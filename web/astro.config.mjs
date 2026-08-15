@@ -29,6 +29,10 @@ const pageSource = {
   "/download": "src/pages/download.astro",
   "/free-restream-service": "src/pages/free-restream-service.astro",
   "/how-to-multistream-from-obs": "src/pages/how-to-multistream-from-obs.astro",
+  "/vs/aitum-multistream": "src/pages/vs/aitum-multistream.astro",
+  "/vs/obs-multi-rtmp": "src/pages/vs/obs-multi-rtmp.astro",
+  "/vs/restreamer": "src/pages/vs/restreamer.astro",
+  "/vs/streamelements": "src/pages/vs/streamelements.astro",
 };
 
 /* An ABSOLUTE path to git, chosen from a fixed list.

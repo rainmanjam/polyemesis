@@ -1,0 +1,74 @@
+---
+/* A visible trail plus the BreadcrumbList that describes it.
+ *
+ * WHY NOW, AND NOT BEFORE. Breadcrumb structured data was looked at once when
+ * every page hung directly off the root, and it was premature: a trail reading
+ * "polyemesis › Features" tells a reader nothing they cannot see in the nav, and
+ * tells a crawler nothing the nav has not already said. The condition that makes
+ * it earn its place is depth, and /vs/<product> is the first thing on this site
+ * two levels down -- reachable from /comparison and from nowhere else in the
+ * chrome, because the nav deliberately does not carry competitor names.
+ *
+ * So this is the ONLY signal that says where these pages sit. It runs in both
+ * registers at once: the <nav> is for a person who arrived from a search result
+ * with no idea what the parent page is, and the JSON-LD is what puts
+ * "polyemesis › Comparison › <product>" under the result instead of a bare URL.
+ *
+ * IN THE BODY, ON PURPOSE. Base.astro takes a title, a description and a path,
+ * and has no slot for extra <head> content. JSON-LD is valid anywhere in the
+ * document and is read from the body, so a new component costs nothing and
+ * leaves the layout -- which every page on the site shares -- untouched.
+ *
+ * The `item` of the LAST crumb is omitted deliberately: it is the current page,
+ * and schema.org's guidance is that the final element needs no URL. Emitting one
+ * is not an error, but a self-referential link in a trail is noise.
+ */
+interface Crumb {
+  label: string;
+  /** Absolute path. Omitted on the current page, which is the last crumb. */
+  href?: string;
+}
+
+interface Props {
+  crumbs: Crumb[];
+}
+
+const { crumbs } = Astro.props;
+const SITE = "https://polyemesis.com";
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: crumbs.map((c, i) => ({
+    "@type": "ListItem",
+    position: i + 1,
+    name: c.label,
+    ...(c.href ? { item: SITE + c.href } : {}),
+  })),
+};
+---
+
+<nav aria-label="Breadcrumb" class="wrap pt-8">
+  <ol class="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-subtle">
+    {
+      crumbs.map((c, i) => (
+        <li class="flex items-center gap-x-2">
+          {/* The separator is on the item rather than between items so it never
+              orphans onto its own line when the trail wraps on a phone. */}
+          {i > 0 && <span aria-hidden="true">/</span>}
+          {c.href ? (
+            <a href={c.href} class="underline-offset-4 hover:text-fg hover:underline">
+              {c.label}
+            </a>
+          ) : (
+            <span class="text-muted" aria-current="page">
+              {c.label}
+            </span>
+          )}
+        </li>
+      ))
+    }
+  </ol>
+</nav>
+
+<script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} />

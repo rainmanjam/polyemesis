@@ -1,0 +1,253 @@
+---
+import Base from "../../layouts/Base.astro";
+import Breadcrumbs from "../../components/Breadcrumbs.astro";
+
+/* Sourced from docs/notes/competitor-facts-2026-08-15.md, sections 3 and H,
+ * and from nothing else.
+ *
+ * THE OVERCLAIM THAT IS BANNED HERE, same as on /vs/aitum-multistream:
+ * obs-multi-rtmp DOES send different audio to different destinations. It selects
+ * an OBS mixer track per output; the summing happened upstream in OBS. Writing
+ * that it cannot is false.
+ *
+ * WHY THIS PAGE IS NOT THE AITUM PAGE WITH THE NAMES SWAPPED. The two plugins
+ * have the same audio model, so if both pages argued about the mixing desk they
+ * would be one page published twice -- thin to a crawler and duplicated to
+ * SonarCloud. They differ elsewhere, and the difference is worth a page of its
+ * own: obs-multi-rtmp's `Get from OBS` shares ONE encode across every
+ * destination, which removes the CPU objection almost entirely and leaves the
+ * uplink standing alone. So this page argues topology -- how many copies of the
+ * broadcast leave the building -- and the Aitum page argues the mixing desk.
+ *
+ * The star count that used to appear in this project's copy is deliberately
+ * absent: it is not in the facts file, and a number nobody re-checks is the kind
+ * of claim this page cannot afford.
+ */
+
+/* Header cell one is "What leaves the stream PC", NOT "Capability".
+ * scripts/check-build.mjs treats any table headed "Capability" as a copy of the
+ * canonical comparison table and requires every row of it to appear verbatim in
+ * docs/COMPARISON.md. This table is not that table and should not pretend to be
+ * -- it describes one machine's outbound load, which COMPARISON.md does not
+ * cover. */
+const outbound = [
+  [
+    "Video encodes running on the stream PC",
+    "One, shared, with Get from OBS — or one per destination when you want different bitrates",
+    "None. The picture is stream-copied through untouched",
+  ],
+  [
+    "Outbound streams from your connection",
+    "One per destination",
+    "One, to the server, regardless of how many destinations there are",
+  ],
+  [
+    "Audio encodes on the stream PC",
+    "One per destination",
+    "None. The mixing and the audio encode both happen on the server",
+  ],
+  [
+    "Where a mix gets summed",
+    "OBS's own audio mixer, upstream of the plugin",
+    "The server, per destination, with a gain per channel-to-channel cell",
+  ],
+];
+
+const merits = [
+  {
+    h: "Actively maintained",
+    p: "Developed by sorayuki, at v0.7.4.3 when this was checked, with regular compatibility releases tracking OBS Studio 30.x, 31.x and 32.x. In a plugin ecosystem where the usual failure is silent abandonment two OBS majors ago, that is the feature that matters most.",
+  },
+  {
+    h: "Get from OBS is genuinely good engineering",
+    p: "Sharing the main OBS encoder across every destination means fanning out to four platforms costs one encode, not four. This is the same idea as a shared rendition on a server, implemented locally, and it is the reason the CPU argument against this plugin is mostly wrong.",
+  },
+  {
+    h: "Independent re-encoding when you want it",
+    p: "Separate encoder instances per destination, with their own bitrates and resolutions, for the platform that will not take your source.",
+  },
+  {
+    h: "Free, GPL-2.0, and inside OBS already",
+    p: "No cost, no account, no server, no second machine. It ingests whatever OBS ingests and publishes over RTMP and RTMPS.",
+  },
+];
+---
+
+<Base
+  title="obs-multi-rtmp vs polyemesis: multistream from OBS"
+  description="The obs-multi-rtmp plugin adds one RTMP output per destination inside OBS. polyemesis fans out from a server. Both free — what changes is your uplink."
+  path="/vs/obs-multi-rtmp"
+>
+  <Breadcrumbs
+    crumbs={[
+      { label: "polyemesis", href: "/" },
+      { label: "Comparison", href: "/comparison" },
+      { label: "obs-multi-rtmp", },
+    ]}
+  />
+
+  <section class="wrap py-12 sm:py-16">
+    <p class="eyebrow">Compared</p>
+    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
+      obs-multi-rtmp uploads once per platform.
+    </h1>
+    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
+      The obs-multi-rtmp plugin adds a second, third and fourth RTMP output
+      inside OBS, and each one is a separate upload from the machine you are
+      broadcasting on. That is the whole shape of it, and for most people it is
+      fine. This page is about the point where it stops being fine, which is
+      your connection rather than your processor.
+    </p>
+
+    <div class="mt-8 max-w-3xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
+      <p class="text-pretty leading-relaxed text-fg">
+        <strong>Give the plugin its due first:</strong> its
+        <span class="font-mono text-[13px]">Get from OBS</span> option shares one
+        encoder across every destination, so multi-RTMP in OBS does
+        <em>not</em> cost you an encode per platform. The processor argument
+        against it is mostly wrong. What it cannot share is the uplink — four
+        destinations is the same bytes sent four times.
+      </p>
+    </div>
+  </section>
+
+  {/* -------------------------------------------------------- the topology -- */}
+  <section class="border-t border-line py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">What actually leaves the stream PC</h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+        The plugin runs inside OBS, so every destination it adds is another
+        output from that machine. polyemesis is a server, so the machine sends
+        one stream and the fan-out happens somewhere with a better connection
+        than a house.
+      </p>
+      <div class="scroll-hint mt-6 max-w-5xl overflow-x-auto rounded-token border border-line">
+        <table class="cmp w-full min-w-[46rem] border-collapse text-sm">
+          <thead class="bg-surface">
+            <tr class="border-b border-line">
+              <th scope="col" class="px-4 py-3 text-left font-medium">What leaves the stream PC</th>
+              <th scope="col" class="w-64 px-4 py-3 text-left font-medium">obs-multi-rtmp</th>
+              <th scope="col" class="w-64 px-4 py-3 text-left font-medium text-primary">polyemesis</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              outbound.map(([what, plugin, poly]) => (
+                <tr class="border-b border-line/60 last:border-0">
+                  <td class="px-4 py-3 text-fg">{what}</td>
+                  <td class="px-4 py-3 text-muted">{plugin}</td>
+                  <td class="px-4 py-3 text-muted">{poly}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-5 max-w-3xl text-sm leading-relaxed text-muted">
+        Read the second row on a domestic upload. A 6 Mbps broadcast to four
+        platforms is 24 Mbps sustained out of a connection that is also carrying
+        the game, and every platform is receiving an identical copy. Moving the
+        fan-out onto a server replaces that with a single 6 Mbps send — which is
+        the argument for a server, and it is a bandwidth argument, not an audio
+        one.
+      </p>
+      <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
+        It cuts the other way too, and belongs on the page: the server has to
+        live somewhere, be patched, and be paid for. obs-multi-rtmp has no such
+        bill and never goes down separately from OBS.
+      </p>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------ the audio -- */}
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">On the audio, precisely</h2>
+      <div class="mt-6 grid max-w-5xl gap-5 lg:grid-cols-2">
+        <div class="card p-6">
+          <p class="font-medium text-fg">What it does</p>
+          <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
+            Each output is assigned one of OBS's audio tracks — mixer IDs 1
+            through 6 — and that track is what the destination receives. So
+            different platforms genuinely can get different audio, and any
+            comparison telling you otherwise is wrong about this plugin.
+          </p>
+        </div>
+        <div class="card p-6">
+          <p class="font-medium text-fg">Where the mix came from</p>
+          <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
+            The plugin does not sum anything. Tracks 1 to 6 were summed by OBS's
+            own mixer before the plugin saw them, so what you are choosing per
+            destination is which of six pre-built mixes to send. polyemesis
+            builds the mix per destination instead, from the tracks as they
+            arrived.
+          </p>
+        </div>
+      </div>
+      <p class="mt-6 max-w-3xl text-sm leading-relaxed text-subtle">
+        Six tracks is a real ceiling and also a generous one — most broadcasts
+        need two. The distinction earns a page because of what it costs to
+        change: a new mix in OBS is a new track layout, and it is not something
+        to be editing while live.
+      </p>
+    </div>
+  </section>
+
+  {/* ---------------------------------------------------------- their merits -- */}
+  <section class="border-t border-line py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">What obs-multi-rtmp does well</h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+        Checked against the project's own repository and releases on
+        <span class="font-mono text-[13px] text-fg">15 August 2026</span>.
+      </p>
+      <div class="mt-8 grid gap-5 sm:grid-cols-2">
+        {
+          merits.map((m) => (
+            <div class="card p-6">
+              <p class="font-medium text-fg">{m.h}</p>
+              <p class="mt-2 text-pretty text-sm leading-relaxed text-muted">{m.p}</p>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">Use the plugin, not this</h2>
+      <ul class="mt-5 max-w-3xl space-y-3">
+        {
+          [
+            "Your upload comfortably carries every destination at once. If it does, the main reason to move the fan-out off your machine has already been answered.",
+            "You broadcast to two or three platforms with the same audio, which is the case this plugin is shaped for and handles at zero cost.",
+            "You want no infrastructure. A plugin that ships with your broadcast software is one fewer thing to keep alive.",
+            "You are already running it and it works. There is no upgrade being sold here.",
+          ].map((l) => (
+            <li class="flex gap-3 text-pretty leading-relaxed text-muted">
+              <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-subtle" aria-hidden="true" />
+              {l}
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <section class="wrap py-20 text-center" data-reveal>
+    <h2 class="text-balance text-3xl font-medium">Still weighing it up?</h2>
+    <div class="mt-7 flex flex-wrap justify-center gap-3">
+      <a href="/comparison" class="btn btn-ghost">All five compared</a>
+      <a href="/download" class="btn btn-primary">Install polyemesis</a>
+    </div>
+    <p class="mt-6 text-sm text-subtle">
+      Also compared:
+      <a href="/vs/aitum-multistream" class="text-primary underline-offset-4 hover:underline">Aitum Multistream</a>
+      ·
+      <a href="/vs/streamelements" class="text-primary underline-offset-4 hover:underline">StreamElements</a>
+      ·
+      <a href="/vs/restreamer" class="text-primary underline-offset-4 hover:underline">Restreamer and restream.io</a>
+    </p>
+  </section>
+</Base>
