@@ -19,8 +19,8 @@ choosing one is deliberate rather than accidental.
   exists for
 - [Standard RTMP](#standard-rtmp-single-track) — one stereo pair, for encoders
   that cannot do SRT
-- [Enhanced RTMP multitrack](#enhanced-rtmp-multitrack-not-implemented) — not
-  supported, and why
+- [Enhanced RTMP multitrack](#enhanced-rtmp-multitrack-works-on-ffmpeg-71-unconfirmed-with-obs)
+  — works on FFmpeg 7.1+, unconfirmed against real OBS
 
 ---
 

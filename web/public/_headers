@@ -56,6 +56,29 @@
 # Adding a page means adding it here. That is deliberate -- broadening this to
 # /* would reach /_astro/* below and turn immutable hashed assets into
 # revalidate-every-time, which is the exact leak the original comment refused.
+#
+# /docs/* IS A PREFIX, AND IT IS THE ONE EXCEPTION TO "list every page".
+#
+# There are 23 rendered documentation pages under it and there will be more. A
+# literal line each would be 23 lines nobody reads, that the next document
+# silently does not get, and the failure mode is the one this block exists to
+# prevent -- a deploy invisible until caches expire. A prefix cannot be
+# forgotten. check-build.mjs matches built pages against these rules with prefix
+# semantics for exactly this reason, so a page under /docs/ is covered and a new
+# TOP-LEVEL page still has to be named here.
+#
+# It does not reach /_astro/*, which is the leak the paragraph above refuses --
+# a Cloudflare `*` matches only within the segment prefix it follows.
+#
+# ON OVERLAPPING WITH /*.html, WHICH IT DOES. A request for /docs/obs.html
+# matches both this rule and /*.html, and Workers CONCATENATES rather than
+# replaces, so that response carries `Cache-Control: no-cache, no-cache`. That is
+# fine and it is worth saying why, because the file's own rule is that no two
+# rules may set the same header: the hazard being avoided is two rules with
+# DIFFERENT values, where `no-cache, public, max-age=31536000, immutable` gave
+# `no-cache` the last word and cost 11 of 11 assets a revalidation. Repeating one
+# directive is idempotent under RFC 9111. The pretty URL -- the one anybody
+# visits -- matches this rule alone.
 /
   Cache-Control: no-cache
 /features
@@ -63,6 +86,8 @@
 /comparison
   Cache-Control: no-cache
 /docs
+  Cache-Control: no-cache
+/docs/*
   Cache-Control: no-cache
 /download
   Cache-Control: no-cache

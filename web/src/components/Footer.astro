@@ -39,11 +39,17 @@ const cols = [
   {
     title: "Docs",
     links: [
+      /* THE PAGE, NOT A FRAGMENT OF THE INDEX. These pointed at /docs#audio-routing
+         and friends, which was the best available answer while the index was the
+         only docs page on the site: a link named "Audio routing" that landed on a
+         heading above a link to GitHub. The documents are pages now, so the link
+         goes to the document -- three site-wide links whose anchor text is exactly
+         what the destination is about. */
       { href: "/docs", label: "Overview" },
-      { href: "/docs#audio-routing", label: "Audio routing" },
+      { href: "/docs/audio-routing", label: "Audio routing" },
       { href: "/how-to-multistream-from-obs", label: "Multistream from OBS" },
-      { href: "/docs#start", label: "OBS setup" },  // OBS.md lives in the "Getting it running" group
-      { href: "/docs#api", label: "HTTP API" },
+      { href: "/docs/obs", label: "OBS setup" },
+      { href: "/docs/api", label: "HTTP API" },
     ],
   },
   {

@@ -1,0 +1,155 @@
+---
+import Base from "./Base.astro";
+import { SECTIONS, PUBLISHED, docsIn, hrefOf, GITHUB_BLOB } from "../data/docs.mjs";
+
+/* One document, rendered. The chrome around it is navigation and nothing else:
+ * a reader who lands here from a search result has no idea 22 other pages exist,
+ * and a flat page with no sidebar is how documentation stays a set of dead ends.
+ */
+
+interface Props {
+  /** The manifest entry. Carries the written title, description and section. */
+  doc: import("../data/docs.mjs").Doc;
+}
+
+const { doc } = Astro.props;
+const section = SECTIONS.find((s) => s.id === doc.section);
+const here = hrefOf(doc);
+
+/* Previous and next in manifest order, which is reading order rather than
+ * alphabetical. Two more internal links per page, pointing at the document
+ * somebody genuinely needs next -- QUICKSTART to INSTALL, not to API. */
+const order = PUBLISHED.findIndex((d) => d.slug === doc.slug);
+const prev = order > 0 ? PUBLISHED[order - 1] : undefined;
+const next = order < PUBLISHED.length - 1 ? PUBLISHED[order + 1] : undefined;
+
+/* BreadcrumbList, and only because there are VISIBLE breadcrumbs below it.
+ *
+ * This was assessed and rejected once already, correctly: on a flat five-page
+ * site with no breadcrumb UI it would have been structured data describing a
+ * hierarchy that did not exist. It exists now -- /docs/<slug> sits under /docs
+ * sits under / -- and the markup states it. Google's own guidance is that the
+ * markup should match what a reader sees, so the two arrive together or not at
+ * all. */
+const crumbs = [
+  { name: "polyemesis", item: "/" },
+  { name: "Docs", item: "/docs" },
+  { name: doc.title, item: here },
+];
+const breadcrumbLd = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: crumbs.map((c, i) => ({
+    "@type": "ListItem",
+    position: i + 1,
+    name: c.name,
+    item: new URL(c.item, Astro.site ?? "https://polyemesis.com").href,
+  })),
+};
+---
+
+<Base title={doc.title} description={doc.description} path={doc.canonical ?? here}>
+  {/* THE COPY BUTTONS ON THIS PAGE ARE BUILT BY A PLUGIN, SO THE SCRIPT HAS TO
+      BE ASKED FOR HERE.
+
+      CodeBlock.astro imports the same module, and Astro emits it once for any
+      page that uses the component. A documentation page never renders that
+      component -- lib/hast-code-block.mjs emits its markup from the markdown
+      instead -- so nothing pulled the script in, and 114 Copy buttons rendered,
+      looked exactly right, and did nothing when clicked. Caught by clicking one;
+      no build output says anything about it, which is why check-build.mjs now
+      asserts that a page carrying these buttons also ships the code that reads
+      them. */}
+  <script>
+    import "../scripts/code-copy.ts";
+  </script>
+
+  <script type="application/ld+json" is:inline set:html={JSON.stringify(breadcrumbLd)} slot="head" />
+
+  <div class="wrap grid gap-10 py-10 lg:grid-cols-[15rem_1fr] lg:gap-14 lg:py-14">
+    {/* The sidebar is the whole set, not the current section. 23 documents is
+        small enough to show at once, and a reader who arrived on
+        /docs/troubleshooting from a search should be able to see that renditions
+        and hardware encoding are also covered without going back a level. */}
+    <nav class="lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto" aria-label="Documentation">
+      <a href="/docs" class="eyebrow hover:text-fg">All documentation</a>
+      {
+        SECTIONS.map((s) => (
+          <div class="mt-6">
+            <p class="text-[13px] font-medium text-fg">{s.title}</p>
+            <ul class="mt-1.5 space-y-0.5 border-l border-line">
+              {docsIn(s.id).map((d) => (
+                <li>
+                  <a
+                    href={hrefOf(d)}
+                    aria-current={d.slug === doc.slug ? "page" : undefined}
+                    class:list={[
+                      "-ml-px block border-l py-1 pl-3 text-[13px] leading-snug transition-colors",
+                      d.slug === doc.slug
+                        ? "border-primary text-fg"
+                        : "border-transparent text-muted hover:border-line-strong hover:text-fg",
+                    ]}
+                  >
+                    {d.title}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </nav>
+
+    <div class="min-w-0">
+      {/* Visible breadcrumbs, which is what makes the JSON-LD above honest. */}
+      <nav aria-label="Breadcrumb" class="text-[13px] text-subtle">
+        <ol class="flex flex-wrap items-center gap-x-2">
+          <li><a href="/" class="hover:text-fg">polyemesis</a></li>
+          <li aria-hidden="true">/</li>
+          <li><a href="/docs" class="hover:text-fg">Docs</a></li>
+          <li aria-hidden="true">/</li>
+          <li class="text-muted">{section?.title}</li>
+        </ol>
+      </nav>
+
+      <article class="doc-prose mt-6 max-w-3xl">
+        <slot />
+      </article>
+
+      <div class="mt-14 max-w-3xl border-t border-line pt-6">
+        <p class="text-sm leading-relaxed text-muted">
+          This page is rendered from
+          <a href={`${GITHUB_BLOB}/docs/${doc.file}`} rel="noopener" class="text-primary-bright underline">
+            <span class="font-mono text-[13px]">docs/{doc.file}</span>
+          </a>
+          in the repository, so it is versioned with the software it describes.
+          It tracks <span class="font-mono text-[13px]">main</span>, which runs
+          ahead of the latest release — if you are running one, read the copy in
+          your own checkout. Corrections are a pull request.
+        </p>
+
+        {/* Prev/next, in reading order. Anchor text is the destination's title
+            rather than "Next →", because a link that names its target is worth
+            something to a reader skimming and to everything else that reads
+            this page. */}
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          {prev && (
+            <a href={hrefOf(prev)} class="card group p-4 transition-colors hover:border-line-strong">
+              <span class="eyebrow">Previous</span>
+              <span class="mt-1 block text-[15px] text-fg group-hover:text-primary-bright">{prev.title}</span>
+            </a>
+          )}
+          {next && (
+            <a
+              href={hrefOf(next)}
+              class="card group p-4 transition-colors hover:border-line-strong sm:col-start-2 sm:text-right"
+            >
+              <span class="eyebrow">Next</span>
+              <span class="mt-1 block text-[15px] text-fg group-hover:text-primary-bright">{next.title}</span>
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+</Base>

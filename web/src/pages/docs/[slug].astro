@@ -1,0 +1,39 @@
+---
+import { getCollection, render } from "astro:content";
+import DocPage from "../../layouts/DocPage.astro";
+import { BY_SLUG } from "../../data/docs.mjs";
+
+/* The 23 documentation pages. One route, because the pages differ only in
+ * content -- the title, description and section come from the manifest, and the
+ * body is the markdown file rendered through the site's own components.
+ *
+ * `build.format: "file"` puts these at dist/docs/<slug>.html, served at
+ * /docs/<slug>. That is a directory below every other page on the site, and
+ * check-build.mjs had to learn to walk it: every guard there enumerated dist/
+ * one level deep, so 23 new pages would have been silently exempt from the
+ * <pre> check, the amber check, the link check and the headers check on the day
+ * they shipped. */
+export async function getStaticPaths() {
+  const entries = await getCollection("docs");
+  return entries.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+
+type Props = { entry: Awaited<ReturnType<typeof getCollection<"docs">>>[number] };
+
+const { entry } = Astro.props;
+const doc = BY_SLUG.get(entry.id);
+if (!doc) {
+  // Unreachable while the loader takes its pattern from the same manifest, and
+  // stated anyway: this is the seam where a page could be built with no written
+  // title or description, which is the one thing this change exists to provide.
+  throw new Error(
+    `no manifest entry for the docs page "${entry.id}". Every published document ` +
+      `needs a hand-written title and description in src/data/docs.mjs.`,
+  );
+}
+const { Content } = await render(entry);
+---
+
+<DocPage doc={doc}>
+  <Content />
+</DocPage>

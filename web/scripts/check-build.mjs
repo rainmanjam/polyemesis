@@ -16,8 +16,10 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { PUBLISHED, NOT_PUBLISHED } from "../src/data/docs.mjs";
 
 const DIST = new URL("../dist/", import.meta.url).pathname;
+const DOCS_SRC = new URL("../../docs/", import.meta.url).pathname;
 const fail = [];
 
 /* Every built page, INCLUDING the nested ones, as a path relative to dist/.
@@ -26,13 +28,23 @@ const fail = [];
  * whole directory listing and reads like it covers the site. It covered the top
  * level only, and that was fine for exactly as long as every page lived there.
  *
- * The /vs/* comparison pages are the first nested ones, and each check below
- * fails differently on them if this is not recursive -- but the loudest is the
- * internal-link check: /comparison links to /vs/aitum-multistream, the page is
- * absent from `built`, and the build fails claiming a page that WAS built was
- * not. The rest fail the other way and are worse for it, silently exempting the
- * new pages from the amber reservation, the hand-rolled-<pre> ban and the
- * _headers rule the guard exists to enforce.
+ * TWO CHANGES ARRIVED AT THIS INDEPENDENTLY, and both are worth recording
+ * because they fail in opposite directions.
+ *
+ * The /vs/* comparison pages were the first nested ones, and there the LOUD
+ * failure was the internal-link check: /comparison links to
+ * /vs/aitum-multistream, the page is absent from `built`, and the build fails
+ * claiming a page that WAS built was not.
+ *
+ * The 23 rendered documentation pages build to dist/docs/<slug>.html, and there
+ * the failure is silent and worse. The hand-rolled-<pre> ban is the guard the
+ * whole docs change is organised around; rendering docs/*.md puts 114 more code
+ * blocks on this site, and a flat listing would have exempted every one of them
+ * from it -- reporting a pass while not looking. The amber reservation and the
+ * _headers rule go the same way.
+ *
+ * A green check that has stopped looking is worse than a red one, which is the
+ * reason this comment is this long.
  *
  * Forward slashes, because these are compared against URL paths. */
 /** @returns {string[]} */
@@ -51,6 +63,13 @@ function htmlPages(dir = DIST, prefix = "") {
   }
   return out;
 }
+
+const pages = htmlPages();
+
+/** The URL a built page is served at. `build.format: "file"` with
+ * `trailingSlash: "never"` means docs/api.html is served as /docs/api.
+ * @param {string} page @returns {string} */
+const servedAt = (page) => "/" + page.replace(/\.html$/, "").replace(/(^|\/)index$/, "$1").replace(/\/$/, "");
 
 const cssFiles = readdirSync(join(DIST, "_astro")).filter((f) => f.endsWith(".css"));
 const css = cssFiles.map((f) => readFileSync(join(DIST, "_astro", f), "utf8")).join("\n");
@@ -126,9 +145,7 @@ if (!/\.card\{[^}]*min-width:0/.test(css.replace(/\s+/g, ""))) {
      HOW SPELLED. Lightning CSS rewrites `::after` to the CSS2 `:after`, which
      is two bytes shorter and identical in meaning. Matching the source
      spelling finds nothing in the output. `::?after` accepts either. */
-  const built = flat + htmlPages()
-    .map((f) => readFileSync(join(DIST, f), "utf8").replace(/\s+/g, ""))
-    .join("");
+  const built = flat + htmlPages().map((f) => readFileSync(join(DIST, f), "utf8").replace(/\s+/g, "")).join("");
 
   if (!/\.scroll-hint::?after\{/.test(built)) {
     fail.push("no `.scroll-hint::after` in the built output — wide tables give no sign they scroll on mobile");
@@ -152,14 +169,57 @@ if (!/\.card\{[^}]*min-width:0/.test(css.replace(/\s+/g, ""))) {
  * Checked against the BUILT pages rather than the source, so it sees what a
  * reader gets. The component emits `<pre>` inside `.code`; a hand-rolled one has
  * no such ancestor, and the class attribute Tailwind leaves on it is the tell.
+ *
+ * THE CLASS ATTRIBUTE IS NO LONGER THE ONLY TELL, and the second check below is
+ * why. Rendering docs/*.md put 114 more code blocks on this site, produced by a
+ * hast plugin rather than by the component, and it exposed how narrow this test
+ * had always been: a `<pre>` with no class at all sails through it while looking
+ * like nothing else on the page. Astro's own Markdown output is exactly that
+ * once syntax highlighting is off. So the class check stays -- it names the
+ * Shiki case precisely, and Shiki being switched back on is the realistic way
+ * this regresses -- and a count invariant covers the plain one.
  */
-for (const f of htmlPages()) {
+for (const f of pages) {
   const html = readFileSync(join(DIST, f), "utf8");
   const handRolled = [...html.matchAll(/<pre\s+class="[^"]+"/g)];
   if (handRolled.length) {
     fail.push(
       `${f}: ${handRolled.length} hand-styled <pre> — use the CodeBlock component so every code block shares one radius, ground and size\n` +
         `    ${handRolled[0][0].slice(0, 100)}`,
+    );
+  }
+
+  /* EVERY <pre> ON THE SITE IS INSIDE A CodeBlock, counted rather than parsed.
+   *
+   * The component emits exactly one `<pre>` per block, and exactly one Copy
+   * button with it -- unless the block is the `quote` variant, which is a
+   * competitor's configuration shown as evidence and deliberately has no Copy
+   * button, because inviting someone to paste a rival's config into their
+   * terminal is not what that block is for. So across a page:
+   *
+   *     <pre> == [data-code-copy] + .code-quote
+   *
+   * A hand-rolled <pre> breaks the equality whether or not it carries a class,
+   * and so does a Copy button that lost its block. Counting is enough here and
+   * an HTML parse would not be better: the thing being asserted is a ratio
+   * between two markers that only this component produces together.
+   *
+   * BOTH MARKERS ARE MATCHED INSIDE A TAG, not anywhere in the file, and the
+   * first version of this was not -- it counted a bare `data-code-copy`, and
+   * Astro inlines scripts/code-copy.ts into every page, where the selector
+   * string `[data-code-copy]` reads as one more button. Every page came up one
+   * over. A marker that also appears in the code that CONSUMES it cannot be
+   * counted loose. */
+  const pre = (html.match(/<pre[\s>]/g) || []).length;
+  const copy = (html.match(/<button[^>]*\bdata-code-copy\b/g) || []).length;
+  const quote = (html.match(/class="[^"]*\bcode-quote\b/g) || []).length;
+  if (pre !== copy + quote) {
+    fail.push(
+      `${f}: ${pre} <pre> but ${copy} copy button(s) and ${quote} quote block(s) — ` +
+        `every code block on this site comes from the CodeBlock component (or the ` +
+        `hast plugin that emits its markup for rendered markdown), and each one ` +
+        `carries a Copy button unless it is the quote variant. A bare <pre> is the ` +
+        `fourth code-block treatment this file exists to prevent.`,
     );
   }
 }
@@ -224,18 +284,54 @@ if (!meterKf) {
  * was live on /features, /comparison, /docs and /download.
  *
  * Derived from the built output rather than a hand-list, so adding a page and
- * forgetting the header fails here rather than in production six hours later. */
+ * forgetting the header fails here rather than in production six hours later.
+ *
+ * IT NOW UNDERSTANDS PREFIXES, because 23 documentation pages arrived under
+ * /docs/ and the alternative was 23 literal lines in _headers that the 24th
+ * document would silently not get. `/docs/*` covers them.
+ *
+ * WHICH MEANS IT HAS TO READ THE FILE PROPERLY RATHER THAN GREP IT. The previous
+ * version collected every line starting with `/` and compared for equality, and
+ * `/*` -- the security-header block that must stay on everything -- never equals
+ * a page path, so it was harmless. Under prefix matching `/*` matches EVERY
+ * path, and this check would have passed on a file with no cache rules at all.
+ * So only the rules that actually set Cache-Control are collected. The remaining
+ * hole, someone putting Cache-Control back on `/*`, is the one
+ * TestNoTwoHeaderRulesSetTheSameHeader in internal/testenv fails on. */
 {
   const headers = readFileSync(join(DIST, "_headers"), "utf8");
-  const rules = new Set(
-    headers
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith("/")),
-  );
-  for (const f of htmlPages()) {
-    const pretty = f === "index.html" ? "/" : `/${f.replace(/\.html$/, "")}`;
-    if (!rules.has(pretty)) {
+
+  /** Path rules that set Cache-Control, in file order. */
+  const cacheRules = [];
+  {
+    let path = null;
+    for (const line of headers.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      // A path rule starts at column zero; a header is indented under it.
+      if (!/^[ \t]/.test(line)) {
+        path = trimmed;
+        continue;
+      }
+      if (path && /^cache-control\s*:/i.test(trimmed)) cacheRules.push(path);
+    }
+  }
+  if (!cacheRules.length) {
+    fail.push(
+      "dist/_headers declares no Cache-Control rules at all, so the coverage check " +
+        "below is comparing every page against an empty list and passing.",
+    );
+  }
+
+  /* Cloudflare's `*` matches the rest of the path after the prefix it follows,
+     so `/docs/*` covers /docs/api and not /docs itself -- which is why the
+     literal `/docs` line is still in the file beside it. */
+  const covered = (path) =>
+    cacheRules.some((r) => (r.endsWith("*") ? path.startsWith(r.slice(0, -1)) : r === path));
+
+  for (const f of pages) {
+    const pretty = servedAt(f);
+    if (!covered(pretty)) {
       fail.push(
         `web/public/_headers has no rule for ${pretty} — the page is SERVED at that ` +
           `path (trailingSlash: "never"), so \`/*.html\` does not match it and a ` +
@@ -274,8 +370,6 @@ if (!meterKf) {
   }
 }
 
-const pages = htmlPages();
-
 /* Every nav page must mark ITSELF as the current one, in BOTH navs.
  *
  * This broke silently in the move to Cloudflare Workers. The build emits flat
@@ -301,7 +395,23 @@ for (const f of ["features", "comparison", "docs", "download"]) {
     );
   }
 }
-const built = new Set(pages.map((f) => "/" + f.replace(/\.html$/, "").replace(/^index$/, "")));
+/* 3+4, and the rewritten documentation links are the reason this now matters
+ * far more than it did.
+ *
+ * docs/*.md carries 73 sibling links written as `](AUDIO-ROUTING.md)`, which
+ * resolve on GitHub and point at nothing here. src/lib/mdast-doc-links.mjs
+ * rewrites them to /docs/<slug>, and a rewrite that silently 404s is worse than
+ * the GitHub link it replaced -- the reader had something that worked before.
+ * This is the check that says the rewriting landed: the links are read back off
+ * the built HTML and matched against the pages that were actually built, so it
+ * verifies the OUTPUT rather than trusting the transform. Its other half lives
+ * in the plugin, which fails the build when a link resolves to a repo path that
+ * does not exist -- between the two, every link on a docs page is verified.
+ *
+ * The fragment pattern had to widen with the paths: it read `href="(\/[a-z]*)#..."`,
+ * which cannot match /docs/audio-routing#mix-matrix, so every cross-document
+ * anchor -- the majority of the 73 -- would have been skipped in silence. */
+const built = new Set(pages.map(servedAt));
 for (const f of pages) {
   const html = readFileSync(join(DIST, f), "utf8");
   for (const m of html.matchAll(/href="(\/[^"#?]*)(#[^"]*)?"/g)) {
@@ -309,13 +419,211 @@ for (const f of pages) {
     if (path.startsWith("/_astro") || /\.[a-z0-9]+$/i.test(path)) continue;
     if (!built.has(path)) fail.push(`${f}: links to ${m[1]}, which was not built`);
   }
-  for (const m of html.matchAll(/href="(\/[a-z]*)#([a-z0-9-]+)"/g)) {
+  for (const m of html.matchAll(/href="(\/[a-z0-9/-]*)#([^"]+)"/g)) {
     const target = m[1] === "/" ? "index.html" : `${m[1].slice(1)}.html`;
     if (!pages.includes(target)) continue;
-    if (!new RegExp(`id="${m[2]}"`).test(readFileSync(join(DIST, target), "utf8"))) {
+    // Heading ids come from github-slugger and can carry dots and underscores,
+    // so the id is compared literally rather than through a character class.
+    if (!readFileSync(join(DIST, target), "utf8").includes(`id="${m[2]}"`)) {
       fail.push(`${f}: links to ${m[1]}#${m[2]} but ${target} has no element with that id`);
     }
   }
+
+  /* SAME-PAGE FRAGMENTS, which this check never looked at.
+   *
+   * The pattern above requires a path, so `href="#the-problem"` matched nothing
+   * and a bare fragment was unverified on every page the site has ever had. It
+   * went unnoticed because the five hand-written pages have a handful between
+   * them and their authors could see the headings they were linking to.
+   *
+   * The documents cannot be read that way: they carry 75 of these, several are
+   * hand-written contents lists at the top of a long page, and the id they point
+   * at is generated from heading text by github-slugger. Reword a heading and
+   * every link to it becomes a click that does nothing -- no console error, no
+   * 404, the page simply stays where it is. */
+  for (const m of html.matchAll(/href="#([^"]+)"/g)) {
+    if (!html.includes(`id="${m[1]}"`)) {
+      fail.push(`${f}: links to #${m[1]} but the page has no element with that id`);
+    }
+  }
+}
+
+/* THE PUBLISH LIST IS AN ALLOWLIST, AND THIS IS WHAT MAKES THAT TRUE.
+ *
+ * docs/ holds 37 markdown files. 23 are user-facing and now ship as pages; 14
+ * are internal, and two of those would genuinely hurt -- RESEARCH-COMPETITIVE.md
+ * is a survey of competitors' issue trackers, and COPY-CONSTRAINTS.md records
+ * what this project's marketing copy may and may not claim. Publishing either is
+ * not a broken page. It is a self-inflicted wound, and nobody here would notice
+ * until somebody else did.
+ *
+ * The manifest in src/data/docs.mjs is a pair of lists rather than a glob with
+ * exclusions, and the FIRST check below is the one that earns the difference:
+ * the two lists have to partition docs/*.md exactly. Add a file to that
+ * directory and the build fails until it is classified. A glob would have made
+ * the same file public by default and said nothing.
+ *
+ * The second is the same claim from the other end -- what actually reached
+ * dist/ -- because a manifest is a statement of intent and this file's whole
+ * premise is that intent and output are different things. */
+{
+  const onDisk = readdirSync(DOCS_SRC)
+    .filter((f) => f.endsWith(".md"))
+    .sort();
+  const classified = new Map();
+  for (const d of PUBLISHED) classified.set(d.file, "published");
+  for (const d of NOT_PUBLISHED) classified.set(d.file, "withheld");
+
+  for (const f of onDisk) {
+    if (!classified.has(f)) {
+      fail.push(
+        `docs/${f} is in neither PUBLISHED nor NOT_PUBLISHED in web/src/data/docs.mjs.\n` +
+          `    Every file in docs/ has to be classified, so that publishing one is a ` +
+          `decision somebody wrote down rather than the default. Add it to PUBLISHED ` +
+          `with a hand-written title and description, or to NOT_PUBLISHED with the reason.`,
+      );
+    }
+  }
+  for (const f of classified.keys()) {
+    if (!onDisk.includes(f)) {
+      fail.push(
+        `web/src/data/docs.mjs names docs/${f}, which does not exist. A renamed ` +
+          `document leaves a page 404ing or a withheld file unguarded.`,
+      );
+    }
+  }
+
+  const wantSlugs = new Set(PUBLISHED.map((d) => `/docs/${d.slug}`));
+  const gotSlugs = new Set(pages.map(servedAt).filter((p) => p.startsWith("/docs/")));
+  for (const p of gotSlugs) {
+    if (!wantSlugs.has(p)) fail.push(`${p} was built and is not in the docs allowlist — how did it get there?`);
+  }
+  for (const p of wantSlugs) {
+    if (!gotSlugs.has(p)) fail.push(`${p} is in the docs allowlist and was NOT built`);
+  }
+
+  /* And the wound named directly. The set comparison above proves no extra PAGE
+     was built; this proves no withheld document's CONTENT reached the site by
+     some other route -- an inline include, a copied excerpt, a glob that got
+     past the loader. Matched on the H1, which is the one line in each of these
+     files that is both distinctive and stable. */
+  for (const { file } of NOT_PUBLISHED) {
+    const h1 = readFileSync(join(DOCS_SRC, file), "utf8").split("\n")[0].replace(/^#\s*/, "").trim();
+    if (!h1) continue;
+    for (const f of pages) {
+      const html = readFileSync(join(DIST, f), "utf8");
+      if (new RegExp(`<h1[^>]*>\\s*${h1.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(html)) {
+        fail.push(`${f}: carries the heading of docs/${file}, which is deliberately NOT published`);
+      }
+    }
+  }
+}
+
+/* A PAGE WITH COPY BUTTONS MUST ALSO SHIP THE CODE THAT MAKES THEM WORK.
+ *
+ * THIS GUARDS A BUG THAT WAS LIVE IN THIS COMMIT'S OWN FIRST DRAFT. The copy
+ * behaviour lives in scripts/code-copy.ts, imported by CodeBlock.astro, and
+ * Astro bundles it into any page that uses the component. The documentation
+ * pages never use the component -- lib/hast-code-block.mjs emits its markup
+ * from the markdown -- so the script was not pulled in, and 114 buttons across
+ * 23 pages rendered perfectly and did nothing at all when clicked.
+ *
+ * It is the worst shape of failure this repository keeps writing checks for: the
+ * button is THERE, styled, focusable and labelled, so the page looks complete.
+ * Nothing in the build, the HTML or the console says otherwise. It was found by
+ * clicking one in a browser, which is not a thing CI does.
+ *
+ * Checked by looking for the attribute the handler binds to, rather than for a
+ * filename: the emitted name is content-hashed, and a check asserting on a hash
+ * breaks on every unrelated edit and gets deleted.
+ *
+ * IT HAS TO FOLLOW THE IMPORT GRAPH, and the first version did not. Two
+ * shapes defeated it. Astro inlines a script below a size threshold, so the
+ * same import is `<script>…</script>` on one page and a hashed module on
+ * another. And a page's `<script src=…>` is frequently a one-line stub --
+ * literally `import"./code-copy.C-9sLLhJ.js";` on index.html -- with the code in
+ * a chunk shared between the pages that need it. Reading only the file the page
+ * names finds nothing and reports every page broken, including the ones that
+ * have always worked. */
+for (const f of pages) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  if (!/<button[^>]*\bdata-code-copy\b/.test(html)) continue;
+
+  const inlined = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].some((m) =>
+    m[1].includes("data-code-copy"),
+  );
+
+  /** Does this module, or anything it imports, bind the copy handler?
+   * @param {string} src @param {Set<string>} seen @returns {boolean} */
+  const reachable = (src, seen = new Set()) => {
+    if (seen.has(src)) return false;
+    seen.add(src);
+    let js;
+    try {
+      js = readFileSync(join(DIST, "_astro", src), "utf8");
+    } catch {
+      return false;
+    }
+    if (js.includes("data-code-copy")) return true;
+    return [...js.matchAll(/from\s*"\.\/([^"]+)"|import\s*"\.\/([^"]+)"/g)].some((m) =>
+      reachable(m[1] ?? m[2], seen),
+    );
+  };
+
+  const bundles = [...html.matchAll(/<script[^>]+src="\/_astro\/([^"]+\.js)"/g)].map((m) => m[1]);
+  const wired = inlined || bundles.some((src) => reachable(src));
+  if (!wired) {
+    fail.push(
+      `${f}: has Copy buttons but ships no script that reads them — every one of ` +
+        `them renders correctly and does nothing when clicked.\n` +
+        `    A page whose code blocks come from the hast plugin rather than from ` +
+        `CodeBlock.astro has to import src/scripts/code-copy.ts itself.`,
+    );
+  }
+}
+
+/* EVERY DOCUMENTATION PAGE ACTUALLY RENDERED ITS DOCUMENT.
+ *
+ * THIS GUARDS A GREEN BUILD THAT SHIPPED NOTHING. Astro's glob loader catches
+ * whatever a markdown pipeline throws, logs `[ERROR] Error rendering FOO.md`,
+ * and CARRIES ON -- `astro build` exits 0, the page is emitted, and the page is
+ * empty. Found by mutation: a deliberately broken cross-document link made
+ * src/lib/mdast-doc-links.mjs throw by design, and the build reported success
+ * while /docs/quickstart went out as chrome around a hole.
+ *
+ * So the plugin's throw is a diagnosis, not a gate. This is the gate. It is
+ * deliberately about the OUTPUT rather than about links: any render failure --
+ * a plugin, a malformed table, a loader change -- has the same symptom, and this
+ * catches the ones nobody has thought of yet.
+ *
+ * If this fires, the reason is upstream in the build log, above the summary. */
+for (const f of pages.filter((p) => p.startsWith("docs/"))) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  const article = /<article[^>]*doc-prose[^>]*>([\s\S]*?)<\/article>/.exec(html);
+  const text = article ? article[1].replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : "";
+  // The shortest published document is QUICKSTART at ~965 words. 500 characters
+  // is far below anything real and far above the empty string a failed render
+  // leaves behind, so this cannot fire on a genuinely short document.
+  if (text.length < 500) {
+    fail.push(
+      `${f}: rendered ${text.length} characters of documentation, which means the ` +
+        `markdown did not render.\n` +
+        `    Astro's content loader logs a render failure and EXITS 0 — look for ` +
+        `"Error rendering" earlier in this build's output for the real cause.`,
+    );
+  }
+}
+
+/* EXACTLY ONE <h1> PER PAGE.
+ *
+ * Verified by hand once, during an audit of the six original pages, and worth
+ * keeping now that 23 more arrive from markdown nobody writes a layout for. A
+ * document's own `# Title` becomes the page's h1; a layout that also renders one
+ * would give every documentation page two, and the failure is invisible on the
+ * page -- two headings that look like a title and a subtitle. */
+for (const f of pages) {
+  const n = (readFileSync(join(DIST, f), "utf8").match(/<h1[\s>]/g) || []).length;
+  if (n !== 1) fail.push(`${f}: ${n} <h1> elements, expected exactly 1`);
 }
 
 // 5. The amber reservation, enforced rather than merely documented.
