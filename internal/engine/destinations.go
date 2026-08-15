@@ -38,6 +38,24 @@ type destPlan struct {
 	// compile, or an upstream rendition that is not there. Either way the
 	// destination is shown as broken rather than started against nothing.
 	err string
+	// oneMix is this destination compiled WITHOUT its second audio mix, and it
+	// is non-nil only for the destinations whose second track is conditional on
+	// a Twitch negotiation -- see vodNeedsNegotiation.
+	//
+	// IT CANNOT BE DERIVED FROM compiled BY CLEARING SecondOutLabel. The label
+	// names an output of the filter graph in compiled.FilterComplex, and FFmpeg
+	// refuses a -filter_complex whose output nothing maps; dropping the map
+	// alone would turn a fallback into a destination that will not start.
+	//
+	// Carried on the plan rather than recompiled in startDest so that both
+	// graphs come from ONE read of the source layout. startDest runs after the
+	// plan, and a source that was re-probed in between would give the fallback
+	// a different track selection from the one the plan hashed.
+	oneMix *routing.Result
+	// vodDropped is the sentence for an operator whose second audio mix is not
+	// being sent, decided at plan time. Empty for every destination that has no
+	// second mix and for every one whose second mix is going out.
+	vodDropped string
 }
 
 // planDestinations works out the desired state of every enabled destination,
@@ -87,7 +105,26 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 		// one is unreliable. The VOD track comes back by itself on the next
 		// reconcile after a probe succeeds, which is the same moment the live
 		// mix stops being provisional.
-		if !provisional && cerr == nil && row.VODProfile != nil {
+		//
+		// AND NOT ON A TWITCH DESTINATION THAT DID NOT OPT IN. The ordinary
+		// Twitch RTMP ingest carries ONE audio track -- db.AudioEncoding's
+		// copyProblems says so in as many words -- and Enhanced Broadcasting is
+		// the only published path that takes a second. Before this gate the
+		// engine compiled the pair on row.VODProfile != nil alone, so such a
+		// destination pushed two tracks at a one-track ingest with nothing
+		// anywhere saying so; db.Destination.VODProfile's own comment promised
+		// "the engine reports it" and nothing did.
+		//
+		// The refusal is here, at plan time, only for the case a network call
+		// could not change: the operator left the toggle off. Where they turned
+		// it ON the answer depends on what Twitch says, so the pair is compiled
+		// and startDest decides -- see oneMix below.
+		switch {
+		case provisional || cerr != nil || row.VODProfile == nil:
+			// Nothing to pair, or nothing worth pairing yet.
+		case twitchOneAudioTrack(row) && !wantsMultitrack(row):
+			p.vodDropped = noteVODWithoutMultitrack
+		default:
 			paired, perr := routing.CompilePair(row.Profile, row.VODProfile, src)
 			if perr != nil {
 				// CompilePair fails only where Compile just failed, so reaching
@@ -96,6 +133,17 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 				// one track.
 				cerr = perr
 			} else {
+				// The single-mix graph is kept beside the paired one for the
+				// destinations whose second track is conditional on a
+				// negotiation that has not happened yet. Compiled HERE, from
+				// the same src, rather than recompiled inside startDest: the
+				// two must be the same destination described two ways, and a
+				// second compile against a source read a moment later is how
+				// they stop being.
+				if vodNeedsNegotiation(row) {
+					one := compiled
+					p.oneMix = &one
+				}
 				compiled = paired.Result
 			}
 		}
@@ -162,6 +210,19 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			// changes again.
 			next := *cur
 			next.row = p.row
+			if p.oneMix == nil {
+				// The plan-time verdict on the second audio mix, refreshed
+				// without a restart. Adding a VOD mix to a Twitch destination
+				// that has not opted into Enhanced Broadcasting does not change
+				// the command line -- that is the whole of the gate -- so
+				// nothing else here would ever notice, and the operator would
+				// be left with a setting that has silently done nothing.
+				//
+				// Only the plan-time verdict. Where oneMix is non-nil the
+				// answer came from a negotiation that this pass has not run,
+				// and the start that did run it is the authority.
+				next.vodDropped = p.vodDropped
+			}
 			e.dests[id] = &next
 			e.mu.Unlock()
 			// AFTER the unlock. SetPolicy itself is a memory write, but the
@@ -173,7 +234,7 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			// because its toggle is absent from destSpec -- so a destination
 			// that survived the stop phase is exactly the case nothing else
 			// would notice the setting changed.
-			e.reconcileBackup(id, &next, p.compiled, p.upstream)
+			e.reconcileBackup(id, &next, backupCompiled(p), p.upstream)
 			continue
 		}
 		e.mu.Unlock()
@@ -195,7 +256,7 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			continue
 		}
 
-		if err := e.startDest(p.row, p.compiled, p.spec, hub, stagger*time.Duration(started)); err != nil {
+		if err := e.startDest(p, hub, stagger*time.Duration(started)); err != nil {
 			e.log.Error("start destination", "dest", p.row.Name, "err", err)
 			e.mu.Lock()
 			e.dests[id] = &destination{row: p.row, compiled: p.compiled, err: err.Error()}
@@ -210,7 +271,7 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 		e.mu.Lock()
 		d := e.dests[id]
 		e.mu.Unlock()
-		e.reconcileBackup(id, d, p.compiled, p.upstream)
+		e.reconcileBackup(id, d, backupCompiled(p), p.upstream)
 	}
 }
 
@@ -612,6 +673,29 @@ func wantsBackup(row *db.Destination) bool {
 	return row.BackupIngestWanted && row.BackupURL != "" && row.Kind == db.DestRTMP
 }
 
+// backupCompiled is the graph the REDUNDANT feed runs, which is not always the
+// primary's.
+//
+// The one place the two legitimately differ, and it is Twitch-specific. A
+// negotiated Enhanced Broadcasting configuration names ONE ingest endpoint; the
+// backup publishes to the operator's own BackupURL, which is an ordinary
+// one-track RTMP ingest whatever the negotiation said. So a destination whose
+// primary won a second audio track must still send ONE track on its backup, or
+// the redundant feed is the silent two-track push all over again -- on exactly
+// the feed that is supposed to take over when the primary drops.
+//
+// oneMix is non-nil for precisely the destinations this applies to: it is set
+// only where the second mix was compiled AND is conditional on a Twitch
+// negotiation (see vodNeedsNegotiation), so for every other destination this
+// returns the primary's graph unchanged and the generic two-mix egress to a
+// non-Twitch target is untouched.
+func backupCompiled(p destPlan) routing.Result {
+	if p.oneMix != nil {
+		return *p.oneMix
+	}
+	return p.compiled
+}
+
 // backupTarget is the redundant output's URL, assembled the way Target() does.
 func backupTarget(row *db.Destination) string {
 	if row.BackupStreamKey == "" {
@@ -640,7 +724,49 @@ func backupSpecOf(row *db.Destination, compiled routing.Result, upstream string)
 	})
 }
 
-func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec string, hub *relay.Hub, startDelay time.Duration) error {
+// multitrackDeadline is the backstop on the go-live negotiation.
+//
+// It is NOT the timeout that normally fires: multitrack.Client carries its own
+// (10s), and obs-studio allows five seconds for the same call. This is the
+// guard for a transport that has none -- a Client with an *http.Client whose
+// Timeout is zero would otherwise be free to hold a broadcast open for as long
+// as the far end keeps the socket alive. Above the client's own, so that the
+// client's timeout produces its own error message where it can.
+//
+// A var so a test can prove the broadcast starts anyway without waiting for it.
+var multitrackDeadline = 15 * time.Second
+
+// startDest brings one destination up.
+//
+// ENHANCED BROADCASTING IS NEGOTIATED HERE AND NOWHERE ELSE, and "here" is the
+// reason "it says so once" is true. This function runs once per START: a
+// destination that survives a reconcile is left strictly alone, and a
+// reconnect reuses the argv the supervisor already holds rather than coming
+// back through this path. So the note is produced once because the negotiation
+// happens once, with no bookkeeping to get wrong.
+func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration) error {
+	row, spec := p.row, p.spec
+	compiled := p.compiled
+
+	// BEFORE the port and the subscription. A negotiation that takes the whole
+	// of its timeout would otherwise hold a relay port and a hub entry open
+	// for the duration, and this call is on the path between the operator
+	// pressing the button and anything reaching a viewer.
+	ctx, cancel := context.WithTimeout(context.Background(), multitrackDeadline)
+	mt := e.negotiateFor(ctx, row)
+	cancel()
+
+	vodDropped := p.vodDropped
+	if p.oneMix != nil && !mt.Use {
+		// The negotiation this destination's second audio mix was conditional
+		// on did not succeed, so the pair must not go on the wire. Twitch's
+		// ordinary RTMP ingest takes one audio track and would either drop or
+		// refuse the second; publishing it anyway is the silent two-track push
+		// this gate exists to stop.
+		compiled = *p.oneMix
+		vodDropped = noteVODNotNegotiated
+	}
+
 	port, err := e.alloc.Allocate()
 	if err != nil {
 		return err
@@ -649,6 +775,15 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	url := hub.Subscribe(subName, port)
 
 	target := row.Target()
+	if mt.Use {
+		// THE NEGOTIATED TARGET REPLACES THE STORED ONE WHOLE, server and key
+		// together. The multitrack ingest is a different host from the one the
+		// row names, and the key is Twitch's minted 312-character credential
+		// with the agreed ladder signed inside it -- publishing to the
+		// negotiated host with the operator's own key would connect and send a
+		// ladder the ingest never agreed to. See multitrack.Outcome.Use.
+		target = mt.Target
+	}
 	writesAFile := destWritesAFile(row)
 	if writesAFile {
 		// File destinations are confined to the recordings directory; the
@@ -696,12 +831,19 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	}
 
 	proc := supervisor.New(e.log, supervisor.Spec{
-		Name:        subName,
-		Kind:        "destination",
-		Bin:         e.tools.FFmpeg,
-		Args:        buildArgs(target),
-		NextArgs:    nextArgs,
-		Secrets:     destSecrets(row),
+		Name:     subName,
+		Kind:     "destination",
+		Bin:      e.tools.FFmpeg,
+		Args:     buildArgs(target),
+		NextArgs: nextArgs,
+		// The minted key is passed as an EXTRA literal rather than left to
+		// inherit the row's registration, because it cannot: SecretSet.Scrub is
+		// a substring replace and the minted key ENDS WITH the operator's
+		// original, so registering only the original masks the last segment and
+		// leaves the signature and the hex manifest standing in the log. Empty
+		// when nothing was minted, which destSecrets and alerts.NewSecretSet
+		// both drop. See TestTheMintedKeyIsMaskedWholeAndNotJustItsTail.
+		Secrets:     destSecrets(row, mt.MintedKey),
 		AutoRestart: true,
 		// Per-destination reconnect policy. Zero values leave the supervisor's
 		// own defaults in place, which is what every destination ran on before
@@ -746,6 +888,7 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	e.dests[row.ID] = &destination{
 		row: row, proc: proc, port: port, subName: subName,
 		compiled: compiled, hub: hub, spec: spec,
+		multitrack: mt, vodDropped: vodDropped,
 	}
 	e.mu.Unlock()
 
@@ -758,8 +901,39 @@ func (e *Engine) startDest(row *db.Destination, compiled routing.Result, spec st
 	proc.Start()
 	e.log.Info("destination started", "dest", row.Name, "kind", row.Kind,
 		"tracks", compiled.Summary, "rendition", renditionLabel(row))
+	e.logMultitrack(row, mt, vodDropped)
 	e.noteReload("destination", row.Name, reloadRestart, "started")
 	return nil
+}
+
+// logMultitrack says what the negotiation decided, once per start.
+//
+// AT INFO, NEVER AT WARN OR ERROR, whatever the verdict. Twitch refuses any
+// client without a supported GPU and polyemesis is installed on the operator's
+// own server, so on most installs the fallback is the path every time for ever
+// -- logging it as a fault would make the ordinary case look broken, would be
+// counted as an incident by the alert rules, and would send somebody hunting
+// for a problem that is not there. multitrack.Outcome's own doc comment refuses
+// an error return for exactly this reason.
+//
+// The note is Twitch's sentence and ours, already scrubbed of the stream key by
+// multitrack.Negotiate. Neither the minted key nor the negotiated target is
+// logged: mt.Target carries the credential as its last path segment, and the
+// server half is already in the argv the monitoring page renders.
+func (e *Engine) logMultitrack(row *db.Destination, mt mtDecision, vodDropped string) {
+	if mt.Asked {
+		e.log.Info("enhanced broadcasting", "dest", row.Name,
+			"verdict", string(mt.Verdict), "note", mt.Note)
+		for _, d := range mt.Divergences {
+			// Advisory, and logged as such. They annotate a destination that IS
+			// publishing; a divergence must never read like a reason it is not.
+			e.log.Info("enhanced broadcasting: Twitch's configuration differs from this destination's",
+				"dest", row.Name, "field", d.Field, "detail", d.Detail)
+		}
+	}
+	if vodDropped != "" {
+		e.log.Info("second audio track not sent", "dest", row.Name, "reason", vodDropped)
+	}
 }
 
 func (e *Engine) teardownDest(d *destination) {

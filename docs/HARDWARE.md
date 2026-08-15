@@ -56,6 +56,12 @@ drivers. Anything else means listed-but-unusable, and the rendition editor
 greys it out with the reason FFmpeg gave — before you go live, rather than
 after.
 
+The candidates are the **five H.264 hardware encoders plus `libx264`** — six
+probes, run concurrently. The HEVC encoder of each family is not probed: it
+opens the same device through the same driver as its H.264 sibling, so the
+sibling's exit status answers for it, and the editor marks that verdict as
+inferred rather than measured.
+
 Three consequences worth knowing:
 
 - **Detection never blocks startup.** A probe that fails, times out or finds
@@ -68,9 +74,17 @@ Three consequences worth knowing:
   first two fields is the whole problem, so the API refuses to collapse them.
   `GET /api/v1/encoders?redetect=1` re-runs the scan — plug a GPU in, install a
   driver, fix a permission, then re-detect, no restart needed.
-- **`libx264` stays the default even on a machine with a working GPU.** Its
-  behaviour is identical everywhere; hardware wrappers vary by driver version.
-  Hardware is an opt-in you make deliberately.
+- **A working hardware encoder becomes the default for a new rendition**, in
+  the order VideoToolbox, NVENC, QSV, VA-API, AMF, then `libx264`. "Working"
+  means it passed the probe — the build merely listing an encoder is not
+  evidence, and defaulting to a listed-but-dead one is how an operator finds out
+  about `libcuda` after going live. If every probe fails, including x264's, the
+  default is `libx264` anyway: that keeps the product usable and the failure
+  legible, where an empty `-c:v` is neither.
+
+  You can still choose `libx264` per rendition, and there are reasons to — its
+  behaviour is identical everywhere, while hardware wrappers vary by driver
+  version. But it is an override, not the starting point.
 
 ---
 

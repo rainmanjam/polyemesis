@@ -5,8 +5,18 @@
 polyemesis migrates its own database on startup. In the normal case, upgrading
 is: stop, replace the binary or pull the image, start.
 
-**Back up `<dataDir>` first.** Migrations run forward only — there is no
-downgrade path, and a backup is the only way back.
+**Back up `<dataDir>` first, and check that the backup contains `secret.key`.**
+Migrations run forward only — there is no downgrade path, and a backup is the
+only way back. From 0.7.0 a backup without that one file is not a backup; see
+[Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back)
+before you start.
+
+**`install.sh` writes a guarded `update.sh` that does all of this for you** — it
+takes the backup, refuses to proceed if the archive is empty or missing
+`secret.key`, and only then pulls. If you installed with `install.sh`, run
+`<installDir>/update.sh` rather than the manual steps below. Operators who
+installed before 0.7.0 do not have it: re-run `install.sh` to regenerate it, or
+follow the manual procedure and do the `secret.key` check by hand.
 
 ```sh
 # Binary
@@ -67,6 +77,42 @@ unsupported and may fail in ways that are not obvious. Restore the backup
 instead.
 
 ## Version-specific notes
+
+### Upgrading to 0.7.0: sealed stream keys — **breaking to roll back**
+
+0.7.0 encrypts every destination stream key at rest. The key that opens them is
+`secret.key`, in `<dataDir>`, and it is generated on first start.
+
+**A restore without `secret.key` looks completely successful and is not.** The
+server starts, the database opens, every destination is listed — and each one
+comes back **disabled**, because a key that will not decrypt disables its
+destination rather than failing open with a wrong key. Nothing is wrong until
+you go live, which is the worst moment to find out.
+
+It is easy to get wrong, because `secret.key` is generated silently when it is
+absent. Restore the database without it and the server mints a fresh one, so
+there is no error to notice — just a new key that cannot open the old rows.
+
+```sh
+# Check your backup before you rely on it.
+tar tzf backup-<stamp>.tar.gz | grep secret.key
+```
+
+**Rolling back to 0.6.0 blanks every stream key.** The sealing migration clears
+the plaintext column, and 0.6.0 has no concept of the encrypted one — so the
+older binary reads every destination as having an empty key while still marked
+enabled. There is no schema version for it to refuse on. Once you have started
+0.7.0 against a database, treat the upgrade as one-way and go back via the
+backup rather than by reinstalling the old version.
+
+If you already have destinations showing as disabled after a restore, the
+`keyUnreadable` field on `GET /api/v1/destinations` says which, and re-entering
+the key on each one fixes it.
+
+Also in 0.7.0: **a stream key containing a control character is now refused
+when you save it** rather than being silently truncated. A destination carrying
+such a key — most often from a terminal paste that appended an escape sequence
+— must have its key re-entered before it can be saved again.
 
 ### Upgrading to multi-source
 
@@ -181,12 +227,29 @@ you can stop.
 Restoring the data directory is not optional. The database will have been
 migrated, and the older binary will not understand it.
 
+**Restore the whole directory, including `secret.key`.** Restoring only
+`polyemesis.db` is the mistake this section exists to prevent: from 0.7.0 the
+database alone is not enough to publish, and the failure is silent until you go
+live. See [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back).
+
 ## Verifying an upgrade
 
 ```sh
 polyemesis -version
 curl -s localhost:8080/api/v1/health
 ```
+
+**Check no destination came back disabled.** From 0.7.0 this is the first thing
+to look at after an upgrade or a restore, because it is the one failure that
+looks like success:
+
+```sh
+curl -s localhost:8080/api/v1/destinations | grep -c keyUnreadable
+```
+
+Anything above zero means those destinations could not decrypt their stream key
+— almost always a restore that omitted `secret.key`. Re-enter the key on each,
+or restore the file and restart.
 
 Then, in the UI: the ingest goes live, each destination reports running, and the
 **Meters** page shows loudness after routing. That last one is the real check —

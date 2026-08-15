@@ -1066,24 +1066,40 @@ docker volume inspect polyemesis-data >/dev/null 2>&1 || {
 docker run --rm -v polyemesis-data:/data -v "$INSTALL_DIR:/backup" alpine \\
   tar czf "/backup/backup-\${stamp}.tar.gz" -C /data .
 
+# LIST ONCE, THEN TEST THE LISTING. Never pipe tar into a reader that can exit
+# early. \`tar tzf … | grep -q\` looks obviously correct and is not: grep -q
+# exits on its FIRST match, tar then takes SIGPIPE, and under the \`set -o
+# pipefail\` above the pipeline returns 141 -- which \`if !\` inverts into "the
+# file is missing". A backup that DOES contain secret.key was refused, and
+# whether it happened depended on where the file landed in readdir order, i.e.
+# inode order. Reproduced at entry 1 of 4002 (false refusal) and entry 4001
+# (pass), same archive contents. Invisible on macOS, where bsdtar exits 0 on
+# SIGPIPE, which is why this survived local testing.
+#
+# Herestrings rather than \`printf | grep\`, because printf takes SIGPIPE too --
+# reordering the pipeline would move the bug, not remove it. This also walks the
+# archive once instead of twice.
+listing="\$(tar tzf "$INSTALL_DIR/backup-\${stamp}.tar.gz")"
+
 # A backup that exists but holds nothing is worse than no backup, because it
 # reads as success. tar always writes the './' entry, so anything under two
 # entries means the volume was empty.
-entries="\$(tar tzf "$INSTALL_DIR/backup-\${stamp}.tar.gz" | wc -l)"
+entries="\$(wc -l <<<"\$listing")"
 if [ "\$entries" -lt 2 ]; then
   echo "ERROR: backup archive is empty (\${entries} entries). Refusing to upgrade." >&2
   exit 1
 fi
-  # AND THE ONE FILE THE COUNT CANNOT VOUCH FOR. A non-empty archive proves the
-  # volume held something, not that it held the file that makes the database
-  # usable. Restoring without secret.key brings every destination back DISABLED
-  # -- correctly, since a key that will not open disables its destination rather
-  # than failing open -- and that reads as a successful restore until go-live.
-  if ! tar tzf "$INSTALL_DIR/backup-\${stamp}.tar.gz" | grep -q "secret\.key"; then
-    echo "ERROR: the backup contains no secret.key. Restoring without it leaves" >&2
-    echo "every destination disabled. Refusing to upgrade." >&2
-    exit 1
-  fi
+
+# AND THE ONE FILE THE COUNT CANNOT VOUCH FOR. A non-empty archive proves the
+# volume held something, not that it held the file that makes the database
+# usable. Restoring without secret.key brings every destination back DISABLED
+# -- correctly, since a key that will not open disables its destination rather
+# than failing open -- and that reads as a successful restore until go-live.
+if ! grep -q "secret\.key" <<<"\$listing"; then
+  echo "ERROR: the backup contains no secret.key. Restoring without it leaves" >&2
+  echo "every destination disabled. Refusing to upgrade." >&2
+  exit 1
+fi
 echo "backup verified: \${entries} entries"
 $COMPOSE_CMD pull
 $COMPOSE_CMD up -d

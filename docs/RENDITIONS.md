@@ -256,8 +256,9 @@ and costed in [the roadmap](roadmap/OVERLAYS.md); they are not built.
 
 ## Hardware encoders
 
-At startup polyemesis **encodes one frame** with each encoder your FFmpeg
-registers, and keeps the exit status:
+At startup polyemesis **encodes one frame** with each of the six encoders it
+probes — the five H.264 hardware encoders and `libx264` — and keeps the exit
+status:
 
 ```bash
 ffmpeg -f lavfi -i testsrc2=size=320x240:rate=1 -frames:v 1 -c:v h264_nvenc -f null -
@@ -274,6 +275,13 @@ found for device /dev/dri/renderD128` — so you find out at the dropdown rather
 than after you have gone live. A rendition saved on an encoder that later stops
 working is refused at start with the same message, instead of crash-looping.
 
+**The six HEVC encoders are not probed.** Each takes its sibling's verdict:
+`hevc_nvenc` opens the same device through the same driver as `h264_nvenc`, so
+if one cannot load libcuda neither can the other. The editor says when a verdict
+was inferred rather than measured. The inference is good enough to stop offering
+a choice and deliberately not good enough to refuse a start, so a rendition
+already saved on an HEVC encoder is never killed on a guess.
+
 The scan is bounded, runs its probes concurrently, and cannot fail the launch:
 if it cannot run at all, every encoder stays on offer and the product falls back
 to software. Measured cost on the development machine: **218 ms** added to
@@ -285,11 +293,11 @@ container.
 
 | Family | Encoders | Notes |
 |---|---|---|
-| Software | `libx264`, `libx265` | Always available. Identical rate control everywhere. |
-| NVIDIA | `h264_nvenc`, `hevc_nvenc` | Presets are `p1`–`p7`; `p4` is the honest middle. |
+| Software | `libx264`, `libx265` | Always available, and the only two whose behaviour is identical on every machine. |
+| NVIDIA | `h264_nvenc`, `hevc_nvenc` | Presets are `p1`–`p7`; `p4` is the honest middle. The only family that must be *told* whether it is doing CBR or capped VBR — `-rc cbr` otherwise pins it to constant bitrate and a ceiling does nothing. |
 | Intel Quick Sync | `h264_qsv`, `hevc_qsv` | Needs a working VA-API/QSV runtime, not just the CPU. |
 | Apple | `h264_videotoolbox`, `hevc_videotoolbox` | No preset knob; `-realtime` is the lever. |
-| VA-API (Linux) | `h264_vaapi`, `hevc_vaapi` | Needs a render node, `/dev/dri/renderD128` by default. This is the AMD path on Linux. |
+| VA-API (Linux) | `h264_vaapi`, `hevc_vaapi` | Needs a render node, `/dev/dri/renderD128` by default, **and** a `format=nv12,hwupload` filter tail — it encodes from GPU surfaces and cannot open without both. This is the AMD path on Linux. |
 | AMD | `h264_amf`, `hevc_amf` | Windows. Ubuntu's packaged FFmpeg contains no `*_amf` encoder at all — on Linux, use VA-API for AMD. |
 
 A **working** hardware encoder is the default for a new rendition, because a

@@ -64,6 +64,23 @@ jobs:
   images:
     name: container images
     runs-on: ubuntu-latest
+    # PUBLISHED LAST, BECAUSE A CONTAINER TAG IS THE ONE THING HERE THAT CANNOT
+    # BE UNPUBLISHED QUIETLY. These two jobs used to run in parallel, so a
+    # `binaries` failure -- a syft download, the SBOM guard, an upload -- left
+    # Docker Hub and GHCR already carrying :0.7.0, :0.7 and :latest with no
+    # GitHub Release, no binaries, no checksums and no SBOM behind them.
+    #
+    # That is worse than a half-finished release looks, because the two install
+    # modes diverge: install.sh writes `image: <IMAGE>:latest` into the compose
+    # file, so every docker operator running update.sh takes the new version
+    # immediately, while binary installs resolve through releases/latest and
+    # stay on the old one. Same tag, two populations, one of them running an
+    # artefact whose SBOM never passed its guard.
+    #
+    # Re-pushing identical tags is idempotent, so this costs a serialised wait
+    # and buys the property that a container tag never exists without the
+    # release it belongs to.
+    needs: binaries
     permissions:
       contents: read # checkout only; this job never writes to the repository
       packages: write # ghcr.io, via GITHUB_TOKEN

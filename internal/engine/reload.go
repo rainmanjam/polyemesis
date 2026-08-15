@@ -203,6 +203,27 @@ var settingsReload = map[string]ReloadRule{
 	// ---------------------------------------------------------- destinations
 	"destinations.staggerMs": {ClassLive, "startDestinations", "read per sweep and applied only to processes started in that sweep; it can never affect one already running"},
 
+	// ---------------------------------------------------------- multitrack
+	//
+	// ON DEMAND, not respawn, and the distinction is real rather than a
+	// classification convenience. None of these reaches an argv: they are the
+	// body of a request made ONCE PER START, in startDest, and read out of
+	// e.Settings() at that moment. A destination that is already publishing
+	// negotiated its configuration at go-live and holds a minted key that
+	// belongs to that negotiation -- changing the declared hardware underneath
+	// it cannot retroactively change what Twitch agreed to, and restarting a
+	// live destination to re-ask would drop a connection to a platform in order
+	// to deliver a setting that only matters next time.
+	//
+	// So the honest answer is: it applies to the next start of each
+	// destination, which is what ClassOnDemand says.
+	"multitrack.gpus.model":                {ClassOnDemand, "negotiateFor", "read at go-live and sent as capabilities.gpu[].model"},
+	"multitrack.gpus.vendorId":             {ClassOnDemand, "negotiateFor", "read at go-live; the field Twitch validates, and zero is what it refuses by name"},
+	"multitrack.gpus.deviceId":             {ClassOnDemand, "negotiateFor", "read at go-live and sent as capabilities.gpu[].device_id"},
+	"multitrack.gpus.dedicatedVideoMemory": {ClassOnDemand, "negotiateFor", "read at go-live and sent as capabilities.gpu[].dedicated_video_memory"},
+	"multitrack.gpus.sharedSystemMemory":   {ClassOnDemand, "negotiateFor", "read at go-live and sent as capabilities.gpu[].shared_system_memory"},
+	"multitrack.gpus.driverVersion":        {ClassOnDemand, "negotiateFor", "read at go-live; Twitch refuses an out-of-date driver naming the version to upgrade to"},
+
 	// ------------------------------------------------------------ chat + automod
 	"chat.retentionHours": {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band by handlePutSettings"},
 	"chat.keepMessages":   {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},

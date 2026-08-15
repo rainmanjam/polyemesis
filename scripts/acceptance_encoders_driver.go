@@ -13,6 +13,8 @@
 //	          one on libx264 beside it, and record what happened to each
 //	fallback  create a libx264 rendition on an FFmpeg whose detection commands
 //	          all failed, and prove it still encodes
+//	hevc      create a libx265 rendition and prove an HEVC encoder's own flags
+//	          are right, which no H.264 leg can show
 //
 // Everything observed is written to a facts file as KEY=value, so the shell
 // script does the asserting and this stays a recorder. The file is written on
@@ -83,6 +85,8 @@ func main() {
 		refuseCase(relay)
 	case "fallback":
 		fallbackCase(relay)
+	case "hevc":
+		hevcCase(relay)
 	default:
 		die("unknown mode %q", mode)
 	}
@@ -225,6 +229,47 @@ func fallbackCase(relay string) {
 
 	// Stopped rather than killed, so the file is finalised and ffprobe can
 	// read a real width and height off it.
+	call("POST", "/destinations/"+destID+"/stop", nil)
+	time.Sleep(5 * time.Second)
+}
+
+// hevcCase runs a real rendition on libx265.
+//
+// Every other leg of this suite encodes H.264, and H.264 cannot show the defect
+// that matters here: `-profile:v high` is an H.264 profile name, and the HEVC
+// encoders REFUSE it rather than ignoring it -- `x265 [error]: unknown profile
+// <high>` -- so an HEVC row copied from its H.264 sibling is a rendition that
+// can be saved and can never start. Six of the twelve encoders the editor
+// offers are HEVC and, before #343, all six were unconfigured.
+//
+// libx265 is the one HEVC encoder that needs no particular silicon, so this
+// runs everywhere the suite runs. It is skipped, not failed, on a build without
+// it: an FFmpeg compiled without libx265 is an environment fact.
+func hevcCase(relay string) {
+	if facts["libx265_AVAILABLE"] != "true" {
+		facts["HEVC_REND_SKIPPED"] = "true"
+		fmt.Println("this build has no libx265; skipping the HEVC leg")
+		return
+	}
+	facts["HEVC_REND_SKIPPED"] = "false"
+
+	src := startSource(relay)
+	defer func() { _ = src.Process.Kill(); _ = src.Wait() }()
+	waitForProbe()
+
+	id := newRendition("hevc-720p", "libx265", 1280, 720)
+	destID := destIDOf(call("POST", "/destinations", dest("hevc", "hevc.mkv", id)))
+
+	waitForRenditionRunning(id)
+	fmt.Println("encoding for 12s")
+	time.Sleep(12 * time.Second)
+
+	r := renditionStatus(get("/status"), id)
+	facts["HEVC_REND_RUNNING"] = boolStr(hasProcess(r))
+	facts["HEVC_REND_ERROR"] = strings.ReplaceAll(str(r["error"]), "\n", " ")
+
+	// Stopped rather than killed, so the file is finalised and ffprobe can read
+	// a real codec name off it.
 	call("POST", "/destinations/"+destID+"/stop", nil)
 	time.Sleep(5 * time.Second)
 }

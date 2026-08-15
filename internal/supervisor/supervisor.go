@@ -700,7 +700,19 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 			if msg != "" {
 				give += ": " + msg
 			}
-			p.log.Error("giving up on process", "restarts", consecutive-1, "err", msg)
+			// SCRUBBED, for the reason the "process exited" line above is, and
+			// this line is the one that was missed when that one was fixed.
+			// #311 scrubbed the retry line and left this one carrying the same
+			// `msg` -- runOnce's error, which holds FFmpeg's stderr and with it
+			// the publish URL and its key.
+			//
+			// The give-up path is the WORSE of the two to leak on. It fires
+			// only after MaxRestarts consecutive failures, which is to say
+			// after a destination has been refused over and over -- exactly the
+			// state an operator is looking at when they copy server.log into an
+			// issue. The retry line got the attention because it fires often;
+			// this one fires when someone is about to ask for help.
+			p.log.Error("giving up on process", "restarts", consecutive-1, "err", p.scrub(msg))
 			p.appendLog(give, "error")
 			p.setState(StateFailed, give)
 			return

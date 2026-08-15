@@ -163,9 +163,24 @@ type Destination struct {
 	//
 	// ON TWITCH THIS NEEDS Multitrack. The ordinary Twitch RTMP ingest takes one
 	// audio track; Enhanced Broadcasting is the only published path that takes
-	// two and says what the second is for. Nothing here enforces that pairing --
-	// the engine reports it, because a setting that silently undoes itself is
-	// worse than one that explains itself.
+	// two and says what the second is for.
+	//
+	// NOTHING HERE ENFORCES THAT PAIRING AND THE ENGINE NOW DOES, which is a
+	// change from what this comment used to promise and never delivered. The
+	// engine compiled the pair on this field alone and never read Multitrack,
+	// so a Twitch destination with a VOD mix pushed two audio tracks at a
+	// one-track ingest silently. Both halves are now real:
+	//
+	//   - engine.planDestinations refuses the pair outright on a Twitch RTMP
+	//     destination that did not opt in, and says so on the card.
+	//   - engine.startDest drops it when the opt-in was made and the
+	//     negotiation did not succeed, which is the ordinary outcome on a
+	//     server with no GPU.
+	//
+	// Validation stays out of it deliberately. A VOD mix configured before the
+	// toggle is turned on is a half-finished setup, not an invalid row, and
+	// refusing to SAVE it would make the two settings impossible to enter in
+	// the order an operator naturally enters them.
 	VODProfile *routing.Profile `json:"vodProfile,omitempty"`
 	// RenditionID selects the shared video encode this destination subscribes
 	// to. nil is passthrough: no encode, no process, straight off the ingest

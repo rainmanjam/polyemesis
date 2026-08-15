@@ -80,6 +80,14 @@ var redactAllowlist = map[string]string{
 		"back clean whatever destSecrets emitted and the test would measure nothing while " +
 		"looking green. This is that guard: it fails the day Redact grows to cover the " +
 		"shape, and says the test stopped being a test.",
+	"internal/engine/multitrack_wiring_test.go": "the same shape as the entry directly " +
+		"above, for the Twitch minted key. It calls Redact ON THE FIXTURE in a negative " +
+		"control that asserts the residual pass does NOT remove the minted key's signature " +
+		"from a bare token -- and, in the same test, that it DOES remove it from a line " +
+		"still shaped like an RTMP URL. That second measurement is why the real guard " +
+		"spawns a child and reads Process.Logs instead of asserting on CommandString: on " +
+		"a URL-shaped line the residual masks the segment whatever destSecrets emitted, " +
+		"so the test would have looked green while measuring nothing.",
 }
 
 // skipWalkDir decides which directories the walk below does not descend into.
@@ -107,6 +115,22 @@ var redactAllowlist = map[string]string{
 func skipWalkDir(rel, name string) bool {
 	switch rel {
 	case "ui", "web", "deploy", "docs":
+		return true
+	// .claude holds git worktrees, which are FULL CHECKOUTS OF THIS SAME
+	// MODULE. Walking one scans every file of whatever branch is checked out
+	// there, under a path the allowlist cannot match -- so
+	// `internal/alerts/redact.go`, which is allowlisted and calls Redact by
+	// definition, reappears as
+	// `.claude/worktrees/agent-<id>/internal/alerts/redact.go` and fails the
+	// guard. Measured: with two agent worktrees open this reported four
+	// violations, none of them in the tree under test, and every one of them a
+	// file already on the allowlist at its real path.
+	//
+	// Root only, per the rule above: a future internal/.claude would be walked
+	// like anything else. This is the same class as the `web` hole that comment
+	// describes -- a directory-shaped blind spot -- except it fails LOUD rather
+	// than silent, which is why it is a nuisance and not a hazard.
+	case ".claude":
 		return true
 	}
 	switch name {
