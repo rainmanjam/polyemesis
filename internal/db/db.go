@@ -137,7 +137,23 @@ func Open(path string, opts ...Option) (*DB, error) {
 	// WAL keeps the API responsive while the retention sweeper writes, and
 	// busy_timeout turns the rare writer collision into a short wait instead
 	// of an SQLITE_BUSY error surfacing to the user.
-	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	//
+	// secure_delete(ON) makes SQLite zero the bytes of a deleted or shortened
+	// cell instead of only unlinking it. THIS FILE HOLDS STREAM KEYS, and
+	// without it the seal-at-rest backfill leaves the plaintext it replaced
+	// legible in freed pages: measured with 60 pre-0.7.0 destinations, 62
+	// copies of the plaintext were still greppable out of the raw .db bytes
+	// after the backfill had blanked every stream_key column. See
+	// TestTheBackfillLeavesNoPlaintextInTheRawDatabaseBytes.
+	//
+	// IT MUST BE SET HERE, IN THE DSN, not executed later: it governs writes
+	// made after it is on, so a pragma issued once the backfill has already
+	// overwritten the rows would protect nothing. The default under
+	// modernc.org/sqlite is 0 -- measured, and worth stating because CPython's
+	// bundled SQLite compiles it to 1, so the same experiment run in Python
+	// reports this bug as refuted.
+	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)" +
+		"&_pragma=foreign_keys(1)&_pragma=secure_delete(ON)"
 	sqldb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite %s: %w", path, err)

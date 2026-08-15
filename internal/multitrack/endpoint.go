@@ -13,6 +13,37 @@ import (
 //	rtmps://ingest.global-contribute.live-video.net/app/{stream_key}
 const keyPlaceholder = "/{stream_key}"
 
+// ingestHostSuffix is the only DNS suffix a negotiated ingest host may have.
+//
+// WITHOUT THIS CHECK THE RESPONSE CHOOSES WHERE THE BROADCAST GOES. Resolve
+// validated the scheme and that the host was non-empty and nothing else, so a
+// body carrying `url_template: "rtmps://attacker.example/app/{stream_key}"`
+// resolved cleanly, and engine/destinations.go replaces the destination's
+// stored target wholesale with what Resolve returns -- nothing downstream
+// reasserts the host the operator configured. The stream key travels in the
+// RTMP connect as the stream name, so the first packet of that publish hands
+// the credential over.
+//
+// A SUFFIX RATHER THAN AN EXACT HOST, and the evidence for where to cut is in
+// the repository rather than in a guess. Three independently measured
+// contribute hosts appear here -- ingest.global-contribute.live-video.net (the
+// package doc's second measured fact, and both response fixtures),
+// fa723fc1b171.global-contribute.live-video.net (services.go) and the
+// per-channel <your-host>.global-contribute.live-video.net that db/platforms.go
+// tells a Kick operator to expect. What varies between them is the LEFTMOST
+// LABEL and nothing else: these are Amazon IVS contribute endpoints, issued per
+// channel and routed regionally, so the host is exactly the part of the
+// response that is not knowable ahead of the call. Pinning the one host that
+// was measured would refuse a legitimate ingest the first time Twitch routed a
+// broadcast anywhere else, and this package exists as a negotiation precisely
+// because that value is Twitch's to choose.
+//
+// THE LEADING DOT IS LOAD-BEARING. Matching the suffix without it accepts
+// "evilglobal-contribute.live-video.net", which is a different registrable
+// domain that anyone may register and which HasSuffix cannot tell apart. With
+// it, everything that matches is a subdomain of a name Amazon controls.
+const ingestHostSuffix = ".global-contribute.live-video.net"
+
 // Target is a publish destination, split the way polyemesis splits one.
 //
 // URL is the server and Key is the stream name, and they are separate because
@@ -78,18 +109,10 @@ func (c *Config) Resolve(streamKey string) (Target, error) {
 		return Target{}, err
 	}
 
-	// THE NEGOTIATED KEY WINS, and on a successful negotiation there always is
-	// one. It is not the operator's key: it is a signed value carrying the
-	// agreed ladder inside it, with the operator's key as its final segment (see
-	// IngestEndpoint.Authentication). Publishing with the operator's key instead
-	// would send a stream the ingest never agreed the shape of -- which is the
-	// single easiest way to implement this feature so that it looks finished and
-	// silently is not.
-	key := streamKey
-	if ep.Authentication != "" {
-		key = ep.Authentication
-	}
-	if key == "" {
+	// A destination with no stream key of its own never reaches a negotiation
+	// worth completing, and saying so first keeps that mistake from being
+	// reported as one of Twitch's below.
+	if streamKey == "" {
 		return Target{}, fmt.Errorf("%w: neither the destination nor Twitch supplied a stream key",
 			ErrNoUsableEndpoint)
 	}
@@ -121,6 +144,54 @@ func (c *Config) Resolve(streamKey string) (Target, error) {
 	}
 	if u.Host == "" {
 		return Target{}, fmt.Errorf("%w: Twitch's ingest template names no host", ErrNoUsableEndpoint)
+	}
+	// WHICH host, not merely that there is one. See ingestHostSuffix.
+	//
+	// Hostname() rather than Host: the port is not part of the name, and the
+	// measured Kick form carries an explicit ":443" that would make every
+	// suffix comparison against the raw Host fail. Lowercased because DNS is
+	// case-insensitive and a response spelling the host "INGEST.Global-..."
+	// names the same machine -- a check that refused it would be rejecting the
+	// legitimate ingest on a technicality while an attacker simply sends
+	// lowercase.
+	if host := strings.ToLower(u.Hostname()); !strings.HasSuffix(host, ingestHostSuffix) {
+		return Target{}, fmt.Errorf("%w: Twitch's ingest template names host %q, which is not under %q -- "+
+			"publishing there would send this broadcast, and the stream key it opens with, to a host "+
+			"the response chose rather than one Twitch operates",
+			ErrNoUsableEndpoint, host, ingestHostSuffix)
+	}
+
+	// AN ABSENT MINTED KEY IS A REFUSAL, NOT A REASON TO SUBSTITUTE THE
+	// OPERATOR'S. The previous spelling of this was
+	//
+	//	key := streamKey
+	//	if ep.Authentication != "" { key = ep.Authentication }
+	//
+	// which reads as a safe default and is the opposite of one. Outcome.Use
+	// says the minted key is MANDATORY when a negotiation succeeds, and gives
+	// the reason: the minted value carries the agreed ladder signed inside it,
+	// so publishing with the operator's key instead connects anyway and sends a
+	// ladder the ingest never agreed to. The fallback did exactly that, quietly,
+	// whenever `authentication` was missing from the response.
+	//
+	// It is worse than a correctness bug because of WHAT THE TWO KEYS ARE. The
+	// minted key is per-broadcast and dies with the negotiation; the operator's
+	// is the long-lived channel credential that is rarely rotated and is worth
+	// whatever the channel is worth. The case where the fallback fired -- a
+	// response that omits the field -- is therefore the case where it shipped
+	// the permanent credential rather than the disposable one.
+	//
+	// AFTER the host check, deliberately. Both orders refuse the same responses,
+	// but this one refuses a hostile host by naming the host, which is the fact
+	// an operator reading the log needs; the other would report a missing field
+	// and say nothing about where the broadcast was nearly sent.
+	key := ep.Authentication
+	if key == "" {
+		return Target{}, fmt.Errorf("%w: Twitch's %s endpoint carries no minted stream key, and the "+
+			"destination's own key is not a substitute for one -- publishing with it would send a "+
+			"ladder this negotiation never agreed to, using the long-lived channel credential "+
+			"rather than the per-broadcast one",
+			ErrNoUsableEndpoint, strings.ToUpper(strings.TrimSpace(ep.Protocol)))
 	}
 
 	return Target{URL: server, Key: withConfigID(key, c.Meta.ConfigID)}, nil

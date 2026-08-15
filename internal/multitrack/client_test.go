@@ -457,3 +457,156 @@ func TestAContextCancellationIsReportedAsAFailureNotARefusal(t *testing.T) {
 		t.Errorf("error does not identify the cancellation: %v", err)
 	}
 }
+
+// TestFetchDoesNotFollowARedirectThatWouldReplayTheKeyToAnotherHost.
+//
+// net/http follows up to ten redirects by default and strips Authorization and
+// Cookie when the hop crosses to another host -- which protects a client whose
+// credential is in a HEADER and does nothing for this one. Fetch puts the
+// stream key in the BODY, deliberately, so it stays out of URLs and proxy logs,
+// and 307/308 preserve the method and REPLAY that body through
+// Request.GetBody. So a single 307 from anything answering for
+// ingest.twitch.tv delivers the operator's stream key to a host of its own
+// choosing, with no interception and no downgrade.
+//
+// 301/302/303 are covered too, and they are expected NOT to leak -- net/http
+// rewrites those to GET and drops the body. They are in the table so the test
+// says which codes are dangerous and which are not, rather than asserting a
+// uniform outcome that is not the real one.
+//
+// Mutation: delete `CheckRedirect: refuseRedirect` from defaultHTTP AND the
+// `cp.CheckRedirect = refuseRedirect` line from Client.http (client.go).
+// Observed to fail on the 307 and 308 subtests with "the far end received the
+// stream key in a replayed request body (684 bytes)". 301/302/303 failed only
+// on "the redirect was followed" and NOT on the key assertion -- which is the
+// measurement, not a weaker test: net/http really does rewrite those to GET and
+// drop the body, so only 307/308 carry the credential across. Restored with
+// `command cp -f` from a file backup; `diff` against the backup reported
+// IDENTICAL.
+//
+// Mutation: set CheckRedirect on defaultHTTP only, dropping the
+// `cp.CheckRedirect = refuseRedirect` line from Client.http. Observed to fail
+// exactly as above -- which is the point of reapplying the policy to an
+// injected client, since every test in this file injects one and the version
+// that trusted the seam would have been untestable.
+func TestFetchDoesNotFollowARedirectThatWouldReplayTheKeyToAnotherHost(t *testing.T) {
+	const key = "live_424242_thekeythatmustnotbereplayedelsewhere"
+
+	for _, code := range []int{
+		http.StatusMovedPermanently,  // 301
+		http.StatusFound,             // 302
+		http.StatusSeeOther,          // 303
+		http.StatusTemporaryRedirect, // 307
+		http.StatusPermanentRedirect, // 308
+	} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			// The far end. A different host from the one Fetch was pointed at,
+			// which is what makes this the cross-domain case net/http believes
+			// it is already handling.
+			var farEndBody []byte
+			var farEndHit bool
+			farEnd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				farEndHit = true
+				farEndBody, _ = readAll(r)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"meta":{}}`))
+			}))
+			defer farEnd.Close()
+
+			near := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, farEnd.URL, code)
+			}))
+			defer near.Close()
+
+			c := &Client{HTTP: near.Client(), BaseURL: near.URL}
+			_, err := c.Fetch(context.Background(), key, NewRequest(Ask{Version: "test"}))
+
+			if strings.Contains(string(farEndBody), key) {
+				t.Errorf("the far end received the stream key in a replayed request body (%d bytes). "+
+					"net/http strips Authorization and Cookie across hosts; it has no notion of a "+
+					"sensitive BODY, and %d preserves the method and replays one through GetBody",
+					len(farEndBody), code)
+			}
+			if farEndHit {
+				t.Errorf("the redirect was followed to a host the response chose")
+			}
+			// The 3xx is surfaced rather than swallowed: a caller has to be able
+			// to tell "Twitch redirected us" from "Twitch negotiated", and
+			// ErrUseLastResponse hands Fetch the 3xx to report.
+			if err == nil {
+				t.Error("Fetch reported success on a redirect it did not follow, so the caller " +
+					"would publish against a configuration Twitch never sent")
+			} else if !strings.Contains(err.Error(), "Twitch returned") {
+				t.Errorf("error does not report the status Twitch returned: %v", err)
+			}
+			if err != nil && strings.Contains(err.Error(), key) {
+				t.Errorf("the redirect error carries the stream key: %v", err)
+			}
+		})
+	}
+}
+
+// TestAKeyStraddlingTheSnippetBoundaryIsStillMasked.
+//
+// The call site read `scrub(snippet(raw), streamKey)` -- truncate at 300 bytes,
+// THEN look for the key. A key that begins before offset 300 and ends after it
+// is handed to scrub as a haystack shorter than the needle, so nothing matches
+// and the surviving prefix goes straight into the error text. Worse than a
+// partial leak: no placeholder appears anywhere in the line, so the output does
+// not look redacted and reads as though the scrub had nothing to do.
+//
+// THIS IS #306's FAILURE MODE, in the newest code in the repository. There a
+// 65-byte configured value was searched for inside a 56-byte printed one; here
+// a whole key is searched for inside its own truncated prefix. The fix is the
+// same shape: make the scrub see the untruncated text.
+//
+// Mutation: restore `scrub(snippet(raw), streamKey)` in Client.Fetch
+// (client.go). Observed to fail with "30 bytes of the stream key survived into
+// the error text ... and masked=false". Restored with `command cp -f`; `diff`
+// against the backup reported IDENTICAL.
+func TestAKeyStraddlingTheSnippetBoundaryIsStillMasked(t *testing.T) {
+	// 55 bytes, placed so it starts at offset 270 and ends at 325 -- across the
+	// 300-byte cut. The arithmetic is the test: at any other offset the old
+	// code passes.
+	const key = "live_424242_aStreamKeyLongEnoughToStraddleTheBoundary_x"
+	const at = 270
+	if len(key) != 55 {
+		t.Fatalf("the fixture key is %d bytes, not 55: the offsets below are chosen so the key "+
+			"straddles snippet's 300-byte cut, and this test proves nothing if it does not", len(key))
+	}
+
+	body := strings.Repeat("p", at) + key + strings.Repeat("q", 200)
+	if at+len(key) <= 300 {
+		t.Fatalf("the key ends at offset %d, before snippet's cut at 300: it does not straddle", at+len(key))
+	}
+
+	c, _ := serve(t, http.StatusInternalServerError, body)
+	_, err := c.Fetch(context.Background(), key, NewRequest(Ask{Version: "test"}))
+	if err == nil {
+		t.Fatal("Fetch succeeded on a 500; this case is supposed to fail")
+	}
+	got := err.Error()
+
+	if strings.Contains(got, key) {
+		t.Errorf("the whole stream key is in the error text: %v", got)
+	}
+	// The prefix is the actual leak, and asserting only on the whole key would
+	// miss it entirely -- which is how this shipped.
+	for n := len(key); n >= 12; n-- {
+		if strings.Contains(got, key[:n]) {
+			t.Errorf("%d bytes of the stream key survived into the error text: %q ... and masked=%v, "+
+				"so the line does not even look redacted", n, key[:n],
+				strings.Contains(got, redactedPlaceholder))
+			break
+		}
+	}
+	if !strings.Contains(got, redactedPlaceholder) {
+		t.Errorf("the error carries no placeholder, so nothing records that a key was removed: %v", got)
+	}
+	// Still bounded. The fix moves the truncation inside the scrub; it must not
+	// remove it, or a megabyte of response body becomes a log line.
+	if len(got) > 600 {
+		t.Errorf("the error is %d bytes: scrubbing outermost dropped the bound rather than "+
+			"reordering it", len(got))
+	}
+}

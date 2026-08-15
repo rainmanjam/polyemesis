@@ -7,6 +7,34 @@ import (
 	"testing"
 )
 
+// ingestHost is a host Resolve will accept, and every hand-built Config below
+// uses it rather than the bare "h" they all used before.
+//
+// That "h" was not a shortcut, it was the bug: Resolve checked the scheme and
+// that the host was non-empty, so "h" -- and equally "attacker.example" --
+// passed, and engine/destinations.go then replaced the destination's stored
+// target with whatever came back. The tests could not have caught it because
+// they were written in the same shape as the hole. A per-channel Amazon IVS
+// host is what the response really carries; see ingestHostSuffix.
+const ingestHost = "fa723fc1b171.global-contribute.live-video.net"
+
+// fixtureMintedKey is the `authentication` value in
+// testdata/negotiated-one-rendition.json.
+//
+// THE FIXTURE DID NOT CARRY ONE UNTIL THIS CHANGE, and that omission is worth
+// recording rather than quietly repairing: it is a fixture named "negotiated",
+// standing in for a SUCCESSFUL negotiation, and IngestEndpoint.Authentication
+// records as measured that a successful negotiation always mints a key. Every
+// test that resolved against it was therefore exercising the operator's own key
+// through a path that only a REFUSAL can reach in production -- which is
+// precisely why nothing here noticed that Resolve fell back to that key.
+//
+// Short rather than the real 312 characters, for the reason
+// TestResolveHonoursTheKeyTwitchMintsRatherThanTheOperatorsOwn already gives:
+// a credential-shaped literal in the tree is what .gitleaks.toml is for. The
+// shape is the documented one -- v1_<sig>_<salt>_<hex manifest>_<original key>.
+const fixtureMintedKey = "v1_sig_salt_7b2276223a317d_live_424242_operatorkey"
+
 // TestResolveSplitsTheTemplateWherePolyemesisSplitsAPublishURL pins the exact
 // pair db.Destination.Target composes, because that composition is what FFmpeg
 // eventually opens and getting the split wrong produces a URL that connects and
@@ -43,7 +71,7 @@ func TestResolveSplitsTheTemplateWherePolyemesisSplitsAPublishURL(t *testing.T) 
 	if strings.Contains(joined, "{stream_key}") {
 		t.Errorf("the placeholder survived into the publish URL: %q", joined)
 	}
-	if !strings.HasPrefix(joined, wantURL+"/live_424242_operatorkey?") {
+	if !strings.HasPrefix(joined, wantURL+"/"+fixtureMintedKey+"?") {
 		t.Errorf("composed publish URL = %q, want it to start with the server, the key, then a query", joined)
 	}
 }
@@ -92,9 +120,18 @@ func TestResolveCarriesTheConfigIDOnTheKeySoTheIngestCanMatchTheNegotiation(t *t
 // test report `bandwidthtest = "", want "true"`. Restored from a /tmp copy;
 // git diff --stat clean.
 func TestAQueryAlreadyOnTheStreamKeyIsKeptAlongsideTheConfigID(t *testing.T) {
+	// The query rides on the MINTED key, because that is the key that is
+	// published with -- Twitch echoes the operator's parameters into the value
+	// it mints. Asserting against the operator's own key here would be
+	// asserting against a value Resolve must never publish.
+	const minted = "v1_sig_salt_7b2276223a317d_live_1_key?bandwidthtest=true"
 	cfg := &Config{
-		Meta:            Meta{ConfigID: "cfg-1"},
-		IngestEndpoints: []IngestEndpoint{{Protocol: "RTMPS", URLTemplate: "rtmps://h/app/{stream_key}"}},
+		Meta: Meta{ConfigID: "cfg-1"},
+		IngestEndpoints: []IngestEndpoint{{
+			Protocol:       "RTMPS",
+			URLTemplate:    "rtmps://" + ingestHost + "/app/{stream_key}",
+			Authentication: minted,
+		}},
 	}
 
 	target, err := cfg.Resolve("live_1_key?bandwidthtest=true")
@@ -102,7 +139,7 @@ func TestAQueryAlreadyOnTheStreamKeyIsKeptAlongsideTheConfigID(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 	base, rawQuery, _ := strings.Cut(target.Key, "?")
-	if base != "live_1_key" {
+	if base != "v1_sig_salt_7b2276223a317d_live_1_key" {
 		t.Errorf("the key itself was rewritten: %q", base)
 	}
 	if strings.Count(target.Key, "?") != 1 {
@@ -152,8 +189,12 @@ func TestResolvePrefersRTMPSEvenThoughTwitchListsRTMPFirst(t *testing.T) {
 	// And RTMP is still used when it is all there is, because refusing would
 	// turn a working-but-cleartext ingest into no ingest.
 	only := &Config{
-		Meta:            Meta{ConfigID: "c"},
-		IngestEndpoints: []IngestEndpoint{{Protocol: "RTMP", URLTemplate: "rtmp://h/app/{stream_key}"}},
+		Meta: Meta{ConfigID: "c"},
+		IngestEndpoints: []IngestEndpoint{{
+			Protocol:       "RTMP",
+			URLTemplate:    "rtmp://" + ingestHost + "/app/{stream_key}",
+			Authentication: fixtureMintedKey,
+		}},
 	}
 	got, err := only.Resolve("k")
 	if err != nil {
@@ -182,7 +223,7 @@ func TestResolveHonoursTheKeyTwitchMintsRatherThanTheOperatorsOwn(t *testing.T) 
 	cfg := &Config{
 		Meta: Meta{ConfigID: "cfg-1"},
 		IngestEndpoints: []IngestEndpoint{
-			{Protocol: "RTMPS", URLTemplate: "rtmps://h/app/{stream_key}", Authentication: minted},
+			{Protocol: "RTMPS", URLTemplate: "rtmps://" + ingestHost + "/app/{stream_key}", Authentication: minted},
 		},
 	}
 
@@ -251,7 +292,7 @@ func TestResolveRefusesATemplateItDoesNotUnderstandRatherThanGuessing(t *testing
 		},
 		{
 			name:      "neither side supplied a key",
-			endpoints: []IngestEndpoint{{Protocol: "RTMPS", URLTemplate: "rtmps://h/app/{stream_key}"}},
+			endpoints: []IngestEndpoint{{Protocol: "RTMPS", URLTemplate: "rtmps://" + ingestHost + "/app/{stream_key}"}},
 			key:       "",
 			want:      "neither the destination nor Twitch supplied a stream key",
 		},
@@ -300,5 +341,136 @@ func TestTheRedactedTargetShowsTheHostAndHidesTheKey(t *testing.T) {
 	}
 	if !strings.Contains(red, "ingest.global-contribute.live-video.net") {
 		t.Errorf("the redacted target hides the host, which is the part worth printing: %q", red)
+	}
+}
+
+// TestResolveRefusesAnIngestHostTwitchDoesNotOperate.
+//
+// Resolve checked the SCHEME of the negotiated template and that the host was
+// non-empty, and nothing checked WHICH host. The response is attacker-shaped
+// input the moment anything can answer for ingest.twitch.tv -- a compromised
+// endpoint, a hostile resolver, a proxy an operator was told to configure -- and
+// engine/destinations.go replaces the destination's stored target wholesale
+// with whatever Resolve returns, so nothing downstream reasserts the host the
+// operator chose. The stream key travels in the RTMP connect as the stream
+// name, which means the first packet of that publish hands the credential over.
+//
+// Mutation: delete the ingestHostSuffix check from Config.Resolve
+// (endpoint.go). Observed to fail on every hostile subtest with "Resolve
+// accepted host ... and returned target rtmps://attacker.example/app/<redacted>"
+// -- and, notably, PASS on all four legitimate ones, which is what says the
+// check is not simply refusing everything. Restored with `command cp -f` from a
+// file backup; `diff` against the backup reported IDENTICAL.
+//
+// Mutation: drop the leading dot, `strings.HasSuffix(host,
+// "global-contribute.live-video.net")`. Observed to fail ONLY on the
+// "sibling domain that merely ends in the same letters" subtest, which is the
+// one written for it -- a suffix match without a label boundary accepts a
+// registrable domain anybody can buy.
+//
+// Mutation: compare u.Host instead of u.Hostname(). Observed to fail on the
+// "legitimate host with an explicit port" subtest, which is the measured Kick
+// form in db/platforms.go.
+func TestResolveRefusesAnIngestHostTwitchDoesNotOperate(t *testing.T) {
+	const minted = "v1_sig_salt_7b2276223a317d_live_1_operatorkey"
+
+	for _, tc := range []struct {
+		name   string
+		host   string
+		accept bool
+	}{
+		{name: "the measured Twitch ingest", host: "ingest.global-contribute.live-video.net", accept: true},
+		{name: "a per-channel Amazon IVS host", host: ingestHost, accept: true},
+		{name: "legitimate host with an explicit port", host: ingestHost + ":443", accept: true},
+		{name: "DNS is case-insensitive", host: "INGEST.Global-Contribute.Live-Video.NET", accept: true},
+
+		{name: "a host the response simply chose", host: "attacker.example"},
+		{name: "the config API host is not an ingest host", host: "ingest.twitch.tv"},
+		{name: "sibling domain that merely ends in the same letters",
+			host: "evilglobal-contribute.live-video.net"},
+		{name: "the suffix as a path on somebody else's host",
+			host: "attacker.example/.global-contribute.live-video.net"},
+		{name: "the suffix as a userinfo prefix",
+			host: "ingest.global-contribute.live-video.net@attacker.example"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				Meta: Meta{ConfigID: "cfg-1"},
+				IngestEndpoints: []IngestEndpoint{{
+					Protocol:       "RTMPS",
+					URLTemplate:    "rtmps://" + tc.host + "/app/{stream_key}",
+					Authentication: minted,
+				}},
+			}
+			target, err := cfg.Resolve("live_1_operatorkey")
+			if tc.accept {
+				if err != nil {
+					t.Fatalf("Resolve refused a legitimate ingest host %q: %v", tc.host, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Resolve accepted host %q and returned target %s -- the broadcast, and the "+
+					"stream key the RTMP connect opens with, would go to a host chosen by the "+
+					"response rather than by the operator", tc.host, target.Redacted())
+			}
+			if !errors.Is(err, ErrNoUsableEndpoint) {
+				t.Errorf("error does not wrap ErrNoUsableEndpoint, so the caller cannot take the "+
+					"ordinary-ingest fallback on it: %v", err)
+			}
+			if !strings.Contains(err.Error(), "which is not under") {
+				t.Errorf("error = %v, want it to name the host it refused", err)
+			}
+		})
+	}
+}
+
+// TestResolveRefusesASuccessfulNegotiationThatMintedNoKey.
+//
+// `key := streamKey; if ep.Authentication != "" { key = ep.Authentication }`
+// reads as a safe default and is the opposite of one. Outcome.Use records that
+// the minted key is MANDATORY on a successful negotiation, so a response
+// without one is not a response to publish against -- and the fallback did not
+// merely publish the wrong ladder, it published the operator's LONG-LIVED
+// channel credential in place of the per-broadcast one that was supposed to
+// replace it.
+//
+// The two halves of SEC-1 compose: the host check refuses a hostile endpoint,
+// and this refuses to hand it the permanent credential if it is ever reached by
+// a route the host check does not cover.
+//
+// Mutation: restore the fallback -- `key := streamKey; if ep.Authentication !=
+// "" { key = ep.Authentication }` -- in Config.Resolve (endpoint.go). Observed
+// to fail with "Resolve published the operator's own long-lived key ...".
+// Restored with `command cp -f`; `diff` against the backup reported IDENTICAL.
+func TestResolveRefusesASuccessfulNegotiationThatMintedNoKey(t *testing.T) {
+	const operatorKey = "live_1_the_operators_permanent_channel_credential"
+
+	cfg := &Config{
+		Meta: Meta{ConfigID: "cfg-1"},
+		IngestEndpoints: []IngestEndpoint{{
+			Protocol:    "RTMPS",
+			URLTemplate: "rtmps://" + ingestHost + "/app/{stream_key}",
+			// No Authentication. On a refusal Twitch echoes what was sent, and
+			// sends nothing back when nothing was sent; on a success it always
+			// mints. Absent is therefore never "use yours instead".
+		}},
+	}
+
+	target, err := cfg.Resolve(operatorKey)
+	if err == nil {
+		t.Fatalf("Resolve published the operator's own long-lived key against an endpoint that "+
+			"minted none: target key %q. The minted key is per-broadcast and dies with the "+
+			"negotiation; this one is the channel credential", target.Key)
+	}
+	if !errors.Is(err, ErrNoUsableEndpoint) {
+		t.Errorf("error does not wrap ErrNoUsableEndpoint: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no minted stream key") {
+		t.Errorf("error = %v, want it to say the endpoint minted no key", err)
+	}
+	// The refusal must not leak what it refused to publish.
+	if strings.Contains(err.Error(), operatorKey) {
+		t.Errorf("the refusal echoes the operator's stream key: %v", err)
 	}
 }

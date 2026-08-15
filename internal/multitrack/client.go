@@ -29,13 +29,69 @@ type Client struct {
 // defaultTimeout is deliberately short. See Client.HTTP.
 const defaultTimeout = 10 * time.Second
 
-var defaultHTTP = &http.Client{Timeout: defaultTimeout}
+var defaultHTTP = &http.Client{
+	Timeout:       defaultTimeout,
+	CheckRedirect: refuseRedirect,
+}
 
+// refuseRedirect stops every redirect on the configuration POST.
+//
+// THE STREAM KEY IS IN THE BODY, which is what makes this different from the
+// two redirect policies already in this repo. net/http strips Authorization and
+// Cookie when a redirect crosses to another host, so a client whose credential
+// rides in a header is protected by the standard library. Ours does not: Fetch
+// puts the key in the JSON body precisely so it stays out of URLs and proxy
+// logs, and net/http has no notion of a sensitive body.
+//
+// Measured against two httptest servers, redirecting a Fetch to a second host:
+//
+//	301, 302, 303  ->  the hop becomes a GET, no body, no leak
+//	307, 308       ->  the hop stays a POST and net/http REPLAYS the body
+//	                   through Request.GetBody -- 684 bytes of request JSON
+//	                   arrived at the second server, stream key included
+//
+// So the leak needs no interception and no downgrade. One 307 from anything
+// answering for ingest.twitch.tv hands the operator's stream key to a host of
+// its choosing, and Go's default of following up to ten of them is what makes
+// it a single response rather than an attack.
+//
+// REFUSED OUTRIGHT RATHER THAN CONSTRAINED TO THE SAME HOST, which is the
+// weaker policy that would also have closed this. ConfigURL is a const for the
+// reason it states -- "a configurable platform host is a partially-redirected
+// provider waiting to happen" -- and no measured response has ever redirected.
+// A same-host allowance would be an untested branch guarding a credential.
+//
+// Returning http.ErrUseLastResponse rather than an error is deliberate: it
+// hands Fetch the 3xx response to deal with, and the status check there reports
+// it as a refusal an operator can read, rather than burying it in a *url.Error
+// that the caller must scrub. Nothing follows the Location header either way.
+func refuseRedirect(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
+// http returns the transport to use, WITH the redirect policy applied whether
+// or not the caller supplied a client.
+//
+// The policy is reapplied to an injected client rather than left to it, and
+// that is the whole reason this is not a two-line accessor. HTTP is described
+// above as the seam, and a seam that quietly drops a security policy is a test
+// suite that proves the wrong thing: every test here passes httptest's
+// srv.Client(), which has no CheckRedirect, so a policy that lived only on
+// defaultHTTP would be a policy no test could exercise and no test could
+// protect. The same argument BaseURL's comment makes about partial redirection
+// applies to the transport.
+//
+// A SHALLOW COPY, so the caller's client does not grow our hook -- the pattern
+// transcribe.download already uses for the same reason. Overwriting
+// CheckRedirect on a shared *http.Client would change the behaviour of every
+// other request made through it.
 func (c *Client) http() *http.Client {
-	if c.HTTP != nil {
-		return c.HTTP
+	if c.HTTP == nil {
+		return defaultHTTP
 	}
-	return defaultHTTP
+	cp := *c.HTTP
+	cp.CheckRedirect = refuseRedirect
+	return &cp
 }
 
 func (c *Client) url() string {
@@ -99,8 +155,36 @@ func (c *Client) Fetch(ctx context.Context, streamKey string, req Request) (*Con
 	// opinion, and decoding one as a Config would produce a zero-valued
 	// negotiation that Verdict would then have to reason about.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// SCRUB OUTERMOST, TRUNCATE INSIDE IT. This read
+		//
+		//	scrub(snippet(raw), streamKey)
+		//
+		// which cuts the body at 300 bytes and only THEN looks for the key, so a
+		// key straddling offset 300 is never matched: snippet hands scrub a
+		// haystack that ends in the middle of the needle, scrub finds nothing,
+		// and the surviving prefix goes into the error. Measured with a 55-byte
+		// key at offset 270: 30 bytes of it leaked, and no placeholder appeared
+		// anywhere in the line -- so the output did not even LOOK redacted,
+		// which is the property that makes it survive review.
+		//
+		// This is #306's failure mode exactly -- a needle longer than the
+		// haystack it is searched in -- reproduced in the newest code in the
+		// repository, three commits after that issue was closed. There it was a
+		// 65-byte configured value against a 56-byte printed one; here it is a
+		// whole key against the truncated tail of one. Same shape, different
+		// route in.
+		//
+		// THE RULE, stated so the next transform added here does not have to
+		// rediscover it: SCRUB IS ONLY SOUND AS THE OUTERMOST TRANSFORM. It is a
+		// literal substring replace, so anything that runs after it can reveal
+		// what it removed, and anything that runs BEFORE it can destroy the
+		// match it depends on -- truncating, escaping, re-encoding, wrapping,
+		// case-folding. Every other scrub call in this function obeys that
+		// already: they scrub err.Error(), which is the last thing that happens
+		// to those strings. This was the only one with a transform underneath
+		// it, and the fix is to put the transform inside.
 		return nil, fmt.Errorf("Twitch returned %d to the multitrack configuration request: %s",
-			resp.StatusCode, scrub(snippet(raw), streamKey))
+			resp.StatusCode, snippet([]byte(scrub(string(raw), streamKey))))
 	}
 
 	var cfg Config
@@ -110,9 +194,13 @@ func (c *Client) Fetch(ctx context.Context, streamKey string, req Request) (*Con
 	return &cfg, nil
 }
 
-// snippet bounds an error message. Borrowed in spirit from oauth.snippet; the
-// body it truncates has already been established to contain a stream key, so
-// the caller scrubs whatever comes back.
+// snippet bounds an error message. Borrowed in spirit from oauth.snippet.
+//
+// IT MUST BE GIVEN ALREADY-SCRUBBED TEXT, not text to be scrubbed afterwards.
+// The doc comment here used to say the opposite -- "the caller scrubs whatever
+// comes back" -- and that instruction is what the leak was: truncating first
+// gives the scrub a haystack shorter than its needle. See the rule written out
+// at the call site in Fetch.
 func snippet(b []byte) string {
 	s := strings.TrimSpace(string(b))
 	if len(s) > 300 {
