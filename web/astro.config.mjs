@@ -29,6 +29,7 @@ const pageSource = {
   "/vs/aitum-multistream": "src/pages/vs/aitum-multistream.astro",
   "/vs/obs-multi-rtmp": "src/pages/vs/obs-multi-rtmp.astro",
   "/vs/restreamer": "src/pages/vs/restreamer.astro",
+  "/vs/streamelements": "src/pages/vs/streamelements.astro",
 };
 
 /** @param {string} file @returns {string|undefined} */

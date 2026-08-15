@@ -1,0 +1,269 @@
+---
+import Base from "../../layouts/Base.astro";
+import Breadcrumbs from "../../components/Breadcrumbs.astro";
+
+/* Sourced from docs/notes/competitor-facts-2026-08-15.md, section 5, and
+ * nothing else. That section was added after this page was first refused: the
+ * facts did not exist, so the page was not written, which is the only correct
+ * order for these.
+ *
+ * THE OVERCLAIM WARNING APPLIES IN FULL. SE.Live SELECTS an OBS audio track per
+ * platform output and cannot sum; the summing happened upstream in Advanced
+ * Audio Properties. Same case as obs-multi-rtmp and Aitum. "It cannot do
+ * per-destination audio" is false and is not written here.
+ *
+ * WHICH IS EXACTLY WHY THE AUDIO SECTION ON THIS PAGE IS SHORT AND LINKS OUT.
+ * The argument has been made at length twice already. Making it a third time
+ * would be the same page published again -- thin to a crawler, duplicated to
+ * SonarCloud, and boring to the one reader who has clicked all three. So this
+ * page states the fact once, sends anyone who wants it argued to the pages that
+ * argue it, and spends its own length on the two things that are true of
+ * SE.Live and of nothing else on this site:
+ *
+ *   1. Windows only. macOS and Linux are not supported. No other tool compared
+ *      anywhere on this site has a hard platform stop.
+ *   2. RTMP/RTMPS egress only, and no ingest at all -- it is not a relay. SRT is
+ *      not supported, multitrack SRT least of all. On the other plugin pages the
+ *      ingest question was a footnote; here it settles the matter outright,
+ *      because a multitrack workflow cannot start.
+ *
+ * The disambiguation is also NOT the one on /vs/restreamer, and the difference
+ * matters. There, two unrelated companies shipped confusingly similar names.
+ * Here one company ships two things, and the famous one -- the overlays and
+ * chat dashboard everybody has heard of -- does not multistream video at all.
+ */
+const CHECKED = "15 August 2026";
+
+/* A verdict per product rather than a feature card, because the question a
+ * reader actually arrives with is "does the StreamElements I already use do
+ * this", and that is answerable yes or no before any comparing starts. */
+const whichOne = [
+  {
+    name: "StreamElements Cloud",
+    what: "The web dashboard. Unified multi-platform chat, activity feeds, overlays and tipping.",
+    verdict: "No video multistreaming",
+    ok: false,
+    then: "If this is the StreamElements you use, it does not restream video anywhere, and nothing on this page is a comparison with it.",
+  },
+  {
+    name: "SE.Live",
+    what: "Formerly OBS.Live. A plugin that installs into OBS Studio on your own machine.",
+    verdict: "This is the multistreaming one",
+    ok: true,
+    then: "Everything below is about this. It is free, and it is the only video multistreaming StreamElements ships.",
+  },
+];
+
+const merits = [
+  {
+    h: "No cap on destinations, and no paid tier",
+    p: "Free at $0 with no paywall above it, and no ceiling on how many platforms you publish to — the limit is your encoding capacity and your upstream bandwidth, which is an honest limit rather than a billing one.",
+  },
+  {
+    h: "Canvas does vertical and horizontal at once",
+    p: "Its Canvas system produces simultaneous 16:9 and 9:16 output from a single OBS session, with Twitch Dual-Output Beta wired in. polyemesis has no equivalent and this page is not going to pretend otherwise — if a vertical cut of your broadcast matters, that is a reason to run SE.Live.",
+  },
+  {
+    h: "Per-destination encoding, with aspect ratio in the mix",
+    p: "Shared copy or an independent re-encode per platform, each with its own resolution, aspect, bitrate, framerate and encoder. Those re-encodes run concurrently on the local machine.",
+  },
+  {
+    h: "GPL-2.0 core, actively supported",
+    p: "The core plugin is GPL-2.0 and openly published; the cloud backend it connects to is proprietary. Nothing about it was deprecated in the year to this check.",
+  },
+];
+---
+
+<Base
+  title="StreamElements multistream: SE.Live vs polyemesis"
+  description="StreamElements multistreaming means SE.Live, a Windows-only OBS plugin. It selects an OBS audio track per platform and sends no SRT at all."
+  path="/vs/streamelements"
+>
+  <Breadcrumbs
+    crumbs={[
+      { label: "polyemesis", href: "/" },
+      { label: "Comparison", href: "/comparison" },
+      { label: "StreamElements", },
+    ]}
+  />
+
+  <section class="wrap py-12 sm:py-16">
+    <p class="eyebrow">Compared</p>
+    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
+      StreamElements multistreaming is SE.Live. It runs on Windows only.
+    </h1>
+    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
+      Anyone looking into StreamElements multistream support meets a fork in the
+      road immediately, and it is not signposted well: the StreamElements almost
+      everybody knows — overlays, tips, the chat dashboard — sends no video
+      anywhere. The multistreaming lives in a separate OBS plugin called SE.Live,
+      and before comparing anything it is worth knowing which one you are holding.
+    </p>
+
+    <div class="mt-8 max-w-3xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
+      <p class="text-pretty leading-relaxed text-fg">
+        <strong>Two facts settle most of this page:</strong> SE.Live is supported
+        on Windows and not on macOS or Linux, and it publishes over RTMP and
+        RTMPS with no SRT support of any kind. The first rules it out for a lot
+        of people outright. The second means the multitrack workflow polyemesis
+        is built around cannot begin.
+      </p>
+    </div>
+  </section>
+
+  {/* ---------------------------------------------------- which one is it --- */}
+  <section class="border-t border-line py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">Which StreamElements do you have?</h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+        One company, two products, and only one of them touches video.
+      </p>
+      <div class="mt-8 max-w-4xl space-y-4">
+        {
+          whichOne.map((w) => (
+            <div class="card p-6">
+              <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+                <p class="font-medium text-fg">{w.name}</p>
+                <p
+                  class:list={[
+                    "font-mono text-[11px]",
+                    w.ok ? "text-live" : "text-subtle",
+                  ]}
+                >
+                  {w.verdict}
+                </p>
+              </div>
+              <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">{w.what}</p>
+              <p class="mt-3 border-t border-line pt-3 text-pretty text-sm leading-relaxed text-subtle">
+                {w.then}
+              </p>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------- the two stops -- */}
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">Two limits worth checking before anything else</h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+        Neither is a matter of degree, which is why they come first. Checked
+        against StreamElements' own documentation on
+        <span class="font-mono text-[13px] text-fg">{CHECKED}</span>.
+      </p>
+      <div class="mt-8 grid max-w-5xl gap-5 lg:grid-cols-2">
+        <div class="card p-6">
+          <p class="font-mono text-[11px] font-medium uppercase tracking-wider text-subtle">
+            Operating system
+          </p>
+          <p class="mt-3 text-pretty leading-relaxed text-fg">
+            Windows, and only Windows. macOS and Linux are not supported.
+          </p>
+          <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
+            Nothing else compared on this site has a stop like this — the other
+            plugins follow OBS wherever it runs, and the servers are containers.
+            If you broadcast from a Mac, the comparison ends at this paragraph.
+          </p>
+        </div>
+        <div class="card p-6">
+          <p class="font-mono text-[11px] font-medium uppercase tracking-wider text-subtle">
+            Transport
+          </p>
+          <p class="mt-3 text-pretty leading-relaxed text-fg">
+            RTMP and RTMPS out. No SRT, and no ingest of any kind — it captures
+            from the OBS it lives inside and is not a relay.
+          </p>
+          <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
+            This is the cleanest version of the difference on any of these pages.
+            polyemesis works by receiving your separated audio tracks over
+            multitrack SRT and deciding what each platform hears from them.
+            SE.Live has no way to send that, so the question of what to do with
+            those tracks never arises.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------ the audio -- */}
+  <section class="border-t border-line py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">On the audio, it is the same story as the other two plugins</h2>
+      <p class="mt-4 max-w-3xl text-pretty leading-relaxed text-muted">
+        SE.Live routes one OBS audio track — any of the six — to each platform
+        output. So yes, it can give Twitch and YouTube different sound, and a
+        comparison claiming otherwise would be wrong. What it cannot do is
+        combine tracks into a new mix at the output; whatever those six tracks
+        contain was decided earlier, in OBS's Advanced Audio Properties.
+      </p>
+      <p class="mt-4 max-w-3xl text-pretty leading-relaxed text-muted">
+        That is precisely the model obs-multi-rtmp and Aitum Multistream use, and
+        it is argued at length on both of their pages rather than repeated here.
+      </p>
+      <p class="mt-5 text-sm text-subtle">
+        The same argument, in full:
+        <a href="/vs/aitum-multistream" class="text-primary underline-offset-4 hover:underline">Aitum Multistream</a>
+        ·
+        <a href="/vs/obs-multi-rtmp" class="text-primary underline-offset-4 hover:underline">obs-multi-rtmp</a>
+      </p>
+    </div>
+  </section>
+
+  {/* ---------------------------------------------------------- their merits -- */}
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">What SE.Live does well</h2>
+      <div class="mt-8 grid gap-5 sm:grid-cols-2">
+        {
+          merits.map((m) => (
+            <div class="card p-6">
+              <p class="font-medium text-fg">{m.h}</p>
+              <p class="mt-2 text-pretty text-sm leading-relaxed text-muted">{m.p}</p>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="border-t border-line py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">Use SE.Live, not this</h2>
+      <ul class="mt-5 max-w-3xl space-y-3">
+        {
+          [
+            "You broadcast from Windows and one of the six OBS tracks already carries the right sound for each platform.",
+            "You need a vertical output alongside the horizontal one. Canvas does that in a single session and polyemesis does not do it at all.",
+            "You are already inside the StreamElements ecosystem for overlays, tips and chat, and adding a separate server to the setup buys you nothing you asked for.",
+            "You want more destinations than a subscription would let you have, at no cost, and your machine can encode them.",
+          ].map((l) => (
+            <li class="flex gap-3 text-pretty leading-relaxed text-muted">
+              <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-subtle" aria-hidden="true" />
+              {l}
+            </li>
+          ))
+        }
+      </ul>
+      <p class="mt-6 max-w-3xl text-pretty leading-relaxed text-muted">
+        polyemesis is the answer to a narrower question: you are not on Windows,
+        or you want a mix assembled per platform rather than chosen from what OBS
+        prepared, or you want the fan-out to leave a server instead of your own
+        connection.
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap py-20 text-center" data-reveal>
+    <h2 class="text-balance text-3xl font-medium">Weighing up the others too?</h2>
+    <div class="mt-7 flex flex-wrap justify-center gap-3">
+      <a href="/comparison" class="btn btn-ghost">All five compared</a>
+      <a href="/download" class="btn btn-primary">Install polyemesis</a>
+    </div>
+    <p class="mt-6 text-sm text-subtle">
+      Also compared:
+      <a href="/vs/restreamer" class="text-primary underline-offset-4 hover:underline">Restreamer and restream.io</a>
+    </p>
+  </section>
+</Base>

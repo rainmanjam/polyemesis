@@ -85,3 +85,51 @@ silence; restream.io duplicates one stereo track everywhere.
 
 *   **Status:** **Actively maintained** by developer `sorayuki` ([Source: obs-multi-rtmp Releases](https://github.com/sorayuki/obs-multi-rtmp/releases)).
 *   **Latest Release:** **v0.7.4.3** ([Source: obs-multi-rtmp GitHub Releases](https://github.com/sorayuki/obs-multi-rtmp/releases)).
+
+
+---
+
+# 5. StreamElements — added 2026-08-15, same sourcing standard
+
+**Two things share the name and must not be merged.**
+
+**StreamElements Cloud (web platform)** offers **no** video restreaming or
+multistreaming at all. Its dashboard is unified multi-platform chat, activity
+feeds, overlays and tipping.
+[Source](https://support.streamelements.com/hc/en-us/articles/19133887258258-Multi-Platform-Activity-Feed-Unified-Chat-Setup)
+
+**SE.Live** (formerly OBS.Live) is the only video multistreaming StreamElements
+ships, and it is a **local OBS Studio plugin**.
+[Source](https://streamelements.com/selive)
+
+## SE.Live
+
+* **A. AUDIO — SELECTS a track, does not sum.** You choose which single OBS audio
+  track (1–6) routes to each platform output. It cannot sum arbitrary tracks into
+  a new stereo mix at the output stage; all summing happens upstream in OBS's
+  Advanced Audio Properties matrix.
+  [Source](https://support.streamelements.com/hc/en-us/articles/18853755490322-SE-Live-The-Complete-Guide-Setup-Features-Multistreaming-Troubleshooting)
+  → This is the SAME case as obs-multi-rtmp and Aitum. The overclaim warning at
+  the top of this file applies to it in full.
+
+* **B. VIDEO.** Both shared copy and independent per-destination re-encode, with
+  custom resolution, aspect (16:9 and 9:16), bitrate, framerate and encoder.
+  Re-encodes run concurrently on the local machine. [Same source]
+
+* **C. INGEST / EGRESS.** No ingest — local OBS capture only, not a relay.
+  Egress is **RTMP/RTMPS only**; **SRT and multitrack SRT are not supported**.
+  [Same source]
+
+* **D. PRICE. Free, $0**, no paid tier, no paywall, and **no cap on simultaneous
+  destinations** — bounded only by local encoding capacity and upstream
+  bandwidth. [Source](https://streamelements.com/selive)
+
+* **E. LICENCE / HOSTING. Windows only**; macOS and Linux are not supported.
+  Core plugin is **GPL-2.0**
+  ([repo](https://github.com/StreamElements/obs-streamelements-core)); the
+  connected cloud backend is proprietary SaaS.
+  [Source](https://streamelements.com/selive)
+
+* **F. LAST 12 MONTHS.** Canvas system expanded for simultaneous dual-format
+  (16:9 + 9:16) output in one OBS session; Twitch Dual-Output Beta integration
+  added. Actively supported, no deprecation. [Same source]

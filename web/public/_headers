@@ -79,6 +79,8 @@
   Cache-Control: no-cache
 /vs/restreamer
   Cache-Control: no-cache
+/vs/streamelements
+  Cache-Control: no-cache
 /*.html
   Cache-Control: no-cache
 

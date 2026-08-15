@@ -180,11 +180,14 @@ const selectors = [
   <section class="wrap pb-16" data-reveal>
     <h2 class="text-2xl font-medium">Compared one at a time</h2>
     <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-      If you already run something, start here. Each page is a full comparison
-      against one tool, with its strengths stated and every claim dated against
-      that project's own sources.
+      If you already run something, start here. Each page compares polyemesis
+      against one of them in full, with that tool's strengths stated and every
+      claim dated against its own sources.
     </p>
-    <div class="mt-6 grid gap-4 lg:grid-cols-3">
+    {/* Two by two rather than a row of three, now that there is a fourth. A
+        four-item row is unreadable at this card width and a 3+1 orphan looks
+        like something failed to load. */}
+    <div class="mt-6 grid gap-4 sm:grid-cols-2">
       {
         [
           {
@@ -204,6 +207,12 @@ const selectors = [
             name: "Restreamer and restream.io",
             kind: "Server · SaaS · two different products",
             line: "Two unrelated things share the name. Neither can build a second mix at all, and one of them bills per channel.",
+          },
+          {
+            href: "/vs/streamelements",
+            name: "StreamElements",
+            kind: "OBS plugin · free · Windows only",
+            line: "The dashboard everyone knows sends no video at all. The multistreaming is SE.Live, which is Windows-only and speaks no SRT.",
           },
         ].map((c) => (
           <a href={c.href} class="card block p-5 transition-colors hover:border-primary">
