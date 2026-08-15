@@ -100,14 +100,18 @@ type Engine struct {
 	// makes N programmes work rather than a rewrite of the reconciler.
 	sourceID int64
 
-	log    *slog.Logger
-	cfg    config.Config
-	store  *db.DB
-	tools  *ffmpeg.Tools
-	bus    *events.Broker
-	hub    *relay.Hub
-	alloc  *relay.PortAllocator
-	mon    *stats.Monitor
+	log   *slog.Logger
+	cfg   config.Config
+	store *db.DB
+	tools *ffmpeg.Tools
+	bus   *events.Broker
+	hub   *relay.Hub
+	alloc *relay.PortAllocator
+	mon   *stats.Monitor
+	// host is the process-wide resource sampler, owned and run by the manager.
+	// READ ONLY from here: see New for why one engine must not sample the box
+	// on behalf of the others. Nil on an engine built outside a manager.
+	host   *stats.Host
 	recman *recording.Manager
 	// loudStore is the latest loudness report per destination. It carries its
 	// own lock and is written from every analyser's stdout goroutine, so it is
@@ -518,7 +522,14 @@ type rendition struct {
 // ports and the second programme's destinations would bind onto the first
 // programme's traffic. Pass one allocator, or pass nil for a private one when
 // there genuinely is only one engine (tests).
-func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools, bus *events.Broker, sourceID int64, alloc *relay.PortAllocator) (*Engine, error) {
+//
+// host is shared for the same kind of reason and is read, never run, here: it
+// describes the BOX, so N engines sampling it produced N identical readings a
+// second and an unscoped API read reported whichever engine it reached. The
+// manager owns the one sampler and runs it. Nil is allowed and means this
+// engine publishes an empty host block on its telemetry frame, which is what a
+// test engine built outside a manager gets.
+func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools, bus *events.Broker, sourceID int64, alloc *relay.PortAllocator, host *stats.Host) (*Engine, error) {
 	hub, err := relay.New(log, 0)
 	if err != nil {
 		return nil, err
@@ -536,6 +547,7 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		bus:       bus,
 		hub:       hub,
 		alloc:     alloc,
+		host:      host,
 		dests:     map[int64]*destination{},
 		rends:     map[int64]*rendition{},
 		loud:      map[int64]*loudnessMon{},
@@ -553,6 +565,24 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		}.Normalized(),
 	}
 	e.mon = stats.NewMonitor(hub.RxBytes)
+	// THE ENGINE'S OWN RECORDING MANAGER, AND IT IS NOT THE MANAGER'S SHARED
+	// ONE. Do not merge the pair.
+	//
+	// Both point at the same directory — there is one recordings directory per
+	// install, not one per programme — so it is tempting to keep only the
+	// shared instance. The two options below are what makes that wrong:
+	//
+	//	WithFFprobe measures finished segments, which only the engine that
+	//	WROTE them has any business doing.
+	//
+	//	WithStorageGuard is ENGINE-SCOPED and is the whole reason this one
+	//	exists: e.onStorage halts and resumes THIS engine's recorder child. A
+	//	shared manager would have to halt every programme on the box because
+	//	one volume filled, or halt none.
+	//
+	// Manager.Recordings() is the read-only counterpart the API asks for
+	// usage, deletes and path confinement, so that those answers do not depend
+	// on which engine is running, or on one running at all.
 	e.recman = recording.New(log, store, cfg.RecordingsDir(), func() {
 		bus.Publish(events.TypeRecordings, nil)
 	},
@@ -699,7 +729,22 @@ func gpuBusy(rends []RenditionStatus) bool {
 func (e *Engine) Recordings() *recording.Manager { return e.recman }
 
 // Tools exposes the detected FFmpeg.
+//
+// The API reads Manager.Tools() instead: the detection is install-wide and
+// every engine was handed the same pointer, so asking an engine for it meant a
+// build without one could not answer a question that has nothing to do with a
+// programme.
 func (e *Engine) Tools() *ffmpeg.Tools { return e.tools }
+
+// hostSystem is the box's resource snapshot, taken from the sampler the
+// manager owns. An engine built outside a manager has none and publishes an
+// empty block rather than starting a second sampler; see New.
+func (e *Engine) hostSystem() stats.System {
+	if e.host == nil {
+		return stats.System{}
+	}
+	return e.host.System()
+}
 
 // Start brings the pipeline up and begins the background loops.
 func (e *Engine) Start(ctx context.Context) error {
@@ -4049,7 +4094,7 @@ func (e *Engine) statsLoop(ctx context.Context) {
 			return
 		case <-tick.C:
 			e.bus.Publish(events.TypeStats, map[string]any{
-				"system":  e.mon.System(),
+				"system":  e.hostSystem(),
 				"bitrate": e.mon.Bitrate(),
 			})
 			e.publishStatus()

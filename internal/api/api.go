@@ -27,10 +27,13 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
+	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 	"github.com/rainmanjam/polyemesis/internal/upgrade"
@@ -48,6 +51,86 @@ import (
 // which is the correct outcome for a bug that means the server is serving
 // before its pipeline exists.
 func (s *Server) eng() *engine.Engine { return s.mgr.Default() }
+
+// tools is the FFmpeg this install detected.
+//
+// OFF THE MANAGER, NOT OFF AN ENGINE, and that is the whole point of it having
+// a name of its own. Every engine is handed the same *ffmpeg.Tools -- it
+// describes the box, not a programme -- so reading it through s.eng() made
+// /system, /encoders, /fonts, the clip planner and the upload probe depend on
+// a pipeline being up to answer a question about the machine.
+//
+// Nil when this build has no manager, which is every server in this package's
+// unit tests, and nil is a value each caller has to handle: only Tools'
+// METHODS are nil-receiver safe, its FIELDS are not. See ffmpeg.Tools.HasFilter
+// versus ffmpeg.Tools.FFmpeg.
+func (s *Server) tools() *ffmpeg.Tools {
+	if s.mgr == nil {
+		return nil
+	}
+	return s.mgr.Tools()
+}
+
+// hostSystem is this box's CPU and memory, from the one sampler the manager
+// runs. Not from an engine: see engine.Manager.Host.
+//
+// A build with no manager reports the zero snapshot rather than panicking.
+// That is not a claim that the box is idle -- it is the same "nothing has
+// looked yet" the sampler itself answers with before its first tick.
+func (s *Server) hostSystem() stats.System {
+	if s.mgr == nil {
+		return stats.System{}
+	}
+	return s.mgr.Host().System()
+}
+
+// recordings is the shared, read-only view of the recordings directory:
+// usage, deletes, and the path confinement the downloads run through.
+//
+// Off the manager for the same reason tools is, plus one of its own:
+// recordings deliberately outlive the source that made them
+// (recordings.source_id is ON DELETE SET NULL), so an operator clearing disk
+// after deleting a programme is exactly the caller this must still serve.
+//
+// The pure PATH readers do not come through here at all -- they take
+// s.cfg.RecordingsDir() directly, because a directory name needs no manager.
+//
+// It requires a manager and does not pretend otherwise: a nil one panics here
+// exactly as s.eng() did, rather than handing back a Manager whose Dir() is ""
+// and turning every confinement below it into confinement against nothing.
+func (s *Server) recordings() *recording.Manager { return s.mgr.Recordings() }
+
+// storageVerdict is the free-space guard's answer: whether the floor has
+// stopped recording, and the sentence that says why.
+//
+// OFF AN ENGINE, and it is the one reader in this group that stays there. The
+// floor itself describes the volume, but the HALT does not -- it is one
+// recorder child being stopped, by the guard on THAT engine's own recording
+// manager (recording.WithStorageGuard in engine.New). The shared read-only
+// manager drives no recorder, so nothing ever calls CheckFreeSpace on it and
+// its StorageState is the zero value for the life of the process. Serving that
+// would tell the operator everything is fine on the one page whose job is to
+// explain a recorder that stopped on its own -- see the field comment on
+// recording.DiskUsage.Storage.
+//
+// The default engine's, because this endpoint is unscoped and that is the
+// programme it speaks for everywhere else. On a real install the answer is the
+// same whichever engine is asked: one volume, one floor, one install-wide
+// Recording block (see engine.effectiveSettings, which overlays the ingest and
+// nothing else).
+//
+// No engine means the zero verdict, and that is the TRUE answer rather than a
+// fallback: nothing has been halted because nothing was recording.
+func (s *Server) storageVerdict() recording.StorageState {
+	if s.mgr == nil {
+		return recording.StorageState{}
+	}
+	e := s.mgr.Default()
+	if e == nil {
+		return recording.StorageState{}
+	}
+	return e.Recordings().Storage()
+}
 
 // Server wires the HTTP layer to everything else.
 type Server struct {
@@ -237,24 +320,30 @@ type Server struct {
 
 	// probeBin supplies the ffprobe path directly, and is set only by tests.
 	//
-	// Same shape as auditSink and for the same reason. probeUpload reaches
-	// ffprobe through s.eng().Tools(), and this package's tests have no
-	// manager, so probing is skipped and every upload is accepted -- which
-	// means deleting the probe call from the handler leaves the package green.
-	// Review found that; the tests did not. Setting this exercises the real
-	// handler path rather than replacing it.
+	// Same shape as auditSink. Its original justification was that probeUpload
+	// reached ffprobe through s.eng().Tools() and this package's tests have no
+	// manager, so probing was skipped and deleting the probe call left the
+	// package green -- review found that; the tests did not. probeUpload now
+	// reads the detection off the MANAGER (Server.tools), so a fixture that
+	// builds one no longer needs a seam at all, and
+	// media_probe_wiring_test.go's pair is exactly that fixture.
+	//
+	// What it still buys is the cheap fixture: the twenty-odd cases in
+	// media_probe_test.go and upload_verdict_test.go aim a fake prober at one
+	// upload each, and they run on testServer -- no manager, no ports, no
+	// engines. Rebuilding each of those around a started manager would trade a
+	// one-line override for a second of setup per case, and it is the same
+	// binary either way.
 	probeBin string
 
 	// encodeBin supplies the ffmpeg path for probeUpload's duration count, and
 	// is set only by tests.
 	//
-	// The sibling of probeBin and needed for the same reason it is. probeUpload
-	// reaches ffmpeg through s.eng().Tools(), this package's tests have no
-	// manager, and so the branch that COUNTS the length of a raw elementary
-	// stream (#218) would be unreachable under `go test ./internal/api` --
-	// deleting it, or wiring the wrong binary into it, would leave the package
-	// green. A test that sets probeBin and leaves this empty exercises the
-	// refusal; one that sets both exercises the count.
+	// The sibling of probeBin and it stands or falls with it. The branch it
+	// reaches is the one that COUNTS the length of a raw elementary stream
+	// (#218), which no other test exercises: a test that sets probeBin and
+	// leaves this empty exercises the refusal; one that sets both exercises the
+	// count.
 	encodeBin string
 
 	// probeTimeout overrides probeUploadTimeout, and is set only by tests.

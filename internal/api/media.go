@@ -371,9 +371,10 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Ve
 	// before, and no other file reaches the count.
 	//
 	// s.encodeBin mirrors s.probeBin and is set only by tests, for the same
-	// reason that one is: this package has no engine manager, so without a seam
-	// the counting branch is unreachable under `go test ./internal/api` and
-	// deleting it would leave the package green.
+	// reason that one is: most servers in this package's tests are built with
+	// no engine manager, so without a seam the counting branch is unreachable
+	// under `go test ./internal/api` and deleting it would leave the package
+	// green.
 	bins := ffmpeg.Bins{FFprobe: s.probeBin, FFmpeg: s.encodeBin}
 	if bins.FFprobe == "" {
 		// EVERY ONE OF THESE LOGS BEFORE IT RETURNS, and that is the whole
@@ -395,27 +396,23 @@ func (s *Server) probeUpload(ctx context.Context, path, name string) (uploads.Ve
 			// detail, which stays in the log where it is useful.
 			return uploads.UnverifiedVerdict(uploads.ReasonNoProber), nil
 		}
-		// s.mgr is nil in every test in this package, and Manager.Default takes
-		// a read lock on the manager, so an unguarded s.eng() turns POST
-		// /api/v1/media into a panic under `go test ./internal/api`. It is
-		// reachable on a real install too: Manager.reconcile logs and continues
-		// when engine.New fails, so an install whose video pipeline will not
-		// build has no default engine -- and refusing every upload because of
-		// that would be a worse outage than the one it is guarding against.
-		if s.mgr == nil {
-			return unchecked("this build has no engine manager")
-		}
-		eng := s.eng()
-		if eng == nil {
-			return unchecked("no default engine")
-		}
-		tools := eng.Tools()
+		// The DETECTION, not a running pipeline. This used to ask s.eng() for
+		// its Tools, which made the gate depend on a programme being up: an
+		// install whose video pipeline will not build -- Manager.reconcile logs
+		// and continues when engine.New fails -- accepted every upload
+		// unchecked, and so did an install between sources. ffprobe is a
+		// property of the box and is now read as one.
+		//
+		// Still fail-open, and still nil-tolerant: a build with no manager at
+		// all (this package's unit tests) reports no prober rather than
+		// panicking, which is the same outcome for the same reason.
+		tools := s.tools()
 		if tools == nil || tools.FFprobe == "" {
-			return unchecked("the engine reports no ffprobe binary")
+			return unchecked("this install reports no ffprobe binary")
 		}
 		bins.FFprobe = tools.FFprobe
 		// Taken from the same snapshot rather than resolved separately, so the
-		// probe and the count are always the same install's pair. An engine
+		// probe and the count are always the same install's pair. An install
 		// that reports no ffmpeg leaves this empty, which is the documented
 		// optional case rather than an error.
 		bins.FFmpeg = tools.FFmpeg

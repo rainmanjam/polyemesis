@@ -279,8 +279,72 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 // ------------------------------------------------------------------- system
 
+// storeSettingsWithDefaultIngest is what an unscoped endpoint means by "the
+// settings": the stored document, with the DEFAULT SOURCE's ingest block laid
+// over the singleton one.
+//
+// It reproduces engine.effectiveSettings (engine.go, `settings.Ingest =
+// src.Ingest`) deliberately, because that overlay is the whole difference
+// between the two spellings and getting it wrong is silent. The settings
+// blob's own ingest block predates sources and NO engine reads it -- an
+// endpoint that reported it would be describing an ingest nothing serves,
+// while the operator's encoder connects somewhere else entirely.
+//
+// The store rather than a running engine, which also fixes a lag: an engine's
+// snapshot is whatever its last reconcile installed, so GET /system described
+// the previous listener ports until something reconciled.
+//
+// A source that cannot be read leaves the singleton block in place, which is
+// the same fallback the engine takes and for the same reason: describing the
+// stale thing beats failing the whole endpoint.
+func (s *Server) storeSettingsWithDefaultIngest() (db.Settings, error) {
+	settings, err := s.store.GetSettings()
+	if err != nil {
+		return settings, err
+	}
+	id, err := s.defaultSourceID()
+	if err != nil {
+		return settings, nil
+	}
+	src, err := s.store.GetSource(id)
+	if err != nil {
+		return settings, nil
+	}
+	settings.Ingest = src.Ingest
+	return settings, nil
+}
+
+// defaultSourceID is which source an unscoped endpoint speaks for: the one the
+// default engine is RUNNING, and only the store's ordering when no engine is.
+//
+// The two disagree, in one direction, and the difference is an operator
+// pointing an encoder at a dead port. Manager.Default() is the first source
+// that BUILT an engine -- Manager.reconcile logs "cannot build engine for
+// source" and carries on -- while db.DefaultSourceID() is the first row by
+// position whether anything is listening for it or not. Take the row on an
+// install whose lowest-positioned source failed to come up and /system
+// advertises that source's ingest URL and passphrase, with no listener behind
+// either; the engine's snapshot, which this replaced, never could.
+//
+// The store is the answer when there is no engine at all, which is the whole
+// reason this endpoint stopped asking one.
+func (s *Server) defaultSourceID() (int64, error) {
+	if s.mgr != nil {
+		// Engine.SourceID dereferences its receiver, so the nil check is the
+		// call's precondition and not decoration.
+		if e := s.mgr.Default(); e != nil {
+			return e.SourceID(), nil
+		}
+	}
+	return s.store.DefaultSourceID()
+}
+
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
-	settings := s.eng().Settings()
+	settings, err := s.storeSettingsWithDefaultIngest()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	spec := ffmpeg.IngestSpec{
 		Kind:          ffmpeg.IngestKind(settings.Ingest.Mode),
 		SRTPort:       settings.Listeners.SRTPort,
@@ -324,7 +388,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version": s.version,
-		"ffmpeg":  s.eng().Tools(),
+		"ffmpeg":  s.tools(),
 		// What the machine has, as opposed to what the FFmpeg build lists. It
 		// rides on /system because the two are only meaningful together: an
 		// encoder list without the hardware behind it is what made the rendition
@@ -706,7 +770,10 @@ func (s *Server) handleSwitchSource(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"system":  s.eng().Monitor().System(),
+		// The host reading comes off the manager, not off this programme: it
+		// describes the box, and an install running three sources used to have
+		// three samplers of it disagreeing by a tick.
+		"system":  s.hostSystem(),
 		"bitrate": s.eng().Monitor().Bitrate(),
 		"relay":   s.eng().Hub().Stats(),
 	})
@@ -783,7 +850,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	// A scrape reports what it can. Failing the whole endpoint because the
 	// recordings volume is momentarily unreadable would also lose the ingest
 	// and destination series, which are the ones an alert is watching.
-	if u, err := s.eng().Recordings().Usage(); err == nil {
+	if u, err := s.recordings().Usage(); err == nil {
 		snap.Recordings = metrics.Recordings{
 			Files:      u.Count,
 			UsedBytes:  u.UsedBytes,
@@ -794,7 +861,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("metrics: recordings usage unavailable", "err", err)
 	}
 
-	sys := mon.System()
+	sys := s.hostSystem()
 	snap.Host = metrics.Host{
 		CPUPercent:     sys.CPUPercent,
 		MemUsedBytes:   sys.MemUsedBytes,
@@ -1703,11 +1770,12 @@ func (s *Server) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRecordingUsage(w http.ResponseWriter, r *http.Request) {
-	usage, err := s.eng().Recordings().Usage()
+	usage, err := s.recordings().Usage()
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
+	usage.Storage = s.storageVerdict()
 	writeJSON(w, http.StatusOK, usage)
 }
 
@@ -1717,7 +1785,7 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := s.eng().Recordings().Delete(id); err != nil {
+	if err := s.recordings().Delete(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -1737,7 +1805,7 @@ func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request)
 	}
 	// Resolve confines the path to the recordings directory; the filename
 	// originates from a database row and is never trusted as a path.
-	path, err := s.eng().Recordings().Resolve(rec.Filename)
+	path, err := s.recordings().Resolve(rec.Filename)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

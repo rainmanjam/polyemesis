@@ -124,7 +124,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		{Type: events.TypeStatus, Time: time.Now(), Data: s.eng().Status()},
 		{Type: events.TypeSource, Time: time.Now(), Data: s.eng().SourceInfo()},
 		{Type: events.TypeStats, Time: time.Now(), Data: map[string]any{
-			"system":  s.eng().Monitor().System(),
+			"system":  s.hostSystem(),
 			"bitrate": s.eng().Monitor().Bitrate(),
 		}},
 	}

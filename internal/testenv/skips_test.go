@@ -75,6 +75,15 @@ func walkSkips(t *testing.T, root string) (map[string]int, map[string]int, []str
 			switch rel {
 			case ".git", "node_modules", "ui", "web":
 				return filepath.SkipDir
+			// .claude/worktrees holds FULL CHECKOUTS OF THIS MODULE, one per
+			// agent branch in flight. Counting them multiplies the census by
+			// the number of worktrees on the machine and reports every package
+			// in each as a brand-new one at "committed count is 0" -- a
+			// failure about the developer's working tree that no commit can
+			// fix and no reviewer can reproduce. Every guard here that walks
+			// the repo has to skip it for the same reason.
+			case ".claude":
+				return filepath.SkipDir
 			}
 			if info.Name() == "testdata" {
 				return filepath.SkipDir

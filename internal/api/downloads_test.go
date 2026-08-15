@@ -272,8 +272,11 @@ func TestStemsDirIsInsideTheRecordingsDirectory(t *testing.T) {
 	// its own tests while pointing somewhere new.
 	h, _, _ := sourceServer(t)
 	s := serverUnderTest(t, h)
-	rec := s.eng().Recordings()
-	stems, recdir := rec.StemsDir(), rec.Dir()
+	// The two expressions the ROUTES use, not an engine's copy of them: the
+	// stems handler and its confinement both derive their base from config now,
+	// so an assertion on a manager's Dir() would be pinning a value nothing
+	// reads.
+	stems, recdir := recording.StemsDir(s.cfg.RecordingsDir()), s.cfg.RecordingsDir()
 	if !strings.HasPrefix(stems, recdir) {
 		t.Errorf("stems dir %q is not inside the recordings dir %q", stems, recdir)
 	}

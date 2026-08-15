@@ -164,7 +164,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	dir := s.eng().Recordings().Dir()
+	dir := s.cfg.RecordingsDir()
 	for _, sess := range sessions {
 		view := librarySession{Session: sess, DisplayTitle: sess.DisplayTitle()}
 		for _, rec := range members[sess.ID] {
@@ -294,7 +294,7 @@ func (s *Server) handleGetLibrarySession(w http.ResponseWriter, r *http.Request)
 
 // expand decorates a set of recordings with everything the segment list shows.
 func (s *Server) expand(recs []db.Recording) []libraryRecording {
-	dir := s.eng().Recordings().Dir()
+	dir := s.cfg.RecordingsDir()
 	ids := make([]int64, 0, len(recs))
 	for _, rec := range recs {
 		ids = append(ids, rec.ID)
@@ -710,7 +710,7 @@ func (s *Server) handleLibraryMedia(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	path, err := media.Resolve(s.eng().Recordings().Dir(), rec.Filename, chi.URLParam(r, "file"))
+	path, err := media.Resolve(s.cfg.RecordingsDir(), rec.Filename, chi.URLParam(r, "file"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -888,6 +888,21 @@ func (s *Server) buildJob(kind jobs.Kind, rec db.Recording, req submitRequest) (
 }
 
 func (s *Server) transcribeJob(rec db.Recording, req submitRequest) (jobs.Job, error) {
+	// FROM THE STORE, NOT FROM AN ENGINE, and NOT from the settings singleton
+	// either: annotations live in a SOURCE's ingest block, so this reads the
+	// default source's row the same way engine.effectiveSettings does. Taking
+	// the singleton block instead would silently label every speaker with
+	// whatever a pre-sources install last saved -- usually nothing.
+	//
+	// A recording knows which source made it in the database, but db.Recording
+	// does not carry the column, so this stays on the default source: the same
+	// answer the default engine gave, minus the requirement that one be
+	// running to submit a transcript job for an archived session.
+	settings, err := s.storeSettingsWithDefaultIngest()
+	if err != nil {
+		return jobs.Job{}, err
+	}
+
 	formats := make([]transcribe.SubtitleFormat, 0, len(req.Formats))
 	for _, f := range req.Formats {
 		sf := transcribe.SubtitleFormat(strings.TrimSpace(f))
@@ -904,7 +919,7 @@ func (s *Server) transcribeJob(rec db.Recording, req submitRequest) (jobs.Job, e
 		// Copied at submission rather than read when the job runs: a transcript
 		// is a record of a session, and re-running it after the roles were
 		// rearranged must not relabel the speakers.
-		Annotations: s.eng().Settings().Ingest.Annotations,
+		Annotations: settings.Ingest.Annotations,
 		Model:       strings.TrimSpace(req.Model),
 		Backend:     transcribe.Backend(strings.TrimSpace(req.Backend)),
 		Language:    strings.TrimSpace(req.Language),

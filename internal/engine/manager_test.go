@@ -419,3 +419,115 @@ func TestTheRTMPPortAcceptsSubscribersOnceStartReturns(t *testing.T) {
 	}
 	_ = c.Close()
 }
+
+// ONE HOST SAMPLER FOR THE PROCESS, RUNNING, AND SHARED BY EVERY ENGINE.
+//
+// Two failures this catches, and they look identical from a distance because
+// both leave the monitoring page reporting a box at 0% forever:
+//
+//	Nobody runs it. System() answers the zero snapshot for the life of the
+//	process -- no error, no log line, a flat graph.
+//
+//	Every engine builds its own. Three programmes means three goroutines
+//	taking three identical readings a second, and an unscoped read reports
+//	whichever engine it happened to reach.
+//
+// The second is what the tree did before this, which is why the identity check
+// below is on the engines and not only on the manager.
+func TestTheManagerRunsOneHostSamplerForEveryEngine(t *testing.T) {
+	m, store := managerFixture(t)
+	addSource(t, store, "Vertical")
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	engines := m.Engines()
+	if len(engines) < 2 {
+		t.Fatalf("running engines = %d, want the migrated default plus Vertical", len(engines))
+	}
+	for _, eng := range engines {
+		if eng.host != m.Host() {
+			t.Fatalf("engine %d holds a different host sampler from the manager's, so this "+
+				"install is sampling the same box once per programme", eng.SourceID())
+		}
+	}
+
+	// The 1 Hz ticker has to have fired once. NumCPU is filled in
+	// synchronously on every sample, so a non-zero one means a real reading
+	// landed rather than a struct being handed back.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if m.Host().System().NumCPU >= 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the host sampler never took a reading: Start did not run it, and the " +
+				"monitoring page reports an idle box for the life of the process")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// Stop ends the sampler. Without this the goroutine outlives the manager, and
+// a process that restarts its manager -- which the tests do constantly --
+// accumulates one gopsutil sampler per restart.
+func TestStopEndsTheHostSampler(t *testing.T) {
+	m, _ := managerFixture(t)
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if m.hostStop == nil {
+		t.Fatal("Start did not record how to stop the host sampler")
+	}
+	m.Stop()
+	if m.hostStop != nil {
+		t.Error("Stop left the host sampler's cancel in place, so nothing says it was called")
+	}
+}
+
+// THE TWO RECORDING MANAGERS ARE NOT ONE, and this is the guard on the comment
+// that says so.
+//
+// They point at the same directory, which is what makes merging them look
+// obvious. The engine's carries WithStorageGuard -- e.onStorage halts and
+// resumes THAT engine's recorder child when the volume fills -- and the
+// manager's deliberately carries neither that nor the ffprobe measurement,
+// because it answers reads for an install that may be running no engine at all.
+// Collapsing them means either halting every programme on the box because one
+// volume filled, or halting none.
+func TestTheSharedRecordingManagerIsNotAnEnginesOwn(t *testing.T) {
+	m, _ := managerFixture(t)
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if m.Recordings() == nil {
+		t.Fatal("the manager has no shared recording manager, so every read the API " +
+			"makes of the archive is back to needing an engine")
+	}
+	for _, eng := range m.Engines() {
+		if eng.Recordings() == m.Recordings() {
+			t.Fatalf("engine %d shares the manager's read-only recording manager: its "+
+				"storage guard now halts recording for every programme on the box, or "+
+				"for none", eng.SourceID())
+		}
+		if eng.Recordings().Dir() != m.Recordings().Dir() {
+			t.Errorf("the two recording managers disagree about where recordings live: "+
+				"%q and %q", eng.Recordings().Dir(), m.Recordings().Dir())
+		}
+		// The half that pointer identity cannot see. Two DISTINCT managers with
+		// no guard on either is also a pass above, and it is the outcome a
+		// mechanical de-duplication of these two construction sites produces:
+		// the recorder then writes until the volume is full, which is the
+		// failure engine.onStorage exists to prevent.
+		if !eng.Recordings().StorageGuarded() {
+			t.Errorf("engine %d's recording manager has no storage guard, so nothing stops "+
+				"its recorder when the volume fills -- it writes until the last byte and "+
+				"takes the database with it", eng.SourceID())
+		}
+	}
+	if m.Recordings().StorageGuarded() {
+		t.Error("the manager's shared recording manager grew a storage guard: whatever it " +
+			"halts is either every programme on the box or none of them, and neither is " +
+			"what a full volume means")
+	}
+}
