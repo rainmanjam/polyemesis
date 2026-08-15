@@ -595,12 +595,10 @@ func redirectHost(cfg config.Config, requestHost string) string {
 	return host
 }
 
-func listenPort(addr string) string {
-	if _, port, err := net.SplitHostPort(addr); err == nil {
-		return port
-	}
-	return ""
-}
+// listenPort delegates to config so there is ONE answer to "what port is this
+// addr", shared with config.TLSPortWarning. Two copies of this could disagree,
+// and the warning would then describe a port the redirect does not use.
+func listenPort(addr string) string { return config.ListenPort(addr) }
 
 func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider, store *db.DB, tools *ffmpeg.Tools) error {
 	hasUser, err := store.HasUser()
@@ -662,6 +660,14 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	if warn := cfg.InsecureExposureWarning(); warn != "" {
 		fmt.Printf("\n  WARNING: %s\n", warn)
 		log.Warn("insecure exposure", "detail", warn)
+	}
+	// TLS on, but not on 443. See config.TLSPortWarning for who this reaches:
+	// not the operator who ran install.sh, which asks and defaults to 443, but
+	// the one whose unit or compose file was written by hand and works well
+	// enough that nobody looks at it again.
+	if warn := cfg.TLSPortWarning(); warn != "" {
+		fmt.Printf("\n  WARNING: %s\n", warn)
+		log.Warn("tls on a non-standard port", "detail", warn)
 	}
 	if _, warn := cfg.HSTSPolicy(); warn != "" {
 		fmt.Printf("\n  WARNING: %s\n", warn)

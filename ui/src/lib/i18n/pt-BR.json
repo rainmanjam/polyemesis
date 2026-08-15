@@ -133,6 +133,7 @@
   "chatpage.subtitle": "Todas as plataformas em uma linha do tempo, com uma única caixa de envio.",
   "chatpage.timeline": "Linha do tempo",
   "chatpage.title": "Chat",
+  "chrome.developmentBuild": "Compilação de desenvolvimento {current}. Não são oferecidas atualizações para compilações a partir do código-fonte — consulte a página de versões para ver o que foi publicado.",
   "chrome.dismiss": "Dispensar",
   "chrome.ingest": "Ingest",
   "chrome.language": "Idioma",

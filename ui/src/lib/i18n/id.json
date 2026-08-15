@@ -133,6 +133,7 @@
   "chatpage.subtitle": "Semua platform dalam satu lini masa, dengan satu kotak kirim.",
   "chatpage.timeline": "Lini masa",
   "chatpage.title": "Obrolan",
+  "chrome.developmentBuild": "Build pengembangan {current}. Pembaruan tidak ditawarkan untuk build dari kode sumber — lihat halaman rilis untuk mengetahui apa yang sudah dirilis.",
   "chrome.dismiss": "Tutup",
   "chrome.ingest": "Ingest",
   "chrome.language": "Bahasa",

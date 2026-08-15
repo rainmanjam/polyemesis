@@ -368,6 +368,55 @@ func (c Config) InsecureExposureWarning() string {
 	return fmt.Sprintf("listening on %s without TLS: passwords and session cookies cross the network in plaintext. Set tls.mode: auto in config.yaml, or bind to 127.0.0.1 and put a reverse proxy in front (then set trustProxyHeaders: true).", c.Addr)
 }
 
+// TLSPortWarning returns a message when TLS is on but the listener is not on
+// 443, or "" when there is nothing to say.
+//
+// WHY THIS IS WORTH A LINE. install.sh already asks -- "HTTPS is normally
+// served on 443, so browsers reach it without a port" -- and defaults the
+// answer to yes, granting CAP_NET_BIND_SERVICE in the unit it writes. So an
+// operator who used the installer never sees this.
+//
+// The one who does is the operator who did NOT: an Ansible role, a hand-written
+// unit, a Dockerfile, a compose file copied from a blog post. They set
+// tls.mode and get a working server on 8080, and nothing anywhere tells them
+// that every person they send the URL to will need to type a port, that
+// redirects from :80 land on a port the client did not ask for, and that an
+// HSTS policy is being advertised for an authority browsers will not treat as
+// canonical. It works, so nobody investigates. That is exactly the shape of
+// thing this warning exists for.
+//
+// NOT FATAL, and deliberately so. A non-standard port is a legitimate choice --
+// behind a reverse proxy that terminates nothing and forwards to 8443, or on a
+// host where 443 belongs to something else. The operator gets told once, at
+// startup, in the same place the FFmpeg and plaintext warnings appear, and is
+// left to decide.
+//
+// It is silent when TLS is off, because then the port is not the problem and
+// InsecureExposureWarning above has already said the thing that matters.
+func (c Config) TLSPortWarning() string {
+	if !c.ServesTLS() {
+		return ""
+	}
+	port := ListenPort(c.Addr)
+	if port == "" || port == "443" {
+		return ""
+	}
+	return fmt.Sprintf("TLS is on but the listener is %s, not :443. Browsers reach this server only if every visitor types the port, and http:// redirects will carry it too. Set addr: \":443\" in config.yaml; a service running as a non-root user also needs AmbientCapabilities=CAP_NET_BIND_SERVICE in its unit, which install.sh grants for you. Keep %s if something in front of this box terminates TLS on 443 or the port is deliberate.", c.Addr, port)
+}
+
+// ListenPort is the port from an addr like ":8080" or "0.0.0.0:443", or "" when
+// there is none to read.
+//
+// Exported so cmd/polyemesis can share one answer with TLSPortWarning rather
+// than keeping a private copy that could disagree with it -- the two are asked
+// the same question about the same string and must not drift.
+func ListenPort(addr string) string {
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		return port
+	}
+	return ""
+}
+
 // Paths derived from DataDir.
 
 func (c Config) DBPath() string        { return filepath.Join(c.DataDir, "polyemesis.db") }

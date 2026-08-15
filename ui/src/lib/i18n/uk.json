@@ -133,6 +133,7 @@
   "chatpage.subtitle": "Усі платформи в одній стрічці, з одним полем надсилання.",
   "chatpage.timeline": "Стрічка",
   "chatpage.title": "Чат",
+  "chrome.developmentBuild": "Складання для розробки {current}. Оновлення не пропонуються для складань із вихідного коду — перегляньте сторінку релізів, щоб дізнатися, що вийшло.",
   "chrome.dismiss": "Закрити",
   "chrome.ingest": "Ingest",
   "chrome.language": "Мова",

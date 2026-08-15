@@ -133,6 +133,7 @@
   "chatpage.subtitle": "Every platform in one timeline, with one send box.",
   "chatpage.timeline": "Timeline",
   "chatpage.title": "Chat",
+  "chrome.developmentBuild": "Development build {current}. Updates are not offered for builds from source — check the releases page for what has shipped.",
   "chrome.dismiss": "Dismiss",
   "chrome.ingest": "Ingest",
   "chrome.language": "Language",

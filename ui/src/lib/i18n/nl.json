@@ -133,6 +133,7 @@
   "chatpage.subtitle": "Elk platform in één tijdlijn, met één verzendvak.",
   "chatpage.timeline": "Tijdlijn",
   "chatpage.title": "Chat",
+  "chrome.developmentBuild": "Ontwikkelbuild {current}. Voor builds vanaf de broncode worden geen updates aangeboden — bekijk de releasepagina voor wat er is uitgebracht.",
   "chrome.dismiss": "Sluiten",
   "chrome.ingest": "Ingest",
   "chrome.language": "Taal",

@@ -79,10 +79,27 @@ export function PreviewPlayer({
     };
   }, [active]);
 
+  /* max-h, because aspect-video alone grows without limit.
+   *
+   * The preview is 16:9 of whatever width it is given, and the dashboard
+   * gives it `minmax(0,1fr)` beside a fixed 20rem column. On a 1440px window
+   * that is a ~530px preview and looks right. Maximised on a 27" display the
+   * main column is ~1490px, so the preview becomes ~838px TALL and pushes the
+   * destination cards, the ingest stats and the publish URL below the fold --
+   * on the one page whose job is showing you all of them at once. The bigger
+   * the screen, the less of the dashboard you can see, which is exactly
+   * backwards.
+     *
+   * Capping the height rather than the app's width is deliberate. This is a
+   * monitoring UI: the destination grid, the meters and chat all earn extra
+   * width, and a global max-width would throw two thirds of an ultrawide away
+   * to fix one component. `object-contain` on the video already letterboxes
+   * whatever the source aspect is, so a shorter box crops nothing.
+   */
   return (
     <div
       className={cn(
-        "relative aspect-video w-full overflow-hidden rounded-md border border-border bg-black",
+        "relative aspect-video max-h-[60vh] w-full overflow-hidden rounded-md border border-border bg-black",
         className,
       )}
     >
