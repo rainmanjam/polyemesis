@@ -20,6 +20,38 @@ import { join } from "node:path";
 const DIST = new URL("../dist/", import.meta.url).pathname;
 const fail = [];
 
+/* Every built page, INCLUDING the nested ones, as a path relative to dist/.
+ *
+ * This used to be `readdirSync(DIST).filter(endsWith(".html"))`, which is the
+ * whole directory listing and reads like it covers the site. It covered the top
+ * level only, and that was fine for exactly as long as every page lived there.
+ *
+ * The /vs/* comparison pages are the first nested ones, and each check below
+ * fails differently on them if this is not recursive -- but the loudest is the
+ * internal-link check: /comparison links to /vs/aitum-multistream, the page is
+ * absent from `built`, and the build fails claiming a page that WAS built was
+ * not. The rest fail the other way and are worse for it, silently exempting the
+ * new pages from the amber reservation, the hand-rolled-<pre> ban and the
+ * _headers rule the guard exists to enforce.
+ *
+ * Forward slashes, because these are compared against URL paths. */
+/** @returns {string[]} */
+function htmlPages(dir = DIST, prefix = "") {
+  /** @type {string[]} */
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    // `_astro` holds hashed assets and `.well-known` holds security.txt;
+    // neither contains a page, and both are read directly where they matter.
+    if (entry.name === "_astro" || entry.name.startsWith(".")) continue;
+    if (entry.isDirectory()) {
+      out.push(...htmlPages(join(dir, entry.name), `${prefix}${entry.name}/`));
+    } else if (entry.name.endsWith(".html")) {
+      out.push(prefix + entry.name);
+    }
+  }
+  return out;
+}
+
 const cssFiles = readdirSync(join(DIST, "_astro")).filter((f) => f.endsWith(".css"));
 const css = cssFiles.map((f) => readFileSync(join(DIST, "_astro", f), "utf8")).join("\n");
 
@@ -94,8 +126,7 @@ if (!/\.card\{[^}]*min-width:0/.test(css.replace(/\s+/g, ""))) {
      HOW SPELLED. Lightning CSS rewrites `::after` to the CSS2 `:after`, which
      is two bytes shorter and identical in meaning. Matching the source
      spelling finds nothing in the output. `::?after` accepts either. */
-  const built = flat + readdirSync(DIST)
-    .filter((f) => f.endsWith(".html"))
+  const built = flat + htmlPages()
     .map((f) => readFileSync(join(DIST, f), "utf8").replace(/\s+/g, ""))
     .join("");
 
@@ -122,7 +153,7 @@ if (!/\.card\{[^}]*min-width:0/.test(css.replace(/\s+/g, ""))) {
  * reader gets. The component emits `<pre>` inside `.code`; a hand-rolled one has
  * no such ancestor, and the class attribute Tailwind leaves on it is the tell.
  */
-for (const f of readdirSync(DIST).filter((n) => n.endsWith(".html"))) {
+for (const f of htmlPages()) {
   const html = readFileSync(join(DIST, f), "utf8");
   const handRolled = [...html.matchAll(/<pre\s+class="[^"]+"/g)];
   if (handRolled.length) {
@@ -202,7 +233,7 @@ if (!meterKf) {
       .map((l) => l.trim())
       .filter((l) => l.startsWith("/")),
   );
-  for (const f of readdirSync(DIST).filter((n) => n.endsWith(".html"))) {
+  for (const f of htmlPages()) {
     const pretty = f === "index.html" ? "/" : `/${f.replace(/\.html$/, "")}`;
     if (!rules.has(pretty)) {
       fail.push(
@@ -243,7 +274,7 @@ if (!meterKf) {
   }
 }
 
-const pages = readdirSync(DIST).filter((f) => f.endsWith(".html"));
+const pages = htmlPages();
 
 /* Every nav page must mark ITSELF as the current one, in BOTH navs.
  *

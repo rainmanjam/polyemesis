@@ -68,6 +68,17 @@
   Cache-Control: no-cache
 /404
   Cache-Control: no-cache
+# The comparison pages are nested, so they are SERVED at /vs/<name> and built as
+# vs/<name>.html. Listed one per page for the same reason as the block above: a
+# `/vs/*` wildcard would revalidate correctly today and silently stop being
+# checkable, because the build guard matches a rule against each built page's
+# exact served path.
+/vs/aitum-multistream
+  Cache-Control: no-cache
+/vs/obs-multi-rtmp
+  Cache-Control: no-cache
+/vs/restreamer
+  Cache-Control: no-cache
 /*.html
   Cache-Control: no-cache
 
