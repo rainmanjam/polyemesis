@@ -183,6 +183,66 @@ if (!meterKf) {
   );
 }
 
+/* Every built page must have a revalidation rule in _headers.
+ *
+ * THIS GUARDS A BUG THAT SHIPPED. The block scoped itself to `/` and `/*.html`
+ * and its comment claimed that covered "the built pages". It did not:
+ * astro.config.mjs builds features.html but SERVES /features, and Cloudflare
+ * matches the request path, so four of six pages went out with no `no-cache` at
+ * all. The stated failure mode -- "a deploy is invisible until caches expire" --
+ * was live on /features, /comparison, /docs and /download.
+ *
+ * Derived from the built output rather than a hand-list, so adding a page and
+ * forgetting the header fails here rather than in production six hours later. */
+{
+  const headers = readFileSync(join(DIST, "_headers"), "utf8");
+  const rules = new Set(
+    headers
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("/")),
+  );
+  for (const f of readdirSync(DIST).filter((n) => n.endsWith(".html"))) {
+    const pretty = f === "index.html" ? "/" : `/${f.replace(/\.html$/, "")}`;
+    if (!rules.has(pretty)) {
+      fail.push(
+        `web/public/_headers has no rule for ${pretty} — the page is SERVED at that ` +
+          `path (trailingSlash: "never"), so \`/*.html\` does not match it and a ` +
+          `deploy stays invisible until caches expire`,
+      );
+    }
+  }
+}
+
+/* security.txt must not be expired, and must not be about to be.
+ *
+ * RFC 9116 makes Expires mandatory, and an expired file is worse than none: it
+ * tells a researcher the channel is unmaintained at the exact moment they are
+ * deciding between reporting privately and going public. 30 days of warning is
+ * enough to renew without a scramble. */
+{
+  const sec = readFileSync(join(DIST, ".well-known", "security.txt"), "utf8");
+  const m = /^Expires:\s*(\S+)/m.exec(sec);
+  if (!m) {
+    fail.push(".well-known/security.txt has no Expires field, which RFC 9116 requires");
+  } else {
+    const days = (Date.parse(m[1]) - Date.now()) / 86400000;
+    if (Number.isNaN(days)) {
+      fail.push(`.well-known/security.txt Expires is not a parseable date: ${m[1]}`);
+    } else if (days < 0) {
+      fail.push(
+        `.well-known/security.txt EXPIRED ${Math.abs(Math.round(days))} days ago — ` +
+          `renew it or remove the file; an expired contact reads as an abandoned one`,
+      );
+    } else if (days < 30) {
+      fail.push(
+        `.well-known/security.txt expires in ${Math.round(days)} days — renew it now, ` +
+          `while this is a build failure rather than a live dead end`,
+      );
+    }
+  }
+}
+
 const pages = readdirSync(DIST).filter((f) => f.endsWith(".html"));
 
 /* Every nav page must mark ITSELF as the current one, in BOTH navs.

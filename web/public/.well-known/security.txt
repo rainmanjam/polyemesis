@@ -1,0 +1,13 @@
+# polyemesis — security contact, per RFC 9116.
+#
+# Reports go through GitHub's private vulnerability reporting, not email. That
+# keeps the report private until there is a fix, gives the reporter a thread
+# they can see, and is where the advisories are published from — so the whole
+# lifecycle stays in one place. SECURITY.md is the same policy in prose.
+
+Contact: https://github.com/rainmanjam/polyemesis/security/advisories/new
+Expires: 2027-08-01T00:00:00.000Z
+Policy: https://github.com/rainmanjam/polyemesis/blob/main/SECURITY.md
+Acknowledgments: https://github.com/rainmanjam/polyemesis/security/advisories
+Preferred-Languages: en
+Canonical: https://polyemesis.com/.well-known/security.txt

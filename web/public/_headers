@@ -38,7 +38,35 @@
 
 # HTML must revalidate, or a deploy is invisible until caches expire. Scoped to
 # the built pages rather than /*, so it cannot leak onto a hashed asset.
+#
+# EVERY PAGE IS LISTED TWICE, AND BOTH SPELLINGS ARE LOAD-BEARING.
+#
+# astro.config.mjs sets `build.format: "file"` with `trailingSlash: "never"`, so
+# a page is BUILT as features.html and SERVED as /features. `/*.html` matches the
+# request path, not the file on disk -- so it caught none of the extensionless
+# URLs anyone actually visits, and four of the six pages went out with no
+# revalidation at all. The failure this block exists to prevent, "a deploy is
+# invisible until caches expire", was happening on /features, /comparison, /docs
+# and /download for as long as the rule has been here.
+#
+# The .html spellings stay because both resolve: a direct hit on /features.html
+# is served rather than redirected, and a rule that covers only the pretty URL
+# would leave the other door open.
+#
+# Adding a page means adding it here. That is deliberate -- broadening this to
+# /* would reach /_astro/* below and turn immutable hashed assets into
+# revalidate-every-time, which is the exact leak the original comment refused.
 /
+  Cache-Control: no-cache
+/features
+  Cache-Control: no-cache
+/comparison
+  Cache-Control: no-cache
+/docs
+  Cache-Control: no-cache
+/download
+  Cache-Control: no-cache
+/404
   Cache-Control: no-cache
 /*.html
   Cache-Control: no-cache
