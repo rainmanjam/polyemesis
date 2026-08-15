@@ -377,7 +377,16 @@ func main() {
 		facts["PID_"+t.label+"_AFTER_DROP_LAST"] = strings.Join(pidsFor(t.mark), ",")
 	}
 	r720 := status().rendition(tierOf("720").id)
-	facts["RENDITION_720_RUNNING_AFTER_DROP_LAST"] = boolStr(r720.Process != nil)
+	// "yes"/"no" rather than Go's true/false, because the shell sources this
+	// file and compares against the same two words every other suite's facts
+	// use. Inline rather than a helper: it is the only such conversion left in
+	// this driver, and a six-line boolStr was the last block still shared
+	// verbatim with acceptance_renditions_driver.go.
+	running720 := "no"
+	if r720.Process != nil {
+		running720 = "yes"
+	}
+	facts["RENDITION_720_RUNNING_AFTER_DROP_LAST"] = running720
 
 	// ------------------------------------------------------------- shut down
 	// Stopped rather than deleted, and last, because stopping is what flushes
@@ -833,13 +842,6 @@ func waitForRunning(want int) {
 // ------------------------------------------------------------------ helpers
 
 func f2(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) }
-
-func boolStr(b bool) string {
-	if b {
-		return "yes"
-	}
-	return "no"
-}
 
 // writeFacts flushes everything measured so far to the file the shell sources.
 //
