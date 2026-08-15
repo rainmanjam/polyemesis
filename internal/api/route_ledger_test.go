@@ -2132,27 +2132,33 @@ func inspectOutboundAlertBody(t *testing.T, rig shapeRig) shapeObservation {
 // inspectSlogOutput reads the server's OWN structured log, by pointing it at a
 // buffer and driving one request through the real mux.
 //
-// It costs one extra request on the shared rig and no fixture at all, which is
-// the finding worth recording next to it: this row sat on a citation for two
-// rounds while the bytes were reachable by swapping a plain field, exactly as
-// TestTheUncheckedBypassSaysSoInTheLog in this package has been doing for other
-// reasons all along.
+// ITS OWN SERVER, NOT THE SHARED RIG'S, and that is the whole reason this
+// inspector pays for a fixture the others do not. Server.log is a plain field
+// and this reads by swapping it; the websocket inspector that runs before it
+// leaves a HIJACKED connection being served on the shared rig, and
+// requestLogger reads s.log when that request finally ends. Swapping the field
+// underneath it is a data race on the shared Server -- reported by -race as
+// route_ledger_test.go against api.go's requestLogger, intermittently, because
+// it depends on when the socket closes. A server nobody else is holding is
+// the fix; inspectProcessLog already builds its own for a different reason.
 //
 // The DISCRIMINATING property, per the rule this section opens with: the sample
 // must be a slog text record -- level=, msg= and the method and path of the
 // request that produced it. "Some bytes appeared in the buffer" would accept a
 // panic trace, an empty write, or a log line from something else entirely.
-func inspectSlogOutput(t *testing.T, rig shapeRig) shapeObservation {
+func inspectSlogOutput(t *testing.T, _ shapeRig) shapeObservation {
 	t.Helper()
+	h, _, sign := plantedServer(t)
+	s := serverUnderTest(t, h)
+	read := createScopedToken(t, h, sign, "ledger-slog", db.ScopeRead)
+
 	var buf bytes.Buffer
-	prev := rig.s.log
-	defer func() { rig.s.log = prev }()
-	rig.s.log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	s.log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	// NOT /health and NOT /stats: requestLogger drops those by design, and an
 	// inspector that drove one of them would read an empty buffer and report
 	// the shape absent.
-	rawBody(t, rig.h, bearer(rig.read), "/api/v1/settings")
+	rawBody(t, h, bearer(read), "/api/v1/settings")
 
 	got := buf.String()
 	for _, want := range []string{"level=", "msg=", "/api/v1/settings"} {
