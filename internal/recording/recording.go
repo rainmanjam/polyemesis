@@ -195,6 +195,18 @@ func (m *Manager) Storage() StorageState {
 // starting or keeping it alive.
 func (m *Manager) RecordingAllowed() bool { return !m.Storage().Halted }
 
+// StorageGuarded reports whether a storage guard is registered.
+//
+// Exported for one caller and that caller is a test, which is worth these
+// words. The guard is a callback whose ABSENCE IS SILENT: drop
+// WithStorageGuard from a construction site and nothing fails, nothing logs,
+// and the only symptom arrives weeks later as a volume filled to the last byte
+// by a recorder nobody stopped. The engine's own manager must carry one and
+// the shared read-only instance must not, and the test that guards that
+// pairing had no way to say so -- comparing the two pointers stays green with
+// the option deleted.
+func (m *Manager) StorageGuarded() bool { return m.onStorage != nil }
+
 func (m *Manager) setStorage(st StorageState) bool {
 	m.storageMu.Lock()
 	if m.storage == st {

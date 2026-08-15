@@ -514,5 +514,20 @@ func TestTheSharedRecordingManagerIsNotAnEnginesOwn(t *testing.T) {
 			t.Errorf("the two recording managers disagree about where recordings live: "+
 				"%q and %q", eng.Recordings().Dir(), m.Recordings().Dir())
 		}
+		// The half that pointer identity cannot see. Two DISTINCT managers with
+		// no guard on either is also a pass above, and it is the outcome a
+		// mechanical de-duplication of these two construction sites produces:
+		// the recorder then writes until the volume is full, which is the
+		// failure engine.onStorage exists to prevent.
+		if !eng.Recordings().StorageGuarded() {
+			t.Errorf("engine %d's recording manager has no storage guard, so nothing stops "+
+				"its recorder when the volume fills -- it writes until the last byte and "+
+				"takes the database with it", eng.SourceID())
+		}
+	}
+	if m.Recordings().StorageGuarded() {
+		t.Error("the manager's shared recording manager grew a storage guard: whatever it " +
+			"halts is either every programme on the box or none of them, and neither is " +
+			"what a full volume means")
 	}
 }
