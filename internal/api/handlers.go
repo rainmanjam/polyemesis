@@ -1387,8 +1387,21 @@ func ingestEqual(a, b db.IngestSettings) bool {
 // would make it impossible to configure a destination before going live --
 // which is when most people configure them. Prove it wrong or allow it; never
 // guess.
+//
+// It answers for an absent programme rather than assuming its caller's route
+// carries requireSource. POST /destinations does; the point is that this is a
+// SECOND read of the engine set, after the middleware's, and one read cannot
+// speak for the other -- see engOrNil. The refusal is the middleware's, word
+// for word, so a create that loses its programme between the two answers the
+// same thing it would have answered an instant earlier rather than storing a
+// destination and reporting a reconcile it never performed.
 func (s *Server) refuseIfSilent(w http.ResponseWriter, profile routing.Profile) bool {
-	src := s.eng().Source()
+	e := s.engOrNil()
+	if e == nil {
+		writeNoSource(w)
+		return true
+	}
+	src := e.Source()
 	// No tracks means nothing has been probed yet, so there is nothing to
 	// evaluate the profile against.
 	if len(src.Tracks) == 0 {
@@ -1480,7 +1493,11 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	}
 	created, err := s.store.CreateDestination(&row)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		// Not a plain 400: a body that names no source is the NORMAL shape,
+		// and resolving it is the store's job, so "there is no source to
+		// resolve" is the install's condition rather than a fault in what was
+		// sent. See writeCreateError.
+		writeCreateError(w, err)
 		return
 	}
 	if err := s.eng().Reconcile(); err != nil {

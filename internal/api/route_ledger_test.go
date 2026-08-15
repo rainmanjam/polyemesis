@@ -260,6 +260,51 @@ type coverageRoute struct {
 	Method   string `json:"method"`
 	Pattern  string `json:"pattern"`
 	Coverage string `json:"coverage"`
+	// ZeroSource is the SECOND word, and it is about a different question from
+	// every other verdict in this file: not "does a read token see a
+	// credential" but "what does this pair do on an install that has no
+	// programme".
+	//
+	// A closed vocabulary of two, and both are DERIVED FROM REGISTRATION:
+	//
+	//	guarded    requireSource is in the middleware chain chi.Walk reports
+	//	           for this pair, so the request is refused before its handler
+	//	           runs
+	//	unguarded  it is not, so the handler runs with s.eng() possibly nil and
+	//	           is expected to answer
+	//
+	// Derived rather than listed, because a hand-list of guarded routes is the
+	// failure this ledger is a monument to: it would be complete on the day it
+	// was written and silently short by one the next time a route was added.
+	// The chain comes off the SAME walk the population does, so a route that
+	// loses its guard changes this artifact and a reviewer sees it in the diff.
+	//
+	// What the word does NOT claim is that an `unguarded` pair answers
+	// correctly -- that is the every-route fresh-install walk, which lands with
+	// the seed removal because that is the first branch where an empty install
+	// is a real state. What it does claim is driven: every `guarded` pair is
+	// issued against a server whose manager has no engines and observed to
+	// return 503 with code "no_source". See
+	// TestEveryGuardedRouteRefusesOnAnInstallWithNoSource.
+	ZeroSource string `json:"zeroSource"`
+}
+
+// zeroSourceWord reads the verdict off the middleware chain chi.Walk reports.
+//
+// Function IDENTITY, not a name and not a path prefix. reflect's code pointer
+// for a method VALUE is the compiler's wrapper for that method, which is the
+// same code whatever the receiver -- hence the nil one below, which is never
+// called and exists only to name the wrapper. So this recognises
+// Server.requireSource whichever Server built the router, and cannot be fooled
+// by a middleware that merely looks like it.
+func zeroSourceWord(mws []func(http.Handler) http.Handler) string {
+	guard := reflect.ValueOf((*Server)(nil).requireSource).Pointer()
+	for _, mw := range mws {
+		if reflect.ValueOf(mw).Pointer() == guard {
+			return "guarded"
+		}
+	}
+	return "unguarded"
 }
 
 // routeWant is a DRIVEN premise, and it is the whole of #164 and #166.
@@ -2279,7 +2324,7 @@ func enumerateRoutes(t *testing.T, s *Server) ([]coverageRoute, map[string]bool)
 	var enumerated []coverageRoute
 	seen := map[string]bool{}
 	err := chi.Walk(s.Handler().(chi.Routes),
-		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
 			if route != "/" {
 				route = strings.TrimSuffix(route, "/")
 			}
@@ -2288,7 +2333,12 @@ func enumerateRoutes(t *testing.T, s *Server) ([]coverageRoute, map[string]bool)
 				return nil
 			}
 			seen[key] = true
-			enumerated = append(enumerated, coverageRoute{Method: method, Pattern: route})
+			enumerated = append(enumerated, coverageRoute{
+				Method: method, Pattern: route,
+				// The same walk, so the zero-source verdict cannot be derived
+				// from a different population than the coverage one.
+				ZeroSource: zeroSourceWord(mws),
+			})
 			return nil
 		})
 	if err != nil {
@@ -3431,10 +3481,16 @@ func assertSweptCounterpartsNameSweptRoutes(t *testing.T, enumerated []coverageR
 
 func assertRouteSetsEqual(t ledgerReporter, want, got []coverageRoute) {
 	t.Helper()
+	// BOTH WORDS, and the second one is here rather than in a comparison of its
+	// own for the reason this file keeps rediscovering: a field that is
+	// measured, written and never compared is committed evidence nothing reads,
+	// which has happened eight times. Carrying it in the same map means a route
+	// that silently loses requireSource fails the same assertion a route that
+	// silently loses its sweep does.
 	index := func(rows []coverageRoute) map[string]string {
 		m := map[string]string{}
 		for _, r := range rows {
-			m[r.Method+" "+r.Pattern] = r.Coverage
+			m[r.Method+" "+r.Pattern] = r.Coverage + " / zero-source: " + r.ZeroSource
 		}
 		return m
 	}

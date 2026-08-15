@@ -86,11 +86,20 @@ export class ApiError extends Error {
   // Written out longhand rather than as a parameter property: the build sets
   // erasableSyntaxOnly, which forbids TS syntax that emits runtime code.
   readonly status: number;
+  /** The server's machine-readable reason, `""` when it sent none.
+   *
+   *  It exists so that a caller distinguishing one refusal from another does
+   *  not have to match on `message`. `"no_source"` is the first: a 503 saying
+   *  this install has no programme yet is an empty state, and every other 503
+   *  is a fault -- telling them apart by reading the English would break on a
+   *  reword and could never work once that sentence is translated. */
+  readonly code: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code = "") {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -136,7 +145,13 @@ async function request<T>(
         : typeof body === "string" && body
           ? body
           : `request failed (${resp.status})`;
-    throw new ApiError(resp.status, msg);
+    // Omitted by the server on every error that has nothing to branch on, so
+    // absent is the common case and "" is the honest reading of it.
+    const code =
+      body && typeof body === "object" && "code" in body
+        ? String((body as { code: unknown }).code)
+        : "";
+    throw new ApiError(resp.status, msg, code);
   }
   return body as T;
 }

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
@@ -73,8 +72,11 @@ func TestIngestOptionsForSendsNothingWhenTheDestinationChoseNothing(t *testing.T
 // `Privacy: db.FBPrivacyEveryone` -- the most-exposing value Facebook offers.
 // Observed FAIL ("privacy = EVERYONE, want SELF").
 func TestRefreshKeySendsTheDestinationsStoredFacebookOptionsToTheProvider(t *testing.T) {
-	s, h, store, stub := stubbedServer(t, config.Config{})
-	sign := login(t, h)
+	// stubbedServer plus a real engine manager: refresh-key carries
+	// requireSource now, so a manager-less server answers 503 without calling
+	// Facebook at all and there would be no Graph request to read.
+	stub := newPlatformStub(t)
+	s, h, store, sign := engineServer(t, defaultTools(), Options{Providers: stub.set()})
 
 	acctID := connectAccount(t, store, s.box, db.PlatformFacebook, "ada")
 	if err := store.PutPlatformCreds(s.box, db.PlatformFacebook, "cid", "topsecret"); err != nil {
@@ -93,12 +95,10 @@ func TestRefreshKeySendsTheDestinationsStoredFacebookOptionsToTheProvider(t *tes
 		t.Fatalf("create destination: %v", err)
 	}
 
-	// Graph refuses the create so the handler exits before s.eng().Reconcile()
-	// -- testServer leaves the engine manager nil because no other route here
-	// needs one, and a real one requires the same FFmpeg-and-listener machinery
-	// renditions_test.go stands up for a different feature entirely. The
-	// request is recorded before the refusal is written, so what Graph answers
-	// has no bearing on what this test reads.
+	// Graph refuses the create so the handler exits before it reconciles.
+	// Nothing here depends on the reconcile succeeding -- the fixture's FFmpeg
+	// path cannot exec -- and the request is recorded before the refusal is
+	// written, so what Graph answers has no bearing on what this test reads.
 	stub.setCreateErr("stub: no real ingest in this test")
 
 	r := jsonRequest(t, http.MethodPost,

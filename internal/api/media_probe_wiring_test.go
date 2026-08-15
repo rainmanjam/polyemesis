@@ -292,12 +292,15 @@ func managerServerWithoutEngines(t *testing.T, tools *ffmpeg.Tools) (*Server, ht
 	bus := events.NewBroker()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	eng := engine.NewManager(quiet, cfg, store, tools, bus)
-	// Start REFUSES an install with no engines, today, and that refusal is
-	// exactly the state under test -- the manager is up, the listeners are
-	// reconciled, and nothing is running. Its error is deliberately ignored
-	// rather than asserted on, because the sentence belongs to PR 3's rescope
-	// and this test must not pin it.
-	_ = eng.Start(context.Background())
+	// Start used to REFUSE an install with no engines, which is exactly the
+	// state under test, so this call used to have its error thrown away. It is
+	// asserted now: a boot with no sources is a boot, and the only thing left
+	// that fails here is sources existing and not one of them coming up. See
+	// Manager.Start.
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatalf("the manager refused to start an install with no sources, which is what "+
+			"a fresh install is: %v", err)
+	}
 	t.Cleanup(eng.Stop)
 
 	s := New(Options{

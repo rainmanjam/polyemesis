@@ -106,7 +106,9 @@ func (s *Server) handleCreateRendition(w http.ResponseWriter, r *http.Request) {
 	// smallest useful payload is {name, height, videoBitrate}.
 	created, err := s.store.CreateRendition(&row)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		// The same lift CreateDestination takes: a payload that names no
+		// source is ordinary, and an install with none is not a bad request.
+		writeCreateError(w, err)
 		return
 	}
 	// Nothing selects a brand-new rendition yet, so this starts no encode; it

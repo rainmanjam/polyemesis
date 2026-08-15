@@ -203,8 +203,11 @@ func TestRefreshKeyTellsKickOperatorsToReconnectRatherThanRetry(t *testing.T) {
 	// 502 is right here and 400 was right before. The distinction is real: this
 	// is an upstream rejection of our credential, not a malformed request, and
 	// the retry the operator needs is a reconnect rather than the same button.
-	s, h, store := testServer(t, config.Config{})
-	sign := login(t, h)
+	// An engine-backed fixture, because refresh-key carries requireSource: the
+	// route reconciles after it rotates, so an install with no programme is
+	// refused before the platform is ever called and this test would read that
+	// refusal instead of Kick's.
+	s, h, store, sign := engineServer(t, defaultTools(), Options{})
 
 	acctID := connectAccount(t, store, s.box, db.PlatformKick, "kicker")
 	if err := store.PutPlatformCreds(s.box, db.PlatformKick, "cid", "topsecret"); err != nil {

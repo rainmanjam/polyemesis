@@ -223,9 +223,15 @@ func run(h *hooks) error {
 
 	bus := events.NewBroker()
 
-	// One engine per source, under a manager that owns the set. An install
-	// always has at least one source -- the database refuses to delete the
-	// last -- so this is never an empty pipeline.
+	// One engine per source, under a manager that owns the set.
+	//
+	// The set may be EMPTY, and that is a boot rather than a failure. What
+	// stood here said an install always has at least one source because the
+	// database refuses to delete the last -- true of deletion, and never true
+	// of an install that had not created its first. Start refuses only when
+	// sources exist and not one of them came up; with none, the server comes
+	// up and serves the Sources page, which is the only screen that can get
+	// the operator out of this state.
 	eng := engine.NewManager(log, cfg, store, tools, bus)
 	h.progress("starting the streaming engine")
 	if err := eng.Start(ctx); err != nil {
