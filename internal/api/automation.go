@@ -574,7 +574,7 @@ type stemFile struct {
 // are swept by following it — so this is a directory read rather than a query.
 // Anything it does not recognise as a stem this build wrote is skipped.
 func (s *Server) handleListStems(w http.ResponseWriter, r *http.Request) {
-	dir := s.eng().Recordings().StemsDir()
+	dir := recording.StemsDir(s.cfg.RecordingsDir())
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -648,7 +648,7 @@ func (s *Server) resolveStem(name string) (string, error) {
 	if _, _, ok := recording.ParseStemFilename(name); !ok {
 		return "", fmt.Errorf("%q is not a stem file", name)
 	}
-	base, err := filepath.Abs(s.eng().Recordings().StemsDir())
+	base, err := filepath.Abs(recording.StemsDir(s.cfg.RecordingsDir()))
 	if err != nil {
 		return "", err
 	}

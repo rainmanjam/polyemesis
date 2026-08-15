@@ -538,7 +538,7 @@ func (s *Server) whisperInfo() whisperInfo {
 		info.Backend = string(s.whisper.BestBackend())
 	}
 
-	hint := transcribe.HintFromTools(s.eng().Tools())
+	hint := transcribe.HintFromTools(s.tools())
 	model := transcribe.DefaultModel(hint)
 	info.DefaultModel = model.Name
 	realtime, note := transcribe.RealtimeCapable(model, hint)
@@ -741,25 +741,23 @@ func (s *Server) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
 // then 404 -- so the honest outcome for a stranded file is a log line naming
 // it, which is strictly better than the silence this replaces.
 func (s *Server) removeClipExport(j jobs.Job) {
-	// The engine is what knows where recordings live, and it can legitimately
-	// be absent: publishAudit documents the same two cases, and the second is
-	// not hypothetical -- Manager.reconcile logs and continues when engine.New
-	// fails, so an install whose video pipeline will not build has no default
-	// engine. Deleting a job must not panic on such a box, and DELETE /jobs and
-	// the purge button are both far busier routes than the download this guard
-	// was previously only implied on.
+	// THE CONFINEMENT BASE COMES FROM CONFIG, and that is what retired the two
+	// nil checks that used to stand here.
 	//
-	// Skipping is the right failure: without a recordings directory there is no
-	// exports directory to confine a path to, and a delete that removed a file
-	// it could not first confine is the one outcome worse than a leaked file.
-	if s.mgr == nil {
-		return
-	}
-	eng := s.eng()
-	if eng == nil {
-		return
-	}
-	removed, err := clipper.RemoveExport(clipper.ExportDirIn(eng.Recordings().Dir()), j)
+	// They asked the engine where recordings live, and the engine can
+	// legitimately be absent -- Manager.reconcile logs and continues when
+	// engine.New fails, so an install whose video pipeline will not build has
+	// no default engine. The guard's own reasoning was that without a
+	// recordings directory there is no exports directory to confine a path to,
+	// and a delete that removed a file it could not first confine is the one
+	// outcome worse than a leaked file.
+	//
+	// The directory was never the engine's to know. It is
+	// config.RecordingsDir(), identical for every programme and answerable on
+	// an install running none, so the base below is always a real directory and
+	// the skip it justified would now only leak the file it was meant to
+	// protect.
+	removed, err := clipper.RemoveExport(clipper.ExportDirIn(s.cfg.RecordingsDir()), j)
 	if err != nil {
 		s.log.Warn("deleted a clip export job but could not delete its file",
 			"job", j.ID, "err", err)

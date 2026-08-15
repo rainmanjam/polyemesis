@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"os"
@@ -9,8 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/media"
+	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
 // The search is the headline of this whole workstream, and it is reached by a
@@ -287,5 +291,69 @@ func writeFile(t *testing.T, path string, body []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// A transcript is a record of a session, so the speaker labels it is submitted
+// with are the operator's own words for the tracks: they come from the SOURCE's
+// ingest annotations, and they are copied at submission rather than read when
+// the job runs, so re-running after the roles were rearranged does not relabel
+// an old session.
+//
+// Two things are asserted here and each has cost the product something before.
+//
+// WHICH ROW. Annotations used to live in the settings singleton and moved to
+// the source's ingest block; the engine follows them there, the settings copy
+// is a mirror a client reads back. Submitting from the mirror looks identical
+// on any install where the mirror is fresh, and produces track1/track2/track3
+// on every install where it is not -- which is exactly the regression
+// apitail_annotations_test.go was written after.
+//
+// WITHOUT AN ENGINE. testServer has no manager at all, which is what makes
+// this test the seam: the labels used to be read off s.eng().Settings(), so
+// this call panicked -- an archived session could not be transcribed on an
+// install whose pipeline was not up, which is the one thing post-production is
+// supposed to survive.
+func TestATranscribeJobCarriesTheSourcesAnnotationsWithNoEngine(t *testing.T) {
+	s, _, store := testServer(t, config.Config{DataDir: t.TempDir()})
+
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("GetSource: %v", err)
+	}
+	src.Ingest.Annotations = []routing.TrackAnnotation{
+		{Track: 1, Role: routing.RoleMic, Label: "Host mic"},
+	}
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("annotate the source: %v", err)
+	}
+	// Planted DIFFERENTLY in the settings mirror, so a job built from the wrong
+	// row is a visibly wrong job rather than a coincidence.
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st.Ingest.Annotations = []routing.TrackAnnotation{
+		{Track: 1, Role: routing.RoleMusic, Label: "Stale mirror"},
+	}
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("plant the mirror: %v", err)
+	}
+
+	job, err := s.transcribeJob(db.Recording{ID: 7, Filename: "rec-20240115-120000.mkv"}, submitRequest{})
+	if err != nil {
+		t.Fatalf("transcribeJob: %v", err)
+	}
+	var params transcribe.Params
+	if err := json.Unmarshal(job.Params, &params); err != nil {
+		t.Fatalf("decode job params: %v", err)
+	}
+	if len(params.Annotations) != 1 {
+		t.Fatalf("the job carries %d annotations, want the source's one: %+v",
+			len(params.Annotations), params.Annotations)
+	}
+	if got := params.Annotations[0].Label; got != "Host mic" {
+		t.Errorf("the job was built with the %q annotation, so it came from the settings "+
+			"mirror rather than the source row the engine reads", got)
 	}
 }

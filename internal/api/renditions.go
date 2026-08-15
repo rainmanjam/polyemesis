@@ -272,7 +272,7 @@ func (s *Server) handleListFonts(w http.ResponseWriter, r *http.Request) {
 		// The directory, spelled out, so the UI can tell the operator WHERE to
 		// put a font rather than leaving them to guess.
 		"dir":           filepath.Join(s.cfg.DataDir, ffmpeg.FontsDirName),
-		"textSupported": s.eng().Tools().HasFilter("drawtext"),
+		"textSupported": s.tools().HasFilter("drawtext"),
 		"bounds": map[string]any{
 			"maxTextLen":      db.MaxTextLen,
 			"minSizePct":      db.MinTextSizePct,
@@ -338,7 +338,7 @@ type encoderInfo struct {
 // not from the cache — and because a driver install or a --device passthrough
 // that happened after launch is invisible until something asks again.
 func (s *Server) handleListEncoders(w http.ResponseWriter, r *http.Request) {
-	tools := s.eng().Tools()
+	tools := s.tools()
 
 	gpu := machineGPUs(r.Context())
 	if r.URL.Query().Get("redetect") != "" {

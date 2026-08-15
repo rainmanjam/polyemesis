@@ -166,7 +166,7 @@ func (s *Server) clipSegmentView(p clipPart) clipSegmentView {
 		MediaBase:   fmt.Sprintf("/api/v1/library/recordings/%d/media/", p.rec.ID),
 		Missing:     p.path == "",
 	}
-	layout := media.LayoutFor(s.eng().Recordings().Dir(), p.rec.Filename)
+	layout := media.LayoutFor(s.cfg.RecordingsDir(), p.rec.Filename)
 	if fileExists(layout.Proxy) {
 		out.Proxy = out.MediaBase + media.ProxyName
 	}
@@ -320,7 +320,7 @@ func (s *Server) clipTimeline(id int64) (clipTimeline, error) {
 		if ok {
 			p.startMS = offsets[i]
 		}
-		if path, err := s.eng().Recordings().Resolve(rec.Filename); err == nil && fileExists(path) {
+		if path, err := s.recordings().Resolve(rec.Filename); err == nil && fileExists(path) {
 			p.path = path
 		}
 		out.parts = append(out.parts, p)
@@ -492,7 +492,7 @@ func (s *Server) handleClipKeyframes(w http.ResponseWriter, r *http.Request) {
 // clipProber is the ffprobe the planner and the keyframe view share.
 func (s *Server) clipProber() clipper.Prober {
 	bin := s.cfg.FFmpeg.Probe
-	if tools := s.eng().Tools(); tools != nil && tools.FFprobe != "" {
+	if tools := s.tools(); tools != nil && tools.FFprobe != "" {
 		bin = tools.FFprobe
 	}
 	// An empty Bin means "ffprobe, off PATH", which is the right answer on a
@@ -628,7 +628,7 @@ func (s *Server) clipRequest(tl clipTimeline, body clipRequestBody) (clipper.Req
 		// for a fraction of a second of video. HeadEncoder prefers x264 and
 		// falls back to it whenever detection cannot demonstrate anything,
 		// which is the fail-open answer.
-		if tools := s.eng().Tools(); tools != nil {
+		if tools := s.tools(); tools != nil {
 			req.VideoEncoder = clipper.HeadEncoder(tools, tools.HWEncoders)
 		}
 	}
@@ -668,7 +668,7 @@ func (s *Server) clipOutPath(tl clipTimeline, body clipRequestBody) string {
 }
 
 func (s *Server) clipExportDir() string {
-	return clipExportDirIn(s.eng().Recordings().Dir())
+	return clipExportDirIn(s.cfg.RecordingsDir())
 }
 
 // clipExportDirIn resolves the exports directory to an ABSOLUTE path.

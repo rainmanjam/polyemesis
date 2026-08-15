@@ -73,30 +73,100 @@ type System struct {
 	NumCPU         int     `json:"numCpu"`
 }
 
-// Monitor samples host resources and the ingest bitrate on a fixed interval.
+// Host samples this box's CPU and memory.
+//
+// ONE PER PROCESS, which is why it is not part of Monitor and must not be
+// folded back into it. Every field it fills describes the machine and this
+// process — cpu.Percent, mem.VirtualMemory and the process's own RSS — so an
+// install running three programmes was running three goroutines a second
+// taking three identical readings, and whichever engine an unscoped API call
+// happened to reach decided which copy the operator saw. The bitrate ring on
+// Monitor is the opposite case: it differentiates ONE programme's ingest
+// counter and belongs to that programme.
+type Host struct {
+	mu     sync.RWMutex
+	system System
+
+	self *process.Process
+}
+
+// NewHost creates the host sampler. It takes no readings until Run.
+func NewHost() *Host {
+	h := &Host{}
+	if p, err := process.NewProcess(int32(os.Getpid())); err == nil {
+		h.self = p
+	}
+	return h
+}
+
+// Run samples until ctx is cancelled.
+func (h *Host) Run(ctx context.Context) {
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			h.sample()
+		}
+	}
+}
+
+func (h *Host) sample() {
+	s := System{NumCPU: numCPU()}
+
+	// Interval 0 means "since the last call", which is what makes this a
+	// rolling reading rather than a blocking one-second average.
+	if pcts, err := cpu.Percent(0, false); err == nil && len(pcts) > 0 {
+		s.CPUPercent = pcts[0]
+	}
+	if vm, err := mem.VirtualMemory(); err == nil {
+		s.MemUsedBytes = vm.Used
+		s.MemTotalBytes = vm.Total
+		s.MemPercent = vm.UsedPercent
+	}
+	if h.self != nil {
+		if c, err := h.self.CPUPercent(); err == nil {
+			s.ProcCPUPercent = c
+		}
+		if mi, err := h.self.MemoryInfo(); err == nil && mi != nil {
+			s.ProcMemBytes = mi.RSS
+		}
+	}
+
+	h.mu.Lock()
+	h.system = s
+	h.mu.Unlock()
+}
+
+// System returns the latest host snapshot. The zero value until Run has taken
+// its first reading, which is the honest answer for a process that has not
+// looked yet.
+func (h *Host) System() System {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.system
+}
+
+// Monitor samples one programme's ingest bitrate on a fixed interval.
+//
+// Host resources used to be sampled here too; see Host for why they are not.
 type Monitor struct {
-	mu      sync.RWMutex
-	system  System
 	bitrate *Ring
 
 	// rxBytes returns the ingest's cumulative received byte count. The monitor
 	// differentiates it rather than asking for a rate, so the relay does not
 	// have to keep its own timing.
 	rxBytes func() uint64
-
-	self *process.Process
 }
 
 // NewMonitor creates a monitor. rxBytes is normally relay.Hub.RxBytes.
 func NewMonitor(rxBytes func() uint64) *Monitor {
-	m := &Monitor{
+	return &Monitor{
 		bitrate: NewRing(1800), // 30 min at 1 Hz
 		rxBytes: rxBytes,
 	}
-	if p, err := process.NewProcess(int32(os.Getpid())); err == nil {
-		m.self = p
-	}
-	return m
 }
 
 // Run samples until ctx is cancelled.
@@ -126,43 +196,8 @@ func (m *Monitor) Run(ctx context.Context) {
 				lastBytes, lastAt = cur, now
 				m.bitrate.Add(Sample{Time: now, Kbps: kbps})
 			}
-			m.sampleSystem()
 		}
 	}
-}
-
-func (m *Monitor) sampleSystem() {
-	s := System{NumCPU: numCPU()}
-
-	// Interval 0 means "since the last call", which is what makes this a
-	// rolling reading rather than a blocking one-second average.
-	if pcts, err := cpu.Percent(0, false); err == nil && len(pcts) > 0 {
-		s.CPUPercent = pcts[0]
-	}
-	if vm, err := mem.VirtualMemory(); err == nil {
-		s.MemUsedBytes = vm.Used
-		s.MemTotalBytes = vm.Total
-		s.MemPercent = vm.UsedPercent
-	}
-	if m.self != nil {
-		if c, err := m.self.CPUPercent(); err == nil {
-			s.ProcCPUPercent = c
-		}
-		if mi, err := m.self.MemoryInfo(); err == nil && mi != nil {
-			s.ProcMemBytes = mi.RSS
-		}
-	}
-
-	m.mu.Lock()
-	m.system = s
-	m.mu.Unlock()
-}
-
-// System returns the latest host snapshot.
-func (m *Monitor) System() System {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.system
 }
 
 // Bitrate returns the ingest bitrate series.
