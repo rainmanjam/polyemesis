@@ -26,6 +26,13 @@ const cols = [
     links: [
       { href: "/features", label: "Features" },
       { href: "/comparison", label: "How it compares" },
+      // NOT IN THE NAV, HERE ON PURPOSE. Both of these are entry points from
+      // search rather than places an existing visitor navigates to, and the
+      // header nav is four items that describe the product. Promoting a landing
+      // page into it would push "Features" and "Comparison" down the list to
+      // serve a reader who, by definition, has not arrived yet. The footer is
+      // where a page earns discovery without costing the nav its shape.
+      { href: "/free-restream-service", label: "Free restream service" },
       { href: "/download", label: "Install" },
     ],
   },
@@ -34,6 +41,7 @@ const cols = [
     links: [
       { href: "/docs", label: "Overview" },
       { href: "/docs#audio-routing", label: "Audio routing" },
+      { href: "/how-to-multistream-from-obs", label: "Multistream from OBS" },
       { href: "/docs#start", label: "OBS setup" },  // OBS.md lives in the "Getting it running" group
       { href: "/docs#api", label: "HTTP API" },
     ],

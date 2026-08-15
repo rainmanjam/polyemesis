@@ -66,6 +66,10 @@
   Cache-Control: no-cache
 /download
   Cache-Control: no-cache
+/free-restream-service
+  Cache-Control: no-cache
+/how-to-multistream-from-obs
+  Cache-Control: no-cache
 /404
   Cache-Control: no-cache
 /*.html
