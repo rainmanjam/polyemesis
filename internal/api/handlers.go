@@ -39,10 +39,28 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	// sources is the second thing a browser needs before it can decide what to
+	// render, and this is the one endpoint it can ask before signing in.
+	//
+	// An install with no programme is a NORMAL state, not a failure: nothing is
+	// running, so the live endpoints answer with empty snapshots that look
+	// exactly like a broadcast that has not started. Only the count separates
+	// "nothing is on air" from "there is nothing to put on air", and only the
+	// second one has an answer the operator can act on.
+	//
+	// A count that cannot be read is reported as absent rather than as zero,
+	// because zero is the value the empty state keys off and inventing it from
+	// a failed query would send a working install to the wrong screen.
+	body := map[string]any{
 		"needsSetup":       !has,
 		"minPasswordChars": db.MinPasswordLength,
-	})
+	}
+	if n, err := s.store.CountSources(); err == nil {
+		body["sources"] = n
+	} else {
+		s.log.Warn("cannot count sources for the setup status", "err", err)
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
@@ -774,8 +792,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		// describes the box, and an install running three sources used to have
 		// three samplers of it disagreeing by a tick.
 		"system":  s.hostSystem(),
-		"bitrate": s.eng().Monitor().Bitrate(),
-		"relay":   s.eng().Hub().Stats(),
+		"bitrate": s.ingestBitrate(),
+		"relay":   s.relayStats(),
 	})
 }
 
@@ -797,7 +815,6 @@ func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request) {
 // is already signed in can just open the URL.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	st := s.eng().Status()
-	mon := s.eng().Monitor()
 
 	snap := metrics.Snapshot{
 		Version:      s.version,
@@ -812,10 +829,22 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	// A scrape says how many programmes exist, so an alert can tell a server
+	// nobody has configured from one whose broadcast ended -- every other
+	// series reads zero in both cases. A count that will not read is left at
+	// zero and warned about, for the same reason the recordings usage below is:
+	// losing the whole exposition would take the series an alert is watching
+	// with it.
+	if n, err := s.store.CountSources(); err == nil {
+		snap.Sources = n
+	} else {
+		s.log.Warn("metrics: source count unavailable", "err", err)
+	}
+
 	// The relay's own rate, not the ingest process's -progress line: this is
 	// the series the dashboard graphs, so the metric cannot disagree with what
 	// an operator is looking at while they read it.
-	if b := mon.Bitrate(); len(b) > 0 {
+	if b := s.ingestBitrate(); len(b) > 0 {
 		snap.Ingest.BitrateKbps = b[len(b)-1].Kbps
 	}
 	snap.Ingest.State = string(supervisor.StateStopped)

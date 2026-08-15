@@ -38,6 +38,13 @@ type Snapshot struct {
 	Version string
 	Uptime  time.Duration
 
+	// Sources is how many programmes this install has. It is what separates a
+	// server that is idle from one that has nothing to run: every other series
+	// below reads zero in both cases, so an alert written on ingest_up alone
+	// cannot tell a broadcast that ended from an install nobody has configured
+	// yet.
+	Sources int
+
 	Ingest       Process
 	Destinations []Destination
 	Relay        Relay
@@ -101,6 +108,9 @@ func Render(s Snapshot) string {
 
 	d.scalar("polyemesis_uptime_seconds", "gauge",
 		"Time since the server process started.", s.Uptime.Seconds())
+
+	d.scalar("polyemesis_sources", "gauge",
+		"Programmes configured on this install.", float64(s.Sources))
 
 	renderIngest(&d, s.Ingest)
 	renderDestinations(&d, s.Destinations)

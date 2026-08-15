@@ -32,6 +32,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/recording"
+	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
@@ -82,6 +83,41 @@ func (s *Server) hostSystem() stats.System {
 		return stats.System{}
 	}
 	return s.mgr.Host().System()
+}
+
+// ingestBitrate is the arrival series the dashboard graphs, empty when no
+// programme is running.
+//
+// The check is HERE, in the handler layer, and not a nil-receiver guard on
+// stats.Monitor. That is the deliberate half of it. stats.Monitor and
+// relay.Hub describe a pipeline that is up; teaching them to answer for one
+// that is not spreads "there is nothing running" into two packages that have
+// no way to say so, and the next reader of Monitor.Bitrate would have to
+// wonder which of its zeroes meant idle and which meant absent. The API is
+// where the question "is there a programme at all" is already asked, so it is
+// where it is answered.
+//
+// Empty rather than a single zero sample: the graph draws no line for a series
+// it has never had a reading of, which is the truth, where a zero reading
+// claims a measured silence.
+// Both halves of the condition are load-bearing, the way playoutManager's
+// already are: eng() goes through Manager.Default, so a build with no manager
+// panics before there is an engine to test.
+func (s *Server) ingestBitrate() []stats.Sample {
+	if s.mgr == nil || s.eng() == nil {
+		return []stats.Sample{}
+	}
+	return s.eng().Monitor().Bitrate()
+}
+
+// relayStats is the fan-out hub's throughput, zero when no programme is
+// running. Same reasoning as ingestBitrate, and the zero value is honest: no
+// hub exists, so nothing has been received, replicated or dropped.
+func (s *Server) relayStats() relay.Stats {
+	if s.mgr == nil || s.eng() == nil {
+		return relay.Stats{}
+	}
+	return s.eng().Hub().Stats()
 }
 
 // recordings is the shared, read-only view of the recordings directory:

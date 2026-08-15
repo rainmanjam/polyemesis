@@ -159,6 +159,20 @@ func (d *DB) ListSources() ([]*Source, error) {
 	return out, rows.Err()
 }
 
+// CountSources is how many programmes this install has.
+//
+// A count rather than len(ListSources()), because the first caller is the
+// UNAUTHENTICATED setup endpoint: a row carries the publish token an encoder
+// authenticates with, and there is no reason to decode one to answer "how
+// many". The number itself is not a secret -- it is what tells a browser
+// whether this install has a programme yet, and therefore whether the
+// dashboard should be showing an empty state instead of a red error.
+func (d *DB) CountSources() (int, error) {
+	var n int
+	err := d.sql.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&n)
+	return n, err
+}
+
 // GetSource returns one source.
 func (d *DB) GetSource(id int64) (*Source, error) {
 	row := d.sql.QueryRow(sourceByIDQuery, id)

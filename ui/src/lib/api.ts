@@ -275,8 +275,13 @@ export const api = {
   upgradeRollback: (force = false) => post<UpgradeResult>("/upgrade/rollback", { force }),
 
   // --- setup & auth ---
+  /** `sources` is how many programmes exist, and it is here rather than on a
+   *  signed-in route because this is the only status a browser can read before
+   *  it has an account. It is optional because the server omits it when the
+   *  count cannot be read — absent means "unknown", which is not the same
+   *  answer as 0 and must not be rendered as one. */
   setupStatus: () =>
-    get<{ needsSetup: boolean; minPasswordChars: number }>("/setup"),
+    get<{ needsSetup: boolean; minPasswordChars: number; sources?: number }>("/setup"),
   setup: (username: string, password: string) =>
     post<{ username: string }>("/setup", { username, password }),
   login: (username: string, password: string) =>
