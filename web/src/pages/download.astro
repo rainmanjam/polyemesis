@@ -118,6 +118,63 @@ rainmanjam/polyemesis/main/scripts/install.sh \\
       </p>
     </div>
 
+    {/* HowTo, describing the four steps rendered immediately below and nothing
+        else. Every step text is a condensation of the visible <li> it names — if
+        the list changes and this does not, the markup describes a page that no
+        longer exists, which is worse than having no structured data at all.
+
+        The one Google-eligible schema this site actually earns: these are
+        sequential setup instructions with a real ordered list behind them, which
+        is the whole test. FAQPage was considered for the "Is this for you?"
+        block on the home page and rejected — that is two bullet lists, not
+        question-and-answer pairs, and marking it up as FAQ would be a claim
+        about content that is not there. */}
+    <script type="application/ld+json" is:inline set:html={JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      name: "Send OBS to polyemesis over multitrack SRT",
+      description:
+        "Point OBS at a self-hosted polyemesis server so each destination can " +
+        "receive its own audio mix, built from the split tracks OBS sends.",
+      totalTime: "PT10M",
+      tool: [{ "@type": "HowToTool", name: "OBS Studio" }],
+      supply: [{ "@type": "HowToSupply", name: "A running polyemesis server" }],
+      step: [
+        {
+          "@type": "HowToStep",
+          name: "Set an admin password",
+          text:
+            "Open the UI and set an admin password. If it is lost, -reset-admin " +
+            "on the box sets a new one; there is no recovery from anywhere else.",
+        },
+        {
+          "@type": "HowToStep",
+          name: "Choose an ingest mode",
+          text:
+            "A fresh install has none. SRT carries many tracks from many sources " +
+            "and is what the routing needs. RTMP shares its port between sources, " +
+            "told apart by the stream key, but carries one audio track on any " +
+            "FFmpeg below 7.1. Copy the ingest URL — it carries the credential " +
+            "that addresses this source.",
+        },
+        {
+          "@type": "HowToStep",
+          name: "Configure OBS for multitrack SRT",
+          text:
+            "In OBS, Settings, Output, Advanced, Recording: set Type to Custom " +
+            "Output (FFmpeg), FFmpeg Output Type to Output to URL, container " +
+            "mpegts, and tick the audio tracks to send. Paste the ingest URL, " +
+            "then press Start Recording — with Output to URL, that is the SRT push.",
+          url: "https://polyemesis.com/download",
+        },
+        {
+          "@type": "HowToStep",
+          name: "Add destinations and route the audio",
+          text: "Add destinations, then tick which tracks each one receives.",
+        },
+      ],
+    })} />
+
     <div class="card p-6" data-reveal>
       <h2 class="text-lg font-medium">Then point OBS at it</h2>
       <ol class="mt-3 space-y-2.5 text-sm leading-relaxed text-muted">
