@@ -844,8 +844,9 @@ func residueTotal(t *testing.T, path string) (db, wal int) {
 //
 // The previous release closed cleanly, so SQLite checkpointed and removed the
 // -wal: every plaintext key is in the main database file. The backfill's UPDATE
-// shortens each stream_key cell to '', and without secure_delete SQLite unlinks
-// those bytes without zeroing them, leaving them legible in the freed space.
+// shortens each stream_key cell to the empty string, and without secure_delete
+// SQLite unlinks those bytes without zeroing them, leaving them legible in the
+// freed space.
 //
 // Mutation: drop `&_pragma=secure_delete(ON)` from Open's DSN in db.go.
 // Observed to fail with "2 copies of the plaintext stream key are still
