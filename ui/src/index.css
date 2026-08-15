@@ -1,5 +1,16 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/* driver.js, for the onboarding tour. Imported for its MECHANICS, not its look:
+   the stylesheet carries the popover's fixed positioning, the arrow geometry and
+   the pointer-events rules that make the highlighted element clickable while the
+   rest of the page is not. Those are part of how the library works, and
+   reimplementing them here would mean owning a behaviour contract that changes
+   with the library.
+
+   Everything visual is overridden at the bottom of this file under
+   `.polyemesis-tour`, which is two classes deep against driver.js's one, so the
+   app's palette wins on specificity rather than on import order. */
+@import "driver.js/dist/driver.css";
 
 /* ===========================================================================
    polyemesis theme — the entire palette lives here and nowhere else.
@@ -317,4 +328,124 @@
     animation: none !important;
     opacity: 0 !important;
   }
+}
+
+/* ===========================================================================
+   The onboarding tour's popover
+   ===========================================================================
+
+   driver.js ships a white card with a 19px bold title and 1px grey buttons,
+   which is a perfectly good popover for a marketing site and reads as a foreign
+   object in a near-black broadcast console. Every visual property below is
+   restated from this file's own tokens: the same surface, border, radius and
+   type scale the Cards and Dialogs use, so the tour looks like part of the app
+   rather than like something bolted onto it.
+
+   SPECIFICITY, NOT ORDER. Each selector pairs `.polyemesis-tour` — the
+   popoverClass set in components/Tour.tsx — with driver.js's own class, giving
+   two classes against its one. That holds however the bundler orders the two
+   stylesheets, which is the failure mode a plain override would have.
+
+   WHAT IS DELIBERATELY LEFT ALONE: position, z-index, pointer-events and the
+   arrow's border geometry. Those are the library's mechanics — the arrow is
+   drawn as a transparent-bordered box whose one opaque side is rotated by
+   class — and the only thing restated for the arrow is the colour, so it keeps
+   matching the card it points from.
+   =========================================================================== */
+
+.polyemesis-tour.driver-popover {
+  background-color: var(--popover);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  /* Wider than driver.js's 300px cap. The steps carry real explanation rather
+     than labels — a sentence about what secret.key does is not a tooltip — and
+     at 300px the last step ran to eleven lines. */
+  max-width: 24rem;
+  min-width: 18rem;
+  padding: 0.75rem;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.55);
+}
+
+.polyemesis-tour .driver-popover-title {
+  /* The app's own heading scale (PageHeader is 15px/semibold), not driver.js's
+     19px/700, which is larger than any real heading in the console. */
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+
+.polyemesis-tour .driver-popover-description {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+
+.polyemesis-tour .driver-popover-progress-text {
+  font-size: 10px;
+  color: var(--subtle-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.polyemesis-tour .driver-popover-close-btn {
+  color: var(--subtle-foreground);
+  transition: color var(--motion-instant) var(--ease-out);
+}
+.polyemesis-tour .driver-popover-close-btn:hover,
+.polyemesis-tour .driver-popover-close-btn:focus {
+  color: var(--foreground);
+}
+
+.polyemesis-tour .driver-popover-footer-btn {
+  background-color: var(--secondary);
+  color: var(--secondary-foreground);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  font-size: 11px;
+  padding: 0.25rem 0.5rem;
+}
+.polyemesis-tour .driver-popover-footer-btn:hover,
+.polyemesis-tour .driver-popover-footer-btn:focus {
+  background-color: var(--accent);
+  color: var(--accent-foreground);
+}
+
+/* The forward button is the one the operator is meant to press, so it carries
+   the app's single accent — the same one every primary Button uses. Selected by
+   position because driver.js gives both navigation buttons the same class. */
+.polyemesis-tour .driver-popover-navigation-btns button:last-child {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+}
+.polyemesis-tour .driver-popover-navigation-btns button:last-child:hover,
+.polyemesis-tour .driver-popover-navigation-btns button:last-child:focus {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  filter: brightness(1.12);
+}
+
+/* Keyboard focus is the app's ring here too. driver.js's own reset removes the
+   outline, which on a control that is reachable by Tab is an accessibility
+   regression rather than a style choice. */
+.polyemesis-tour .driver-popover-footer-btn:focus-visible,
+.polyemesis-tour .driver-popover-close-btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* Colour only. The four side-* classes carry the geometry and are untouched. */
+.polyemesis-tour .driver-popover-arrow-side-left {
+  border-left-color: var(--popover);
+}
+.polyemesis-tour .driver-popover-arrow-side-right {
+  border-right-color: var(--popover);
+}
+.polyemesis-tour .driver-popover-arrow-side-top {
+  border-top-color: var(--popover);
+}
+.polyemesis-tour .driver-popover-arrow-side-bottom {
+  border-bottom-color: var(--popover);
 }

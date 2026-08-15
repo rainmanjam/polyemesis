@@ -64,6 +64,7 @@ import type {
   SystemInfo,
   SystemStats,
   TlsStatus,
+  TourState,
   TrackAnnotation,
   TranscriptTrack,
   TranscriptView,
@@ -294,6 +295,20 @@ export const api = {
   createToken: (name: string, scope: TokenScope) =>
     post<{ token: ApiToken; plaintext: string }>("/auth/tokens", { name, scope }),
   revokeToken: (id: number) => del<{ status: string }>(`/auth/tokens/${id}`),
+
+  // --- onboarding tour ---
+  /** Whether the tour should still be offered. */
+  tourState: () => get<TourState>("/tour"),
+  /**
+   * Records that the tour was finished or dismissed — the two write the same
+   * thing, because the offer is one-time either way and Settings carries the
+   * replay control for anyone who changes their mind.
+   *
+   * Idempotent on the server: the first completion wins, so calling it twice
+   * (finishing the last step also destroys the popover, which is the dismiss
+   * path) cannot move the timestamp or un-complete it.
+   */
+  completeTour: () => post<TourState>("/tour/complete"),
 
   // --- system & telemetry ---
   system: () => get<SystemInfo>("/system"),

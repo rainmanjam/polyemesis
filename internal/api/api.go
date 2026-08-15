@@ -430,6 +430,24 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Post("/auth/logout", s.handleLogout)
 			r.Get("/auth/me", s.handleMe)
 
+			// The onboarding tour's "have I already been offered this".
+			//
+			// Read is a plain GET, so a read-scoped token may ask. There is
+			// nothing to protect in the answer: it is one timestamp about a
+			// popover, and refusing it would be the sort of denial that teaches
+			// nobody anything.
+			//
+			// The WRITE is admin-scoped, and it is admin-scoped BY
+			// CONSTRUCTION rather than by a list: requireScope refuses every
+			// non-GET to a read token unless the pattern is in
+			// readScopeWritePatterns, and this one deliberately is not. A
+			// read-only credential must not be able to mutate user state,
+			// however small that state is -- "it is only a boolean" is the
+			// argument that ends with a read token turning off a warning
+			// somebody else needs.
+			r.Get("/tour", s.handleTourState)
+			r.Post("/tour/complete", s.handleTourComplete)
+
 			// --- session only ---
 			//
 			// A signed-in browser reaches these; an API token does not, and the

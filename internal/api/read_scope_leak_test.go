@@ -415,6 +415,12 @@ func leakRoutes() []string {
 		"/api/v1/schedules",
 		"/api/v1/schedules/runs",
 		"/api/v1/tls",
+		// The onboarding tour's completion flag. Swept rather than excused: a
+		// read token genuinely reaches it and it genuinely answers 200 with a
+		// body, so the discharge rule leaves no excuse available. The body is
+		// two fields about a popover, which is precisely the sort of thing a
+		// sweep is cheap on and an argument is expensive on.
+		"/api/v1/tour",
 		"/api/v1/upgrade/plan",
 
 		// PROMOTED OUT OF excusedRoutes BY THE DISCHARGE RULE, and every one of

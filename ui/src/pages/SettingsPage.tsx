@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/accordion";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/AppLayout";
+import { TourReplayButton } from "@/components/Tour";
 import { Experimental, ExperimentalBadge } from "@/components/Experimental";
 // The destination dialog renders this matrix inline; this page shows the same
 // rows as a full table. Both read it from lib, which is where it belongs.
@@ -162,7 +163,16 @@ export function SettingsPage() {
 
   return (
     <div className="p-3">
-      <PageHeader title={t("set.title")} subtitle={system ? `polyemesis ${system.version}` : undefined} />
+      <PageHeader
+        title={t("set.title")}
+        subtitle={system ? `polyemesis ${system.version}` : undefined}
+        // The tour's replay control, in the header rather than in a tab: the
+        // tour crosses four pages and two of the four tabs here, so filing it
+        // under one of them would be filing it under the wrong one. It is also
+        // the reason the first-run offer can be a dismissible strip instead of
+        // a modal — dismissing costs nothing when the thing is still findable.
+        actions={<TourReplayButton />}
+      />
 
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
         <TabsList>
@@ -2270,17 +2280,26 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
           </>
         )}
 
-        <div className="flex items-start justify-between gap-2 border-t border-border pt-2">
-          <span className="shrink-0 text-[11px] text-muted-foreground">{t("set.dataDirectory")}</span>
-          <code className="min-w-0 break-all text-right font-mono text-[10px]">
-            {system?.dataDir ?? "—"}
-          </code>
+        {/* The onboarding tour's last step anchors here, and the wrapper exists
+            so the highlight covers the path AND the sentence about secret.key
+            underneath it — the path alone would highlight a directory name with
+            no statement of why it matters. Reached at /settings?tab=security:
+            the tab is URL-driven (see the Tabs in SettingsPage above), which is
+            what lets the tour navigate straight to it rather than asking the
+            operator to find it. See ui/src/lib/tourSteps.ts. */}
+        <div data-tour="data-directory" className="flex flex-col gap-2">
+          <div className="flex items-start justify-between gap-2 border-t border-border pt-2">
+            <span className="shrink-0 text-[11px] text-muted-foreground">{t("set.dataDirectory")}</span>
+            <code className="min-w-0 break-all text-right font-mono text-[10px]">
+              {system?.dataDir ?? "—"}
+            </code>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            OAuth tokens and client secrets are encrypted at rest with NaCl secretbox, keyed by
+            <code className="mx-1 font-mono">secret.key</code> in that directory. Back it up with the
+            database, or connected accounts must be re-authorised.
+          </p>
         </div>
-        <p className="text-[10px] text-muted-foreground">
-          OAuth tokens and client secrets are encrypted at rest with NaCl secretbox, keyed by
-          <code className="mx-1 font-mono">secret.key</code> in that directory. Back it up with the
-          database, or connected accounts must be re-authorised.
-        </p>
       </CardContent>
     </Card>
   );

@@ -85,6 +85,72 @@ func (d *DB) BumpTokenEpoch(id int64) error {
 	return nil
 }
 
+// MigrateUserTourCompleted adds users.tour_completed_at to a database created
+// before the onboarding tour existed.
+//
+// It follows MigrateUserTokenEpoch above exactly, including the has-column
+// guard, so running it against a database that already carries the column is a
+// no-op rather than an error -- every startup calls it.
+//
+// The default is 0, meaning "never taken". An operator upgrading into this
+// version therefore gets offered the tour once, which is the intended behaviour:
+// the things it points at (the publish URL, Routing, secret.key) are exactly as
+// unfindable on an install that has been running for a year as on a fresh one,
+// and the offer is dismissible.
+func (d *DB) MigrateUserTourCompleted() error {
+	has, err := columnExists(d.sql, "users", "tour_completed_at")
+	if err != nil {
+		return fmt.Errorf("inspect users columns: %w", err)
+	}
+	if has {
+		return nil
+	}
+	if _, err := d.sql.Exec(
+		`ALTER TABLE users ADD COLUMN tour_completed_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("add users.tour_completed_at: %w", err)
+	}
+	return nil
+}
+
+// TourCompletedAt returns the unix time at which the operator finished or
+// dismissed the onboarding tour, or 0 if they never have.
+//
+// A timestamp rather than a boolean, and it costs nothing extra: "completed"
+// answers the only question the UI asks today, and "completed when" is the one
+// a support conversation asks next -- whether somebody saw the tour before or
+// after the version that changed what it says.
+func (d *DB) TourCompletedAt(id int64) (int64, error) {
+	var at int64
+	err := d.sql.QueryRow(`SELECT tour_completed_at FROM users WHERE id = ?`, id).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNoUser
+	}
+	return at, err
+}
+
+// SetTourCompleted records that the operator finished or dismissed the tour.
+//
+// Finishing and dismissing write the same thing on purpose. The offer is a
+// one-time affordance either way, and Settings carries a replay control for
+// somebody who changes their mind -- so there is no state in which the
+// difference between "read it" and "closed it" would change what the UI does.
+//
+// updated_at is deliberately NOT touched. It describes the ACCOUNT -- the
+// username and the password hash -- and dismissing a tour is not a change to
+// the credential; moving it here would make "when was this account last
+// modified" answer a question about a popover.
+func (d *DB) SetTourCompleted(id int64, at time.Time) error {
+	res, err := d.sql.Exec(
+		`UPDATE users SET tour_completed_at = ? WHERE id = ?`, at.Unix(), id)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrNoUser
+	}
+	return nil
+}
+
 // HasUser reports whether first-run setup has been completed.
 func (d *DB) HasUser() (bool, error) {
 	var n int

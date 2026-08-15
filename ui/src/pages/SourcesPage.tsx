@@ -171,7 +171,17 @@ export function SourcesPage() {
         title={t("sources.title")}
         subtitle={t("sources.subtitle")}
         actions={
-          <Button size="sm" onClick={() => setCreating(true)}>
+          <Button
+            size="sm"
+            // The onboarding tour's anchor for "install.sh printed a publish
+            // address once and that terminal is gone". It is THIS button and
+            // not a source card, because a first-run install has no sources at
+            // all — nothing is seeded — so the card is the one thing on this
+            // page that is guaranteed absent when the tour matters most.
+            // See ui/src/lib/tourSteps.ts.
+            data-tour="add-source"
+            onClick={() => setCreating(true)}
+          >
             <Plus className="h-3.5 w-3.5" /> {t("sources.addSource")}
           </Button>
         }
@@ -480,7 +490,26 @@ function SourceCard({
           </div>
         )}
 
-        {/* What to paste into the encoder. */}
+        {/* What to paste into the encoder.
+
+            The wrapper is the onboarding tour's CONDITIONAL step, and the only
+            one it has. It exists only once the operator has a source, which on
+            a first run they do not — nothing is seeded — so the tour skips it
+            and the step before it, on the Add source button, carries the
+            teaching instead. On a configured install, which is what a replay
+            from Settings usually is, the step shows.
+
+            It deliberately spans the URLs AND the token block below rather than
+            the URLs alone: publishUrls is EMPTY while ingest.mode is unset —
+            see publishURLs() in internal/api/sources.go — so a wrapper around
+            the map alone would collapse to zero height on a source whose
+            protocol has not been chosen, and the tour would highlight a
+            hairline. The token row always renders, so this span always has
+            something in it. It is also the honest boundary for the step, which
+            is about the address and the credential together.
+
+            See ui/src/lib/tourSteps.ts. */}
+        <div data-tour="source-publish-urls" className="flex flex-col gap-3">
         {Object.entries(source.publishUrls).map(([proto, url]) =>
           url ? (
             <div key={proto} className="flex items-center gap-2">
@@ -582,6 +611,7 @@ function SourceCard({
               </span>
             </p>
           )}
+        </div>
         </div>
       </CardContent>
     </Card>
