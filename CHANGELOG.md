@@ -8,6 +8,10 @@ its first tagged release.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.7.0] — 2026-08-14
+
 ### Security
 - **0.7.0's seal-at-rest migration left the plaintext stream keys it replaced
   legible in the database file.** The migration writes the ciphertext and blanks
@@ -109,88 +113,6 @@ its first tagged release.
   arrives there predates the negotiation; fixed anyway, since that is a property
   of the current callers rather than of the function.
 
-### Added
-- **The second (VOD) audio mix has a UI.** `vodProfile` shipped complete — the
-  column, the migration, the API, `routing.CompilePair`, the engine's gate on
-  Twitch's one-track ingest — and appeared in the frontend exactly once, as a
-  type on line 268 of `types.ts`. An operator could switch Enhanced Broadcasting
-  on, watch it negotiate, and have no way to say what the second mix *contained*;
-  the feature was API-reachable only.
-
-  It is now edited on **Routing → Second (VOD) audio mix**, and it is the SAME
-  editor the live mix uses rather than a second one written beside it. Both are
-  a `routing.Profile`, so the block under the destination picker was extracted
-  into one `ProfileEditor` component and is rendered twice — same track picks,
-  mix matrix, music rights, loudness, delay, ducking, presets, and its own
-  compiled filter graph from the same Go code that will run. Two things had to
-  change to make it reusable: every DOM id is now namespaced (`id="norm"` became
-  a duplicate the moment there were two editors, so clicking the second one's
-  label moved the first one's control), and each instance compiles itself
-  instead of borrowing a result that is not its own.
-
-  Off is the default and stays the default. Switching it on seeds the second mix
-  from the live one, so the first edit is the actual difference. Switching it
-  off sends an explicit `null` — the API decodes over the stored row, so an
-  omitted field would leave the pointer alone and the operator would watch their
-  delete undo itself on the next load.
-
-  The editor is **not** gated on Twitch: `routing.CompilePair` →
-  `engine/destinations.go` → `ffmpeg.secondAudioMap` is a real two-mix egress
-  and correct for every other target. What is gated on Twitch is the
-  *explanation*. Where Enhanced Broadcasting is off on a Twitch RTMP
-  destination, the engine refuses the pair at plan time and the page says the
-  second mix is **not being sent**, in those words. Where it is on, the page
-  says the answer is decided at go-live and lands on the destination card — it
-  does not claim a second track that no negotiation has granted yet.
-
-### Changed
-- **Two features are now labelled EXPERIMENTAL throughout — labelled, not
-  gated.** Twitch Enhanced Broadcasting and hardware encoding both shipped in
-  0.7.0 with a gap in the evidence behind them, and the label names where each
-  gap actually starts. For Enhanced Broadcasting it is *after* the negotiation:
-  `internal/multitrack/live_test.go` reaches `ingest.twitch.tv` on every run and
-  Twitch accepts a supported-GPU inventory, grants a VOD audio track and mints a
-  key — what has never been observed is a broadcast published through that key,
-  and `internal/engine`'s wiring around it has only ever been driven by an
-  `httptest` server. For hardware encoding it is the `_nvenc`, `_qsv`, `_vaapi`
-  and `_amf` flags — eight of the twelve encoder profiles — which were read off
-  FFmpeg's option tables inside a GPU-less container. Both remain fully enabled,
-  nothing is hidden, no opt-in env var or feature flag exists, and every control
-  works exactly as before.
-
-  **The first version of these labels was wrong in both directions, and only
-  running something found it.** They asserted that the negotiation had never
-  reached Twitch while a non-skipping test in the tree reached it on every green
-  build, and they warned a Mac operator off `h264_videotoolbox` — the one
-  hardware family a real encode confirms. A claim about what has *never* been
-  tested can only be checked by running the test.
-
-  One convention, applied everywhere, and each use names the specific untested
-  claim rather than saying "beta": a `<Experimental>` component in the UI
-  (`ui/src/components/Experimental.tsx`), an `// EXPERIMENTAL: <what is
-  unverified>` line in Go doc comments, a `> **EXPERIMENTAL — <claim>.**`
-  blockquote in docs, and a leading `**EXPERIMENTAL.**` sentence on a changelog
-  entry. The badge deliberately uses the neutral `outline` variant: the app's
-  saturated tokens mean the state of a *destination*, and "unverified on
-  hardware" is a property of the feature.
-
-  This also corrects one claim that read as stronger than it was.
-  `encoderProfiles`' doc comment said the values were "verified by running
-  `ffmpeg -h encoder=<name>` and a real one-frame encode" — true, but the option
-  table answers on a machine with no such device, and the one-frame encode only
-  ran for encoders the container could open. The narrower evidence that *does*
-  exist is now named where the table lives:
-  `TestEveryConfiguredEncoderOpensWithItsOwnFlags` runs a real encode per
-  registered encoder with that encoder's own row — capped-VBR path included —
-  and answers for whichever encoders the machine running it registers. A CI
-  runner with an NVIDIA card would retire the NVENC caveat by itself.
-
-  The UI badge is gated on the encoder *family* rather than on
-  `encoder.hardware`, which is what made it fire on VideoToolbox.
-
-## [0.7.0] — 2026-08-14
-
-### Security
 - **A destination's stream key could reach `server.log` on the give-up path.**
   The supervisor logs the child's error twice: once per retry, and once when it
   stops retrying. The retry line was scrubbed; the give-up line four lines below
@@ -437,6 +359,39 @@ its first tagged release.
   it.**
 
 ### Added
+- **The second (VOD) audio mix has a UI.** `vodProfile` shipped complete — the
+  column, the migration, the API, `routing.CompilePair`, the engine's gate on
+  Twitch's one-track ingest — and appeared in the frontend exactly once, as a
+  type on line 268 of `types.ts`. An operator could switch Enhanced Broadcasting
+  on, watch it negotiate, and have no way to say what the second mix *contained*;
+  the feature was API-reachable only.
+
+  It is now edited on **Routing → Second (VOD) audio mix**, and it is the SAME
+  editor the live mix uses rather than a second one written beside it. Both are
+  a `routing.Profile`, so the block under the destination picker was extracted
+  into one `ProfileEditor` component and is rendered twice — same track picks,
+  mix matrix, music rights, loudness, delay, ducking, presets, and its own
+  compiled filter graph from the same Go code that will run. Two things had to
+  change to make it reusable: every DOM id is now namespaced (`id="norm"` became
+  a duplicate the moment there were two editors, so clicking the second one's
+  label moved the first one's control), and each instance compiles itself
+  instead of borrowing a result that is not its own.
+
+  Off is the default and stays the default. Switching it on seeds the second mix
+  from the live one, so the first edit is the actual difference. Switching it
+  off sends an explicit `null` — the API decodes over the stored row, so an
+  omitted field would leave the pointer alone and the operator would watch their
+  delete undo itself on the next load.
+
+  The editor is **not** gated on Twitch: `routing.CompilePair` →
+  `engine/destinations.go` → `ffmpeg.secondAudioMap` is a real two-mix egress
+  and correct for every other target. What is gated on Twitch is the
+  *explanation*. Where Enhanced Broadcasting is off on a Twitch RTMP
+  destination, the engine refuses the pair at plan time and the page says the
+  second mix is **not being sent**, in those words. Where it is on, the page
+  says the answer is decided at go-live and lands on the destination card — it
+  does not claim a second track that no negotiation has granted yet.
+
 - **Twitch Enhanced Broadcasting is now reachable. EXPERIMENTAL: no broadcast
   has ever been published through a key it minted.** The negotiation is not the
   gap — `internal/multitrack/live_test.go` reaches `ingest.twitch.tv` on every
@@ -699,6 +654,50 @@ its first tagged release.
   different category of problem from one that can read a stream key.
 
 ### Changed
+- **Two features are now labelled EXPERIMENTAL throughout — labelled, not
+  gated.** Twitch Enhanced Broadcasting and hardware encoding both shipped in
+  0.7.0 with a gap in the evidence behind them, and the label names where each
+  gap actually starts. For Enhanced Broadcasting it is *after* the negotiation:
+  `internal/multitrack/live_test.go` reaches `ingest.twitch.tv` on every run and
+  Twitch accepts a supported-GPU inventory, grants a VOD audio track and mints a
+  key — what has never been observed is a broadcast published through that key,
+  and `internal/engine`'s wiring around it has only ever been driven by an
+  `httptest` server. For hardware encoding it is the `_nvenc`, `_qsv`, `_vaapi`
+  and `_amf` flags — eight of the twelve encoder profiles — which were read off
+  FFmpeg's option tables inside a GPU-less container. Both remain fully enabled,
+  nothing is hidden, no opt-in env var or feature flag exists, and every control
+  works exactly as before.
+
+  **The first version of these labels was wrong in both directions, and only
+  running something found it.** They asserted that the negotiation had never
+  reached Twitch while a non-skipping test in the tree reached it on every green
+  build, and they warned a Mac operator off `h264_videotoolbox` — the one
+  hardware family a real encode confirms. A claim about what has *never* been
+  tested can only be checked by running the test.
+
+  One convention, applied everywhere, and each use names the specific untested
+  claim rather than saying "beta": a `<Experimental>` component in the UI
+  (`ui/src/components/Experimental.tsx`), an `// EXPERIMENTAL: <what is
+  unverified>` line in Go doc comments, a `> **EXPERIMENTAL — <claim>.**`
+  blockquote in docs, and a leading `**EXPERIMENTAL.**` sentence on a changelog
+  entry. The badge deliberately uses the neutral `outline` variant: the app's
+  saturated tokens mean the state of a *destination*, and "unverified on
+  hardware" is a property of the feature.
+
+  This also corrects one claim that read as stronger than it was.
+  `encoderProfiles`' doc comment said the values were "verified by running
+  `ffmpeg -h encoder=<name>` and a real one-frame encode" — true, but the option
+  table answers on a machine with no such device, and the one-frame encode only
+  ran for encoders the container could open. The narrower evidence that *does*
+  exist is now named where the table lives:
+  `TestEveryConfiguredEncoderOpensWithItsOwnFlags` runs a real encode per
+  registered encoder with that encoder's own row — capped-VBR path included —
+  and answers for whichever encoders the machine running it registers. A CI
+  runner with an NVIDIA card would retire the NVENC caveat by itself.
+
+  The UI badge is gated on the encoder *family* rather than on
+  `encoder.hardware`, which is what made it fire on VideoToolbox.
+
 - **Documentation-only pull requests no longer run the acceptance matrix.**
   Three documentation PRs in one day each fired all 27 checks — the full
   acceptance matrix, three-OS builds, Docker and browser suites — to validate
@@ -1160,6 +1159,40 @@ its first tagged release.
   It now reads `pull (dials out; no inbound port)`.
 
 ### Testing
+- **Ten UI-drift guards, recovered from a branch that was never merged.** They
+  check that the React frontend still offers what the Go side expects — the
+  Facebook crosspost and donate controls, the destination dialog's save payload,
+  the backup-ingest toggle, the card's link to a scheduled broadcast, the
+  header's one question about being live, and the composer's tag and compliance
+  pushes. `internal/db/limits_drift_test.go` and
+  `internal/oauth/capabilities_drift_test.go` already established the pattern;
+  these are eight more of it, plus two in `internal/oauth`.
+
+  **They are here because each one was watched to fail, not because they
+  passed.** All ten passed on recovery, which this release has learned means
+  nothing on its own: a mutation was applied to the source each guard names, the
+  test was run by its full name with `-v` so a mistyped filter could not report
+  `[no tests to run]` as success, and the file was restored from a backup with
+  `git diff` confirmed empty. One example of the class: deleting
+  `id="dest-fb-donate"` kills the crosspost guard, and wrapping the block in
+  `{false && …}` kills it too — which proves the guard bounds the block rather
+  than grepping the whole file.
+
+  **Two real defects were found in the recovered code and fixed before it
+  landed.** A source-grep guard passes forever if the string it looks for
+  survives in a comment: deleting the real code in `AppLayout.tsx` and leaving
+  its text in a `// was: …` comment kept one test green.
+  `facebook_ui_drift_test.go` already shipped `stripJSComments` for exactly that
+  and documents it at length; the sibling file in the same package was not using
+  it. And one guard sliced from an unguarded `strings.Index`, so a rename
+  produced a slice-bounds panic instead of a readable failure.
+
+  Recorded rather than fixed: the two `internal/oauth` guards remain
+  comment-defeatable, because that package has no comment stripper and copying a
+  forty-line helper between packages is the wrong repair. Promoting `readUI` and
+  `stripJSComments` to a shared test helper is the follow-up.
+  ([#367](https://github.com/rainmanjam/polyemesis/pull/367))
+
 - **Five acceptance suites that talk to a real far end**, where before this
   release exactly one did. The argument for them is their hit rate rather than
   their theory: each of the first three found a defect on its first live run,
