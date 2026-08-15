@@ -222,7 +222,16 @@ jobs:
             echo "ffmpeg restored from cache"
           else
             for attempt in 1 2 3; do
-              if curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 \
+              # --proto/--proto-redir pin the whole exchange to https. -L
+              # follows redirects, and without these curl will happily follow an
+              # https -> http hop and fetch the binary CI is about to run over
+              # plaintext. SonarCloud githubactions:S6506 flagged the copy of
+              # this block added for the acceptance job; the other two had the
+              # same hole and are fixed here too, because leaving a known-bad
+              # copy beside a fixed one is how the fix gets reverted later by
+              # someone copying the wrong neighbour.
+              if curl -fsSL --proto '=https' --proto-redir '=https' \
+                   --retry 3 --retry-all-errors --retry-delay 5 \
                    --connect-timeout 20 --max-time 90 \
                    -o /tmp/ff.tar.xz \
                    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; then
@@ -550,7 +559,16 @@ jobs:
             echo "ffmpeg restored from cache"
           else
             for attempt in 1 2 3; do
-              if curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 \
+              # --proto/--proto-redir pin the whole exchange to https. -L
+              # follows redirects, and without these curl will happily follow an
+              # https -> http hop and fetch the binary CI is about to run over
+              # plaintext. SonarCloud githubactions:S6506 flagged the copy of
+              # this block added for the acceptance job; the other two had the
+              # same hole and are fixed here too, because leaving a known-bad
+              # copy beside a fixed one is how the fix gets reverted later by
+              # someone copying the wrong neighbour.
+              if curl -fsSL --proto '=https' --proto-redir '=https' \
+                   --retry 3 --retry-all-errors --retry-delay 5 \
                    --connect-timeout 20 --max-time 90 \
                    -o /tmp/ff.tar.xz \
                    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; then
@@ -1272,29 +1290,59 @@ jobs:
 
       - name: Install FFmpeg
         if: needs.changes.outputs.code == 'true'
-        # See the note on the go job's install step: a hung apt must fail with its
-        # own name attached rather than eating this job's whole 20 minutes.
         timeout-minutes: 6
         run: |
-          # RETRIES AND A PER-ACQUISITION TIMEOUT, because THIS is the install
-          # that has been failing. Three acceptance jobs hit the 6-minute
-          # ceiling here in one day -- acceptance-postprod, acceptance-pull and
-          # acceptance-mqtt -- every one of them stalled mid-fetch against
-          # azure.archive.ubuntu.com:
+          # STILL apt's 6.1.1, and that is now a KNOWN GAP rather than an
+          # oversight -- see the issue linked below.
           #
-          #   Get:48 .../noble/universe amd64 libavformat...
-          #   ##[error]The action 'Install FFmpeg' has timed out after 6 minutes.
+          # Moving this job to the cached, pinned 8.1 the other jobs use is
+          # correct on both counts it was attempted for: it removes an uncached
+          # third-party fetch that has hit the 6-minute ceiling four times, and
+          # it stops the acceptance suites testing an FFmpeg users never run.
           #
-          # apt's default is ZERO retries and no per-connection timeout, so one
-          # slow mirror connection stalls the whole acquisition until the step
-          # ceiling fires. These three options are the supported way to bound
-          # that, and they bound it well inside the ceiling: at most 3 tries of
-          # 20s connect + 60s transfer per file.
+          # It was attempted on this branch and REVERTED, because it broke
+          # acceptance-failover on its first run: the mismatch destination, whose
+          # content changes resolution mid-stream, produced 18154ms of media into
+          # a 293-byte file. Two runs green before the switch, two red after. The
+          # pin did exactly what it was added to do -- surfaced something 6.1.1
+          # was hiding -- and that finding deserves its own change rather than a
+          # ride on a website PR.
+          #
+          # RETRIES AND A PER-ACQUISITION TIMEOUT. apt's default is zero retries
+          # and no per-connection timeout, so one slow mirror connection stalls
+          # the whole acquisition until the step ceiling fires.
           APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=60 -o Acquire::http::ConnectionAttemptDelayMsec=1000"
-          sudo apt-get $APT_OPTS update -qq
+
+          # BOUND EACH ATTEMPT WELL INSIDE THE STEP CEILING, then retry the whole
+          # thing. This is the part Acquire::Retries cannot do.
+          #
+          # Acquire::Retries retries a FILE within one apt run, and the observed
+          # failure is not a file erroring -- it is the whole acquisition sitting
+          # on a stalled connection until the 6-minute step ceiling fires and
+          # takes the job with it. Six occurrences now: acceptance-postprod,
+          # acceptance-pull, acceptance-mqtt, acceptance-audio, and today
+          # acceptance-renditions and acceptance-failover together.
+          #
+          # `timeout` turns "stalls for six minutes and kills the job" into
+          # "stalls for 100 seconds and is retried", which fits three attempts
+          # plus the install inside the ceiling with room to spare.
+          #
+          # NOT the cached pinned 8.1 build the other jobs use, though that would
+          # solve this outright. It was tried, and it broke acceptance-failover
+          # -- see the note above and issue #398. Reliability and the version
+          # change are separable, and this is the half that carries no risk.
+          apt_try() {
+            for attempt in 1 2 3; do
+              if sudo timeout 100 apt-get $APT_OPTS "$@"; then return 0; fi
+              echo "apt attempt $attempt failed or stalled; retrying"
+              sleep 5
+            done
+            return 1
+          }
+          apt_try update -qq
           # lsof as well: three suites read the engine's relay port out of it
           # to measure the right socket, and they fail obscurely without it.
-          sudo apt-get $APT_OPTS install -y --no-install-recommends ffmpeg lsof
+          apt_try install -y --no-install-recommends ffmpeg lsof
           ffmpeg -hide_banner -version | head -1
           # Not fatal: none of these suites needs SRT (the container ones do,
           # and they run elsewhere). Logged because a suite behaving oddly is

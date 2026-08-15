@@ -1,0 +1,368 @@
+---
+import Base from "../layouts/Base.astro";
+import CodeBlock from "../components/CodeBlock.astro";
+
+/* A GUIDE THAT NAMES THE OPTIONS THAT ARE NOT THIS PRODUCT.
+ *
+ * Somebody searching "how to multistream from OBS" has a problem, not a
+ * shortlist, and for a good number of them a free OBS plugin is the right
+ * answer and a server is overkill. A page that hides that in order to win the
+ * install is a page they will find out about later, from somebody else.
+ *
+ * Everything said here about obs-multi-rtmp, Aitum Multistream, Restreamer and
+ * restream.io traces to a line in docs/notes/competitor-facts-2026-08-15.md,
+ * which is the only sanctioned source for it. In particular the audio sentence
+ * on the plugins is the exact narrow claim that file exists to protect: they DO
+ * send different audio to different destinations. They select a track OBS has
+ * already mixed. Writing that they cannot is false, and is the overclaim this
+ * page must never make.
+ *
+ * Nothing here describes an OBS built-in multi-destination feature, because no
+ * sourced line covers one. Twitch Enhanced Broadcasting is in the facts file,
+ * but it is multi-rendition to a single platform, which is a different subject
+ * from this page's. */
+const CHECKED = "2026-08-15";
+
+/* The one field table on the site that is worth reproducing in full: it is what
+ * step 4 below actually asks somebody to type, and sending them to a Markdown
+ * file on GitHub to read it is how a tutorial loses people. Sourced from
+ * docs/OBS.md §3. */
+const fields = [
+  ["FFmpeg Output Type", "Output to URL"],
+  ["File path or URL", "the ingest URL, copied from Sources"],
+  ["Container Format", "mpegts"],
+  ["Muxer Settings", "leave blank"],
+  ["Video Encoder", "libx264, h264_nvenc or h264_videotoolbox"],
+  ["Video Encoder Settings", "preset=veryfast tune=zerolatency"],
+  ["Video Bitrate", "whatever you already stream at — it is copied, not re-encoded"],
+  ["Keyframe interval (frames)", "60, which is 2 s at 30 fps"],
+  ["Audio Encoder", "aac"],
+  ["Audio Bitrate", "160 Kbps"],
+  ["Audio Track", "tick every track you want to send, up to 6"],
+];
+
+/* The rendered steps. ONE array, read by both the ordered list and the HowTo
+ * JSON-LD below it, so the structured data cannot describe a page that has
+ * changed underneath it. That is the failure the markup on /download warns
+ * about, solved by construction here rather than by discipline.
+ *
+ * `text` is what the JSON-LD carries; `body` is the rendered prose, which is
+ * allowed to be richer because a reader gets typography and a crawler does not.
+ * Where they differ, `text` is a condensation of `body` and never an addition
+ * to it. */
+const steps = [
+  {
+    name: "Check that your FFmpeg speaks SRT",
+    text: "Run ffmpeg -version and ffmpeg -protocols to confirm FFmpeg 6.0 or newer with the srt protocol. Without SRT you are limited to single-track RTMP. Docker bundles a known-good build and skips the check.",
+  },
+  {
+    name: "Run the server and set an admin password",
+    text: "Start polyemesis, open the UI on port 8080 and set an admin password. If it is lost, -reset-admin on the box sets a new one; there is no recovery from anywhere else.",
+  },
+  {
+    name: "Assign each OBS source to audio tracks",
+    text: "In the OBS Audio Mixer, open Advanced Audio Properties and tick which of the six tracks each source feeds. A typical layout is track 1 for everything, track 2 for the same mix without music, track 3 for the microphone alone. Set a bitrate per track under Settings, Output, Audio.",
+  },
+  {
+    name: "Configure the output — in Recording, not Stream",
+    text: "Settings, Output, Output Mode: Advanced, then the Recording tab. Set Type to Custom Output (FFmpeg), FFmpeg Output Type to Output to URL, Container Format to mpegts, paste the ingest URL copied from Sources, and tick the audio tracks to send.",
+  },
+  {
+    name: "Press Start Recording, not Start Streaming",
+    text: "With FFmpeg Output Type set to Output to URL, the Start Recording button is the SRT push. The ingest should appear live in polyemesis within a couple of seconds, with a meter per incoming track.",
+  },
+  {
+    name: "Add destinations and route the tracks",
+    text: "Add each platform as a destination, then tick which tracks it receives. Play music and confirm on the meters that track 1 moves while track 2 stays flat before going live.",
+  },
+];
+---
+
+<Base
+  title="How to multistream from OBS: three ways"
+  description="Send one OBS stream to Twitch, YouTube and Kick: a plugin, a hosted service, or a server you run. Field-by-field setup, including the tab everyone misses."
+  path="/how-to-multistream-from-obs"
+>
+  <section class="wrap py-16 sm:py-20">
+    <p class="eyebrow">Guide</p>
+    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
+      How to multistream from OBS
+    </h1>
+    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
+      To multistream is to broadcast one programme to several platforms at once
+      — Twitch and YouTube and Kick from a single run of the show. OBS’s Stream
+      tab takes one server and one stream key, so the second destination has to
+      come from somewhere: a plugin running beside OBS, a hosted service, or a
+      server of your own. All three work. They fail in different places, and
+      this guide is mostly about where.
+    </p>
+    <nav class="mt-8 flex flex-wrap gap-2" aria-label="Sections">
+      <a href="#routes" class="chip transition-colors hover:border-primary hover:text-fg">The three routes</a>
+      <a href="#walkthrough" class="chip transition-colors hover:border-primary hover:text-fg">Walkthrough</a>
+      <a href="#gotchas" class="chip transition-colors hover:border-primary hover:text-fg">What goes wrong</a>
+    </nav>
+  </section>
+
+  {/* ----------------------------------------------------------- routes ---- */}
+  <section id="routes" class="border-t border-line py-16 sm:py-20">
+    <div class="wrap">
+      <p class="eyebrow">Pick one</p>
+      <h2 class="mt-3 max-w-3xl text-balance text-2xl font-medium sm:text-3xl">
+        Three routes, and the cost each one moves somewhere else
+      </h2>
+      <p class="mt-4 max-w-2xl text-pretty leading-relaxed text-muted">
+        The question underneath all three is where the copying happens: on the
+        machine running OBS, in somebody’s cloud, or on a box you keep. Every
+        other difference follows from that one. Details of the named products
+        below were checked on {CHECKED}.
+      </p>
+
+      <div class="mt-8 grid gap-6 lg:grid-cols-3">
+        <div class="card p-6" data-reveal>
+          <p class="font-mono text-[11px] uppercase tracking-wider text-primary">Route one</p>
+          <h3 class="mt-2 text-lg font-medium">A plugin, beside OBS</h3>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            <span class="font-mono text-[13px]">obs-multi-rtmp</span> and Aitum
+            Multistream both add destinations to OBS itself. Both are free, both
+            are GPL-2.0, and both can either share the encode OBS already made or
+            run an independent re-encode per destination with its own resolution
+            and bitrate.
+          </p>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            The cost is that your streaming PC does all of it. Every destination
+            is another upload leaving the house on the same connection that is
+            already carrying the game, and every independent re-encode is another
+            job for the card that is already encoding.
+          </p>
+          <p class="mt-3 text-[11px] leading-relaxed text-subtle">
+            obs-multi-rtmp is actively maintained; v0.7.4.3 was the current
+            release on {CHECKED}. Aitum ships this plugin at no cost — the
+            separate Aitum desktop automation suite is $4.99/mo and is not
+            required to run it.
+          </p>
+        </div>
+
+        <div class="card p-6" data-reveal>
+          <p class="font-mono text-[11px] uppercase tracking-wider text-primary">Route two</p>
+          <h3 class="mt-2 text-lg font-medium">A hosted service</h3>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            restream.io takes one upload and replicates it from their cloud, so
+            your uplink carries one stream no matter how many platforms are
+            listed. Nothing to install and nothing to operate.
+          </p>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            The cost is a subscription and a boundary. Their free plan allows two
+            simultaneous channels, to personal profiles and platforms, and
+            excludes custom RTMP destinations along with Facebook Pages and
+            Groups — so a platform they have not integrated is not reachable on
+            it at all.
+          </p>
+          <p class="mt-3 text-[11px] leading-relaxed text-subtle">
+            Free-plan limits as published on {CHECKED}. Plans move; the current
+            page is the authority, and there is a fuller breakdown with dated
+            prices on our <a href="/free-restream-service" class="text-primary-bright hover:underline">free restream service</a> page.
+          </p>
+        </div>
+
+        <div class="card p-6" data-reveal>
+          <p class="font-mono text-[11px] uppercase tracking-wider text-primary">Route three</p>
+          <h3 class="mt-2 text-lg font-medium">A server you run</h3>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            OBS sends one stream to a box you keep, and the box fans it out.
+            datarhei Restreamer is the long-standing option here — free,
+            Apache-2.0, self-hosted. polyemesis is the one this site is about,
+            MIT licensed, and exists for the audio difference below.
+          </p>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            The cost is that you now operate a server: bandwidth for the fan-out,
+            an FFmpeg with the right options compiled in, and a pager that rings
+            for you. It buys back the channel limits and gives the audio
+            somewhere to be mixed.
+          </p>
+          <p class="mt-3 text-[11px] leading-relaxed text-subtle">
+            The walkthrough below takes this route, because it is the one with a
+            step people reliably get wrong.
+          </p>
+        </div>
+      </div>
+
+      {/* THE PRECISE AUDIO CLAIM, in the only wording that is true.
+          docs/notes/competitor-facts-2026-08-15.md exists largely to stop the
+          shorter, false version of this paragraph being written. */}
+      <div class="mt-8 max-w-3xl rounded-token border border-line bg-surface/60 p-6">
+        <p class="font-mono text-[11px] uppercase tracking-wider text-muted">
+          On sending different audio to different platforms
+        </p>
+        <p class="mt-3 text-sm leading-relaxed text-muted">
+          The plugins can do this, and it is worth being exact about how. They
+          select a track OBS has already mixed. Building three different mixes
+          therefore means configuring three track layouts in OBS and encoding
+          each output on the stream PC. polyemesis sums the tracks server-side,
+          so one upload and one video encode feed every destination.
+        </p>
+        <p class="mt-3 text-sm leading-relaxed text-muted">
+          Restreamer is a different case: per egress target it can copy the
+          audio, transcode the codec, or force silence, but it has no matrix for
+          summing discrete channels into a new mix. restream.io duplicates the
+          one ingested stereo track identically to every endpoint.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------- walkthrough --- */}
+  <section id="walkthrough" class="border-t border-line bg-surface/30 py-16 sm:py-20">
+    <div class="wrap max-w-3xl">
+      <p class="eyebrow">Walkthrough</p>
+      <h2 class="mt-3 text-balance text-2xl font-medium sm:text-3xl">
+        Multistreaming from OBS to a server you run
+      </h2>
+      <p class="mt-4 text-pretty leading-relaxed text-muted">
+        Six steps, about ten minutes. The one that catches nearly everybody is
+        step four, and it is worth reading before you start: the multitrack path
+        does not go through the Stream tab.
+      </p>
+
+      <ol class="mt-8 space-y-6">
+        {
+          steps.map((s, i) => (
+            <li class="border-l-2 border-line pl-5">
+              <p class="font-mono text-[11px] text-subtle">Step {i + 1}</p>
+              <h3 class="mt-1 text-[15px] font-medium text-fg">{s.name}</h3>
+              <p class="mt-2 text-sm leading-relaxed text-muted">{s.text}</p>
+            </li>
+          ))
+        }
+      </ol>
+
+      <p class="mt-8 text-sm leading-relaxed text-muted">
+        The check in step one, in full:
+      </p>
+      <CodeBlock
+        label="check ffmpeg"
+        code={`ffmpeg -version | head -1                       # 6.0 or newer
+ffmpeg -protocols | tr ' ' '\\n' | grep -x srt   # must print: srt`}
+      />
+
+      <h3 class="mt-12 text-lg font-medium">Step four, field by field</h3>
+      <p class="mt-2 text-sm leading-relaxed text-muted">
+        In <span class="font-mono">Settings → Output</span>, with Output Mode set
+        to Advanced, on the <em>Recording</em> tab, with Type set to “Custom
+        Output (FFmpeg)”.
+      </p>
+      <div class="scroll-hint mt-5 overflow-x-auto rounded-token border border-line">
+        <table class="cmp w-full min-w-[46rem] border-collapse text-left text-sm">
+          <thead class="bg-surface">
+            <tr class="border-b border-line">
+              <th scope="col" class="w-64 px-4 py-3 font-medium">Field</th>
+              <th scope="col" class="px-4 py-3 font-medium">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              fields.map(([f, v]) => (
+                <tr class="border-b border-line/60 last:border-0">
+                  <td class="px-4 py-3 text-fg">{f}</td>
+                  <td class="px-4 py-3 font-mono text-xs leading-relaxed text-muted">{v}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-4 text-sm leading-relaxed text-subtle">
+        Copy the ingest URL out of the Sources page rather than assembling it.
+        It renders your own hostname and current settings, and it carries the
+        token that tells the server which source you are — one port serves every
+        source, and a publisher presenting an unrecognised token is refused
+        rather than guessed at.
+      </p>
+
+      {/* HowTo, describing exactly the six <li> above and nothing else. The
+          step text is the same string the list renders — one array, two
+          consumers — because the realistic way this markup goes wrong is the
+          prose being edited and the JSON-LD being left behind, which leaves
+          structured data describing a page that no longer exists.
+
+          Genuinely applicable here: these are sequential setup instructions
+          with a real ordered list behind them, which is the whole test. */}
+      <script type="application/ld+json" is:inline set:html={JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "HowTo",
+        name: "How to multistream from OBS with a self-hosted server",
+        description:
+          "Send one OBS stream over multitrack SRT to a self-hosted polyemesis " +
+          "server, which fans it out to every platform and gives each destination " +
+          "its own audio mix.",
+        totalTime: "PT10M",
+        tool: [
+          { "@type": "HowToTool", name: "OBS Studio" },
+          { "@type": "HowToTool", name: "FFmpeg 6.0 or newer, built with libsrt" },
+        ],
+        supply: [{ "@type": "HowToSupply", name: "A machine to run polyemesis on" }],
+        step: steps.map((s) => ({
+          "@type": "HowToStep",
+          name: s.name,
+          text: s.text,
+          url: "https://polyemesis.com/how-to-multistream-from-obs#walkthrough",
+        })),
+      })} />
+    </div>
+  </section>
+
+  {/* ---------------------------------------------------------- gotchas ---- */}
+  <section id="gotchas" class="border-t border-line py-16 sm:py-20">
+    <div class="wrap max-w-3xl">
+      <p class="eyebrow">What goes wrong</p>
+      <h2 class="mt-3 text-balance text-2xl font-medium sm:text-3xl">
+        Four things that break a first attempt
+      </h2>
+      <dl class="mt-6 divide-y divide-line border-y border-line">
+        {
+          [
+            [
+              "The Stream tab looks like the right place and is not",
+              "It can speak SRT, and it sends one audio track — which loses the only reason to be doing any of this. Multitrack SRT lives under Settings → Output → Advanced → Recording, as Custom Output (FFmpeg) with FFmpeg Output Type set to Output to URL. That reads as wrong and is not: with Output to URL, the recording is the push.",
+            ],
+            [
+              "latency is written in microseconds",
+              "200000 means 200 ms, and it has to match the latency configured on the server’s ingest. Typing 200 gives you a fifth of a millisecond of buffer and a stream that comes apart on the first piece of jitter.",
+            ],
+            [
+              "An FFmpeg without SRT, discovered late",
+              "Homebrew’s macOS build ships without it. Ubuntu 22.04 (4.4) and Debian 12 (5.1) ship an FFmpeg too old to start against at all. If the protocol check in step one prints nothing, use the container and stop debugging it.",
+            ],
+            [
+              "A “clean” track that is not clean",
+              "Play music and watch the meters before you go live: track 1 should move while track 2 stays flat. A clean feed that quietly carries the music bed is silent until somebody files a copyright claim, which is the worst possible moment to find out.",
+            ],
+          ].map(([t, d]) => (
+            <div class="py-4">
+              <dt class="text-[15px] font-medium text-fg">{t}</dt>
+              <dd class="mt-1.5 text-sm leading-relaxed text-muted">{d}</dd>
+            </div>
+          ))
+        }
+      </dl>
+      <p class="mt-6 text-sm leading-relaxed text-subtle">
+        One more, for completeness: OBS 30.2 and newer can carry several audio
+        tracks over Enhanced RTMP, and FFmpeg has demuxed that since 7.1 — but a
+        run with OBS itself as the publisher is still unconfirmed here, and
+        Ubuntu 24.04’s stock 6.1.1 drops the extra tracks with no error at either
+        end. SRT is the path that is operated and tested. Use it.
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap border-t border-line py-20 text-center">
+    <h2 class="text-balance text-3xl font-medium">Try it against a real box.</h2>
+    <p class="mx-auto mt-4 max-w-xl text-pretty leading-relaxed text-muted">
+      Docker, an installer script, or one static binary — then work back up this
+      page from step two.
+    </p>
+    <div class="mt-7 flex flex-wrap justify-center gap-3">
+      <a href="/download" class="btn btn-primary">Install</a>
+      <a href="/docs" class="btn btn-ghost">Read the docs</a>
+    </div>
+  </section>
+</Base>

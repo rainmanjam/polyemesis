@@ -323,7 +323,13 @@ func quoteArgv(bin string, args []string) string {
 // Do not "fix" this by masking the argv. The next reader who is tempted should
 // read that list's comment first.
 func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []string, live bool, note string, err error) {
-	bin = s.eng().Tools().FFmpeg
+	// A FIELD read, so the nil check is not optional the way it is on
+	// HasFilter: only Tools' methods are nil-receiver safe. An install that
+	// reported no FFmpeg leaves the binary empty here, which is what the
+	// caller already renders as "this command cannot be run".
+	if tools := s.tools(); tools != nil {
+		bin = tools.FFmpeg
+	}
 
 	want := fmt.Sprintf("dest:%d", row.ID)
 	for _, p := range s.eng().Processes() {

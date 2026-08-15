@@ -1611,6 +1611,19 @@ export interface CertInfo {
   selfSigned: boolean;
 }
 
+/** Whether the onboarding tour has already been offered to this operator.
+ *
+ *  Held on the server, against the user row, rather than in localStorage. The
+ *  difference is a real one: an operator who sets this install up on a desktop
+ *  and opens it later from a laptop has already seen the tour, and a per-browser
+ *  flag would offer it to them again on every new browser, machine and private
+ *  window. See internal/db/schema.sql. */
+export interface TourState {
+  completed: boolean;
+  /** Unix seconds; 0 when the tour has never been finished or dismissed. */
+  completedAt: number;
+}
+
 export interface TlsStatus {
   /** What `auto` decided, or the mode as written when it was not `auto`. */
   mode: TlsMode;

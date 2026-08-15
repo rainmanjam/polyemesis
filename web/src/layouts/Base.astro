@@ -8,9 +8,18 @@ interface Props {
   description: string;
   /** Canonical path, e.g. "/features". Defaults to the current URL. */
   path?: string;
+  /** Keep this page out of the index, and out of the structured data.
+   *
+   *  Only the 404 sets it. A 404 that carries a canonical URL and a
+   *  SoftwareApplication block is a page Google can decide to index -- a soft
+   *  404, competing with the real pages for the same brand terms and offering a
+   *  visitor nothing when it wins. `noindex` is what makes the canonical safe to
+   *  keep: the canonical stops /404 and /404.html being seen as duplicates,
+   *  while noindex stops either being indexed at all. */
+  noindex?: boolean;
 }
 
-const { title, description, path } = Astro.props;
+const { title, description, path, noindex = false } = Astro.props;
 const canonical = new URL(path ?? Astro.url.pathname, Astro.site ?? "https://polyemesis.com");
 const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
 ---
@@ -23,6 +32,7 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical.href} />
+    {noindex && <meta name="robots" content="noindex, follow" />}
 
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
@@ -53,6 +63,10 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
         thing the audience for a self-hosted broadcast server would notice and
         hold against the project. `offers` at price 0 is the honest way to say
         "free and MIT" in a vocabulary search engines read. */}
+    {/* Not emitted on a noindex page. Structured data is a claim about what the
+        page IS, and a 404 is not a SoftwareApplication -- shipping the product's
+        JSON-LD there invites the soft-404 the noindex above exists to prevent. */}
+    {!noindex && (
     <script type="application/ld+json" is:inline set:html={JSON.stringify({
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
@@ -74,9 +88,27 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
       isAccessibleForFree: true,
     })} />
+    )}
+
+    {/* Page-specific head content. Only the docs use it, for the
+        BreadcrumbList block that belongs beside the SoftwareApplication one
+        above rather than loose in the body. A named slot rather than a prop so
+        that what a page adds to <head> is written as markup where the page can
+        see it. */}
+    <slot name="head" />
 
     <meta name="theme-color" content="#0b0d11" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    {/* iOS will not use an SVG favicon and will not invent a raster from one --
+        without this, a page saved to a home screen gets a blank tile or a
+        screenshot of the page. 180x180 is the size iOS requests; it downsamples
+        for every smaller slot itself.
+
+        Rendered from favicon.svg with the corner radius REMOVED. Apple applies
+        its own squircle mask, so a source that is already rounded shows the
+        theme's corners inside Apple's, with transparent gaps between them. The
+        file is full-bleed square on purpose; see web/public/apple-touch-icon.png. */}
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
 
     {/* Self-hosted, not linked. A font request to a third party is a request the
         visitor did not make and the slowest thing on an otherwise static page.

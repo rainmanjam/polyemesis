@@ -1,0 +1,325 @@
+---
+import Base from "../../layouts/Base.astro";
+import Breadcrumbs from "../../components/Breadcrumbs.astro";
+
+/* Sourced from docs/notes/competitor-facts-2026-08-15.md, sections 1 and 2.
+ *
+ * THIS PAGE IS THE ONE WHERE THE STRONG AUDIO CLAIM IS TRUE, and keeping that
+ * straight is the reason it is a separate page rather than a fourth column
+ * somewhere.
+ *
+ * On /vs/aitum-multistream and /vs/obs-multi-rtmp the copy is careful to say the
+ * plugins DO send different audio per destination -- they select an OBS track,
+ * and the summing happened upstream. Here that qualification does not apply:
+ * per the facts file, neither Restreamer nor restream.io can produce a different
+ * mix per destination at all. Restreamer can copy, transcode the codec, or force
+ * silence; restream.io duplicates one stereo track everywhere.
+ *
+ * Flattening all four competitors into "they cannot do what we do" would be
+ * wrong about two of them. Flattening the other way -- hedging here because we
+ * hedged there -- would be underselling a difference that is real. Two pages,
+ * two claims, both accurate.
+ *
+ * WHY THE DISAMBIGUATION IS THE SPINE. The keywords this page answers are
+ * "restream alternative", "restream alternatives" and "restreamer alternative",
+ * and they are three different intentions: datarhei Restreamer is a free
+ * self-hosted Apache-2.0 server, restream.io is a paid SaaS, and a reader who
+ * typed one of those phrases may well have meant the other. Sorting that out is
+ * genuinely the most useful thing this page can do, and it is also what keeps it
+ * from being the plugin pages again with different nouns.
+ *
+ * EVERY PRICE CARRIES A VISIBLE CHECKED DATE. restream.io's tiers move, and an
+ * unstamped figure is a false statement about a competitor's pricing -- a
+ * different class of problem from a stale docs page.
+ */
+const CHECKED = "15 August 2026";
+
+const products = [
+  {
+    name: "datarhei Restreamer",
+    id: "github.com/datarhei/restreamer",
+    kind: "Self-hosted server, Docker",
+    licence: "Apache-2.0",
+    price: "Free",
+    body: "A complete self-hosted restreaming server you run yourself. Ingests SRT, RTMP, RTMPS, RTSP and HLS, and publishes to as many destinations as your hardware carries.",
+  },
+  {
+    name: "restream.io",
+    id: "restream.io",
+    kind: "Hosted service, subscription",
+    licence: "Proprietary",
+    price: "Free tier, then $19/mo",
+    body: "A cloud service that takes one stream and replicates it to your platforms, with a browser studio on top. Nothing to run, and a per-channel bill.",
+  },
+];
+
+/* Header cell one is deliberately not "Capability": scripts/check-build.mjs
+ * requires every row of a table headed that way to appear verbatim in
+ * docs/COMPARISON.md, which is the canonical five-product table and does not
+ * carry pricing. */
+const pricing = [
+  ["Restreamer (datarhei)", "Free, Apache-2.0, self-hosted", "—", "No per-destination charge"],
+  [
+    "restream.io Free",
+    "$0",
+    "2 channels",
+    "Personal profiles only. No custom RTMP, no Facebook Pages or Groups. Studio capped at 720p and watermarked",
+  ],
+  [
+    "restream.io Standard",
+    "$19/mo, or $16/mo billed annually at $190/yr",
+    "3 channels",
+    "No watermark. Custom RTMP destinations enabled",
+  ],
+  [
+    "restream.io Professional",
+    "$49/mo, or $39/mo billed annually at $470/yr",
+    "5 channels",
+    "1080p Studio. Dual Format — horizontal and vertical output together",
+  ],
+  ["polyemesis", "Free, MIT, self-hosted", "No configured cap", "Your hardware and your bandwidth are the bill"],
+];
+
+const merits = [
+  {
+    h: "Restreamer is free, Apache-2.0 and complete",
+    p: "Not a trial or an open core. It ships as a Docker container, ingests over five protocols, and does per-destination re-encoding in software or hardware when a platform will not take your source.",
+  },
+  {
+    h: "Restreamer shares one ingest across destinations",
+    p: "Several destination processes pull from the single ingested internal stream without re-encoding it — the same shared-rendition idea polyemesis uses, and it has had it longer.",
+  },
+  {
+    h: "restream.io needs no server from you",
+    p: "That is a real advantage and no self-hosted tool answers it. There is nothing to provision, patch, monitor or pay a host for, and the fan-out runs on a connection far better than yours.",
+  },
+  {
+    h: "restream.io keeps shipping",
+    p: `In the twelve months to ${CHECKED} it added Dual-Format streaming — separate horizontal and vertical outputs at once — and automated AI clip generation.`,
+  },
+];
+---
+
+<Base
+  title="Restream alternatives: Restreamer, restream.io, polyemesis"
+  description="Two different products are called Restream. One is self-hosted and Apache-2.0, one is a subscription — and neither can mix audio per destination."
+  path="/vs/restreamer"
+>
+  <Breadcrumbs
+    crumbs={[
+      { label: "polyemesis", href: "/" },
+      { label: "Comparison", href: "/comparison" },
+      { label: "Restreamer and restream.io", },
+    ]}
+  />
+
+  <section class="wrap py-12 sm:py-16">
+    <p class="eyebrow">Compared</p>
+    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
+      Two products are called Restream. Neither mixes audio.
+    </h1>
+    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
+      Almost everyone searching for a restream alternative means one of two
+      unrelated things, and the answers are not the same. A
+      <strong class="font-medium text-fg">Restreamer alternative</strong> is a
+      replacement for datarhei's free, self-hosted, Apache-2.0 server. A
+      <strong class="font-medium text-fg">restream.io alternative</strong> is a
+      replacement for a subscription. This page separates them, then makes the
+      one argument that applies to both.
+    </p>
+  </section>
+
+  {/* ---------------------------------------------------- disambiguation ---- */}
+  <section class="border-t border-line py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">Which one did you mean?</h2>
+      <div class="mt-8 grid gap-5 lg:grid-cols-2">
+        {
+          products.map((p) => (
+            <div class="card p-6">
+              <p class="font-medium text-fg">{p.name}</p>
+              <p class="mt-1 font-mono text-[11px] text-subtle">{p.id}</p>
+              <p class="mt-4 text-pretty text-sm leading-relaxed text-muted">{p.body}</p>
+              <dl class="mt-5 space-y-1.5 border-t border-line pt-4 font-mono text-[11px]">
+                {[
+                  ["Kind", p.kind],
+                  ["Licence", p.licence],
+                  ["Price", p.price],
+                ].map(([k, v]) => (
+                  <div class="flex gap-3">
+                    <dt class="w-16 shrink-0 text-subtle">{k}</dt>
+                    <dd class="text-muted">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------ the audio -- */}
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">Neither can build a second mix</h2>
+      <p class="mt-3 max-w-3xl text-pretty leading-relaxed text-muted">
+        This is the sharpest version of the argument on this site, and it is
+        worth being exact about why. The OBS plugins people also weigh up —
+        <a href="/vs/obs-multi-rtmp" class="text-primary underline-offset-4 hover:underline">obs-multi-rtmp</a>
+        and
+        <a href="/vs/aitum-multistream" class="text-primary underline-offset-4 hover:underline">Aitum Multistream</a>
+        — genuinely do send different audio to different platforms, by selecting
+        a track OBS mixed for them. These two do not do that either.
+      </p>
+      <div class="mt-8 grid max-w-5xl gap-5 lg:grid-cols-2">
+        <div class="card p-6">
+          <p class="font-medium text-fg">Restreamer</p>
+          <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
+            Per egress target the web UI offers three choices: copy the primary
+            stream's audio, transcode the codec — AAC or MP3 — or force silence.
+            There is no matrix for summing discrete channels into a new stereo
+            mix. Re-routing multiple tracks is possible, but only by writing
+            FFmpeg pipelines by hand against the underlying REST API, which is a
+            different product than the one the UI presents.
+          </p>
+        </div>
+        <div class="card p-6">
+          <p class="font-medium text-fg">restream.io</p>
+          <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
+            It cannot sum tracks and it cannot select between them. The single
+            stereo track you send is duplicated identically to every enabled
+            endpoint. There is no per-destination audio setting because there is
+            no second piece of audio for one to choose from.
+          </p>
+        </div>
+      </div>
+      <p class="mt-6 max-w-3xl text-pretty leading-relaxed text-muted">
+        polyemesis takes a multitrack ingest and sums a mix per destination, with
+        a gain on each input-channel-to-output-channel cell and a loudness target
+        measured after the routing rather than before it. The clean feed goes to
+        one platform, the full mix to the next, from one upload — and the picture
+        is copied through rather than re-encoded to do it.
+      </p>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------- ingest --- */}
+  <section class="border-t border-line py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">The reason is upstream, at the ingest</h2>
+      <p class="mt-3 max-w-3xl text-pretty leading-relaxed text-muted">
+        Neither product is missing a mixer by oversight. Neither can route a
+        multitrack input in the first place, so there is nothing for a mixer to
+        work on.
+      </p>
+      <ul class="mt-6 max-w-3xl space-y-4">
+        <li class="text-pretty leading-relaxed text-muted">
+          <span class="font-medium text-fg">Restreamer</span> ingests SRT, RTMP,
+          RTMPS, RTSP and HLS. SRT arrives with a single audio track in the UI,
+          and multitrack SRT is neither exposed nor routable there.
+        </li>
+        <li class="text-pretty leading-relaxed text-muted">
+          <span class="font-medium text-fg">restream.io</span> accepts RTMP,
+          RTMPS and SRT. Multitrack SRT is not supported at all — a single stereo
+          stream is the input contract.
+        </li>
+        <li class="text-pretty leading-relaxed text-muted">
+          <span class="font-medium text-fg">polyemesis</span> takes the split
+          audio tracks OBS already knows how to send over multitrack SRT and
+          keeps them separate all the way to the point where a destination asks
+          for a mix.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------ pricing --- */}
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">What each one costs</h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+        Every figure below was read from the vendor's own pricing page on
+        <span class="font-mono text-[13px] text-fg">{CHECKED}</span>. Tiers move.
+        Check before deciding on the strength of a number here.
+      </p>
+      <div class="scroll-hint mt-6 max-w-5xl overflow-x-auto rounded-token border border-line">
+        <table class="cmp w-full min-w-[52rem] border-collapse text-sm">
+          <caption class="sr-only">
+            Pricing for Restreamer, restream.io and polyemesis, checked on {CHECKED}
+          </caption>
+          <thead class="bg-surface">
+            <tr class="border-b border-line">
+              <th scope="col" class="px-4 py-3 text-left font-medium">Plan</th>
+              <th scope="col" class="w-56 px-4 py-3 text-left font-medium">
+                Price <span class="font-mono text-[10px] font-normal text-subtle">checked {CHECKED}</span>
+              </th>
+              <th scope="col" class="w-32 px-4 py-3 text-left font-medium">Destinations</th>
+              <th scope="col" class="px-4 py-3 text-left font-medium">What is included</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              pricing.map(([plan, price, channels, notes]) => (
+                <tr class="border-b border-line/60 last:border-0">
+                  <td class="px-4 py-3 text-fg">{plan}</td>
+                  <td class="px-4 py-3 font-mono text-xs text-muted">{price}</td>
+                  <td class="px-4 py-3 font-mono text-xs text-muted">{channels}</td>
+                  <td class="px-4 py-3 text-muted">{notes}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
+        The free-tier exclusion worth knowing before you sign up: restream.io's
+        free plan does not include custom RTMP destinations, which is the setting
+        anyone sending to a self-hosted or niche endpoint needs.
+      </p>
+    </div>
+  </section>
+
+  {/* ---------------------------------------------------------- their merits -- */}
+  <section class="border-t border-line py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">What they do well</h2>
+      <div class="mt-8 grid gap-5 sm:grid-cols-2">
+        {
+          merits.map((m) => (
+            <div class="card p-6">
+              <p class="font-medium text-fg">{m.h}</p>
+              <p class="mt-2 text-pretty text-sm leading-relaxed text-muted">{m.p}</p>
+            </div>
+          ))
+        }
+      </div>
+      <p class="mt-6 max-w-3xl text-sm leading-relaxed text-subtle">
+        Restreamer's stable line was at v2.12.0 when this was checked, with
+        ongoing dependency and container maintenance. If one mix to every
+        platform is what you need, it does that job for nothing and has done for
+        years — and it is the tool this project would point you at.
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap py-20 text-center" data-reveal>
+    <h2 class="text-balance text-3xl font-medium">Different audio per platform?</h2>
+    <p class="mx-auto mt-4 max-w-xl text-pretty leading-relaxed text-muted">
+      That is the one thing neither of them does, and the reason this project
+      exists.
+    </p>
+    <div class="mt-7 flex flex-wrap justify-center gap-3">
+      <a href="/download" class="btn btn-primary">Install polyemesis</a>
+      <a href="/comparison" class="btn btn-ghost">All five compared</a>
+    </div>
+    <p class="mt-6 text-sm text-subtle">
+      Also compared:
+      <a href="/vs/aitum-multistream" class="text-primary underline-offset-4 hover:underline">Aitum Multistream</a>
+      ·
+      <a href="/vs/obs-multi-rtmp" class="text-primary underline-offset-4 hover:underline">obs-multi-rtmp</a>
+      ·
+      <a href="/vs/streamelements" class="text-primary underline-offset-4 hover:underline">StreamElements</a>
+    </p>
+  </section>
+</Base>

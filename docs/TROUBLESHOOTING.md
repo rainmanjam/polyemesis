@@ -334,7 +334,7 @@ pasting it into a pull source bypasses all of the above. That is issue #201.
 **Every one of them also writes a WARN line naming the upload:**
 
 ```
-level=WARN msg="no ffprobe available; accepting this upload unchecked" reason="the engine reports no ffprobe binary" name=show-629507cb.mkv
+level=WARN msg="no ffprobe available; accepting this upload unchecked" reason="this install reports no ffprobe binary" name=show-629507cb.mkv
 level=WARN msg="upload probe was interrupted; accepting the file unchecked" name=show-4aee482d.mkv cause="context deadline exceeded" err="signal: killed"
 level=WARN msg="the upload probe could not be run; accepting the file unchecked" name=show-1f0c22a1.mkv err="fork/exec /usr/bin/ffprobe: no such file or directory"
 level=WARN msg="an upload was stored without being inspected" name=show-4aee482d.mkv reason="the inspection was cut short before it finished"

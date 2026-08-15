@@ -1,0 +1,331 @@
+---
+import Base from "../layouts/Base.astro";
+import CodeBlock from "../components/CodeBlock.astro";
+
+/* THE PAGE FOR SOMEONE COMPARING AGAINST A HOSTED FREE TIER.
+ *
+ * Written against docs/notes/competitor-facts-2026-08-15.md, which is the only
+ * sanctioned source for anything on this page that describes restream.io. Every
+ * figure below traces to a line in it. Nothing about their product is written
+ * from memory, from their marketing, or from what a competitor's free tier
+ * "usually" includes.
+ *
+ * WHY THE DATE IS RENDERED RATHER THAN KEPT IN A COMMENT. A price on a
+ * competitor's plan is not a stale docs line when it goes out of date — it is a
+ * false statement about another company's prices, which is a different class of
+ * problem. The stamp is in the markup, twice, around every figure that can move:
+ * once on the section, once in the table caption. If someone rechecks, they
+ * change one constant and both move together; if nobody rechecks, a reader can
+ * see how old the numbers are and go and look.
+ *
+ * NO FAQPage JSON-LD, though the headings below are literally questions. The
+ * home page's "Is this for you?" block was considered for it and rejected for
+ * being bullet lists rather than question-and-answer pairs; this block would
+ * pass that test and still fails a different one. Marking up a competitor's
+ * pricing as structured data invites a search engine to reproduce those figures
+ * in a result card, detached from the "checked" stamp that is the only thing
+ * making them honest. The claims stay on the page, next to their date. */
+const CHECKED = "2026-08-15";
+
+/* restream.io plans, from facts file §2.D. Read as: what the money buys, in the
+ * terms this page is about. Deliberately NOT a full feature list — this page is
+ * not a review of their product and cannot be, on one sourced document. */
+const plans = [
+  {
+    name: "Free",
+    price: "$0",
+    channels: "2 simultaneous channels",
+    detail:
+      "Personal profiles and platforms only. Excludes custom RTMP destinations, and excludes Facebook Pages and Groups. Restream watermark on Studio output, capped at 720p.",
+  },
+  {
+    name: "Standard",
+    price: "$19/mo",
+    channels: "3 channels",
+    detail:
+      "$16/mo billed annually, at $190/yr. No watermark, and custom RTMP destinations are enabled.",
+  },
+  {
+    name: "Professional",
+    price: "$49/mo",
+    channels: "5 channels",
+    detail:
+      "$39/mo billed annually, at $470/yr. 1080p Studio, and dual-format output — horizontal and vertical at once.",
+  },
+];
+
+/* The self-hosting bill, itemised. This section is the reason the page exists in
+ * the shape it does: a reader arriving on "free restream service" has already
+ * been sold something free once today, and a page that lists only what
+ * self-hosting removes reads as the same pitch with a different logo. Every
+ * entry below is a cost we have actually met, sourced from the install and
+ * quickstart docs rather than imagined. */
+const costs = [
+  {
+    title: "A box, and its upstream",
+    body: "One upload leaves your studio; the fan-out leaves the server. So the server needs roughly your bitrate multiplied by the number of destinations, in sustained upstream. CPU is rarely the wall — video is stream-copied, and a destination measures at about 4% of one core — but bandwidth is, and a domestic connection is usually the wrong place to put it.",
+  },
+  {
+    title: "A domain and a certificate, if it leaves the LAN",
+    body: "The installer fits a self-signed certificate unless told otherwise, which browsers will complain about. Let’s Encrypt needs a hostname that resolves and an email address, and the installer refuses to proceed without both. Behind a proxy that already terminates TLS, you turn it off here instead.",
+  },
+  {
+    title: "An FFmpeg with the right things in it",
+    body: "FFmpeg 6.0 or newer, and it needs libsrt for the multitrack SRT ingest that makes per-destination audio possible at all. Homebrew’s macOS build ships without SRT. Ubuntu 24.04’s stock 6.1.1 carries SRT but predates multitrack FLV. The container bundles a known-good build and sidesteps the question entirely.",
+  },
+  {
+    title: "Your own time, and your own pager",
+    body: "There is no status page to refresh and no support queue to sit in. polyemesis ships Prometheus metrics and alert rules with webhook delivery so that a stream which stops can page somebody — but the somebody is you, and at 3am nobody else is on call. That is the single honest difference between this and a subscription, and it is not a small one.",
+  },
+  {
+    title: "Linux, for anything you care about",
+    body: "The broadcast path is tested on Windows and macOS in CI, and that suite has caught Windows-only bugs before they shipped. What is not proven on Windows is long-running service operation: the service wrapper is unexercised and recording can truncate on service stop. Build and evaluate anywhere; operate on Linux.",
+  },
+];
+---
+
+<Base
+  title="A free restream service you run yourself"
+  description="Restream’s free tier allows two channels and watermarks Studio. polyemesis is MIT, self-hosted and caps nothing — and here is what that trade costs."
+  path="/free-restream-service"
+>
+  <section class="wrap py-16 sm:py-20">
+    <p class="eyebrow">Free restream service</p>
+    <h1 class="mt-3 max-w-4xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
+      A free restream service, if you are willing to run the server.
+    </h1>
+    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
+      Restream does have a free tier, and it allows two simultaneous channels.
+      If that is the answer you came for, it is at the top of the page on
+      purpose. The rest of this is the other answer: polyemesis is a restreaming
+      server that is free in the plain sense — MIT licensed, no account, no
+      hosted tier, nothing phoning home — because it runs on a machine you
+      already pay for. That machine is the price, and this page is mostly about
+      what it costs.
+    </p>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a href="/download" class="btn btn-primary">Install it</a>
+      <a href="#the-trade" class="btn btn-ghost">What it costs you</a>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------ what is a restream --- */}
+  <section id="what-it-is" class="border-t border-line py-16 sm:py-20">
+    <div class="wrap max-w-3xl">
+      <p class="eyebrow">The word</p>
+      <h2 class="mt-3 text-balance text-2xl font-medium sm:text-3xl">
+        What a restream service actually is
+      </h2>
+      <p class="mt-4 text-pretty leading-relaxed text-muted">
+        You send one stream out of your encoder. Something downstream copies it
+        and delivers a copy to every platform you named — Twitch, YouTube, Kick,
+        Facebook, Rumble — so your uplink carries one broadcast instead of five.
+        That is the whole job, and every product in this category does it.
+      </p>
+      <p class="mt-3 text-pretty leading-relaxed text-muted">
+        The word also does double duty as a brand. Restream, at restream.io, is
+        a proprietary hosted service that does this in their cloud on a monthly
+        subscription. If you searched for a free restream service you are
+        probably weighing one against the other, so both are on this page: what
+        their free tier gives you, and what running the fan-out yourself gives
+        you instead.
+      </p>
+      <p class="mt-3 text-pretty leading-relaxed text-muted">
+        Where products in this category diverge is not the copying. It is what
+        happens to the audio on the way, and whether the fan-out runs on
+        somebody else’s hardware or on yours.
+      </p>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------- is restream free? --- */}
+  <section id="is-restream-free" class="border-t border-line bg-surface/30 py-16 sm:py-20" data-reveal>
+    <div class="wrap max-w-4xl">
+      <p class="eyebrow">The direct answer</p>
+      <div class="mt-3 flex flex-wrap items-baseline gap-3">
+        <h2 class="text-balance text-2xl font-medium sm:text-3xl">Is Restream free?</h2>
+        <span class="chip">checked {CHECKED}</span>
+      </div>
+      <p class="mt-4 max-w-2xl text-pretty leading-relaxed text-muted">
+        Partly. There is a free plan and it allows two simultaneous channels, to
+        personal profiles and platforms. What it does not include is the part
+        most people find out later: custom RTMP destinations are excluded, so a
+        platform Restream has no built-in integration for is not reachable on
+        it, and Facebook Pages and Groups are excluded as well. Anything you
+        produce in their browser Studio carries a Restream watermark and is
+        capped at 720p.
+      </p>
+
+      {/* THE DATE SITS OUTSIDE THE SCROLL BOX. A <caption> inherits the table's
+          min-width, so on a phone the sentence qualifying every price in the
+          table would itself be behind a horizontal scroll — the one line here
+          that must not be missable. The caption stays, short, for the screen
+          reader; the warning is prose the page can lay out. */}
+      <p class="mt-8 text-sm leading-relaxed text-subtle">
+        Prices move. These were read off restream.io’s published pricing on
+        {" "}{CHECKED}; if that stamp is old by the time you are reading it, go
+        and look before you rely on any of it.
+      </p>
+      <div class="scroll-hint mt-3 overflow-x-auto rounded-token border border-line">
+        <table class="cmp w-full min-w-[46rem] border-collapse text-left text-sm">
+          <caption class="px-4 py-3 text-left text-[11px] text-subtle">
+            restream.io plans, checked {CHECKED}
+          </caption>
+          <thead class="bg-surface">
+            <tr class="border-b border-line">
+              <th scope="col" class="px-4 py-3 font-medium">Plan</th>
+              <th scope="col" class="w-28 px-4 py-3 font-medium">Price</th>
+              <th scope="col" class="w-44 px-4 py-3 font-medium">Channels</th>
+              <th scope="col" class="px-4 py-3 font-medium">What that includes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              plans.map((p) => (
+                <tr class="border-b border-line/60 last:border-0">
+                  <td class="px-4 py-3 text-fg">{p.name}</td>
+                  <td class="px-4 py-3 font-mono text-xs text-muted">{p.price}</td>
+                  <td class="px-4 py-3 text-muted">{p.channels}</td>
+                  <td class="px-4 py-3 leading-relaxed text-muted">{p.detail}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
+        Every figure above is recorded with its source in this repository rather
+        than paraphrased from a competitor’s marketing, and it is dated because a
+        stale price is not a stale docs line — it is a false statement about
+        another company’s prices. If one of these has moved, that is a bug in
+        this page and we would like to be told.
+      </p>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------ what free means here - */}
+  <section id="free-here" class="border-t border-line py-16 sm:py-20">
+    <div class="wrap max-w-3xl">
+      <p class="eyebrow">The other kind of free</p>
+      <h2 class="mt-3 text-balance text-2xl font-medium sm:text-3xl">
+        No plan, because there is nothing to bill for.
+      </h2>
+      <p class="mt-4 text-pretty leading-relaxed text-muted">
+        polyemesis is MIT licensed and ships as one static binary or one
+        container. There is no account to create, no free tier to graduate out
+        of, and no telemetry — it can publish its own state over MQTT, but that
+        is off by default and goes to a broker you name. The only runtime
+        dependency is FFmpeg, and the container bundles it.
+      </p>
+      <CodeBlock
+        label="docker"
+        code={`docker run -d \\
+  --name polyemesis \\
+  -p 8080:8080 \\
+  -p 6000:6000/udp \\
+  -v polyemesis-data:/data \\
+  rainmanjam/polyemesis`}
+      />
+      <dl class="mt-8 divide-y divide-line border-y border-line">
+        {
+          [
+            [
+              "Destinations",
+              "No configured cap. There is no limit in the software, but upload bandwidth and CPU are real: a destination measures at roughly 4% of one core, so a four-core box runs out somewhere near 96. “No cap” is not the same word as “unlimited”, and the difference is the part that bites.",
+            ],
+            [
+              "Custom RTMP",
+              "Every destination is a custom RTMP destination. There is no list of blessed platforms, because there is no integration tier to sell — a URL and a key is all a destination has ever been.",
+            ],
+            [
+              "Watermark",
+              "None, anywhere. There is nothing on the page to advertise, and no plan above this one to advertise it to.",
+            ],
+            [
+              "Your video",
+              "Stream-copied by default, so the picture that reaches each platform is the one your encoder made. Optional shared renditions re-encode it, once, for the platforms that refuse your source.",
+            ],
+          ].map(([t, d]) => (
+            <div class="py-4">
+              <dt class="text-[15px] font-medium text-fg">{t}</dt>
+              <dd class="mt-1.5 text-sm leading-relaxed text-muted">{d}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------ the bill - */}
+  <section id="the-trade" class="border-t border-line bg-surface/30 py-16 sm:py-20" data-reveal>
+    <div class="wrap">
+      <p class="eyebrow">The trade</p>
+      <h2 class="mt-3 max-w-3xl text-balance text-2xl font-medium sm:text-3xl">
+        The subscription does not disappear. It changes currency.
+      </h2>
+      <p class="mt-4 max-w-2xl text-pretty leading-relaxed text-muted">
+        Self-hosting removes the per-channel tier, the watermark and the monthly
+        invoice. It replaces them with five things, and you should price all
+        five before you install anything. If any one of them reads as a dealbreaker,
+        a hosted service is the correct answer and this page has done its job.
+      </p>
+      <div class="mt-8 grid gap-5 md:grid-cols-2">
+        {
+          costs.map((c) => (
+            <div class="card p-6">
+              <h3 class="text-[15px] font-medium text-fg">{c.title}</h3>
+              <p class="mt-2 text-sm leading-relaxed text-muted">{c.body}</p>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  {/* --------------------------------------------------------- the reason -- */}
+  <section id="the-audio" class="border-t border-line py-16 sm:py-20">
+    <div class="wrap max-w-3xl">
+      <p class="eyebrow">Why anyone accepts that trade</p>
+      <h2 class="mt-3 text-balance text-2xl font-medium sm:text-3xl">
+        One thing no plan on the list above sells.
+      </h2>
+      <p class="mt-4 text-pretty leading-relaxed text-muted">
+        restream.io duplicates the single ingested stereo audio track
+        identically across every enabled endpoint. Read the plans above again
+        for what the money buys: channels, a resolution, the removal of a
+        watermark. None of them is an audio plan, so on any of them the mix that
+        goes to Twitch is the mix that goes to YouTube.
+      </p>
+      <p class="mt-3 text-pretty leading-relaxed text-muted">
+        polyemesis takes the split audio tracks your encoder already sends —
+        music on one, game on another, microphone on a third — and builds a
+        different mix per destination from them, on the server, from one upload.
+        The platform that mutes music gets the clean feed while the one that does
+        not gets the full one, and neither costs you a second video encode.
+      </p>
+      <p class="mt-3 text-pretty leading-relaxed text-muted">
+        That is the whole reason to run a server rather than rent one. If you do
+        not need it, the honest recommendation is to weigh the five costs above
+        against a subscription and pick whichever you would rather pay.
+      </p>
+      <p class="mt-6">
+        <a href="/features" class="inline-block py-1 text-sm text-primary underline-offset-4 hover:underline">
+          How the routing works →
+        </a>
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap border-t border-line py-20 text-center">
+    <h2 class="text-balance text-3xl font-medium">Five minutes to a running server.</h2>
+    <p class="mx-auto mt-4 max-w-xl text-pretty leading-relaxed text-muted">
+      Docker, an installer script, or a single static binary. Then point your
+      encoder at it.
+    </p>
+    <div class="mt-7 flex flex-wrap justify-center gap-3">
+      <a href="/download" class="btn btn-primary">Install</a>
+      <a href="/how-to-multistream-from-obs" class="btn btn-ghost">Set up OBS</a>
+    </div>
+  </section>
+</Base>

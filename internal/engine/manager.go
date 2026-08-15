@@ -13,9 +13,11 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/rtmpserver"
 	"github.com/rainmanjam/polyemesis/internal/srtserver"
+	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
@@ -40,6 +42,17 @@ type Manager struct {
 	tools *ffmpeg.Tools
 	bus   *events.Broker
 	alloc *relay.PortAllocator
+
+	// host is the one resource sampler for this process, and recman is the one
+	// read-only view of the recordings directory. Both are INSTALL-WIDE state
+	// that used to be reached through whichever engine happened to be default,
+	// which made the answer depend on a programme running — and on WHICH one.
+	// Neither is guarded by mu: both are set once in NewManager and are
+	// internally synchronised.
+	host   *stats.Host
+	recman *recording.Manager
+	// hostStop ends the sampler goroutine. Set by Start, called by Stop.
+	hostStop context.CancelFunc
 
 	// syncMu serialises Sync and reconcileSharedIngest end to end, the way
 	// Engine.reconcileMu does for a single engine's Reconcile.
@@ -106,8 +119,41 @@ func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg
 		bus:     bus,
 		alloc:   relay.NewPortAllocator(relayPortBase, relayPortSpan),
 		engines: map[int64]*Engine{},
+		host:    stats.NewHost(),
+		// NO ffprobe and NO storage guard, and both omissions are the point.
+		// This instance answers reads — usage, resolve, delete — for the API,
+		// which must be able to ask them on an install where no engine is
+		// running. Measuring a segment belongs to the engine that recorded it,
+		// and halting a recorder belongs to the engine that owns the child;
+		// see the pair of comments on Engine's own recman in engine.go.
+		recman: recording.New(log, store, cfg.RecordingsDir(), func() {
+			bus.Publish(events.TypeRecordings, nil)
+		}),
 	}
 }
+
+// Tools is the FFmpeg this install detected.
+//
+// It is a property of the BOX, not of a programme: every engine is handed this
+// same pointer. Reading it here rather than off an engine is what lets
+// /system, /encoders, /fonts and the upload probe answer on an install with no
+// engine running.
+func (m *Manager) Tools() *ffmpeg.Tools { return m.tools }
+
+// Host is the process-wide CPU/RAM sampler, running between Start and Stop.
+func (m *Manager) Host() *stats.Host { return m.host }
+
+// Recordings is the shared, read-only view of the recordings directory.
+//
+// READ-ONLY MEANS "does not drive a recorder": it indexes, measures usage,
+// confines paths and deletes indexed files, all of which are properties of the
+// directory rather than of a programme. It deliberately carries neither the
+// ffprobe measurement nor the storage guard the engines' own managers do.
+//
+// Recordings outlive the source that made them -- recordings.source_id is ON
+// DELETE SET NULL by design -- so the library, the clip editor and the
+// downloads must keep working when the engine that wrote them is long gone.
+func (m *Manager) Recordings() *recording.Manager { return m.recman }
 
 // Start brings up an engine for every source.
 //
@@ -116,10 +162,18 @@ func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg
 // say -- must not take the rest off the air; that would make adding a source a
 // risk to everything already running.
 func (m *Manager) Start(ctx context.Context) error {
+	hostCtx, stopHost := context.WithCancel(ctx)
 	m.mu.Lock()
 	m.ctx = ctx
 	m.started = true
+	m.hostStop = stopHost
 	m.mu.Unlock()
+
+	// Before the engines and outside the error paths below: the resource
+	// sampler describes the box, so it is worth having on an install where not
+	// one source came up -- that is exactly the install an operator is staring
+	// at the monitoring page of.
+	go m.host.Run(hostCtx)
 
 	// Listeners BEFORE engines. This used to be the other way round, with a
 	// comment about the token lookup needing to see the engines -- but the
@@ -194,7 +248,7 @@ func (m *Manager) Sync() error {
 	}
 
 	for _, id := range missing {
-		eng, err := New(m.log, m.cfg, m.store, m.tools, m.bus, id, m.alloc)
+		eng, err := New(m.log, m.cfg, m.store, m.tools, m.bus, id, m.alloc, m.host)
 		if err != nil {
 			m.log.Error("cannot build engine for source", "source", id, "err", err)
 			continue
@@ -788,7 +842,14 @@ func (m *Manager) Stop() {
 	}
 	m.engines = map[int64]*Engine{}
 	m.started = false
+	stopHost := m.hostStop
+	m.hostStop = nil
 	m.mu.Unlock()
+
+	// Nil when Stop is reached without a Start, which several tests do.
+	if stopHost != nil {
+		stopHost()
+	}
 
 	for _, eng := range engines {
 		eng.Stop()

@@ -6,13 +6,19 @@
 -- every token issued and checked on every request; bumping it here invalidates
 -- every token already in the wild, which is what "change my password because I
 -- think someone else has my session" has to mean.
+-- tour_completed_at is the onboarding tour's "do not offer this again", as a
+-- unix timestamp, 0 meaning never. It lives on the user rather than in the
+-- browser's localStorage on purpose: an operator who opens this install from a
+-- second machine has already seen the tour, and a per-browser flag would offer
+-- it to them again on every new laptop, phone and private window.
 CREATE TABLE IF NOT EXISTS users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    username      TEXT    NOT NULL UNIQUE,
-    password_hash TEXT    NOT NULL,
-    created_at    INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL,
-    token_epoch   INTEGER NOT NULL DEFAULT 0
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    username          TEXT    NOT NULL UNIQUE,
+    password_hash     TEXT    NOT NULL,
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    token_epoch       INTEGER NOT NULL DEFAULT 0,
+    tour_completed_at INTEGER NOT NULL DEFAULT 0
 );
 
 -- Long-lived credentials for automation, so a script never needs the admin

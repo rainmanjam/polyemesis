@@ -697,7 +697,7 @@ func (s *Server) handlePlayoutPoster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ffmpegPath := ""
-	if tools := s.eng().Tools(); tools != nil {
+	if tools := s.tools(); tools != nil {
 		ffmpegPath = tools.FFmpeg
 	}
 

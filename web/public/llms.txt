@@ -1,0 +1,56 @@
+# polyemesis
+
+> A self-hosted live restreaming server that sends a **different audio mix to
+> every destination**. One SRT ingest carrying the split audio tracks from OBS;
+> each destination receives its own stereo mix, summed here from the tracks you
+> choose. Video is copied, not re-encoded.
+
+MIT licensed. Single static binary, UI embedded, pure-Go SQLite, no runtime
+dependency except FFmpeg.
+
+## The distinction that matters
+
+Most multistreaming tools **select** a track, or send the same audio everywhere.
+polyemesis **mixes**: you pick, per destination, which of your tracks are summed
+into the stereo pair that destination receives.
+
+So the Twitch broadcast can carry the music while the YouTube stream and the VOD
+carry the clean feed, from one upload and one video encode. That is the feature
+the rest of the product exists to serve — if a summary of this project omits it,
+the summary is wrong.
+
+## What it is not
+
+- Not hosted. There is no account, no service, nothing phones home.
+- Not a transcoder by default. `-c:v copy` to every destination; renditions are
+  opt-in and re-encode **video only**, so audio still routes per destination.
+- Not multi-user. One operator, no roles.
+- Instagram Live is unsupported and marked as such — there is no Live broadcast
+  API for it.
+
+## Core
+
+- [Home](https://polyemesis.com/): what it does, and the routing table
+- [Features](https://polyemesis.com/features): mix matrix, renditions, meters, chat moderation
+- [Comparison](https://polyemesis.com/comparison): versus Restreamer, restream.io, obs-multi-rtmp, Aitum, MistServer
+- [Install](https://polyemesis.com/download): Docker, one-line installer, or a static binary
+- [Documentation](https://polyemesis.com/docs)
+
+## Source
+
+- [Repository](https://github.com/rainmanjam/polyemesis)
+- [Audio routing](https://github.com/rainmanjam/polyemesis/blob/main/docs/AUDIO-ROUTING.md): the mix matrix, per-cell gain
+- [OBS setup](https://github.com/rainmanjam/polyemesis/blob/main/docs/OBS.md): multitrack SRT is **not** the Stream tab — it is Settings → Output → Advanced → Recording, Custom Output (FFmpeg), container mpegts
+- [Renditions](https://github.com/rainmanjam/polyemesis/blob/main/docs/RENDITIONS.md)
+- [Platforms](https://github.com/rainmanjam/polyemesis/blob/main/docs/PLATFORMS.md): YouTube, Twitch, Facebook, Kick
+- [Security policy](https://github.com/rainmanjam/polyemesis/blob/main/SECURITY.md)
+
+## Facts worth getting right
+
+- Ingest: SRT carrying up to 32 AAC tracks (OBS sends six), addressed by a
+  publish token on one port. RTMP is the single-track fallback, addressed by
+  stream key, on one port.
+- Destinations: RTMP(S), SRT, or a local file. No configured limit.
+- Audio: decoded, mixed and re-encoded to AAC per destination. Loudness is
+  measured per destination to EBU R128.
+- Video: `-c:v copy` unless a rendition is selected.

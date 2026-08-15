@@ -36,6 +36,7 @@ package testenv
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -106,6 +107,81 @@ func FreeUDPPort(t *testing.T) int {
 	r := ReserveUDP(t)
 	r.Release()
 	return r.port
+}
+
+// FreeUDPWindow reserves n CONTIGUOUS UDP ports and holds every one of them
+// until the test ends, returning the base.
+//
+// WHY THIS EXISTS, and it is a bug that failed CI three times in one day on
+// three different port ranges. internal/engine builds a deliberately tight
+// allocator:
+//
+//	e.alloc = relay.NewPortAllocator(freeUDPPort(t), 3)
+//
+// The tightness is the point -- with three ports and no spare, a released port
+// is the only one Allocate can return afterwards, which is what identifies it.
+// But FreeUDPPort probes ONE port and releases it, so base+1 and base+2 were
+// never checked at all and base is no longer held. Under `go test ./...` with
+// packages in parallel, anything can take one of the three in the gap.
+//
+// The failure then surfaces while RESERVING the third port, during setup, and
+// reads as though the code under test leaked one -- "the one taken by the path
+// under test was never released". It had not. The window was short by one before
+// the test began, and the diagnostic points at the wrong thing.
+//
+// HELD, NOT PROBED-AND-RELEASED. The caller gets a window nothing else on the
+// machine can take, and Release is deliberately NOT called here: the reservation
+// lives until t.Cleanup runs. A caller that needs the ports free for its own
+// bind calls Release on the returned reservations itself, one at a time, at the
+// moment it binds.
+//
+// Non-contiguous draws are discarded and retried rather than worked around. The
+// kernel hands out ephemeral ports in no particular order, so a run of n is
+// luck; 40 attempts is far more than enough in practice and failing loudly beats
+// returning a window that is not one.
+func FreeUDPWindow(t *testing.T, n int) (base int, held []*Reservation) {
+	t.Helper()
+	if n < 1 {
+		t.Fatalf("FreeUDPWindow: n must be at least 1, got %d", n)
+	}
+	// EXPLICIT BINDS, SCANNING UPWARD -- not "draw ephemeral ports and hope".
+	//
+	// The first version of this asked the kernel for 4n random ports and looked
+	// for a run of n among them. It essentially never found one: ephemeral ports
+	// are handed out in no useful order, so a contiguous run is a coincidence.
+	// It failed 40 attempts in under a second, which is at least a fast way to
+	// learn that the idea was wrong.
+	//
+	// So: take one ephemeral port to find a region of the range the kernel is
+	// currently willing to hand out, then try to bind n CONSECUTIVE numbers
+	// starting a little above it. Anything already taken fails its bind and the
+	// scan moves on.
+	probe := ReserveUDP(t)
+	from := probe.Port() + 1
+	probe.Release()
+
+	for start := from; start < from+4096 && start+n < 65535; start++ {
+		run := make([]*Reservation, 0, n)
+		for k := 0; k < n; k++ {
+			c, err := net.ListenPacket("udp", fmt.Sprintf("127.0.0.1:%d", start+k))
+			if err != nil {
+				break
+			}
+			r := &Reservation{port: start + k, c: c}
+			t.Cleanup(r.Release)
+			run = append(run, r)
+		}
+		if len(run) == n {
+			return start, run
+		}
+		// Give the partial run straight back so the next start does not have to
+		// step over ports this loop is holding.
+		for _, r := range run {
+			r.Release()
+		}
+	}
+	t.Fatalf("FreeUDPWindow: no run of %d free UDP ports in 4096 numbers above %d", n, from)
+	return 0, nil
 }
 
 // FreeTCPPort is the same trick for a TCP listener.

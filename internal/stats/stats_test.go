@@ -195,12 +195,12 @@ func TestRunStopsWhenTheContextIsCancelled(t *testing.T) {
 }
 
 func TestSystemSnapshotIsPopulatedAndConcurrencySafe(t *testing.T) {
-	m := NewMonitor(func() uint64 { return 0 })
+	h := NewHost()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go m.Run(ctx)
+	go h.Run(ctx)
 
-	// The governor calls System() on every job-claim decision while the monitor
+	// The governor calls System() on every job-claim decision while the sampler
 	// writes it once a second.
 	var wg sync.WaitGroup
 	for g := 0; g < 4; g++ {
@@ -208,7 +208,7 @@ func TestSystemSnapshotIsPopulatedAndConcurrencySafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 500; i++ {
-				_ = m.System()
+				_ = h.System()
 			}
 		}()
 	}
@@ -217,7 +217,31 @@ func TestSystemSnapshotIsPopulatedAndConcurrencySafe(t *testing.T) {
 	// NumCPU is filled in synchronously on every sample, so once a sample has
 	// landed it must be sane. Give the 1 Hz ticker room.
 	time.Sleep(1500 * time.Millisecond)
-	if n := m.System().NumCPU; n < 1 {
+	if n := h.System().NumCPU; n < 1 {
 		t.Errorf("NumCPU = %d, want at least 1", n)
+	}
+}
+
+// The sampler is process-wide and is read by the API on every /stats poll and
+// by the governor on every job-claim decision, both of which can arrive before
+// Run has ticked once -- on a fresh install that is the first page load. The
+// zero snapshot is the answer they get, and nothing must have to check first.
+func TestHostAnswersBeforeItHasSampled(t *testing.T) {
+	h := NewHost()
+	if got := h.System(); got != (System{}) {
+		t.Errorf("System() = %+v before Run, want the zero snapshot", got)
+	}
+}
+
+// The bitrate ring is per programme and the host sampler is per process, so a
+// Monitor must not carry a second copy of the host reading back in. This is a
+// compile-time guard written as a test: it fails to build if System() is put
+// back on Monitor.
+func TestMonitorDoesNotSampleTheHost(t *testing.T) {
+	var m any = NewMonitor(nil)
+	if _, ok := m.(interface{ System() System }); ok {
+		t.Error("Monitor grew a System() again: an install with three sources is " +
+			"back to three gopsutil samplers, and an unscoped read reports whichever " +
+			"engine it reached")
 	}
 }

@@ -8,7 +8,31 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+- **An onboarding tour, offered once per install rather than once per browser.**
+  A new operator finishes the signup screen and lands on an empty dashboard, and
+  everything they need next is either in a terminal they have closed or in
+  `docs/`. The tour covers the things the console does not say out loud: where a
+  source's publish address and token live now that `install.sh` has printed them
+  and exited, that Routing is the part which is not restreaming, what the
+  `experimental` badge is actually claiming, and that `secret.key` is a separate
+  file whose absence brings every destination back *disabled* after a restore
+  with nothing on screen to explain why.
+
+  It is **offered, not launched**: a dismissible strip under the header, plus a
+  replay control in Settings. Completion is stored server-side —
+  `users.tour_completed_at`, added by an idempotent migration — so an operator
+  opening the same install from a second machine is not offered it again. New
+  routes: `GET /api/v1/tour` and `POST /api/v1/tour/complete`, the write
+  admin-scoped because a read-only token must not mutate user state.
+
+  Built on [driver.js](https://github.com/kamranahmedse/driver.js) (MIT, **zero
+  dependencies**), themed from `ui/src/index.css`'s own tokens rather than the
+  library's stock white popover. A tour's failure mode is silent — a selector
+  that stops matching simply highlights nothing — so the steps are DATA in
+  `ui/src/lib/tourSteps.ts` and `ui/src/lib/tour-drift.test.ts` asserts every
+  selector against the component that owns it, reading past comments so an
+  anchor cannot be kept green by leaving the words behind in one.
 
 ## [0.7.0] — 2026-08-14
 

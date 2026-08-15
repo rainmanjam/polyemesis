@@ -75,18 +75,15 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 		jobs.WithSensors(jobs.Sensors{
 			// IngestLive and GPUBusy aggregate across every programme: one
 			// live source is reason enough to keep heavy background work off
-			// the CPU. CPUPercent is system-wide whichever engine reports it,
-			// so it comes off whichever one is default.
+			// the CPU. CPUPercent is system-wide, and it now comes from the
+			// one sampler the manager runs rather than from whichever engine
+			// happened to be default -- which is why the nil dance that used
+			// to stand here, reporting an idle box whenever no source was up,
+			// is gone.
 			IngestLive: eng.IngestLive,
-			CPUPercent: func() float64 {
-				d := eng.Default()
-				if d == nil {
-					return 0
-				}
-				return d.Monitor().System().CPUPercent
-			},
-			GPUBusy: eng.GPUBusy,
-			Power:   jobs.ReadPowerState,
+			CPUPercent: func() float64 { return eng.Host().System().CPUPercent },
+			GPUBusy:    eng.GPUBusy,
+			Power:      jobs.ReadPowerState,
 		}),
 	)
 

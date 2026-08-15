@@ -153,7 +153,7 @@ func engineOnKeylessStore(t *testing.T, dir, path string, box *secrets.Box) (*En
 	if err != nil {
 		t.Fatalf("DefaultSourceID: %v", err)
 	}
-	e, err := New(testLogger(), cfg, store, tools, events.NewBroker(), id, nil)
+	e, err := New(testLogger(), cfg, store, tools, events.NewBroker(), id, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

@@ -92,8 +92,14 @@ const wins = [
  *
  * Every `src` below was read in that project's own repository on 2026-08-09.
  * Sourced from docs/COMPARISON.md, "They select a track. polyemesis mixes." */
+/* `href` is optional and only two of the three have one: MistServer has no page
+ * of its own, because the facts file that governs competitor claims does not
+ * cover it and a comparison page cannot be written from the one line of source
+ * quoted below. The card still earns its place here — it is the only tool in
+ * this set that selects tracks WELL — it simply cannot carry a page yet. */
 const selectors = [
   {
+    href: "/vs/obs-multi-rtmp",
     name: "obs-multi-rtmp",
     what: "An OBS plugin, around 4,975 stars. Each destination is another output from the stream PC, so N destinations is N uploads off one connection.",
     src: "struct AudioTrackConfig { int mixer_track; int output_track; };",
@@ -101,6 +107,7 @@ const selectors = [
     note: "Two integers: this mixer track goes in that output slot. No gain, no sum.",
   },
   {
+    href: "/vs/aitum-multistream",
     name: "Aitum Multistream",
     what: "An OBS plugin, around 250 stars. The destination's audio is picked in its output settings and stored as one number.",
     src: 'obs_audio_encoder_create(…, obs_data_get_int(settings, "audio_track"), …)',
@@ -117,9 +124,19 @@ const selectors = [
 ];
 ---
 
+{/* The title used to lead with "polyemesis vs", which is a brand nobody is
+    searching for yet, and spent its first eleven characters saying so. The
+    category term is what has to win the click before the argument below can do
+    any work — so the title states what the page IS, and the brand appears where
+    it belongs, in the list of things being compared.
+
+    The headline is untouched on purpose. An earlier audit proposed replacing
+    "The audio is the difference." with a keyword string; it was rejected then
+    and would be worse now that this page has four children carrying the
+    long-tail terms. */}
 <Base
-  title="polyemesis vs Restreamer, obs-multi-rtmp and MistServer"
-  description="Restreamer, restream.io, obs-multi-rtmp, Aitum and MistServer compared. They select an audio track per destination; polyemesis mixes one."
+  title="Multistream tools compared: polyemesis vs four others"
+  description="Multistream to Twitch, YouTube and Kick from one ingest. Restreamer, restream.io, obs-multi-rtmp, Aitum and MistServer compared on audio."
   path="/comparison"
 >
   <section class="wrap py-16 sm:py-20">
@@ -144,6 +161,73 @@ const selectors = [
         else in this space treats it as one stereo pair.
       </p>
     </div>
+  </section>
+
+  {/* ------------------------------------------------------------- the hub -- */}
+  {/* HIGH ON THE PAGE, and that placement is the point.
+
+      Most people arriving here typed a product name, not a category — they
+      already have one of these installed and want to know what changes. Making
+      them read a nine-row capability table before they find the page about the
+      tool they actually use is answering a question they did not ask.
+
+      Each page is linked with the argument it makes rather than a bare product
+      name, because the three arguments are genuinely different and a reader
+      choosing between them should be able to tell which one is theirs. They are
+      also the reason these are separate pages instead of three more columns
+      here: a Yes/No grid cannot say "both do this, and one costs more to
+      change", which is the true shape of the plugin comparison. */}
+  <section class="wrap pb-16" data-reveal>
+    <h2 class="text-2xl font-medium">Compared one at a time</h2>
+    <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+      If you already run something, start here. Each page compares polyemesis
+      against one of them in full, with that tool's strengths stated and every
+      claim dated against its own sources.
+    </p>
+    {/* Two by two rather than a row of three, now that there is a fourth. A
+        four-item row is unreadable at this card width and a 3+1 orphan looks
+        like something failed to load. */}
+    <div class="mt-6 grid gap-4 sm:grid-cols-2">
+      {
+        [
+          {
+            href: "/vs/aitum-multistream",
+            name: "Aitum Multistream",
+            kind: "OBS plugin · free · GPL-2.0",
+            line: "It already sends different audio per platform. The argument is about where the mix gets built, and what a third one costs.",
+          },
+          {
+            href: "/vs/obs-multi-rtmp",
+            name: "obs-multi-rtmp",
+            kind: "OBS plugin · free · GPL-2.0",
+            line: "Get from OBS means fanning out costs one encode, not four. What it cannot share is your uplink — the same bytes, sent once per platform.",
+          },
+          {
+            href: "/vs/restreamer",
+            name: "Restreamer and restream.io",
+            kind: "Server · SaaS · two different products",
+            line: "Two unrelated things share the name. Neither can build a second mix at all, and one of them bills per channel.",
+          },
+          {
+            href: "/vs/streamelements",
+            name: "StreamElements",
+            kind: "OBS plugin · free · Windows only",
+            line: "The dashboard everyone knows sends no video at all. The multistreaming is SE.Live, which is Windows-only and speaks no SRT.",
+          },
+        ].map((c) => (
+          <a href={c.href} class="card block p-5 transition-colors hover:border-primary">
+            <p class="font-medium text-fg">{c.name}</p>
+            <p class="mt-1 font-mono text-[11px] text-subtle">{c.kind}</p>
+            <p class="mt-3 text-sm leading-relaxed text-muted">{c.line}</p>
+            <p class="mt-4 text-sm text-primary">Read the comparison →</p>
+          </a>
+        ))
+      }
+    </div>
+    <p class="mt-6 max-w-3xl text-sm leading-relaxed text-subtle">
+      Twitch multistreaming is the case most of these are bought for, and all
+      five do it. The tables below are what separates them once that is assumed.
+    </p>
   </section>
 
   <section class="wrap pb-16" data-reveal>
@@ -227,6 +311,13 @@ const selectors = [
             <CodeBlock code={s.src} variant="quote" />
             <p class="mt-2 font-mono text-[11px] text-subtle">{s.file} · read 2026-08-09</p>
             <p class="mt-3 text-sm leading-relaxed text-muted">{s.note}</p>
+            {s.href && (
+              <p class="mt-4">
+                <a href={s.href} class="text-sm text-primary underline-offset-4 hover:underline">
+                  Full comparison against {s.name} →
+                </a>
+              </p>
+            )}
           </div>
         ))
       }

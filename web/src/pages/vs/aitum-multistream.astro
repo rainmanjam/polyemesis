@@ -1,0 +1,251 @@
+---
+import Base from "../../layouts/Base.astro";
+import Breadcrumbs from "../../components/Breadcrumbs.astro";
+
+/* EVERY CLAIM ABOUT AITUM ON THIS PAGE TRACES TO docs/notes/competitor-facts-2026-08-15.md,
+ * section 4, and to nothing else. That file is the only sanctioned source, and
+ * the reason is the paragraph it opens with:
+ *
+ *   Aitum Multistream DOES send different audio to different destinations.
+ *
+ * It assigns an OBS audio track per output, and the summing that produced those
+ * tracks happened upstream in OBS's Advanced Audio Properties. So "Aitum cannot
+ * do per-destination audio" is FALSE and must never appear here in any wording.
+ * The true argument is narrower and better, and it is the one this page makes:
+ * they select a mix OBS has already built, so N different mixes means N track
+ * layouts maintained in OBS and N encodes on the stream PC.
+ *
+ * That is also why this page is a WALKTHROUGH rather than a table. The
+ * difference is not a capability either product lacks -- it is how much work the
+ * same finished result costs, and a Yes/No grid cannot show that. It would also
+ * have made this page a near-copy of /vs/obs-multi-rtmp, whose argument is about
+ * the uplink rather than the mixing desk.
+ */
+
+/* The same job, done twice. Deliberately the modest version of the task -- two
+ * destinations, one difference between them -- because the honest thing about
+ * Aitum is that at this size it is fine, and the cost only compounds later. */
+const steps = [
+  {
+    tool: "In OBS, with Aitum Multistream",
+    where: "Every step is on the stream PC.",
+    list: [
+      "Open Advanced Audio Properties and build the layout: mic and game on Track 1, mic and game and music on Track 2. This is the mix, and this is where it is made.",
+      "Add the Twitch destination in Aitum, set its audio track to 2.",
+      "Add the YouTube destination, set its audio track to 1.",
+      "Choose an encoder for each destination, or clone the main OBS output for both.",
+      "Both destinations now upload from this machine.",
+    ],
+  },
+  {
+    tool: "In polyemesis",
+    where: "One upload leaves the stream PC. The rest happens on the server.",
+    list: [
+      "In OBS, put each source on its own track — mic on 1, game on 2, music on 3. No layout to design, because nothing is being summed yet.",
+      "Send one multitrack SRT stream to polyemesis.",
+      "Tick the tracks each destination should hear: Twitch gets 1, 2 and 3; YouTube gets 1 and 2.",
+      "Change your mind mid-broadcast by unticking a box. The track layout in OBS never moves.",
+    ],
+  },
+];
+
+/* Stated because a comparison page that finds no merit in the other tool reads
+ * as marketing, and this audience checks. Every line traces to section 4. */
+const merits = [
+  {
+    h: "Free, and GPL-2.0",
+    p: "The Multistream plugin costs nothing. Aitum sells a separate desktop automation suite at $4.99/mo, and Multistream does not require it.",
+  },
+  {
+    h: "Per-destination encoding",
+    p: "Each destination can clone the main OBS output or re-encode independently, with its own resolution, bitrate and encoder. That is not a lesser feature than what a server does — it is the same feature, paid for locally.",
+  },
+  {
+    h: "It is where you already are",
+    p: "It runs inside OBS. There is no server to provision, no second machine, no ingest to point anywhere. For a great many broadcasts that is the correct architecture and this page is not an argument against it.",
+  },
+  {
+    h: "StreamSuite",
+    p: "Multistream is now bundled with Aitum Vertical under the StreamSuite name, with unified multi-chat and metadata panels alongside it.",
+  },
+];
+---
+
+<Base
+  title="Aitum Multistream vs polyemesis: the audio model"
+  description="The Aitum Multistream OBS plugin assigns one OBS audio track per destination. polyemesis sums tracks server-side. Both free — here is what differs."
+  path="/vs/aitum-multistream"
+>
+  <Breadcrumbs
+    crumbs={[
+      { label: "polyemesis", href: "/" },
+      { label: "Comparison", href: "/comparison" },
+      { label: "Aitum Multistream", },
+    ]}
+  />
+
+  <section class="wrap py-12 sm:py-16">
+    <p class="eyebrow">Compared</p>
+    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
+      Aitum Multistream picks a mix. polyemesis builds one.
+    </h1>
+    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
+      The Aitum Multistream OBS plugin can already send different audio to
+      different platforms — anyone telling you otherwise has not used it. Each
+      destination is assigned one of OBS's six audio tracks, and that track goes
+      out. The question this page answers is a narrower one: where the mix on
+      that track gets made, and what it costs you to have more than one.
+    </p>
+
+    <div class="mt-8 max-w-3xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
+      <p class="text-pretty leading-relaxed text-fg">
+        <strong>The difference in one sentence:</strong> Aitum selects a mix OBS
+        has already built, so three different mixes means three track layouts
+        maintained in Advanced Audio Properties and each output encoded on the
+        stream PC. polyemesis sums the tracks server-side, so one upload and one
+        video encode feed every destination.
+      </p>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------ the walkthrough -- */}
+  <section class="border-t border-line py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">The same broadcast, set up both ways</h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+        Two destinations. Twitch takes the music, YouTube does not. Both tools
+        finish this job, and comparing the routes is more useful than comparing
+        a column of Yes against a column of No.
+      </p>
+      <div class="mt-8 grid gap-5 lg:grid-cols-2">
+        {
+          steps.map((s) => (
+            <div class="card p-6">
+              <p class="font-medium text-fg">{s.tool}</p>
+              <p class="mt-1 font-mono text-[11px] text-subtle">{s.where}</p>
+              <ol class="mt-4 space-y-3">
+                {s.list.map((step, i) => (
+                  <li class="flex gap-3 text-sm leading-relaxed text-muted">
+                    <span class="mt-px font-mono text-[11px] text-primary tnum">{i + 1}</span>
+                    <span class="text-pretty">{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))
+        }
+      </div>
+      <p class="mt-6 max-w-3xl text-sm leading-relaxed text-muted">
+        At two destinations these are the same amount of work, and the honest
+        summary is that it does not matter which you pick. The divergence starts
+        at the third: a new mix in Aitum is a new track layout in OBS, and OBS
+        has six tracks. In polyemesis a new mix is a row of checkboxes, and the
+        thing being ticked is the ingest, which has not changed.
+      </p>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------- what it costs -- */}
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">Where the work lands</h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+        Not a capability difference. A location difference — and on a machine
+        that is also running the game, location is the whole argument.
+      </p>
+      <div class="mt-8 grid max-w-4xl gap-5 sm:grid-cols-2">
+        <div class="card p-6">
+          <p class="font-mono text-[11px] font-medium uppercase tracking-wider text-subtle">
+            Aitum Multistream
+          </p>
+          <p class="mt-3 text-pretty leading-relaxed text-fg">
+            The mixing desk is OBS's Advanced Audio Properties. The encoders run
+            on the stream PC, one per destination unless you clone the main
+            output. Every destination uploads from your connection.
+          </p>
+        </div>
+        <div class="card p-6">
+          <p class="font-mono text-[11px] font-medium uppercase tracking-wider text-primary">
+            polyemesis
+          </p>
+          <p class="mt-3 text-pretty leading-relaxed text-fg">
+            The mixing desk is the server, with a gain per input-channel-to-output-channel
+            cell and a loudness target measured after the routing. One upload
+            leaves the stream PC; the picture is copied through rather than
+            re-encoded.
+          </p>
+        </div>
+      </div>
+      <p class="mt-6 max-w-3xl text-sm leading-relaxed text-subtle">
+        The cost belongs here too, because it is real: mixing means decoding the
+        audio and encoding it again for every destination, where selecting a
+        track is a copy. polyemesis also needs a server, and Aitum does not. If
+        one mix suits everyone, the plugin is free and you should use it.
+      </p>
+    </div>
+  </section>
+
+  {/* --------------------------------------------------------- their merits -- */}
+  <section class="border-t border-line py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">What Aitum Multistream does well</h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+        Checked against Aitum's own repository and site on
+        <span class="font-mono text-[13px] text-fg">15 August 2026</span>.
+      </p>
+      <div class="mt-8 grid gap-5 sm:grid-cols-2">
+        {
+          merits.map((m) => (
+            <div class="card p-6">
+              <p class="font-medium text-fg">{m.h}</p>
+              <p class="mt-2 text-pretty text-sm leading-relaxed text-muted">{m.p}</p>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------ pick the other -- */}
+  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">Use Aitum, not this</h2>
+      <ul class="mt-5 max-w-3xl space-y-3">
+        {
+          [
+            "One mix suits every platform. This is most broadcasts, and adding a server to serve it is a worse setup, not a better one.",
+            "Your track layout is settled and you are not editing it under load.",
+            "You want a destination at a different resolution or bitrate and your PC has the headroom to encode it. Aitum does this natively.",
+            "You do not want to run, patch or pay for a server. That is a legitimate position and there is no answer to it here.",
+          ].map((l) => (
+            <li class="flex gap-3 text-pretty leading-relaxed text-muted">
+              <span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-subtle" aria-hidden="true" />
+              {l}
+            </li>
+          ))
+        }
+      </ul>
+      <p class="mt-6 max-w-3xl text-pretty leading-relaxed text-muted">
+        polyemesis is worth the server when the mixes outnumber the tracks, when
+        the stream PC has no headroom left to encode with, or when the upload is
+        the ceiling — one stream out instead of one per platform.
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap py-20 text-center" data-reveal>
+    <h2 class="text-balance text-3xl font-medium">Weighing up the others too?</h2>
+    <div class="mt-7 flex flex-wrap justify-center gap-3">
+      <a href="/comparison" class="btn btn-ghost">All five compared</a>
+      <a href="/download" class="btn btn-primary">Install polyemesis</a>
+    </div>
+    <p class="mt-6 text-sm text-subtle">
+      Also compared:
+      <a href="/vs/obs-multi-rtmp" class="text-primary underline-offset-4 hover:underline">obs-multi-rtmp</a>
+      ·
+      <a href="/vs/streamelements" class="text-primary underline-offset-4 hover:underline">StreamElements</a>
+      ·
+      <a href="/vs/restreamer" class="text-primary underline-offset-4 hover:underline">Restreamer and restream.io</a>
+    </p>
+  </section>
+</Base>
