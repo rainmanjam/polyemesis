@@ -99,7 +99,26 @@ export function AppLayout({
 
   // Close the drawer on navigation, or a phone user taps a link and stares at
   // the menu they just used.
+  //
+  // NOT SUFFICIENT ON ITS OWN, which is how it shipped. This fires on a CHANGE
+  // of pathname, so tapping the page you are already on changes nothing and the
+  // drawer stays open over the page it just failed to navigate to. Reported by
+  // an operator who could not get rid of it: the link that looks most like
+  // "close this" -- the one you are already reading -- was the one that did
+  // nothing. The drawer now also closes on any nav tap (see NAV below), on the
+  // backdrop, and on Escape.
   useEffect(() => setMobileOpen(false), [location.pathname]);
+
+  // Escape closes it, because every other dismissible layer in this UI answers
+  // to Escape and a drawer that does not is the one that feels stuck.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileOpen]);
 
   const ingest = status?.ingest;
   // BYTES ARRIVING, not a process running.
@@ -221,6 +240,36 @@ export function AppLayout({
       </header>
 
       <div className="flex min-h-0 flex-1">
+        {/* The backdrop, and the reason it exists rather than being decoration.
+         *
+         * A drawer that slides over the page with nothing behind it gives a
+         * user no way to say "not this" -- the gesture everybody tries first is
+         * tapping the page, and before this there was nothing there to receive
+         * it. Reported exactly that way: "I can't click off the menu to close
+         * it."
+         *
+         * z-30 sits under the nav's z-40 so the drawer stays on top, and above
+         * the page so nothing beneath it can be clicked by accident while the
+         * drawer is open -- a stray tap landing on a destination control the
+         * user could not even see would be worse than the stuck menu.
+         *
+         * max-md only: on a desktop the sidebar is part of the layout, not a
+         * layer, and there is nothing to dismiss.
+         *
+         * aria-hidden with no role: the close affordance a screen reader should
+         * find is the toggle button in the header, which already carries the
+         * state. A backdrop announced as a button would be a second, unlabelled
+         * way to do the same thing. */}
+        {mobileOpen && (
+          <button
+            type="button"
+            aria-hidden="true"
+            tabIndex={-1}
+            onClick={() => setMobileOpen(false)}
+            className="fixed inset-0 top-11 z-30 cursor-default bg-black/40 md:hidden"
+          />
+        )}
+
         {/* ---- sidebar ---- */}
         <TooltipProvider delayDuration={0}>
           <nav
@@ -275,6 +324,15 @@ export function AppLayout({
                       key={to}
                       to={to}
                       end={end}
+                      // Close the drawer on ANY tap, not only on a route
+                      // change. The pathname effect above misses the case that
+                      // was actually reported: tapping the page you are already
+                      // on. React Router does not navigate, the pathname does
+                      // not change, the effect does not fire, and the drawer
+                      // sits there over the page it just declined to move to --
+                      // with the link that most looks like "close this" being
+                      // the one that does nothing.
+                      onClick={() => setMobileOpen(false)}
                       // The icon is aria-hidden (lucide's default when an icon
                       // gets no a11y prop of its own) and the label span below is
                       // display:none while collapsed, so without this the
