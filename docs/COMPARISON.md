@@ -110,6 +110,15 @@ but it is not zero, and a selector's is.
 | Typed SRT rejections — the publisher is told *why* it was refused | No | n/a | n/a | n/a | Unverified |
 | A second audio mix to the same destination, from one ingest | No | n/a | n/a | n/a | Twitch Enhanced Broadcasting, and it needs a supported GPU; competitors unverified |
 
+> **EXPERIMENTAL, on the last row only — no broadcast has been published through
+> a key Twitch minted.** The negotiation is not the gap: polyemesis's own tests
+> reach `ingest.twitch.tv` on every run, and Twitch accepts a supported-GPU
+> inventory, grants the VOD audio track and mints a key. What has never been
+> observed is everything after that. On a **non-Twitch** destination the two-mix
+> egress is a different mechanism and is not covered by this caveat. Nothing is
+> gated: a negotiation that does not succeed falls back to the ordinary Twitch
+> ingest. See [AUDIO-ROUTING.md § Two mixes to one destination](AUDIO-ROUTING.md#two-mixes-to-one-destination).
+
 Two cells say **Unverified** rather than "No" on purpose. MistServer's own
 recording row is a loss and is marked as one: a recording target with
 `?audio=all` keeps every track (`Util::findTracks`, `lib/stream.cpp`, checked
@@ -222,7 +231,7 @@ reconnect when a platform drops, show you whether it is working.
 | Recording | Multitrack, stream-copied | No built-in<sup>2</sup> | Yes | Yes, tracks selectable |
 | Unified chat | Yes | No | Yes | No |
 | Metrics / API | Prometheus + REST | See<sup>4</sup> | REST | REST |
-| Hardware encoding | NVENC, QSV, VA-API, VideoToolbox, AMF | Yes | n/a | NVENC |
+| Hardware encoding | NVENC, QSV, VA-API, VideoToolbox, AMF<sup>5</sup> | Yes | n/a | NVENC |
 | Public release in the last 12 months | Yes<sup>3</sup> | No<sup>3</sup> | n/a, hosted | Yes<sup>3</sup> |
 | Cost | Your hardware | Your hardware | Subscription | Your hardware |
 
@@ -260,6 +269,16 @@ Restreamer's own README advertises resource monitoring "optionally by
 Prom-Metrics", datarhei Core documents Prometheus support, and it serves GraphQL
 as well as REST — so "REST" understated them twice over and implied Prometheus
 was ours alone.
+
+<sup>5</sup> All five are offered and all five are probed with a real one-frame
+encode at startup, so an encoder that is listed but unusable is caught before a
+broadcast is. What is **EXPERIMENTAL** is narrower: the per-encoder command-line
+flags handed to NVENC, QSV, VA-API and AMF — rate control, preset, profile —
+were read out of FFmpeg's own option tables rather than measured on silicon, and
+no such encode has been observed. VideoToolbox is not in that set:
+`TestEveryConfiguredEncoderOpensWithItsOwnFlags` runs a real encode per
+registered encoder with that encoder's own flags and both VideoToolbox rows
+pass. See [ENCODING.md § Per-encoder flags](ENCODING.md#per-encoder-flags).
 
 ---
 

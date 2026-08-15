@@ -238,6 +238,32 @@ type encoderProfile struct {
 // Verified by running `ffmpeg -h encoder=<name>` and a real one-frame encode.
 // See the PR for #343 for which binary answered for which encoder; the two
 // *_amf rows are the only ones no reachable build registers.
+//
+// EXPERIMENTAL, FOR THE *_nvenc, *_qsv, *_vaapi AND *_amf ROWS ONLY: those
+// flags have not been confirmed on real hardware. The sentence above is precise
+// about what WAS done and is easy to read as more than it is -- `ffmpeg -h
+// encoder=<name>` reads the encoder's own OPTION TABLE, which is compiled into
+// the binary and answers on a machine with no such device at all. No NVENC, QSV
+// or VA-API encode has been observed. That covers the capped-VBR fix in `vbr`
+// in particular, whose entire effect is on an argv nobody has watched an NVIDIA
+// card accept.
+//
+// THE *_videotoolbox ROWS ARE NOT IN THAT SET, and it took running something to
+// find out. TestEveryConfiguredEncoderOpensWithItsOwnFlags runs a real encode
+// per registered encoder using THAT ENCODER'S OWN ROW from this map -- preset
+// flag, rate control, the capped-VBR path, all of it -- and on macOS
+// h264_videotoolbox and hevc_videotoolbox both open and encode. That test is
+// the strongest evidence any row here has and it is per-row: whichever
+// encoders a machine registers are the ones it answers for, so a CI runner with
+// an NVIDIA card would retire the paragraph above by itself.
+//
+// The SOFTWARE rows (libx264, libx265) are not experimental either: that argv
+// has been running in production since before renditions existed.
+//
+// Not a gate. Every encoder here stays selectable, the probe still decides what
+// is offered, and the editor says which of the two categories the chosen one is
+// in. A flag that is wrong shows up as an encoder that refuses to open, which
+// the start gate already reports by name -- see RenditionArgs and #343.
 var encoderProfiles = map[string]encoderProfile{
 	EncoderX264: {
 		presetFlag:    "-preset",

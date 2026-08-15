@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Experimental, ExperimentalBadge } from "@/components/Experimental";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -1862,7 +1863,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               above -- both are per-destination switches in this same dialog. */}
           {platform === "twitch" && (
             <div className="flex flex-col gap-1">
-              <Label htmlFor="dest-multitrack">Enhanced Broadcasting (Twitch)</Label>
+              <Label htmlFor="dest-multitrack" className="flex items-center gap-1.5">
+                Enhanced Broadcasting (Twitch)
+                <ExperimentalBadge />
+              </Label>
               <div className="flex h-9 items-center gap-2">
                 <Switch
                   id="dest-multitrack"
@@ -1899,6 +1903,21 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 is skipped rather than attempted and failed. What was decided appears on this
                 destination's card once it goes live.
               </span>
+              {/* The switch above still works and is still one click. What is
+                  added here is the one fact the paragraphs above cannot supply,
+                  because it is about our evidence rather than about Twitch:
+                  where the measurements stop. They stop after Negotiate
+                  returns, not before it. */}
+              <Experimental>
+                The negotiation itself runs against ingest.twitch.tv and succeeds: polyemesis's
+                own tests reach the live endpoint on every run, and Twitch accepts a
+                supported-GPU inventory, grants a VOD audio track and mints a key. What has
+                never been observed is a broadcast <em>published through</em> a minted key
+                &mdash; everything after the negotiation answers, including polyemesis's own
+                wiring around it, which has only been driven by a stand-in server. Leaving this
+                on is still safe: a negotiation that does not succeed falls back to the ordinary
+                Twitch ingest, which is the path every install used before this existed.
+              </Experimental>
             </div>
           )}
 

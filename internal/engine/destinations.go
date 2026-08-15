@@ -120,8 +120,15 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 		// it ON the answer depends on what Twitch says, so the pair is compiled
 		// and startDest decides -- see oneMix below.
 		switch {
-		case provisional || cerr != nil || row.VODProfile == nil:
-			// Nothing to pair, or nothing worth pairing yet.
+		case row.VODProfile == nil || cerr != nil:
+			// Nothing to pair, or nothing worth pairing.
+		case provisional:
+			// SAY SO. This arm used to share the one above and set no note, so a
+			// destination on an unprobed ingest dropped its second mix on every
+			// platform in silence -- the one drop with no explanation attached,
+			// which is the case an operator is least able to work out for
+			// themselves because nothing about it is their configuration.
+			p.vodDropped = noteVODProvisional
 		case twitchOneAudioTrack(row) && !wantsMultitrack(row):
 			p.vodDropped = noteVODWithoutMultitrack
 		default:

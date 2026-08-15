@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/AppLayout";
+import { Experimental } from "@/components/Experimental";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
@@ -138,6 +139,22 @@ e: EncoderInfo | undefined): string {
     ? t("rend.encoderTestFailed", { name: e.name })
     : t("rend.encoderRelatedFailed", { name: e.name });
   return e.reason ? `${measured} FFmpeg said: ${e.reason}` : measured;
+}
+
+/** The encoder families whose per-encoder FLAGS have no evidence behind them.
+ *
+ *  Deliberately NOT `encoder.hardware`, which is what this was gated on and
+ *  which made the badge false. `TestEveryConfiguredEncoderOpensWithItsOwnFlags`
+ *  runs a real encode per registered encoder using that encoder's own row from
+ *  `ffmpeg.encoderProfiles` — preset flag, rate control and the capped-VBR path
+ *  included — and `h264_videotoolbox` and `hevc_videotoolbox` pass on macOS.
+ *  Warning a Mac operator off the one hardware family that IS confirmed also
+ *  costs the badge its credibility everywhere else: having watched it fire
+ *  falsely once, they discount it on `h264_nvenc`, where it is true. */
+const UNCONFIRMED_ENCODER_FAMILIES = ["_nvenc", "_qsv", "_vaapi", "_amf"];
+
+function flagsUnconfirmed(name: string | undefined): boolean {
+  return !!name && UNCONFIRMED_ENCODER_FAMILIES.some((family) => name.endsWith(family));
 }
 
 /** As much of a reason as fits on a dropdown row. The full text is on the
@@ -1686,6 +1703,25 @@ function RenditionDialog({
               )}
               {encoderProblem(t, encoder) && (
                 <span className="text-[10px] text-down">{encoderProblem(t, encoder)}</span>
+              )}
+              {/* Only on NVENC, QSV, VA-API and AMF, and only about the FLAGS.
+                  Gated on the encoder FAMILY rather than on `hardware`, which
+                  is what it used to read and which made the badge false on
+                  VideoToolbox — see flagsUnconfirmed. libx264/libx265 argv has
+                  been running in production since before renditions existed,
+                  and the VideoToolbox argv is covered by a real encode in
+                  TestEveryConfiguredEncoderOpensWithItsOwnFlags. Nothing is
+                  disabled here — the encoder stays selectable and the save
+                  still works. */}
+              {flagsUnconfirmed(encoder?.name) && (
+                <Experimental>
+                  The command-line flags polyemesis hands {encoder?.name} have not been confirmed
+                  on real hardware. They were read off FFmpeg's own option tables inside a
+                  container, and no NVENC, QSV or VA-API encode has been observed running with
+                  them &mdash; including the capped-VBR fix, whose whole effect is on this argv.
+                  A probe verdict of &ldquo;works&rdquo; above means this encoder opened here; it
+                  does not mean the rate control below behaves as the numbers say it will.
+                </Experimental>
               )}
               {!caps?.tested && choices.length > 0 && (
                 <span className="text-[10px] text-muted-foreground">

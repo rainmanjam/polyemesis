@@ -109,6 +109,85 @@ its first tagged release.
   arrives there predates the negotiation; fixed anyway, since that is a property
   of the current callers rather than of the function.
 
+### Added
+- **The second (VOD) audio mix has a UI.** `vodProfile` shipped complete — the
+  column, the migration, the API, `routing.CompilePair`, the engine's gate on
+  Twitch's one-track ingest — and appeared in the frontend exactly once, as a
+  type on line 268 of `types.ts`. An operator could switch Enhanced Broadcasting
+  on, watch it negotiate, and have no way to say what the second mix *contained*;
+  the feature was API-reachable only.
+
+  It is now edited on **Routing → Second (VOD) audio mix**, and it is the SAME
+  editor the live mix uses rather than a second one written beside it. Both are
+  a `routing.Profile`, so the block under the destination picker was extracted
+  into one `ProfileEditor` component and is rendered twice — same track picks,
+  mix matrix, music rights, loudness, delay, ducking, presets, and its own
+  compiled filter graph from the same Go code that will run. Two things had to
+  change to make it reusable: every DOM id is now namespaced (`id="norm"` became
+  a duplicate the moment there were two editors, so clicking the second one's
+  label moved the first one's control), and each instance compiles itself
+  instead of borrowing a result that is not its own.
+
+  Off is the default and stays the default. Switching it on seeds the second mix
+  from the live one, so the first edit is the actual difference. Switching it
+  off sends an explicit `null` — the API decodes over the stored row, so an
+  omitted field would leave the pointer alone and the operator would watch their
+  delete undo itself on the next load.
+
+  The editor is **not** gated on Twitch: `routing.CompilePair` →
+  `engine/destinations.go` → `ffmpeg.secondAudioMap` is a real two-mix egress
+  and correct for every other target. What is gated on Twitch is the
+  *explanation*. Where Enhanced Broadcasting is off on a Twitch RTMP
+  destination, the engine refuses the pair at plan time and the page says the
+  second mix is **not being sent**, in those words. Where it is on, the page
+  says the answer is decided at go-live and lands on the destination card — it
+  does not claim a second track that no negotiation has granted yet.
+
+### Changed
+- **Two features are now labelled EXPERIMENTAL throughout — labelled, not
+  gated.** Twitch Enhanced Broadcasting and hardware encoding both shipped in
+  0.7.0 with a gap in the evidence behind them, and the label names where each
+  gap actually starts. For Enhanced Broadcasting it is *after* the negotiation:
+  `internal/multitrack/live_test.go` reaches `ingest.twitch.tv` on every run and
+  Twitch accepts a supported-GPU inventory, grants a VOD audio track and mints a
+  key — what has never been observed is a broadcast published through that key,
+  and `internal/engine`'s wiring around it has only ever been driven by an
+  `httptest` server. For hardware encoding it is the `_nvenc`, `_qsv`, `_vaapi`
+  and `_amf` flags — eight of the twelve encoder profiles — which were read off
+  FFmpeg's option tables inside a GPU-less container. Both remain fully enabled,
+  nothing is hidden, no opt-in env var or feature flag exists, and every control
+  works exactly as before.
+
+  **The first version of these labels was wrong in both directions, and only
+  running something found it.** They asserted that the negotiation had never
+  reached Twitch while a non-skipping test in the tree reached it on every green
+  build, and they warned a Mac operator off `h264_videotoolbox` — the one
+  hardware family a real encode confirms. A claim about what has *never* been
+  tested can only be checked by running the test.
+
+  One convention, applied everywhere, and each use names the specific untested
+  claim rather than saying "beta": a `<Experimental>` component in the UI
+  (`ui/src/components/Experimental.tsx`), an `// EXPERIMENTAL: <what is
+  unverified>` line in Go doc comments, a `> **EXPERIMENTAL — <claim>.**`
+  blockquote in docs, and a leading `**EXPERIMENTAL.**` sentence on a changelog
+  entry. The badge deliberately uses the neutral `outline` variant: the app's
+  saturated tokens mean the state of a *destination*, and "unverified on
+  hardware" is a property of the feature.
+
+  This also corrects one claim that read as stronger than it was.
+  `encoderProfiles`' doc comment said the values were "verified by running
+  `ffmpeg -h encoder=<name>` and a real one-frame encode" — true, but the option
+  table answers on a machine with no such device, and the one-frame encode only
+  ran for encoders the container could open. The narrower evidence that *does*
+  exist is now named where the table lives:
+  `TestEveryConfiguredEncoderOpensWithItsOwnFlags` runs a real encode per
+  registered encoder with that encoder's own row — capped-VBR path included —
+  and answers for whichever encoders the machine running it registers. A CI
+  runner with an NVIDIA card would retire the NVENC caveat by itself.
+
+  The UI badge is gated on the encoder *family* rather than on
+  `encoder.hardware`, which is what made it fire on VideoToolbox.
+
 ## [0.7.0] — 2026-08-14
 
 ### Security
@@ -358,7 +437,18 @@ its first tagged release.
   it.**
 
 ### Added
-- **Twitch Enhanced Broadcasting is now reachable.** `internal/multitrack` was
+- **Twitch Enhanced Broadcasting is now reachable. EXPERIMENTAL: no broadcast
+  has ever been published through a key it minted.** The negotiation is not the
+  gap — `internal/multitrack/live_test.go` reaches `ingest.twitch.tv` on every
+  run and Twitch answers: a supported-GPU inventory is accepted, a VOD audio
+  track is granted, and a key is minted. What has never been observed is
+  anything after that. No second audio track has been seen arriving at Twitch,
+  and `internal/engine`'s wiring around the negotiation has only ever been
+  driven by an `httptest` server; watching it end to end needs a real stream key
+  and a real broadcast. Nothing is gated on that label: the feature is linked in,
+  the toggle is one click, and a negotiation that does not succeed falls back
+  to the ordinary Twitch ingest — the path every install used before this
+  existed. `internal/multitrack` was
   complete, documented and tested, and nothing imported it: `go list -deps
   ./cmd/polyemesis` did not include the package, the `multitrack` column on a
   destination was written by the API, migrated, persisted, scanned back and
@@ -434,6 +524,14 @@ its first tagged release.
   for. It fetches a configuration from Twitch, reads the verdict, and resolves
   the ingest endpoint and stream key it hands back. Nothing publishes through it
   yet; see below for what is deliberately not built.
+
+  **EXPERIMENTAL:** the four measurements below come from responses Twitch sent
+  to this package's own requests, and `live_test.go` asks for them again on
+  every run rather than replaying a capture — so a change at the far end shows
+  up as a failing test rather than as a fixture that has quietly stopped being
+  true. A declared GPU inventory does get past Twitch's hardware check. What is
+  untested is everything after the negotiation answers: no key minted here has
+  ever carried a broadcast.
 
   Four things were measured against the live endpoint rather than assumed, and
   each one changes what the code has to do:
@@ -732,12 +830,22 @@ its first tagged release.
   either — selectable in the editor, dead at go-live.
 
   All twelve now carry a profile, and the values were read off real encoder
-  option tables rather than inferred. That mattered: **`-profile:v high` is
+  option tables rather than inferred. **EXPERIMENTAL: an option table is not
+  silicon.** `ffmpeg -h encoder=<name>` is answered from the binary and returns
+  the same text on a machine with no such device in it, which is the machine
+  every one of these twelve was read on — so no NVENC, QSV or VA-API encode has
+  been observed running with the flags below. The `libx264`/`libx265` rows are
+  exempt: that argv predates renditions. Nothing is disabled by the label; a
+  flag that is wrong surfaces as an encoder that refuses to open, which the
+  start gate already reports by name. That mattered: **`-profile:v high` is
   H.264 only, and an HEVC encoder does not ignore it, it refuses to open**
   (`x265 [error]: unknown profile <high>`). Copying the existing rows across —
   the obvious fix — would have broken every HEVC encode instead of fixing one.
 
-- **Capped VBR did nothing on NVENC.** `-rc cbr` was appended unconditionally,
+- **Capped VBR did nothing on NVENC. EXPERIMENTAL: the fix has not been
+  confirmed on an NVIDIA card.** The whole effect of this change is on an argv
+  nobody has watched NVENC accept — the reasoning below is from FFmpeg's option
+  tables and source, on a host with no GPU. `-rc cbr` was appended unconditionally,
   immediately before `-b:v/-maxrate/-bufsize`, so a rendition with a ceiling
   above its target still ran constant-bitrate and the operator's number was
   inert. The mode is now chosen from what was asked for, and emitted before the

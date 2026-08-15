@@ -2,6 +2,46 @@
 // IVS runs it -- calls Multitrack Video, and which Twitch's own error text calls
 // both names within a single response body.
 //
+// EXPERIMENTAL: THE NEGOTIATION RUNS AGAINST TWITCH AND SUCCEEDS. WHAT HAS
+// NEVER BEEN OBSERVED IS A BROADCAST PUBLISHED THROUGH A MINTED KEY. Read that
+// precisely: the boundary runs through Negotiate's return, not around this
+// package.
+//
+//   - UP TO THAT RETURN, this is measured against ingest.twitch.tv itself.
+//     live_test.go reaches the real endpoint on every run and does not skip:
+//     it gets Twitch's refusal verbatim, it gets a SUCCESSFUL negotiation that
+//     accepts a supported-GPU inventory and grants a VOD audio track alongside
+//     a single video track, and it gets back a key Twitch minted -- 314
+//     characters, from the 44 it was sent. The observations under "THREE
+//     THINGS MEASURED" below are those responses.
+//
+//   - AFTER THAT RETURN, nothing has been observed. No minted key has ever
+//     carried a broadcast and no second audio track has been seen arriving at
+//     Twitch; that needs a real stream key and a real broadcast. See
+//     engine.negotiateDestination, whose own wiring has only ever been driven
+//     by an httptest server -- so the translation between this package and
+//     polyemesis is the part still without live evidence, not the protocol.
+//
+// TWITCH VALIDATES THE DECLARED INVENTORY, NOT THE HARDWARE. live_test.go
+// declares an `NVIDIA GeForce RTX 3080` and Twitch grants Enhanced
+// Broadcasting -- on an Apple M1 Ultra, which has no such card in it. The
+// vendor ID, device ID and driver version are checked as SENT, against a list
+// Twitch does not publish; the endpoint has no way to see the machine. That is
+// the same fact docs/ENCODING.md states when it calls the GPU requirement "a
+// gate, not a workload", and it is why Settings asks an operator to declare an
+// inventory rather than reading one: polyemesis sends what it is told.
+//
+// Nothing here can fail a broadcast either way -- Negotiate turns every error
+// into a Refused outcome and the caller publishes to the ordinary Twitch ingest
+// -- so the cost of being wrong is the feature not working, not a broadcast not
+// going out. See engine.negotiateDestination, which is built around exactly
+// that guarantee.
+//
+// The label is NOT a switch. This package is linked in, the toggle is
+// reachable, and an operator with the hardware can use it today. Deleting this
+// paragraph is for whoever first watches a broadcast go out through a key
+// Twitch minted.
+//
 // WHAT THIS IS FOR. polyemesis publishes one AAC stereo track to an RTMP
 // destination, because that is what RTMP ingests were measured to take (see
 // db.AudioEncoding.copyProblems, which refuses a copied multitrack RTMP
@@ -20,7 +60,10 @@
 // is knowable ahead of the call.
 //
 // THREE THINGS MEASURED AGAINST THE LIVE ENDPOINT, each of which shapes the
-// code below and none of which is an assumption:
+// code below and none of which is an assumption. They are OBSERVATIONS OF WHAT
+// TWITCH SENT in answer to this package's own requests -- live_test.go still
+// asks for all three on every run, which is the only canary for Twitch
+// changing any of them:
 //
 //  1. A REFUSAL ARRIVES AS HTTP 200. Every response observed -- valid, invalid,
 //     unsupported hardware, unparseable schema version -- was 200. The verdict
