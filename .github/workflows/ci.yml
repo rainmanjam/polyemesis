@@ -55,12 +55,15 @@ jobs:
   # Does this pull request contain anything an acceptance suite could break?
   #
   # THE EXPENSIVE HALF OF THIS WORKFLOW RAN ON MARKDOWN. Three documentation-only
-  # PRs on 2026-08-14 each fired all 27 checks -- the full acceptance matrix,
+  # PRs on 2026-08-14 each fired all 28 checks -- the full acceptance matrix,
   # three-OS builds, Docker and browser suites -- to validate files no job reads.
   # One of them was a single file. See #350.
   #
-  # WHY THIS GATES STEPS AND NOT JOBS. Twelve of the acceptance suites are
-  # REQUIRED status checks. A workflow-level `paths:` filter stops the workflow
+  # WHY THIS GATES STEPS AND NOT JOBS. The acceptance suites are REQUIRED status
+  # checks -- twelve of them when this was written, thirteen since
+  # acceptance-ladder joined the matrix, and a leg's context has to be added to
+  # the branch-protection ruleset by hand or it reports without gating anything.
+  # A workflow-level `paths:` filter stops the workflow
   # running at all, so a required check never reports and the pull request stays
   # pending forever with no way to merge it.
   #
@@ -68,7 +71,7 @@ jobs:
   # shipped it. A skipped ordinary job does report, and a skip does satisfy the
   # requirement -- but a skipped MATRIX job never expands its matrix, so the
   # per-leg contexts are never created at all. The checks list showed one entry
-  # named literally `acceptance: ${{ matrix.suite }}`, the twelve required
+  # named literally `acceptance: ${{ matrix.suite }}`, the required
   # contexts were absent rather than skipped, and #349 -- a documentation-only
   # pull request, the exact case this was built for -- was unmergeable. Fifteen
   # green checks and no way in.
@@ -1178,8 +1181,8 @@ jobs:
   acceptance:
     name: "acceptance: ${{ matrix.suite }}"
     runs-on: ubuntu-latest
-    # NO JOB-LEVEL `if:` HERE, DELIBERATELY, and #351 is why. All twelve of
-    # these are required checks. A skipped matrix job never expands its matrix,
+    # NO JOB-LEVEL `if:` HERE, DELIBERATELY, and #351 is why. These are required
+    # checks. A skipped matrix job never expands its matrix,
     # so the per-leg contexts are not skipped -- they do not exist, and the
     # pull request can never satisfy branch protection. The `if:` is on every
     # step below instead: the matrix expands, all twelve report, and a
@@ -1205,6 +1208,26 @@ jobs:
           - acceptance          # end to end: ingest, fan-out, persistence
           - acceptance-audio    # per-track RMS through a bandpass
           - acceptance-renditions
+          # The LADDER: three tiers at once, which acceptance-renditions cannot
+          # cover because every test in it uses ONE rendition and one is the
+          # only number it ever counts. This counts three, and counts them going
+          # up and down, which is the claim docs/ENCODING.md attaches a bill to.
+          #
+          # ADDING A LEG HERE ADDS A REQUIRED STATUS CHECK. The matrix is named
+          # `acceptance: ${{ matrix.suite }}` and every leg of it is required by
+          # branch protection, so this is not a free addition: the new context
+          # has to be added to the ruleset or pull requests will show it as an
+          # extra check that nothing waits for.
+          #
+          # It belongs in the matrix rather than in a workflow of its own for
+          # the same reason acceptance-renditions does: it needs nothing but
+          # FFmpeg and the built binary, it contacts no external service, and
+          # the thing it guards -- how many encodes an operator is paying for --
+          # is broken by ordinary changes to the engine's reconcile. A suite
+          # that only runs on dispatch is a suite that reports a regression
+          # after it has shipped. Measured at 75s locally, which is inside the
+          # spread of the legs already here.
+          - acceptance-ladder
           - acceptance-encoders
           - acceptance-tls
           - acceptance-pull     # dial-out ingest

@@ -389,7 +389,7 @@ Note that `e2e/` is Playwright's and is excluded from vitest in
 
 ## 10. Acceptance suites
 
-Fifteen scripts drive the built binary — or the shipped image — through a real
+Sixteen scripts drive the built binary — or the shipped image — through a real
 ingest and assert on what came out the other end. They need `make build` first,
 and they are the only tests that can fail on something the unit tests cannot
 see.
@@ -400,6 +400,7 @@ Against the host binary:
 ./scripts/acceptance.sh              # per-destination audio routing, by measurement
 ./scripts/acceptance-audio.sh        # per-track RMS through a bandpass
 ./scripts/acceptance-renditions.sh   # one shared encode serving two destinations
+./scripts/acceptance-ladder.sh       # three tiers at once: N encodes, ref-counted up and down
 ./scripts/acceptance-tls.sh          # every TLS mode, including the old configs
 ./scripts/acceptance-encoders.sh     # hardware-encoder detection
 ./scripts/acceptance-failover.sh     # a source switch without restarting a destination
