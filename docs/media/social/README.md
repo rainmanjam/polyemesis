@@ -36,6 +36,14 @@ The meter bars use fixed heights rather than random ones, so re-rendering
 produces a byte-comparable image. A preview that changes on every build is one
 nobody can review.
 
+## Candidates
+
+`card-a.html` … `card-d.html` are proposed replacements, rendered alongside a
+400px version of each because that is roughly the size an unfurl is actually
+seen at. [ITERATIONS.md](ITERATIONS.md) says what each is optimising for and
+where each one fails. None of them is live: the card above stays until one is
+chosen and promoted over `card.html`.
+
 ## What it shows, and why
 
 Three destinations taking three different subsets of the same three tracks, each

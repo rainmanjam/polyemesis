@@ -1,0 +1,241 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>polyemesis social card — B, the mix matrix</title>
+<style>
+  /* Tokens copied verbatim from ui/src/index.css. The card is the product's
+     own palette, not an approximation of it — DESIGN-SYSTEM.md's whole point is
+     that :root is the system and every consumer reads the same block.
+
+     Note --primary: the matrix fill is the interaction accent, NOT a signal
+     colour, because a gain is a setting and not a state. index.css is explicit
+     that saturated colour is reserved for signal, so the grid must not be
+     green. ui/src/components/signature/MixMatrix.tsx fills its cells with
+     bg-primary/30 for exactly this reason, and this card copies that. */
+  :root {
+    --surface: #0f1115;
+    --card: #141821;
+    --card-raised: #1a1f2b;
+    --muted: #1c222e;
+    --muted-foreground: #8b94a7;
+    --subtle-foreground: #5d6779;
+    --primary: #5b7fc7;
+    --primary-dim: #253148;
+    --border: #232a38;
+    --border-strong: #303a4d;
+    --live: #3ecf6d;
+    --armed: #45b5d0;
+    --meter-low: #3ecf6d;
+    --meter-mid: #cfd23e;
+    --meter-high: #e8a33d;
+    --meter-peak: #e5484d;
+    --foreground: #e6e9ef;
+    --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 1280px; height: 640px;
+    background: var(--surface);
+    color: var(--foreground);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  .card {
+    width: 100%; height: 100%;
+    padding: 56px 64px;
+    display: grid;
+    grid-template-columns: 0.86fr 1fr;
+    gap: 48px;
+    align-items: center;
+    position: relative;
+  }
+
+  .card::before {
+    content: "";
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(900px 400px at 8% 100%, rgba(62,207,109,.09), transparent 65%),
+      radial-gradient(700px 340px at 72% 0%, rgba(91,127,199,.10), transparent 60%);
+    pointer-events: none;
+  }
+
+  .left { position: relative; z-index: 1; }
+
+  .wordmark { display: flex; align-items: center; gap: 14px; margin-bottom: 26px; }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 30px; }
+  .bars i { width: 4px; border-radius: 1px; display: block; }
+  .name { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+
+  /* Two lines, per DESIGN-SYSTEM.md's rule for the hero. The contrast is the
+     whole headline, so the verb carries the accent. */
+  h1 {
+    font-size: 56px; line-height: 1.07; font-weight: 640;
+    letter-spacing: -0.028em;
+    margin-bottom: 20px;
+  }
+  h1 em { font-style: normal; color: var(--live); }
+
+  .sub {
+    font-size: 20px; line-height: 1.45; color: var(--muted-foreground);
+    max-width: 27ch;
+  }
+
+  .foot {
+    margin-top: 28px;
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-mono); font-size: 14px;
+    color: var(--muted-foreground);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 99px; background: var(--live); }
+
+  /* The matrix. Rows are the ingest tracks, columns the destinations, and each
+     cell is the gain that track contributes to that destination's mix. The real
+     component (MixMatrix.tsx) is channel-level and far denser; this is the same
+     operation at the resolution a 400px-wide thumbnail can actually carry. */
+  .panel {
+    position: relative; z-index: 1;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 22px 18px;
+  }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 12px;
+    color: var(--muted-foreground);
+    padding-bottom: 12px; margin-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .live-pill { display: inline-flex; align-items: center; gap: 6px; color: var(--live); }
+
+  table { width: 100%; border-collapse: separate; border-spacing: 6px 6px; }
+
+  /* Column heads: the destinations. */
+  th.dest {
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+    letter-spacing: .03em; text-transform: uppercase;
+    color: var(--muted-foreground);
+    padding-bottom: 2px; text-align: center;
+  }
+  th.corner { width: 88px; }
+
+  /* Row heads: the ingest tracks, colour-keyed to the meter palette the app
+     already uses for them. */
+  th.track {
+    text-align: left; font-size: 14px; font-weight: 550;
+    white-space: nowrap; padding-right: 4px;
+  }
+  th.track i {
+    display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+    margin-right: 8px; vertical-align: baseline;
+  }
+
+  /* A cell has to work twice: as a precise number at full size, and as a filled
+     or empty block at thumbnail size, where 11px mono is gone. The fill height
+     IS the gain, so the grid still reads as a pattern when the digits do not. */
+  td.cell {
+    position: relative;
+    height: 62px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--muted);
+    overflow: hidden;
+    text-align: center;
+  }
+  td.cell.on { border-color: var(--primary); }
+  td.cell .fill {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: var(--primary);
+    opacity: .34;
+  }
+  td.cell .g {
+    position: relative;
+    display: block; line-height: 62px;
+    font-family: var(--font-mono); font-size: 17px;
+    font-variant-numeric: tabular-nums;
+    color: var(--subtle-foreground);
+  }
+  td.cell.on .g { color: var(--foreground); }
+
+  .legend {
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--muted-foreground);
+  }
+</style>
+
+<div class="card">
+  <div class="left">
+    <div class="wordmark">
+      <div class="bars" id="bars"></div>
+      <div class="name">polyemesis</div>
+    </div>
+
+    <!-- docs/COMPARISON.md:46 — "They select a track. polyemesis mixes." -->
+    <h1>They select<br>a track.<br>polyemesis <em>mixes</em>.</h1>
+
+    <p class="sub">
+      A gain per source track, per destination — summed, then loudness-matched
+      after the routing.
+    </p>
+
+    <div class="foot">
+      <span class="dot"></span> SRT multitrack · self-hosted · MIT
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span>MIX MATRIX &middot; GAIN PER CELL</span>
+      <span class="live-pill"><span class="dot"></span> 3 LIVE</span>
+    </div>
+
+    <table>
+      <tr>
+        <th class="corner"></th>
+        <th class="dest">YouTube</th>
+        <th class="dest">Twitch</th>
+        <th class="dest">Podcast</th>
+      </tr>
+      <tr>
+        <th class="track"><i style="background:var(--live)"></i>mic</th>
+        <td class="cell on"><span class="fill" style="height:100%"></span><span class="g">1.00</span></td>
+        <td class="cell on"><span class="fill" style="height:100%"></span><span class="g">1.00</span></td>
+        <td class="cell on"><span class="fill" style="height:100%"></span><span class="g">1.00</span></td>
+      </tr>
+      <tr>
+        <th class="track"><i style="background:var(--armed)"></i>music</th>
+        <td class="cell on"><span class="fill" style="height:71%"></span><span class="g">0.71</span></td>
+        <td class="cell"><span class="fill" style="height:0%"></span><span class="g">0.00</span></td>
+        <td class="cell"><span class="fill" style="height:0%"></span><span class="g">0.00</span></td>
+      </tr>
+      <tr>
+        <th class="track"><i style="background:var(--meter-mid)"></i>co-host</th>
+        <td class="cell on"><span class="fill" style="height:100%"></span><span class="g">1.00</span></td>
+        <td class="cell on"><span class="fill" style="height:85%"></span><span class="g">0.85</span></td>
+        <td class="cell"><span class="fill" style="height:0%"></span><span class="g">0.00</span></td>
+      </tr>
+    </table>
+
+    <div class="legend">
+      One ingest · one video encode · a different stereo mix out of each column
+    </div>
+  </div>
+</div>
+
+<script>
+  /* The wordmark's meter bars. Deterministic heights rather than random, so
+     re-rendering the card produces the same image. */
+  const heights = [10, 18, 26, 30, 22, 14, 20, 28];
+  const colours = ["--meter-low","--meter-low","--meter-mid","--meter-high",
+                   "--meter-mid","--meter-low","--meter-low","--meter-mid"];
+  const el = document.getElementById("bars");
+  heights.forEach((h, i) => {
+    const b = document.createElement("i");
+    b.style.height = h + "px";
+    b.style.background = `var(${colours[i]})`;
+    el.appendChild(b);
+  });
+</script>
