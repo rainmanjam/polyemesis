@@ -133,6 +133,7 @@
   "chatpage.subtitle": "Jede Plattform in einer Zeitleiste, mit einem Sendefeld.",
   "chatpage.timeline": "Zeitleiste",
   "chatpage.title": "Chat",
+  "chrome.developmentBuild": "Entwicklungs-Build {current}. Für Builds aus dem Quellcode werden keine Updates angeboten — die Releases-Seite zeigt, was veröffentlicht wurde.",
   "chrome.dismiss": "Schließen",
   "chrome.ingest": "Ingest",
   "chrome.language": "Sprache",

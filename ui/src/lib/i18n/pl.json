@@ -133,6 +133,7 @@
   "chatpage.subtitle": "Wszystkie platformy na jednej osi czasu, z jednym polem wysyłania.",
   "chatpage.timeline": "Oś czasu",
   "chatpage.title": "Czat",
+  "chrome.developmentBuild": "Kompilacja deweloperska {current}. Dla kompilacji ze źródeł nie są oferowane aktualizacje — sprawdź stronę wydań, aby zobaczyć, co zostało opublikowane.",
   "chrome.dismiss": "Zamknij",
   "chrome.ingest": "Ingest",
   "chrome.language": "Język",

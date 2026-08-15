@@ -133,6 +133,7 @@
   "chatpage.subtitle": "Tüm platformlar tek bir zaman çizelgesinde, tek bir gönderme kutusuyla.",
   "chatpage.timeline": "Zaman çizelgesi",
   "chatpage.title": "Sohbet",
+  "chrome.developmentBuild": "Geliştirme derlemesi {current}. Kaynaktan yapılan derlemeler için güncelleme sunulmaz — yayımlananları görmek için sürümler sayfasına bakın.",
   "chrome.dismiss": "Kapat",
   "chrome.ingest": "Ingest",
   "chrome.language": "Dil",

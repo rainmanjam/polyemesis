@@ -133,6 +133,7 @@
   "chatpage.subtitle": "すべてのプラットフォームを一つのタイムラインに、送信欄も一つ。",
   "chatpage.timeline": "タイムライン",
   "chatpage.title": "チャット",
+  "chrome.developmentBuild": "開発ビルド {current}。ソースからのビルドには更新は提供されません。公開済みの内容はリリースページをご確認ください。",
   "chrome.dismiss": "閉じる",
   "chrome.ingest": "Ingest",
   "chrome.language": "言語",
