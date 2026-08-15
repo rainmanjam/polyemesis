@@ -692,6 +692,13 @@ export function Dashboard() {
         actions={
           <Button
             size="sm"
+            // The onboarding tour's step 4. This button, and not the one in the
+            // empty state below, because the header renders whatever the
+            // destination count is — the empty-state twin disappears the moment
+            // the operator adds their first destination, which is precisely
+            // when somebody replaying the tour from Settings would be looking
+            // for it. See ui/src/lib/tourSteps.ts.
+            data-tour="add-destination"
             onClick={() => {
               setEditing(null);
               setDialogOpen(true);

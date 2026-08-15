@@ -217,6 +217,16 @@ a decision about the resource that a role-level scope must not override.
 | `POST` | `/auth/password` |
 | `GET` `POST` | `/auth/tokens` |
 | `DELETE` | `/auth/tokens/{id}` |
+| `GET` | `/tour` |
+| `POST` | `/tour/complete` |
+
+`/tour` is the onboarding tour's "has this operator been offered it already",
+kept on the server rather than in the browser so a second machine does not
+re-offer it. `GET` returns `{"completed": bool, "completedAt": <unix, 0 if
+never>}`; `POST /tour/complete` is idempotent — the first completion wins, and
+dismissing the offer writes the same thing as finishing the tour. The `POST`
+needs an `admin` token: it is a write to user state, and a read-only credential
+does not get to change what another operator's console shows them.
 
 ### State and telemetry
 

@@ -165,6 +165,73 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// tourState is the body both tour handlers return, so a caller that just wrote
+// does not have to re-read to learn what the state now is.
+type tourState struct {
+	Completed bool `json:"completed"`
+	// Unix seconds, 0 when the tour has never been finished or dismissed. The
+	// zero is carried rather than omitted: a client that special-cased a missing
+	// field would be reading the same thing twice.
+	CompletedAt int64 `json:"completedAt"`
+}
+
+// handleTourState answers whether the onboarding tour should still be offered.
+//
+// It resolves the SINGLE admin account rather than the calling principal, which
+// is not a shortcut -- this product has exactly one user row, enforced by
+// CreateUser's WHERE NOT EXISTS, and a token principal has no user of its own to
+// ask about. handleMe already resolves the admin the same way for the same
+// reason.
+//
+// A GET on an install that has not completed first-run setup answers 404 rather
+// than inventing a "not completed": there is nobody yet whose tour this would
+// be, and 200 with a plausible-looking body is how a client comes to believe an
+// unconfigured install is a configured one.
+func (s *Server) handleTourState(w http.ResponseWriter, r *http.Request) {
+	u, err := s.store.GetUser()
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no admin user configured")
+		return
+	}
+	at, err := s.store.TourCompletedAt(u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, tourState{Completed: at > 0, CompletedAt: at})
+}
+
+// handleTourComplete records that the tour has been finished or dismissed.
+//
+// IDEMPOTENT, and deliberately not a toggle. The UI calls it when the operator
+// finishes the tour and again when they dismiss the offer, and the two can race
+// -- clicking "done" on the last step also destroys the popover, which is the
+// same path a dismissal takes. A toggle would make the second call undo the
+// first and the offer would come back on the next page load.
+//
+// The FIRST completion wins, so the timestamp answers "when did this operator
+// first stop needing the tour" rather than "when did they last replay it".
+func (s *Server) handleTourComplete(w http.ResponseWriter, r *http.Request) {
+	u, err := s.store.GetUser()
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no admin user configured")
+		return
+	}
+	at, err := s.store.TourCompletedAt(u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if at == 0 {
+		at = time.Now().Unix()
+		if err := s.store.SetTourCompleted(u.ID, time.Unix(at, 0)); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, tourState{Completed: true, CompletedAt: at})
+}
+
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Current string `json:"current"`

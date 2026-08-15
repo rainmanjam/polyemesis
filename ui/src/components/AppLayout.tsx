@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 
 import { UpdateBanner } from "./UpdateBanner";
+import { TourOffer } from "./Tour";
 import {
   Activity,
   AudioLines,
@@ -63,14 +64,22 @@ type NavItem = {
   to: string;
   icon: React.ComponentType<{ className?: string }>;
   end?: boolean;
+  /** The onboarding tour's anchor for this entry, when it has one.
+   *
+   *  Written out as a LITERAL rather than derived from `to`, and that is the
+   *  whole point: ui/src/lib/tour-drift.test.ts asserts that the selector in
+   *  lib/tourSteps.ts appears in this file as an attribute, and a computed
+   *  `data-tour={`nav-${to}`}` would leave nothing for it to find — the guard
+   *  would go vacuous while still passing. See the note on TOUR_STEPS. */
+  tour?: string;
 } & ({ labelKey: TranslationKey; label?: never } | { label: string; labelKey?: never });
 
 const NAV: NavItem[] = [
   { to: "/", labelKey: "nav.dashboard", icon: LayoutDashboard, end: true },
-  { to: "/sources", labelKey: "nav.sources", icon: RadioTower },
+  { to: "/sources", labelKey: "nav.sources", icon: RadioTower, tour: "nav-sources" },
   { to: "/meters", labelKey: "nav.meters", icon: AudioLines },
-  { to: "/routing", labelKey: "nav.routing", icon: Sliders },
-  { to: "/renditions", labelKey: "nav.renditions", icon: Layers },
+  { to: "/routing", labelKey: "nav.routing", icon: Sliders, tour: "nav-routing" },
+  { to: "/renditions", labelKey: "nav.renditions", icon: Layers, tour: "nav-renditions" },
   { to: "/playout", labelKey: "nav.playout", icon: Radio },
   { to: "/library", labelKey: "nav.library", icon: Library },
   { to: "/recordings", labelKey: "nav.recordings", icon: Disc },
@@ -124,6 +133,13 @@ export function AppLayout({
     <div className="flex h-dvh flex-col bg-surface">
       {/* ---- top bar: the always-visible answer to "am I on air?" ---- */}
       <UpdateBanner />
+      {/* An OFFER, not a launch. It renders nothing once the tour has been
+          taken or dismissed, and nothing at all until the server has said
+          which. Above the header and outside <main> so it pushes the console
+          down rather than covering any of it — a strip that overlays the
+          status bar would hide the one thing an operator mid-broadcast is
+          watching. See components/Tour.tsx. */}
+      <TourOffer />
 
       <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-background px-3">
         <Button
@@ -254,7 +270,7 @@ export function AppLayout({
               mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
             )}
           >
-            {NAV.map(({ to, labelKey, label, icon: Icon, end }) => {
+            {NAV.map(({ to, labelKey, label, icon: Icon, end, tour }) => {
               const text = labelKey ? t(labelKey) : label;
               // Tooltip/TooltipTrigger mount UNCONDITIONALLY -- only
               // TooltipContent below is gated on navCollapsed. Earlier this
@@ -275,6 +291,10 @@ export function AppLayout({
                       key={to}
                       to={to}
                       end={end}
+                      // The onboarding tour highlights three of these links.
+                      // undefined on every other entry, so React emits no
+                      // attribute at all and the selector stays unique.
+                      data-tour={tour}
                       // The icon is aria-hidden (lucide's default when an icon
                       // gets no a11y prop of its own) and the label span below is
                       // display:none while collapsed, so without this the

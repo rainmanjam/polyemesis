@@ -11,17 +11,17 @@
   "shapeFloor": 27,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 213,
-    "swept": 63,
+    "methodPatternPairs": 215,
+    "swept": 64,
     "excused": 50,
-    "denied": 100,
+    "denied": 101,
     "nonTrieProbes": 12,
     "shapesEmitted": 27,
     "shapesNotInspected": 3
   },
   "partition": {
     "differential": 8,
-    "invariant": 51,
+    "invariant": 52,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 1,
     "unstable": 3
@@ -904,6 +904,16 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/tour",
+      "coverage": "swept"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/tour/complete",
+      "coverage": "denied-by-method"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/upgrade/plan",
       "coverage": "swept"
     },
@@ -1144,7 +1154,7 @@
       "class": "invariant"
     },
     {
-      "path": "/api/v1/chat/users?platform=twitch&authorId=1",
+      "path": "/api/v1/chat/users?platform=twitch\u0026authorId=1",
       "pattern": "GET /api/v1/chat/users",
       "class": "invariant"
     },
@@ -1238,11 +1248,6 @@
       "class": "invariant"
     },
     {
-      "path": "/api/v1/hooks/meta",
-      "pattern": "GET /api/v1/hooks/meta",
-      "class": "invariant"
-    },
-    {
       "path": "/api/v1/hooks/1",
       "pattern": "GET /api/v1/hooks/{id}",
       "class": "invariant"
@@ -1252,6 +1257,11 @@
       "pattern": "GET /api/v1/hooks/{id}/deliveries",
       "class": "invariant",
       "inert": true
+    },
+    {
+      "path": "/api/v1/hooks/meta",
+      "pattern": "GET /api/v1/hooks/meta",
+      "class": "invariant"
     },
     {
       "path": "/api/v1/jobs/overview",
@@ -1372,13 +1382,13 @@
       "class": "invariant"
     },
     {
-      "path": "/api/v1/renditions/presets",
-      "pattern": "GET /api/v1/renditions/presets",
+      "path": "/api/v1/renditions/1",
+      "pattern": "GET /api/v1/renditions/{id}",
       "class": "invariant"
     },
     {
-      "path": "/api/v1/renditions/1",
-      "pattern": "GET /api/v1/renditions/{id}",
+      "path": "/api/v1/renditions/presets",
+      "pattern": "GET /api/v1/renditions/presets",
       "class": "invariant"
     },
     {
@@ -1392,15 +1402,15 @@
       "class": "invariant"
     },
     {
+      "path": "/api/v1/schedules/1",
+      "pattern": "GET /api/v1/schedules/{id}",
+      "class": "invariant"
+    },
+    {
       "path": "/api/v1/schedules/runs",
       "pattern": "GET /api/v1/schedules/runs",
       "class": "invariant",
       "inert": true
-    },
-    {
-      "path": "/api/v1/schedules/1",
-      "pattern": "GET /api/v1/schedules/{id}",
-      "class": "invariant"
     },
     {
       "path": "/api/v1/services",
@@ -1500,6 +1510,11 @@
     {
       "path": "/api/v1/tls",
       "pattern": "GET /api/v1/tls",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/tour",
+      "pattern": "GET /api/v1/tour",
       "class": "invariant"
     },
     {
