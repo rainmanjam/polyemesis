@@ -1312,10 +1312,37 @@ jobs:
           # and no per-connection timeout, so one slow mirror connection stalls
           # the whole acquisition until the step ceiling fires.
           APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=60 -o Acquire::http::ConnectionAttemptDelayMsec=1000"
-          sudo apt-get $APT_OPTS update -qq
+
+          # BOUND EACH ATTEMPT WELL INSIDE THE STEP CEILING, then retry the whole
+          # thing. This is the part Acquire::Retries cannot do.
+          #
+          # Acquire::Retries retries a FILE within one apt run, and the observed
+          # failure is not a file erroring -- it is the whole acquisition sitting
+          # on a stalled connection until the 6-minute step ceiling fires and
+          # takes the job with it. Six occurrences now: acceptance-postprod,
+          # acceptance-pull, acceptance-mqtt, acceptance-audio, and today
+          # acceptance-renditions and acceptance-failover together.
+          #
+          # `timeout` turns "stalls for six minutes and kills the job" into
+          # "stalls for 100 seconds and is retried", which fits three attempts
+          # plus the install inside the ceiling with room to spare.
+          #
+          # NOT the cached pinned 8.1 build the other jobs use, though that would
+          # solve this outright. It was tried, and it broke acceptance-failover
+          # -- see the note above and issue #398. Reliability and the version
+          # change are separable, and this is the half that carries no risk.
+          apt_try() {
+            for attempt in 1 2 3; do
+              if sudo timeout 100 apt-get $APT_OPTS "$@"; then return 0; fi
+              echo "apt attempt $attempt failed or stalled; retrying"
+              sleep 5
+            done
+            return 1
+          }
+          apt_try update -qq
           # lsof as well: three suites read the engine's relay port out of it
           # to measure the right socket, and they fail obscurely without it.
-          sudo apt-get $APT_OPTS install -y --no-install-recommends ffmpeg lsof
+          apt_try install -y --no-install-recommends ffmpeg lsof
           ffmpeg -hide_banner -version | head -1
           # Not fatal: none of these suites needs SRT (the container ones do,
           # and they run elsewhere). Logged because a suite behaving oddly is
