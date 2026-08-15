@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
@@ -257,4 +258,76 @@ func TestACreateThatCannotResolveASourceIsNotABadRequest(t *testing.T) {
 				"can branch on", body.Code)
 		}
 	})
+}
+
+// PR 3b, and it is a different bug that happens to share this branch.
+//
+// Every mutating handler in this package called the DEFAULT engine's Reconcile.
+// With one programme that is right by accident; with two it means editing the
+// second programme's destination saves the row, answers 200, and reconciles the
+// first -- so nothing takes effect until a restart and nothing on screen says
+// why. sources.go has carried a comment about this hazard since sources landed,
+// and it was never true only of the source routes.
+//
+// THE WITNESS IS THE ENGINE SET, because that is the difference between the two
+// calls rather than a consequence of it. Manager.Reconcile re-derives which
+// engines should exist from the sources table and then reconciles each of them;
+// an engine's own Reconcile cannot do either. So a source that appeared without
+// the API being told has an engine afterwards, and did not before.
+//
+// A destination process would be the more obvious witness and does not work: no
+// engine plans one until the ingest layout has been MEASURED, and nothing is
+// arriving in a unit test, so neither engine spawns anything and the two are
+// indistinguishable that way.
+func TestAMutationReconcilesEveryProgrammeRatherThanTheDefault(t *testing.T) {
+	h, store, auth := renditionServer(t, defaultTools())
+	s := serverUnderTest(t, h)
+
+	dest, err := store.CreateDestination(&db.Destination{
+		Name: "Main out", Kind: db.DestRTMP, URL: "rtmp://ingest.example/app",
+		StreamKey: "sk-main",
+	})
+	if err != nil {
+		t.Fatalf("create a destination: %v", err)
+	}
+
+	// Written straight to the store, ON PURPOSE: POST /sources reconciles
+	// through the manager already, so creating it through the route would build
+	// the engine and this test would pass whatever the destination handler
+	// does.
+	second := &db.Source{Name: "Vertical", Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	if err := store.CreateSource(second); err != nil {
+		t.Fatalf("create the second source: %v", err)
+	}
+	if s.mgr.Engine(second.ID) != nil {
+		t.Fatal("the second source already has an engine before any reconcile, so this " +
+			"test cannot tell the two calls apart")
+	}
+
+	r := jsonRequest(t, http.MethodPut, fmt.Sprintf("/api/v1/destinations/%d", dest.ID),
+		map[string]any{"name": "Main out, renamed"})
+	auth(r)
+	if w := do(t, h, r); w.Code != http.StatusOK {
+		t.Fatalf("update the destination: %d %s", w.Code, w.Body.String())
+	}
+
+	if s.mgr.Engine(second.ID) == nil {
+		t.Fatalf("after a destination update, source %d still has no engine. The handler "+
+			"reconciled the default programme and nothing else, which is the whole of "+
+			"PR 3b: with two programmes, a mutation takes effect on one of them.", second.ID)
+	}
+}
+
+// The nil-manager half, which every server in this package's unit tests has and
+// which is why the check lives in the helper rather than at seventeen call
+// sites.
+func TestReconcilingWithNoManagerIsNothingRatherThanAPanic(t *testing.T) {
+	s, _, _ := testServer(t, config.Config{})
+	if s.mgr != nil {
+		t.Fatal("this fixture grew a manager; it is here for the case where there is none")
+	}
+	if err := s.reconcile(); err != nil {
+		t.Fatalf("reconcile with no manager returned %v, want nil: nothing is running, "+
+			"which is not a failure to report", err)
+	}
 }

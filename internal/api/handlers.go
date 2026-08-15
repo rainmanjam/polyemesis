@@ -764,7 +764,7 @@ func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		s.log.Warn("annotations saved to the source but not mirrored to settings", "err", err)
 	}
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, "annotations saved but reconcile failed: "+err.Error())
 		return
 	}
@@ -1183,7 +1183,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// default engine saved the setting and changed nothing: enabling shared
 	// ingest returned 200 while no listener ever bound, which is exactly the
 	// kind of silent no-op that is worse than an error.
-	if err := s.mgr.Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, "settings saved but reconcile failed: "+err.Error())
 		return
 	}
@@ -1500,7 +1500,7 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		writeCreateError(w, err)
 		return
 	}
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after destination create", "err", err)
 	}
 	resp := map[string]any{"destination": created}
@@ -1558,7 +1558,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	}
 	// Reconcile restarts only this destination, and only if the change
 	// actually affects its command line.
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after destination update", "err", err)
 	}
 
@@ -1612,7 +1612,7 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after destination delete", "err", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -1628,7 +1628,7 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

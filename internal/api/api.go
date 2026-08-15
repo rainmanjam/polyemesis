@@ -88,6 +88,36 @@ func (s *Server) engOrNil() *engine.Engine {
 	return s.eng()
 }
 
+// reconcile makes what is running match what is stored, for EVERY programme.
+//
+// Through the manager, never through one engine, and that is the fix rather
+// than a tidy-up. Eleven handlers called s.eng().Reconcile(), which reconciles
+// the DEFAULT source and nothing else -- so on an install with two programmes,
+// editing the second one's destination saved the row and reconciled the first.
+// Nothing on screen said so: the response was a 200 and the change simply did
+// not take until a restart. sources.go's opening comment has described this
+// hazard for the source routes since they landed; it was never true only of
+// them.
+//
+// Manager.Reconcile is a superset of the old call in the direction that
+// matters: it re-derives the engine set from the sources table and then
+// reconciles each engine, so the default programme is still reconciled and the
+// others stop being skipped. It costs a Sync per mutation, which is a store
+// read and a map comparison.
+//
+// A nil manager is not an error. Every server in this package's unit tests has
+// one, and the caller's question -- "is what is running what is stored" -- is
+// answered by "nothing is running" rather than by a failure. The callers that
+// only warn keep warning and the callers that return 500 keep returning 500;
+// what changes is which engines were reconciled, not how a failure is
+// reported.
+func (s *Server) reconcile() error {
+	if s.mgr == nil {
+		return nil
+	}
+	return s.mgr.Reconcile()
+}
+
 // tools is the FFmpeg this install detected.
 //
 // OFF THE MANAGER, NOT OFF AN ENGINE, and that is the whole point of it having

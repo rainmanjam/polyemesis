@@ -822,7 +822,7 @@ func (s *Server) handlePutExpert(w http.ResponseWriter, r *http.Request) {
 	// running state are never allowed to drift. The arguments ride in the
 	// destination's restart signature, so this is what actually applies them —
 	// the destination is torn down and respawned with the new command line.
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after expert args update", "err", err)
 	}
 
@@ -857,7 +857,7 @@ func (s *Server) handleDeleteExpert(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after expert args delete", "err", err)
 	}
 	resp := expertResponse{
