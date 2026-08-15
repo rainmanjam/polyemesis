@@ -133,6 +133,7 @@
   "chatpage.subtitle": "所有平台汇入一条时间线，共用一个发送框。",
   "chatpage.timeline": "时间线",
   "chatpage.title": "聊天",
+  "chrome.developmentBuild": "开发版本 {current}。从源码构建的版本不提供更新——请查看发布页面了解已发布的内容。",
   "chrome.dismiss": "关闭",
   "chrome.ingest": "Ingest",
   "chrome.language": "语言",

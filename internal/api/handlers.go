@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -441,8 +442,43 @@ func newerThan(latest, current string) (newer, comparable bool) {
 	if !ok {
 		return false, false
 	}
+	// A BUILD FROM SOURCE IS NOT A PRE-RELEASE OF THE TAG IT NAMES.
+	//
+	// `git describe --tags` emits `v0.6.0-167-g346af01`, meaning 167 commits
+	// AFTER v0.6.0. parseSemver reads everything past the first hyphen as a
+	// pre-release, and compareSemver then applies the semver rule that a
+	// release outranks any pre-release of the same numbers -- correctly, for a
+	// real `-rc1`. The result on a source build is the banner offering v0.6.0
+	// as an upgrade over v0.6.0-167-g346af01, which is a DOWNGRADE, and
+	// "Prepare update" would stage it.
+	//
+	// It is worst for the operators who are most current: right now a build
+	// from main is the only way to have 0.7.0's security fixes, and those are
+	// exactly the installs being told they are behind.
+	//
+	// NOT-COMPARABLE rather than "newer", because that is the truth. A source
+	// build cannot be ordered against a release feed: it may be ahead of the
+	// tag it names and behind some later tag, and nothing in the string says
+	// which. This function already returns `comparable` for precisely this --
+	// "an unparseable version must not be reported as up to date, and it must
+	// not be reported as out of date either" -- and a describe build is the
+	// same situation wearing a parseable shape.
+	if isSourceBuild(c.pre) {
+		return false, false
+	}
 	return compareSemver(l, c) > 0, true
 }
+
+// describeSuffix matches the `<commits>-g<sha>` tail `git describe --tags`
+// appends, with the optional `-dirty` a working tree adds.
+//
+// Anchored at both ends so a genuine pre-release cannot match: `rc1` has no
+// commit count, `beta-2-gabcdefg` would need the whole string to be the
+// suffix, and `0-g1234567` -- zero commits past the tag, which git emits only
+// with --long -- is still a source build and still not orderable.
+var describeSuffix = regexp.MustCompile(`^[0-9]+-g[0-9a-f]{7,40}(-dirty)?$`)
+
+func isSourceBuild(pre string) bool { return describeSuffix.MatchString(pre) }
 
 type semver struct {
 	nums [3]int
