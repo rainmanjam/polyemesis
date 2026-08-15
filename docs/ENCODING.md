@@ -62,6 +62,13 @@ ingests directly.
 - Two ingests each needing 1080p and 720p is four encodes. That is where a card
   stops being optional.
 
+These three sentences are a claim about a bill, so they are measured rather than
+asserted. `scripts/acceptance-ladder.sh` builds a real 1080p/720p/480p ladder off
+one ingest and counts the encoder processes in the live process table: three
+tiers are three encodes, a fourth destination joining an existing tier is still
+three and joins the same process rather than restarting it, and the encode stops
+only when its LAST subscriber leaves. It prints the CPU each tier actually cost.
+
 Twelve encoders are offered: `libx264` and `libx265` in software, plus **ten
 hardware** encoders — NVENC, QSV, VAAPI, VideoToolbox and AMF, each in H.264 and
 HEVC.

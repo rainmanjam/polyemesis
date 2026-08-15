@@ -323,7 +323,7 @@ rm -rf "$WORK9"
 
 step "10. Every suite installs that exact trap, not its own variant"
 # Case 9 proves the SHAPE works. This proves the shape is what the suites
-# actually carry -- thirteen files is twelve chances to drift, and a suite that
+# actually carry -- fourteen files is thirteen chances to drift, and a suite that
 # quietly reverted to `trap 'poly_watchdog_disarm; cleanup' EXIT` would go back
 # to discarding the verdict while every check above still passed.
 #
@@ -337,7 +337,7 @@ step "10. Every suite installs that exact trap, not its own variant"
 SUITES="acceptance.sh acceptance-audio.sh acceptance-encoders.sh acceptance-failover.sh
 acceptance-mqtt.sh acceptance-playlist-phase0.sh acceptance-postprod.sh acceptance-pull.sh
 acceptance-recording-stop.sh acceptance-renditions.sh acceptance-synth.sh acceptance-tls.sh
-acceptance-obs-multitrack.sh"
+acceptance-obs-multitrack.sh acceptance-ladder.sh"
 missing=""
 checked=0
 for s in $SUITES; do
@@ -349,12 +349,12 @@ for s in $SUITES; do
 	grep -Fqx "$TRAP_SHAPE" "$SCRIPTS/$s" || missing="$missing $s"
 	grep -q "poly_cleanup_exit" "$SCRIPTS/$s" || missing="$missing $s(no-poly_cleanup_exit)"
 done
-if [[ "$checked" -ne 13 ]]; then
-	bad "only $checked of 13 named suites exist; a renamed suite would make this check pass by examining nothing"
+if [[ "$checked" -ne 14 ]]; then
+	bad "only $checked of 14 named suites exist; a renamed suite would make this check pass by examining nothing"
 elif [ -n "$missing" ]; then
 	bad "these suites do not carry the shared trap shape:$missing"
 else
-	ok "all 13 suites carry the shared trap and call poly_cleanup_exit"
+	ok "all 14 suites carry the shared trap and call poly_cleanup_exit"
 fi
 
 total=$((pass + fail))

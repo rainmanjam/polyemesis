@@ -11,6 +11,7 @@ Measured 2026-07-28 against a running Docker instance on FFmpeg 8.1.2.
 | | `acceptance-audio.sh` | 35 | green |
 | | `acceptance-encoders.sh` | 32 | green |
 | | `acceptance-renditions.sh` | 29 | green |
+| | `acceptance-ladder.sh` | 45 | green |
 | | `acceptance-tls.sh` | 35 | green |
 | | `acceptance-postprod.sh` | 12 | green |
 | E2E (shipped container) | `acceptance-docker.sh` | 28 | green |
