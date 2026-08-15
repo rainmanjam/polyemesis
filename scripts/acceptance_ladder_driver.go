@@ -335,36 +335,64 @@ func main() {
 	// ------------------------------------------------- ref counting DOWNWARDS
 	fmt.Println("removing destination B — the 720p rung still has D on it")
 	remove(facts["DEST_B_ID"])
-	// Long enough for Reconcile to have run and for a doomed child to have been
-	// reaped. Measured teardown of one FFmpeg is a few seconds.
-	time.Sleep(6 * time.Second)
+
+	// TWO WAITS, SPELLED SEPARATELY, and #370 is why. That fix found a sleep in
+	// acceptance-failover doing two different jobs: letting time elapse, and
+	// waiting for a condition. Six seconds was "how long it happened to take on
+	// the machine where the line was written", and on the OVH box it was not
+	// enough -- the suite refused to measure and reported two failures against a
+	// feature that was working. The same six seconds was sitting here.
+	//
+	// (a) A CONDITION: has the engine PROCESSED the removal yet? The ref count
+	//     is the engine saying so, and polling it is bounded by the answer
+	//     rather than by someone's laptop.
+	facts["CONSUMERS_720_AFTER_DROP_ONE"] = strconv.Itoa(
+		waitForConsumers(tierOf("720").id, 1, 30*time.Second))
+	// (b) ELAPSED TIME, genuinely, and this one has to stay a sleep. The
+	//     assertion below is that the 720p encode SURVIVED, and an absence of an
+	//     event cannot be polled for: reading the instant the ref count moved
+	//     would pass against an engine that killed the tier a second later.
+	//     holdStill is the window in which that mistake would become visible.
+	time.Sleep(holdStill)
 	facts["PROCS_AFTER_DROP_ONE"] = strconv.Itoa(totalEncoders())
 	for _, t := range tiers {
 		facts["N_"+t.label+"_AFTER_DROP_ONE"] = strconv.Itoa(countEncoders(t.mark))
 		facts["PID_"+t.label+"_AFTER_DROP_ONE"] = strings.Join(pidsFor(t.mark), ",")
 	}
-	facts["CONSUMERS_720_AFTER_DROP_ONE"] = strconv.Itoa(status().rendition(tierOf("720").id).Consumers)
 
 	fmt.Println("removing destination D — the LAST subscriber of the 720p rung")
 	remove(facts["DEST_D_ID"])
-	time.Sleep(8 * time.Second)
+	facts["CONSUMERS_720_AFTER_DROP_LAST"] = strconv.Itoa(
+		waitForConsumers(tierOf("720").id, 0, 30*time.Second))
+	// A condition this time, because here the tier is supposed to GO -- and the
+	// helper reports what it LAST SAW rather than what it was waiting for, which
+	// is the whole difference between a check and a formality. An encode that
+	// leaked never reaches zero, the poll times out, and the count recorded
+	// below is the real one. Mutating the engine's ref-count gate is what proved
+	// that: the poll runs its full 30s and the suite still says "1 encoder".
+	waitForEncoders(tierOf("720").mark, 0, 30*time.Second)
 	facts["PROCS_AFTER_DROP_LAST"] = strconv.Itoa(totalEncoders())
 	for _, t := range tiers {
 		facts["N_"+t.label+"_AFTER_DROP_LAST"] = strconv.Itoa(countEncoders(t.mark))
 		facts["PID_"+t.label+"_AFTER_DROP_LAST"] = strings.Join(pidsFor(t.mark), ",")
 	}
 	r720 := status().rendition(tierOf("720").id)
-	facts["CONSUMERS_720_AFTER_DROP_LAST"] = strconv.Itoa(r720.Consumers)
 	facts["RENDITION_720_RUNNING_AFTER_DROP_LAST"] = boolStr(r720.Process != nil)
 
 	// ------------------------------------------------------------- shut down
 	// Stopped rather than deleted, and last, because stopping is what flushes
 	// and closes a file destination's output. The shell probes all four files
-	// after this returns.
+	// after this returns, so what is waited for here is the WRITER going away --
+	// a condition, observable by name in the process table, rather than a guess
+	// at how long a flush takes on this machine.
 	fmt.Println("stopping the surviving destinations so their files close")
 	stop(facts["DEST_A_ID"])
 	stop(facts["DEST_C_ID"])
-	time.Sleep(5 * time.Second)
+	for _, out := range []string{"ladder-1080.mkv", "ladder-480.mkv"} {
+		waitForGone(out, 30*time.Second)
+	}
+	waitForEncoders(tierOf("1080").mark, 0, 30*time.Second)
+	waitForEncoders(tierOf("480").mark, 0, 30*time.Second)
 	facts["PROCS_AFTER_ALL_STOPPED"] = strconv.Itoa(totalEncoders())
 	fmt.Println("driver done")
 }
@@ -688,6 +716,77 @@ func (w window) record(phase string) {
 }
 
 // ------------------------------------------------------- waiting on the engine
+
+// holdStill is elapsed time ON PURPOSE, and the only sleep left in this file
+// that is not a poll.
+//
+// It exists for the one assertion that cannot be polled: that an encode
+// SURVIVED a removal. A condition can be waited for; the absence of an event
+// cannot, so proving nothing happened means giving it a window in which to
+// happen and then looking. Five seconds is comfortably longer than a measured
+// reconcile-plus-reap, which is what a wrong engine would need to tear the tier
+// down in.
+const holdStill = 5 * time.Second
+
+// EVERY POLL BELOW RETURNS WHAT IT LAST SAW, NEVER WHAT IT WANTED.
+//
+// This is the property that keeps them from turning checks into formalities. A
+// helper that waited for a value and then handed that value back would make its
+// caller's assertion unfalsifiable -- it would be asserting the thing the
+// helper had already guaranteed. Returning the final observation means a
+// timeout produces the REAL number, the caller records it, and the shell fails
+// with the truth in the message. See scripts/acceptance-failover.sh's
+// wait_for_dest_process, which hands back the last read for the same reason.
+
+// waitForConsumers polls a rung's ref count until it reaches want.
+func waitForConsumers(id int64, want int, d time.Duration) int {
+	deadline := time.Now().Add(d)
+	got := -1
+	for {
+		got = status().rendition(id).Consumers
+		if got == want || !time.Now().Before(deadline) {
+			if got != want {
+				fmt.Printf("  consumers on rendition %d settled at %d, not the %d expected, after %s\n",
+					id, got, want, d)
+			}
+			return got
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// waitForEncoders polls one rung's encoder count until it reaches want.
+func waitForEncoders(mark string, want int, d time.Duration) int {
+	return waitForCount("encoders matching "+mark, func() int { return countEncoders(mark) }, want, d)
+}
+
+// waitForGone polls until no process carries substr in its argv -- used to wait
+// for a file destination's writer to exit, which is what closes its output.
+func waitForGone(substr string, d time.Duration) int {
+	return waitForCount("processes writing "+substr, func() int {
+		n := 0
+		for _, r := range psProcs() {
+			if strings.Contains(r.args, substr) && strings.Contains(r.args, "ffmpeg") {
+				n++
+			}
+		}
+		return n
+	}, 0, d)
+}
+
+func waitForCount(what string, count func() int, want int, d time.Duration) int {
+	deadline := time.Now().Add(d)
+	for {
+		got := count()
+		if got == want || !time.Now().Before(deadline) {
+			if got != want {
+				fmt.Printf("  %s settled at %d, not the %d expected, after %s\n", what, got, want, d)
+			}
+			return got
+		}
+		time.Sleep(time.Second)
+	}
+}
 
 func waitForProbe() {
 	deadline := time.Now().Add(60 * time.Second)
