@@ -3,6 +3,7 @@ package secrets
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -241,23 +242,91 @@ func TestLoadOrCreateGeneratesThenReusesTheSameKey(t *testing.T) {
 	}
 }
 
-func TestLoadOrCreateWritesAPrivateKeyFile(t *testing.T) {
+// TestTheKeyFileIsPrivateWhetherThisProcessWroteItOrFoundIt.
+//
+// The two halves used to be one half. Creating the file was careful and READING
+// it accepted whatever mode it found, so a key file that arrived by any other
+// route kept that mode silently and for ever. Every route is an ordinary
+// operator action: `tar x` from an archive built without --same-permissions,
+// `cp` under the default umask 022, an rsync without -p, a hand-written file
+// following the docs. All of them land at 0644, and this file decrypts every
+// destination stream key in the database -- so the whole seal-at-rest guarantee
+// is worth exactly the mode of this one file.
+//
+// db.Open already runs fsperm.SecureFile over polyemesis.db and its two
+// sidecars on EVERY open, after the same gap was found on a real server. This
+// was the one credential file not getting it.
+//
+// ONE TEST FUNCTION RATHER THAN TWO, and the reason is the skip. The Windows
+// guard below is a bare skip, and internal/testenv's census counts those per
+// package precisely so a second one is a reviewable act rather than a drift. A
+// second function asserting the same property about the same file, needing the
+// same guard, does not earn one.
+//
+// Mutation: delete the `fsperm.SecureFile(path)` call from LoadOrCreate's read
+// branch (secrets.go). Observed to fail on all four "found" subtests with "the
+// key file was left at 0644 after a successful read", and to pass on "created"
+// -- which is the divergence, exactly. Restored with `command cp -f` from a
+// file backup; `diff` against the backup reported IDENTICAL.
+func TestTheKeyFileIsPrivateWhetherThisProcessWroteItOrFoundIt(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix file modes do not apply on windows")
 	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "secret.key")
-	if _, err := LoadOrCreate(path); err != nil {
-		t.Fatalf("LoadOrCreate: %v", err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	// The key at rest is the whole security boundary: anyone who can read this
-	// file can decrypt every credential in the database.
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("key file mode is %04o, want 0600", perm)
+
+	t.Run("created", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "secret.key")
+		if _, err := LoadOrCreate(path); err != nil {
+			t.Fatalf("LoadOrCreate: %v", err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		// The key at rest is the whole security boundary: anyone who can read
+		// this file can decrypt every credential in the database.
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("key file mode is %04o, want 0600", perm)
+		}
+	})
+
+	for _, mode := range []os.FileMode{0o644, 0o664, 0o666, 0o640} {
+		t.Run(fmt.Sprintf("found at %04o", mode), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "secret.key")
+			key := bytes.Repeat([]byte{0x11}, keySize)
+			if err := os.WriteFile(path, []byte(hex.EncodeToString(key)), mode); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			// os.WriteFile applies the umask, so the fixture is only a fixture
+			// if the mode really landed. Without this the test passes vacuously
+			// on any host with a restrictive umask -- which is most CI runners.
+			if err := os.Chmod(path, mode); err != nil {
+				t.Fatalf("chmod: %v", err)
+			}
+			if info, err := os.Stat(path); err != nil {
+				t.Fatalf("stat: %v", err)
+			} else if got := info.Mode().Perm(); got != mode {
+				t.Fatalf("the fixture is at %04o, not %04o: this subtest would prove nothing", got, mode)
+			}
+
+			box, err := LoadOrCreate(path)
+			if err != nil {
+				t.Fatalf("LoadOrCreate: %v", err)
+			}
+
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatalf("stat after load: %v", err)
+			}
+			if perm := info.Mode().Perm(); perm != 0o600 {
+				t.Errorf("the key file was left at %04o after a successful read: anyone who "+
+					"can read it can decrypt every destination stream key in the database, "+
+					"which is the one thing this package claims to prevent", perm)
+			}
+			// The key still loaded, or this hardened a file by breaking it.
+			if box == nil || !bytes.Equal(box.key[:], key) {
+				t.Error("the key read back wrong after being narrowed")
+			}
+		})
 	}
 }
 

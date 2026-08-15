@@ -85,7 +85,7 @@ func destSecrets(row *db.Destination, extra ...string) []string {
 // transformation nobody has hit yet: this pass costs one scan of a handful of
 // short strings and holds for all of them.
 //
-// TWO expansions, and the second is the one that carries the measurement:
+// THREE expansions, and the second is the one that carries the measurement:
 //
 //   - THE TRIMMED FORM. alerts.NewSecretSet trims every value it is handed
 //     today, so this is currently redundant THERE -- it is emitted because what
@@ -95,6 +95,37 @@ func destSecrets(row *db.Destination, extra ...string) []string {
 //   - THE PREFIX ENDING AT THE FIRST CONTROL CHARACTER, which is the form the
 //     wire actually carried. Trimming does not reach it: ESC is not whitespace,
 //     so strings.TrimSpace returns the 65 bytes unchanged.
+//
+//   - THE PREFIX ENDING AT THE FIRST '?', which is the same defect reached by a
+//     route nobody had to paste anything to hit. It is the SAME TRUNCATION
+//     CLASS as the control-character case: a value is stored in one spelling
+//     and appears on the wire in a shorter one, so the long literal cannot
+//     match the short text.
+//
+//     THE CASE THAT SHIPPED. engine/multitrack.go registers the Twitch minted
+//     key AFTER multitrack.withConfigID has appended "?clientConfigId=<uuid>"
+//     -- Outcome.Target.Key is that composed value and there is no field
+//     carrying the bare one. So the registered literal is strictly longer than
+//     the minted key itself, and any text carrying the key WITHOUT the query
+//     went unmasked: a manifest, an FFmpeg message that stopped at the '?',
+//     anything that split the URL on its query. What survived was
+//     v1_<signature>_<manifest>_<MASK> -- the operator's original key masked
+//     because it is a suffix, and the signature and manifest standing. Exactly
+//     the half-fix destSecrets's own doc comment above warns about, arrived at
+//     from the other direction.
+//
+//     It is also the RIGHT spelling for an ordinary stream key, independently
+//     of the minted one: Twitch keys carry documented query parameters
+//     ("?bandwidthtest=true"), so a key stored with one has a bare form that
+//     reaches the wire whenever the parameter is dropped.
+//
+//     The cost is bounded and known. wireSpellings is applied to literals that
+//     are ALREADY secret in full -- keys, userinfo, last path segments, expert
+//     argv values -- so this can only ever mask a PREFIX of something already
+//     masked. The one place it widens reach is an expert-args token that is a
+//     whole URL with a query, whose host would then be masked on its own too;
+//     expertArgsSecrets is documented as blunt on purpose and already accepts
+//     that a destination's own hostnames get masked beside its keys.
 //
 // ONLY THE FIRST PREFIX, and not every control-delimited segment, which the
 // first draft emitted. The mechanism is TRUNCATION AT THE FIRST CONTROL BYTE:
@@ -116,6 +147,12 @@ func wireSpellings(values []string) []string {
 			out = append(out, t)
 		}
 		if i := strings.IndexFunc(v, unicode.IsControl); i > 0 {
+			out = append(out, v[:i])
+		}
+		// i > 0, so a value that IS a query -- one starting with '?' -- yields
+		// nothing rather than the empty string. An empty literal in a SecretSet
+		// would match at every position of every line.
+		if i := strings.IndexByte(v, '?'); i > 0 {
 			out = append(out, v[:i])
 		}
 	}

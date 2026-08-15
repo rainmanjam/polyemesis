@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/rainmanjam/polyemesis/internal/fsperm"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -39,6 +40,25 @@ type Box struct {
 }
 
 // LoadOrCreate reads the key file, generating one if it does not exist.
+//
+// THE READ PATH RESTRICTS THE FILE TOO, not only the create path. Creating it
+// was already careful -- 0o700 on the directory and 0o600 on the file below --
+// and reading it accepted whatever mode it happened to find. A key file that
+// arrived any way other than through this function therefore kept that mode
+// silently and for ever: restored from a tar archive that did not preserve
+// permissions, copied with `cp` under umask 022, checked out, rsynced without
+// -p, or written by an operator following the docs by hand. Any of those lands
+// at 0644, and this file is what opens every destination stream key in the
+// database -- so a world-readable one gives up the whole point of sealing them.
+//
+// The database next door already does exactly this: db.Open runs
+// fsperm.SecureFile over polyemesis.db and its two sidecars on EVERY open, for
+// the same reason and after finding the same gap on a real server. This is the
+// one credential file that was not getting it.
+//
+// fsperm rather than os.Chmod(0o600): a FileMode is a Unix concept that Windows
+// discards, so a literal mode here would compile, succeed, and restrict nothing
+// on that platform. See internal/fsperm.
 func LoadOrCreate(path string) (*Box, error) {
 	b, err := os.ReadFile(path)
 	if err == nil {
@@ -48,6 +68,13 @@ func LoadOrCreate(path string) (*Box, error) {
 		}
 		if len(raw) != keySize {
 			return nil, fmt.Errorf("secret key %s is %d bytes, want %d", path, len(raw), keySize)
+		}
+		// AFTER the content checks, so a file that is not a key at all is
+		// reported as such rather than having its permissions quietly changed
+		// first. Before the return, so no caller ever gets a Box from a file
+		// this did not narrow.
+		if err := fsperm.SecureFile(path); err != nil {
+			return nil, fmt.Errorf("restrict secret key %s: %w", path, err)
 		}
 		box := &Box{}
 		copy(box.key[:], raw)

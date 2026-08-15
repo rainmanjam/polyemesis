@@ -1776,6 +1776,34 @@ func (d *DB) backfillDestinationStreamKeys() error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit stream key backfill: %w", err)
 	}
+
+	// THE COMMIT IS NOT THE END OF THE PLAINTEXT. Committing wrote the sealed
+	// rows into the -wal; the pages the plaintext used to live in are still in
+	// the main database file, untouched, until a checkpoint copies the new
+	// pages over them. Between the two, `grep` on either file finds the keys
+	// this function exists to remove -- and the -wal is not even mode-protected
+	// on an install that predates the fsperm pass in Open.
+	//
+	// TRUNCATE rather than PASSIVE or FULL: PASSIVE may copy nothing at all if
+	// a reader is active, and FULL leaves the -wal at full size with the old
+	// frames still in it. TRUNCATE copies everything back and then shortens the
+	// -wal to zero bytes, which is the only variant that removes both copies.
+	//
+	// IT IS NOT SUFFICIENT ON ITS OWN, and neither is secure_delete on its own:
+	// measured against 60 pre-0.7.0 destinations, this checkpoint alone left 2
+	// plaintext copies in freed pages, and secure_delete alone left every copy
+	// that had not yet been checkpointed. Open's DSN supplies the other half.
+	//
+	// A FAILURE HERE IS FATAL, and deliberately so. Open has one connection
+	// (SetMaxOpenConns(1)), so there is no concurrent reader to block the
+	// checkpoint and no expected way for this to fail. If it does, the rows
+	// read back correctly and every automated check passes while the plaintext
+	// is still on disk -- exactly the silent half-fix this change is about. An
+	// operator who sees the startup error can run the remediation in
+	// docs/UPGRADING.md; one who sees nothing cannot.
+	if _, err := d.sql.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return fmt.Errorf("checkpoint after stream key backfill: %w", err)
+	}
 	return nil
 }
 

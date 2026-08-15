@@ -8,7 +8,106 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Security
+- **0.7.0's seal-at-rest migration left the plaintext stream keys it replaced
+  legible in the database file.** The migration writes the ciphertext and blanks
+  the `stream_key` column, and every check that reads the row back through SQL
+  confirms it is empty. `grep` on the raw file disagrees. SQLite unlinks the
+  bytes of a shortened cell without zeroing them — `secure_delete` defaults to
+  **0** under `modernc.org/sqlite`, which is the driver this ships with — and it
+  writes the sealed rows into the write-ahead log rather than over the old pages,
+  so copies survive in both files. Measured on a 60-destination install: 60
+  plaintext copies still in `polyemesis.db` after a clean-shutdown upgrade, and
+  122 in `polyemesis.db-wal` after an upgrade over a server that had been killed.
+
+  This is the one claim `internal/secrets` makes for itself — "a leaked database
+  file … is not a leaked set of live streaming credentials" — and it was false
+  for every install that had upgraded. No attacker is needed and nothing has to
+  go wrong; it is the state a normal upgrade leaves behind.
+
+  The database is now opened with `secure_delete` on, and the migration
+  truncates the write-ahead log once it has committed. Neither half is
+  sufficient alone: with the checkpoint but no pragma, two copies survived in
+  freed pages; with the pragma but no checkpoint, every copy the migration had
+  not yet checkpointed survived in the `-wal`.
+
+  **The pragma only protects writes made after it is set, so an install that
+  already ran the 0.7.0 migration is not fixed by upgrading.** It needs a one-off
+  `VACUUM` plus `PRAGMA wal_checkpoint(TRUNCATE)` with the server stopped — see
+  [UPGRADING](docs/UPGRADING.md#if-you-already-upgraded-to-070-one-off-remediation-required).
+  Any backup taken between upgrading and running that scrub still contains the
+  plaintext and cannot be repaired; rotate those keys instead of trusting the
+  archive.
+
+- **Twitch's negotiated ingest host was never checked, and an omitted
+  `authentication` fell back to the operator's own key.** `multitrack.Resolve`
+  validated that the returned `url_template` was `rtmp://` or `rtmps://` and
+  that it named *a* host — never *which* host. A response carrying
+  `rtmps://attacker.example/app/{stream_key}` resolved cleanly, and the engine
+  replaces a destination's stored target wholesale with what Resolve returns, so
+  nothing downstream reasserted the intended host. The stream key travels in the
+  RTMP connect as the stream name, which means the first packet of that publish
+  hands the credential over.
+
+  The second half made it worse. `key := streamKey; if ep.Authentication != ""
+  { key = ep.Authentication }` reads as a safe default: it means an endpoint
+  that mints no key gets the operator's own long-lived channel credential
+  instead of the per-broadcast one — while `Outcome.Use` documents the minted key
+  as *mandatory*. So the hostile-host case shipped the permanent credential, not
+  a disposable one.
+
+  The host is now constrained to `.global-contribute.live-video.net`, the Amazon
+  IVS contribute domain all three independently measured ingest hosts sit under,
+  and a successful negotiation carrying no minted key is refused rather than
+  substituted for.
+
+- **The credential-carrying POST followed redirects.** `multitrack`'s HTTP
+  client set no `CheckRedirect`, so Go followed up to ten. Go strips
+  `Authorization` and `Cookie` across hosts — but the stream key is in the
+  **body**, and 307/308 preserve the method and replay it. Measured: 301/302/303
+  became GETs and leaked nothing; 307 and 308 delivered 684 bytes of request
+  JSON, stream key included, to a second server. Every redirect is now refused.
+  The same policy is reapplied to an injected client, so the test seam cannot
+  silently drop it.
+
+- **A stream key straddling the 300-byte error snippet was printed unmasked.**
+  The non-2xx path read `scrub(snippet(raw), streamKey)` — truncate first, then
+  look for the key — so a key beginning before offset 300 and ending after it
+  was searched for in a haystack shorter than itself and never matched. Measured
+  with a 55-byte key at offset 270: 30 bytes leaked, and no placeholder appeared
+  anywhere in the line, so the output did not even look redacted. This is
+  [#306](https://github.com/rainmanjam/polyemesis/issues/306)'s exact failure
+  mode reproduced in newer code. Scrubbing is now the outermost transform, and
+  the rule is written down where the next transform will be added.
+
+- **The Twitch minted key was registered as a secret in only one of its two
+  spellings.** The engine registers `Outcome.Target.Key`, which already carries
+  `?clientConfigId=…`; `SecretSet.Scrub` is a substring replace, so text
+  containing the key *without* its query went unmasked. What survived was
+  `v1_<signature>_<manifest>_[redacted]` — the operator's original key masked
+  because it is a suffix, and the signature and hex manifest left standing. The
+  guard that was supposed to catch this registered the bare key, which no code
+  path produces, so it passed while the shipped code leaked. `wireSpellings` now
+  emits the pre-`?` prefix, symmetric with its existing control-character
+  expansion and the same truncation class, and the guard registers what the
+  engine registers.
+
+- **`secret.key` was read at whatever mode it was found in.** Creating it was
+  careful (`0o700` directory, `0o600` file); reading it accepted anything. A key
+  file restored from a tar archive without `--same-permissions`, copied under
+  umask 022, or rsynced without `-p` lands at 0644 and stayed there for ever,
+  silently — and that file decrypts every destination stream key in the
+  database. It is now narrowed on every successful read, the way `db.Open`
+  already treats the database and its sidecars.
+
+- **`ScrubDestinationText` collected a destination's secrets differently from
+  its sibling.** The supervisor spec passes the minted key alongside the row;
+  this path passed only the row, so the two answers to "which strings on this
+  destination are secret" disagreed — and the shorter answer belonged to the
+  function that hands text back to a caller, on its way to a **retained** MQTT
+  topic that cannot be recalled. Not reachable today, because the only text that
+  arrives there predates the negotiation; fixed anyway, since that is a property
+  of the current callers rather than of the function.
 
 ## [0.7.0] — 2026-08-14
 
