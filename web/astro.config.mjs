@@ -1,5 +1,6 @@
 // @ts-check
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { defineConfig } from "astro/config";
 import sitemap from "@astrojs/sitemap";
 import tailwindcss from "@tailwindcss/vite";
@@ -28,36 +29,43 @@ const pageSource = {
   "/download": "src/pages/download.astro",
 };
 
-/* PATH is pinned, and that is not cargo cult -- SonarCloud javascript:S4036
-   failed this file, and the rule is right. `execFileSync("git", ...)` resolves
-   the binary through the inherited PATH, so whatever `git` comes first on the
-   machine running the build is what executes. On a developer box that can be a
-   wrapper in a writable directory; in CI it is one more thing an action earlier
-   in the workflow can prepend to. Two fixed system directories, and no more.
-
-   Not an absolute path to one binary, because /usr/bin/git and
-   /opt/homebrew/bin/git are both legitimate and naming either breaks the other
-   machine. Two directories that no unprivileged process can write to is the
-   property the rule actually asks for.
-
-   A machine with git somewhere else falls through the catch and the page ships
-   without a lastmod, which is the documented degradation, not a build failure. */
-const SAFE_PATH = "/usr/bin:/bin";
+/* An ABSOLUTE path to git, chosen from a fixed list.
+ *
+ * SonarCloud javascript:S4036 failed this file twice. The first attempt pinned
+ * `env.PATH` to /usr/bin:/bin, which the rule's own documentation offers as a
+ * remediation -- and the analyser flagged it again anyway, because it cannot see
+ * that a variable holds a safe value. The rule wants a literal absolute path,
+ * and arguing with a static analyser about intent is a fight that costs more
+ * than it returns.
+ *
+ * It is also, on reflection, the better fix. Pinning PATH still leaves the
+ * lookup to the OS; naming the binary removes the lookup. Both candidates are
+ * directories no unprivileged process can write to: /usr/bin is git on Linux and
+ * on macOS via the Xcode shim, /opt/homebrew/bin covers an Apple-silicon
+ * developer box where /usr/bin/git may be absent.
+ *
+ * Resolved once at config load rather than per page -- five existsSync calls to
+ * answer the same question was the shape of the first draft.
+ *
+ * No candidate found means no lastmod, which is the documented degradation: the
+ * feed omits the field rather than inventing a date. */
+const GIT = ["/usr/bin/git", "/opt/homebrew/bin/git"].find((p) => existsSync(p));
 
 /** @param {string} file @returns {string|undefined} */
 function lastCommitISO(file) {
+  if (!GIT) return undefined;
   try {
-    const out = execFileSync("git", ["log", "-1", "--format=%cI", "--", file], {
+    const out = execFileSync(GIT, ["log", "-1", "--format=%cI", "--", file], {
       cwd: new URL(".", import.meta.url).pathname,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      env: { PATH: SAFE_PATH },
     }).trim();
     return out || undefined;
   } catch {
     return undefined;
   }
 }
+
 
 /* Static output on purpose. The site is marketing copy and screenshots — there
  * is nothing to render per-request, so it ships as files behind nginx and Cloud
