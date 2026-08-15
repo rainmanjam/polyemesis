@@ -12,12 +12,11 @@ You stream once. polyemesis fans it out to as many destinations as you like —
 and each destination gets its *own* audio mix, chosen from the audio tracks your
 encoder sent. Video is copied through untouched.
 
-```
-                                          ┌── YouTube    tracks 1+2   (no music)
-OBS ──SRT, 6 audio tracks──► polyemesis ──┼── Twitch     tracks 1+2+3
-                                          ├── Kick       tracks 1+2+3+4
-                                          └── local file all tracks, unencoded
-```
+![One stream in, a different mix out of each. A routing panel: YouTube gets mic and co-host with no music, Twitch gets mic, music and co-host, the same upload also goes out as a VOD mix without music, and a podcast destination gets the mic alone — each with its own loudness after mixing.](docs/media/social/card-a.png)
+
+One SRT ingest carrying up to 32 tracks; each destination gets its own stereo
+mix summed from the tracks you choose, and a local recording can keep all of
+them unencoded.
 
 ## The problem it solves
 

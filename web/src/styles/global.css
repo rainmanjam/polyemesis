@@ -67,6 +67,17 @@
   --color-cross-dim: #3d2f12;
   --color-meter: #45b5d0;
   --color-down: #e25c5c;
+  /* Two more TRACK colours. The hero panel names four tracks at once — mic,
+     music, co-host, game — and the palette had only two that read as signal, so
+     three of the four chips would have had to share one.
+
+     NOT --color-cross for either: that is documented above as the active
+     crosspoint and nothing else, and borrowing it here would make a legend
+     swatch and a matrix cell mean the same thing while meaning different
+     things. Violet rather than a second blue for `game`, because --color-meter
+     is already cyan and two blues at 20px wide are one colour. */
+  --color-cohost: #e2cf4a;
+  --color-game: #9b7fd4;
 
   --radius-token: 0.5rem;
 
@@ -493,22 +504,10 @@
   }
   .reveal.shown { opacity: 1; transform: none; }
 
-  /* 2. Signal flowing. The dash marches along the hero's route lines at the
-        pace of something actually moving through them. This is the one piece
-        of motion that is genuinely explanatory: it says the lines are a path,
-        not a diagram. */
-  @keyframes flow {
-    to { stroke-dashoffset: -24; }
-  }
-  .route-live {
-    stroke-dasharray: 4 8;
-    animation: flow 1.4s linear infinite;
-  }
-
-  /* Destination loudness bars. Same principle as the hero meters and a
-     narrower amplitude: these carry measured LUFS figures, so the movement has
-     to stay small enough that nobody could misread the bar as reporting a
-     different number than the one printed beside it. 1.5% of width, and the
+  /* 2. Destination loudness bars. These carry measured LUFS figures, so the
+     movement has to stay small enough that nobody could misread the bar as
+     reporting a different number than the one printed beside it. 1.5% of width,
+     and the
      printed figure never moves. */
   @keyframes loud {
     0%, 100% { transform: scaleX(1); }
@@ -523,46 +522,44 @@
     animation: loud 3.4s var(--ease-breath) infinite;
   }
 
-  /* 3. Levels moving. Meter bars breathe by a couple of percent so the hero
-        reads as live rather than as a screenshot of a meter. Deliberately
-        small: a bar swinging its whole width would be a lie about the
-        signal.
+  /* MOMENTARY loudness, which is a different instrument from the one above.
 
-        BALLISTICS, NOT A SINE WAVE. The previous keyframe was symmetric with
-        ease-in-out — the bar took as long to rise as to fall. No meter behaves
-        that way, and an audience of broadcast engineers reads a symmetric
-        wobble as a decorative web animation, which is the one impression this
-        page cannot afford.
+     .loud-bar is integrated LUFS: a long moving average that drifts, so it is
+     slow and barely moves. The hero panel shows MOMENTARY loudness — EBU R128's
+     400ms window — and that genuinely chases programme material. A mic hitting a
+     consonant moves it several LU inside a second.
 
-        A real peak meter has a fast attack and a slow decay: programme
-        material arrives suddenly and the needle chases it, then falls back at
-        a fixed rate. So the rise is ~8% of the cycle and the fall is the rest,
-        and the curve is linear on the way down because a decay that eases out
-        looks like it is being animated rather than measured. */
-  @keyframes meter {
-    0%   { transform: scaleX(0.94); }
-    8%   { transform: scaleX(1); }      /* attack: fast */
-    70%  { transform: scaleX(0.955); }  /* decay: linear, unhurried */
-    100% { transform: scaleX(0.94); }
+     So this is fast and has real amplitude, and both are honest rather than
+     decorative: it is what an M-scale readout does. The hero prints no LUFS
+     figure precisely so that this movement cannot be read as contradicting the
+     measured integrated numbers in LoudnessBars.astro further down the page.
+
+     BALLISTICS, NOT A SINE WAVE, and this is the surviving statement of a rule
+     the old hero meters also followed. A symmetric rise and fall is what no
+     meter does, and an audience of broadcast engineers reads it as a decorative
+     web animation — the one impression this page cannot afford. A real meter
+     chases a transient suddenly and falls back at a fixed rate, so the rise is
+     ~9% of the cycle and the decay is linear the rest of the way: a decay that
+     eases out looks animated rather than measured. */
+  @keyframes loud-momentary {
+    0%   { transform: scaleX(0.90); }
+    9%   { transform: scaleX(1); }      /* a transient arrives */
+    64%  { transform: scaleX(0.935); }  /* and falls back at a fixed rate */
+    100% { transform: scaleX(0.90); }
   }
-  .meter-live {
+  .loud-fast {
     transform-origin: left;
-    animation: meter 2.4s linear infinite;
+    animation: loud-momentary 0.72s linear infinite;
   }
 
-  /* Peak hold. A real meter leaves the highest recent peak marked while the
-     bar itself falls away — it is how you read a transient you did not catch.
-     Held near the top of the bar's travel and released on the same cycle. */
-  @keyframes peak-hold {
-    0%, 8%   { opacity: 0; transform: translateX(0); }
-    9%, 62%  { opacity: 1; transform: translateX(0); }
-    100%     { opacity: 0.25; transform: translateX(-6%); }
-  }
-  .meter-peak-tick {
-    animation: peak-hold 2.4s linear infinite;
-  }
+  /* `meter`/.meter-live, `peak-hold`/.meter-peak-tick and `flow`/.route-live
+     stood here until the hero stopped drawing the six-track fan-out and the
+     signal path. They had no consumers left, and three animated classes with
+     nothing to animate is a false statement about the motion scale this file
+     documents. The ballistics rule they encoded is not lost — it is restated on
+     .loud-fast above, which is now the page's only meter-like motion.
 
-  /* The crosspoint's press used to be a `latch` keyframe here. It is now a
+     The crosspoint's press used to be a `latch` keyframe here. It is now a
      spring in MixMatrix.astro, because a keyframe restarts from scale(0.88)
      every time it is retriggered — visible as a stutter when you toggle a row
      quickly — whereas a spring retargets from wherever the cell currently is.

@@ -1,0 +1,190 @@
+---
+/* The hero panel: one upload, six outputs, each with its own mix.
+ *
+ * This is the product's whole argument in one object, which is why it opens the
+ * page instead of a screenshot. Three things it has to say at a glance: the same
+ * ingest reaches every row, the rows carry DIFFERENT track sets, and the
+ * resulting loudness differs because of it.
+ *
+ * NO LUFS FIGURES HERE, deliberately, and it is what lets the bars move fast.
+ * LoudnessBars.astro further down the page prints measured integrated LUFS from
+ * the capture in scripts/seed_demo.go, and those bars barely move because
+ * integrated loudness is a long average. These bars are MOMENTARY loudness —
+ * R128's 400ms window — which really does chase programme material. Printing a
+ * number next to a fast bar would invite reading the movement as a measurement;
+ * printing none means the panel illustrates routing, which is what it is for.
+ *
+ * BAR LENGTHS ARE ARITHMETIC, NOT DECORATION. A destination whose track set is a
+ * SUPERSET of another's cannot be quieter than it. That exact error shipped once
+ * on this site — an "all six" destination drawn 6.3 LU below a two-track one —
+ * and it is the first thing a broadcast engineer checks. Every pair below holds:
+ *
+ *   Twitch ⊃ VOD ⊃ Facebook ⊃ LinkedIn      92 > 80 > 70 > 55
+ *   Twitch ⊃ YouTube ⊃ Facebook             92 > 86 > 70
+ *   Facebook = Podcast (same tracks)        70 = 70
+ *
+ * YouTube and the VOD row are NOT comparable — neither track set contains the
+ * other — so their lengths are free. Everything else is pinned by the rule.
+ */
+
+const TRACKS = [
+  { key: "mic", label: "mic", cls: "bg-live" },
+  { key: "music", label: "music", cls: "bg-meter" },
+  { key: "cohost", label: "co-host", cls: "bg-cohost" },
+  { key: "game", label: "game", cls: "bg-game" },
+] as const;
+
+type Row = {
+  name: string;
+  mix: string;
+  has: readonly string[];
+  level: number;
+  nested?: boolean;
+  badge?: string;
+};
+
+/* The platform set is the four polyemesis actually signs in to plus the two
+ * shapes that are not a platform at all: a second mix off the same upload, and
+ * a local podcast master. LinkedIn is here because it is the case that makes the
+ * feature obvious to somebody who does not stream games — a talking head that
+ * must not carry the music bed the same broadcast is sending to Twitch. */
+const ROWS: readonly Row[] = [
+  {
+    name: "YouTube",
+    mix: "mic + music + co-host",
+    has: ["mic", "music", "cohost"],
+    level: 86,
+  },
+  {
+    name: "Twitch",
+    mix: "mic + music + co-host + game",
+    has: ["mic", "music", "cohost", "game"],
+    level: 92,
+  },
+  {
+    name: "same upload",
+    mix: "mic + co-host + game · no music",
+    has: ["mic", "cohost", "game"],
+    level: 80,
+    nested: true,
+    badge: "VOD MIX",
+  },
+  { name: "Facebook", mix: "mic + co-host · no music", has: ["mic", "cohost"], level: 70 },
+  { name: "LinkedIn", mix: "mic only", has: ["mic"], level: 55 },
+  { name: "Podcast", mix: "mic + co-host · no music", has: ["mic", "cohost"], level: 70 },
+];
+
+/* DERIVED, never typed in. The badge read "3 LIVE" beside four rows on the card
+ * this came from, and it was right only because the VOD row is not a separate
+ * destination — it is a second mix of an upload already counted. A literal would
+ * go stale the moment a row is added, and a wrong count on the one element
+ * claiming to report live state is worse than no badge. */
+const liveCount = ROWS.filter((r) => !r.nested).length;
+
+/* The gradient is anchored to the FULL track, not to each bar, so a longer bar
+ * reaches further into the hot end of the scale. Sizing the background to
+ * 100/level of the bar's own width is what pins it there — without this every
+ * bar would run green-to-red over its own length and they would all look
+ * identical, which would destroy the one comparison the panel exists to make. */
+const gradient = (level: number) =>
+  `background-image: linear-gradient(90deg, var(--color-live) 0%, var(--color-live) 46%, var(--color-cohost) 72%, var(--color-down) 100%); background-size: ${((100 / level) * 100).toFixed(1)}% 100%;`;
+
+/* MOTION IS KEYED TO THE MIX, NOT TO THE ROW.
+ *
+ * Facebook and Podcast carry the same tracks off the same upload, so their
+ * momentary loudness is the same signal and has to move in lockstep. Phasing by
+ * row index — the obvious thing, and what the first version did — made identical
+ * mixes visibly disagree, which is a claim the panel has no business making and
+ * the sort of detail the audience for this page checks.
+ *
+ * Distinct mixes get their own phase and period for the opposite reason: five
+ * independent programmes never pump in unison, and bars that do read as one
+ * animation driving six elements. */
+const mixKey = (has: readonly string[]) => [...has].sort().join("+");
+const MIXES = [...new Set(ROWS.map((r) => mixKey(r.has)))];
+const phaseOf = (has: readonly string[]) => MIXES.indexOf(mixKey(has));
+---
+
+<div class="card overflow-hidden">
+  <div class="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+    <span class="font-mono text-[11px] uppercase tracking-wider text-subtle">
+      routing · loudness after mix
+    </span>
+    <span class="flex shrink-0 items-center gap-1.5">
+      <span class="size-1.5 rounded-full bg-live"></span>
+      <span class="font-mono text-[11px] text-live">{liveCount} LIVE</span>
+    </span>
+  </div>
+
+  <div class="space-y-3 p-4 sm:p-5">
+    {
+      ROWS.map((r) => (
+        <div>
+          {/* The INDENT IS ON THE LABEL ONLY, never on the bar.
+
+              The card this came from indents the whole nested row, which pushes
+              the VOD bar's left edge in by the gutter — so its length stops
+              being comparable with the rows above and below it. Every bar has to
+              start at the same x or none of them can be compared, and comparing
+              them is the only reason the panel exists. The border and the ↳ do
+              the nesting; the scale stays common. */}
+          <div
+            class:list={[
+              "flex items-start justify-between gap-3",
+              r.nested && "ml-3 border-l border-line-strong pl-3",
+            ]}
+          >
+            <div class="min-w-0">
+              <p class="flex items-center gap-2 text-[13px] leading-tight text-fg">
+                {r.nested && <span class="font-mono text-subtle">↳</span>}
+                <span class="truncate">{r.name}</span>
+                {r.badge && (
+                  <span class="shrink-0 rounded border border-meter/50 px-1 font-mono text-[9px] uppercase tracking-wider text-meter">
+                    {r.badge}
+                  </span>
+                )}
+              </p>
+              <p class="mt-0.5 truncate font-mono text-[11px] text-subtle">{r.mix}</p>
+            </div>
+
+            {/* Track chips, always all four, dimmed where absent. Showing only
+                the tracks a row HAS would make every row look complete; the
+                argument is what each destination is NOT getting. */}
+            <div class="flex shrink-0 items-center gap-1 pt-0.5" aria-hidden="true">
+              {TRACKS.map((t) => (
+                <span
+                  class:list={[
+                    "h-1.5 w-4 rounded-full sm:w-5",
+                    r.has.includes(t.key) ? t.cls : "bg-line-strong",
+                  ]}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-ink">
+            <div
+              class="loud-fast h-full rounded-full"
+              style={`width: ${r.level}%; ${gradient(r.level)} animation-delay: -${(phaseOf(r.has) * 0.19).toFixed(2)}s; animation-duration: ${(0.62 + phaseOf(r.has) * 0.09).toFixed(2)}s`}
+            />
+          </div>
+        </div>
+      ))
+    }
+  </div>
+
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-line px-4 py-2.5">
+    {
+      TRACKS.map((t) => (
+        <span class="flex items-center gap-1.5">
+          <span class:list={["h-1.5 w-4 rounded-full", t.cls]} aria-hidden="true" />
+          <span class="font-mono text-[11px] text-subtle">{t.label}</span>
+        </span>
+      ))
+    }
+    {/* Says what the movement is, so nobody has to guess whether it is data.
+        Momentary loudness moves like this; integrated loudness, which is what
+        the measured panel further down reports, does not. */}
+    <span class="ml-auto font-mono text-[10px] text-subtle">momentary · illustrative</span>
+  </div>
+</div>

@@ -152,23 +152,33 @@ if (!/var\(--motion-instant\)/.test(css)) {
   );
 }
 
-/* The meter keyframe must stay asymmetric.
+/* The meter-like keyframe must stay asymmetric.
  *
  * A symmetric rise and fall is a sine wave, and to the audience this page is
  * written for that reads as a decorative web animation rather than an
  * instrument. Attack fast, decay slow — the check is that the midpoint is NOT
- * the extreme, which is what a 0/50/100 keyframe always is. */
+ * the extreme, which is what a 0/50/100 keyframe always is.
+ *
+ * NOW POINTED AT `loud-momentary`, which is the hero's momentary-loudness bar.
+ * It used to be `meter`, the six-track hero fan-out; that hero was replaced by
+ * the routing table and its keyframe went with it. The RULE did not change and
+ * neither did the reason for it, so the guard followed the motion rather than
+ * being deleted alongside the thing it happened to be watching — a check that
+ * quietly stops guarding anything is worse than no check, which is exactly what
+ * the `if (!kf)` arm below exists to prevent. */
 /* NB: matched against the css as-built, NOT a whitespace-stripped copy. The
  * first version of this check stripped whitespace first, which turned
  * "@keyframes meter" into "@keyframesmeter" and matched nothing — the guard
  * passed on a deliberately symmetric keyframe. Caught by mutating the source
  * and watching the build stay green. */
-const meterKf = /@keyframes\s+meter\s*\{((?:[^{}]*\{[^{}]*\})*)\s*\}/.exec(css);
+const meterKf = /@keyframes\s+loud-momentary\s*\{((?:[^{}]*\{[^{}]*\})*)\s*\}/.exec(css);
 if (!meterKf) {
-  fail.push("the meter keyframe is gone from the built CSS; this check no longer guards anything");
+  fail.push(
+    "the loud-momentary keyframe is gone from the built CSS; this check no longer guards anything",
+  );
 } else if (/(^|[},])\s*50%\s*[,{]/.test(meterKf[1])) {
   fail.push(
-    "the meter keyframe is symmetric again (has a 50% stop): real peak meters " +
+    "the loud-momentary keyframe is symmetric again (has a 50% stop): real meters " +
       "attack fast and decay slowly, and engineers read a sine wobble as fake",
   );
 }
@@ -225,8 +235,17 @@ for (const f of pages) {
 //    had always been amber, and a comparison-page callout had quietly picked it
 //    up as a general accent. Prose in a stylesheet did not stop that; this does.
 const amberAllowed = {
-  // The hero's route lines and their junction dot.
-  "index.html": 3,
+  // Zero, since the hero stopped drawing the signal path. The three uses this
+  // counted were the route lines and their junction dot in the old hero SVG,
+  // which the routing-table hero replaced — the fan-out it drew is still on the
+  // page at full size in MixMatrix, which gets its amber from the .xpt rules
+  // rather than from literals, so nothing here needs an allowance any more.
+  //
+  // Left as an explicit 0 rather than deleted: the entry is the record that the
+  // hero USED to be the amber consumer, so a future literal appearing in
+  // index.html reads as the drift this check exists to catch, not as a gap
+  // somebody forgot to fill.
+  "index.html": 0,
 };
 for (const f of pages) {
   const html = readFileSync(join(DIST, f), "utf8");

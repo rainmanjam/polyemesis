@@ -3,6 +3,7 @@ import Base from "../layouts/Base.astro";
 import MixMatrix from "../components/MixMatrix.astro";
 import SpecStrip from "../components/SpecStrip.astro";
 import LoudnessBars from "../components/LoudnessBars.astro";
+import HeroRouting from "../components/HeroRouting.astro";
 
 const features = [
   {
@@ -52,18 +53,24 @@ const features = [
           MIT licensed · self-hosted
         </span>
 
+        {/* "One stream in. A different mix out of each." — the shape the social
+            card settled on, and it is a better opening than the old headline for
+            one reason: it states the trade in the reader's terms (what they send,
+            what comes out) rather than in the product's (six tracks, platforms).
+            The old one named OBS in the first three words, which excludes every
+            reader who arrived from a hardware encoder. */}
         <h1 class="rise rise-2 mt-6 text-balance text-4xl font-bold leading-[1.08] sm:text-5xl lg:text-[3.4rem]">
-          Six tracks from OBS.<br />
-          A different mix to<br />
-          every platform.
+          One stream in.<br />
+          A <span class="text-live">different mix</span><br />
+          out of each.
         </h1>
 
         <p class="rise rise-3 mt-6 text-pretty text-lg leading-relaxed text-muted">
-          Every live platform accepts exactly one stereo pair. So you either pick
-          one mix for everyone, or you multistream from the encoder and pay for
-          it in uploads. polyemesis ingests once over SRT and lets you choose,
-          per destination, which of your tracks get summed into the stereo feed
-          that destination receives — the clean feed here, the full mix there.
+          Self-hosted restreaming with per-destination audio routing. Video is
+          copied, not re-encoded. Every live platform takes exactly one stereo
+          pair, so normally you pick one mix for everyone — polyemesis ingests
+          once over SRT and lets you choose, per destination, which tracks get
+          summed into the feed it receives.
         </p>
 
         <div class="rise rise-4 mt-8 flex flex-wrap gap-3">
@@ -78,96 +85,20 @@ const features = [
 
       {/* The hero visual is the signal path itself, not a screenshot floating
           at an angle. Both design passes reached that independently: the
-          product's architecture IS the argument, so the page opens with it. */}
-      <div class="relative">
-        <div class="card rise rise-3 overflow-hidden">
-          <div class="flex items-center gap-2 border-b border-line px-4 py-2.5">
-            <span class="size-1.5 rounded-full bg-live"></span>
-            <span class="font-mono text-[11px] text-subtle">one ingest · three destinations</span>
-          </div>
+          product's architecture IS the argument, so the page opens with it.
 
-          <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 p-5 sm:gap-5 sm:p-6">
-            {/* sources */}
-            <div class="space-y-1.5">
-              <p class="mb-2 font-mono text-[10px] uppercase tracking-wider text-subtle">
-                SRT ingest
-              </p>
-              {
-                [
-                  ["01", "full mix", "w-[86%]"],
-                  ["02", "clean mix", "w-[72%]"],
-                  ["03", "mic", "w-[58%]"],
-                  ["04", "guest", "w-[46%]"],
-                  ["05", "game", "w-[66%]"],
-                  ["06", "ambience", "w-[28%]"],
-                ].map(([n, label, w], i) => (
-                  <div class="flex items-center gap-2">
-                    <span class="font-mono text-[10px] text-subtle">{n}</span>
-                    <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-ink">
-                      {/* Each track drifts on its own phase and its own period.
-                          Six bars sharing one keyframe would pump in unison,
-                          which is the one thing six independent audio sources
-                          never do. Movement stays under 6% of width: enough to
-                          read as live, not enough to imply levels that are not
-                          being measured. */}
-                      <div
-                        class={`meter-live h-full rounded-full bg-meter/70 ${w}`}
-                        style={`animation-delay: -${(i * 0.41).toFixed(2)}s; animation-duration: ${(2.1 + i * 0.23).toFixed(2)}s`}
-                      />
-                    </div>
-                    <span class="w-16 shrink-0 font-mono text-[10px] text-subtle">{label}</span>
-                  </div>
-                ))
-              }
-            </div>
-
-            {/* The split. Drawn twice: a dim static path so the topology is
-                legible the instant it paints, and a marching dash over it so
-                the lines read as a path with something in them rather than a
-                diagram of one. The three branches are separate elements only
-                so their dashes can be offset from each other — three lines
-                pulsing in lockstep looks like a loading spinner. */}
-            <div class="flex h-full items-center" aria-hidden="true">
-              <svg width="34" height="120" viewBox="0 0 34 120" fill="none">
-                <g stroke="#e8a33d" stroke-width="1.25" opacity="0.32">
-                  <path d="M0 60h10M10 60V22h24M10 60h24M10 60v38h24" />
-                </g>
-                <g stroke="#e8a33d" stroke-width="1.25" stroke-linecap="round">
-                  <path class="route-live" d="M0 60h10" />
-                  <path class="route-live" style="animation-delay: -0.1s" d="M10 60V22h24" />
-                  <path class="route-live" style="animation-delay: -0.45s" d="M10 60h24" />
-                  <path class="route-live" style="animation-delay: -0.8s" d="M10 60v38h24" />
-                </g>
-                <circle cx="10" cy="60" r="2.5" fill="#e8a33d" />
-              </svg>
-            </div>
-
-            {/* destinations */}
-            <div class="space-y-2">
-              <p class="mb-2 font-mono text-[10px] uppercase tracking-wider text-subtle">
-                stereo out
-              </p>
-              {
-                [
-                  ["YouTube", "02 + 03", "text-live"],
-                  ["Twitch", "01 + 03", "text-live"],
-                  ["Archive", "all six", "text-meter"],
-                ].map(([name, mix, tone]) => (
-                  <div class="rounded border border-line bg-ink px-2.5 py-2">
-                    <div class="flex items-center justify-between gap-2">
-                      <span class="text-[13px]">{name}</span>
-                      <span class={`font-mono text-[10px] ${tone}`}>●</span>
-                    </div>
-                    <span class="font-mono text-[10px] text-subtle">{mix}</span>
-                  </div>
-                ))
-              }
-            </div>
-          </div>
-
-          <p class="border-t border-line px-5 py-3 font-mono text-[11px] leading-relaxed text-subtle">
-            one video encode · <span class="text-fg">-c:v copy</span> to all three
-          </p>
+          It is now the ROUTING TABLE rather than the track fan-out. Same claim,
+          told from the other end: the old panel showed six tracks going in and
+          left the reader to infer that the outputs differed, while this one
+          shows four destinations whose mixes visibly differ and whose loudness
+          differs because of it. The fan-out survives further down the page in
+          MixMatrix, where there is room to be explicit about it. */}
+      {/* Centred against the copy rather than pinned to the top. The panel is
+          shorter than the text column, and top-aligning left a hole under it
+          that read as a missing element. */}
+      <div class="relative flex items-center">
+        <div class="rise rise-3 w-full">
+          <HeroRouting />
         </div>
       </div>
     </div>
