@@ -8,11 +8,13 @@
     "ingest_endpoints": [
         {
             "protocol": "RTMP",
-            "url_template": "rtmp://ingest.global-contribute.live-video.net/app/{stream_key}"
+            "url_template": "rtmp://ingest.global-contribute.live-video.net/app/{stream_key}",
+            "authentication": "v1_sig_salt_7b2276223a317d_live_424242_operatorkey"
         },
         {
             "protocol": "RTMPS",
-            "url_template": "rtmps://ingest.global-contribute.live-video.net/app/{stream_key}"
+            "url_template": "rtmps://ingest.global-contribute.live-video.net/app/{stream_key}",
+            "authentication": "v1_sig_salt_7b2276223a317d_live_424242_operatorkey"
         }
     ],
     "encoder_configurations": [

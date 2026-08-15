@@ -402,14 +402,34 @@ func (e *Engine) ScrubDestinationText(id int64, text string) string {
 	}
 	e.mu.RLock()
 	var row *db.Destination
+	// THE MINTED KEY IS COLLECTED HERE TOO, and the sibling at
+	// destinations.go's supervisor.Spec is why. That one passes
+	// destSecrets(row, mt.MintedKey); this one passed destSecrets(row) and
+	// nothing else, so the two answers to "which strings on this destination
+	// are secret" disagreed -- and the shorter one is the one serving text back
+	// to a caller.
+	//
+	// NOT REACHABLE TODAY, and that is stated rather than relied on. The only
+	// text that arrives here predates the negotiation, so there is nothing
+	// carrying a minted key for it to miss. But "unreachable" is a property of
+	// today's callers, not of this function, and the next caller that hands it
+	// a line captured after go-live turns it into a leak with no code change
+	// here to notice -- while the FFmpeg text this is closest to is exactly the
+	// text that carries the value. A divergence between two collections of the
+	// same secret set is a defect whether or not anything currently walks it.
+	var minted string
 	if d := e.dests[id]; d != nil {
 		row = d.row
+		minted = d.multitrack.MintedKey
 	}
 	e.mu.RUnlock()
 	if row == nil {
 		return alerts.Redact(text)
 	}
-	return alerts.Redact(alerts.NewSecretSet(nil, destSecrets(row)...).Scrub(text))
+	// destSecrets and alerts.NewSecretSet both drop an empty literal, so the
+	// overwhelmingly common case -- a destination that never negotiated -- is
+	// unchanged.
+	return alerts.Redact(alerts.NewSecretSet(nil, destSecrets(row, minted)...).Scrub(text))
 }
 
 // Processes returns every supervised process, for the monitoring page.

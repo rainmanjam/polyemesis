@@ -114,6 +114,54 @@ when you save it** rather than being silently truncated. A destination carrying
 such a key — most often from a terminal paste that appended an escape sequence
 — must have its key re-entered before it can be saved again.
 
+#### If you already upgraded to 0.7.0: one-off remediation required
+
+**0.7.0's sealing migration blanked the `stream_key` column but left the
+plaintext legible in the database file.** SQLite unlinks the bytes of a
+shortened row without zeroing them, and it writes the new rows into the
+write-ahead log rather than over the old ones, so both the freed pages of
+`polyemesis.db` and the frames of `polyemesis.db-wal` kept readable copies of
+every key the migration replaced. `SELECT stream_key FROM destinations` returns
+empty; `grep` on the same file returns the key. Measured against a 60-destination
+install: 60 plaintext copies still in the raw bytes after a clean-shutdown
+upgrade, 122 in the `-wal` after an upgrade over a server that had been killed.
+
+This defeats the one thing sealing at rest is for. A leaked database file was
+still a leaked set of live streaming credentials.
+
+**Fixed forward for new upgrades**, which now open the database with
+`secure_delete` on and truncate the write-ahead log once the migration has
+finished. That pragma only governs writes made after it is set, so **it does
+nothing for an install that already ran the 0.7.0 migration.** Those need the
+scrub run once by hand:
+
+```sh
+systemctl stop polyemesis                      # or: docker compose down
+sqlite3 /var/lib/polyemesis/polyemesis.db "VACUUM; PRAGMA wal_checkpoint(TRUNCATE);"
+systemctl start polyemesis                     # or: docker compose up -d
+```
+
+Both statements are required and neither is sufficient alone. `VACUUM` rebuilds
+the file without the freed pages but writes the result into the `-wal`, where
+the old content stays until it is checkpointed; `wal_checkpoint(TRUNCATE)` on
+its own copies the current pages back and empties the log but leaves whatever
+was already stranded in freed pages. Run them in that order, in one session,
+with the server stopped.
+
+To confirm it worked, check for a key you know:
+
+```sh
+grep -c 'live_' /var/lib/polyemesis/polyemesis.db     # expect 0
+```
+
+**Every backup taken between upgrading to 0.7.0 and running the scrub still
+contains the plaintext**, and so does every backup taken before the upgrade —
+the whole point of those is that they predate sealing. The scrub cannot reach
+them. Treat those archives as carrying live credentials: if they left the host,
+or sit anywhere with a broader audience than the data directory, **rotate the
+stream keys** on the platforms rather than trusting the archive. Rotating is the
+only remedy for a copy that has already been made.
+
 ### Upgrading to multi-source
 
 The existing configuration becomes the **default source**, automatically. All
