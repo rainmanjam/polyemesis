@@ -54,7 +54,15 @@ func vodDest(t *testing.T, store *db.DB) int64 {
 	t.Helper()
 	created, err := store.CreateDestination(&db.Destination{
 		Name: "archive", Kind: db.DestRTMP, Platform: db.PlatformTwitch,
-		URL: "rtmp://live.twitch.tv/app", StreamKey: "live_1_abcdefghijklmnop",
+		// Short and obviously fake, like every other stream key in these tests
+		// ("original-key", "sk-live-Zq7", "key"). A realistic-LOOKING one --
+		// this was `live_1_abcdefghijklmnop` -- trips gitleaks' generic-api-key
+		// rule, which fires on a credential-shaped literal next to a `...Key:`
+		// identifier. That failed the allowlist self-test in security.yml before
+		// the scan itself even ran, because that guard needs a clean baseline to
+		// prove anything. Allowlisting the file would be the wrong fix and
+		// .gitleaks.toml says so: a blanket path rule "would hide a real key".
+		URL: "rtmp://live.twitch.tv/app", StreamKey: "sk-live-vod",
 		AudioBitrate: 160,
 	})
 	if err != nil {
