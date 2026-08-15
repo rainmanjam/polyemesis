@@ -100,6 +100,38 @@ func (s *Server) hostSystem() stats.System {
 // and turning every confinement below it into confinement against nothing.
 func (s *Server) recordings() *recording.Manager { return s.mgr.Recordings() }
 
+// storageVerdict is the free-space guard's answer: whether the floor has
+// stopped recording, and the sentence that says why.
+//
+// OFF AN ENGINE, and it is the one reader in this group that stays there. The
+// floor itself describes the volume, but the HALT does not -- it is one
+// recorder child being stopped, by the guard on THAT engine's own recording
+// manager (recording.WithStorageGuard in engine.New). The shared read-only
+// manager drives no recorder, so nothing ever calls CheckFreeSpace on it and
+// its StorageState is the zero value for the life of the process. Serving that
+// would tell the operator everything is fine on the one page whose job is to
+// explain a recorder that stopped on its own -- see the field comment on
+// recording.DiskUsage.Storage.
+//
+// The default engine's, because this endpoint is unscoped and that is the
+// programme it speaks for everywhere else. On a real install the answer is the
+// same whichever engine is asked: one volume, one floor, one install-wide
+// Recording block (see engine.effectiveSettings, which overlays the ingest and
+// nothing else).
+//
+// No engine means the zero verdict, and that is the TRUE answer rather than a
+// fallback: nothing has been halted because nothing was recording.
+func (s *Server) storageVerdict() recording.StorageState {
+	if s.mgr == nil {
+		return recording.StorageState{}
+	}
+	e := s.mgr.Default()
+	if e == nil {
+		return recording.StorageState{}
+	}
+	return e.Recordings().Storage()
+}
+
 // Server wires the HTTP layer to everything else.
 type Server struct {
 	log      *slog.Logger

@@ -235,7 +235,7 @@ func (s *Server) storeSettingsWithDefaultIngest() (db.Settings, error) {
 	if err != nil {
 		return settings, err
 	}
-	id, err := s.store.DefaultSourceID()
+	id, err := s.defaultSourceID()
 	if err != nil {
 		return settings, nil
 	}
@@ -245,6 +245,31 @@ func (s *Server) storeSettingsWithDefaultIngest() (db.Settings, error) {
 	}
 	settings.Ingest = src.Ingest
 	return settings, nil
+}
+
+// defaultSourceID is which source an unscoped endpoint speaks for: the one the
+// default engine is RUNNING, and only the store's ordering when no engine is.
+//
+// The two disagree, in one direction, and the difference is an operator
+// pointing an encoder at a dead port. Manager.Default() is the first source
+// that BUILT an engine -- Manager.reconcile logs "cannot build engine for
+// source" and carries on -- while db.DefaultSourceID() is the first row by
+// position whether anything is listening for it or not. Take the row on an
+// install whose lowest-positioned source failed to come up and /system
+// advertises that source's ingest URL and passphrase, with no listener behind
+// either; the engine's snapshot, which this replaced, never could.
+//
+// The store is the answer when there is no engine at all, which is the whole
+// reason this endpoint stopped asking one.
+func (s *Server) defaultSourceID() (int64, error) {
+	if s.mgr != nil {
+		// Engine.SourceID dereferences its receiver, so the nil check is the
+		// call's precondition and not decoration.
+		if e := s.mgr.Default(); e != nil {
+			return e.SourceID(), nil
+		}
+	}
+	return s.store.DefaultSourceID()
 }
 
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
@@ -1683,6 +1708,7 @@ func (s *Server) handleRecordingUsage(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	usage.Storage = s.storageVerdict()
 	writeJSON(w, http.StatusOK, usage)
 }
 

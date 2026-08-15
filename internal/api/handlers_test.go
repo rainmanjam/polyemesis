@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -135,5 +136,71 @@ func TestSystemReportsAPortChangeWithoutWaitingForAReconcile(t *testing.T) {
 		t.Errorf("GET /system still advertises the old port after a settings save: %q. "+
 			"An operator pastes this URL into OBS, so a stale one sends their encoder "+
 			"at a port nothing is listening on", body.IngestURL)
+	}
+}
+
+// WHICH SOURCE AN UNSCOPED ENDPOINT SPEAKS FOR is the running engine's, not
+// the first row in the table, and the two are not always the same source.
+//
+// Manager.reconcile logs "cannot build engine for source" and carries on, so
+// the lowest-positioned source on an install can be one that never came up --
+// a port already taken, a pull URL that will not resolve. Manager.Default()
+// then answers with the next one, which is the source actually listening, and
+// db.DefaultSourceID() still answers with the first row. GET /system describes
+// the ingest an operator is about to paste into OBS: take the row and they are
+// handed the URL and passphrase of a source with nothing behind it.
+//
+// The state is built by adding a source the manager has not been told about,
+// which is the same shape from the store's side and needs no port collision to
+// produce.
+//
+// Mutation: s.defaultSourceID() back to s.store.DefaultSourceID(). Observed to
+// fail here with ingestMode rtmp.
+func TestSystemDescribesTheSourceThatIsActuallyOnAir(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+
+	eng := s.mgr.Default()
+	if eng == nil {
+		t.Fatal("the fixture started no engine, so there is no on-air source to prefer")
+	}
+	onAir, err := s.store.GetSource(eng.SourceID())
+	if err != nil {
+		t.Fatalf("GetSource(%d): %v", eng.SourceID(), err)
+	}
+	onAir.Ingest.Mode = db.IngestSRT
+	if err := s.store.UpdateSource(onAir); err != nil {
+		t.Fatalf("UpdateSource: %v", err)
+	}
+
+	// Position -1 puts it ahead of everything: CreateSource only appends when
+	// the caller leaves the position at zero. Its ingest is the on-air one with
+	// the mode changed, so the mode is the only thing that can tell the two
+	// apart in the response.
+	ghostIngest := onAir.Ingest
+	ghostIngest.Mode = db.IngestRTMP
+	ghostIngest.RTMP.App = "ghost"
+	ghost := &db.Source{
+		Name: "never came up", Enabled: true, Position: -1, Ingest: ghostIngest,
+	}
+	if err := s.store.CreateSource(ghost); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	if id, err := s.store.DefaultSourceID(); err != nil || id != ghost.ID {
+		t.Fatalf("the store's default source is %d (%v), want the new row %d -- the "+
+			"divergence this case is about was never created", id, err, ghost.ID)
+	}
+	if s.mgr.Default().SourceID() != onAir.ID {
+		t.Fatalf("the manager's default engine moved to source %d: adding a row was "+
+			"supposed to leave the running set alone", s.mgr.Default().SourceID())
+	}
+
+	var body struct {
+		IngestMode string `json:"ingestMode"`
+	}
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/system", nil, http.StatusOK), &body)
+	if body.IngestMode != string(db.IngestSRT) {
+		t.Errorf("GET /system reports ingest mode %q, which is the source that is NOT "+
+			"running. An operator following this connects an encoder to a listener that "+
+			"does not exist", body.IngestMode)
 	}
 }
