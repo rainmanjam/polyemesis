@@ -3,6 +3,11 @@ import { execFileSync } from "node:child_process";
 import { defineConfig } from "astro/config";
 import sitemap from "@astrojs/sitemap";
 import tailwindcss from "@tailwindcss/vite";
+import { satteri } from "@astrojs/markdown-satteri";
+import { PUBLISHED } from "./src/data/docs.mjs";
+import { mdastDocLinks } from "./src/lib/mdast-doc-links.mjs";
+import { hastCodeBlock } from "./src/lib/hast-code-block.mjs";
+import { hastDocTables } from "./src/lib/hast-doc-tables.mjs";
 
 /* lastmod, taken from git rather than from the clock.
  *
@@ -19,6 +24,11 @@ import tailwindcss from "@tailwindcss/vite";
  * Falls back to omitting lastmod rather than guessing: no date at all is how the
  * feed behaved before this, and is honest. A shallow CI clone or a file added
  * but not yet committed both land here. */
+/* A DOCS PAGE'S SOURCE IS THE MARKDOWN, NOT THE ROUTE. All 23 render through
+ * one src/pages/docs/[slug].astro, so keying them to that file would stamp
+ * every document with the date somebody last touched the template -- 23 URLs
+ * changing lastmod in unison for a change none of them contains. The markdown
+ * file is the thing whose content the date is a claim about. */
 /** @type {Record<string, string>} */
 const pageSource = {
   "/": "src/pages/index.astro",
@@ -26,7 +36,20 @@ const pageSource = {
   "/comparison": "src/pages/comparison.astro",
   "/docs": "src/pages/docs.astro",
   "/download": "src/pages/download.astro",
+  ...Object.fromEntries(PUBLISHED.map((d) => [`/docs/${d.slug}`, `../docs/${d.file}`])),
 };
+
+/* Paths that declare a canonical somewhere else, and therefore must not be
+ * submitted in the sitemap.
+ *
+ * A sitemap entry says "index this URL"; a canonical on the page says "index
+ * that one instead". A crawler handed both contradicts itself out of the
+ * conflict by trusting neither, which costs the signal the canonical was there
+ * to give. Derived from the manifest so that the two can only disagree if
+ * somebody edits the manifest, where the reasoning is written down. */
+const canonicalisedElsewhere = new Set(
+  PUBLISHED.filter((d) => d.canonical && d.canonical !== `/docs/${d.slug}`).map((d) => `/docs/${d.slug}`),
+);
 
 /** @param {string} file @returns {string|undefined} */
 function lastCommitISO(file) {
@@ -54,10 +77,46 @@ export default defineConfig({
   // which costs every internal navigation an extra round trip for nothing.
   build: { format: "file" },
   trailingSlash: "never",
+  /* SHIKI IS OFF, and this is the resolution of the one blocker in this change.
+   *
+   * Astro renders a fence through Shiki, which emits `<pre class="astro-code"
+   * style="...">`. check-build.mjs fails the build on any `<pre class="...">`,
+   * for a reason its comment states: three treatments of the same content once
+   * shipped across three pages of one site. There are 114 fenced blocks in the
+   * published documents, so the first docs page would have failed.
+   *
+   * The alternative was a Shiki transformer deleting the class attribute. That
+   * passes the check and defeats it: Shiki's own background and token colours
+   * would still be on the page, and nothing else on this site has either, so the
+   * docs would have become the fourth treatment -- arrived at by silencing the
+   * alarm. Off, and lib/rehype-code-block.mjs puts the plain <pre> inside the
+   * CodeBlock component's own markup instead, so a rendered fence and a
+   * hand-written one are the same object. */
+  markdown: {
+    syntaxHighlight: false,
+    /* Sätteri is Astro 7's default Markdown processor, and `processor` is the
+       only place its plugins can be registered -- `remarkPlugins` and
+       `rehypePlugins` still exist but switch the whole pipeline back to unified
+       and need @astrojs/markdown-remark installed alongside. Three small
+       visitors is not a reason to run a second Markdown processor.
+
+       IF YOU EDIT ONE OF THESE PLUGINS AND THE OUTPUT DOES NOT CHANGE, delete
+       `node_modules/.astro`. The content layer caches rendered markdown keyed on
+       the SOURCE FILE, not on the pipeline that rendered it, so a plugin fix
+       against unchanged documents is served from the store and the build reports
+       success. Cost an hour once: a corrected attribute kept appearing in dist/
+       in its broken spelling across three clean `rm -rf dist` builds. CI starts
+       cold and never sees it. */
+    processor: satteri({
+      mdastPlugins: [mdastDocLinks],
+      hastPlugins: [hastCodeBlock, hastDocTables],
+    }),
+  },
   integrations: [
     sitemap({
       serialize(item) {
         const path = new URL(item.url).pathname.replace(/\/$/, "") || "/";
+        if (canonicalisedElsewhere.has(path)) return undefined;
         const src = pageSource[path];
         const iso = src && lastCommitISO(src);
         if (iso) item.lastmod = iso;

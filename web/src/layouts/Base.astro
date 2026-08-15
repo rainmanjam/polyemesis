@@ -90,6 +90,13 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
     })} />
     )}
 
+    {/* Page-specific head content. Only the docs use it, for the
+        BreadcrumbList block that belongs beside the SoftwareApplication one
+        above rather than loose in the body. A named slot rather than a prop so
+        that what a page adds to <head> is written as markup where the page can
+        see it. */}
+    <slot name="head" />
+
     <meta name="theme-color" content="#0b0d11" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     {/* iOS will not use an SVG favicon and will not invent a raster from one --
