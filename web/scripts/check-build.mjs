@@ -16,7 +16,7 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { PUBLISHED, NOT_PUBLISHED } from "../src/data/docs.mjs";
+import { PUBLISHED, NOT_PUBLISHED, SECTIONS, SECTION_IDS_WITH_DOCS } from "../src/data/docs.mjs";
 
 const DIST = new URL("../dist/", import.meta.url).pathname;
 const DOCS_SRC = new URL("../../docs/", import.meta.url).pathname;
@@ -490,6 +490,49 @@ for (const f of pages) {
         `web/src/data/docs.mjs names docs/${f}, which does not exist. A renamed ` +
           `document leaves a page 404ing or a withheld file unguarded.`,
       );
+    }
+  }
+
+  /* THE SLUG IS DERIVED NOW, so the thing that used to be a typo is a rule, and
+     the rule needs a guard the typo never had.
+     `slugOf` lowercases the filename and drops the extension, which is exactly
+     right for the 23 SHOUTING-KEBAB.md files here and produces something no one
+     wants for a filename shaped differently: `NOTES_v2.md` becomes
+     `/docs/notes_v2`, and `CHANGES-SINCE-v0.6.0.md` becomes a URL with a dot in
+     it that this flat-file build would emit as `changes-since-v0.6.0.html`.
+     Neither is a crash. Both are a bad address nobody would notice until it was
+     linked. */
+  for (const d of PUBLISHED) {
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(d.slug)) {
+      fail.push(
+        `docs/${d.file} derives the slug "${d.slug}", which is not a clean URL segment.\n` +
+          `    slugOf() lowercases the filename and drops ".md"; that only gives a good ` +
+          `address for SHOUTING-KEBAB-CASE names. Rename the document, or give it an ` +
+          `explicit slug in web/src/data/docs.mjs.`,
+      );
+    }
+  }
+
+  /* Every section has a table, and every table belongs to a section.
+     The two halves are separate structures — SECTION_ROWS carries the order and
+     the copy, DOCS_BY_SECTION carries the membership — and the failure mode of
+     splitting them is silent: a section listed with no table renders as a
+     heading with nothing under it, and a table keyed to a section that does not
+     exist drops every document in it off the site without a word. */
+  {
+    const ordered = SECTIONS.map((s) => s.id);
+    for (const id of ordered) {
+      if (!SECTION_IDS_WITH_DOCS.includes(id)) {
+        fail.push(`section "${id}" is in SECTIONS but has no table in DOCS_BY_SECTION — it would render empty`);
+      }
+    }
+    for (const id of SECTION_IDS_WITH_DOCS) {
+      if (!ordered.includes(id)) {
+        fail.push(
+          `DOCS_BY_SECTION has a "${id}" table and SECTIONS does not list it — ` +
+            `every document in it is silently dropped, because PUBLISHED is built from SECTIONS' order`,
+        );
+      }
     }
   }
 
