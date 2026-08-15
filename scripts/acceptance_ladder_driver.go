@@ -27,31 +27,39 @@
 // audio out of the SAME video encode. Everything this driver writes to
 // facts.env is read out of the live process table or off the delivered media,
 // never out of the API's own answer about itself.
+//
+// THE HTTP SESSION IS scripts/internal/driverlib's, NOT THIS FILE'S. Six
+// drivers had already grown their own copy of the same cookie jar, CSRF dance
+// and error handling; driverlib's package comment records what the second copy
+// cost when a fix landed in one of them and not the other. The seventh copy is
+// not free either, so there is not one here.
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/scripts/internal/driverlib"
 )
 
 var (
-	client *http.Client
-	base   string
-	csrf   string
-	facts  = map[string]string{}
+	facts = map[string]string{}
 	// factsFile is written on the way out, successful or not, so a failed run
 	// still tells the shell script which assertion it got to.
 	factsFile string
+
+	// The external programs this driver runs, resolved to absolute paths once
+	// at startup. See toolPath.
+	ffmpegBin string
+	psBin     string
 )
 
 // A tier is one rung of the ladder: a rendition, and the string that identifies
@@ -75,7 +83,6 @@ type tier struct {
 	bitrate int
 	mark    string // the argv fragment that identifies this rung's encoder
 	id      int64
-	destIDs []string
 }
 
 var tiers = []*tier{
@@ -92,6 +99,67 @@ func tierOf(label string) *tier {
 	}
 	die("no tier %q", label)
 	return nil
+}
+
+// ------------------------------------------------------- what the API answers
+//
+// Decoded into TYPES rather than map[string]any, and that is not a style
+// preference. A `m["renditions"].([]any)[0].(map[string]any)["consumers"]
+// .(float64)` chain has one failure mode -- a silent zero -- for every one of
+// its four assertions, and this suite's whole business is telling a real zero
+// apart from a measurement that broke. A struct field that does not decode is
+// visibly absent; a type assertion that does not hold is a panic or a zero, and
+// which one it is depends on punctuation.
+
+type processState struct {
+	State string `json:"state"`
+}
+
+type statusDoc struct {
+	Relay struct {
+		Port int `json:"port"`
+	} `json:"relay"`
+	Destinations []struct {
+		ID            int64         `json:"id"`
+		Name          string        `json:"name"`
+		Summary       string        `json:"summary"`
+		RenditionName string        `json:"renditionName"`
+		Process       *processState `json:"process"`
+	} `json:"destinations"`
+	Renditions []renditionStatus `json:"renditions"`
+}
+
+type renditionStatus struct {
+	ID        int64         `json:"id"`
+	Consumers int           `json:"consumers"`
+	RelayPort int           `json:"relayPort"`
+	Error     string        `json:"error"`
+	Process   *processState `json:"process"`
+}
+
+type sourceDoc struct {
+	Probed bool `json:"probed"`
+	Tracks []struct {
+		Index int `json:"index"`
+	} `json:"tracks"`
+	Video struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	} `json:"video"`
+}
+
+type renditionResp struct {
+	Rendition struct {
+		ID     int64 `json:"id"`
+		Width  int   `json:"width"`
+		Height int   `json:"height"`
+	} `json:"rendition"`
+}
+
+type destResp struct {
+	Destination struct {
+		ID int64 `json:"id"`
+	} `json:"destination"`
 }
 
 // How long each measurement window runs. Two of them, back to back, are the
@@ -113,30 +181,36 @@ func main() {
 	port, relay := os.Args[1], os.Args[2]
 	factsFile = os.Args[3]
 	srcW, srcH, srcFPS := os.Args[4], os.Args[5], os.Args[6]
-	base = "http://127.0.0.1:" + port + "/api/v1"
 
-	jar, _ := cookiejar.New(nil)
-	client = &http.Client{Jar: jar, Timeout: 30 * time.Second}
+	// Resolved before anything else runs, so a machine missing either one is
+	// told so immediately rather than sixty seconds into a measurement.
+	ffmpegBin = toolPath("ffmpeg")
+	psBin = toolPath("ps")
+
+	driverlib.Init("http://127.0.0.1:" + port)
 	defer writeFacts()
 
-	waitUp()
+	driverlib.WaitUp()
 	fmt.Println("first-run setup")
-	call("POST", "/setup", map[string]any{"username": "admin", "password": "acceptance-pw"})
-	grabCSRF()
+	driverlib.Setup("admin", "acceptance-pw")
 
 	// Recording and metering off. Both spawn FFmpeg processes of their own, and
 	// this suite's central number is how much CPU the ENCODERS use; a recorder
 	// competing for the same cores would move it for a reason that has nothing
 	// to do with renditions.
-	settings := get("/settings")
-	settings["recording"].(map[string]any)["enabled"] = false
-	settings["meters"].(map[string]any)["enabled"] = false
-	call("PUT", "/settings", settings)
+	//
+	// The WHOLE document is read and written back -- see driverlib.LoadSettings.
+	// A PUT of one block resets every other to defaults, which here would move
+	// the ingest listener off the port the source is publishing to.
+	settings := driverlib.LoadSettings()
+	blockOff(settings, "recording")
+	blockOff(settings, "meters")
+	driverlib.SaveSettings(settings, "disable recording and meters")
 
 	fmt.Printf("starting synthetic %sx%s@%s 3-tone source (300 / 900 / 2000 Hz)\n", srcW, srcH, srcFPS)
 	relayPort, _ := strconv.Atoi(relay)
 	fps, _ := strconv.Atoi(srcFPS)
-	src := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
+	src := exec.Command(ffmpegBin, "-hide_banner", "-loglevel", "error", "-re",
 		"-f", "lavfi", "-i", fmt.Sprintf("testsrc2=size=%sx%s:rate=%d", srcW, srcH, fps),
 		"-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000",
 		"-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000",
@@ -160,7 +234,8 @@ func main() {
 	// ------------------------------------------------------- the three rungs
 	fmt.Println("creating three renditions: 1080p, 720p, 480p")
 	for _, t := range tiers {
-		created := call("POST", "/renditions", map[string]any{
+		var created renditionResp
+		post("/renditions", map[string]any{
 			"name":         t.name,
 			"width":        t.w,
 			"height":       t.h,
@@ -175,15 +250,14 @@ func main() {
 			// and what shape each one is, neither of which the preset changes.
 			"preset":     "ultrafast",
 			"gopSeconds": 2,
-		})
-		rend := mapOf(created["rendition"])
-		t.id = int64(intOf(rend["id"]))
+		}, &created)
+		t.id = created.Rendition.ID
 		facts["TIER_"+t.label+"_ID"] = strconv.FormatInt(t.id, 10)
-		// Read back rather than trusting the POST. If the store dropped a
+		// Read back rather than trusting the request. If the store dropped a
 		// dimension the encoder would come up at the wrong size and the pixel
 		// checks downstream would fail somewhere nobody could locate.
-		facts["TIER_"+t.label+"_W_STORED"] = strconv.Itoa(intOf(rend["width"]))
-		facts["TIER_"+t.label+"_H_STORED"] = strconv.Itoa(intOf(rend["height"]))
+		facts["TIER_"+t.label+"_W_STORED"] = strconv.Itoa(created.Rendition.Width)
+		facts["TIER_"+t.label+"_H_STORED"] = strconv.Itoa(created.Rendition.Height)
 		fmt.Printf("  rendition %d %q %dx%d (mark %q)\n", t.id, t.name, t.w, t.h, t.mark)
 	}
 
@@ -198,12 +272,9 @@ func main() {
 	// rendition re-encodes video ONLY and copies every audio track through, so
 	// the destination is still the thing that mixes. If a shared video encode
 	// ever flattened audio, these three files would stop differing.
-	a := call("POST", "/destinations", dest("A 1080p — tracks 1+2", "ladder-1080.mkv", []int{0, 1}, tierOf("1080").id))
-	b := call("POST", "/destinations", dest("B 720p — tracks 1+3", "ladder-720.mkv", []int{0, 2}, tierOf("720").id))
-	c := call("POST", "/destinations", dest("C 480p — tracks 2+3", "ladder-480.mkv", []int{1, 2}, tierOf("480").id))
-	facts["DEST_A_ID"] = destID(a)
-	facts["DEST_B_ID"] = destID(b)
-	facts["DEST_C_ID"] = destID(c)
+	facts["DEST_A_ID"] = newDest("A 1080p — tracks 1+2", "ladder-1080.mkv", tierOf("1080").id, 0, 1)
+	facts["DEST_B_ID"] = newDest("B 720p — tracks 1+3", "ladder-720.mkv", tierOf("720").id, 0, 2)
+	facts["DEST_C_ID"] = newDest("C 480p — tracks 2+3", "ladder-480.mkv", tierOf("480").id, 1, 2)
 
 	fmt.Println("waiting for all three destinations to run")
 	waitForRunning(3)
@@ -223,12 +294,12 @@ func main() {
 	// Relay hubs, read off /status. Each rung publishes to its OWN hub -- that
 	// is the mechanism by which one encode can feed several destinations -- so
 	// three rungs must show three distinct ports, none of them the ingest's.
-	st := get("/status")
-	facts["INGEST_RELAY_PORT"] = strconv.Itoa(intOf(mapOf(st["relay"])["port"]))
+	st := status()
+	facts["INGEST_RELAY_PORT"] = strconv.Itoa(st.Relay.Port)
 	for _, t := range tiers {
-		r := renditionStatus(st, t.id)
-		facts["RELAY_"+t.label] = strconv.Itoa(intOf(r["relayPort"]))
-		facts["CONSUMERS_"+t.label+"_A0"] = strconv.Itoa(intOf(r["consumers"]))
+		r := st.rendition(t.id)
+		facts["RELAY_"+t.label] = strconv.Itoa(r.RelayPort)
+		facts["CONSUMERS_"+t.label+"_A0"] = strconv.Itoa(r.Consumers)
 	}
 
 	// ------------------------- phase A1: a FOURTH destination on an EXISTING rung
@@ -237,8 +308,7 @@ func main() {
 	// the smallest case that can distinguish it: two. Track 1 alone, so this
 	// destination's audio differs from the other 720p destination's even though
 	// both are copying the same video bitstream.
-	d := call("POST", "/destinations", dest("D 720p second subscriber — track 1", "ladder-720b.mkv", []int{0}, tierOf("720").id))
-	facts["DEST_D_ID"] = destID(d)
+	facts["DEST_D_ID"] = newDest("D 720p second subscriber — track 1", "ladder-720b.mkv", tierOf("720").id, 0)
 	waitForRunning(4)
 
 	fmt.Printf("sampling again for %s (4 destinations, still 3 tiers)\n", sampleWindow)
@@ -247,9 +317,9 @@ func main() {
 	for _, t := range tiers {
 		facts["PID_"+t.label+"_A1"] = strings.Join(pidsFor(t.mark), ",")
 	}
-	st = get("/status")
+	st = status()
 	for _, t := range tiers {
-		facts["CONSUMERS_"+t.label+"_A1"] = strconv.Itoa(intOf(renditionStatus(st, t.id)["consumers"]))
+		facts["CONSUMERS_"+t.label+"_A1"] = strconv.Itoa(st.rendition(t.id).Consumers)
 	}
 
 	// THE COST CLAIM, MEASURED. The cheapest rung's own CPU rate is the yardstick
@@ -264,7 +334,7 @@ func main() {
 
 	// ------------------------------------------------- ref counting DOWNWARDS
 	fmt.Println("removing destination B — the 720p rung still has D on it")
-	call("DELETE", "/destinations/"+facts["DEST_B_ID"], nil)
+	remove(facts["DEST_B_ID"])
 	// Long enough for Reconcile to have run and for a doomed child to have been
 	// reaped. Measured teardown of one FFmpeg is a few seconds.
 	time.Sleep(6 * time.Second)
@@ -273,41 +343,157 @@ func main() {
 		facts["N_"+t.label+"_AFTER_DROP_ONE"] = strconv.Itoa(countEncoders(t.mark))
 		facts["PID_"+t.label+"_AFTER_DROP_ONE"] = strings.Join(pidsFor(t.mark), ",")
 	}
-	st = get("/status")
-	facts["CONSUMERS_720_AFTER_DROP_ONE"] = strconv.Itoa(intOf(renditionStatus(st, tierOf("720").id)["consumers"]))
+	facts["CONSUMERS_720_AFTER_DROP_ONE"] = strconv.Itoa(status().rendition(tierOf("720").id).Consumers)
 
 	fmt.Println("removing destination D — the LAST subscriber of the 720p rung")
-	call("DELETE", "/destinations/"+facts["DEST_D_ID"], nil)
+	remove(facts["DEST_D_ID"])
 	time.Sleep(8 * time.Second)
 	facts["PROCS_AFTER_DROP_LAST"] = strconv.Itoa(totalEncoders())
 	for _, t := range tiers {
 		facts["N_"+t.label+"_AFTER_DROP_LAST"] = strconv.Itoa(countEncoders(t.mark))
 		facts["PID_"+t.label+"_AFTER_DROP_LAST"] = strings.Join(pidsFor(t.mark), ",")
 	}
-	st = get("/status")
-	r720 := renditionStatus(st, tierOf("720").id)
-	facts["CONSUMERS_720_AFTER_DROP_LAST"] = strconv.Itoa(intOf(r720["consumers"]))
-	_, hasProc := r720["process"].(map[string]any)
-	facts["RENDITION_720_RUNNING_AFTER_DROP_LAST"] = boolStr(hasProc)
+	r720 := status().rendition(tierOf("720").id)
+	facts["CONSUMERS_720_AFTER_DROP_LAST"] = strconv.Itoa(r720.Consumers)
+	facts["RENDITION_720_RUNNING_AFTER_DROP_LAST"] = boolStr(r720.Process != nil)
 
 	// ------------------------------------------------------------- shut down
 	// Stopped rather than deleted, and last, because stopping is what flushes
 	// and closes a file destination's output. The shell probes all four files
 	// after this returns.
 	fmt.Println("stopping the surviving destinations so their files close")
-	call("POST", "/destinations/"+facts["DEST_A_ID"]+"/stop", nil)
-	call("POST", "/destinations/"+facts["DEST_C_ID"]+"/stop", nil)
+	stop(facts["DEST_A_ID"])
+	stop(facts["DEST_C_ID"])
 	time.Sleep(5 * time.Second)
 	facts["PROCS_AFTER_ALL_STOPPED"] = strconv.Itoa(totalEncoders())
 	fmt.Println("driver done")
 }
 
+// ------------------------------------------------------------- API shorthands
+
+// post sends a create and decodes the answer, dying on any refusal.
+//
+// 200 AND 201 both count, the same pair driverlib.Setup accepts and for the
+// same reason: the API has answered both over its life and no suite should
+// hold an opinion about which.
+func post(path string, body, out any) {
+	code, raw := driverlib.Do(http.MethodPost, path, body)
+	if code != http.StatusOK && code != http.StatusCreated {
+		die("POST %s -> %d: %s", path, code, raw)
+	}
+	if out != nil {
+		if err := json.Unmarshal(raw, out); err != nil {
+			die("POST %s answered unreadable JSON: %v", path, err)
+		}
+	}
+}
+
+// newDest creates one file destination on a rung and returns its id.
+//
+// The track rows come from driverlib.Sel, which emits EVERY row -- enabled or
+// not -- because a profile is a full declaration of the width it was authored
+// against and a short list leaves the server guessing.
+func newDest(name, file string, rendition int64, tracks ...int) string {
+	var out destResp
+	post("/destinations", map[string]any{
+		"name": name, "kind": "file", "platform": "custom", "url": file,
+		"enabled": true, "audioBitrate": 160, "renditionId": rendition,
+		"profile": map[string]any{
+			"mode": "simple", "tracks": driverlib.Sel(tracks...),
+			"normalize": "auto", "sampleRate": 48000,
+		},
+	}, &out)
+	if out.Destination.ID == 0 {
+		die("create destination %q came back with no id", name)
+	}
+	return strconv.FormatInt(out.Destination.ID, 10)
+}
+
+func remove(id string) {
+	if code, raw := driverlib.Do(http.MethodDelete, "/destinations/"+id, nil); code != http.StatusOK {
+		die("DELETE destination %s -> %d: %s", id, code, raw)
+	}
+}
+
+func stop(id string) {
+	if code, raw := driverlib.Do(http.MethodPost, "/destinations/"+id+"/stop", nil); code != http.StatusOK {
+		die("stop destination %s -> %d: %s", id, code, raw)
+	}
+}
+
+func status() statusDoc {
+	var st statusDoc
+	driverlib.GetJSON("/status", "status", &st)
+	return st
+}
+
+// rendition finds one rung in a status document, and refuses to invent one.
+//
+// A missing rendition returns a zero struct if you let it, and a zero struct
+// reads as "0 consumers, no process" -- which is exactly what this suite
+// asserts after a tier is released. Dying instead means the two can never be
+// confused.
+func (s statusDoc) rendition(id int64) renditionStatus {
+	for _, r := range s.Renditions {
+		if r.ID == id {
+			return r
+		}
+	}
+	die("rendition %d missing from /status", id)
+	return renditionStatus{}
+}
+
+// blockOff turns off one named settings block, and says so if it is absent.
+//
+// The absence matters: PUT /settings replaces the document, so a block this
+// silently skipped would leave recording enabled and put a recorder's FFmpeg
+// into the CPU figures this suite prints.
+func blockOff(settings map[string]any, name string) {
+	block, ok := settings[name].(map[string]any)
+	if !ok {
+		die("settings carried no %q block to disable", name)
+	}
+	block["enabled"] = false
+}
+
 // ------------------------------------------------------- process-table reading
+
+// toolPath resolves an external program to an ABSOLUTE path, once, at startup.
+//
+// exec.Command("ffmpeg", ...) searches $PATH at spawn time, so what actually
+// runs is whatever the first matching directory on the path happens to contain
+// -- go:S4036, and a real hazard for a process this file then reads a command
+// line back out of. Resolving once and refusing anything non-absolute closes
+// it.
+//
+// It buys a second thing worth having on its own: a machine without one of
+// these tools is told so here, by name, instead of failing opaquely sixty
+// seconds into a measurement window.
+func toolPath(name string) string {
+	found, err := exec.LookPath(name)
+	if err != nil {
+		die("%s is not on PATH: %v", name, err)
+	}
+	abs, err := filepath.Abs(found)
+	if err != nil {
+		die("cannot resolve %s (%q) to an absolute path: %v", name, found, err)
+	}
+	if !filepath.IsAbs(abs) {
+		die("%s resolved to %q, which is not an absolute path", name, abs)
+	}
+	return abs
+}
 
 // proc is one encoder seen in the process table, with its cumulative CPU time.
 type proc struct {
 	pid string
 	cpu float64 // seconds of CPU consumed since the process started
+}
+
+// psRow is one line of the process table: a process, and its full argv.
+type psRow struct {
+	proc
+	args string
 }
 
 // psProcs returns every process in the table as pid, cumulative CPU, argv.
@@ -321,27 +507,18 @@ type proc struct {
 // LIFETIME, so an encoder that has been running for a minute barely moves it,
 // while `time` is a monotonic counter whose difference over a known interval is
 // the rate during that interval and nothing else.
-func psProcs() []struct {
-	proc
-	args string
-} {
-	out, err := exec.Command("ps", "-Ao", "pid=,time=,args=").Output()
+func psProcs() []psRow {
+	out, err := exec.Command(psBin, "-Ao", "pid=,time=,args=").Output()
 	if err != nil {
 		die("ps: %v", err)
 	}
-	var rows []struct {
-		proc
-		args string
-	}
+	var rows []psRow
 	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Fields(line)
 		if len(f) < 3 {
 			continue
 		}
-		rows = append(rows, struct {
-			proc
-			args string
-		}{proc{pid: f[0], cpu: parseCPUTime(f[1])}, strings.Join(f[2:], " ")})
+		rows = append(rows, psRow{proc{pid: f[0], cpu: parseCPUTime(f[1])}, strings.Join(f[2:], " ")})
 	}
 	return rows
 }
@@ -492,21 +669,16 @@ func (w window) cheapestRate() float64 {
 }
 
 func (w window) record(phase string) {
+	totalMin, totalMax := 0, 0
 	for _, t := range tiers {
 		facts["N_"+t.label+"_MIN_"+phase] = strconv.Itoa(w.min[t.label])
 		facts["N_"+t.label+"_MAX_"+phase] = strconv.Itoa(w.max[t.label])
 		facts["RATE_"+t.label+"_"+phase] = f2(w.rate[t.label])
+		totalMin += w.min[t.label]
+		totalMax += w.max[t.label]
 	}
-	total := 0
-	for _, t := range tiers {
-		total += w.max[t.label]
-	}
-	facts["PROCS_MAX_"+phase] = strconv.Itoa(total)
-	total = 0
-	for _, t := range tiers {
-		total += w.min[t.label]
-	}
-	facts["PROCS_MIN_"+phase] = strconv.Itoa(total)
+	facts["PROCS_MIN_"+phase] = strconv.Itoa(totalMin)
+	facts["PROCS_MAX_"+phase] = strconv.Itoa(totalMax)
 	facts["WINDOW_SECS_"+phase] = f2(w.secs)
 	fmt.Printf("  window %s over %.0fs:", phase, w.secs)
 	for _, t := range tiers {
@@ -515,47 +687,19 @@ func (w window) record(phase string) {
 	fmt.Printf("  (total %.2f cores)\n", w.totalRate())
 }
 
-// ------------------------------------------------------------------ helpers
-
-func f2(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) }
-
-func dest(name, file string, tracks []int, rendition int64) map[string]any {
-	on := map[int]bool{}
-	for _, t := range tracks {
-		on[t] = true
-	}
-	rows := []map[string]any{}
-	for i := 0; i < 6; i++ {
-		rows = append(rows, map[string]any{"track": i, "enabled": on[i], "gain": 1.0})
-	}
-	return map[string]any{
-		"name": name, "kind": "file", "platform": "custom", "url": file,
-		"enabled": true, "audioBitrate": 160, "renditionId": rendition,
-		"profile": map[string]any{
-			"mode": "simple", "tracks": rows, "normalize": "auto", "sampleRate": 48000,
-		},
-	}
-}
-
-func destID(resp map[string]any) string {
-	d, ok := resp["destination"].(map[string]any)
-	if !ok {
-		die("create destination returned %v", resp)
-	}
-	return strconv.Itoa(intOf(d["id"]))
-}
+// ------------------------------------------------------- waiting on the engine
 
 func waitForProbe() {
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(1500 * time.Millisecond)
-		s := get("/source")
-		tracks, _ := s["tracks"].([]any)
-		if s["probed"] == true && len(tracks) == 3 {
-			v := mapOf(s["video"])
-			fmt.Printf("probed: %d audio tracks, video %vx%v\n", len(tracks), v["width"], v["height"])
-			facts["SOURCE_WIDTH"] = strconv.Itoa(intOf(v["width"]))
-			facts["SOURCE_HEIGHT"] = strconv.Itoa(intOf(v["height"]))
+		var s sourceDoc
+		driverlib.GetJSON("/source", "source", &s)
+		if s.Probed && len(s.Tracks) == 3 {
+			fmt.Printf("probed: %d audio tracks, video %dx%d\n",
+				len(s.Tracks), s.Video.Width, s.Video.Height)
+			facts["SOURCE_WIDTH"] = strconv.Itoa(s.Video.Width)
+			facts["SOURCE_HEIGHT"] = strconv.Itoa(s.Video.Height)
 			return
 		}
 	}
@@ -566,22 +710,20 @@ func waitForRunning(want int) {
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(1500 * time.Millisecond)
-		st := get("/status")
+		st := status()
 		running := 0
-		for _, d := range st["destinations"].([]any) {
-			dm := d.(map[string]any)
-			if p, ok := dm["process"].(map[string]any); ok && p["state"] == "running" {
+		for _, d := range st.Destinations {
+			if d.Process != nil && d.Process.State == "running" {
 				running++
 			}
 		}
 		if running == want {
-			for _, d := range st["destinations"].([]any) {
-				dm := d.(map[string]any)
-				via := "passthrough"
-				if n, ok := dm["renditionName"].(string); ok && n != "" {
-					via = n
+			for _, d := range st.Destinations {
+				via := d.RenditionName
+				if via == "" {
+					via = "passthrough"
 				}
-				fmt.Printf("  %-36s %-22s via %s\n", dm["name"], dm["summary"], via)
+				fmt.Printf("  %-36s %-22s via %s\n", d.Name, d.Summary, via)
 			}
 			return
 		}
@@ -589,30 +731,9 @@ func waitForRunning(want int) {
 	die("destinations never all reached running (wanted %d)", want)
 }
 
-func renditionStatus(st map[string]any, id int64) map[string]any {
-	list, _ := st["renditions"].([]any)
-	for _, r := range list {
-		rm := r.(map[string]any)
-		if int64(intOf(rm["id"])) == id {
-			return rm
-		}
-	}
-	die("rendition %d missing from /status", id)
-	return nil
-}
+// ------------------------------------------------------------------ helpers
 
-func mapOf(v any) map[string]any {
-	m, _ := v.(map[string]any)
-	if m == nil {
-		return map[string]any{}
-	}
-	return m
-}
-
-func intOf(v any) int {
-	f, _ := v.(float64)
-	return int(f)
-}
+func f2(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) }
 
 func boolStr(b bool) string {
 	if b {
@@ -621,16 +742,20 @@ func boolStr(b bool) string {
 	return "no"
 }
 
+// writeFacts flushes everything measured so far to the file the shell sources.
+//
+// Sorted, so two runs of the same suite produce diffable files -- which is how
+// the CPU figures get compared across runs at all.
 func writeFacts() {
 	if factsFile == "" {
 		return
 	}
-	var b strings.Builder
 	keys := make([]string, 0, len(facts))
 	for k := range facts {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	var b strings.Builder
 	for _, k := range keys {
 		fmt.Fprintf(&b, "%s=%q\n", k, facts[k])
 	}
@@ -639,72 +764,18 @@ func writeFacts() {
 	}
 }
 
-func waitUp() {
-	for i := 0; i < 60; i++ {
-		if r, err := client.Get(base + "/health"); err == nil {
-			r.Body.Close()
-			return
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-	die("server never came up")
-}
-
-func grabCSRF() {
-	req, _ := http.NewRequest("GET", base+"/health", nil)
-	for _, c := range client.Jar.Cookies(req.URL) {
-		if c.Name == "polyemesis_csrf" {
-			csrf = c.Value
-		}
-	}
-	if csrf == "" {
-		die("no CSRF cookie issued")
-	}
-}
-
-func call(method, path string, body any) map[string]any {
-	var r io.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
-		r = bytes.NewReader(b)
-	}
-	req, _ := http.NewRequest(method, base+path, r)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CSRF-Token", csrf)
-	resp, err := client.Do(req)
-	if err != nil {
-		die("%s %s: %v", method, path, err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		die("%s %s -> %d: %s", method, path, resp.StatusCode, raw)
-	}
-	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
-	return out
-}
-
-func get(path string) map[string]any {
-	resp, err := client.Get(base + path)
-	if err != nil {
-		die("GET %s: %v", path, err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		die("GET %s -> %d: %s", path, resp.StatusCode, raw)
-	}
-	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
-	return out
-}
-
+// die reports a driver-level failure, having first flushed what it measured.
+//
+// THE FLUSH IS THE POINT and it is why this is not simply driverlib.Die.
+// os.Exit skips deferred calls, so without writing the facts here a failing run
+// would tell the shell script nothing about how far it got -- and the shell
+// distinguishes "the driver aborted" from "the assertion failed" precisely so a
+// broken harness is not reported as a broken product.
 func die(f string, a ...any) {
-	fmt.Printf("FATAL: "+f+"\n", a...)
-	// os.Exit skips deferred calls, so the facts gathered so far have to be
-	// flushed here or a failing run tells the shell script nothing.
-	facts["DRIVER_FAILED"] = fmt.Sprintf(f, a...)
+	msg := fmt.Sprintf(f, a...)
+	facts["DRIVER_FAILED"] = msg
 	writeFacts()
-	os.Exit(1)
+	// driverlib.Die's "driver: " prefix is load-bearing across the suites, so
+	// the exit goes through it rather than around it.
+	driverlib.Die(msg)
 }
