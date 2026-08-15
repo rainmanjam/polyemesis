@@ -1270,37 +1270,78 @@ jobs:
         run: |
           echo "::notice title=${{ matrix.suite }} skipped::every changed path was documentation, so this suite could not be affected by it. See the 'which changes' job."
 
+      # BtbN's `latest` release tag is ROLLING: the same asset name can serve a
+      # newer build over time. A cache keyed on the name therefore FREEZES the
+      # build CI runs, which is the right trade here for the same reason it is
+      # right in the unit job -- the Dockerfile pins FFMPEG_VERSION=8.1.2-r0.
+      #
+      # Bump the -v1 suffix to take a newer build on purpose.
+      - name: Cache FFmpeg
+        if: needs.changes.outputs.code == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ffmpeg-${{ runner.os }}-n8.1-latest-linux64-gpl-8.1-v1
+
       - name: Install FFmpeg
         if: needs.changes.outputs.code == 'true'
-        # See the note on the go job's install step: a hung apt must fail with its
-        # own name attached rather than eating this job's whole 20 minutes.
         timeout-minutes: 6
+        env:
+          FFCACHE: /tmp/ffcache
         run: |
-          # RETRIES AND A PER-ACQUISITION TIMEOUT, because THIS is the install
-          # that has been failing. Three acceptance jobs hit the 6-minute
-          # ceiling here in one day -- acceptance-postprod, acceptance-pull and
-          # acceptance-mqtt -- every one of them stalled mid-fetch against
-          # azure.archive.ubuntu.com:
+          # THE SAME CACHED, PINNED 8.1 THE OTHER JOBS USE -- this job was the
+          # one left on apt, and that was two defects rather than one.
           #
-          #   Get:48 .../noble/universe amd64 libavformat...
-          #   ##[error]The action 'Install FFmpeg' has timed out after 6 minutes.
+          # RELIABILITY. apt fetches from azure.archive.ubuntu.com on every run
+          # with no cache, and it has hit the 6-minute ceiling repeatedly:
+          # acceptance-postprod, acceptance-pull, acceptance-mqtt and
+          # acceptance-audio, all stalled mid-acquisition. Acquire::Retries was
+          # added to bound it and did not stop it, for the reason the unit job
+          # already recorded: "a retry re-asks a host that is refusing. The
+          # cache stops asking."
           #
-          # apt's default is ZERO retries and no per-connection timeout, so one
-          # slow mirror connection stalls the whole acquisition until the step
-          # ceiling fires. These three options are the supported way to bound
-          # that, and they bound it well inside the ceiling: at most 3 tries of
-          # 20s connect + 60s transfer per file.
+          # CORRECTNESS, and this is the worse half. Ubuntu ships FFmpeg 6.1.1;
+          # the Docker image ships 8.1.2. The unit job was moved to a pinned 8.1
+          # precisely because "testing against 6.1.1 meant CI never exercised the
+          # FFmpeg users actually get" -- and 6.1.1 "cannot demux multitrack FLV
+          # at all". The ACCEPTANCE suites are the ones that push real multitrack
+          # audio end to end, so they were the jobs that most needed 8.1 and the
+          # only ones still on 6.1.1.
+          set -euo pipefail
+          cd /tmp
+          if [ -x "$FFCACHE/ffmpeg" ] && [ -x "$FFCACHE/ffprobe" ]; then
+            echo "ffmpeg restored from cache"
+          else
+            for attempt in 1 2 3; do
+              if curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 \
+                   --connect-timeout 20 --max-time 90 \
+                   -o /tmp/ff.tar.xz \
+                   "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; then
+                break
+              fi
+              echo "ffmpeg download attempt $attempt failed"
+              [ "$attempt" = 3 ] && exit 1
+              sleep 5
+            done
+            mkdir -p ffbuild && tar xf ff.tar.xz --strip-components=1 -C ffbuild
+            mkdir -p "$FFCACHE"
+            cp ffbuild/bin/ffmpeg ffbuild/bin/ffprobe "$FFCACHE/"
+          fi
+          sudo install -m 0755 "$FFCACHE/ffmpeg"  /usr/local/bin/ffmpeg
+          sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
+          # lsof still comes from apt: three suites read the engine's relay port
+          # out of it to measure the right socket, and fail obscurely without it.
+          # One small package, and its own retry options, rather than the whole
+          # multimedia stack.
           APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=60 -o Acquire::http::ConnectionAttemptDelayMsec=1000"
           sudo apt-get $APT_OPTS update -qq
-          # lsof as well: three suites read the engine's relay port out of it
-          # to measure the right socket, and they fail obscurely without it.
-          sudo apt-get $APT_OPTS install -y --no-install-recommends ffmpeg lsof
+          sudo apt-get $APT_OPTS install -y --no-install-recommends lsof
           ffmpeg -hide_banner -version | head -1
-          # Not fatal: none of these suites needs SRT (the container ones do,
-          # and they run elsewhere). Logged because a suite behaving oddly is
-          # much easier to read with the build's capabilities in front of you.
-          ffmpeg -hide_banner -protocols | tr " " "\n" | grep -qx srt \
-            && echo "libsrt: yes" || echo "libsrt: no"
+          # NOW FATAL, where the apt build could only be logged about. A pinned
+          # GPL 8.1 build has libsrt; if it does not, the cache holds something
+          # other than what this step believes it fetched.
+          ffmpeg -hide_banner -protocols | tr " " "\n" | grep -qx srt
+          echo "libsrt: yes"
 
       # The suites run the real binary with the UI embedded, so it has to be
       # the real build rather than `go build ./cmd/...`.
