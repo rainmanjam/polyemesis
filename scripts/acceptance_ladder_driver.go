@@ -634,52 +634,72 @@ type window struct {
 // spawns a second encoder and reaps it a second later is a real bug and a
 // single sample at the end would miss it entirely; min and max make a count
 // that ever moved impossible to miss.
+// It is three steps, and they are three functions: take the opening CPU
+// reading, watch the counts, then close the books on the CPU. Written as one
+// block it read as a single loop that happened to touch two unrelated maps.
 func sample(d time.Duration) window {
 	w := window{
 		min:  map[string]int{},
 		max:  map[string]int{},
 		rate: map[string]float64{},
 	}
-	start := map[string]map[string]float64{} // rung -> pid -> cpu at t0
 	for _, t := range tiers {
 		w.min[t.label] = -1
-		start[t.label] = map[string]float64{}
-		for _, p := range encodersFor(t.mark) {
-			start[t.label][p.pid] = p.cpu
-		}
 	}
+	start := cpuByPID()
 
 	t0 := time.Now()
-	deadline := t0.Add(d)
-	for time.Now().Before(deadline) {
-		for _, t := range tiers {
-			n := countEncoders(t.mark)
-			if w.min[t.label] < 0 || n < w.min[t.label] {
-				w.min[t.label] = n
-			}
-			if n > w.max[t.label] {
-				w.max[t.label] = n
-			}
-		}
-		time.Sleep(time.Second)
+	for deadline := t0.Add(d); time.Now().Before(deadline); time.Sleep(time.Second) {
+		w.observe()
 	}
 	w.secs = time.Since(t0).Seconds()
+	w.closeRates(start)
+	return w
+}
 
+// cpuByPID is the cumulative CPU of every rung's encoders, right now, keyed by
+// rung and then by pid.
+func cpuByPID() map[string]map[string]float64 {
+	out := map[string]map[string]float64{}
+	for _, t := range tiers {
+		out[t.label] = map[string]float64{}
+		for _, p := range encodersFor(t.mark) {
+			out[t.label][p.pid] = p.cpu
+		}
+	}
+	return out
+}
+
+// observe folds one reading of the process table into the running min and max.
+func (w window) observe() {
+	for _, t := range tiers {
+		n := countEncoders(t.mark)
+		if w.min[t.label] < 0 || n < w.min[t.label] {
+			w.min[t.label] = n
+		}
+		if n > w.max[t.label] {
+			w.max[t.label] = n
+		}
+	}
+}
+
+// closeRates turns the opening CPU reading into a per-rung rate.
+//
+// ONLY PIDS PRESENT AT BOTH ENDS CONTRIBUTE. A process that appeared or
+// vanished mid-window has no rate over this window, and inventing one from a
+// partial interval would report a number the interval does not support. Such a
+// rung is caught by min != max anyway.
+func (w window) closeRates(start map[string]map[string]float64) {
 	for _, t := range tiers {
 		if w.min[t.label] < 0 {
 			w.min[t.label] = 0
 		}
-		// Only pids present at BOTH ends contribute. A process that appeared or
-		// vanished mid-window has no rate over this window, and inventing one
-		// from a partial interval would report a number the interval does not
-		// support. Such a rung is caught by min != max above anyway.
 		for _, p := range encodersFor(t.mark) {
 			if c0, ok := start[t.label][p.pid]; ok {
 				w.rate[t.label] += (p.cpu - c0) / w.secs
 			}
 		}
 	}
-	return w
 }
 
 func (w window) totalRate() float64 {
@@ -818,25 +838,36 @@ func waitForRunning(want int) {
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(1500 * time.Millisecond)
-		st := status()
-		running := 0
-		for _, d := range st.Destinations {
-			if d.Process != nil && d.Process.State == "running" {
-				running++
-			}
-		}
-		if running == want {
-			for _, d := range st.Destinations {
-				via := d.RenditionName
-				if via == "" {
-					via = "passthrough"
-				}
-				fmt.Printf("  %-36s %-22s via %s\n", d.Name, d.Summary, via)
-			}
+		if st := status(); st.running() == want {
+			st.printLayout()
 			return
 		}
 	}
 	die("destinations never all reached running (wanted %d)", want)
+}
+
+// running counts the destinations the engine reports as actually running,
+// which is not the same as the number configured.
+func (s statusDoc) running() int {
+	n := 0
+	for _, d := range s.Destinations {
+		if d.Process != nil && d.Process.State == "running" {
+			n++
+		}
+	}
+	return n
+}
+
+// printLayout shows which rung each destination is reading, so a run's log
+// carries the ladder it actually built rather than the one it was asked for.
+func (s statusDoc) printLayout() {
+	for _, d := range s.Destinations {
+		via := d.RenditionName
+		if via == "" {
+			via = "passthrough"
+		}
+		fmt.Printf("  %-36s %-22s via %s\n", d.Name, d.Summary, via)
+	}
 }
 
 // ------------------------------------------------------------------ helpers
