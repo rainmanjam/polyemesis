@@ -73,7 +73,36 @@ export function UpdateBanner() {
   if (!info || dismissed) return null;
   // A failed check says nothing and must look like nothing: an operator whose
   // box has no outbound network should not see a permanent warning about it.
-  if (info.checkFailed || !info.updateAvailable || !info.latest) return null;
+  if (info.checkFailed) return null;
+
+  // A BUILD FROM SOURCE SAYS SO, rather than saying nothing.
+  //
+  // The server reports `comparable: false` for a git-describe version, because
+  // a source build genuinely cannot be ordered against a release feed -- it may
+  // be ahead of the tag it names and behind some later one. Before this, that
+  // produced silence, and silence is indistinguishable from "you are current".
+  //
+  // An operator running a source build is usually doing it deliberately and is
+  // exactly the person who wants to know that the update path is not going to
+  // tell them anything. So the line explains WHY there is no offer and points
+  // at the releases page, which is where the answer actually is.
+  //
+  // No action button: there is nothing safe to offer. Staging "the latest
+  // release" over a build that is ahead of it is the downgrade this whole
+  // change exists to stop.
+  const devBuild = !info.comparable && !!info.version;
+
+  // Built here rather than in the JSX so the compiler can narrow `info.latest`.
+  // A compound guard like `!devBuild && !info.latest` does not narrow it, and
+  // reaching for `?? ""` to silence that would put an empty version number in
+  // front of an operator rather than admitting the branch cannot happen.
+  let headline: string;
+  if (devBuild) {
+    headline = t("chrome.developmentBuild", { current: info.version });
+  } else {
+    if (!info.updateAvailable || !info.latest) return null;
+    headline = t("chrome.updateAvailable", { latest: info.latest, current: info.version });
+  }
 
   const fail = (e: unknown) => {
     setError(e instanceof Error ? e.message : String(e));
@@ -133,10 +162,14 @@ export function UpdateBanner() {
       className="flex flex-wrap items-center gap-3 border-b border-border bg-muted/50 px-3 py-1.5 text-sm"
     >
       <span className="min-w-0 flex-1 truncate">
-        {t("chrome.updateAvailable", { latest: info.latest, current: info.version })}
+        {headline}
       </span>
 
-      {info.onAirSummary && stage === "idle" && (
+      {/* Everything below offers or performs an upgrade, and none of it applies
+          to a source build: there is no release that is known to be newer, so
+          there is nothing to prepare. The dismiss control stays, because an
+          operator who knows what they are running should be able to close it. */}
+      {!devBuild && info.onAirSummary && stage === "idle" && (
         // Shown WITH the offer, not instead of it. An operator who learns a
         // release exists is going to act on it eventually, and the useful moment
         // to tell them what is live is while they are deciding -- not after they
@@ -146,7 +179,7 @@ export function UpdateBanner() {
         </span>
       )}
 
-      {stage === "idle" && (
+      {!devBuild && stage === "idle" && (
         <button type="button" onClick={prepare} className="shrink-0 underline underline-offset-2">
           {t("chrome.updatePrepare")}
         </button>

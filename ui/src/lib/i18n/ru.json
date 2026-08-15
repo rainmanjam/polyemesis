@@ -133,6 +133,7 @@
   "chatpage.subtitle": "Все платформы в одной ленте, с одним полем отправки.",
   "chatpage.timeline": "Лента",
   "chatpage.title": "Чат",
+  "chrome.developmentBuild": "Сборка для разработки {current}. Обновления не предлагаются для сборок из исходного кода — что вышло, смотрите на странице релизов.",
   "chrome.dismiss": "Закрыть",
   "chrome.ingest": "Ingest",
   "chrome.language": "Язык",

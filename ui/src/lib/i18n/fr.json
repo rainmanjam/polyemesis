@@ -133,6 +133,7 @@
   "chatpage.subtitle": "Toutes les plateformes dans une seule chronologie, avec une seule zone d'envoi.",
   "chatpage.timeline": "Chronologie",
   "chatpage.title": "Chat",
+  "chrome.developmentBuild": "Build de développement {current}. Aucune mise à jour n'est proposée pour les builds compilés depuis les sources — consultez la page des versions pour voir ce qui est publié.",
   "chrome.dismiss": "Ignorer",
   "chrome.ingest": "Ingest",
   "chrome.language": "Langue",

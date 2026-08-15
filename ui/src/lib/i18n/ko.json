@@ -133,6 +133,7 @@
   "chatpage.subtitle": "모든 플랫폼을 하나의 타임라인에, 전송창도 하나로.",
   "chatpage.timeline": "타임라인",
   "chatpage.title": "채팅",
+  "chrome.developmentBuild": "개발 빌드 {current}. 소스에서 빌드한 경우 업데이트가 제공되지 않습니다. 배포된 내용은 릴리스 페이지를 확인하세요.",
   "chrome.dismiss": "닫기",
   "chrome.ingest": "Ingest",
   "chrome.language": "언어",

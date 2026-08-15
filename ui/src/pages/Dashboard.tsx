@@ -707,7 +707,10 @@ export function Dashboard() {
         <div className="flex flex-col gap-3">
           <Suspense
             fallback={
-              <div className="aspect-video w-full rounded-md border border-border bg-black" />
+              // Same max-h as PreviewPlayer, and it has to be: this stands in for
+              // it before a stream arrives, so a taller box here would make the
+              // layout jump the moment one does.
+              <div className="aspect-video max-h-[60vh] w-full rounded-md border border-border bg-black" />
             }
           >
             <PreviewPlayer active={settingsPreview} />
