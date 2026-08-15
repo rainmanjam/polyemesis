@@ -222,7 +222,16 @@ jobs:
             echo "ffmpeg restored from cache"
           else
             for attempt in 1 2 3; do
-              if curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 \
+              # --proto/--proto-redir pin the whole exchange to https. -L
+              # follows redirects, and without these curl will happily follow an
+              # https -> http hop and fetch the binary CI is about to run over
+              # plaintext. SonarCloud githubactions:S6506 flagged the copy of
+              # this block added for the acceptance job; the other two had the
+              # same hole and are fixed here too, because leaving a known-bad
+              # copy beside a fixed one is how the fix gets reverted later by
+              # someone copying the wrong neighbour.
+              if curl -fsSL --proto '=https' --proto-redir '=https' \
+                   --retry 3 --retry-all-errors --retry-delay 5 \
                    --connect-timeout 20 --max-time 90 \
                    -o /tmp/ff.tar.xz \
                    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; then
@@ -550,7 +559,16 @@ jobs:
             echo "ffmpeg restored from cache"
           else
             for attempt in 1 2 3; do
-              if curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 \
+              # --proto/--proto-redir pin the whole exchange to https. -L
+              # follows redirects, and without these curl will happily follow an
+              # https -> http hop and fetch the binary CI is about to run over
+              # plaintext. SonarCloud githubactions:S6506 flagged the copy of
+              # this block added for the acceptance job; the other two had the
+              # same hole and are fixed here too, because leaving a known-bad
+              # copy beside a fixed one is how the fix gets reverted later by
+              # someone copying the wrong neighbour.
+              if curl -fsSL --proto '=https' --proto-redir '=https' \
+                   --retry 3 --retry-all-errors --retry-delay 5 \
                    --connect-timeout 20 --max-time 90 \
                    -o /tmp/ff.tar.xz \
                    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; then
@@ -1313,7 +1331,16 @@ jobs:
             echo "ffmpeg restored from cache"
           else
             for attempt in 1 2 3; do
-              if curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 \
+              # --proto/--proto-redir pin the whole exchange to https. -L
+              # follows redirects, and without these curl will happily follow an
+              # https -> http hop and fetch the binary CI is about to run over
+              # plaintext. SonarCloud githubactions:S6506 flagged the copy of
+              # this block added for the acceptance job; the other two had the
+              # same hole and are fixed here too, because leaving a known-bad
+              # copy beside a fixed one is how the fix gets reverted later by
+              # someone copying the wrong neighbour.
+              if curl -fsSL --proto '=https' --proto-redir '=https' \
+                   --retry 3 --retry-all-errors --retry-delay 5 \
                    --connect-timeout 20 --max-time 90 \
                    -o /tmp/ff.tar.xz \
                    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; then
