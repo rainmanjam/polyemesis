@@ -528,13 +528,27 @@ export function RoutingPage() {
                 onPatch={patchVod}
                 onApplyPreset={applyVodPreset}
                 onCompileError={setVodError}
-                footer={() => (
-                  <>
-                    This graph produces the SECOND audio track only. The first is the live mix
-                    above, the video is copied without re-encoding either way, and both are built
-                    from the same ingest in one FFmpeg process.
-                  </>
-                )}
+                // Conditional on the plan-time gate for the same reason the
+                // switch label is: "produces the SECOND audio track" is a
+                // statement about output, and it is not true on a Twitch RTMP
+                // destination with Enhanced Broadcasting off — where this graph
+                // is compiled, stored, and then not emitted.
+                footer={() =>
+                  vodBlockedByToggle ? (
+                    <>
+                      This is the graph the second audio track WOULD be built from. It is not
+                      being emitted while Enhanced Broadcasting is off for this destination — see
+                      the note above — so nothing here reaches Twitch yet. It is still compiled
+                      and still saved.
+                    </>
+                  ) : (
+                    <>
+                      This graph is the SECOND audio track. The first is the live mix above, the
+                      video is copied without re-encoding either way, and both are built from the
+                      same ingest in one FFmpeg process.
+                    </>
+                  )
+                }
               />
             )}
           </div>
@@ -625,25 +639,39 @@ function ProfileEditor({
   const [compileError, setCompileError] = useState<string>("");
 
   // ---- compile on every edit, debounced ----
+  //
+  // The debounce cancels a request not yet SENT. `cancelled` discards the
+  // answer to one already in flight, which is a different failure: two edits a
+  // few hundred milliseconds apart put two requests on the wire, and nothing
+  // guarantees they come back in order. Without this, a slow first response
+  // landing after a fast second one paints a filter string that is not the one
+  // the controls describe — and the whole claim this panel makes is that the
+  // graph shown is the graph that will run.
   const debounceRef = useRef<number | undefined>(undefined);
   useEffect(() => {
+    let cancelled = false;
     window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
       api
         .compileRouting(profile)
         .then((res) => {
+          if (cancelled) return;
           setCompiled(res.routing);
           setCompileError("");
           onCompileError("");
         })
         .catch((err) => {
+          if (cancelled) return;
           const msg = err instanceof Error ? err.message : t("route.couldNotCompileThisRouting");
           setCompiled(null);
           setCompileError(msg);
           onCompileError(msg);
         });
     }, 180);
-    return () => window.clearTimeout(debounceRef.current);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(debounceRef.current);
+    };
   }, [profile, t, onCompileError]);
 
   // An editor that unmounts — the second mix being switched off — must not
@@ -737,6 +765,7 @@ function ProfileEditor({
 
             <TabsContent value="simple">
               <TrackRows
+                idPrefix={idPrefix}
                 tracks={ctx.tracks}
                 selection={profile.tracks ?? []}
                 levels={ctx.levels}
@@ -909,17 +938,24 @@ function SecondMixCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
+        {/* THE SWITCH DESCRIBES THE CONFIGURATION, NOT THE WIRE. "This
+            destination carries a second audio track" was the first wording and
+            it is a claim about delivery — which is false whenever the engine
+            refuses the pair at plan time, three lines below its own "not being
+            sent" alert. Whether a second track is sent is answered by the
+            states underneath; this label answers only whether a second mix
+            exists to send. */}
         <div className="flex h-9 items-center gap-2">
           <Switch id="vod-enabled" checked={profile !== null} onCheckedChange={enable} />
           <Label htmlFor="vod-enabled" className="text-[11px] text-muted-foreground">
             {profile !== null
-              ? "This destination carries a second audio track"
-              : "One audio track (the normal case)"}
+              ? "A second mix is configured for this destination"
+              : "One audio mix (the normal case)"}
           </Label>
         </div>
 
         <span className="text-[10px] text-muted-foreground">
-          A whole second mix of the same ingest, published as a second audio track alongside the
+          A whole second mix of the same ingest, intended for a second audio track alongside the
           live one. The usual reason is an archive that must not carry licensed music while the
           live mix does. Off is the normal state.
         </span>

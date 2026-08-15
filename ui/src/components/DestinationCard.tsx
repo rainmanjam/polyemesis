@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusDot } from "@/components/signature/StatusDot";
+import { ExperimentalBadge } from "@/components/Experimental";
 import { TrackSummary } from "@/components/signature/TrackRows";
 import { Stat } from "@/components/signature/Stat";
 import { duration, kbps } from "@/lib/format";
@@ -244,10 +245,20 @@ export function DestinationCard({
             — an operator who is shown a warning every broadcast learns to
             ignore warnings. The toggle in the dialog promises this sentence;
             this is where it is kept. */}
+        {/* The badge, and NOT the full <Experimental> block. This is the one
+            place the operator is sent for the go-live decision — the dialog
+            toggle and the routing editor both point here — so it has to carry
+            the label, or the caveat stops exactly where the answer starts. But
+            it renders on every broadcast, so a paragraph here would be the
+            "warning every time" this note's own comment exists to avoid. The
+            claim itself is stated in full where the feature is switched on. */}
         {dest.multitrackNote && (
           <div className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
             <Info className="mt-0.5 h-3 w-3 shrink-0" />
-            <span className="break-words">{dest.multitrackNote}</span>
+            <span className="break-words">
+              <ExperimentalBadge className="mr-1 align-[1px]" />
+              {dest.multitrackNote}
+            </span>
           </div>
         )}
         {/* Advisory only. Twitch agreed and said something about it; the

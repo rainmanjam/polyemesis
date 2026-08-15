@@ -2,22 +2,29 @@
 // IVS runs it -- calls Multitrack Video, and which Twitch's own error text calls
 // both names within a single response body.
 //
-// EXPERIMENTAL: this negotiation has never been run against Twitch's live
-// endpoint. Everything below -- the request shape, the three measurements this
-// doc comment states as fact, the refusal wording, the minted key -- was
-// measured against RECORDED FIXTURES replayed from an httptest server, never
-// against ingest.twitch.tv, and no successful negotiation has been observed on
-// real hardware. It needs a real stream key and a GPU Twitch supports, and the
-// machine this was written on has neither.
+// EXPERIMENTAL: THIS CODE has never talked to Twitch. Read that precisely,
+// because it is narrower than "none of this is known" and wider than "it is
+// fine". The distinction the rest of this comment turns on:
 //
-// What that does and does not mean. The fixtures are real captured responses,
-// so the parsing is tested against genuine bytes; what is untested is whether
-// today's endpoint still sends those bytes and whether a real GPU inventory
-// gets past its hardware check. Nothing here can fail a broadcast either way --
-// Negotiate turns every error into a Refused outcome and the caller publishes
-// to the ordinary Twitch ingest -- so the cost of being wrong is the feature not
-// working, not a broadcast not going out. See engine.negotiateDestination,
-// which is built around exactly that guarantee.
+//   - The observations under "THREE THINGS MEASURED" below are real. They are
+//     what the endpoint sent, captured from it, and they are the reason this
+//     package is shaped as it is rather than as the issue guessed.
+//
+//   - What has never happened is a request LEAVING THIS PROCESS FOR
+//     ingest.twitch.tv. Every test drives an httptest server replaying those
+//     captures, so this code is verified against the recorded bytes and not
+//     against the endpoint. No negotiation has been observed succeeding
+//     end-to-end and no minted key has ever carried a broadcast; doing so needs
+//     a real stream key and a GPU Twitch supports, and the machine this was
+//     written on has neither.
+//
+// So the parsing is tested against genuine bytes. What is untested is whether
+// today's endpoint still sends them, whether a real GPU inventory gets past its
+// hardware check, and whether a key minted for real publishes. Nothing here can
+// fail a broadcast either way -- Negotiate turns every error into a Refused
+// outcome and the caller publishes to the ordinary Twitch ingest -- so the cost
+// of being wrong is the feature not working, not a broadcast not going out. See
+// engine.negotiateDestination, which is built around exactly that guarantee.
 //
 // The label is NOT a switch. This package is linked in, the toggle is
 // reachable, and an operator with the hardware can use it today. Deleting this
@@ -41,7 +48,10 @@
 // is knowable ahead of the call.
 //
 // THREE THINGS MEASURED AGAINST THE LIVE ENDPOINT, each of which shapes the
-// code below and none of which is an assumption:
+// code below and none of which is an assumption. They are OBSERVATIONS OF WHAT
+// TWITCH SENT, and they say nothing about whether this package's own request
+// would be accepted -- see the EXPERIMENTAL note above, which is the boundary
+// between the two:
 //
 //  1. A REFUSAL ARRIVES AS HTTP 200. Every response observed -- valid, invalid,
 //     unsupported hardware, unparseable schema version -- was 200. The verdict
