@@ -28,6 +28,22 @@ const pageSource = {
   "/download": "src/pages/download.astro",
 };
 
+/* PATH is pinned, and that is not cargo cult -- SonarCloud javascript:S4036
+   failed this file, and the rule is right. `execFileSync("git", ...)` resolves
+   the binary through the inherited PATH, so whatever `git` comes first on the
+   machine running the build is what executes. On a developer box that can be a
+   wrapper in a writable directory; in CI it is one more thing an action earlier
+   in the workflow can prepend to. Two fixed system directories, and no more.
+
+   Not an absolute path to one binary, because /usr/bin/git and
+   /opt/homebrew/bin/git are both legitimate and naming either breaks the other
+   machine. Two directories that no unprivileged process can write to is the
+   property the rule actually asks for.
+
+   A machine with git somewhere else falls through the catch and the page ships
+   without a lastmod, which is the documented degradation, not a build failure. */
+const SAFE_PATH = "/usr/bin:/bin";
+
 /** @param {string} file @returns {string|undefined} */
 function lastCommitISO(file) {
   try {
@@ -35,6 +51,7 @@ function lastCommitISO(file) {
       cwd: new URL(".", import.meta.url).pathname,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      env: { PATH: SAFE_PATH },
     }).trim();
     return out || undefined;
   } catch {
