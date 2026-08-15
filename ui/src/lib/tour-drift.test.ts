@@ -404,4 +404,22 @@ describe("the tour survives an install where nothing is configured", () => {
         "configured, and is the whole audience for this — is taught nothing.",
     ).toEqual([]);
   });
+
+  /* GUARDING THESE GUARDS, the same way stripJSComments is guarded above. All
+     three rules in this block are of the form "no bad step exists", and every
+     one of them is satisfied by a tour with nothing conditional left in it.
+
+     That is not maintenance paranoia. Marking `publishUrl` "always" is the
+     obvious way to quiet this block, it keeps all three green, and it hands the
+     one anchor that is legitimately absent on a fresh install the three-second
+     grace period meant for chrome — a frozen popover on every first run, which
+     is the exact defect `presence` was introduced to prevent. */
+  it("at least one step is conditional", () => {
+    expect(
+      TOUR_STEPS.filter((s) => s.presence === "whenConfigured").map((s) => s.id),
+      "no step is marked whenConfigured, so every rule above it is vacuously true. If a " +
+        "step really did stop depending on configured data, delete those rules on " +
+        "purpose rather than leaving them here reading like cover.",
+    ).not.toEqual([]);
+  });
 });
