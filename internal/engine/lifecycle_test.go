@@ -17,6 +17,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // The child lifecycle: startRendition, teardownRendition, stopAux, the preview
@@ -435,7 +436,20 @@ func TestStoppingOneAuxiliaryChildClearsOnlyItsOwnPortAndSignature(t *testing.T)
 			e := lifeEngine(t)
 			// Three ports and no spare: a released port is the ONLY one
 			// Allocate can return afterwards, which is what identifies it.
-			e.alloc = relay.NewPortAllocator(freeUDPPort(t), 3)
+			//
+			// A HELD WINDOW, not freeUDPPort. That probes one port, releases it,
+			// and leaves base+1 and base+2 unchecked -- so under `go test ./...`
+			// something else takes one of the three and this test fails during
+			// SETUP, blaming the path under test for a port it never had. Three
+			// times in one day on three different ranges before it was fixed.
+			base, held := testenv.FreeUDPWindow(t, 3)
+			// Released together, immediately before the allocator is built: the
+			// window has to be free for Allocate to hand it out, and holding it
+			// until this line is what stopped anything else from taking it.
+			for _, r := range held {
+				r.Release()
+			}
+			e.alloc = relay.NewPortAllocator(base, 3)
 			ports := map[string]int{}
 			for _, s := range slots {
 				ports[s.name] = mustAllocate(t, e.alloc, "reserving "+s.name+"'s port")
