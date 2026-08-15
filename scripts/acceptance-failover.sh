@@ -215,6 +215,49 @@ waitfor() {
   poly_poll_field "$name to become $want" "$idx" "$want" "$secs" readstatus
 }
 
+# wait_for_dest_process waits until the status line carries a REAL destination
+# restart count, rather than the -1 that means "no destination process was
+# reported".
+#
+# WHY THIS EXISTS. Step 6 -- "THE POINT: the destination never restarted" -- is
+# the whole feature, and it compares a count taken before the cut against one
+# taken after. The before-read used to be taken a fixed six seconds after the
+# primary went on air, and six seconds is not a fact about anything: it is how
+# long it happened to take on the machine where the line was written. On the
+# OVH box it was not enough, the read came back
+#
+#     before the cut: primary 2 true -1
+#
+# and the suite correctly refused to measure. Every behavioural check around it
+# passed -- the primary was restored, both switches were recorded, the selector
+# moved to the filler -- so the FEATURE was fine and the MEASUREMENT was not.
+#
+# Note the shape of the bug: a sleep that was doing two jobs. Letting a few
+# seconds of primary land in the recording genuinely needs elapsed time. Waiting
+# for the destination to start reporting needs a CONDITION, and was being
+# covered by the same sleep without anyone saying so. They are separated now.
+#
+# -1 rather than "unreadable": readstatus validates field 4 with ^-?[0-9]+$,
+# which accepts a negative on purpose, so a genuine -1 from the API flows
+# through the validator untouched and is indistinguishable here from the
+# fallback line. Both mean the same thing to this suite and both are waited out.
+wait_for_dest_process() {
+  local secs="${1:-30}" deadline=$(( SECONDS + secs )) line
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    line=$(readstatus)
+    if [ "$(printf '%s' "$line" | awk '{print $4}')" != "-1" ]; then
+      printf '%s\n' "$line"
+      return 0
+    fi
+    sleep 1
+  done
+  # Hand back whatever the last read was. The caller reports it as unmeasured,
+  # which is the same verdict as before this helper existed -- the point is that
+  # it now takes 30 seconds of trying to get there rather than one look.
+  printf '%s\n' "$line"
+  return 1
+}
+
 # settle waits until the active feed has HELD one value for a stretch, rather
 # than merely reached it once.
 #
@@ -411,8 +454,15 @@ else
   exit 1
 fi
 # Let a few seconds of real primary land in the file before anything is cut.
+# This one IS about elapsed time -- there has to be primary in the recording for
+# the timeline check at step 9 to have anything to find.
 sleep 6
-BEFORE=$(readstatus)
+
+# And this one is about a condition, which the sleep above was quietly being
+# asked to cover as well. See wait_for_dest_process.
+if ! BEFORE=$(wait_for_dest_process 30); then
+  note "the destination process was still unreported after 30s; step 6 will say so"
+fi
 set -- $BEFORE; restarts_before="${4:-0}"
 note "before the cut: $BEFORE"
 
