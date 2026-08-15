@@ -26,6 +26,8 @@ const pageSource = {
   "/comparison": "src/pages/comparison.astro",
   "/docs": "src/pages/docs.astro",
   "/download": "src/pages/download.astro",
+  "/free-restream-service": "src/pages/free-restream-service.astro",
+  "/how-to-multistream-from-obs": "src/pages/how-to-multistream-from-obs.astro",
 };
 
 /** @param {string} file @returns {string|undefined} */
