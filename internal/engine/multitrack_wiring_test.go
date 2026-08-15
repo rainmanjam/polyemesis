@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -219,16 +218,28 @@ func TestASuccessfulNegotiationPublishesToTheMintedTarget(t *testing.T) {
 // URL is scrubbed whether or not anything was registered as a secret -- a test
 // built on one cannot fail. A bare token is the shape Redact has no rule for,
 // so it is the shape where Spec.Secrets is the only protection there is.
+// IT RE-EXECUTES THE TEST BINARY rather than writing a shell script, and that
+// is not a style preference. The first version wrote a `#!/bin/sh` stand-in,
+// which cannot run on Windows: `test: windows-latest` failed with "the stand-in
+// ffmpeg never logged a line containing ...", because the child never started
+// at all. Every other fake child in this package and in internal/supervisor
+// already re-executes the test binary behind a flag for exactly this reason, so
+// the portable mechanism was there to be used.
 func leakyChild(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "leaky-ffmpeg")
-	script := "#!/bin/sh\nlast=\"\"\nfor a in \"$@\"; do last=\"$a\"; done\n" +
-		"echo \"stream key rejected: ${last##*/}\" >&2\nexit 1\n"
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
-		t.Fatalf("write stand-in ffmpeg: %v", err)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate the test binary to re-execute as a stand-in ffmpeg: %v", err)
 	}
-	return path
+	// supervisor never sets cmd.Env, so the child inherits what t.Setenv puts
+	// here -- the same route the existing fake child uses, and the only one
+	// available when the engine builds the whole argv itself.
+	t.Setenv(engineFakeChildEchoLast, leakyChildPrefix)
+	return self
 }
+
+// leakyChildPrefix is what the stand-in prints before the segment it echoes.
+const leakyChildPrefix = "stream key rejected: "
 
 // waitForLog polls the supervisor's ring for a captured stderr line.
 func waitForLog(t *testing.T, d *destination, want string) string {

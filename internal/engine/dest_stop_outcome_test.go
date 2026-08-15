@@ -43,7 +43,39 @@ const engineFakeChildFlag = "-polyemesis-engine-fake-child"
 // supervisor never sets cmd.Env, so the child inherits what t.Setenv put here.
 const engineFakeChildStderr = "POLYEMESIS_ENGINE_FAKE_CHILD_STDERR"
 
+// engineFakeChildEchoLast makes the fake child print this prefix followed by the
+// last path segment of its own final argument. See the branch that reads it.
+const engineFakeChildEchoLast = "POLYEMESIS_ENGINE_FAKE_CHILD_ECHO_LAST"
+
 func TestMain(m *testing.M) {
+	// KEYED ON THE ENVIRONMENT, NOT ON argv[1], and that is what makes it
+	// usable as a stand-in FFmpeg. The branch below needs the flag first on the
+	// command line, which is fine for a child this file spawns itself — but a
+	// stand-in FFmpeg is spawned by the engine, which builds the whole argv, so
+	// there is nowhere to put a flag. The variable is the only channel that
+	// survives that. supervisor never sets cmd.Env, so the child inherits it.
+	if prefix := os.Getenv(engineFakeChildEchoLast); prefix != "" {
+		// Echo the LAST PATH SEGMENT of the final argument. Deriving it from
+		// argv rather than taking a fixed string from the parent is the point:
+		// it proves the token that reached the command line is the token that
+		// reaches stderr.
+		//
+		// The segment alone, never the whole URL. alerts.Redact recognises an
+		// RTMP URL and masks its last segment on sight, so a line that still
+		// looks like a URL is scrubbed whether or not anything was registered
+		// as a secret — a test built on one cannot fail. A bare token is the
+		// shape Redact has no rule for, so it is the shape where
+		// supervisor.Spec.Secrets is the only protection there is.
+		last := ""
+		if n := len(os.Args); n > 1 {
+			last = os.Args[n-1]
+		}
+		if i := strings.LastIndex(last, "/"); i >= 0 {
+			last = last[i+1:]
+		}
+		fmt.Fprintln(os.Stderr, prefix+last)
+		os.Exit(1)
+	}
 	if len(os.Args) > 1 && os.Args[1] == engineFakeChildFlag {
 		// A child that says something and dies, for the tests that need the
 		// stderr scan to run for real: the line goes through classify,
