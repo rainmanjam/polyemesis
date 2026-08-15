@@ -156,11 +156,20 @@ const costs = [
         capped at 720p.
       </p>
 
-      <div class="scroll-hint mt-8 overflow-x-auto rounded-token border border-line">
+      {/* THE DATE SITS OUTSIDE THE SCROLL BOX. A <caption> inherits the table's
+          min-width, so on a phone the sentence qualifying every price in the
+          table would itself be behind a horizontal scroll — the one line here
+          that must not be missable. The caption stays, short, for the screen
+          reader; the warning is prose the page can lay out. */}
+      <p class="mt-8 text-sm leading-relaxed text-subtle">
+        Prices move. These were read off restream.io’s published pricing on
+        {" "}{CHECKED}; if that stamp is old by the time you are reading it, go
+        and look before you rely on any of it.
+      </p>
+      <div class="scroll-hint mt-3 overflow-x-auto rounded-token border border-line">
         <table class="cmp w-full min-w-[46rem] border-collapse text-left text-sm">
-          <caption class="px-4 py-3 text-left text-[11px] leading-relaxed text-subtle">
-            restream.io published plans, checked {CHECKED}. Prices move; if this
-            stamp is old, go and look before you rely on it.
+          <caption class="px-4 py-3 text-left text-[11px] text-subtle">
+            restream.io plans, checked {CHECKED}
           </caption>
           <thead class="bg-surface">
             <tr class="border-b border-line">
@@ -186,10 +195,11 @@ const costs = [
       </div>
 
       <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
-        Sourced from restream.io’s published pricing on {CHECKED} and recorded in
-        this repository rather than paraphrased from memory. A tier that has
-        moved since then is a mistake we would want to hear about — the figures
-        are dated so that reading them is never a guess.
+        Every figure above is recorded with its source in this repository rather
+        than paraphrased from a competitor’s marketing, and it is dated because a
+        stale price is not a stale docs line — it is a false statement about
+        another company’s prices. If one of these has moved, that is a bug in
+        this page and we would like to be told.
       </p>
     </div>
   </section>
@@ -282,9 +292,10 @@ const costs = [
       </h2>
       <p class="mt-4 text-pretty leading-relaxed text-muted">
         restream.io duplicates the single ingested stereo audio track
-        identically across every enabled endpoint. That is a property of the
-        product rather than of the plan, so no amount of money moves it: the mix
-        that goes to Twitch is the mix that goes to YouTube.
+        identically across every enabled endpoint. Read the plans above again
+        for what the money buys: channels, a resolution, the removal of a
+        watermark. None of them is an audio plan, so on any of them the mix that
+        goes to Twitch is the mix that goes to YouTube.
       </p>
       <p class="mt-3 text-pretty leading-relaxed text-muted">
         polyemesis takes the split audio tracks your encoder already sends —
