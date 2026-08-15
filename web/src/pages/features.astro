@@ -28,7 +28,8 @@ const sections = [
     body: [
       "Twitch Enhanced Broadcasting negotiates a second audio track alongside the live one. polyemesis builds both from the same ingest, in one filter graph, and sends them over one connection — the live mix with the music bed, and a VOD track without it. No second upload, no second encode of the picture.",
       "A single video rendition is enough. Multitrack video is not a precondition for the second audio track, which is the part most people expect to be required — the feature is named for it and does not need it.",
-      "It needs a GPU. Twitch refuses the negotiation outright if the encoder reports none, so this is the one thing here a headless server cannot use. Every other destination still receives its own single mix, exactly as before. The picture is still copied rather than re-encoded; the second track is a second AAC encode, which is cheap and is not free.",
+      "It needs a GPU, and it needs you to say so. Twitch refuses the negotiation outright if the request reports no GPU, so this is the one thing here a headless server cannot use. polyemesis does not guess at your hardware — you declare it in Settings, because Twitch validates the inventory and a fabricated one is refused by name. Leave it blank and the destination publishes to the ordinary Twitch ingest and tells you once, which is the right behaviour on the majority of installs rather than an error.",
+      "Every other destination still receives its own single mix, exactly as before. The picture is still copied rather than re-encoded; the second track is a second AAC encode, which is cheap and is not free.",
     ],
     shot: "02-routing.png",
     caption: "The archive mix is per destination, and off unless asked for.",

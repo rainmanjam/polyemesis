@@ -35,7 +35,12 @@ const shared = [
   // Restreamer product simply does not put recording in front of you, which is
   // why the request exists. See docs/COMPARISON.md for the full footnote.
   ["Recording", "Multitrack, stream-copied", "No built-in", "Yes"],
-  ["Metrics / API", "Prometheus + REST", "REST", "REST"],
+  // Restreamer's cell said "REST" and implied Prometheus was ours alone. Its
+  // own README advertises resource monitoring "optionally by Prom-Metrics" and
+  // datarhei Core documents Prometheus support, and it serves GraphQL as well
+  // as REST. Neither half of the old cell survived contact with their docs, so
+  // the row now states what we do and says nothing about what they do.
+  ["Metrics / API", "Prometheus + REST", "", ""],
   ["Hardware encoding", "NVENC, QSV, VA-API, VideoToolbox, AMF", "Yes", "n/a"],
   ["Unified chat", "Yes", "No", "Yes"],
   ["Self-hosted", "Yes", "Yes", "No"],
@@ -50,12 +55,24 @@ const shared = [
 const wins = [
   ["Per-destination audio mix from one multitrack ingest", "Yes", "No", "No"],
   ["Channel-level mix matrix with per-cell gain", "Yes", "No", "No"],
-  ["Per-destination loudness target, measured after routing", "Yes", "No", "No"],
+  // "No" against Restreamer was wrong as written: it mounts a filter select per
+  // publication service and loudnorm is one of the filters offered, so it DOES
+  // apply a per-destination loudness filter. What it does not offer is a
+  // configurable target -- its control is an on/off checkbox emitting the bare
+  // string `loudnorm`, taking FFmpeg's defaults for I, LRA and TP. That is the
+  // real difference, so the row states it and leaves their cell alone.
+  ["Per-destination loudness TARGET you set — I, LRA and TP, measured after routing", "Yes", "", ""],
   ["Multitrack archive — every ingest track preserved, stream-copied", "Yes", "No", "No"],
   ["Per-track stems as 24-bit WAV or FLAC, segment-aligned", "Yes", "No", "No"],
   ["Track annotations — what each incoming track actually is", "Yes", "No", "No"],
   ["Typed SRT rejections — the publisher is told why it was refused", "Yes", "No", "n/a"],
-  ["A second audio mix to the same destination, from one ingest", "Yes", "—", "—"],
+  // "Yes" on its own was the wrong shape for this cell, and wiring the feature
+  // is what made it matter: Twitch refuses Enhanced Broadcasting without a
+  // supported GPU, so on the headless VPS this audience actually runs, ticking
+  // the toggle gets a quiet fallback to the ordinary ingest. A bare "Yes" in a
+  // comparison table is the worst place to omit that. COPY-CONSTRAINTS.md says
+  // to state it in the same block that announces the feature, not a footnote.
+  ["A second audio mix to the same destination, from one ingest", "Yes — Twitch Enhanced Broadcasting, needs a GPU", "—", "—"],
   ["Runs on hardware you control, no per-destination pricing", "Yes", "Yes", "No"],
 ];
 
