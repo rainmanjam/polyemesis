@@ -103,12 +103,12 @@ but it is not zero, and a selector's is.
 |---|---|---|---|---|---|
 | **Per-destination audio mix** from one multitrack ingest | No | No | No | No | No |
 | **Channel-level mix matrix** with per-cell gain | No | No | No | No | No |
-| **Per-destination loudness target**, measured after routing | No | No | No | No | No |
+| **Per-destination loudness TARGET you set** — I, LRA and TP, measured after routing | Filter only<sup>4</sup> | No | No | No | No |
 | **Multitrack archive** — every ingest track preserved, stream-copied | No | No | Via OBS | Via OBS | Yes |
 | **Per-track stems** as 24-bit WAV or FLAC, segment-aligned to the master | No | No | No | No | No |
 | Track annotations — what each incoming track actually is | No | No | n/a | n/a | Unverified |
 | Typed SRT rejections — the publisher is told *why* it was refused | No | n/a | n/a | n/a | Unverified |
-| A second audio mix to the same destination, from one ingest | No | n/a | n/a | n/a | Twitch Enhanced Broadcasting only; competitors unverified |
+| A second audio mix to the same destination, from one ingest | No | n/a | n/a | n/a | Twitch Enhanced Broadcasting, and it needs a supported GPU; competitors unverified |
 
 > **EXPERIMENTAL, on the last row only — no broadcast has been published through
 > a key Twitch minted.** The negotiation is not the gap: polyemesis's own tests
@@ -230,8 +230,8 @@ reconnect when a platform drops, show you whether it is working.
 | Video re-encoded per destination | **No** (`-c:v copy`) | Optional | Yes, server-side | Optional, as a process |
 | Recording | Multitrack, stream-copied | No built-in<sup>2</sup> | Yes | Yes, tracks selectable |
 | Unified chat | Yes | No | Yes | No |
-| Metrics / API | Prometheus + REST | REST | REST | REST |
-| Hardware encoding | NVENC, QSV, VA-API, VideoToolbox, AMF<sup>4</sup> | Yes | n/a | NVENC |
+| Metrics / API | Prometheus + REST | See<sup>4</sup> | REST | REST |
+| Hardware encoding | NVENC, QSV, VA-API, VideoToolbox, AMF<sup>5</sup> | Yes | n/a | NVENC |
 | Public release in the last 12 months | Yes<sup>3</sup> | No<sup>3</sup> | n/a, hosted | Yes<sup>3</sup> |
 | Cost | Your hardware | Your hardware | Subscription | Your hardware |
 
@@ -253,7 +253,24 @@ tagged v0.1.0 on 2026-07-31 and v0.6.0 on 2026-08-09 — which is the velocity o
 something pre-release with one maintainer, and is worth exactly that much. All
 three checked 2026-08-09.
 
-<sup>4</sup> All five are offered and all five are probed with a real one-frame
+<sup>4</sup> **This row said "No" against Restreamer and that was wrong.**
+Restreamer mounts a filter select per publication service, and `loudnorm` is one
+of the filters it offers, so it does apply a per-destination loudness filter.
+What it does not offer is a *target you set*: its control is an on/off checkbox
+that emits the bare string `loudnorm` with no I, LRA or TP, so it takes FFmpeg's
+defaults and an operator cannot ask for −16 LUFS rather than −24. That is the
+real difference and it is narrower than the row used to claim. Corrected
+2026-08-14 after a sweep read their source rather than their feature list — the
+same correction the recording row needed in the other direction, and the second
+time a cell here has asserted a competitor lacks something they ship.
+
+The metrics row above was wrong the same way and is now blank on their side:
+Restreamer's own README advertises resource monitoring "optionally by
+Prom-Metrics", datarhei Core documents Prometheus support, and it serves GraphQL
+as well as REST — so "REST" understated them twice over and implied Prometheus
+was ours alone.
+
+<sup>5</sup> All five are offered and all five are probed with a real one-frame
 encode at startup, so an encoder that is listed but unusable is caught before a
 broadcast is. What is **EXPERIMENTAL** is narrower: the per-encoder command-line
 flags handed to NVENC, QSV, VA-API and AMF — rate control, preset, profile —
