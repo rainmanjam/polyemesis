@@ -449,11 +449,20 @@ verbatim out of `libavcodec.so.60` / `libavutil.so.58` with `strings`, which
 gives the exact wording but not the conditions that trigger it.
 
 This is also why hardware encoding carries an **EXPERIMENTAL** label in the
-product. The twelve encoder profiles configured in 0.7.0 — the per-encoder flags
-in [ENCODING.md](ENCODING.md#per-encoder-flags), and the capped-VBR fix on NVENC
-— were derived from the same containers described above, so they have the same
+product — but on the NVENC, QSV, VA-API and AMF rows only. Eight of the twelve
+encoder profiles configured in 0.7.0 — the per-encoder flags in
+[ENCODING.md](ENCODING.md#per-encoder-flags), and the capped-VBR fix on NVENC —
+were derived from the same containers described above, so they have the same
 status as everything else in this section: correct as far as FFmpeg's own
 option tables go, unconfirmed on silicon. The label does not disable anything.
+
+The other four are confirmed. `TestEveryConfiguredEncoderOpensWithItsOwnFlags`
+runs a real encode per registered encoder with that encoder's own flags — the
+capped-VBR path included — and on this Apple Silicon machine
+`h264_videotoolbox`, `hevc_videotoolbox`, `libx264` and `libx265` all pass. The
+test answers for whichever encoders the machine running it registers, which is
+why a GPU-less container cannot retire the paragraph above and a runner with an
+NVIDIA card could.
 
 **Verified by running it:**
 

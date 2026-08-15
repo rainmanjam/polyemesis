@@ -155,6 +155,29 @@ export function RoutingPage() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // ---- what survives switching the second mix off ----
+  //
+  // Off is a destructive edit with no undo: the profile is dropped and turning
+  // the switch back on re-seeds from the LIVE mix, so an operator who mis-clicks
+  // loses the exclusions, the gains and the loudness target they set. This holds
+  // the last non-null profile so the switch can put it back, which is cheaper
+  // than a confirmation dialog and better than one — nothing is lost, so nothing
+  // has to be confirmed. It is per DESTINATION and is cleared on a switch: the
+  // stash is an undo for the toggle, not a clipboard between destinations.
+  const stashedVod = useRef<RoutingProfile | null>(null);
+
+  // ---- what applyPresetTo re-checks AFTER its await ----
+  //
+  // A closure captures values, not state, so reading `selected` or `vodProfile`
+  // inside an async callback reads what they were when the button was clicked —
+  // which is exactly the question being asked. These are written at the same
+  // moments the state they mirror is.
+  const selectedIdRef = useRef<number | null>(null);
+  const vodEnabledRef = useRef(false);
+  // One counter per mix, so a live-mix preset and a second-mix preset in flight
+  // at the same time do not cancel each other.
+  const presetSeq = useRef<{ live: number; vod: number }>({ live: 0, vod: 0 });
+
   // ---- load destinations & presets ----
   useEffect(() => {
     let cancelled = false;
@@ -197,6 +220,9 @@ export function RoutingPage() {
       setSelected(null);
       setProfile(null);
       setVodProfile(null);
+      selectedIdRef.current = null;
+      vodEnabledRef.current = false;
+      stashedVod.current = null;
       return;
     }
     const found = list.find((d) => d.destination.id === Number(id));
@@ -207,9 +233,14 @@ export function RoutingPage() {
       // when there is no second mix (`json:"vodProfile,omitempty"`), so the
       // absent case arrives as undefined and has to normalise to the same null
       // the switch and the save path both work in.
-      setVodProfile(
-        found.destination.vodProfile ? structuredClone(found.destination.vodProfile) : null,
-      );
+      const vod = found.destination.vodProfile
+        ? structuredClone(found.destination.vodProfile)
+        : null;
+      setVodProfile(vod);
+      selectedIdRef.current = found.destination.id;
+      vodEnabledRef.current = vod !== null;
+      // A stash from the destination we just left is not an undo for this one.
+      stashedVod.current = null;
       setDirty(false);
     }
   }, [id, list]);
@@ -295,35 +326,62 @@ export function RoutingPage() {
     }
   };
 
-  // Shared by both mixes. `apply` is the setter for whichever profile asked, so
-  // an archive preset can be dropped on the second mix without the first one
-  // moving — which is most of the point of having a second mix at all.
+  // Shared by both mixes. `mix` says which profile asked, so an archive preset
+  // can be dropped on the second mix without the first one moving — which is
+  // most of the point of having a second mix at all.
   //
-  // The compiled result the endpoint returns is deliberately dropped: the
-  // editor that owns this profile recompiles it 180ms later from the same Go
-  // code, and storing it here as well would give the page two answers to the
-  // same question that could disagree.
+  // EVERYTHING INTERESTING HERE IS IN THE WINDOW BETWEEN THE ASK AND THE ANSWER.
+  // This is a network round trip started by a click, and three things can change
+  // inside it. Applying the answer regardless — which is what this did — is not
+  // a cosmetic race:
+  //
+  //   - THE SECOND MIX CAN BE SWITCHED OFF. Click a VOD preset, switch the mix
+  //     off before the answer lands, and it comes back on with setDirty(true).
+  //     Save then PUTs a vodProfile where the operator chose null, which is the
+  //     one guarantee this whole editor exists to make.
+  //   - THE DESTINATION CAN CHANGE. The answer would be written into whichever
+  //     mix is on screen now, and marked dirty, so a Save the operator does not
+  //     associate with the click persists it.
+  //   - A SECOND PRESET CAN BE CLICKED. Nothing orders two responses, so the
+  //     slower first one can land last and win.
+  //
+  // RESOLVES, NEVER REJECTS. On success it hands back the routing the endpoint
+  // already compiled for this profile; on a discarded answer or a failed request
+  // it hands back null. That return is the fix for the OTHER half of this
+  // function's history: it used to drop the compiled result, which left the
+  // Result card showing the previous graph, the previous warnings and a stale
+  // red error — with Save disabled underneath them — until the editor's own
+  // debounce came round 180 ms and a round trip later. The editor still owns
+  // `compiled`; this only lets it stop showing an answer it knows is out of date.
   const applyPresetTo = useCallback(
-    async (apply: (p: RoutingProfile) => void, presetId: string) => {
+    async (mix: "live" | "vod", presetId: string): Promise<RoutingResult | null> => {
+      const destAtClick = selectedIdRef.current;
+      const seq = (presetSeq.current[mix] += 1);
       try {
         const res = await api.applyPreset(presetId, presetOpts);
-        apply(res.profile);
+        if (seq !== presetSeq.current[mix]) return null;
+        if (selectedIdRef.current !== destAtClick) return null;
+        if (mix === "vod" && !vodEnabledRef.current) return null;
+        if (mix === "live") setProfile(res.profile);
+        else setVodProfile(res.profile);
         setDirty(true);
         toast.success(t("route.presetApplied"));
+        return res.routing;
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("route.couldNotApplyThePreset"));
+        return null;
       }
     },
     [presetOpts, t],
   );
 
   const applyPreset = useCallback(
-    (presetId: string) => applyPresetTo(setProfile, presetId),
+    (presetId: string) => applyPresetTo("live", presetId),
     [applyPresetTo],
   );
 
   const applyVodPreset = useCallback(
-    (presetId: string) => applyPresetTo(setVodProfile, presetId),
+    (presetId: string) => applyPresetTo("vod", presetId),
     [applyPresetTo],
   );
 
@@ -511,13 +569,20 @@ export function RoutingPage() {
             <SecondMixCard
               profile={vodProfile}
               liveProfile={profile}
+              restorable={stashedVod.current}
               onChange={(next) => {
+                // Switching OFF stashes what is being dropped, so switching
+                // back on is an UNDO rather than a fresh copy of the live mix.
+                // See stashedVod.
+                if (next === null && vodProfile) stashedVod.current = vodProfile;
                 setVodProfile(next);
+                vodEnabledRef.current = next !== null;
                 setDirty(true);
               }}
               twitchRtmp={twitchRtmp}
               multitrack={selected.multitrack ?? false}
               blockedByToggle={vodBlockedByToggle}
+              probed={ctx.probed}
             />
 
             {vodProfile && (
@@ -528,27 +593,61 @@ export function RoutingPage() {
                 onPatch={patchVod}
                 onApplyPreset={applyVodPreset}
                 onCompileError={setVodError}
-                // Conditional on the plan-time gate for the same reason the
-                // switch label is: "produces the SECOND audio track" is a
-                // statement about output, and it is not true on a Twitch RTMP
-                // destination with Enhanced Broadcasting off — where this graph
-                // is compiled, stored, and then not emitted.
-                footer={() =>
-                  vodBlockedByToggle ? (
-                    <>
-                      This is the graph the second audio track WOULD be built from. It is not
-                      being emitted while Enhanced Broadcasting is off for this destination — see
-                      the note above — so nothing here reaches Twitch yet. It is still compiled
-                      and still saved.
-                    </>
-                  ) : (
+                // "This graph IS the second audio track" is a statement about
+                // OUTPUT, and there are three separate ways for it to be false.
+                // It used to be the else-branch of one of them, which meant it
+                // was asserted on the Twitch path where the negotiation decides
+                // — contradicting the hedge SecondMixCard prints two cards
+                // above. The unconditional sentence is reserved for the case
+                // where nothing is conditional: a probed ingest, off Twitch.
+                footer={() => {
+                  if (vodBlockedByToggle) {
+                    return (
+                      <>
+                        This is the graph the second audio track WOULD be built from. It is not
+                        being emitted while Enhanced Broadcasting is off for this destination —
+                        see the note above — so nothing here reaches Twitch yet. It is still
+                        compiled and still saved.
+                      </>
+                    );
+                  }
+                  // engine/destinations.go refuses the pair on the provisional
+                  // path for EVERY platform, not just Twitch: a provisional
+                  // compile already runs on a guessed channel layout, and a
+                  // second guessed mix on top of it doubles what is approximate.
+                  if (!ctx.probed) {
+                    return (
+                      <>
+                        This is the graph the second audio track WOULD be built from. The ingest
+                        has not been probed, so the live mix is running on a guessed channel
+                        layout and the engine does not add a second guessed mix on top of it —
+                        nothing here is being emitted yet, on any platform. It returns by itself
+                        on the first reconcile after a probe succeeds, which is the same moment
+                        the live mix stops being provisional. It is still compiled and still
+                        saved.
+                      </>
+                    );
+                  }
+                  if (twitchRtmp) {
+                    return (
+                      <>
+                        This is the graph the second audio track would be built from. Whether it
+                        is sent is decided at go-live by the Enhanced Broadcasting negotiation —
+                        where Twitch does not grant it, this destination publishes the live mix
+                        alone and this graph is not emitted. The answer appears on this
+                        destination's card. Either way the video is copied without re-encoding
+                        and both mixes are built from the same ingest in one FFmpeg process.
+                      </>
+                    );
+                  }
+                  return (
                     <>
                       This graph is the SECOND audio track. The first is the live mix above, the
                       video is copied without re-encoding either way, and both are built from the
                       same ingest in one FFmpeg process.
                     </>
-                  )
-                }
+                  );
+                }}
               />
             )}
           </div>
@@ -623,7 +722,11 @@ function ProfileEditor({
   ctx: EditorContext;
   profile: RoutingProfile;
   onPatch: (next: Partial<RoutingProfile>) => void;
-  onApplyPreset: (presetId: string) => void;
+  /** Applies the preset to THIS editor's profile and resolves with the routing
+   *  the endpoint compiled for it, or null when the answer was discarded (a
+   *  stale destination, a mix switched off, a superseded click) or the request
+   *  failed. Must not reject: a null is how "nothing happened" is reported. */
+  onApplyPreset: (presetId: string) => Promise<RoutingResult | null>;
   /** Called with "" when this mix compiles and with the message when it does
    *  not. MUST be referentially stable — a raw setState function is ideal —
    *  because it is a dependency of the compile effect below. */
@@ -679,6 +782,30 @@ function ProfileEditor({
   // that no longer exists.
   useEffect(() => () => onCompileError(""), [onCompileError]);
 
+  // A preset changes this profile from outside the edit path, and the effect
+  // above will not answer for another 180 ms plus a round trip. Until it does,
+  // the Result card shows the graph, the warnings and the red compile error of
+  // the profile the preset just REPLACED — and Save stays disabled by an error
+  // belonging to a profile that no longer exists. Applying a preset to fix an
+  // invalid mix is exactly when that is most visible and most wrong.
+  //
+  // The endpoint has already compiled the profile it is handing back, so take
+  // that answer. This does NOT introduce a second source of truth: it writes
+  // this editor's own `compiled`, the same state the effect writes, and the
+  // effect overwrites it with the same result a moment later. The page keeps no
+  // copy — it only passes the routing through to whichever editor asked.
+  const handleApplyPreset = useCallback(
+    (presetId: string) => {
+      void onApplyPreset(presetId).then((routing) => {
+        if (!routing) return;
+        setCompiled(routing);
+        setCompileError("");
+        onCompileError("");
+      });
+    },
+    [onApplyPreset, onCompileError],
+  );
+
   const excludeRoles = profile.excludeRoles ?? [];
   // The compiler's own answer to "which tracks reach this destination", which
   // is the only one that survives a role exclusion.
@@ -699,7 +826,7 @@ function ProfileEditor({
             opts={ctx.presetOpts}
             setOpts={ctx.setPresetOpts}
             trackOptions={ctx.trackOptions}
-            onApply={onApplyPreset}
+            onApply={handleApplyPreset}
           />
           {ctx.platformPresets.length > 0 && (
             <div className="flex flex-col gap-1.5 border-t border-border pt-3">
@@ -711,7 +838,7 @@ function ProfileEditor({
                 opts={ctx.presetOpts}
                 setOpts={ctx.setPresetOpts}
                 trackOptions={ctx.trackOptions}
-                onApply={onApplyPreset}
+                onApply={handleApplyPreset}
                 showMusicPolicy
               />
             </div>
@@ -906,27 +1033,41 @@ function ProfileEditor({
 function SecondMixCard({
   profile,
   liveProfile,
+  restorable,
   onChange,
   twitchRtmp,
   multitrack,
   blockedByToggle,
+  probed,
 }: {
   profile: RoutingProfile | null;
-  /** Seeds a newly enabled second mix. */
+  /** Seeds a newly enabled second mix when there is nothing to restore. */
   liveProfile: RoutingProfile;
+  /** The profile this switch dropped last time it was turned off, if any. */
+  restorable: RoutingProfile | null;
   onChange: (next: RoutingProfile | null) => void;
   twitchRtmp: boolean;
   multitrack: boolean;
   blockedByToggle: boolean;
+  /** Whether the ingest has been probed. An unprobed one drops the second mix
+   *  on every platform — see engine/destinations.go's provisional path. */
+  probed: boolean;
 }) {
   const enable = (on: boolean) => {
     if (!on) return onChange(null);
-    // Seeded from the live mix rather than from a blank profile. A second mix
-    // is defined by how it DIFFERS from the first — drop the music, keep the
-    // commentary — so starting from a copy means the first edit is the actual
-    // decision, and an operator who switches this on and changes nothing gets
-    // two identical tracks rather than a silent one.
-    onChange(structuredClone(liveProfile));
+    // RESTORE FIRST. Switching off drops the whole profile, and re-seeding from
+    // the live mix would silently discard the exclusions, gains and loudness
+    // target the operator set — a destructive edit with no undo, from a switch
+    // that reads as reversible. Putting the last one back makes it reversible
+    // in fact, which is better than a confirmation dialog: there is nothing to
+    // confirm if nothing is lost.
+    //
+    // Otherwise seed from the live mix rather than from a blank profile. A
+    // second mix is defined by how it DIFFERS from the first — drop the music,
+    // keep the commentary — so starting from a copy means the first edit is the
+    // actual decision, and an operator who switches this on and changes nothing
+    // gets two identical tracks rather than a silent one.
+    onChange(structuredClone(restorable ?? liveProfile));
   };
 
   return (
@@ -958,7 +1099,28 @@ function SecondMixCard({
           A whole second mix of the same ingest, intended for a second audio track alongside the
           live one. The usual reason is an archive that must not carry licensed music while the
           live mix does. Off is the normal state.
+          {profile === null && restorable !== null && (
+            <> Switching this back on restores the mix you just turned off.</>
+          )}
         </span>
+
+        {/* State 0: not being sent, on every platform, and nothing on the
+            destination card says so — engine/destinations.go's provisional
+            branch drops the pair without setting a note, unlike the Twitch
+            one. It is first because it outranks the others: an unprobed ingest
+            is not a Twitch question. */}
+        {!probed && profile !== null && (
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-[11px] text-warn">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>
+              This second mix is <strong>not being sent yet</strong>, on any platform. The ingest
+              has not been probed, so the live mix is compiled on a guessed channel layout and
+              the engine does not add a second guessed mix on top of one it is already calling
+              approximate. It comes back by itself on the first reconcile after a probe succeeds.
+              Everything below is still saved.
+            </span>
+          </div>
+        )}
 
         {/* State 1: definitely not being sent, and this page knows why. */}
         {blockedByToggle && (
@@ -977,7 +1139,7 @@ function SecondMixCard({
         {/* State 2: it depends on a negotiation nobody has made yet. Stated as
             a dependency, never as a success — the answer does not exist until
             go-live, and it lands on the destination card. */}
-        {twitchRtmp && multitrack && profile !== null && (
+        {twitchRtmp && multitrack && profile !== null && probed && (
           <span className="text-[10px] text-muted-foreground">
             Whether this second track is actually sent is decided at go-live: Twitch grants
             Enhanced Broadcasting only to a client with a GPU it supports, and where it is not
@@ -990,7 +1152,7 @@ function SecondMixCard({
         {/* Off Twitch there is no negotiation and nothing conditional: the
             generic two-mix egress is what runs. Said plainly so the Twitch
             caveats above are not read as applying everywhere. */}
-        {!twitchRtmp && profile !== null && (
+        {!twitchRtmp && profile !== null && probed && (
           <span className="text-[10px] text-muted-foreground">
             This destination is not a Twitch RTMP one, so nothing is negotiated: both mixes are
             built in the same FFmpeg process and published as two audio tracks. Whether the far
@@ -1001,12 +1163,12 @@ function SecondMixCard({
 
         {twitchRtmp && (
           <Experimental>
-            On Twitch this depends on Enhanced Broadcasting, whose negotiation has never been run
-            against Twitch's live endpoint. Every part of it was measured against recorded
-            fixtures in polyemesis's own tests, and no successful negotiation — and therefore no
-            second audio track reaching Twitch — has been observed. The mix you configure here is
-            stored and compiled regardless, and on a non-Twitch destination it does not depend on
-            any of this.
+            On Twitch this depends on Enhanced Broadcasting. The negotiation runs against
+            ingest.twitch.tv and succeeds — polyemesis's own tests reach the live endpoint on
+            every run and watch Twitch grant a VOD audio track and mint a key. What has never
+            been observed is a broadcast published through that key, so no second audio track has
+            been seen arriving at Twitch. The mix you configure here is stored and compiled
+            regardless, and on a non-Twitch destination it does not depend on any of this.
           </Experimental>
         )}
       </CardContent>

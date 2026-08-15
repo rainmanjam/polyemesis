@@ -45,11 +45,24 @@ its first tagged release.
 ### Changed
 - **Two features are now labelled EXPERIMENTAL throughout — labelled, not
   gated.** Twitch Enhanced Broadcasting and hardware encoding both shipped in
-  0.7.0 with no evidence from real hardware behind them: the negotiation has
-  only ever reached an `httptest` server replaying fixtures, and the twelve
-  encoder profiles were read off FFmpeg's option tables inside a GPU-less
-  container. Both remain fully enabled, nothing is hidden, no opt-in env var or
-  feature flag exists, and every control works exactly as before.
+  0.7.0 with a gap in the evidence behind them, and the label names where each
+  gap actually starts. For Enhanced Broadcasting it is *after* the negotiation:
+  `internal/multitrack/live_test.go` reaches `ingest.twitch.tv` on every run and
+  Twitch accepts a supported-GPU inventory, grants a VOD audio track and mints a
+  key — what has never been observed is a broadcast published through that key,
+  and `internal/engine`'s wiring around it has only ever been driven by an
+  `httptest` server. For hardware encoding it is the `_nvenc`, `_qsv`, `_vaapi`
+  and `_amf` flags — eight of the twelve encoder profiles — which were read off
+  FFmpeg's option tables inside a GPU-less container. Both remain fully enabled,
+  nothing is hidden, no opt-in env var or feature flag exists, and every control
+  works exactly as before.
+
+  **The first version of these labels was wrong in both directions, and only
+  running something found it.** They asserted that the negotiation had never
+  reached Twitch while a non-skipping test in the tree reached it on every green
+  build, and they warned a Mac operator off `h264_videotoolbox` — the one
+  hardware family a real encode confirms. A claim about what has *never* been
+  tested can only be checked by running the test.
 
   One convention, applied everywhere, and each use names the specific untested
   claim rather than saying "beta": a `<Experimental>` component in the UI
@@ -64,7 +77,15 @@ its first tagged release.
   `encoderProfiles`' doc comment said the values were "verified by running
   `ffmpeg -h encoder=<name>` and a real one-frame encode" — true, but the option
   table answers on a machine with no such device, and the one-frame encode only
-  ran for encoders the container could open.
+  ran for encoders the container could open. The narrower evidence that *does*
+  exist is now named where the table lives:
+  `TestEveryConfiguredEncoderOpensWithItsOwnFlags` runs a real encode per
+  registered encoder with that encoder's own row — capped-VBR path included —
+  and answers for whichever encoders the machine running it registers. A CI
+  runner with an NVIDIA card would retire the NVENC caveat by itself.
+
+  The UI badge is gated on the encoder *family* rather than on
+  `encoder.hardware`, which is what made it fire on VideoToolbox.
 
 ## [0.7.0] — 2026-08-14
 
@@ -315,12 +336,15 @@ its first tagged release.
   it.**
 
 ### Added
-- **Twitch Enhanced Broadcasting is now reachable. EXPERIMENTAL: the
-  negotiation has never been run against Twitch's live endpoint.** Everything
-  below was measured against recorded fixtures replayed by an `httptest`
-  server; no successful negotiation, and therefore no second audio track
-  reaching Twitch, has been observed. It needs a real stream key and a GPU
-  Twitch supports. Nothing is gated on that label: the feature is linked in,
+- **Twitch Enhanced Broadcasting is now reachable. EXPERIMENTAL: no broadcast
+  has ever been published through a key it minted.** The negotiation is not the
+  gap — `internal/multitrack/live_test.go` reaches `ingest.twitch.tv` on every
+  run and Twitch answers: a supported-GPU inventory is accepted, a VOD audio
+  track is granted, and a key is minted. What has never been observed is
+  anything after that. No second audio track has been seen arriving at Twitch,
+  and `internal/engine`'s wiring around the negotiation has only ever been
+  driven by an `httptest` server; watching it end to end needs a real stream key
+  and a real broadcast. Nothing is gated on that label: the feature is linked in,
   the toggle is one click, and a negotiation that does not succeed falls back
   to the ordinary Twitch ingest — the path every install used before this
   existed. `internal/multitrack` was
@@ -400,11 +424,13 @@ its first tagged release.
   the ingest endpoint and stream key it hands back. Nothing publishes through it
   yet; see below for what is deliberately not built.
 
-  **EXPERIMENTAL:** the four measurements below come from captured responses
-  replayed in tests. The parsing is therefore tested against genuine bytes; what
-  is untested is whether today's endpoint still sends them and whether a real
-  GPU inventory gets past Twitch's hardware check, because no request from
-  polyemesis has ever reached `ingest.twitch.tv`.
+  **EXPERIMENTAL:** the four measurements below come from responses Twitch sent
+  to this package's own requests, and `live_test.go` asks for them again on
+  every run rather than replaying a capture — so a change at the far end shows
+  up as a failing test rather than as a fixture that has quietly stopped being
+  true. A declared GPU inventory does get past Twitch's hardware check. What is
+  untested is everything after the negotiation answers: no key minted here has
+  ever carried a broadcast.
 
   Four things were measured against the live endpoint rather than assumed, and
   each one changes what the code has to do:

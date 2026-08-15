@@ -134,11 +134,41 @@ func TestASecondMixSurvivesTheRoundTripThroughTheAPI(t *testing.T) {
 	if got.DelayMS != 250 {
 		t.Errorf("delayMs came back %d, want 250", got.DelayMS)
 	}
+	// MODE. Not covered by anything else here, and it is the field that decides
+	// which of two entirely different graphs routing.Compile builds. A handler
+	// that stored a matrix mix as simple mode would publish a stereo downmix
+	// where the operator asked for a channel map, and every other assertion in
+	// this test would still pass.
+	//
+	// MUTATION: in handleUpdateDestination, force `existing.VODProfile.Mode =
+	// routing.ModeMatrix` after the decode. Observed: FAIL -- `mode came back
+	// "matrix", want "simple"`. Before this assertion existed the same mutation
+	// SURVIVED.
+	if got.Mode != routing.ModeSimple {
+		t.Errorf("mode came back %q, want %q", got.Mode, routing.ModeSimple)
+	}
 	if len(got.Tracks) != 2 {
 		t.Fatalf("track selection came back with %d entries, want 2: %+v", len(got.Tracks), got.Tracks)
 	}
-	if got.Tracks[0].Gain != -3 {
-		t.Errorf("the first track's gain came back %v, want -3", got.Tracks[0].Gain)
+	// THE TRACK ROWS THEMSELVES, not just how many there are. `len(Tracks)` and
+	// `Gain[0]` between them leave `Track` and `Enabled` unpinned on every row,
+	// which is the whole selection: a handler that zeroed them would return two
+	// entries that both point at track 0 and are both switched off, and the
+	// length check would pass.
+	//
+	// MUTATION: in handleUpdateDestination, walk existing.VODProfile.Tracks and
+	// set `.Enabled = false` and `.Track = 0` on each. Observed: FAIL -- `track
+	// row 1 came back {Track:0 Enabled:false Gain:0}, want track 2 enabled`.
+	// Before this assertion existed the same mutation SURVIVED.
+	want := []struct {
+		track int
+		gain  float64
+	}{{track: 0, gain: -3}, {track: 2, gain: 0}}
+	for i, w := range want {
+		if got.Tracks[i].Track != w.track || !got.Tracks[i].Enabled || got.Tracks[i].Gain != w.gain {
+			t.Errorf("track row %d came back %+v, want track %d enabled at gain %v",
+				i, got.Tracks[i], w.track, w.gain)
+		}
 	}
 	// The DMCA switch specifically: a second mix whose whole purpose is to drop
 	// the music is worthless if the exclusion is the field that gets lost.

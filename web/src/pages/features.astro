@@ -6,7 +6,16 @@ import Lightbox from "../components/Lightbox.astro";
  * dashboard capture is deliberately absent: it currently photographs an ingest
  * reading "Offline" while audio is demonstrably flowing, which is a defect in
  * the capture harness and the product's state reporting, not something to put
- * on a marketing page. */
+ * on a marketing page.
+ *
+ * `note` is the EXPERIMENTAL convention from the product, carried onto the
+ * site. It exists because this page — not a Go doc comment, not a card in the
+ * routing editor — is where most people meet a feature for the first time, and
+ * a caveat that appears only after install is a caveat that arrived too late.
+ * Same rule as ui/src/components/Experimental.tsx: it NAMES the specific claim
+ * without evidence rather than saying "beta", and it labels rather than gates —
+ * nothing here is turned off, and the surrounding copy stays a description of
+ * what the feature does. */
 
 const sections = [
   {
@@ -28,8 +37,9 @@ const sections = [
     body: [
       "Twitch Enhanced Broadcasting negotiates a second audio track alongside the live one. polyemesis builds both from the same ingest, in one filter graph, and sends them over one connection — the live mix with the music bed, and a VOD track without it. No second upload, no second encode of the picture.",
       "A single video rendition is enough. Multitrack video is not a precondition for the second audio track, which is the part most people expect to be required — the feature is named for it and does not need it.",
-      "It needs a GPU. Twitch refuses the negotiation outright if the encoder reports none, so this is the one thing here a headless server cannot use. Every other destination still receives its own single mix, exactly as before. The picture is still copied rather than re-encoded; the second track is a second AAC encode, which is cheap and is not free.",
+      "It needs a GPU. Twitch refuses the negotiation outright if the client reports none — it checks the GPU information in the request, not the card doing the encoding, so this is a gate rather than a workload. It is still the one thing here a headless server cannot use. Every other destination still receives its own single mix, exactly as before. The picture is still copied rather than re-encoded; the second track is a second AAC encode, which is cheap and is not free.",
     ],
+    note: "The negotiation itself is proven: polyemesis's tests reach ingest.twitch.tv on every run, and Twitch accepts a supported-GPU inventory, grants the VOD audio track and mints a key. What nobody has watched yet is a broadcast published through that key — the last step, and the one this feature is for. Nothing is gated on that: a negotiation that does not succeed falls back to the ordinary Twitch ingest, which is what every install used before this existed.",
     shot: "02-routing.png",
     caption: "The archive mix is per destination, and off unless asked for.",
     alt: "polyemesis routing page: per-destination track selection with music policy and loudness target",
@@ -54,6 +64,7 @@ const sections = [
       "For the platforms that will not take your source — a 4K60 ingest that Twitch or Kick refuses. One encode, ref-counted, so an unused tier costs nothing.",
       "It re-encodes video only. Audio still routes per destination underneath it, which is the whole point.",
     ],
+    note: "Hardware encoding is offered on NVENC, QSV, VA-API, AMF and VideoToolbox, and polyemesis test-encodes a frame with each one at startup so an encoder that is listed but unusable is caught before a broadcast is. The command-line flags it hands the NVENC, QSV, VA-API and AMF encoders — rate control, preset, profile — are the part still without evidence: they were read out of FFmpeg's own option tables rather than measured on silicon. VideoToolbox is not in that set; a real encode with its own flags is run per build.",
     shot: "06-renditions.png",
     caption: "One shared encode, ref-counted across the destinations that selected it. Audio still routes per destination underneath.",
     alt: "polyemesis renditions page: shared video encodes with overlays and hardware encoder selection",
@@ -160,6 +171,17 @@ const sections = [
                 <p class="text-pretty leading-relaxed text-muted">{p}</p>
               ))}
             </div>
+            {/* Neutral border, not a signal colour, for the reason the product
+                gives: "unverified" is a property of the feature, not a state
+                anything is in. It sits AFTER the description so the feature is
+                described before it is qualified — a caveat first reads as a
+                warning not to bother. */}
+            {s.note && (
+              <div class="mt-5 rounded-token border border-line bg-surface/60 p-4">
+                <span class="chip">experimental</span>
+                <p class="mt-2 text-pretty text-sm leading-relaxed text-subtle">{s.note}</p>
+              </div>
+            )}
           </div>
           <figure data-reveal>
             {/* The button wraps the image rather than sitting beside it, so the

@@ -1906,15 +1906,17 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               {/* The switch above still works and is still one click. What is
                   added here is the one fact the paragraphs above cannot supply,
                   because it is about our evidence rather than about Twitch:
-                  every sentence they state was measured against a fixture. */}
+                  where the measurements stop. They stop after Negotiate
+                  returns, not before it. */}
               <Experimental>
-                This negotiation has never been run against Twitch's live endpoint. Every claim
-                above &mdash; the refusal shape, the minted key, the tracks Twitch grants &mdash;
-                was measured against recorded fixtures in polyemesis's own tests, not against
-                ingest.twitch.tv, and no successful negotiation has been observed on real
-                hardware. Leaving it on is still safe: a negotiation that does not succeed falls
-                back to the ordinary Twitch ingest, which is the path every install used before
-                this existed.
+                The negotiation itself runs against ingest.twitch.tv and succeeds: polyemesis's
+                own tests reach the live endpoint on every run, and Twitch accepts a
+                supported-GPU inventory, grants a VOD audio track and mints a key. What has
+                never been observed is a broadcast <em>published through</em> a minted key
+                &mdash; everything after the negotiation answers, including polyemesis's own
+                wiring around it, which has only been driven by a stand-in server. Leaving this
+                on is still safe: a negotiation that does not succeed falls back to the ordinary
+                Twitch ingest, which is the path every install used before this existed.
               </Experimental>
             </div>
           )}

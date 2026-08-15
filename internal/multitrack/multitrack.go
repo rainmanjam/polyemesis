@@ -2,33 +2,45 @@
 // IVS runs it -- calls Multitrack Video, and which Twitch's own error text calls
 // both names within a single response body.
 //
-// EXPERIMENTAL: THIS CODE has never talked to Twitch. Read that precisely,
-// because it is narrower than "none of this is known" and wider than "it is
-// fine". The distinction the rest of this comment turns on:
+// EXPERIMENTAL: THE NEGOTIATION RUNS AGAINST TWITCH AND SUCCEEDS. WHAT HAS
+// NEVER BEEN OBSERVED IS A BROADCAST PUBLISHED THROUGH A MINTED KEY. Read that
+// precisely: the boundary runs through Negotiate's return, not around this
+// package.
 //
-//   - The observations under "THREE THINGS MEASURED" below are real. They are
-//     what the endpoint sent, captured from it, and they are the reason this
-//     package is shaped as it is rather than as the issue guessed.
+//   - UP TO THAT RETURN, this is measured against ingest.twitch.tv itself.
+//     live_test.go reaches the real endpoint on every run and does not skip:
+//     it gets Twitch's refusal verbatim, it gets a SUCCESSFUL negotiation that
+//     accepts a supported-GPU inventory and grants a VOD audio track alongside
+//     a single video track, and it gets back a key Twitch minted -- 314
+//     characters, from the 44 it was sent. The observations under "THREE
+//     THINGS MEASURED" below are those responses.
 //
-//   - What has never happened is a request LEAVING THIS PROCESS FOR
-//     ingest.twitch.tv. Every test drives an httptest server replaying those
-//     captures, so this code is verified against the recorded bytes and not
-//     against the endpoint. No negotiation has been observed succeeding
-//     end-to-end and no minted key has ever carried a broadcast; doing so needs
-//     a real stream key and a GPU Twitch supports, and the machine this was
-//     written on has neither.
+//   - AFTER THAT RETURN, nothing has been observed. No minted key has ever
+//     carried a broadcast and no second audio track has been seen arriving at
+//     Twitch; that needs a real stream key and a real broadcast. See
+//     engine.negotiateDestination, whose own wiring has only ever been driven
+//     by an httptest server -- so the translation between this package and
+//     polyemesis is the part still without live evidence, not the protocol.
 //
-// So the parsing is tested against genuine bytes. What is untested is whether
-// today's endpoint still sends them, whether a real GPU inventory gets past its
-// hardware check, and whether a key minted for real publishes. Nothing here can
-// fail a broadcast either way -- Negotiate turns every error into a Refused
-// outcome and the caller publishes to the ordinary Twitch ingest -- so the cost
-// of being wrong is the feature not working, not a broadcast not going out. See
-// engine.negotiateDestination, which is built around exactly that guarantee.
+// TWITCH VALIDATES THE DECLARED INVENTORY, NOT THE HARDWARE. live_test.go
+// declares an `NVIDIA GeForce RTX 3080` and Twitch grants Enhanced
+// Broadcasting -- on an Apple M1 Ultra, which has no such card in it. The
+// vendor ID, device ID and driver version are checked as SENT, against a list
+// Twitch does not publish; the endpoint has no way to see the machine. That is
+// the same fact docs/ENCODING.md states when it calls the GPU requirement "a
+// gate, not a workload", and it is why Settings asks an operator to declare an
+// inventory rather than reading one: polyemesis sends what it is told.
+//
+// Nothing here can fail a broadcast either way -- Negotiate turns every error
+// into a Refused outcome and the caller publishes to the ordinary Twitch ingest
+// -- so the cost of being wrong is the feature not working, not a broadcast not
+// going out. See engine.negotiateDestination, which is built around exactly
+// that guarantee.
 //
 // The label is NOT a switch. This package is linked in, the toggle is
 // reachable, and an operator with the hardware can use it today. Deleting this
-// paragraph is for whoever first watches a negotiation succeed against Twitch.
+// paragraph is for whoever first watches a broadcast go out through a key
+// Twitch minted.
 //
 // WHAT THIS IS FOR. polyemesis publishes one AAC stereo track to an RTMP
 // destination, because that is what RTMP ingests were measured to take (see
@@ -49,9 +61,9 @@
 //
 // THREE THINGS MEASURED AGAINST THE LIVE ENDPOINT, each of which shapes the
 // code below and none of which is an assumption. They are OBSERVATIONS OF WHAT
-// TWITCH SENT, and they say nothing about whether this package's own request
-// would be accepted -- see the EXPERIMENTAL note above, which is the boundary
-// between the two:
+// TWITCH SENT in answer to this package's own requests -- live_test.go still
+// asks for all three on every run, which is the only canary for Twitch
+// changing any of them:
 //
 //  1. A REFUSAL ARRIVES AS HTTP 200. Every response observed -- valid, invalid,
 //     unsupported hardware, unparseable schema version -- was 200. The verdict

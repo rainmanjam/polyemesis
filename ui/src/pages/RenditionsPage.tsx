@@ -141,6 +141,22 @@ e: EncoderInfo | undefined): string {
   return e.reason ? `${measured} FFmpeg said: ${e.reason}` : measured;
 }
 
+/** The encoder families whose per-encoder FLAGS have no evidence behind them.
+ *
+ *  Deliberately NOT `encoder.hardware`, which is what this was gated on and
+ *  which made the badge false. `TestEveryConfiguredEncoderOpensWithItsOwnFlags`
+ *  runs a real encode per registered encoder using that encoder's own row from
+ *  `ffmpeg.encoderProfiles` — preset flag, rate control and the capped-VBR path
+ *  included — and `h264_videotoolbox` and `hevc_videotoolbox` pass on macOS.
+ *  Warning a Mac operator off the one hardware family that IS confirmed also
+ *  costs the badge its credibility everywhere else: having watched it fire
+ *  falsely once, they discount it on `h264_nvenc`, where it is true. */
+const UNCONFIRMED_ENCODER_FAMILIES = ["_nvenc", "_qsv", "_vaapi", "_amf"];
+
+function flagsUnconfirmed(name: string | undefined): boolean {
+  return !!name && UNCONFIRMED_ENCODER_FAMILIES.some((family) => name.endsWith(family));
+}
+
 /** As much of a reason as fits on a dropdown row. The full text is on the
  *  item's tooltip and under the select, so nothing is only ever truncated. */
 function shortReason(reason: string): string {
@@ -1688,17 +1704,18 @@ function RenditionDialog({
               {encoderProblem(t, encoder) && (
                 <span className="text-[10px] text-down">{encoderProblem(t, encoder)}</span>
               )}
-              {/* Only on a hardware encoder, and only about the FLAGS. The
-                  probe above is a real test encode and its verdict is evidence;
-                  what has no evidence behind it is the argv each hardware
-                  family is handed once it starts, which is a different claim
-                  and the one #362 changed. Software encoders are unaffected:
-                  libx264/libx265 argv has been running in production since
-                  before renditions existed. Nothing is disabled here — the
-                  encoder stays selectable and the save still works. */}
-              {encoder?.hardware && (
+              {/* Only on NVENC, QSV, VA-API and AMF, and only about the FLAGS.
+                  Gated on the encoder FAMILY rather than on `hardware`, which
+                  is what it used to read and which made the badge false on
+                  VideoToolbox — see flagsUnconfirmed. libx264/libx265 argv has
+                  been running in production since before renditions existed,
+                  and the VideoToolbox argv is covered by a real encode in
+                  TestEveryConfiguredEncoderOpensWithItsOwnFlags. Nothing is
+                  disabled here — the encoder stays selectable and the save
+                  still works. */}
+              {flagsUnconfirmed(encoder?.name) && (
                 <Experimental>
-                  The command-line flags polyemesis hands {encoder.name} have not been confirmed
+                  The command-line flags polyemesis hands {encoder?.name} have not been confirmed
                   on real hardware. They were read off FFmpeg's own option tables inside a
                   container, and no NVENC, QSV or VA-API encode has been observed running with
                   them &mdash; including the capped-VBR fix, whose whole effect is on this argv.

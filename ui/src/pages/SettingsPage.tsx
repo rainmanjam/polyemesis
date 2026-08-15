@@ -1373,14 +1373,19 @@ function MultitrackHardware({
       <CardContent className="flex flex-col gap-3">
         {/* The form is unchanged and still fully usable. This says only what
             polyemesis has and has not seen, which is a different question from
-            what Twitch documents. */}
+            what Twitch documents. It is also the one place an operator can act
+            on knowing that Twitch reads the DECLARATION, so the mechanism is
+            stated here rather than left to be inferred from a refusal. */}
         <Experimental>
-          No inventory declared here has ever been sent to Twitch's live endpoint by polyemesis.
-          What a real GPU makes Twitch answer is unverified: the vendor IDs, the driver-version
-          check and the refusal wording below were all measured against recorded fixtures, and no
-          successful negotiation has been observed on real hardware. Filling this in is still
-          safe &mdash; nothing is sent until a destination with the toggle on goes live, and a
-          refusal falls back to the ordinary Twitch ingest.
+          An inventory declared here does reach Twitch's live endpoint, and polyemesis's own
+          tests watch it be accepted: a supported GPU is granted Enhanced Broadcasting, a VOD
+          audio track and a minted key. What Twitch checks is <em>this declaration</em> &mdash;
+          the vendor ID, device ID and driver version as sent, against a list it does not
+          publish. It has no way to inspect the machine, which is why these fields exist at all:
+          polyemesis sends what it is told. What has never been observed is a broadcast published
+          through a minted key. Filling this in is safe either way &mdash; nothing is sent until
+          a destination with the toggle on goes live, and a refusal falls back to the ordinary
+          Twitch ingest.
         </Experimental>
         <span className="text-[10px] text-muted-foreground">
           Twitch grants Enhanced Broadcasting only to a client with a GPU it supports, and it checks

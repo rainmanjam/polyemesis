@@ -40,11 +40,14 @@ of a 5.1 track, pan a mono mic hard left, or swap channels.
 
 ## Two mixes to one destination
 
-> **EXPERIMENTAL — on Twitch, the negotiation this depends on has never been run
-> against Twitch's live endpoint.** Enhanced Broadcasting is measured only
-> against recorded fixtures replayed by polyemesis's own tests: no successful
-> negotiation, and therefore no second audio track reaching Twitch, has been
-> observed. It stays fully enabled and there is no flag to turn it off — a
+> **EXPERIMENTAL — on Twitch, no broadcast has ever been published through a key
+> Enhanced Broadcasting minted.** The negotiation itself is not the gap: it runs
+> against `ingest.twitch.tv` and succeeds, and polyemesis's own tests reach the
+> live endpoint on every run — Twitch accepts a supported-GPU inventory, grants
+> a VOD audio track and mints a key. What has never been observed is everything
+> *after* that: no second audio track has been seen arriving at Twitch, and the
+> engine wiring that carries the decision has only been driven by a stand-in
+> server. It stays fully enabled and there is no flag to turn it off — a
 > negotiation that does not succeed falls back to the ordinary Twitch ingest,
 > which is the path every install used before this existed. The generic two-mix
 > egress on a **non-Twitch** destination is a separate mechanism and is not

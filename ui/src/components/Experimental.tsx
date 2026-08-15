@@ -5,12 +5,26 @@ import { Badge } from "@/components/ui/badge";
    The EXPERIMENTAL convention
    ==========================================================================
 
-   Two things shipped in 0.7.0 that nobody has watched work on real hardware:
-   Twitch Enhanced Broadcasting (measured only against httptest fixtures, never
-   against Twitch's live endpoint) and the hardware encoder flags (read out of
-   FFmpeg's own option tables inside a container, never confirmed by an NVENC,
-   QSV or VA-API encode). Both are reachable, both are supposed to stay
-   reachable, and neither has evidence behind it yet.
+   Two things shipped in 0.7.0 with a gap in the evidence behind them, and in
+   BOTH cases the gap is narrower than the first version of this comment said.
+   Running the tests is what established that, which is the whole lesson:
+
+     - Twitch Enhanced Broadcasting. The NEGOTIATION is not the gap.
+       internal/multitrack's live_test.go reaches ingest.twitch.tv on every run:
+       Twitch accepts a supported-GPU inventory, grants a VOD audio track and
+       mints a key. What has never been observed is a broadcast PUBLISHED
+       through a minted key -- everything after Negotiate returns -- and
+       internal/engine's wiring around it has only ever been driven by an
+       httptest server.
+
+     - The hardware encoder flags, on NVENC, QSV, VA-API and AMF only. Those
+       were read out of FFmpeg's own option tables inside a container and no
+       such encode has been observed. VideoToolbox is NOT in that set:
+       TestEveryConfiguredEncoderOpensWithItsOwnFlags runs a real encode per
+       registered encoder with that encoder's own flags, and both VideoToolbox
+       rows pass on macOS.
+
+   Both features are reachable and both are supposed to stay reachable.
 
    SO THIS LABELS, IT DOES NOT GATE. There is no flag that turns either feature
    off, nothing is hidden, and no opt-in is required. An operator who wants to
@@ -18,11 +32,18 @@ import { Badge } from "@/components/ui/badge";
    that the control now says what has not been checked.
 
    ONE BADGE, ONE SENTENCE, AND THE SENTENCE NAMES THE UNTESTED CLAIM. "Beta"
-   tells a reader to be vaguely nervous and gives them nothing to act on. "The
-   negotiation has never run against Twitch's live endpoint" tells them exactly
+   tells a reader to be vaguely nervous and gives them nothing to act on. "No
+   broadcast has been published through a key Twitch minted" tells them exactly
    which part is a guess and therefore exactly what a failure would mean. Every
    use of <Experimental> in this codebase carries that specific sentence; a use
    that only says "experimental" is a bug in the copy.
+
+   AND THE SENTENCE HAS TO STAY TRUE. A specific claim can go stale in the
+   direction of being WRONG, which is worse than being vague: this convention
+   shipped saying the negotiation had never run against Twitch while a test in
+   the tree ran it against Twitch on every green build. A claim about what has
+   never been tested can only be checked by running the test, so when a use of
+   this component is edited, run the thing it is about.
 
    NOT A SIGNAL COLOUR. The app's five saturated tokens -- live, warn, down,
    armed, idle -- mean the state of a destination. "Unverified on hardware" is
