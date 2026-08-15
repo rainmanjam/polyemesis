@@ -150,6 +150,17 @@ interval breaks HLS and DASH packaging on the platform side.
 
 ### Per-encoder flags
 
+> **EXPERIMENTAL — every hardware row below is unconfirmed on real hardware.**
+> These values were read off FFmpeg's own option tables (`ffmpeg -h
+> encoder=<name>`) inside a container, which answer on a machine with no such
+> device in it at all. No NVENC, QSV or VA-API encode has been observed running
+> with them, including the capped-VBR behaviour described under [Setting a
+> ceiling](#setting-a-ceiling), whose entire effect is on this argv. The
+> `libx264` and `libx265` rows are **not** experimental: that command line has
+> been in production since before renditions existed. Nothing is disabled — the
+> encoders stay selectable, and a flag that is wrong shows up as an encoder that
+> refuses to open, which the start gate reports by name.
+
 | Encoder | Adds |
 |---|---|
 | `libx264` | `-preset veryfast -profile:v high -pix_fmt yuv420p` |

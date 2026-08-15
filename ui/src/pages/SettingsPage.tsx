@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/accordion";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/AppLayout";
+import { Experimental, ExperimentalBadge } from "@/components/Experimental";
 // The destination dialog renders this matrix inline; this page shows the same
 // rows as a full table. Both read it from lib, which is where it belongs.
 import {
@@ -1360,13 +1361,27 @@ function MultitrackHardware({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Enhanced Broadcasting hardware (Twitch)</CardTitle>
+        <CardTitle className="flex items-center gap-1.5">
+          Enhanced Broadcasting hardware (Twitch)
+          <ExperimentalBadge />
+        </CardTitle>
         <CardDescription>
           What this machine's GPU is, for the negotiation a destination with Enhanced Broadcasting
           switched on makes at go-live.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
+        {/* The form is unchanged and still fully usable. This says only what
+            polyemesis has and has not seen, which is a different question from
+            what Twitch documents. */}
+        <Experimental>
+          No inventory declared here has ever been sent to Twitch's live endpoint by polyemesis.
+          What a real GPU makes Twitch answer is unverified: the vendor IDs, the driver-version
+          check and the refusal wording below were all measured against recorded fixtures, and no
+          successful negotiation has been observed on real hardware. Filling this in is still
+          safe &mdash; nothing is sent until a destination with the toggle on goes live, and a
+          refusal falls back to the ordinary Twitch ingest.
+        </Experimental>
         <span className="text-[10px] text-muted-foreground">
           Twitch grants Enhanced Broadcasting only to a client with a GPU it supports, and it checks
           what it is told: a zero vendor ID, a vendor it does not know and an out-of-date driver are

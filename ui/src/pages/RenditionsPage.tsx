@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/AppLayout";
+import { Experimental } from "@/components/Experimental";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
@@ -1686,6 +1687,24 @@ function RenditionDialog({
               )}
               {encoderProblem(t, encoder) && (
                 <span className="text-[10px] text-down">{encoderProblem(t, encoder)}</span>
+              )}
+              {/* Only on a hardware encoder, and only about the FLAGS. The
+                  probe above is a real test encode and its verdict is evidence;
+                  what has no evidence behind it is the argv each hardware
+                  family is handed once it starts, which is a different claim
+                  and the one #362 changed. Software encoders are unaffected:
+                  libx264/libx265 argv has been running in production since
+                  before renditions existed. Nothing is disabled here — the
+                  encoder stays selectable and the save still works. */}
+              {encoder?.hardware && (
+                <Experimental>
+                  The command-line flags polyemesis hands {encoder.name} have not been confirmed
+                  on real hardware. They were read off FFmpeg's own option tables inside a
+                  container, and no NVENC, QSV or VA-API encode has been observed running with
+                  them &mdash; including the capped-VBR fix, whose whole effect is on this argv.
+                  A probe verdict of &ldquo;works&rdquo; above means this encoder opened here; it
+                  does not mean the rate control below behaves as the numbers say it will.
+                </Experimental>
               )}
               {!caps?.tested && choices.length > 0 && (
                 <span className="text-[10px] text-muted-foreground">

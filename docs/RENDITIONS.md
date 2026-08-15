@@ -256,6 +256,15 @@ and costed in [the roadmap](roadmap/OVERLAYS.md); they are not built.
 
 ## Hardware encoders
 
+> **EXPERIMENTAL — the flags polyemesis hands a hardware encoder have not been
+> confirmed on real hardware.** The probe described below is genuine evidence
+> about whether an encoder *opens* on your machine; it says nothing about
+> whether the rate control, preset and profile flags then behave as documented,
+> and those were read out of FFmpeg's option tables rather than measured against
+> silicon. No NVENC, QSV or VA-API encode has been observed. Every encoder stays
+> selectable and there is no flag to turn this off; see
+> [ENCODING.md § Per-encoder flags](ENCODING.md#per-encoder-flags).
+
 At startup polyemesis **encodes one frame** with each of the six encoders it
 probes — the five H.264 hardware encoders and `libx264` — and keeps the exit
 status:

@@ -1,5 +1,14 @@
 // Twitch Enhanced Broadcasting, wired into the go-live path.
 //
+// EXPERIMENTAL: nothing in this file has been observed running against Twitch.
+// negotiateDestination has only ever reached an httptest server replaying
+// recorded fixtures — see the package doc on internal/multitrack, which states
+// what was and was not measured — so the fallback path is the only one with
+// evidence behind it. That is also the path this file guarantees: every
+// function here returns a usable decision and none of them can fail a
+// broadcast, so an operator switching the toggle on is risking the feature not
+// working rather than the stream not going out.
+//
 // internal/multitrack does the negotiation and says nothing about polyemesis;
 // this file is the whole of the translation between the two. It answers three
 // questions and nothing else:

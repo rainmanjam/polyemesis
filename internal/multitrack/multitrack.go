@@ -2,6 +2,27 @@
 // IVS runs it -- calls Multitrack Video, and which Twitch's own error text calls
 // both names within a single response body.
 //
+// EXPERIMENTAL: this negotiation has never been run against Twitch's live
+// endpoint. Everything below -- the request shape, the three measurements this
+// doc comment states as fact, the refusal wording, the minted key -- was
+// measured against RECORDED FIXTURES replayed from an httptest server, never
+// against ingest.twitch.tv, and no successful negotiation has been observed on
+// real hardware. It needs a real stream key and a GPU Twitch supports, and the
+// machine this was written on has neither.
+//
+// What that does and does not mean. The fixtures are real captured responses,
+// so the parsing is tested against genuine bytes; what is untested is whether
+// today's endpoint still sends those bytes and whether a real GPU inventory
+// gets past its hardware check. Nothing here can fail a broadcast either way --
+// Negotiate turns every error into a Refused outcome and the caller publishes
+// to the ordinary Twitch ingest -- so the cost of being wrong is the feature not
+// working, not a broadcast not going out. See engine.negotiateDestination,
+// which is built around exactly that guarantee.
+//
+// The label is NOT a switch. This package is linked in, the toggle is
+// reachable, and an operator with the hardware can use it today. Deleting this
+// paragraph is for whoever first watches a negotiation succeed against Twitch.
+//
 // WHAT THIS IS FOR. polyemesis publishes one AAC stereo track to an RTMP
 // destination, because that is what RTMP ingests were measured to take (see
 // db.AudioEncoding.copyProblems, which refuses a copied multitrack RTMP

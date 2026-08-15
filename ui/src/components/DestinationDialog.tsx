@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Experimental, ExperimentalBadge } from "@/components/Experimental";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -1862,7 +1863,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               above -- both are per-destination switches in this same dialog. */}
           {platform === "twitch" && (
             <div className="flex flex-col gap-1">
-              <Label htmlFor="dest-multitrack">Enhanced Broadcasting (Twitch)</Label>
+              <Label htmlFor="dest-multitrack" className="flex items-center gap-1.5">
+                Enhanced Broadcasting (Twitch)
+                <ExperimentalBadge />
+              </Label>
               <div className="flex h-9 items-center gap-2">
                 <Switch
                   id="dest-multitrack"
@@ -1899,6 +1903,19 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 is skipped rather than attempted and failed. What was decided appears on this
                 destination's card once it goes live.
               </span>
+              {/* The switch above still works and is still one click. What is
+                  added here is the one fact the paragraphs above cannot supply,
+                  because it is about our evidence rather than about Twitch:
+                  every sentence they state was measured against a fixture. */}
+              <Experimental>
+                This negotiation has never been run against Twitch's live endpoint. Every claim
+                above &mdash; the refusal shape, the minted key, the tracks Twitch grants &mdash;
+                was measured against recorded fixtures in polyemesis's own tests, not against
+                ingest.twitch.tv, and no successful negotiation has been observed on real
+                hardware. Leaving it on is still safe: a negotiation that does not succeed falls
+                back to the ordinary Twitch ingest, which is the path every install used before
+                this existed.
+              </Experimental>
             </div>
           )}
 
