@@ -3362,15 +3362,7 @@ func (e *Engine) ClipUsage() (clips.Usage, error) {
 	e.mu.RLock()
 	cfg := e.clipCfg
 	e.mu.RUnlock()
-	list, err := clips.List(cfg.Dir)
-	if err != nil {
-		return clips.Usage{}, err
-	}
-	u := clips.Usage{Count: len(list), MaxBytes: int64(cfg.MaxDiskMB) << 20, MaxClips: cfg.MaxClips}
-	for _, cl := range list {
-		u.UsedBytes += cl.Bytes
-	}
-	return u, nil
+	return clips.UsageOf(cfg)
 }
 
 // ClipPath resolves a clip name to a path a download handler can open,

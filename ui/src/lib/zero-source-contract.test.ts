@@ -74,6 +74,16 @@ describe("the status the dashboard renders on an install with no source", () => 
       .toMatch(/Renditions:\s*\[\]RenditionStatus\{\}/);
     expect(guard, "the nil-receiver Status does not name an empty destinations slice")
       .toMatch(/Destinations:\s*\[\]DestStatus\{\}/);
+    /* loudness is not on the Status interface here YET, and that is exactly why
+     * it is asserted in Go rather than skipped: the field is already on the
+     * wire, it has no omitempty, and both GET /api/v1/loudness and
+     * Engine.Loudness normalise it to []. Whoever adds it to types.ts will
+     * declare it non-nullable to match what a running server sends, and would
+     * inherit a null from this one branch on the first load of a fresh install.
+     */
+    expect(guard, "the nil-receiver Status does not name an empty loudness slice, so it " +
+      "sends null for a field every other producer sends [] for")
+      .toMatch(/Loudness:\s*\[\]meters\.Report\{\}/);
   });
 });
 

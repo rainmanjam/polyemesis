@@ -222,17 +222,28 @@ func (e *Engine) Renditions() []RenditionStatus {
 // WebSocket opening burst and the Prometheus scrape all read this method, and a
 // panic in any of them is a 500 on the first screen an operator ever sees.
 //
-// The two slices are empty, NOT nil. ui/src/lib/types.ts declares renditions
-// and destinations non-nullable, so a JSON null there is a type lie the UI
-// walks straight into. The rest of the zero value is already the truth about an
-// install with no programme: nothing supervised, no relay traffic, nothing on
-// air.
+// EVERY SLICE IS EMPTY, NOT NIL, and that is a rule about the whole struct
+// rather than a fact about two of its fields. ui/src/lib/types.ts declares
+// renditions and destinations non-nullable, so a JSON null there is a type lie
+// the UI walks straight into -- but loudness has no omitempty either, and
+// GET /api/v1/loudness and Engine.Loudness both normalise that same field to
+// []. A null here would be the one producer in the tree that disagreed, and
+// the disagreement would surface the day types.ts grows the field it is
+// already being sent. Anything added to Status that marshals as an array
+// belongs in this literal.
+//
+// The rest of the zero value is already the truth about an install with no
+// programme: nothing supervised, no relay traffic, nothing on air.
 //
 // READS ONLY. A mutation that answered a nil receiver would be a 200 OK for
 // something that did not happen; those refuse at the API boundary instead.
 func (e *Engine) Status() Status {
 	if e == nil {
-		return Status{Renditions: []RenditionStatus{}, Destinations: []DestStatus{}}
+		return Status{
+			Renditions:   []RenditionStatus{},
+			Destinations: []DestStatus{},
+			Loudness:     []meters.Report{},
+		}
 	}
 	// ONE acquisition for everything e.mu owns. Status used to take it here and
 	// again inside SourceInfo, and a reconcile landing between the two paired

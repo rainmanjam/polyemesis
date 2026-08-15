@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/chat"
+	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -52,6 +54,31 @@ import (
 // which is the correct outcome for a bug that means the server is serving
 // before its pipeline exists.
 func (s *Server) eng() *engine.Engine { return s.mgr.Default() }
+
+// engOrNil is eng() for the callers that have to answer for an absent engine,
+// and it exists to make that answer ATOMIC.
+//
+// Two properties, and the second is the one that was got wrong:
+//
+//	It tolerates a Server with no manager at all -- every server in this
+//	package's unit tests -- where eng() would panic inside Manager.Default
+//	before there is an engine to test.
+//
+//	It reads the engine set ONCE. eng() re-derives from Manager.Engines under
+//	m.mu on every call, and Manager.reconcile deletes from that map when a
+//	source is deleted, as does Manager.Stop when the process drains. A caller
+//	that wrote `if s.eng() == nil { ... }; s.eng().Hub()` therefore tested one
+//	engine and dereferenced another, and the guard bought nothing at exactly
+//	the moment it was needed: the last source going away under a scrape.
+//
+// Capture the return value and use THAT. See audit.go's eng := s.eng(), which
+// is the shape the rest of this package already uses.
+func (s *Server) engOrNil() *engine.Engine {
+	if s.mgr == nil {
+		return nil
+	}
+	return s.eng()
+}
 
 // tools is the FFmpeg this install detected.
 //
@@ -100,24 +127,41 @@ func (s *Server) hostSystem() stats.System {
 // Empty rather than a single zero sample: the graph draws no line for a series
 // it has never had a reading of, which is the truth, where a zero reading
 // claims a measured silence.
-// Both halves of the condition are load-bearing, the way playoutManager's
-// already are: eng() goes through Manager.Default, so a build with no manager
-// panics before there is an engine to test.
+//
+// ONE engOrNil, and the result is what gets dereferenced. See engOrNil.
 func (s *Server) ingestBitrate() []stats.Sample {
-	if s.mgr == nil || s.eng() == nil {
+	e := s.engOrNil()
+	if e == nil {
 		return []stats.Sample{}
 	}
-	return s.eng().Monitor().Bitrate()
+	return e.Monitor().Bitrate()
 }
 
 // relayStats is the fan-out hub's throughput, zero when no programme is
 // running. Same reasoning as ingestBitrate, and the zero value is honest: no
 // hub exists, so nothing has been received, replicated or dropped.
 func (s *Server) relayStats() relay.Stats {
-	if s.mgr == nil || s.eng() == nil {
+	e := s.engOrNil()
+	if e == nil {
 		return relay.Stats{}
 	}
-	return s.eng().Hub().Stats()
+	return e.Hub().Stats()
+}
+
+// clipDir is where captured clips live: recordings/clips, one directory for
+// the whole install.
+//
+// Off the CONFIG, not off an engine, for the same reason Server.recordings is:
+// engine.New computes this exact path from the same cfg.RecordingsDir(), so
+// every engine names the same directory and a clip an operator captured
+// yesterday is still on disk after the programme that made it was deleted.
+//
+// It is a real base directory and must stay one. clips.Resolve confines a
+// downloaded name against it, and a nil-safe accessor answering "" would turn
+// that confinement into confinement against nothing. See jobs.go's ruling on
+// the same question for recordings.
+func (s *Server) clipDir() string {
+	return filepath.Join(s.cfg.RecordingsDir(), clips.Subdir)
 }
 
 // recordings is the shared, read-only view of the recordings directory:

@@ -348,8 +348,15 @@ func (s *Server) storeSettingsWithDefaultIngest() (db.Settings, error) {
 // reason this endpoint stopped asking one.
 func (s *Server) defaultSourceID() (int64, error) {
 	if s.mgr != nil {
-		// Engine.SourceID dereferences its receiver, so the nil check is the
-		// call's precondition and not decoration.
+		// The nil check is NOT the precondition of the call any more --
+		// Engine.SourceID answers 0 on a nil receiver, as of the same commit
+		// this note is in -- and deleting it on those grounds would change
+		// what this function means. A nil engine returning 0 would be handed
+		// straight back as "the default source is id 0" and the store would
+		// never be consulted, so an install whose lowest-positioned source
+		// failed to build would advertise a source that does not exist
+		// instead of falling through to the row that does. The check is what
+		// selects between the two answers below, not armour around a deref.
 		if e := s.mgr.Default(); e != nil {
 			return e.SourceID(), nil
 		}
@@ -831,12 +838,16 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	// A scrape says how many programmes exist, so an alert can tell a server
 	// nobody has configured from one whose broadcast ended -- every other
-	// series reads zero in both cases. A count that will not read is left at
-	// zero and warned about, for the same reason the recordings usage below is:
-	// losing the whole exposition would take the series an alert is watching
-	// with it.
+	// series reads zero in both cases.
+	//
+	// A count that will not read OMITS the series, the same rule the setup
+	// status follows. It is the one number here where a fabricated zero is not
+	// a smaller version of the truth but its opposite: 0 means "nobody has
+	// configured this install", so a sqlite hiccup would silence an outage
+	// alert and fire a first-run alert at a live broadcast. Absent is a state
+	// Prometheus can already ask about with absent(); a wrong 0 is not.
 	if n, err := s.store.CountSources(); err == nil {
-		snap.Sources = n
+		snap.Sources = &n
 	} else {
 		s.log.Warn("metrics: source count unavailable", "err", err)
 	}
@@ -1933,7 +1944,22 @@ func (s *Server) hlsHandler() http.Handler {
 			// A request that starts the encoder is answered 404 below, since
 			// ffmpeg has not written the playlist yet. hls.js retries a failed
 			// manifest load, so the player recovers within a segment or two.
-			s.eng().PreviewRequested()
+			//
+			// The nil branch is not hypothetical and it is not covered by the
+			// boundary guard: /hls is registered in its own group outside
+			// /api/v1, and Dashboard.tsx mounts PreviewPlayer with the preview
+			// ON before GET /settings has answered, so on an install with no
+			// source this is one of the FIRST requests the browser makes --
+			// and hls.js then retries it. PreviewRequested is a mutation and
+			// must keep panicking on a nil receiver, so the check is here.
+			//
+			// Falling through to the file server rather than refusing: the
+			// directory is real and possibly non-empty, and a 404 for a
+			// playlist nothing is writing is the same answer a live install
+			// gives in the seconds before the encoder starts.
+			if e := s.engOrNil(); e != nil {
+				e.PreviewRequested()
+			}
 		}
 		fs.ServeHTTP(w, r)
 	}))

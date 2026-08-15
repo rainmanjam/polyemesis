@@ -253,13 +253,17 @@ func writePlayoutConfig(path string, cfg *playoutPublish) error {
 // engine, and every playout route has to answer "unavailable" rather than
 // panic when it is.
 func (s *Server) playoutManager() *playout.Manager {
-	// Two checks, not one: a Server built with no manager at all, and a manager
-	// with no engine running. Both mean "there is no pipeline to ask", and both
-	// have to answer unavailable rather than panic.
-	if s.mgr == nil || s.eng() == nil {
+	// Both cases -- a Server built with no manager at all, and a manager with
+	// no engine running -- mean "there is no pipeline to ask", and engOrNil
+	// answers nil to both. It is asked ONCE and the answer is what gets
+	// dereferenced: this function used to test one engine and dereference a
+	// second read of the set, which is a panic when the last source is deleted
+	// between the two. See Server.engOrNil.
+	e := s.engOrNil()
+	if e == nil {
 		return nil
 	}
-	return s.eng().Playout()
+	return e.Playout()
 }
 
 // playoutSettings is the stored configuration, which is authoritative for the

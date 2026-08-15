@@ -10,9 +10,11 @@ import (
 )
 
 func testSnapshot() Snapshot {
+	sources := 2
 	return Snapshot{
 		Version: "1.2.3",
 		Uptime:  90 * time.Second,
+		Sources: &sources,
 		Ingest: Process{
 			State:       "running",
 			Restarts:    2,
@@ -75,6 +77,7 @@ func TestSnapshotIsExposedAsPrometheusSamples(t *testing.T) {
 	}{
 		{"version is carried on build_info", `polyemesis_build_info{version="1.2.3"}`, "1"},
 		{"uptime is in seconds", "polyemesis_uptime_seconds", "90"},
+		{"configured programmes are counted", "polyemesis_sources", "2"},
 
 		{"ingest is up while running", "polyemesis_ingest_up", "1"},
 		{"ingest kbps is exposed as bits per second", "polyemesis_ingest_bitrate_bits_per_second", "6e+06"},
@@ -301,5 +304,38 @@ func TestNonFiniteValuesRenderAsPrometheusLiterals(t *testing.T) {
 				t.Errorf("formatValue(%v) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// An unknown source count is ABSENT from the exposition, not zero.
+//
+// The two are opposite statements about the same install: 0 means "nobody has
+// configured this server", which is the condition a first-run alert fires on,
+// so a collector that could not read the count and published 0 anyway would
+// fire that alert at a box that is on air and silence
+// `ingest_up == 0 and sources > 0` during the outage it was written for.
+// Prometheus can ask about a missing series with absent(); it cannot recover a
+// count that was overwritten with a plausible number.
+func TestAnUnknownSourceCountIsOmittedRatherThanRenderedAsZero(t *testing.T) {
+	snap := testSnapshot()
+	snap.Sources = nil
+
+	text := Render(snap)
+	for _, line := range strings.Split(text, "\n") {
+		name, _, _ := strings.Cut(line, " ")
+		if name == "polyemesis_sources" {
+			t.Fatalf("a source count that could not be read was published anyway, as %q. "+
+				"An alert on polyemesis_sources == 0 now fires against an install this "+
+				"collector knows nothing about.", line)
+		}
+	}
+	if strings.Contains(text, "polyemesis_sources") {
+		t.Fatalf("the family header survived without its sample:\n%s", text)
+	}
+	// The rest of the scrape is unaffected: one family is dropped, not the
+	// exposition, which is what makes omitting it cheap enough to be right.
+	if !strings.Contains(text, "polyemesis_uptime_seconds") ||
+		!strings.Contains(text, "polyemesis_ingest_up") {
+		t.Fatalf("dropping the source count took other families with it:\n%s", text)
 	}
 }

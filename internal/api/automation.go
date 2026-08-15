@@ -431,8 +431,33 @@ func (s *Server) handleScheduleRuns(w http.ResponseWriter, r *http.Request) {
 
 // -------------------------------------------------------------------- clips
 
+// handleListClips is a READ OF A DIRECTORY, and that is why it answers on an
+// install with no source.
+//
+// The rolling buffer is on the engine, but the clips it has already written
+// are files under recordings/clips — one directory per install, outliving the
+// buffer being switched off and outliving the programme itself, exactly as the
+// recordings beside them do. 503-ing this route would blank a listing of files
+// that are still on disk, for the one operator who has just deleted their last
+// source and is trying to get their material off the box.
+//
+// The engine is still preferred when there is one: ClipUsage asks a RUNNING
+// capturer, which knows its own retention, and only falls back to counting the
+// directory. With no engine there is nothing to ask, so the count comes off
+// disk against the same defaults engine.New would have configured.
 func (s *Server) handleListClips(w http.ResponseWriter, r *http.Request) {
-	list, err := s.eng().Clips()
+	e := s.engOrNil()
+
+	var (
+		list  []clips.Clip
+		usage clips.Usage
+		err   error
+	)
+	if e != nil {
+		list, err = e.Clips()
+	} else {
+		list, err = clips.List(s.clipDir())
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -440,7 +465,11 @@ func (s *Server) handleListClips(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []clips.Clip{}
 	}
-	usage, err := s.eng().ClipUsage()
+	if e != nil {
+		usage, err = e.ClipUsage()
+	} else {
+		usage, err = clips.UsageOf(clips.Config{Dir: s.clipDir()}.Normalized())
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -448,7 +477,7 @@ func (s *Server) handleListClips(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"clips":  list,
 		"usage":  usage,
-		"buffer": s.eng().ClipBuffer(),
+		"buffer": e.ClipBuffer(),
 		"bounds": map[string]int{
 			"minWindowSeconds": clips.MinWindowSeconds,
 			"maxWindowSeconds": clips.MaxWindowSeconds,
@@ -510,9 +539,26 @@ func (s *Server) handleDeleteClip(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// handleDownloadClip serves a file that is already on disk, so it answers with
+// no source for the same reason the listing does.
+//
+// The base directory is RE-PLUMBED, never nil-safed. clips.Resolve confines
+// the requested name against it; an accessor that answered "" on a nil engine
+// would leave every download confined against nothing, which is the trap
+// MUST NOT #6 names. s.clipDir() is the same real path engine.New computes.
 func (s *Server) handleDownloadClip(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	path, err := s.eng().ClipPath(name)
+	var (
+		path string
+		err  error
+	)
+	if e := s.engOrNil(); e != nil {
+		// The engine stays authoritative while there is one, so the confinement
+		// base cannot drift from the directory the capturer is writing into.
+		path, err = e.ClipPath(name)
+	} else {
+		path, err = clips.Resolve(s.clipDir(), name)
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

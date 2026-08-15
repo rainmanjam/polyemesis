@@ -43,7 +43,16 @@ type Snapshot struct {
 	// below reads zero in both cases, so an alert written on ingest_up alone
 	// cannot tell a broadcast that ended from an install nobody has configured
 	// yet.
-	Sources int
+	//
+	// A POINTER, because for this one number "unknown" and 0 are opposite
+	// statements and the type has to be able to say so. Nil OMITS the series
+	// rather than publishing 0, and 0 is the value that means "nobody has
+	// configured this install": a collector that could not read the count and
+	// reported 0 anyway would silence `ingest_up == 0 and sources > 0` during
+	// a real outage and fire "nobody configured this server" at a box that is
+	// on air. Prometheus already has a word for the other case -- absent() --
+	// and one missing family is not a lost exposition.
+	Sources *int
 
 	Ingest       Process
 	Destinations []Destination
@@ -109,8 +118,10 @@ func Render(s Snapshot) string {
 	d.scalar("polyemesis_uptime_seconds", "gauge",
 		"Time since the server process started.", s.Uptime.Seconds())
 
-	d.scalar("polyemesis_sources", "gauge",
-		"Programmes configured on this install.", float64(s.Sources))
+	if s.Sources != nil {
+		d.scalar("polyemesis_sources", "gauge",
+			"Programmes configured on this install.", float64(*s.Sources))
+	}
 
 	renderIngest(&d, s.Ingest)
 	renderDestinations(&d, s.Destinations)
