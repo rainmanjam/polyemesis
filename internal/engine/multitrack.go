@@ -1,5 +1,18 @@
 // Twitch Enhanced Broadcasting, wired into the go-live path.
 //
+// EXPERIMENTAL, AND THIS FILE IS THE PART THE LABEL IS ACTUALLY ABOUT. The
+// negotiation itself is not experimental any more: internal/multitrack's
+// live_test.go runs it against ingest.twitch.tv on every run and Twitch
+// answers — a supported-GPU inventory is accepted, a VOD audio track is
+// granted, and a key is minted. What has never been observed is anything AFTER
+// that: no broadcast has been published through a minted key. THIS FILE is
+// where that gap lives. negotiateDestination has only ever reached an httptest
+// server replaying recorded fixtures, so of the two paths it chooses between,
+// the fallback is the one with evidence behind it. That is also the path this
+// file guarantees: every function here returns a usable decision and none of
+// them can fail a broadcast, so an operator switching the toggle on is risking
+// the feature not working rather than the stream not going out.
+//
 // internal/multitrack does the negotiation and says nothing about polyemesis;
 // this file is the whole of the translation between the two. It answers three
 // questions and nothing else:
@@ -122,6 +135,14 @@ func vodNeedsNegotiation(row *db.Destination) bool {
 const noteVODWithoutMultitrack = "This destination has a second (VOD) audio mix and the ordinary Twitch " +
 	"RTMP ingest carries one audio track, so the second mix is not being sent. Switch on Enhanced " +
 	"Broadcasting for this destination to negotiate an ingest that takes it."
+
+// noteVODProvisional is what an operator is told when the second mix is dropped
+// because the ingest could not be probed. It is the only one of these three that
+// is not about a destination's configuration and not about Twitch, so it says
+// there is nothing to do: the mix returns on its own once a probe lands.
+const noteVODProvisional = "The second (VOD) audio mix is not being sent yet: this ingest could " +
+	"not be probed, so the live mix is running on a guessed channel layout and a second guessed " +
+	"mix is not added on top of it. It returns by itself once a probe succeeds."
 
 // noteVODNotNegotiated is the same fact after the negotiation was tried and did
 // not succeed. Separate wording because the operator's next step is different:

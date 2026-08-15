@@ -35,6 +35,20 @@ machine you are, not using the card. A headless VPS with no GPU cannot negotiate
 Enhanced Broadcasting no matter how much CPU it has, and a machine with a GPU
 can negotiate it while still encoding on the CPU.
 
+More precisely: what Twitch validates is the inventory the request *declares* —
+vendor ID, device ID and driver version, against a list it does not publish. It
+has no way to inspect your machine, which is why polyemesis asks you to fill the
+inventory in on the Settings page rather than reading it: it sends what it is
+told. `internal/multitrack/live_test.go` demonstrates the mechanism directly —
+it declares an NVIDIA card and Twitch grants Enhanced Broadcasting, on an Apple
+Silicon machine that has no such card in it.
+
+> **EXPERIMENTAL — no broadcast has been published through a key Enhanced
+> Broadcasting minted.** The negotiation is not the gap: those tests reach
+> `ingest.twitch.tv` on every run and Twitch grants the VOD audio track and
+> mints a key. Everything after that return is unobserved. Nothing is gated — a
+> negotiation that does not succeed falls back to the ordinary Twitch ingest.
+
 Renditions are the opposite: real work, and where a card earns its place.
 
 ## 3. Where a GPU actually helps
@@ -150,6 +164,26 @@ interval breaks HLS and DASH packaging on the platform side.
 
 ### Per-encoder flags
 
+> **EXPERIMENTAL — the `_nvenc`, `_qsv`, `_vaapi` and `_amf` rows below are
+> unconfirmed on real hardware.** Those values were read off FFmpeg's own option
+> tables (`ffmpeg -h encoder=<name>`) inside a container, which answer on a
+> machine with no such device in it at all. No NVENC, QSV or VA-API encode has
+> been observed running with them, including the capped-VBR behaviour described
+> under [Setting a ceiling](#setting-a-ceiling), whose entire effect is on this
+> argv. Nothing is disabled — the encoders stay selectable, and a flag that is
+> wrong shows up as an encoder that refuses to open, which the start gate
+> reports by name.
+>
+> The `_videotoolbox` rows are **not** in that set and neither are `libx264` and
+> `libx265`. `TestEveryConfiguredEncoderOpensWithItsOwnFlags`
+> (`internal/ffmpeg/rendition_encoder_profiles_test.go`) runs a real encode per
+> registered encoder using that encoder's own row from the table below — preset
+> flag, rate control and the capped-VBR path included — and on macOS
+> `h264_videotoolbox` and `hevc_videotoolbox` both pass. It is the strongest
+> evidence any row here has, and it answers for whichever encoders the machine
+> running it registers: a CI runner with an NVIDIA card would retire the
+> paragraph above on its own.
+
 | Encoder | Adds |
 |---|---|
 | `libx264` | `-preset veryfast -profile:v high -pix_fmt yuv420p` |
@@ -226,4 +260,13 @@ need a keyframe interval the encoder is not sending, or when one destination
 needs a smaller picture than the others.
 
 **Add a GPU** when the number of *distinct* renditions across all sources is more
-than a couple, or when you want Twitch Enhanced Broadcasting at all.
+than a couple, or when you want Twitch Enhanced Broadcasting at all — remembering
+that for Enhanced Broadcasting the card is a gate rather than a workload (§2),
+and that the feature carries an EXPERIMENTAL label: the negotiation is proven
+against Twitch, a broadcast published through the key it mints is not.
+
+If a rendition is the reason for the card, note which encoder family you are
+buying into: the flags polyemesis hands NVENC, QSV, VA-API and AMF are
+unconfirmed on silicon, per [§ Per-encoder flags](#per-encoder-flags). They are
+not disabled and a wrong flag surfaces as an encoder that refuses to open, named
+by the start gate — but you would be the first to run them.

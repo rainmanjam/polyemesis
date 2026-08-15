@@ -14,7 +14,7 @@
 [extend]
 useDefault = true
 
-# One historical commit is exempted, by SHA.
+# Two historical commits are exempted, by SHA.
 #
 # 5cbe821 added the allowlist self-test below and wrote its planted, made-up
 # credential as a literal directly into .github/workflows/security.yml. That
@@ -34,10 +34,26 @@ useDefault = true
 #
 # The string was invented for this test, matches no real service, and was never
 # valid anywhere. It was a fixture that briefly sat in the wrong file.
+#
+# a357faf is the same shape a second time, which is why this is a list rather
+# than a special case. It wrote a Twitch stream-key FIXTURE as
+# `live_1_abcdefghijklmnop` next to a `StreamKey:` identifier, and
+# generic-api-key fires on a credential-SHAPED literal beside a credential-shaped
+# name — it cannot tell an invented one from a real one, which is the whole
+# reason it is worth running. 91e0d47 replaced it with `sk-live-vod`, matching
+# the deliberately unconvincing keys every other test in that file uses
+# ("original-key", "key"). But a value removed in a later commit is still in the
+# earlier one, and the PR scan reads the range, not the tip.
+#
+# Allowlisted by COMMIT for the same three reasons as above, and the second is
+# the one that matters here: the path is `internal/api/vod_profile_roundtrip_test.go`,
+# and exempting a test file forever is exactly what the header of this file
+# refuses to do. A real key committed to that file tomorrow is still a finding.
 [allowlist]
-description = "A made-up fixture value that briefly lived in security.yml"
+description = "Made-up fixture values that briefly lived in the wrong commits"
 commits = [
   "5cbe821ff686ddcc59aee9a8aa830269122e9c36",
+  "a357fafffad25b8912a5c08aa16312adbedce09d",
 ]
 
 [[rules]]

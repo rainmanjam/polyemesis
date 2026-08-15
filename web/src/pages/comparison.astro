@@ -41,6 +41,12 @@ const shared = [
   // as REST. Neither half of the old cell survived contact with their docs, so
   // the row now states what we do and says nothing about what they do.
   ["Metrics / API", "Prometheus + REST", "", ""],
+  // All five are offered and all five are probed with a real one-frame encode
+  // at startup. What is EXPERIMENTAL is narrower and does not belong in a table
+  // cell: the per-encoder FLAGS handed to NVENC, QSV, VA-API and AMF were read
+  // out of FFmpeg's option tables rather than measured on silicon. VideoToolbox
+  // is not in that set. The footnote under this table carries it, and
+  // docs/COMPARISON.md carries the same footnote — change both together.
   ["Hardware encoding", "NVENC, QSV, VA-API, VideoToolbox, AMF", "Yes", "n/a"],
   ["Unified chat", "Yes", "No", "Yes"],
   ["Self-hosted", "Yes", "Yes", "No"],
@@ -178,6 +184,20 @@ const selectors = [
         </tbody>
       </table>
     </div>
+    {/* The second-audio-mix row's caveat, in the same convention the product
+        uses: name the specific claim without evidence, and do not gate. */}
+    <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
+      <span class="chip align-middle">experimental</span>
+      <span class="ml-2">
+        On the second-audio-mix row, and only where the destination is Twitch. The
+        negotiation itself is proven — polyemesis’s tests reach ingest.twitch.tv on
+        every run, and Twitch accepts a supported-GPU inventory, grants the VOD
+        audio track and mints a key. What nobody has watched yet is a broadcast
+        published through that key. Off Twitch the two-mix egress is a different
+        mechanism and is not covered by this. Nothing is gated either way: a
+        negotiation that does not succeed falls back to the ordinary Twitch ingest.
+      </span>
+    </p>
     <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
       The multitrack ask is not hypothetical. “Multiple audio tracks for Twitch”
       was an open request on
@@ -262,6 +282,21 @@ const selectors = [
         Two rows are not a tie and are left that way: restream.io needs no server
         from you at all, and Restreamer has a far longer public release history.
         Both are real advantages, and neither changes what happens to your audio.
+      </p>
+      {/* The hardware-encoding row's caveat. It is not in the cell because the
+          cell would then be false in the other direction: all five ARE offered
+          and all five are probed. Mirrors the footnote in docs/COMPARISON.md. */}
+      <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
+        <span class="chip align-middle">experimental</span>
+        <span class="ml-2">
+          On the hardware-encoding row: all five encoders are offered, and each is
+          probed with a real one-frame encode at startup so one that is listed but
+          unusable is caught before a broadcast is. What is unverified is narrower —
+          the command-line flags handed to NVENC, QSV, VA-API and AMF were read out
+          of FFmpeg’s own option tables rather than measured on silicon.
+          VideoToolbox is not in that set: a real encode with its own flags runs on
+          every build.
+        </span>
       </p>
       <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
         The recording row said “Yes” for Restreamer until 9 August 2026 and was

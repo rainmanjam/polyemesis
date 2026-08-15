@@ -1,5 +1,15 @@
 # Hardware encoding
 
+> **EXPERIMENTAL — no NVENC, QSV or VA-API encode has ever been observed by this
+> project.** Every claim on this page about a GPU encoding a frame is reasoned
+> from FFmpeg's source and option tables, or reproduced in a container with no
+> GPU attached; see [What has actually been run, and what has
+> not](#what-has-actually-been-run-and-what-has-not), which is the precise
+> boundary. Hardware encoding is fully enabled, requires no opt-in, and the
+> probe still refuses an encoder that cannot open — what is unverified is
+> whether the encoders that *do* open behave as this page says once they are
+> running.
+
 polyemesis re-encodes video in one place — the **rendition** — so a single 4K60
 ingest can feed platforms with lower ceilings without you running four
 encoders. That only works if the encode keeps up with realtime, and `libx264`
@@ -437,6 +447,22 @@ Entries marked **(reproduced)** in the troubleshooting section above were
 produced by running the command and copying the output. Everything else was read
 verbatim out of `libavcodec.so.60` / `libavutil.so.58` with `strings`, which
 gives the exact wording but not the conditions that trigger it.
+
+This is also why hardware encoding carries an **EXPERIMENTAL** label in the
+product — but on the NVENC, QSV, VA-API and AMF rows only. Eight of the twelve
+encoder profiles configured in 0.7.0 — the per-encoder flags in
+[ENCODING.md](ENCODING.md#per-encoder-flags), and the capped-VBR fix on NVENC —
+were derived from the same containers described above, so they have the same
+status as everything else in this section: correct as far as FFmpeg's own
+option tables go, unconfirmed on silicon. The label does not disable anything.
+
+The other four are confirmed. `TestEveryConfiguredEncoderOpensWithItsOwnFlags`
+runs a real encode per registered encoder with that encoder's own flags — the
+capped-VBR path included — and on this Apple Silicon machine
+`h264_videotoolbox`, `hevc_videotoolbox`, `libx264` and `libx265` all pass. The
+test answers for whichever encoders the machine running it registers, which is
+why a GPU-less container cannot retire the paragraph above and a runner with an
+NVIDIA card could.
 
 **Verified by running it:**
 

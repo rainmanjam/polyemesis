@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/accordion";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/AppLayout";
+import { Experimental, ExperimentalBadge } from "@/components/Experimental";
 // The destination dialog renders this matrix inline; this page shows the same
 // rows as a full table. Both read it from lib, which is where it belongs.
 import {
@@ -1360,13 +1361,32 @@ function MultitrackHardware({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Enhanced Broadcasting hardware (Twitch)</CardTitle>
+        <CardTitle className="flex items-center gap-1.5">
+          Enhanced Broadcasting hardware (Twitch)
+          <ExperimentalBadge />
+        </CardTitle>
         <CardDescription>
           What this machine's GPU is, for the negotiation a destination with Enhanced Broadcasting
           switched on makes at go-live.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
+        {/* The form is unchanged and still fully usable. This says only what
+            polyemesis has and has not seen, which is a different question from
+            what Twitch documents. It is also the one place an operator can act
+            on knowing that Twitch reads the DECLARATION, so the mechanism is
+            stated here rather than left to be inferred from a refusal. */}
+        <Experimental>
+          An inventory declared here does reach Twitch's live endpoint, and polyemesis's own
+          tests watch it be accepted: a supported GPU is granted Enhanced Broadcasting, a VOD
+          audio track and a minted key. What Twitch checks is <em>this declaration</em> &mdash;
+          the vendor ID, device ID and driver version as sent, against a list it does not
+          publish. It has no way to inspect the machine, which is why these fields exist at all:
+          polyemesis sends what it is told. What has never been observed is a broadcast published
+          through a minted key. Filling this in is safe either way &mdash; nothing is sent until
+          a destination with the toggle on goes live, and a refusal falls back to the ordinary
+          Twitch ingest.
+        </Experimental>
         <span className="text-[10px] text-muted-foreground">
           Twitch grants Enhanced Broadcasting only to a client with a GPU it supports, and it checks
           what it is told: a zero vendor ID, a vendor it does not know and an out-of-date driver are

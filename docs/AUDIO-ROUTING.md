@@ -40,6 +40,19 @@ of a 5.1 track, pan a mono mic hard left, or swap channels.
 
 ## Two mixes to one destination
 
+> **EXPERIMENTAL — on Twitch, no broadcast has ever been published through a key
+> Enhanced Broadcasting minted.** The negotiation itself is not the gap: it runs
+> against `ingest.twitch.tv` and succeeds, and polyemesis's own tests reach the
+> live endpoint on every run — Twitch accepts a supported-GPU inventory, grants
+> a VOD audio track and mints a key. What has never been observed is everything
+> *after* that: no second audio track has been seen arriving at Twitch, and the
+> engine wiring that carries the decision has only been driven by a stand-in
+> server. It stays fully enabled and there is no flag to turn it off — a
+> negotiation that does not succeed falls back to the ordinary Twitch ingest,
+> which is the path every install used before this existed. The generic two-mix
+> egress on a **non-Twitch** destination is a separate mechanism and is not
+> covered by this caveat.
+
 A destination can receive a second audio track carrying a different mix. The
 live broadcast keeps the music bed; the archive track does not — from one
 ingest, one video encode, one connection.
@@ -52,7 +65,14 @@ one, and the `-c:a copy` refusal for RTMP destinations still stands.
 
 ### Turning it on
 
-Two fields on the destination, both off by default:
+In the UI: **Routing → pick the destination → Second (VOD) audio mix**. The
+switch there is off on every destination and switching it on opens a second copy
+of the same editor the live mix uses — the same track picks, mix matrix, music
+rights, loudness, delay and ducking, compiled and shown as its own filter graph.
+It is seeded from the live mix, so the first edit you make is the actual
+difference you wanted.
+
+Over the API, two fields on the destination, both off by default:
 
 | Field | What it does |
 |---|---|

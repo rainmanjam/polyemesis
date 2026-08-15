@@ -256,6 +256,21 @@ and costed in [the roadmap](roadmap/OVERLAYS.md); they are not built.
 
 ## Hardware encoders
 
+> **EXPERIMENTAL — the flags polyemesis hands an NVENC, QSV, VA-API or AMF
+> encoder have not been confirmed on real hardware.** The probe described below
+> is genuine evidence about whether an encoder *opens* on your machine; it says
+> nothing about whether the rate control, preset and profile flags then behave
+> as documented, and for those four families they were read out of FFmpeg's
+> option tables rather than measured against silicon. No NVENC, QSV or VA-API
+> encode has been observed. Every encoder stays selectable and there is no flag
+> to turn this off; see
+> [ENCODING.md § Per-encoder flags](ENCODING.md#per-encoder-flags).
+>
+> **VideoToolbox is not in that set.**
+> `TestEveryConfiguredEncoderOpensWithItsOwnFlags` runs a real encode per
+> registered encoder with that encoder's own flags, and
+> `h264_videotoolbox`/`hevc_videotoolbox` pass on macOS.
+
 At startup polyemesis **encodes one frame** with each of the six encoders it
 probes — the five H.264 hardware encoders and `libx264` — and keeps the exit
 status:

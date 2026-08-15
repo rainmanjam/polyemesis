@@ -48,6 +48,15 @@ import { AlertTriangle, VolumeX } from "lucide-react";
 const NO_ROLE = "__none__";
 
 interface TrackRowsProps {
+  /** Namespaces the checkbox ids, and is REQUIRED rather than defaulted.
+   *
+   *  There are two of these on the routing page — the live mix and the second
+   *  (VOD) one — and a constant `track-0` in both means the second editor's
+   *  `<label for>` resolves to the FIRST checkbox in document order. Clicking
+   *  "Track 1" under the VOD mix then toggles the track in the LIVE mix, which
+   *  is a wrong edit to the wrong profile with nothing on screen saying so.
+   *  No default, so a third instance cannot inherit the collision by omission. */
+  idPrefix: string;
   tracks: SourceTrack[];
   selection: TrackSel[];
   levels?: Levels | null;
@@ -68,6 +77,7 @@ interface TrackRowsProps {
 }
 
 export function TrackRows({
+  idPrefix,
   tracks,
   selection,
   levels,
@@ -123,13 +133,16 @@ export function TrackRows({
           >
             <div className="grid grid-cols-[auto_7.5rem_1fr_9rem] items-center gap-3">
               <Checkbox
-                id={`track-${t.index}`}
+                id={`${idPrefix}-track-${t.index}`}
                 checked={sel.enabled}
                 onCheckedChange={(v) => update(t.index, { enabled: v === true })}
                 aria-label={`Include track ${t.index + 1}`}
               />
 
-              <label htmlFor={`track-${t.index}`} className="min-w-0 cursor-pointer select-none">
+              <label
+                htmlFor={`${idPrefix}-track-${t.index}`}
+                className="min-w-0 cursor-pointer select-none"
+              >
                 <div className="flex items-center gap-1.5">
                   <span className="text-[12px] font-semibold leading-tight">
                     Track {t.index + 1}

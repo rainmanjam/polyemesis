@@ -419,6 +419,57 @@ The measurement is post-routing and needs a minimum integration time before it
 means anything; a reading taken in the first few seconds is not yet meaningful.
 Check the destination's target matches the platform you are sending to.
 
+### The second (VOD) audio mix is not arriving
+
+> **EXPERIMENTAL** — on Twitch this depends on Enhanced Broadcasting. The
+> negotiation is proven against `ingest.twitch.tv`; a broadcast *published
+> through* the key it mints is not. If you get to the end of this list and the
+> track still is not there, that is the unobserved step, and an issue with the
+> destination card's message in it is worth more than anything on this page.
+
+polyemesis says which of these it was on the **destination's card**, once the
+destination has gone live at least once. Check there first — it names the reason
+rather than making you guess between them.
+
+1. **Enhanced Broadcasting is off for this destination.** The ordinary Twitch
+   RTMP ingest carries one audio track, so the engine refuses the pair before
+   the broadcast starts and publishes the live mix alone. Switch it on in the
+   destination's settings. The routing editor also says so, in the second-mix
+   card, before you save.
+2. **No GPU inventory is declared.** Twitch refuses the negotiation outright for
+   a client that reports none — *"did not send GPU Information"* — and it checks
+   the inventory it is *sent*, not the hardware (see
+   [ENCODING.md §2](ENCODING.md#2-the-gpu-has-two-unrelated-jobs-and-only-one-is-a-workload)).
+   Fill it in on the Settings page. A declared GPU Twitch does not recognise, or
+   a driver version it considers out of date, is refused by name too.
+3. **The ingest has not been probed yet.** The second mix is dropped on *every*
+   platform while the channel layout is a guess — the live mix is already
+   running provisionally and a second guessed mix is not stacked on top of it.
+   It returns by itself on the first reconcile after a probe succeeds; nothing
+   to do.
+4. **The far end is not Twitch and takes one track.** Off Twitch nothing is
+   negotiated: both mixes are published and whether the second is accepted is a
+   property of that ingest. Many RTMP ingests ignore or reject it.
+
+A refusal at any of these never fails the broadcast: the destination falls back
+to publishing the live mix alone to the ordinary ingest.
+
+### An NVENC / QSV / VA-API rendition opens but the bitrate looks wrong
+
+> **EXPERIMENTAL** — the command-line flags polyemesis hands NVENC, QSV, VA-API
+> and AMF encoders were read out of FFmpeg's own option tables rather than
+> measured on silicon. VideoToolbox and the software encoders are not in that
+> set. See [ENCODING.md § Per-encoder flags](ENCODING.md#per-encoder-flags).
+
+If the encoder *opens* and produces picture, the argv is at least valid — an
+invalid flag value refuses to open and the start gate reports it by name. What
+is not established is whether the rate control then behaves as the numbers in
+the editor say, and the capped-VBR path (a bitrate ceiling above the target) is
+where that is most likely to show. Compare the measured output bitrate against
+the target you set; if they disagree, the fallback that works today is to set
+the ceiling equal to the target, which asks for CBR. Please report it — this is
+the exact evidence gap the label exists to mark.
+
 ---
 
 ## Recordings and jobs

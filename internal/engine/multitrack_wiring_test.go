@@ -701,6 +701,58 @@ func TestAVODMixIsNotSentWhenTheNegotiationDoesNotSucceed(t *testing.T) {
 	}
 }
 
+// AN UNPROBED INGEST DROPS THE SECOND MIX, AND SAYS SO.
+//
+// The provisional path drops the pair on EVERY platform -- a provisional
+// compile already runs on a guessed channel layout and a second guessed mix on
+// top of it doubles what is approximate -- and that is deliberate. What was
+// wrong is that it was the only one of the three drops that set no vodDropped,
+// so it reached neither the destination card nor the log. It is also the drop
+// an operator is least able to work out for themselves, because unlike the
+// other two it is not caused by anything they configured.
+//
+// Non-Twitch on purpose: the sibling test above asserts a non-Twitch
+// destination is never told its second mix was dropped, and this is the one
+// case where it must be. A Twitch row here could pass on the Twitch arm alone.
+//
+// MUTATION: fold the `case provisional` arm back into the one above it, so it
+// drops the mix and sets nothing. Observed: FAIL, "nothing explains why".
+func TestAVODMixOnAnUnprobedIngestIsNotSentAndSaysSo(t *testing.T) {
+	e, _ := storeEngine(t)
+	row := twitchRow()
+	row.Platform = db.PlatformYouTube
+	row.Multitrack = false
+	row.URL = "rtmp://a.rtmp.youtube.com/live2"
+	row.Profile = mixProfile(0)
+	vod := mixProfile(1)
+	row.VODProfile = &vod
+
+	// The last argument is `provisional`.
+	plans := e.planDestinations([]*db.Destination{row}, nil, pairSource(), "", true)
+	p := plans[row.ID]
+	if p.err != "" {
+		t.Fatalf("the destination will not run at all: %s", p.err)
+	}
+	if mapsASecondMix(e.destArgs(row, p.compiled, "udp://127.0.0.1:1", row.Target())) {
+		t.Error("a second mix was compiled on a guessed channel layout, which is the thing the " +
+			"provisional path exists not to do")
+	}
+	if p.vodDropped == "" {
+		t.Fatal("nothing explains why the second mix is not being sent, so an operator watching " +
+			"a configured mix fail to appear has nothing to read -- on the one drop that is not " +
+			"their configuration's fault")
+	}
+	// It must not read as the Twitch one. "Switch on Enhanced Broadcasting" is
+	// advice that does nothing here, and this destination is not even on Twitch.
+	if strings.Contains(p.vodDropped, "Enhanced Broadcasting") {
+		t.Errorf("the explanation offers the Twitch fix for a problem that is not Twitch's and "+
+			"not the operator's: %q", p.vodDropped)
+	}
+	if !strings.Contains(p.vodDropped, "probed") {
+		t.Errorf("the explanation does not name the cause: %q", p.vodDropped)
+	}
+}
+
 // AND THE GENERIC TWO-MIX EGRESS IS UNTOUCHED.
 //
 // The regression guard. routing.CompilePair, ffmpeg.SecondAudioOutLabel and the
