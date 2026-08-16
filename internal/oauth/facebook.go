@@ -1073,7 +1073,7 @@ func fbAdvice(err error, what string, scopes []string) error {
 	if !ok {
 		return err
 	}
-	ge, ok := decodeGraphError(se.Body)
+	ge, ok := decodeGraphError(se.payload())
 	if !ok {
 		return err
 	}

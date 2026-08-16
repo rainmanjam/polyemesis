@@ -185,11 +185,39 @@ func MetadataFor(p db.Platform) (MetadataPusher, bool) {
 type statusError struct {
 	Status int
 	URL    string
-	Body   string
+	// Body is TRUNCATED, for display. Use payload() to parse it.
+	Body string
+	// full is the untruncated response body, and its absence was a live bug.
+	//
+	// Body is set from snippet(), which cuts at 300 characters so a platform
+	// that answers with an HTML error page cannot dump it into a log line. That
+	// is right for DISPLAY and wrong for PARSING, and facebook.go parses it:
+	// fbAdvice reads the Graph error code out of this body to decide what to
+	// tell the operator.
+	//
+	// A realistic Meta refusal is 362 bytes -- the message text alone runs past
+	// 250 before the type, code, error_subcode and fbtrace_id are added -- so it
+	// arrived here as 303 characters of invalid JSON. decodeGraphError returned
+	// false, and EVERY code-specific branch was skipped: the expired-token
+	// advice, and any other advice keyed on a Graph code. The failure was
+	// invisible because the short bodies in the test fixtures decoded fine.
+	//
+	// Truncation is therefore a property of the presentation, not of the error.
+	full string
 }
 
 func (e *statusError) Error() string {
 	return fmt.Sprintf("%s returned %d: %s", e.URL, e.Status, e.Body)
+}
+
+// payload returns the body to PARSE: the whole thing when it was captured, and
+// the truncated one only for errors constructed without it (tests, and older
+// call sites). Never use Body for parsing.
+func (e *statusError) payload() string {
+	if e.full != "" {
+		return e.full
+	}
+	return e.Body
 }
 
 // requestJSON performs an authenticated request with an arbitrary method.
@@ -225,7 +253,7 @@ func requestJSON(ctx context.Context, method, endpoint, accessToken string, payl
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &statusError{Status: resp.StatusCode, URL: endpoint, Body: snippet(raw)}
+		return &statusError{Status: resp.StatusCode, URL: endpoint, Body: snippet(raw), full: string(raw)}
 	}
 	// A successful PATCH is a 204 on Helix; there is nothing to decode.
 	if out == nil || len(raw) == 0 {
