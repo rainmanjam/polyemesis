@@ -41,7 +41,6 @@ deliberately does not do, and how to get it running. These are the details.
 | [DESIGN-ONE-PORT-INGEST.md](DESIGN-ONE-PORT-INGEST.md) | The original token-addressing design, superseded in part by the above |
 | [MODULES.md](MODULES.md) | Inventory of every dependency: version, licence, and whether it ships in the binary |
 | [DEPENDENCIES.md](DEPENDENCIES.md) | Why the significant ones were chosen, and what was rejected |
-| [RESEARCH-COMPETITIVE.md](RESEARCH-COMPETITIVE.md) | What comparable tools do, and the gaps that shaped this one |
 
 ## Testing and quality
 
@@ -49,7 +48,6 @@ deliberately does not do, and how to get it running. These are the details.
 |---|---|
 | [TESTING.md](TESTING.md) | Every suite and how to run it |
 | [TEST-STRATEGY.md](TEST-STRATEGY.md) | What is covered, what deliberately is not, and the gaps |
-| [REVIEW-POKA-YOKE.md](REVIEW-POKA-YOKE.md) | A mistake-proofing review of the code and UI, and the eight changes it produced |
 
 ## Contributing
 

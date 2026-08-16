@@ -8,7 +8,7 @@ single track over RTMP. OBS is what most people use, so it gets its own page.
 > late 2024, so a new enough build carries those tracks through polyemesis's
 > existing ingest command unchanged — verified up to six tracks on FFmpeg 8.1.
 > Ubuntu 24.04's stock FFmpeg 6.1.1 cannot: it refuses with *"at most one audio
-> stream is supported in flv"*. See `notes/enhanced-rtmp-multitrack.md`; a
+> stream is supported in flv"*. See `evidence/enhanced-rtmp-multitrack.md`; a
 > confirmation run against real OBS is still outstanding.
 
 Only one of these configurations unlocks per-destination audio routing:
@@ -154,7 +154,7 @@ used FFmpeg. OBS writes the same `MULTITRACKTYPE_ONE_TRACK` format (read from
 its `flv-mux.c`), so the wire format is not in question, but the handshake and
 metadata path are unconfirmed. SRT remains the operated path.
 
-See `notes/enhanced-rtmp-multitrack.md`.
+See `evidence/enhanced-rtmp-multitrack.md`.
 
 `config.yaml` used to declare an `enhancedRtmp` key. It has been removed: it
 was an inert placeholder that read as a switch, and it was kept on the belief

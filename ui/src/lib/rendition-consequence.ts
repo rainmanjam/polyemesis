@@ -4,7 +4,7 @@
  *  starts one encode, every later one joins that same encode for free, and it
  *  stops when the last enabled destination leaves. That arithmetic is the whole
  *  reason renditions exist, and it is invisible on a dropdown that shows only a
- *  name. `docs/notes/video-treatment-ui.md` has the full argument.
+ *  name. `docs/evidence/video-treatment-ui.md` has the full argument.
  *
  *  These live outside the dialog because they are the part worth testing. In
  *  JSX they were four nested ternaries inside a template literal — reachable

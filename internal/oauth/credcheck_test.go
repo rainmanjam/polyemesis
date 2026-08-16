@@ -122,10 +122,10 @@ func TestCheckCredentialsForYouTube(t *testing.T) {
 // unverifiable -- never both, never neither.
 //
 // This is the guard that stops a provider added later from defaulting into
-// "we could not check this" by omission. The same shape of omission produced
-// the Medium finding in the 2026-07-30 security review: KickConfig carried an
-// optional Verify hook that no construction site ever set, so signature
-// checking silently never ran. An optional security control is an absent one.
+// "we could not check this" by omission. That shape of omission has already
+// produced one real defect here: KickConfig carried an optional Verify hook
+// that no construction site ever set, so signature checking silently never
+// ran. An optional security control is an absent one.
 func TestEveryProviderIsEitherCheckableOrDeclaredUnverifiable(t *testing.T) {
 	for platform, provider := range Providers() {
 		_, checkable := provider.(CredentialChecker)

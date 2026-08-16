@@ -450,12 +450,17 @@ for (const f of pages) {
 
 /* THE PUBLISH LIST IS AN ALLOWLIST, AND THIS IS WHAT MAKES THAT TRUE.
  *
- * docs/ holds 37 markdown files. 23 are user-facing and now ship as pages; 14
- * are internal, and two of those would genuinely hurt -- RESEARCH-COMPETITIVE.md
- * is a survey of competitors' issue trackers, and COPY-CONSTRAINTS.md records
- * what this project's marketing copy may and may not claim. Publishing either is
- * not a broken page. It is a self-inflicted wound, and nobody here would notice
- * until somebody else did.
+ * docs/ holds 31 markdown files. 23 are user-facing and ship as pages; 8 are
+ * internal to the repository but harmless in it -- design notes, a runbook, the
+ * internal half of a published document. Publishing one of those is not a broken
+ * page. It is a self-inflicted wound, and nobody here would notice until
+ * somebody else did.
+ *
+ * The documents this comment used to name as the dangerous ones -- a competitor
+ * survey and the marketing-copy governance -- are no longer in the repository.
+ * They live under docs/internal/, which git ignores, because being absent from a
+ * publish list and being absent from the internet are different properties and
+ * a public repository only ever gave the first.
  *
  * The manifest in src/data/docs.mjs is a pair of lists rather than a glob with
  * exclusions, and the FIRST check below is the one that earns the difference:

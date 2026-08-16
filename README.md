@@ -94,7 +94,7 @@ roadmap.
 
 | | |
 |---|---|
-| **RTMP multitrack is not the operated path.** | Classic RTMP carries one stereo pair. Enhanced RTMP (OBS 30.2+) carries more and works on FFmpeg 7.1+ — verified end to end — but not on FFmpeg 6.1.1, and not yet confirmed with OBS publishing. SRT is what is operated. See `docs/notes/enhanced-rtmp-multitrack.md`. |
+| **RTMP multitrack is not the operated path.** | Classic RTMP carries one stereo pair. Enhanced RTMP (OBS 30.2+) carries more and works on FFmpeg 7.1+ — verified end to end — but not on FFmpeg 6.1.1, and not yet confirmed with OBS publishing. SRT is what is operated. See `docs/evidence/enhanced-rtmp-multitrack.md`. |
 | **No per-source ports.** | Every push source is addressed by its token on one SRT port, or its stream key on one RTMP port. Giving one programme its own port for firewall, NIC or QoS purposes is not something polyemesis does. [Why](docs/DESIGN-ONE-PORT-ONLY.md#what-it-costs) |
 | **One user, no roles.** | No multi-user model, no per-destination permissions. Access to the UI is full control of the server's streaming — and, through file destinations and expert mode, meaningful control of the machine. |
 | **Instagram Live cannot work.** | There is no Live broadcast API, and Live Producer's RTMP path was removed for most accounts. It is listed and marked unsupported rather than shipped as a preset that quietly never connects. |
@@ -146,8 +146,7 @@ The honest summary: if you do not need different audio per platform, Restreamer
 is a more mature product and you should probably use it. polyemesis exists for
 the case where one stereo pair for everybody is the thing that does not work.
 
-More detail in
-[docs/RESEARCH-COMPETITIVE.md](docs/RESEARCH-COMPETITIVE.md).
+More detail in [docs/COMPARISON.md](docs/COMPARISON.md).
 
 ## Try it
 
