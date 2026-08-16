@@ -29,6 +29,13 @@ prints the path, and stamps the date — a higher standard than this file meets.
 rule that marks that as non-compliant is the rule that is wrong, and it has been
 corrected rather than the page.
 
+**A PAGE-LEVEL "WE SURVEYED THESE PRODUCTS" FOOTER IS NOT A SOURCE FOR A CELL.**
+The amended rule was checked adversarially and this is the hole it left: two
+capability rows on `/comparison` asserted "Yes" for both competitors on the
+strength of a general re-check stamp at the foot of the page. A footer says
+somebody looked at the products. It does not say anybody checked *that row*.
+Provenance is per claim or it is decoration.
+
 What remains forbidden is unchanged and is the thing that actually matters: a
 claim about another product with **no** dated source of either kind. A star
 count nobody re-checks, a plan limit from memory, a capability someone assumed.

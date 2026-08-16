@@ -26,8 +26,15 @@ import CodeBlock from "../components/CodeBlock.astro";
  * are; that is the point of the section. */
 const shared = [
   ["Ingest once, fan out to several platforms", "Yes", "Yes", "Yes"],
-  ["Reconnects when a platform drops", "Yes", "Yes", "Yes"],
-  ["Live health and status you can watch", "Yes", "Yes", "Yes"],
+  // "not assessed" on the competitor columns, and this is the gap the amended
+  // sourcing rule was caught leaving open. Both rows asserted "Yes" for both
+  // products on the strength of the page's general re-check footer. A footer
+  // saying the page was surveyed is not a citable source for a specific cell:
+  // it says somebody looked at the products, not that anybody checked THIS.
+  // Neither row has a line in the facts file, and neither has a quoted primary
+  // source beside it, so neither may assert.
+  ["Reconnects when a platform drops", "Yes", "not assessed", "not assessed"],
+  ["Live health and status you can watch", "Yes", "not assessed", "not assessed"],
   // Restreamer's cell said "Yes" until 2026-08-09 and was wrong: recording is
   // an open feature request on their own tracker (datarhei/restreamer#692,
   // opened 2024-02-14, still open when checked). "No built-in" rather than a
