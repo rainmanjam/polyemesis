@@ -8,6 +8,30 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Changed
+- **An install with no source is one somebody can actually use.** A fresh
+  database no longer manufactures a "Main" source nobody configured, so zero
+  sources is a normal state rather than a state the product had never been run
+  in — and every screen now behaves as though it were. Reads answer (the
+  dashboard, the telemetry socket and the Prometheus scrape used to nil-deref
+  together on the very first page load); the routes that act on a pipeline
+  refuse with `503` and `code: "no_source"` rather than falling over; and the
+  Dashboard, Sources and Settings pages draw an empty state naming the one next
+  action instead of a red toast.
+
+  Two things that were previously silent are now loud. The settings **ingest**
+  editor refuses a change on an install with nowhere to write it through to,
+  where it used to store the block, answer `200` and have no effect whatever;
+  every other setting in the same request is still saved, because `PUT
+  /settings` also holds the listeners, recording, chat, automod and alerts, all
+  of which an operator legitimately configures before creating a source. And
+  the startup banner says `ingest no programme yet` instead of naming a port
+  that is bound and will refuse the encoder aimed at it.
+
+  Upgrading installs are unaffected: the migration still carries an existing
+  single-ingest configuration onto a source called "Main", and now tells that
+  case apart from a first run rather than seeding both. (#387)
+
 ### Added
 - **An onboarding tour, offered once per install rather than once per browser.**
   A new operator finishes the signup screen and lands on an empty dashboard, and

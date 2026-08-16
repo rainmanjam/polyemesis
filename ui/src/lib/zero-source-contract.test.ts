@@ -104,3 +104,69 @@ describe("the setup status, the only thing a browser can read before signing in"
       "so the field arrives and TypeScript says it is not there").toMatch(/sources\?:\s*number/);
   });
 });
+
+/* The screens an operator meets on an install with no source.
+ *
+ * TEXT, not a rendered DOM, and the limitation is the one this file already
+ * accepts for the Go side: there is no component harness in this project, and
+ * inventing one for three branches would be a larger change than the branches.
+ * What these catch is the failure that actually happened during review -- a
+ * branch deleted, or its condition inverted, leaving a page that renders a
+ * pipeline for a programme that does not exist and invites the operator to
+ * click the one control that cannot work.
+ *
+ * The half a DOM test would add is whether the card LOOKS right; the half this
+ * has is whether the decision is still being made at all, and only the second
+ * one has ever been wrong here.
+ */
+describe("the screens that meet an install with no source", () => {
+  it("the dashboard draws the empty state instead of an empty pipeline", () => {
+    const src = read("ui/src/pages/Dashboard.tsx");
+    expect(src, "the dashboard no longer reads how many sources exist, so it cannot " +
+      "tell a fresh install from a running one").toContain("api\n      .listSources()");
+    expect(src, "the dashboard renders its pipeline unconditionally again: a preview of " +
+      "a stream nobody is sending, an ingest URL no encoder can publish to, and an Add " +
+      "destination button that answers 503").toMatch(/sourceCount === 0/);
+    expect(src, "the dashboard no longer renders NoProgrammeYet").toContain("<NoProgrammeYet");
+  });
+
+  it("the dashboard treats the refusal as an empty state rather than a fault", () => {
+    const src = read("ui/src/pages/Dashboard.tsx");
+    /* THE RED TOAST. Every destination control is behind requireSource, so a
+     * source that goes away turns each of them into a 503 -- and
+     * `toast.error("Could not start the destination")` is a fault report for a
+     * state in which nothing has failed. */
+    expect(src, "the destination controls no longer branch on the no-source code, so a " +
+      "503 that means \"this install has nothing yet\" is drawn as a failure")
+      .toContain("isNoSource(err)");
+  });
+
+  it("the settings page does not open the tab it cannot save", () => {
+    const src = read("ui/src/pages/SettingsPage.tsx");
+    /* The ingest belongs to the source row. With no source there is nothing to
+     * write it through to, the server refuses a change to it, and this was the
+     * DEFAULT tab -- so the first settings page a first-time operator opened
+     * was a form that could not be saved. */
+    expect(src, "the settings page defaults to the ingest tab unconditionally again")
+      .not.toMatch(/params\.get\("tab"\)\s*\?\?\s*"ingest"/);
+    expect(src, "the settings page's default tab does not consider the source count")
+      .toMatch(/params\.get\("tab"\)\s*\?\?\s*\(sourceCount === 0/);
+    /* And the badges that must NOT go with the form: docs/INSTALL.md sends a
+     * first-time operator to this tab to read whether FFmpeg has SRT, and that
+     * operator has not created a source yet by definition. */
+    expect(src, "the FFmpeg capability badges are no longer rendered on the zero-source " +
+      "ingest tab, so the check docs/INSTALL.md sends a first-time operator to make is " +
+      "on a screen they cannot reach yet").toMatch(/<FfmpegBadges system=\{system\} \/>[\s\S]*<FfmpegBadges/);
+  });
+
+  it("the sources page says what to do rather than showing nothing", () => {
+    const src = read("ui/src/pages/SourcesPage.tsx");
+    /* Every refusal on every other screen names this page, so a blank area
+     * under a heading is the worst thing it can be: it reads as "the thing you
+     * were sent to do is already done, or broken". */
+    expect(src, "the sources page renders nothing at all when the list is empty, which " +
+      "is where every other screen's refusal sends the operator")
+      .toMatch(/sources\.length === 0 \?/);
+    expect(src, "the sources page no longer renders NoProgrammeYet").toContain("<NoProgrammeYet");
+  });
+});

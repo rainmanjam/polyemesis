@@ -10,13 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
+import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { DestinationCard } from "@/components/DestinationCard";
 import { DestinationDialog } from "@/components/DestinationDialog";
 import { ChatPanel } from "@/components/ChatPanel";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
-import { api } from "@/lib/api";
+import { api, isNoSource } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
 import type { SignalTone } from "@/lib/signal";
@@ -583,6 +584,7 @@ export function Dashboard() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [pending, setPending] = useState<number[] | null>(null);
   const [moveNote, setMoveNote] = useState("");
+  const [sourceCount, setSourceCount] = useState<number | null>(null);
 
   useEffect(() => {
     api.system().then(setSystem).catch(() => {});
@@ -590,6 +592,23 @@ export function Dashboard() {
       .getSettings()
       .then((s) => setSettingsPreview(s.preview.enabled))
       .catch(() => {});
+    // How many programmes exist, which is what decides whether this page shows
+    // a pipeline or an empty state.
+    //
+    // `null` means NOT KNOWN, and the branch below tests `=== 0` rather than
+    // falsiness precisely so that unknown renders the ordinary dashboard. The
+    // cost is that a fresh install shows the pipeline for the length of one
+    // request before the empty state replaces it; the alternative is a spinner
+    // in front of the main screen on every load of every install, for a
+    // question only one install in a thousand answers differently.
+    api
+      .listSources()
+      .then((rows) => setSourceCount(rows.length))
+      // A count that cannot be read leaves the page rendering as it always did.
+      // The empty state is an improvement on a working dashboard, never a
+      // replacement for one, and drawing it because a request failed would tell
+      // an operator mid-broadcast that their programme is gone.
+      .catch(() => setSourceCount(null));
   }, [refreshKey]);
 
   const act = useCallback(
@@ -598,6 +617,19 @@ export function Dashboard() {
       try {
         await fn();
       } catch (err) {
+        // THE RED TOAST THIS EXISTS TO REPLACE. Every destination control on
+        // this page is behind requireSource, so on an install whose last source
+        // has just gone the answer is a 503 -- and "Could not start the
+        // destination" over a scarlet background is a fault report for a state
+        // in which nothing is wrong and nothing is broken.
+        //
+        // Rendering the empty state instead means re-reading the count rather
+        // than assuming it: the refusal says this install has no programme, and
+        // the page below is built from that number.
+        if (isNoSource(err)) {
+          setSourceCount(0);
+          return;
+        }
         toast.error(err instanceof Error ? err.message : `Could not ${label}.`);
       } finally {
         setBusyId(null);
@@ -683,6 +715,27 @@ export function Dashboard() {
       toast.error(t("dash.clipboardUnavailable"));
     }
   };
+
+  // NO PROGRAMME YET. The whole page, not a strip above it.
+  //
+  // Everything below this line is about one: a preview of a stream nobody is
+  // sending, an ingest URL no encoder can publish to, a pipeline of processes
+  // that do not exist, and destination controls that answer 503. Rendering it
+  // over an empty install is not merely unhelpful -- it invites the operator to
+  // click the one button that cannot work, which is how they met the red toast
+  // in the first place.
+  //
+  // `=== 0` rather than `!sourceCount`, deliberately: null means the count has
+  // not arrived, and an operator mid-broadcast must never see their dashboard
+  // replaced because a request was slow.
+  if (sourceCount === 0) {
+    return (
+      <div className="p-3">
+        <PageHeader title={t("dash.title")} subtitle={t("dash.subtitle")} />
+        <NoProgrammeYet title={t("empty.dashTitle")} body={t("empty.dashBody")} />
+      </div>
+    );
+  }
 
   return (
     <div className="p-3">

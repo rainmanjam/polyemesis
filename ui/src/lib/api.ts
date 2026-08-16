@@ -103,6 +103,26 @@ export class ApiError extends Error {
   }
 }
 
+/** The code the server sends when this install has no source yet.
+ *
+ *  Written once, here, next to the field it reads. Every screen that draws an
+ *  empty state compares against it, and a string literal repeated across four
+ *  pages is four chances to typo it into a comparison that is simply always
+ *  false -- which fails by drawing the red toast, i.e. by looking exactly like
+ *  the bug it was supposed to fix. lib/no-source-code.test.ts reads the Go
+ *  constant and asserts this equals it. */
+export const NO_SOURCE = "no_source";
+
+/** Whether a rejected request failed because the install has no programme yet.
+ *
+ *  This is an EMPTY STATE, not a fault: nothing is broken, and the only thing
+ *  missing is a source only the operator can create. A caller that treats it
+ *  like any other error tells a first-time operator that their brand-new
+ *  install is failing. */
+export function isNoSource(e: unknown): boolean {
+  return e instanceof ApiError && e.code === NO_SOURCE;
+}
+
 /** Read the double-submit CSRF token the server set as a readable cookie. */
 function csrfToken(): string {
   const match = document.cookie.match(/(?:^|;\s*)polyemesis_csrf=([^;]+)/);

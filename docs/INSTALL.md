@@ -646,6 +646,12 @@ carries three badges: the FFmpeg version, `srt yes/no`, and `x264 yes/no`. If
 `srt` reads `no`, no amount of OBS configuration will fix it — go back to your
 platform's FFmpeg section.
 
+Those badges are there before you have created anything: a fresh install has no
+source, so that tab shows the badges and an invitation to make one rather than
+an ingest form. Creating the first source is [QUICKSTART step
+3](QUICKSTART.md#3-create-a-source) and it is what an encoder publishes to; the
+ingest settings then live on that source.
+
 The startup log carries the same facts:
 
 ```text
@@ -667,8 +673,8 @@ tls mode=… hostname=…
 
 The ingest listeners bind `0.0.0.0` regardless of `addr`, so restricting `addr`
 to loopback for a reverse-proxy deployment does not restrict ingest. Set an SRT
-passphrase in *Settings → Ingest*: without one your stream crosses the network
-in the clear. RTMP has no equivalent — its stream key authenticates the
+passphrase on the source's ingest (*Settings → Ingest* for the default one):
+without one your stream crosses the network in the clear. RTMP has no equivalent — its stream key authenticates the
 publisher but encrypts nothing, so the RTMP port is the one to keep off the
 public internet if you have the choice.
 

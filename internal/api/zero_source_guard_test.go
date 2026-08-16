@@ -98,6 +98,13 @@ var noSourceRefusalSites = map[string]string{
 		"by TestResolvingAnExpertCommandWithNoEngineRefusesRatherThanPanicking.",
 	"writeExpertCommandError": "the lift for the entry above, at the five " +
 		"resolveExpertCommand call sites. Same test.",
+	"handlePutSettings": "PUT /settings, which carries NO requireSource and must " +
+		"not: the same document holds the listeners, recording, chat, automod and " +
+		"alerts, all of which an operator configures before creating a source. It " +
+		"refuses for ONE field -- an ingest block changed on an install with nowhere " +
+		"to write it through to -- and saves everything else in the request first. " +
+		"Driven through the router by " +
+		"TestChangingTheIngestWithNoSourceIsRefusedRatherThanSavedIntoNothing.",
 }
 
 // TestEveryNoSourceRefusalIsAGuardOrIsRecorded reads the package's own source.

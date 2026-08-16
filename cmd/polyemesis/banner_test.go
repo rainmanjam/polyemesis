@@ -88,6 +88,27 @@ func bannerFixture(t *testing.T, mode db.IngestMode) (config.Config, *db.DB, *ff
 	if err := store.PutSettings(s); err != nil {
 		t.Fatalf("PutSettings: %v", err)
 	}
+	// A SOURCE, because the ingest line is now a statement about one.
+	//
+	// db.Open stopped seeding one -- MigrateSources only builds "Main" for an
+	// install upgrading from single-ingest -- so a fresh database has none, and
+	// the banner says so rather than naming a mode nothing is running. Every
+	// case in the table below is about which mode a RUNNING install prints, so
+	// each one needs the programme that makes that question meaningful. The
+	// zero-source case has its own test, which is where the absence belongs.
+	//
+	// The source carries the DEFAULT ingest rather than this case's mode, and
+	// the two are unrelated on purpose: the banner reads the settings singleton,
+	// never a source row, so what this row ingests changes nothing it prints.
+	// Copying the mode across would only matter for one case and would break it
+	// -- CreateSource validates, and "pull with no URL yet" is precisely the
+	// state PutSettings is used above to arrange.
+	if err := store.CreateSource(&db.Source{
+		Name: db.DefaultSourceName, Enabled: true,
+		Ingest: db.DefaultSettings().Ingest, Position: 1,
+	}); err != nil {
+		t.Fatalf("create the fixture's source: %v", err)
+	}
 
 	cfg := config.Default()
 	cfg.Addr = "127.0.0.1:8080"
@@ -196,5 +217,78 @@ func TestStartupBannerNamesTheIngestModeItActuallyRuns(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestStartupBannerDoesNotAdvertiseAnIngestWithNoProgrammeBehindIt is the A7
+// half, and it is a lie rather than a crash.
+//
+// settings.ingest is not read by anything any more: the engine takes its ingest
+// from the source row, and the only thing that ever wrote the block through was
+// a settings save on an install that had a source. So on a fresh install the
+// block can say srt on 6000 while there is no programme to admit anybody to --
+// and 6000 really is bound, because both listeners bind unconditionally, so
+// nothing downstream contradicts the banner. The operator points an encoder at
+// a port that answers and refuses them, and the only place that could have told
+// them why is this line.
+//
+// The mode is set to SRT on PURPOSE. An unset mode already prints "not chosen
+// yet" for its own reason, so a fixture that left it unset would pass this test
+// with the source count doing nothing at all.
+func TestStartupBannerDoesNotAdvertiseAnIngestWithNoProgrammeBehindIt(t *testing.T) {
+	provider, err := tlsx.New(tlsx.Options{Mode: tlsx.ModeOff})
+	if err != nil {
+		t.Fatalf("tlsx.New(off): %v", err)
+	}
+
+	dir := t.TempDir()
+	store, err := db.Open(filepath.Join(dir, "polyemesis.db"))
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	// The premise, asserted rather than assumed: if db.Open ever starts seeding
+	// a source again this test would be describing an ordinary install and
+	// would pass or fail for reasons that have nothing to do with the banner.
+	if n, err := store.CountSources(); err != nil || n != 0 {
+		t.Fatalf("a freshly opened database has %d sources (err %v); this test is about "+
+			"the install that has none", n, err)
+	}
+
+	s := db.DefaultSettings()
+	s.Ingest.Mode = db.IngestSRT
+	if err := store.PutSettings(s); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Addr = "127.0.0.1:8080"
+	cfg.DataDir = dir
+
+	out := captureStdout(t, func() {
+		if err := reportStartup(newLogger("error"), cfg, provider, store,
+			&ffmpeg.Tools{Version: "test-ffmpeg"}); err != nil {
+			t.Errorf("reportStartup: %v", err)
+		}
+	})
+	line := bannerIngestLine(t, out)
+
+	for _, bad := range []string{"srt", "(port", "6000"} {
+		if strings.Contains(line, bad) {
+			t.Errorf("the ingest banner line on an install with no source =\n  %q\nwhich "+
+				"contains %q.\n\nsettings.ingest describes a programme that does not exist: "+
+				"nothing reads that block, the engine reads the source row, and there is no "+
+				"source row. The port named here is bound and will refuse the encoder aimed "+
+				"at it, so this line is the only thing that could have told the operator "+
+				"what to do instead.", strings.TrimSpace(line), bad)
+		}
+	}
+	// And it has to say what to do, not merely stop saying the wrong thing. A
+	// blank where the ingest was reads as a build problem.
+	if !strings.Contains(line, "source") {
+		t.Errorf("the ingest banner line =\n  %q\nwhich never names a source. The operator "+
+			"is at a terminal with no web UI open and no account yet; if this line does not "+
+			"name the next step, nothing does.", strings.TrimSpace(line))
 	}
 }

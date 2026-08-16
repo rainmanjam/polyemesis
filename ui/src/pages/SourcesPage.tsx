@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/AppLayout";
+import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { SecretInput } from "@/components/SecretInput";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
@@ -191,6 +192,24 @@ export function SourcesPage() {
         <div className="flex items-center gap-2 py-6 text-[12px] text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("sources.loading")}
         </div>
+      ) : sources.length === 0 ? (
+        // THE END OF THE TRAIL. Every refusal on every other screen sends the
+        // operator here, so a blank page under a heading is the worst possible
+        // thing for this one to be -- it reads as "the thing you were sent to
+        // do has already been done, or is broken".
+        //
+        // Its own button rather than the shared link, because this page IS the
+        // Sources page: a link back to itself would be a loop, and the control
+        // that ends the state is the create dialog three lines below.
+        <NoProgrammeYet
+          title={t("empty.sourcesTitle")}
+          body={t("empty.sourcesBody")}
+          action={
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus className="h-3.5 w-3.5" /> {t("sources.addSource")}
+            </Button>
+          }
+        />
       ) : (
         <div className="flex flex-col gap-3">
           {sources.map((s) => (
