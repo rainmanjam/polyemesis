@@ -11,8 +11,8 @@
   "shapeFloor": 27,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 215,
-    "swept": 64,
+    "methodPatternPairs": 216,
+    "swept": 65,
     "excused": 50,
     "denied": 101,
     "nonTrieProbes": 12,
@@ -21,7 +21,7 @@
   },
   "partition": {
     "differential": 8,
-    "invariant": 52,
+    "invariant": 53,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 1,
     "unstable": 3
@@ -899,6 +899,11 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/tls/acme-preflight",
+      "coverage": "swept"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/tls/ca",
       "coverage": "excused"
     },
@@ -1510,6 +1515,11 @@
     {
       "path": "/api/v1/tls",
       "pattern": "GET /api/v1/tls",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/tls/acme-preflight",
+      "pattern": "GET /api/v1/tls/acme-preflight",
       "class": "invariant"
     },
     {
