@@ -4,7 +4,7 @@
 //
 // NOT A PACKAGE, AND IT CANNOT BE ONE. These drivers are invoked as
 //
-//	go run "$SCRIPTS/acceptance_audio_driver.go" "$SCRIPTS/driverhelpers.go" -- ...
+//	go run "$SCRIPTS/acceptance_audio_driver.go" "$SCRIPTS/driverhelpers.go" "$PORT" ...
 //
 // from a shell that has already cd'd into $WORK under /tmp, outside any module.
 // `go run` resolves a module IMPORT against the current directory's go.mod, so
