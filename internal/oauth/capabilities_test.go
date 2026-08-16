@@ -39,8 +39,12 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		{"youtube fetches its key", "youtube", CapStreamKey, SupportYes, "Data API ingestion"},
 		{"twitch fetches its key", "twitch", CapStreamKey, SupportYes, "Helix stream key"},
 
-		{"x cannot sign in", "x", CapSSO, SupportNo,
-			"the X API covers posts, not live-video ingest"},
+		// This row asserted the opposite until 2026-08-16, on the belief that
+		// "the X API covers posts, not live-video ingest". X's served OpenAPI
+		// spec declares a Broadcasts family of 13 operations and a Chat family
+		// of 16, under broadcast.read and broadcast.write.
+		{"x can sign in, and the belief that it could not was wrong", "x", CapSSO, SupportYes,
+			"OAuth 2.0 with the broadcast scopes is in X's own served spec"},
 		{"x key is pasted", "x", CapStreamKey, SupportManual,
 			"the destination still works; only the automation is absent"},
 
@@ -49,8 +53,12 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		{"instagram has no sign-in", "instagram", CapSSO, SupportNo,
 			"Instagram publishes no Live broadcast API"},
 
-		{"rumble sign-in is unverified, not refused", "rumble", CapSSO, SupportUnknown,
-			"the API sits behind a login wall; undocumented is not the same as absent"},
+		// Was SupportUnknown on the sound argument that undocumented is not
+		// absent. Now refused on affirmative evidence rather than more looking:
+		// rumble.com/oauth/authorize answers an honest 404, and Rumble's one
+		// API article states authentication is not required for it.
+		{"rumble sign-in is refused, on a probe rather than a search", "rumble", CapSSO, SupportNo,
+			"oauth/authorize is a genuine 404 and the published API declares no auth"},
 		{"rumble key is pasted", "rumble", CapStreamKey, SupportManual, "Rumble Studio issues both fields"},
 		// Rumble's chat came from the live-stream API, which is a different
 		// surface from the account API page the row used to be written about.
@@ -59,10 +67,17 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		// The half of that row that did NOT move, and the more important half to
 		// pin: shipping chat read is not evidence about sending, and this row
 		// must not drift into a yes because the platform now feels integrated.
-		{"rumble chat send stays unverified rather than becoming a refusal", "rumble", CapChatSend, SupportUnknown,
-			"get-data returns data; no send endpoint is published, which is not the same as one being known absent"},
-		{"rumble moderation stays unverified", "rumble", CapModeration, SupportUnknown,
-			"nothing was checked either way, and a wrong 'no' becomes a refusal an operator cannot argue with"},
+		// Both were SupportUnknown because the surface had "barely been seen".
+		// It has now been enumerated -- a complete 158-article knowledge base,
+		// whose entire published API is one read-only snapshot GET -- so the
+		// absence is read off a small surface fully covered, not a large one
+		// sampled.
+		{"rumble chat send is refused once the whole surface has been read", "rumble", CapChatSend, SupportNo,
+			"the published API is a single read-only request; no send path exists to document"},
+		{"rumble moderation is refused, and Rumble says so in its own words", "rumble", CapModeration, SupportNo,
+			"Rumble documents moderation as clicking three dots in live chat, and never mentions an API"},
+		{"rumble metadata is a template set in the account UI", "rumble", CapMetadata, SupportManual,
+			"no write API exists, but a live-stream template applies title and category automatically"},
 
 		{"dlive sign-in is unverified, not refused", "dlive", CapSSO, SupportUnknown,
 			"the developer portal does not resolve, which tells us nothing about the API itself"},

@@ -31,10 +31,10 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 |---|---|---|---|---|---|---|---|
 | **YouTube Live** | Works | Works | Works | Works | Works | Works | Works |
 | **Twitch** | Works | Works | Works | Works | Works | Works | Works |
-| **Facebook Live** | Works | Works | Works | Works | Unverified | Works | Unverified |
+| **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified |
 | **Kick** | Works | Works | Works | Works | Works | Works | Works |
-| **X (Twitter) Live** | Not possible | By hand | Not possible | Not possible | Not possible | Not possible | Not possible |
-| **Rumble** | Unverified | By hand | Unverified | Works | Unverified | Unverified | Unverified |
+| **X (Twitter) Live** | Works | By hand | Works | Works | Works | Works | Unverified |
+| **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Trovo** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
