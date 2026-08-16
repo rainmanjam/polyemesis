@@ -30,7 +30,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers |
 |---|---|---|---|---|---|---|---|
 | **YouTube Live** | Works | Works | Works | Works | Works | Works | Unverified |
-| **Twitch** | Works | Works | Works | Works | Works | Works | Unverified |
+| **Twitch** | Works | Works | Works | Works | Works | Works | Works |
 | **Facebook Live** | Works | Works | Works | Works | Unverified | Works | Unverified |
 | **Kick** | Works | Works | Works | Works | Works | Works | Works |
 | **X (Twitter) Live** | Not possible | By hand | Not possible | Not possible | Not possible | Not possible | Not possible |

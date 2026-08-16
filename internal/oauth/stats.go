@@ -47,12 +47,20 @@ type LiveStats struct {
 	//
 	// omitempty drops the key when it is nil, so the wire says the same thing
 	// the platform said: nothing. Consumers must branch on presence.
-	ViewerCount *int      `json:"viewerCount,omitempty"`
-	Title       string    `json:"title,omitempty"`
-	Category    string    `json:"category,omitempty"`
-	Language    string    `json:"language,omitempty"`
-	Slug        string    `json:"slug,omitempty"`
-	StartedAt   time.Time `json:"startedAt,omitempty"`
+	ViewerCount *int   `json:"viewerCount,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Category    string `json:"category,omitempty"`
+	Language    string `json:"language,omitempty"`
+	Slug        string `json:"slug,omitempty"`
+	// StartedAt IS A POINTER BECAUSE omitempty DOES NOTHING TO A time.Time.
+	// encoding/json only honours omitempty for empty scalars, maps and slices;
+	// a struct is never empty to it, so this field used to serialise the zero
+	// time as "startedAt":"0001-01-01T00:00:00Z" on every offline channel and
+	// every timestamp we failed to parse. A consumer correctly branching on the
+	// absence of viewerCount got a confidently wrong start time in the same
+	// payload, which is the failure this type spent ViewerCount's comment
+	// preventing one field earlier.
+	StartedAt *time.Time `json:"startedAt,omitempty"`
 	// Source names the endpoint the numbers came from, so a viewer count that
 	// disagrees with the platform's own dashboard can be traced without a
 	// packet capture. It matters more with several platforms than it did with

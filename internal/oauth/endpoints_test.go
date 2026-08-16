@@ -161,6 +161,7 @@ func TestAStubbedProviderReachesNoRealHost(t *testing.T) {
 				"Refresh":      func() { _, _ = tw.Refresh(ctx, cid, secret, "refresh") },
 				"Account":      func() { _, _ = tw.Account(ctx, cid, tok) },
 				"Ingest":       func() { _, _ = tw.Ingest(ctx, cid, tok) },
+				"Stats":        func() { _, _ = tw.Stats(ctx, cid, tok) },
 				"PushMetadata": func() { _, _ = tw.PushMetadata(ctx, cid, tok, "4242", Metadata{Title: "x", Category: "Chess"}) },
 				"PushCompliance": func() {
 					_, _ = tw.PushCompliance(ctx, cid, tok, ComplianceTarget{AccountRef: "4242"}, db.Compliance{Labels: map[string]bool{"x": true}})
@@ -344,20 +345,27 @@ func TestEveryCapabilityLookupHasASetTwinThatResolves(t *testing.T) {
 	base, guard := stubbedWorld(t)
 	set := NewSet(WithBaseURL(base))
 
-	// Kick is the platform that implements the newest capability, so it is the
-	// one that proves the newest twin. The others are here because a twin that
-	// resolves for one platform and not the rest is the same bug, later.
-	if ls, ok := set.StatsFor(db.PlatformKick); !ok {
-		t.Error("Set.StatsFor(kick) did not resolve; Kick implements Stats, so the twin is not wired")
-	} else {
+	// Kick was the first platform to implement the newest capability and Twitch
+	// is the second, which is the interesting case: a twin that resolves for one
+	// platform and not the rest is the same bug, later. Both are driven so a
+	// provider that resolves but is aimed at production still trips the guard
+	// below.
+	for _, p := range []db.Platform{db.PlatformKick, db.PlatformTwitch} {
+		ls, ok := set.StatsFor(p)
+		if !ok {
+			t.Errorf("Set.StatsFor(%s) did not resolve; it implements Stats, so the twin is not wired", p)
+			continue
+		}
 		_, _ = ls.Stats(context.Background(), "cid", "tok")
 	}
 
 	// A platform without the capability must answer false rather than a nil
 	// interface that panics on use: internal/api branches on this bool to
 	// answer supported:false, and a nil-with-true would crash the handler.
-	if _, ok := set.StatsFor(db.PlatformTwitch); ok {
-		t.Error("Set.StatsFor(twitch) resolved, but Twitch has no Stats method — " +
+	// YouTube holds this end of the assertion now that Twitch has grown Stats;
+	// its liveStreamingDetails read is a broadcast lookup, not this interface.
+	if _, ok := set.StatsFor(db.PlatformYouTube); ok {
+		t.Error("Set.StatsFor(youtube) resolved, but YouTube has no Stats method — " +
 			"the assertion is matching something it should not")
 	}
 

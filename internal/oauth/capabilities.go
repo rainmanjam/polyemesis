@@ -220,10 +220,16 @@ var platformCapabilities = []PlatformCapability{
 			CapChatRead:    SupportYes,
 			CapChatSend:    SupportYes,
 			CapModeration:  SupportYes,
-			CapViewerStats: SupportUnknown,
+			CapViewerStats: SupportYes,
 		},
 		Reasons: map[Capability]string{
 			CapMetadata: "Title and category, over the channel:manage:broadcast scope.",
+			CapViewerStats: "Live state, viewer count, title, category and start time from Helix Get Streams. It needs " +
+				"no scope of its own — Twitch asks only for an app or user access token — so every account " +
+				"already connected can answer without reconnecting. A channel that is not live returns no " +
+				"count at all rather than a count of zero, and polyemesis reports the difference. Twitch " +
+				"publishes no encoder health on this endpoint: there is no bitrate, framerate or " +
+				"dropped-frame figure to show beside the viewer number.",
 			CapModeration: "Delete a message, over moderator:manage:chat_messages. An account connected before this " +
 				"existed holds a token without that scope — the account list says so and asks you to reconnect, " +
 				"rather than letting the delete button fail on the message you needed gone. Twitch refuses to delete " +

@@ -655,7 +655,7 @@ func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*LiveSt
 	if stats.Slug == "" {
 		stats.Slug = ch.Slug
 	}
-	if stats.StartedAt.IsZero() {
+	if stats.StartedAt == nil {
 		stats.StartedAt = parseKickTime(ch.Stream.StartTime)
 	}
 	if stats.Source == "" {
@@ -664,19 +664,23 @@ func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*LiveSt
 	return stats, nil
 }
 
-// parseKickTime is deliberately forgiving: an unparseable timestamp yields the
-// zero time rather than failing a stats read that is otherwise fine.
-func parseKickTime(s string) time.Time {
+// parseKickTime is deliberately forgiving: an unparseable timestamp costs the
+// timestamp rather than failing a stats read that is otherwise fine.
+//
+// Nil rather than the zero time, so the caller reports "not known" instead of
+// the year 1. Kick documents no format for started_at, which is why three
+// layouts are tried here and only one is tried for Twitch.
+func parseKickTime(s string) *time.Time {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return time.Time{}
+		return nil
 	}
 	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
 		if t, err := time.Parse(layout, s); err == nil {
-			return t
+			return &t
 		}
 	}
-	return time.Time{}
+	return nil
 }
 
 // CheckCredentials proves the pair through Kick's app-access-token flow, which

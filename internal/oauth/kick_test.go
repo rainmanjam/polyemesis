@@ -832,8 +832,12 @@ func TestKickStatsParsesTheStartTimeAndSurvivesOneItCannotRead(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Stats: %v", err)
 			}
-			if got.StartedAt.IsZero() != tc.wantZero {
-				t.Fatalf("StartedAt = %v (zero=%v), want zero=%v", got.StartedAt, got.StartedAt.IsZero(), tc.wantZero)
+			// Nil, not the zero time. A start time we could not read is now
+			// absent from the payload rather than serialised as the year 1,
+			// and calling IsZero on the pointer would panic rather than
+			// report that -- which is how this assertion found the change.
+			if (got.StartedAt == nil) != tc.wantZero {
+				t.Fatalf("StartedAt = %v, want absent=%v", got.StartedAt, tc.wantZero)
 			}
 			if got.ViewerCount == nil || *got.ViewerCount != 3 {
 				t.Errorf("ViewerCount = %v, want the read to survive the timestamp", got.ViewerCount)
