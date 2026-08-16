@@ -53,10 +53,30 @@ If you are reaching this over anything other than localhost, the server will
 have warned you at startup that the password crosses the network in clear text.
 It is right. Set `tls.mode: auto` or use an SSH tunnel.
 
-## 3. Point OBS at it
+## 3. Create a source
 
-The **Sources** page shows the publish URL for your source. Copy it — it looks
-like this, and the `streamid` is what tells polyemesis which source you are:
+A **source** is one ingested programme — one feed from one encoder. A fresh
+install has none, so this is the step that turns a running server into one
+anything can publish to.
+
+Open the **Sources** page and add one. The dialog asks for a name and nothing
+else.
+
+Then pick its **protocol** on the card — **SRT** for multitrack, **RTMP** for a
+single audio track — and press **Apply**. A source is created with no protocol
+chosen, which is deliberate: nothing is listening for it yet, so the card shows
+a publish token and no publish URL. The URL appears when the protocol does.
+
+Until you do this, the dashboard says "no programme yet" rather than showing an
+empty pipeline, and anything that acts on a programme — starting a destination,
+capturing a clip — answers "this install has no source yet". That is the server
+telling you which step you are on, not an error.
+
+## 4. Point OBS at it
+
+The **Sources** page shows the publish URL for the source you just created, once
+its protocol is set. Copy it — it looks like this, and the `streamid` is that
+source's publish token, which is what tells polyemesis which source you are:
 
 ```
 srt://your-host:6000?streamid=<token>
@@ -88,7 +108,7 @@ including the `latency` unit that catches everybody.
 The polyemesis dashboard should show the ingest live within a couple of
 seconds, with a meter per incoming track.
 
-## 4. Tell it what each track is
+## 5. Tell it what each track is
 
 On **Sources → annotations**, label the incoming tracks: *mic*, *music*,
 *commentary*, and a language where it matters.
@@ -96,7 +116,7 @@ On **Sources → annotations**, label the incoming tracks: *mic*, *music*,
 This is optional but it is the step that makes everything after it obvious. The
 labels belong to the feed, so every destination sees the same set.
 
-## 5. Add a destination
+## 6. Add a destination
 
 **Destinations → Add.**
 
@@ -110,7 +130,7 @@ labels belong to the feed, so every destination sees the same set.
 Enable it. Video is copied, not re-encoded, so this costs almost nothing — add
 as many as you have upstream bandwidth for.
 
-## 6. Watch that it is actually right
+## 7. Watch that it is actually right
 
 The **Meters** page shows loudness measured *after* routing, which is what the
 platform on the other end receives. That is the number worth trusting: it

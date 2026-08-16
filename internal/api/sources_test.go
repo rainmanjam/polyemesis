@@ -359,14 +359,34 @@ func TestUpdatingASourceWithoutATokenKeepsTheStoredOne(t *testing.T) {
 	}
 }
 
-func TestTheLastSourceCannotBeDeletedThroughTheAPI(t *testing.T) {
+// The last source may be deleted, and the install it leaves behind is one an
+// operator can still use.
+//
+// This answered 400 until the store guard came off. The refusal was written
+// when zero sources was an unreachable state that nothing in the product could
+// answer in; a fresh install now boots into exactly that state, so the delete
+// is a route to somewhere the operator already is on their first day.
+//
+// The second half is the half worth asserting. A 204 that left the Sources page
+// unable to answer would be the same trap under a better status code, so this
+// reads the list back through the API rather than the store: it is the screen
+// the operator lands on, and the create form is on it.
+func TestTheLastSourceCanBeDeletedAndTheSourcesPageStillAnswers(t *testing.T) {
 	h, _, sign := sourceServer(t)
 
 	only := listSources(t, h, sign)[0]
-	// 400 rather than 204: an install with no sources has no ingest at all and
-	// no way back through the UI.
 	send(t, h, sign, http.MethodDelete,
-		"/api/v1/sources/"+strconv.FormatInt(only.ID, 10), nil, http.StatusBadRequest)
+		"/api/v1/sources/"+strconv.FormatInt(only.ID, 10), nil, http.StatusNoContent)
+
+	if rows := listSources(t, h, sign); len(rows) != 0 {
+		t.Fatalf("got %d sources after deleting the only one, want 0", len(rows))
+	}
+
+	// And a repeat of the same delete says the row is gone rather than
+	// describing a rule -- a client retrying a request it never saw the answer
+	// to, which is the ordinary way this arrives.
+	send(t, h, sign, http.MethodDelete,
+		"/api/v1/sources/"+strconv.FormatInt(only.ID, 10), nil, http.StatusNotFound)
 }
 
 func TestDeletingASourceIsAllowedOnceASecondExists(t *testing.T) {

@@ -331,8 +331,23 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 		bin = tools.FFmpeg
 	}
 
+	// THE REFUSAL LIVES HERE rather than on the three read routes, because
+	// this is what needs the engine: the process list this searches, and the
+	// arriving stream the profile below is compiled against. Three of the five
+	// expert routes write nothing, so the router's requireSource list does not
+	// carry them, and an operator asking what command a destination would run
+	// on an install with no programme gets the same sentence the guarded two
+	// give rather than a 409 about the destination.
+	//
+	// Returned as an error, not rendered: this is reached from five handlers
+	// and none of them has told it whether a response has been written yet.
+	e := s.engOrNil()
+	if e == nil {
+		return bin, nil, false, "", errNoSource
+	}
+
 	want := fmt.Sprintf("dest:%d", row.ID)
-	for _, p := range s.eng().Processes() {
+	for _, p := range e.Processes() {
 		if p.Name() != want {
 			continue
 		}
@@ -355,7 +370,7 @@ func (s *Server) destinationBaseArgv(row *db.Destination) (bin string, base []st
 		return argv[0], ffmpeg.StripExtraArgs(argv[1:], oldIn, oldOut), true, "", nil
 	}
 
-	compiled, cerr := routing.Compile(row.Profile, s.eng().Source())
+	compiled, cerr := routing.Compile(row.Profile, e.Source())
 	if cerr != nil {
 		// A profile that does not compile is a routing problem, not an expert
 		// mode one, and it has its own editor. Say which so the operator does
@@ -418,6 +433,21 @@ func (s *Server) resolveExpertCommand(row *db.Destination, in, out []string) (re
 		Live:    live,
 		Note:    note,
 	}, nil
+}
+
+// writeExpertCommandError renders a resolveExpertCommand failure.
+//
+// Everything this can fail with is a 409 -- a destination whose routing profile
+// will not compile, which is a conflict between what is stored and what can be
+// built -- except one. "There is no programme at all" is not a statement about
+// this destination, and answering 409 would send the operator to the routing
+// editor of a destination that is fine.
+func writeExpertCommandError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errNoSource) {
+		writeNoSource(w)
+		return
+	}
+	writeError(w, http.StatusConflict, err.Error())
 }
 
 // ----------------------------------------------------------------- dry run
@@ -693,7 +723,7 @@ func (s *Server) handleGetExpert(w http.ResponseWriter, r *http.Request) {
 
 	cmd, err := s.resolveExpertCommand(row, in, out)
 	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		writeExpertCommandError(w, err)
 		return
 	}
 
@@ -732,7 +762,7 @@ func (s *Server) handlePreviewExpert(w http.ResponseWriter, r *http.Request) {
 	}
 	cmd, err := s.resolveExpertCommand(row, in, out)
 	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		writeExpertCommandError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, expertResponse{
@@ -792,7 +822,7 @@ func (s *Server) handlePutExpert(w http.ResponseWriter, r *http.Request) {
 	// running state are never allowed to drift. The arguments ride in the
 	// destination's restart signature, so this is what actually applies them —
 	// the destination is torn down and respawned with the new command line.
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after expert args update", "err", err)
 	}
 
@@ -800,7 +830,7 @@ func (s *Server) handlePutExpert(w http.ResponseWriter, r *http.Request) {
 	// the one the reconcile above just started.
 	cmd, cerr := s.resolveExpertCommand(updated, in, out)
 	if cerr != nil {
-		writeError(w, http.StatusConflict, cerr.Error())
+		writeExpertCommandError(w, cerr)
 		return
 	}
 	writeJSON(w, http.StatusOK, expertResponse{
@@ -827,7 +857,7 @@ func (s *Server) handleDeleteExpert(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after expert args delete", "err", err)
 	}
 	resp := expertResponse{
@@ -863,7 +893,7 @@ func (s *Server) handleDryRunExpert(w http.ResponseWriter, r *http.Request) {
 	// tell them until they have acknowledged it would be backwards.
 	cmd, err := s.resolveExpertCommand(row, in, out)
 	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		writeExpertCommandError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, runDryRun(r.Context(), cmd.Bin, cmd.Argv))

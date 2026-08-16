@@ -46,7 +46,6 @@ func main() {
 		die("usage: acceptance_postprod_driver.go <http-port> <relay-port>")
 	}
 	base = "http://127.0.0.1:" + os.Args[1] + "/api/v1"
-	relayPort, _ = strconv.Atoi(os.Args[2])
 
 	jar, _ := cookiejar.New(nil)
 	client = &http.Client{Jar: jar, Timeout: 60 * time.Second}
@@ -54,6 +53,21 @@ func main() {
 	waitUp()
 	call("POST", "/setup", map[string]any{"username": "admin", "password": "acceptance-pw"})
 	grabCSRF()
+
+	// The programme everything below hangs off. A fresh install has none since
+	// #387; see acceptance_driver.go's copy of this note for the full reason.
+	fmt.Println("creating the first source")
+	call("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+
+	// AFTER the source, and after the client exists. Both matter and the first
+	// version of this got the second one wrong: resolving here used to sit above
+	// the cookiejar, so a shell that found no socket sent this straight into
+	// `net/http.(*Client).Get` on a nil client and the driver panicked before it
+	// had spoken to the server at all.
+	//
+	// The ordering is not incidental either way -- the relay exists only once an
+	// engine runs, and an engine runs only for the source created just above.
+	relayPort = resolveRelayPort(os.Args[2])
 
 	prepare()
 	recs := recordSomething()
@@ -560,4 +574,23 @@ func get(path string) map[string]any {
 func die(f string, a ...any) {
 	fmt.Printf("FATAL: "+f+"\n", a...)
 	os.Exit(1)
+}
+
+// resolveRelayPort: the shell's lsof is a hint, not a precondition. Without a
+// seeded source no relay socket exists until this driver creates one, so an
+// empty value means "ask the server", not "fail". The full account of the cycle
+// is in driverlib.ResolveRelayPort; this file cannot import it, because `go run`
+// resolves module imports against the cwd and these suites run from /tmp.
+func resolveRelayPort(fromShell string) int {
+	if p, err := strconv.Atoi(strings.TrimSpace(fromShell)); err == nil && p > 0 {
+		return p
+	}
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+		relay, _ := get("/stats")["relay"].(map[string]any)
+		if pf, ok := relay["port"].(float64); ok && pf > 0 {
+			return int(pf)
+		}
+	}
+	die("no relay port after 30s; the source was probably never created")
+	return 0
 }

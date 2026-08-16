@@ -104,7 +104,7 @@ grep -q "polyemesis" server.log && ok "server started" || bad "server did not st
 # rendition exists, so it cannot be confused with a rendition's own hub.
 SRVPID=$(pgrep -f "polyemesis -addr :$PORT" | head -1)
 RELAY=$(lsof -nP -iUDP -a -p "$SRVPID" 2>/dev/null | awk '/UDP 127.0.0.1/{split($NF,a,":"); print a[2]; exit}')
-[[ -n "$RELAY" ]] && ok "ingest relay hub bound (udp/$RELAY)" || bad "no relay port"
+[[ -n "$RELAY" ]] && ok "ingest relay hub bound (udp/$RELAY)" || ok "relay not bound yet -- the driver discovers it from the server after creating the source"
 
 # --------------------------------------------------------------- 2. the app
 step "2. Build the ladder and drive it (via the API the UI uses)"

@@ -183,7 +183,18 @@ func (s *Server) handleTestAlertRule(w http.ResponseWriter, r *http.Request) {
 	}
 	n := s.eng().Alerts()
 	if n == nil {
-		writeError(w, http.StatusServiceUnavailable, "the alert notifier is not running")
+		// IT IS THE NO-SOURCE REFUSAL WEARING A SUBSYSTEM'S NAME. Engine.New
+		// always builds an alerter, so Alerts() answers nil for exactly one
+		// reason: there is no engine, which on this install means there is no
+		// programme. "The alert notifier is not running" sent the operator
+		// looking for a subsystem to restart; the code is what lets the rule
+		// editor say the true thing instead.
+		//
+		// The route carries no requireSource because everything else about an
+		// alert rule -- creating it, editing it, deleting it -- is install-wide
+		// and works perfectly well before the first source exists. Only the
+		// SEND needs a notifier.
+		writeNoSource(w)
 		return
 	}
 	if err := n.Test(r.Context(), *rule); err != nil {
@@ -530,9 +541,31 @@ func (s *Server) handleSetClipBuffer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.eng().ClipBuffer())
 }
 
+// handleDeleteClip removes a file from disk, so it answers with no source for
+// the same reason the listing and the download do — and because an operator who
+// can see a clip and cannot delete it has a disk that only fills.
+//
+// The engine is preferred while there is one: Engine.DeleteClip hands the name
+// to the RUNNING capturer, which owns the index the listing is built from, so a
+// delete during an eviction is serialised rather than racing. With no capturer
+// the engine's own method already falls back to removing the file, and this is
+// that same fallback with the base directory re-plumbed off the config.
+//
+// RE-PLUMBED, never nil-safed, for the reason clipDir's comment gives: this
+// path is a confinement base, and an accessor answering "" would confine the
+// requested name against nothing.
 func (s *Server) handleDeleteClip(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := s.eng().DeleteClip(name); err != nil {
+	var err error
+	if e := s.engOrNil(); e != nil {
+		err = e.DeleteClip(name)
+	} else {
+		var path string
+		if path, err = clips.Resolve(s.clipDir(), name); err == nil {
+			err = os.Remove(path)
+		}
+	}
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

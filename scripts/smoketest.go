@@ -38,6 +38,16 @@ func main() {
 	do("POST", "/setup", map[string]any{"username": "admin", "password": "hunter2hunter2"})
 	grabCSRF()
 
+	// The programme everything below hangs off.
+	//
+	// A fresh install has none since #387: the migration used to seed a source
+	// called Main on first open, so this smoke test was silently inheriting a
+	// programme nobody had created. Creating it here is not a workaround for
+	// that removal -- it is the flow an operator actually performs, and this
+	// run now covers POST /sources, which it never did before.
+	step("creating the first source")
+	do("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+
 	step("quiet the recorder and the preview")
 	settings := doGet("/settings")
 	ing := settings["ingest"].(map[string]any)

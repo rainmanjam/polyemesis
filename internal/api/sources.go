@@ -16,10 +16,15 @@ import (
 // Sources are the multi-programme endpoints: one install, several independent
 // ingests, each with its own destinations and renditions.
 //
-// Reconcile goes through the manager rather than a single engine here, because
-// creating or deleting a source changes which engines should exist at all --
-// s.eng().Reconcile() would only ever reconcile the default programme and a new
-// source would sit in the database doing nothing until a restart.
+// Reconcile goes through the manager rather than a single engine, because
+// creating or deleting a source changes which engines should exist at all -- a
+// single engine's Reconcile would only ever reconcile the default programme and
+// a new source would sit in the database doing nothing until a restart.
+//
+// These routes were the only ones that got that right for a while. Every other
+// mutating handler in this package called the default engine's Reconcile
+// directly and silently skipped the other programmes; they all go through
+// Server.reconcile now, which is this rule written once.
 
 // sourceView is a source plus the things the UI needs but does not store: the
 // publish URLs an operator pastes into OBS, and whether this programme is the
@@ -464,7 +469,7 @@ func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
 	}
 	// Through the manager: a new source needs an engine built for it, which
 	// only Sync does.
-	if err := s.mgr.Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after source create", "err", err)
 	}
 	defaultID, _ := s.store.DefaultSourceID()
@@ -501,7 +506,7 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, sourceStatus(err), err.Error())
 		return
 	}
-	if err := s.mgr.Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after source update", "err", err)
 	}
 	defaultID, _ := s.store.DefaultSourceID()
@@ -520,7 +525,7 @@ func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, sourceStatus(err), err.Error())
 		return
 	}
-	if err := s.mgr.Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after source delete", "err", err)
 	}
 	w.WriteHeader(http.StatusNoContent)

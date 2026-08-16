@@ -253,9 +253,10 @@ func TestTheUploadGateStillChecksWithNoEngineRunning(t *testing.T) {
 // before the manager starts, so it comes up with the listeners and the
 // detection and no engines at all.
 //
-// The sources go through raw SQL rather than db.DeleteSource because the store
-// still refuses to delete the last one -- that guard is the last commit in this
-// stack, and this fixture must not wait for it.
+// The sources go through raw SQL rather than db.DeleteSource -- one statement
+// for the whole table rather than a list to enumerate. The store no longer
+// refuses the last one, so this is now a convenience where it used to be the
+// only way to build the fixture at all.
 func managerServerWithoutEngines(t *testing.T, tools *ffmpeg.Tools) (*Server, http.Handler, *bytes.Buffer, func(*http.Request)) {
 	t.Helper()
 
@@ -292,12 +293,15 @@ func managerServerWithoutEngines(t *testing.T, tools *ffmpeg.Tools) (*Server, ht
 	bus := events.NewBroker()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	eng := engine.NewManager(quiet, cfg, store, tools, bus)
-	// Start REFUSES an install with no engines, today, and that refusal is
-	// exactly the state under test -- the manager is up, the listeners are
-	// reconciled, and nothing is running. Its error is deliberately ignored
-	// rather than asserted on, because the sentence belongs to PR 3's rescope
-	// and this test must not pin it.
-	_ = eng.Start(context.Background())
+	// Start used to REFUSE an install with no engines, which is exactly the
+	// state under test, so this call used to have its error thrown away. It is
+	// asserted now: a boot with no sources is a boot, and the only thing left
+	// that fails here is sources existing and not one of them coming up. See
+	// Manager.Start.
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatalf("the manager refused to start an install with no sources, which is what "+
+			"a fresh install is: %v", err)
+	}
 	t.Cleanup(eng.Stop)
 
 	s := New(Options{

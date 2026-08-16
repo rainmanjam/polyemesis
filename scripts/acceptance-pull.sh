@@ -77,7 +77,13 @@ for _ in $(seq 1 40); do sleep 0.3; grep -q "web ui" server.log 2>/dev/null && b
 sleep 1
 grep -q "polyemesis" server.log && ok "server started" || { bad "server did not start"; exit 1; }
 
-OUT=$(go run "$SCRIPTS/acceptance_pull_driver.go" "http://127.0.0.1:$PORT" 2>&1)
+# pullsynthhelpers.go IS NAMED HERE ON PURPOSE. This driver and the synth one
+# were forked copies of the same programme; the shared half now lives in that
+# file and `go run` compiles a list of .go files from one directory as a single
+# package, which is what lets them share it from a working directory that is
+# inside no module. No `--` separator: go run passes it straight through to the
+# program, and only LEADING consecutive .go arguments are compiled anyway.
+OUT=$(go run "$SCRIPTS/acceptance_pull_driver.go" "$SCRIPTS/pullsynthhelpers.go" "http://127.0.0.1:$PORT" 2>&1)
 case "$OUT" in
   *SETUP_OK*)   ok "first-run setup" ;;
   *)            bad "setup failed: $OUT"; exit 1 ;;
@@ -94,7 +100,7 @@ esac
 step "3. The dialled source is probed"
 probed=no
 for _ in $(seq 1 40); do
-  n=$(go run "$SCRIPTS/acceptance_pull_driver.go" "http://127.0.0.1:$PORT" tracks 2>/dev/null | tail -1)
+  n=$(go run "$SCRIPTS/acceptance_pull_driver.go" "$SCRIPTS/pullsynthhelpers.go" "http://127.0.0.1:$PORT" tracks 2>/dev/null | tail -1)
   if [ "${n:-0}" -ge 3 ] 2>/dev/null; then probed=yes; break; fi
   sleep 1
 done
@@ -106,7 +112,7 @@ fi
 
 step "4. Each destination carries exactly its own mix"
 sleep 18
-go run "$SCRIPTS/acceptance_pull_driver.go" "http://127.0.0.1:$PORT" stopall >/dev/null 2>&1
+go run "$SCRIPTS/acceptance_pull_driver.go" "$SCRIPTS/pullsynthhelpers.go" "http://127.0.0.1:$PORT" stopall >/dev/null 2>&1
 sleep 8
 
 A3=$(rms data/recordings/pullA.mkv 300 100)
@@ -138,7 +144,7 @@ else
 fi
 
 step "5. Confinement"
-OUT=$(go run "$SCRIPTS/acceptance_pull_driver.go" "http://127.0.0.1:$PORT" escape 2>&1)
+OUT=$(go run "$SCRIPTS/acceptance_pull_driver.go" "$SCRIPTS/pullsynthhelpers.go" "http://127.0.0.1:$PORT" escape 2>&1)
 case "$OUT" in
   *ESCAPE_REFUSED*) ok "a file:// source outside the data directory is refused" ;;
   *)                bad "an escaping pull source was accepted: $OUT" ;;

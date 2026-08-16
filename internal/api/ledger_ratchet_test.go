@@ -65,6 +65,7 @@ var ratchetDirection = map[string]string{
 	"SentinelWitnessFloor":          "max",
 	"NonGetDifferentialFloor":       "max",
 	"ShapeFloor":                    "max",
+	"GuardedFloor":                  "max",
 	// MEASUREMENTS. Regeneration may refresh these wholesale because each is
 	// compared, element by element, by an assertion that runs on every plain
 	// run: routes and sweepVerdicts by assertRouteSetsEqual and

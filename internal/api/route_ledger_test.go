@@ -210,6 +210,28 @@ type coverageLedger struct {
 	// of shapes this API is known to emit may rise freely and falls only by a
 	// hand edit that says, on purpose, "this API stopped emitting this shape".
 	ShapeFloor int `json:"shapeFloor"`
+	// GuardedFloor is the zero-source word's ratchet, and it is the reason that
+	// word is evidence rather than a description.
+	//
+	// The route rows carry `zeroSource: guarded|unguarded` and
+	// assertRouteSetsEqual compares them, so removing an `r.With(s.requireSource)`
+	// fails TestLedgerPreflight -- with a message that names one pair and says
+	// the committed word disagrees with the live one. It does not say a guard
+	// vanished, and the sentence beside it in this file tells the reader to
+	// regenerate. One `-update-coverage` later the word is `unguarded`, the
+	// whole package is green, and the route nil-derefs to a 500 for the first
+	// operator on a fresh install. Measured, on this branch, against
+	// PUT /api/v1/loudness.
+	//
+	// The derived guard test cannot backstop it: its population comes off the
+	// same live walk, so a route that loses its guard LEAVES the set it would
+	// have been quantified over rather than failing inside it.
+	//
+	// So the count of guarded pairs is floored, max()-clamped exactly like the
+	// differential floors. It may rise freely -- guarding a new route is always
+	// allowed -- and falls only by a hand edit whose sentence somebody has to
+	// write on purpose: "this route no longer needs a programme to act on".
+	GuardedFloor int `json:"guardedFloor"`
 	// And the mirror, min()-clamped like every ceiling: the number of emitted
 	// shapes nobody inspects may fall freely and rises only by hand. This is
 	// the one number this round moved in the loosening direction (4 -> 6, two
@@ -260,6 +282,79 @@ type coverageRoute struct {
 	Method   string `json:"method"`
 	Pattern  string `json:"pattern"`
 	Coverage string `json:"coverage"`
+	// ZeroSource is the SECOND word, and it is about a different question from
+	// every other verdict in this file: not "does a read token see a
+	// credential" but "what does this pair do on an install that has no
+	// programme".
+	//
+	// A closed vocabulary of two, and both are DERIVED FROM REGISTRATION:
+	//
+	//	guarded    requireSource is in the middleware chain chi.Walk reports
+	//	           for this pair, so the request is refused before its handler
+	//	           runs
+	//	unguarded  it is not, so the handler runs with s.eng() possibly nil and
+	//	           is expected to answer
+	//
+	// Derived rather than listed, because a hand-list of guarded routes is the
+	// failure this ledger is a monument to: it would be complete on the day it
+	// was written and silently short by one the next time a route was added.
+	// The chain comes off the SAME walk the population does, so a route that
+	// loses its guard changes this artifact and a reviewer sees it in the diff.
+	//
+	// What the word does NOT claim is that an `unguarded` pair answers
+	// correctly -- that is the every-route fresh-install walk, which lands with
+	// the seed removal because that is the first branch where an empty install
+	// is a real state. What it does claim is driven: every `guarded` pair is
+	// issued against a server whose manager has no engines and observed to
+	// return 503 with code "no_source". See
+	// TestEveryGuardedRouteRefusesOnAnInstallWithNoSource.
+	//
+	// AND THE LIMIT OF THE DERIVATION, stated because "the list IS the
+	// registration" is true of the MIDDLEWARE and not of the refusal. A route
+	// whose handler reaches the same 503 through a helper -- destinationBaseArgv
+	// on the three write-nothing expert routes, refuseIfSilent, writeCreateError
+	// -- has no requireSource in its chain and is recorded `unguarded`, which
+	// reads here exactly like GET /setup, a route that genuinely must answer. No
+	// third word, because a word in this vocabulary is DRIVEN and those refusals
+	// cannot be driven through the router today: a destination row cannot exist
+	// on an install with no source, so every one of those requests 404s at the
+	// store long before the helper is asked. The instrument that does watch them
+	// is TestEveryNoSourceRefusalIsAGuardOrIsRecorded, in
+	// zero_source_guard_test.go, which enumerates the refusal sites out of this
+	// package's source and fails when one arrives unrecorded.
+	//
+	// This artifact keeps the middleware half only, and keeps it honest with
+	// guardedFloor.
+	ZeroSource string `json:"zeroSource"`
+}
+
+// zeroSourceWord reads the verdict off the middleware chain chi.Walk reports.
+//
+// Function IDENTITY, not a name and not a path prefix. reflect's code pointer
+// for a method VALUE is the compiler's wrapper for that method, which is the
+// same code whatever the receiver -- hence the nil one below, which is never
+// called and exists only to name the wrapper. So this recognises
+// Server.requireSource whichever Server built the router, and cannot be fooled
+// by a middleware that merely looks like it.
+// countGuardedRoutes is the measurement GuardedFloor ratchets against.
+func countGuardedRoutes(routes []coverageRoute) int {
+	n := 0
+	for _, r := range routes {
+		if r.ZeroSource == "guarded" {
+			n++
+		}
+	}
+	return n
+}
+
+func zeroSourceWord(mws []func(http.Handler) http.Handler) string {
+	guard := reflect.ValueOf((*Server)(nil).requireSource).Pointer()
+	for _, mw := range mws {
+		if reflect.ValueOf(mw).Pointer() == guard {
+			return "guarded"
+		}
+	}
+	return "unguarded"
 }
 
 // routeWant is a DRIVEN premise, and it is the whole of #164 and #166.
@@ -2279,7 +2374,7 @@ func enumerateRoutes(t *testing.T, s *Server) ([]coverageRoute, map[string]bool)
 	var enumerated []coverageRoute
 	seen := map[string]bool{}
 	err := chi.Walk(s.Handler().(chi.Routes),
-		func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
 			if route != "/" {
 				route = strings.TrimSuffix(route, "/")
 			}
@@ -2288,7 +2383,12 @@ func enumerateRoutes(t *testing.T, s *Server) ([]coverageRoute, map[string]bool)
 				return nil
 			}
 			seen[key] = true
-			enumerated = append(enumerated, coverageRoute{Method: method, Pattern: route})
+			enumerated = append(enumerated, coverageRoute{
+				Method: method, Pattern: route,
+				// The same walk, so the zero-source verdict cannot be derived
+				// from a different population than the coverage one.
+				ZeroSource: zeroSourceWord(mws),
+			})
 			return nil
 		})
 	if err != nil {
@@ -2564,6 +2664,7 @@ func TestLedgerPreflight(t *testing.T) {
 		Part:            part,
 		Verdicts:        verdicts,
 		NonGetWitnesses: nonGetWitnesses,
+		Guarded:         countGuardedRoutes(enumerated),
 		RegenCommand:    ledgerRegenCommand(t),
 	})
 
@@ -3030,6 +3131,10 @@ func writeLedger(t *testing.T, prev coverageLedger, routes []coverageRoute,
 	// max() refuses to bank it; downgrading a row to not-inspected raises
 	// shapesNotInspected and min() refuses to bank that.
 	out.ShapeFloor = max(totals.ShapesEmitted, prev.ShapeFloor)
+	// The guard's floor, on the one evidence field in the route rows that had
+	// none. Regeneration may bank a route BECOMING guarded and may not bank one
+	// losing its guard. See the field's comment for the measured laundering.
+	out.GuardedFloor = max(countGuardedRoutes(routes), prev.GuardedFloor)
 	out.ShapesNotInspectedCeiling = min(totals.ShapesNotInspected, prev.ShapesNotInspectedCeiling)
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
@@ -3431,10 +3536,16 @@ func assertSweptCounterpartsNameSweptRoutes(t *testing.T, enumerated []coverageR
 
 func assertRouteSetsEqual(t ledgerReporter, want, got []coverageRoute) {
 	t.Helper()
+	// BOTH WORDS, and the second one is here rather than in a comparison of its
+	// own for the reason this file keeps rediscovering: a field that is
+	// measured, written and never compared is committed evidence nothing reads,
+	// which has happened eight times. Carrying it in the same map means a route
+	// that silently loses requireSource fails the same assertion a route that
+	// silently loses its sweep does.
 	index := func(rows []coverageRoute) map[string]string {
 		m := map[string]string{}
 		for _, r := range rows {
-			m[r.Method+" "+r.Pattern] = r.Coverage
+			m[r.Method+" "+r.Pattern] = r.Coverage + " / zero-source: " + r.ZeroSource
 		}
 		return m
 	}
@@ -3919,6 +4030,9 @@ type ledgerFacts struct {
 	Part            partitionTotals
 	Verdicts        []sweepVerdict
 	NonGetWitnesses int
+	// Guarded is the live count of pairs whose middleware chain carries
+	// requireSource, derived from the same walk the population comes from.
+	Guarded int
 	// RegenCommand is passed in rather than derived, because deriving it needs a
 	// *testing.T and this function takes a reporter.
 	RegenCommand string
@@ -4032,6 +4146,19 @@ func assertLedgerRatchets(t ledgerReporter, want coverageLedger, f ledgerFacts) 
 			"shapeFloor in %s, and the sentence somebody has to write is \"this API no "+
 			"longer produces this kind of output\".",
 			liveShapes.ShapesEmitted, want.ShapeFloor, f.RegenCommand, coveragePath)
+	}
+	// THE GUARD'S FLOOR. Every other clamp in this function is about what the
+	// sweep can see; this one is about what the API refuses.
+	if f.Guarded < want.GuardedFloor {
+		t.Errorf("A ZERO-SOURCE GUARD DISAPPEARED. %d registered pairs carry requireSource "+
+			"and the committed floor is %d. The route-row mismatch above names WHICH pair, "+
+			"and its message -- like every other mismatch in this file -- reads as though "+
+			"regenerating were the remedy. It is not, here: the word this artifact carries "+
+			"for that pair is the difference between a refusal and a nil dereference, and "+
+			"`%s` would commit the dereference as the new truth. A route that genuinely no "+
+			"longer needs a programme is a hand edit of guardedFloor in %s, and the "+
+			"sentence is \"this route can act on an install with no source\".",
+			f.Guarded, want.GuardedFloor, f.RegenCommand, coveragePath)
 	}
 	if liveShapes.ShapesNotInspected > want.ShapesNotInspectedCeiling {
 		t.Errorf("%d emitted shapes are inspected by nothing and the committed ceiling is "+
