@@ -99,7 +99,7 @@ const differences = [
     </p>
     <div class="mt-8 grid gap-6 md:grid-cols-2">
       {paths.map((p) => (
-        <div class="rounded-xl border border-hairline bg-raised p-6">
+        <div class="rounded-xl border border-line bg-raised p-6">
           <h3 class="text-lg font-semibold">{p.name}</h3>
           <p class="mt-2 text-sm leading-relaxed text-muted">{p.what}</p>
           <p class="mt-4 font-mono text-[11px] uppercase tracking-wide text-subtle">{p.verdict}</p>
@@ -113,7 +113,7 @@ const differences = [
     <h2 class="text-2xl font-bold sm:text-3xl">The four differences that matter</h2>
     <div class="mt-8 space-y-8">
       {differences.map((d) => (
-        <div class="border-l-2 border-hairline pl-6">
+        <div class="border-l-2 border-line pl-6">
           <h3 class="text-lg font-semibold">{d.h}</h3>
           <p class="mt-3 max-w-3xl text-pretty leading-relaxed text-muted">{d.p}</p>
         </div>

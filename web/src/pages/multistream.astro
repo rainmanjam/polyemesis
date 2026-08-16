@@ -38,9 +38,9 @@ import Breadcrumbs from "../components/Breadcrumbs.astro";
 
 const approaches = [
   {
-    name: "One encode per platform",
-    how: "Your streaming PC encodes and uploads a separate copy of the stream for every destination.",
-    cost: "CPU and upload multiply by the number of destinations.",
+    name: "Your PC does the work",
+    how: "Your streaming PC uploads a separate copy of the stream for every destination. The encode can be shared across all of them or run independently per destination.",
+    cost: "Upload multiplies by the number of destinations. CPU multiplies only if you re-encode per destination instead of sharing the encode OBS already made.",
     audio: "Whatever mix that output was given.",
     who: "obs-multi-rtmp, Aitum Multistream, SE.Live — plugins that live inside OBS.",
     href: "/vs/obs-multi-rtmp",
@@ -49,8 +49,8 @@ const approaches = [
   {
     name: "A cloud relay",
     how: "You send one stream to somebody else's server. They fan it out to the platforms for you.",
-    cost: "One upload. A subscription, and your stream passes through a third party.",
-    audio: "One mix, duplicated — unless the service says otherwise.",
+    cost: "One upload. A subscription once you pass a free tier's limits, and your stream passes through a third party.",
+    audio: "restream.io duplicates the one stream it ingests to every endpoint, and Castr sends identical audio to all destinations (both checked 2026-08-15). Streamlabs does not describe per-destination audio either way, so nothing is claimed here.",
     who: "restream.io, Castr, Streamlabs Multistream.",
     href: "/vs/streamlabs",
     hrefLabel: "How the cloud relays compare",
@@ -136,7 +136,7 @@ const platforms = [
 
     <div class="mt-8 grid gap-6 md:grid-cols-3">
       {approaches.map((a) => (
-        <div class="rounded-xl border border-hairline bg-raised p-6">
+        <div class="rounded-xl border border-line bg-raised p-6">
           <h3 class="text-lg font-semibold">{a.name}</h3>
           <p class="mt-3 text-sm leading-relaxed text-muted">{a.how}</p>
           <dl class="mt-4 space-y-2 text-sm">
@@ -179,6 +179,7 @@ const platforms = [
       <a class="text-sm text-primary-bright underline" href="/how-to-multistream-from-obs">Multistream from OBS, three ways</a>
       <a class="text-sm text-primary-bright underline" href="/docs/audio-routing">How the mix matrix works</a>
       <a class="text-sm text-primary-bright underline" href="/comparison">The full comparison</a>
+      <a class="text-sm text-primary-bright underline" href="/free-restream-service">A free restream service you run yourself</a>
       <a class="text-sm text-primary-bright underline" href="/download">Install it</a>
     </div>
   </section>
@@ -187,7 +188,7 @@ const platforms = [
     <h2 class="text-2xl font-bold sm:text-3xl">Per platform</h2>
     <div class="mt-8 space-y-8">
       {platforms.map((p) => (
-        <div id={p.slug} class="border-l-2 border-hairline pl-6">
+        <div id={p.slug} class="border-l-2 border-line pl-6">
           <h3 class="text-lg font-semibold">Multistreaming to {p.name}</h3>
           <p class="mt-3 max-w-2xl text-pretty leading-relaxed text-muted">{p.body}</p>
           <p class="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-subtle">{p.caveat}</p>

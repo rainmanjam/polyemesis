@@ -238,7 +238,7 @@ reconnect when a platform drops, show you whether it is working.
 | Simultaneous destinations | No configured cap<sup>1</sup> | not assessed | 2–5 by plan tier (checked 15 Aug 2026) | Unverified |
 | Video re-encoded per destination | **No** (`-c:v copy`) | Optional | Yes, server-side | Optional, as a process |
 | Recording | Multitrack, stream-copied | No built-in<sup>2</sup> | Yes | Yes, tracks selectable |
-| Unified chat | Yes | No | Yes | No |
+| Unified chat | Yes | not assessed | not assessed | not assessed |
 | Metrics / API | Prometheus + REST | See<sup>4</sup> | REST | REST |
 | Hardware encoding | NVENC, QSV, VA-API, VideoToolbox, AMF<sup>5</sup> | Yes | n/a | NVENC |
 | Public release in the last 12 months | Yes<sup>3</sup> | No<sup>3</sup> | n/a, hosted | Yes<sup>3</sup> |

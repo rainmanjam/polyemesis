@@ -20,7 +20,7 @@ const features = [
   },
   {
     t: "Live meters on every channel of every track",
-    d: "How you verify the clean track really is clean before you go live, rather than after a copyright strike.",
+    d: "How you verify the clean track really is clean before you go live, rather than after the VOD is published.",
   },
   {
     t: "Chat moderation across five platforms",
@@ -40,7 +40,7 @@ const features = [
     that the person with this problem searches for the problem. */}
 <Base
   title="Multistream, a different mix per platform — polyemesis"
-  description="Self-hosted multistreaming with a different audio mix per platform. One SRT ingest carrying OBS's six split audio tracks — send the clean feed where music gets muted."
+  description="Self-hosted multistreaming with a different audio mix per platform. One SRT ingest carries OBS's split tracks — send the clean feed where music gets muted."
   path="/"
 >
   {/* ---------------------------------------------------------------- hero */}
@@ -123,8 +123,8 @@ const features = [
         </p>
         <p>
           Every live platform accepts exactly one stereo pair. So
-          normally you must choose one mix for everyone — and take a copyright
-          strike on YouTube or a DMCA-muted VOD on Twitch, or send both a
+          normally you must choose one mix for everyone — and risk a claim on
+          YouTube or a muted VOD on Twitch, or send both a
           broadcast with no music — or multistream from the stream PC: several
           encoders and several uploads off one machine and one connection.
         </p>
@@ -156,6 +156,12 @@ const features = [
           was sent a different set of tracks — loudness is measured per
           destination, after routing, on the programme that destination
           actually receives.
+        </p>
+        <p class="mt-3 text-pretty text-sm leading-relaxed text-subtle">
+          This capture is a different source from the example above: track 1 is
+          the host mic, track 2 the music bed, track 3 the co-host. So Twitch's
+          <span class="font-mono">01&nbsp;+&nbsp;03</span> is the mix with the
+          music left out, and it reads quieter for exactly that reason.
         </p>
       </div>
 

@@ -27,6 +27,13 @@ import Breadcrumbs from "../components/Breadcrumbs.astro";
  *   §4  Do NOT write "safe". Do not promise a strike will not happen. Do not
  *       give legal advice. Describe the mechanism and let the reader conclude.
  *       The sanctioned phrasing is reproduced almost verbatim below.
+ *
+ *       THE H1 BREACHED THIS AND WAS CAUGHT BY AUDIT, not by writing. It read
+ *       "The broadcast keeps the music. The archive does not" -- a statement
+ *       about what TWITCH archives, which is not ours to make, in the largest
+ *       type on the page, while the body four lines down had the sanctioned
+ *       mechanism phrasing correct. Getting a rule right in the prose and wrong
+ *       in the headline is the specific way this one fails.
  *   §6  Two safety properties are worth stating because this audience checks for
  *       them and rarely gets told.
  *
@@ -71,7 +78,7 @@ const facts = [
   <section class="wrap py-12 sm:py-16">
     <p class="eyebrow">Twitch</p>
     <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
-      The broadcast keeps the music. The archive does not.
+      The broadcast carries the music. The VOD track does not.
     </h1>
     <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
       Twitch can carry a second audio track alongside the live one, and use it
@@ -83,7 +90,7 @@ const facts = [
     {/* §3: THE GPU CAVEAT IS IN THE BLOCK THAT ANNOUNCES THE FEATURE. It is not
         a footnote, it is not further down the page, and it must not be moved.
         The reader most likely to want this runs a headless VPS. */}
-    <div class="mt-8 max-w-2xl rounded-xl border border-hairline bg-raised p-6">
+    <div class="mt-8 max-w-2xl rounded-xl border border-line bg-raised p-6">
       <p class="font-mono text-[11px] uppercase tracking-wide text-subtle">Before you install anything</p>
       <p class="mt-2 leading-relaxed text-muted">
         This is a <strong>Twitch Enhanced Broadcasting</strong> capability, and
@@ -97,6 +104,15 @@ const facts = [
         Kick, Facebook or Rumble accepting a second audio track, and the code
         declines to send one to them rather than guessing.
       </p>
+      <p class="mt-3 leading-relaxed text-muted">
+        One thing worth knowing if you came here from OBS's own Twitch VOD
+        track: that mechanism tags a second track with FLV metadata, and
+        obsproject/obs-studio issue #13636 (read 15 August 2026) reports it
+        conflicting with Enhanced Broadcasting, with live audio archived
+        regardless of the track exclusions. polyemesis does not use that path —
+        it negotiates the second track through Enhanced Broadcasting itself.
+        What Twitch finally archives is still Twitch's decision.
+      </p>
     </div>
   </section>
 
@@ -104,7 +120,7 @@ const facts = [
     <h2 class="text-2xl font-bold sm:text-3xl">What it actually does</h2>
     <div class="mt-8 grid gap-6 md:grid-cols-2">
       {facts.map((f) => (
-        <div class="border-l-2 border-hairline pl-6">
+        <div class="border-l-2 border-line pl-6">
           <h3 class="text-lg font-semibold">{f.h}</h3>
           <p class="mt-3 text-pretty leading-relaxed text-muted">{f.p}</p>
         </div>
