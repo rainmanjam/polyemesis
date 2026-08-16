@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -883,6 +884,155 @@ func TestFacebookErrorsBecomeAdviceTheOperatorCanAct(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ------------------------------------------------- go-live eligibility
+
+// Meta's two go-live requirements are not permissions and not scopes, and Graph
+// names neither when it refuses over them. The whole value of the note is that
+// it appears on refusals the operator cannot otherwise explain -- and the whole
+// risk of it is that it appears somewhere it is certainly wrong, teaching people
+// to skip the last paragraph. Both halves are the test.
+//
+// Mutation: in facebook.go, drop the `se.Status >= 500` half of the guard in
+// fbCreateAdvice. Observed: red, "500 is Meta failing, not Meta refusing".
+func TestABroadcastRefusalRaisesEligibilityWithoutClaimingItIsTheCause(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantNote bool
+		why      string
+	}{
+		{
+			name: "a bare permission refusal carries it, because eligibility looks exactly like this",
+			err: &statusError{Status: http.StatusForbidden, URL: "https://graph.example/me/live_videos",
+				Body: `{"error":{"message":"(#200) Requires publish_video permission","type":"OAuthException","code":200}}`},
+			wantNote: true,
+		},
+		{
+			name: "the unhelpful (#100) an ineligible account actually gets carries it",
+			err: &statusError{Status: http.StatusBadRequest, URL: "https://graph.example/me/live_videos",
+				Body: `{"error":{"message":"(#100) Unsupported post request","type":"OAuthException","code":100}}`},
+			wantNote: true,
+			why:      "this is the refusal an operator has nothing else to go on for",
+		},
+		{
+			name: "an expired token does not, because that refusal is already diagnosed exactly",
+			err: &statusError{Status: http.StatusBadRequest, URL: "https://graph.example/me/live_videos",
+				Body: `{"error":{"message":"Session has expired","type":"OAuthException","code":190}}`},
+			why: "190 has a one-button cure, and its advice already says 60 days about the TOKEN",
+		},
+		{
+			name: "a 500 does not, because that is Meta failing rather than Meta refusing",
+			err: &statusError{Status: http.StatusInternalServerError, URL: "https://graph.example/me/live_videos",
+				Body: `{"error":{"message":"An unknown error occurred","code":1}}`},
+			why: "no eligibility gate answers 500; the cure for this one is to try again",
+		},
+		{
+			name: "an HTML error page does not, because we cannot tell Graph was reached",
+			err: &statusError{Status: http.StatusBadGateway, URL: "https://graph.example/me/live_videos",
+				Body: `<html>502 Bad Gateway</html>`},
+			why: "a proxy refused, and a proxy knows nothing about follower counts",
+		},
+		{
+			name: "a transport failure does not, because nothing reached Facebook to be refused",
+			err:  errors.New("dial tcp 127.0.0.1:1: connect: connection refused"),
+			why:  "no account property can explain a connection that was never made",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := fbCreateAdvice(tc.err, "start a Facebook broadcast", []string{"publish_video"})
+			has := strings.Contains(got.Error(), "at least 100 followers")
+			if has != tc.wantNote {
+				t.Fatalf("eligibility note present = %v, want %v (%s)\ngot: %v", has, tc.wantNote, tc.why, got)
+			}
+			if !tc.wantNote {
+				return
+			}
+			// The note must read as a thing to check, never as a finding. An
+			// operator who believes a wrong diagnosis stops looking for the
+			// right one, and this error is most often about something else.
+			for _, hedge := range []string{"may have nothing to do with either", "not a diagnosis"} {
+				if !strings.Contains(got.Error(), hedge) {
+					t.Errorf("the note asserts eligibility rather than offering it: %q is missing\n%v", hedge, got)
+				}
+			}
+			if !strings.Contains(got.Error(), "at least 60 days old") {
+				t.Errorf("only one of the two requirements is named: %v", got)
+			}
+			// Appending must not cost the operator what fbAdvice worked out.
+			// The actionable instruction comes first; the hedge comes last.
+			advised := fbAdvice(tc.err, "start a Facebook broadcast", []string{"publish_video"})
+			if !strings.HasPrefix(got.Error(), advised.Error()) {
+				t.Errorf("the note replaced fbAdvice's instruction instead of following it:\nwant prefix: %v\ngot: %v", advised, got)
+			}
+		})
+	}
+}
+
+// End to end: the note reaches an operator from the call that actually creates
+// the broadcast, and never from one that succeeds.
+func TestTheEligibilityNoteReachesTheOperatorFromARefusedCreateOnly(t *testing.T) {
+	t.Run("a refused create", func(t *testing.T) {
+		fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, `{"error":{"message":"(#100) Unsupported post request","code":100}}`, http.StatusBadRequest)
+		})
+		_, err := fb.IngestFor(context.Background(), "cid", "user-token", "user:1000", IngestOptions{})
+		if err == nil {
+			t.Fatal("IngestFor succeeded against a stub that refuses every create")
+		}
+		if !strings.Contains(err.Error(), "at least 100 followers") {
+			t.Errorf("the refusal an operator sees does not mention eligibility: %v", err)
+		}
+	})
+
+	t.Run("a create that works", func(t *testing.T) {
+		fb, _ := fbServer(t, graphStub(t, fbLiveResponse("4242")))
+		b, err := fb.IngestFor(context.Background(), "cid", "user-token", "user:1000", IngestOptions{})
+		if err != nil {
+			t.Fatalf("IngestFor: %v", err)
+		}
+		// Nothing on a success carries advice. Named explicitly because the
+		// cheap implementation of this feature -- appending to whatever
+		// IngestFor returns -- passes the refusal test and fails here.
+		if strings.Contains(b.ID+b.Target+b.Ingest.URL+b.Ingest.Key, "followers") {
+			t.Errorf("advice leaked into a successful broadcast: %+v", b)
+		}
+	})
+
+	t.Run("a transport failure the platform never saw", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		base := srv.URL
+		srv.Close() // nothing is listening now, so the create cannot leave the machine
+		fb := NewFacebook(WithBaseURL(base))
+
+		_, err := fb.IngestFor(context.Background(), "cid", "user-token", "user:1000", IngestOptions{})
+		if err == nil {
+			t.Fatal("IngestFor succeeded against a closed server")
+		}
+		if strings.Contains(err.Error(), "followers") {
+			t.Errorf("a connection failure was dressed up as an account problem: %v", err)
+		}
+	})
+}
+
+// A broadcast that already exists is proof the account was eligible when it was
+// made, so the paths that edit one must not send an operator to count followers.
+func TestOperationsOnAnExistingBroadcastDoNotMentionEligibility(t *testing.T) {
+	fb, _ := fbServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"(#100) Unsupported post request","code":100}}`, http.StatusBadRequest)
+	})
+
+	err := fb.RescheduleBroadcast(context.Background(), "user-token", "808", time.Now().Add(48*time.Hour))
+	if err == nil {
+		t.Fatal("RescheduleBroadcast succeeded against a stub that refuses everything")
+	}
+	if strings.Contains(err.Error(), "followers") {
+		t.Errorf("a reschedule failure blamed go-live eligibility, which cannot be why "+
+			"a broadcast that already exists will not move: %v", err)
 	}
 }
 
