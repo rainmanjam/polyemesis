@@ -1,0 +1,27 @@
+# THE SHAPE THAT LOOKS WRONG AND IS NOT, which is why this fixture exists: a
+# job-level `if:` on a matrix job, reading a different job's output. ci.yml's
+# `container` job is exactly this, and it is legitimate because its per-leg
+# contexts are NOT required -- a suite that is not wanted should not exist as a
+# skipped row.
+#
+# A rule that flagged every job-level `if:` on a matrix would flag it, be wrong,
+# and grow an allowlist within a month. This one is about one boolean.
+name: green - a job-level if on a different job's output
+on: pull_request
+jobs:
+  suites:
+    name: which suites
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'suites=["a"]' >> "$GITHUB_OUTPUT"
+  run-suites:
+    name: "suite: ${{ matrix.suite }}"
+    needs: suites
+    if: needs.suites.outputs.suites != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        suite: ${{ fromJSON(needs.suites.outputs.suites) }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/${{ matrix.suite }}.sh

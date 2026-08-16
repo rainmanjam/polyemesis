@@ -1,0 +1,16 @@
+# `needs:` written as a list, which GitHub accepts and which a rule that only
+# understood the scalar form would walk straight past. The ungated checkout
+# below is the finding; the list is what a naive rule would fail to notice it
+# through.
+name: red - needs written as a list
+on: pull_request
+jobs:
+  build:
+    name: build
+    needs: [changes, container-suites]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: build
+        if: needs.changes.outputs.code == 'true'
+        run: make
