@@ -24,8 +24,30 @@ import (
 // capability. The shape needed no change -- it was already neutral -- so this
 // is a rename and a move, not a redesign.
 type LiveStats struct {
-	Live        bool      `json:"live"`
-	ViewerCount int       `json:"viewerCount"`
+	Live bool `json:"live"`
+	// ViewerCount IS A POINTER BECAUSE "NOBODY IS WATCHING" AND "WE WERE NOT
+	// TOLD" ARE DIFFERENT ANSWERS, AND EVERY PLATFORM HAS A WAY OF GIVING THE
+	// SECOND ONE. It was an int, which can only say zero, and all three
+	// documented cases below would have been reported as an audience of none:
+	//
+	//   YouTube omits liveStreamingDetails.concurrentViewers entirely when
+	//   there are no current viewers, when the owner has HIDDEN the count, and
+	//   after the broadcast ends -- three states, one absent key.
+	//   Kick, verbatim: "Viewer count will be 0 if the streamer has opted not
+	//   to share their viewer count."
+	//   Twitch answers an empty data array for a channel that is not live,
+	//   which carries no count rather than a count of zero.
+	//
+	// A streamer who has hidden their viewer count is the case that turns this
+	// from pedantry into a bug report: polyemesis would show them 0 viewers,
+	// on a stream with an audience, with no indication the number was never
+	// sent. docs/DESIGN-SYSTEM.md's rule for the UI is the same one -- a false
+	// zero on a live stream is worse than a blank -- and a UI cannot render
+	// "not reported" from a type that cannot express it.
+	//
+	// omitempty drops the key when it is nil, so the wire says the same thing
+	// the platform said: nothing. Consumers must branch on presence.
+	ViewerCount *int      `json:"viewerCount,omitempty"`
 	Title       string    `json:"title,omitempty"`
 	Category    string    `json:"category,omitempty"`
 	Language    string    `json:"language,omitempty"`
