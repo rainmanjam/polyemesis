@@ -5,11 +5,14 @@
  * THIS IS AN ALLOWLIST AND IT MUST STAY ONE. The obvious implementation is a
  * glob over docs/ with a handful of exclusions, and it is wrong in a way that
  * only shows up later: it makes the NEXT internal note added to docs/ public by
- * default. Two of the files in that directory are exactly the kind that must
- * never ship — RESEARCH-COMPETITIVE.md is a survey of competitors' issue
- * trackers, and COPY-CONSTRAINTS.md records what this project's marketing copy
- * may and may not claim. Publishing either is not a broken page, it is a
+ * default. Publishing an internal document is not a broken page, it is a
  * self-inflicted wound, and nobody would notice until someone else did.
+ *
+ * The documents that argument was written about are no longer in this
+ * repository at all — they live under docs/internal/, which is git-ignored,
+ * because "not linked from the website" and "not on the internet" are different
+ * things and only the second one was ever the goal. This list is now the second
+ * line of defence rather than the only one.
  *
  * So the two tables below partition docs/*.md, and check-build.mjs fails if a
  * file in that directory appears in neither. Adding a document is therefore a
@@ -168,10 +171,10 @@ const DOCS_BY_SECTION = {
      * mentions in this file against none in that one. So the phrase goes in
      * this description, where it describes the page.
      *
-     * Scoped to Twitch on purpose, and docs/COPY-CONSTRAINTS.md §1 is why: a
+     * Scoped to Twitch on purpose, and the project's copy rules are why: a
      * second audio track is a Twitch Enhanced Broadcasting capability, and
      * nothing here has measured YouTube, Kick, Facebook or Rumble accepting one.
-     * §4 rules out the tempting version of this sentence as well — describe the
+     * The same rules exclude the tempting version of this sentence — describe the
      * mechanism, do not promise an outcome nobody here controls. */
     ["AUDIO-ROUTING.md", "Audio routing: a different mix per destination",
       "Up to 32 tracks in, one FFmpeg filter graph per destination out. The mix matrix, per-cell gain, and the two-mix egress — including the experimental second Twitch VOD track."],
@@ -252,27 +255,23 @@ export const SECTION_IDS_WITH_DOCS = Object.keys(DOCS_BY_SECTION);
  * is not a reason, and the next person deciding where a new file goes needs to
  * see what kind of thing lands here.
  *
- * The two in capitals are the ones that would actually hurt. The rest are
- * internal by nature rather than by risk: design notes for work not yet done,
- * process documents, and a changelog that is already published as releases. */
+ * Everything left here is internal by nature rather than by risk: design notes
+ * for work not yet done, an internal counterpart to a published document, and a
+ * runbook. Anything whose CONTENT should not be public no longer belongs in this
+ * list — it belongs in docs/internal/, which git does not track. A row here
+ * still means "in the repository, just not on the website". */
 
 /** @typedef {[file: `${string}.md`, why: string]} WithheldRow */
 
 /** @type {WithheldRow[]} */
 const WITHHELD_ROWS = [
-  ["RESEARCH-COMPETITIVE.md", "COMPETITOR ANALYSIS. A survey of rivals' issue trackers, written for us."],
-  ["COPY-CONSTRAINTS.md", "GOVERNS THE MARKETING COPY — what it may and may not claim, and why."],
-  ["SITE-IMPROVEMENTS.md", "A work list for this website."],
   ["SITE-DEPLOY.md", "Deployment runbook for this website."],
-  ["WEBSITE-COPY-PROPOSAL.md", "A draft of website copy, not documentation."],
-  ["REVIEW-POKA-YOKE.md", "Internal review process."],
   ["TEST-STRATEGY.md", "Internal test strategy; TESTING.md is the user-facing half."],
   ["MODULES.md", "Internal package inventory; ARCHITECTURE.md is the user-facing half."],
   ["DESIGN-SYSTEM.md", "Design tokens for the app UI."],
   ["DESIGN-DESTINATION-HEALTH.md", "Design note for unshipped work."],
   ["DESIGN-ONE-PORT-ONLY.md", "Design note for unshipped work."],
   ["DESIGN-ONE-PORT-INGEST.md", "Design note for unshipped work."],
-  ["CHANGES-SINCE-v0.6.0.md", "Release notes, already published on the releases page."],
   ["README.md", "A directory of the others; /docs is that page here."],
 ];
 

@@ -188,8 +188,7 @@ carries no failover fields — so there is no per-source playlist for a `source_
 to select, and a column would have been a schema change selecting between
 identical things. Moving the playlist block onto `db.Source` is what would make
 it mean something, and that is deferred until somebody runs two programmes and
-wants different filler on each. See
-`docs/superpowers/specs/2026-08-03-scheduled-playlist-design.md`.
+wants different filler on each.
 
 **Still to do:** `source.select`. The selector pin is in-memory only
 (`e.sel.pinned`), so there is no stored intent to flip — scheduling it needs

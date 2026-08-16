@@ -1863,8 +1863,7 @@ became `backupIngestWanted` with no compatibility alias, which breaks any client
 that *writes* that field. Everything else here is a fix.
 
 An adversarial audit of the 0.2.0 release, and the fixes for everything it
-found. The full record, with a numbered finding behind every change below, is
-[docs/roadmap/ADVERSARIAL-AUDIT-0.2.0.md](docs/roadmap/ADVERSARIAL-AUDIT-0.2.0.md).
+found. Every change below traces to a numbered finding in that audit.
 
 ### Security
 

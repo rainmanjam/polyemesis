@@ -146,8 +146,7 @@ The honest summary: if you do not need different audio per platform, Restreamer
 is a more mature product and you should probably use it. polyemesis exists for
 the case where one stereo pair for everybody is the thing that does not work.
 
-More detail in
-[docs/RESEARCH-COMPETITIVE.md](docs/RESEARCH-COMPETITIVE.md).
+More detail in [docs/COMPARISON.md](docs/COMPARISON.md).
 
 ## Try it
 

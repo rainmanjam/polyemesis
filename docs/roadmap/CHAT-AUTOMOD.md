@@ -212,5 +212,4 @@ The suite that would make this trustworthy:
 ## See also
 
 - [CHAT-MODERATION.md](CHAT-MODERATION.md) — the manual actions this builds on
-- [../REVIEW-POKA-YOKE.md](../REVIEW-POKA-YOKE.md) — friction proportional to consequence
 - [../../SECURITY.md](../../SECURITY.md) — where the API credential is stored
