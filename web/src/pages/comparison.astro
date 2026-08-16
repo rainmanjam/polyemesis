@@ -226,7 +226,14 @@ const selectors = [
     </p>
     {/* Two by two rather than a row of three, now that there is a fourth. A
         four-item row is unreadable at this card width and a 3+1 orphan looks
-        like something failed to load. */}
+        like something failed to load.
+
+        THE FIFTH SPANS BOTH COLUMNS, for the same reason. Five cards in a
+        two-column grid leave one alone on the last row, which is the orphan this
+        layout was built to avoid. Spanning it is not a workaround: Streamlabs is
+        the only cloud relay in the set -- the other four run on your own
+        machine, as a plugin or a server -- so the card that looks different is
+        the one that IS different. */}
     <div class="mt-6 grid gap-4 sm:grid-cols-2">
       {
         [
@@ -254,8 +261,18 @@ const selectors = [
             kind: "OBS plugin · free · Windows only",
             line: "The dashboard everyone knows sends no video at all. The multistreaming is SE.Live, which is Windows-only and speaks no SRT.",
           },
+          {
+            href: "/vs/streamlabs",
+            name: "Streamlabs",
+            kind: "Cloud relay · Ultra subscription",
+            line: "Their servers do the fan-out, and multistreaming proper is behind the paid tier. The free path stops at two destinations.",
+            wide: true,
+          },
         ].map((c) => (
-          <a href={c.href} class="card block p-5 transition-colors hover:border-primary">
+          <a
+            href={c.href}
+            class:list={["card block p-5 transition-colors hover:border-primary", c.wide && "sm:col-span-2"]}
+          >
             <p class="font-medium text-fg">{c.name}</p>
             <p class="mt-1 font-mono text-[11px] text-subtle">{c.kind}</p>
             <p class="mt-3 text-sm leading-relaxed text-muted">{c.line}</p>

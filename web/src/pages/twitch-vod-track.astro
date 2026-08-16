@@ -1,0 +1,135 @@
+---
+import Base from "../layouts/Base.astro";
+import Breadcrumbs from "../components/Breadcrumbs.astro";
+
+/* THE PAGE FOR THE SMALLEST NUMBER IN THE RESEARCH, AND THE BEST-QUALIFIED ONE.
+ *
+ * "twitch vod track obs" is 110 US searches a month at KD 0 (DataForSEO, 16
+ * August 2026). That will not move sessions and this page is not built for
+ * sessions. Everyone typing it has already worked out that they want the
+ * broadcast and the archive to carry different audio, which is the exact problem
+ * this product solves better than the alternatives. A visitor who arrives
+ * understanding the problem is worth more than ten who arrive at a head term.
+ * That is the argument; it is a conversion argument, not a traffic one.
+ *
+ * EVERY CLAIM HERE IS BOUNDED BY docs/internal/COPY-CONSTRAINTS.md, which was
+ * written before any of this copy and exists because each trap below is a
+ * sentence a reasonable person would write and would be wrong:
+ *
+ *   §1  The second track is a TWITCH ENHANCED BROADCASTING capability. Nothing
+ *       here has measured YouTube, Kick, Facebook or Rumble accepting one, and
+ *       internal/db/destinations.go refuses `-c:a copy` on RTMP for that reason.
+ *       Do not let this page imply otherwise.
+ *   §3  It needs a GPU, and that must appear IN THE SAME BLOCK that announces
+ *       the feature -- not a footnote. This audience self-hosts on VPSes without
+ *       one, and finding out after installing is the experience the caveat
+ *       exists to prevent.
+ *   §4  Do NOT write "safe". Do not promise a strike will not happen. Do not
+ *       give legal advice. Describe the mechanism and let the reader conclude.
+ *       The sanctioned phrasing is reproduced almost verbatim below.
+ *   §6  Two safety properties are worth stating because this audience checks for
+ *       them and rarely gets told.
+ *
+ * §2 is why the "no video ladder required" line is here at all: a reader assumes
+ * multitrack VIDEO is a precondition, because the Twitch feature is named for
+ * it. maximum_video_tracks: 1 returns one rendition and both audio tracks, which
+ * is what makes this reachable for a project that stream-copies video.
+ */
+const facts = [
+  {
+    h: "One ingest, one encode, one connection",
+    p: "The live broadcast carries the music. The VOD track does not. polyemesis builds both mixes from the tracks already arriving on your single SRT ingest, and sends them to Twitch over the same connection — your encoder uploads once and encodes video once.",
+  },
+  {
+    h: "No video ladder required",
+    p: "Enhanced Broadcasting is named for multitrack video, so the reasonable assumption is that you must send several video renditions to get a second audio track. You do not. Requesting a single video track returns one rendition and both audio tracks, which is what makes this reachable at all for a server that copies video through untouched.",
+  },
+  {
+    h: "A second mix cannot break your broadcast",
+    p: "If the secondary mix will not compile, it is a warning and the stream goes out without it. An optional VOD track must never veto a working broadcast. A primary mix that will not compile is still an error, because that one is the broadcast.",
+  },
+  {
+    h: "Adding it does not rewrite what you already send",
+    p: "A destination that gains a VOD track keeps its live mix byte-for-byte identical to what it produced before. Turning the feature on is additive, and turning it off returns you exactly where you were.",
+  },
+];
+---
+
+<Base
+  title="Twitch VOD track: different audio live and on the archive"
+  description="Send Twitch a live mix with the music and a VOD mix without it, from one SRT ingest and one video encode. What it needs, and what it does not."
+  path="/twitch-vod-track"
+>
+  <Breadcrumbs
+    crumbs={[
+      { label: "polyemesis", href: "/" },
+      { label: "Multistream", href: "/multistream" },
+      { label: "Twitch VOD track" },
+    ]}
+  />
+
+  <section class="wrap py-12 sm:py-16">
+    <p class="eyebrow">Twitch</p>
+    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
+      The broadcast keeps the music. The archive does not.
+    </h1>
+    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
+      Twitch can carry a second audio track alongside the live one, and use it
+      for the VOD. polyemesis builds that second mix from the same upload — so
+      what your viewers hear live and what stays on the archive can differ,
+      without a second encoder, a second upload, or a second stream key.
+    </p>
+
+    {/* §3: THE GPU CAVEAT IS IN THE BLOCK THAT ANNOUNCES THE FEATURE. It is not
+        a footnote, it is not further down the page, and it must not be moved.
+        The reader most likely to want this runs a headless VPS. */}
+    <div class="mt-8 max-w-2xl rounded-xl border border-hairline bg-raised p-6">
+      <p class="font-mono text-[11px] uppercase tracking-wide text-subtle">Before you install anything</p>
+      <p class="mt-2 leading-relaxed text-muted">
+        This is a <strong>Twitch Enhanced Broadcasting</strong> capability, and
+        Twitch requires a GPU. A host that reports none is refused the
+        negotiation outright — so on a headless VPS, which is where a lot of
+        self-hosted streaming lives, this particular feature will not come up.
+        Everything else polyemesis does works there; this one does not.
+      </p>
+      <p class="mt-3 leading-relaxed text-muted">
+        It is also Twitch-only. Nothing in this project has measured YouTube,
+        Kick, Facebook or Rumble accepting a second audio track, and the code
+        declines to send one to them rather than guessing.
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap pb-12 sm:pb-16">
+    <h2 class="text-2xl font-bold sm:text-3xl">What it actually does</h2>
+    <div class="mt-8 grid gap-6 md:grid-cols-2">
+      {facts.map((f) => (
+        <div class="border-l-2 border-hairline pl-6">
+          <h3 class="text-lg font-semibold">{f.h}</h3>
+          <p class="mt-3 text-pretty leading-relaxed text-muted">{f.p}</p>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section class="wrap pb-12 sm:pb-16">
+    <h2 class="text-2xl font-bold sm:text-3xl">What this page is not telling you</h2>
+    <p class="mt-4 max-w-3xl text-pretty leading-relaxed text-muted">
+      polyemesis builds a second mix and sends it. What Twitch does with it, and
+      whether any particular rights-holder agrees with the result, is not
+      something this project can promise and nothing here should be read as legal
+      advice. The mechanism is described above; the conclusion is yours to draw.
+    </p>
+    <p class="mt-4 max-w-3xl text-pretty leading-relaxed text-muted">
+      The same mechanism has nothing to do with Twitch in the general case. A
+      second mix is only the two-destination version of what this server does
+      everywhere: sum the tracks you choose, per destination, from one upload.
+      The archive is simply the most common reason to want two.
+    </p>
+    <div class="mt-6 flex flex-wrap gap-4">
+      <a class="text-sm text-primary-bright underline" href="/docs/audio-routing">How the mix matrix works</a>
+      <a class="text-sm text-primary-bright underline" href="/multistream">Multistreaming, three ways</a>
+      <a class="text-sm text-primary-bright underline" href="/download">Install it</a>
+    </div>
+  </section>
+</Base>

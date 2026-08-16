@@ -225,6 +225,65 @@ const sections = [
     ))
   }
 
+  {/* ------------------------------------------------------- who it is for -- */}
+  {/* PROSE, NOT PAGES, AND THAT IS A DELIBERATE CHOICE BACKED BY DATA.
+
+      Each of these three is a real workflow the audio routing already supports,
+      and each was checked for search demand before being written (DataForSEO,
+      16 August 2026). All three returned NOTHING above 20 searches a month:
+      multi-language and interpretation streaming, live stream transcription,
+      captions and accessibility, corporate and conference streaming. The
+      "church live streaming" cluster looks bigger at 22,430/month and is worse
+      -- it is almost entirely people looking for one named church's own Sunday
+      service, not for software.
+
+      So there is no SEO case for a page each, and building four would be four
+      thin pages chasing an audience that is not searching those words. There IS
+      a case for saying them out loud HERE, where a reader who already arrived is
+      deciding whether this product is for them. These earn their place by
+      recognition, not by traffic, and this comment exists so nobody later
+      "promotes" them to pages on the assumption that nobody checked. */}
+  <section class="border-t border-line py-16 sm:py-20" data-reveal>
+    <div class="wrap">
+      <p class="eyebrow">Who it is for</p>
+      <h2 class="mt-3 text-balance text-3xl font-medium">
+        Three rooms where one mix is the thing that does not work.
+      </h2>
+      <div class="mt-8 grid gap-8 md:grid-cols-3">
+        <div>
+          <h3 class="font-medium">Two languages, one camera</h3>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            The floor mic on track 1, the interpreter on track 2. The English
+            channel gets one, the Spanish channel gets the other, and both get
+            the same video from the same upload. Adding a third language is a
+            checkbox and another destination, not another encoder.
+          </p>
+        </div>
+        <div>
+          <h3 class="font-medium">The archive that differs from the broadcast</h3>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            The live broadcast carries the music bed. A second mix, built from
+            the same ingest, leaves it out — for a recording, a file
+            destination, or Twitch's VOD track. One upload, one video encode.
+          </p>
+          <p class="mt-2 text-sm leading-relaxed text-subtle">
+            The Twitch route needs a GPU, and is Twitch-only.
+            <a href="/twitch-vod-track" class="text-primary underline-offset-4 hover:underline">What that involves →</a>
+          </p>
+        </div>
+        <div>
+          <h3 class="font-medium">Vertical and horizontal, at once</h3>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            A 16:9 composition and a 9:16 one are two programmes, not one
+            cropped from the other — which is exactly the case sources were
+            built for. Run both from one install, each with its own ingest,
+            destinations and mixes.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   {/* ------------------------------------------------- how it compares ---- */}
   {/* On the features page on purpose: a reader deciding between these three is
       doing it while reading the capability list, not after. Every row is a

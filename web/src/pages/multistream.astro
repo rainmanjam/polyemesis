@@ -1,0 +1,199 @@
+---
+import Base from "../layouts/Base.astro";
+import Breadcrumbs from "../components/Breadcrumbs.astro";
+
+/* THE PILLAR PAGE FOR THE HEAD TERM, AND THE REASON IT DID NOT EXIST BEFORE.
+ *
+ * "multistream" is 3,600 US searches a month at KD 35 (DataForSEO, 16 August
+ * 2026). Until this page, the site's answer to that query was the homepage,
+ * whose title begins "Multistream, a different mix per platform" and whose H1 is
+ * "One stream in. A different mix out of each."
+ *
+ * That H1 is the right hero line and the wrong landing for a generic query. A
+ * reader typing "multistream" has not yet accepted the category, let alone the
+ * subtlety that distinguishes this product inside it. The homepage was arguing
+ * the differentiator to someone still asking what the thing is.
+ *
+ * So this page takes the category question and routes it, and the homepage keeps
+ * selling the mix. It also gives /vs/* an internal-link parent, which the four
+ * comparison pages did not have -- they were reachable from /comparison and the
+ * footer and nothing else.
+ *
+ * WHAT THIS PAGE MUST NOT BECOME. A second homepage. It says what multistreaming
+ * is, what the three architectures are, and where to go next. Every claim that
+ * needs arguing is argued somewhere else and linked, because a pillar page that
+ * re-argues its children is the same page published five times -- thin to a
+ * crawler and boring to the reader who clicked through.
+ *
+ * The platform sections exist for "kick multistream" (170/mo, KD 5) and "youtube
+ * multistream" (170/mo, KD 0). They are sections rather than pages on purpose:
+ * separately they would be thin, and the honest answer to both is nearly the
+ * same one.
+ *
+ * NO COMPETITOR CLAIM APPEARS HERE WITHOUT A SOURCE. The architecture table
+ * names categories, not products, precisely so it does not need per-product
+ * provenance; where a product is named, the claim traces to
+ * docs/evidence/competitor-facts-2026-08-15.md and the /vs/ page carries it.
+ */
+
+const approaches = [
+  {
+    name: "One encode per platform",
+    how: "Your streaming PC encodes and uploads a separate copy of the stream for every destination.",
+    cost: "CPU and upload multiply by the number of destinations.",
+    audio: "Whatever mix that output was given.",
+    who: "obs-multi-rtmp, Aitum Multistream, SE.Live — plugins that live inside OBS.",
+    href: "/vs/obs-multi-rtmp",
+    hrefLabel: "How the plugins compare",
+  },
+  {
+    name: "A cloud relay",
+    how: "You send one stream to somebody else's server. They fan it out to the platforms for you.",
+    cost: "One upload. A subscription, and your stream passes through a third party.",
+    audio: "One mix, duplicated — unless the service says otherwise.",
+    who: "restream.io, Castr, Streamlabs Multistream.",
+    href: "/vs/streamlabs",
+    hrefLabel: "How the cloud relays compare",
+  },
+  {
+    name: "A relay you run",
+    how: "You send one stream to a server you own. It fans out, on your hardware, on your network.",
+    cost: "One upload. No subscription. A box to run it on.",
+    audio: "This is where polyemesis differs: a different mix per destination, summed server-side.",
+    who: "polyemesis, datarhei Restreamer, MistServer.",
+    href: "/vs/restreamer",
+    hrefLabel: "How the self-hosted relays compare",
+  },
+];
+
+const platforms = [
+  {
+    name: "Twitch",
+    slug: "twitch",
+    body:
+      "Twitch is the destination that makes the audio question concrete. Its Enhanced Broadcasting can carry a second audio track alongside the live one, which is how the broadcast keeps a music bed while the archive gets a mix without it — from one upload and one encode.",
+    caveat:
+      "It needs a GPU on the machine polyemesis runs on: Twitch refuses the negotiation outright when the request reports none, which matters on the VPS this audience often uses.",
+    href: "/twitch-vod-track",
+    hrefLabel: "The Twitch VOD track, in detail",
+  },
+  {
+    name: "YouTube",
+    slug: "youtube",
+    body:
+      "YouTube takes one stereo pair, like every other live platform. Multistreaming to it is unremarkable — the interesting decision is which mix it gets, and that is the same decision for every destination in the fan-out.",
+    caveat:
+      "A second audio track is not offered here. Nothing in this project has measured YouTube accepting one, and the code refuses to try.",
+    href: "/docs/audio-routing",
+    hrefLabel: "How a mix is chosen",
+  },
+  {
+    name: "Kick",
+    slug: "kick",
+    body:
+      "Kick is an RTMP destination and behaves like one. polyemesis signs in to it for chat and metadata as well, so a Kick fan-out is not only video — the moderation timeline reads it alongside the others.",
+    caveat:
+      "Chat moderation covers five platforms: YouTube, Twitch, Kick, Facebook and Rumble. Facebook is read-and-moderate only; it is not in the send fan-out.",
+    href: "/docs/platforms",
+    hrefLabel: "What each platform can automate",
+  },
+];
+---
+
+<Base
+  title="Multistream to Twitch, YouTube and Kick from one upload"
+  description="Three ways to multistream, what each costs in CPU and upload, and how to send a different audio mix to every destination from a single SRT ingest."
+  path="/multistream"
+>
+  <Breadcrumbs
+    crumbs={[
+      { label: "polyemesis", href: "/" },
+      { label: "Multistream" },
+    ]}
+  />
+
+  <section class="wrap py-12 sm:py-16">
+    <p class="eyebrow">Multistreaming</p>
+    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
+      Multistreaming is one upload reaching several platforms. The question is
+      what each one hears.
+    </h1>
+    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
+      Going live to Twitch and YouTube at once is a solved problem with three
+      well-known answers. Sending them <em>different audio</em> — the full mix to
+      one, a music-free mix to another, your mic alone to a third — is where the
+      three answers stop agreeing. This page covers both.
+    </p>
+  </section>
+
+  <section class="wrap pb-12 sm:pb-16">
+    <h2 class="text-2xl font-bold sm:text-3xl">The three architectures</h2>
+    <p class="mt-4 max-w-2xl text-pretty leading-relaxed text-muted">
+      Every multistreaming tool is one of these. Which one you want follows from
+      what you are short of: upload bandwidth, CPU, money, or trust in a third
+      party.
+    </p>
+
+    <div class="mt-8 grid gap-6 md:grid-cols-3">
+      {approaches.map((a) => (
+        <div class="rounded-xl border border-hairline bg-raised p-6">
+          <h3 class="text-lg font-semibold">{a.name}</h3>
+          <p class="mt-3 text-sm leading-relaxed text-muted">{a.how}</p>
+          <dl class="mt-4 space-y-2 text-sm">
+            <div>
+              <dt class="font-mono text-[11px] uppercase tracking-wide text-subtle">Costs you</dt>
+              <dd class="mt-1 text-muted">{a.cost}</dd>
+            </div>
+            <div>
+              <dt class="font-mono text-[11px] uppercase tracking-wide text-subtle">Audio</dt>
+              <dd class="mt-1 text-muted">{a.audio}</dd>
+            </div>
+            <div>
+              <dt class="font-mono text-[11px] uppercase tracking-wide text-subtle">Examples</dt>
+              <dd class="mt-1 text-muted">{a.who}</dd>
+            </div>
+          </dl>
+          <a class="mt-5 inline-block text-sm text-primary-bright underline" href={a.href}>
+            {a.hrefLabel}
+          </a>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section class="wrap pb-12 sm:pb-16">
+    <h2 class="text-2xl font-bold sm:text-3xl">Where polyemesis sits</h2>
+    <p class="mt-4 max-w-2xl text-pretty leading-relaxed text-muted">
+      It is the third kind: a relay on hardware you control. What it adds to that
+      category is the audio. One SRT ingest carries up to 32 tracks, and each
+      destination gets its own stereo mix summed from the tracks you choose —
+      server-side, so your encoder uploads once and encodes video once. Video is
+      copied through untouched.
+    </p>
+    <p class="mt-4 max-w-2xl text-pretty leading-relaxed text-muted">
+      That is the whole argument, and it is worth being plain about when it does
+      <em>not</em> matter: if one mix suits every platform you send to, a free OBS
+      plugin does the job and you should use one.
+    </p>
+    <div class="mt-6 flex flex-wrap gap-4">
+      <a class="text-sm text-primary-bright underline" href="/how-to-multistream-from-obs">Multistream from OBS, three ways</a>
+      <a class="text-sm text-primary-bright underline" href="/docs/audio-routing">How the mix matrix works</a>
+      <a class="text-sm text-primary-bright underline" href="/comparison">The full comparison</a>
+      <a class="text-sm text-primary-bright underline" href="/download">Install it</a>
+    </div>
+  </section>
+
+  <section class="wrap pb-12 sm:pb-16">
+    <h2 class="text-2xl font-bold sm:text-3xl">Per platform</h2>
+    <div class="mt-8 space-y-8">
+      {platforms.map((p) => (
+        <div id={p.slug} class="border-l-2 border-hairline pl-6">
+          <h3 class="text-lg font-semibold">Multistreaming to {p.name}</h3>
+          <p class="mt-3 max-w-2xl text-pretty leading-relaxed text-muted">{p.body}</p>
+          <p class="mt-3 max-w-2xl text-pretty text-sm leading-relaxed text-subtle">{p.caveat}</p>
+          <a class="mt-3 inline-block text-sm text-primary-bright underline" href={p.href}>{p.hrefLabel}</a>
+        </div>
+      ))}
+    </div>
+  </section>
+</Base>
