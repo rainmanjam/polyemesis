@@ -1445,7 +1445,12 @@ func fbCreateAdvice(err error, what string, scopes []string) error {
 	if !ok || se.Status < 400 || se.Status >= 500 {
 		return advised
 	}
-	ge, ok := decodeGraphError(se.Body)
+	// payload(), never Body. Body is truncated to 300 characters for display and
+	// a realistic Meta refusal is longer, so parsing it fails, `ok` is false,
+	// and this returns WITHOUT the note -- withholding it from the exact
+	// refusal it was written for. This call site arrived on a branch that
+	// forked before the fix in fbAdvice and reintroduced the bug on merge.
+	ge, ok := decodeGraphError(se.payload())
 	if !ok || ge.Code == 190 {
 		return advised
 	}

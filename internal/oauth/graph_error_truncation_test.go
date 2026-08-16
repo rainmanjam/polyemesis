@@ -111,3 +111,27 @@ func TestAnErrorWithNoCapturedBodyFallsBackToTheTruncatedOne(t *testing.T) {
 			"statusError by hand, so a payload() that ignored Body would break them all.", ok, ge.Code)
 	}
 }
+
+// The eligibility note is built on the same decode and inherited the same bug:
+// it was added on a branch that forked before the fix, so the merge reintroduced
+// a truncated parse on a second call site. A realistic refusal is the only
+// fixture that catches it -- the one shipped with the feature was hand-written
+// at 74 bytes, short enough to survive the cut that was the whole problem.
+func TestTheEligibilityNoteReachesARealisticRefusal(t *testing.T) {
+	const realistic = `{"error":{"message":"(#100) Unsupported post request. Object with ID '1234567890' ` +
+		`does not exist, cannot be loaded due to missing permissions, or does not support this ` +
+		`operation. Please read the Graph API documentation at ` +
+		`https://developers.facebook.com/docs/graph-api","type":"OAuthException","code":100,` +
+		`"error_subcode":33,"fbtrace_id":"AbCdEfGhIjKlMnOpQrStUv"}}`
+	if len(realistic) <= 300 {
+		t.Fatalf("fixture is %d bytes and does not exercise truncation", len(realistic))
+	}
+	se := &statusError{Status: 400, URL: "u", Body: snippet([]byte(realistic)), full: realistic}
+
+	got := fbCreateAdvice(se, "create the broadcast", []string{"publish_video"}).Error()
+	if !strings.Contains(got, "60 days") || !strings.Contains(got, "100 followers") {
+		t.Errorf("the eligibility note did not reach a realistic refusal, which is the only "+
+			"kind Meta sends. An operator with a 40-day-old account gets raw truncated JSON "+
+			"and no hint that account age is why.\ngot: %s", got)
+	}
+}
