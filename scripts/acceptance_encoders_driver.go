@@ -540,30 +540,21 @@ func die(f string, a ...any) {
 	os.Exit(1)
 }
 
-// resolveRelayPort returns the relay hub's UDP port, preferring what the shell
-// found and asking the server when the shell found nothing.
-//
-// See acceptance_audio_driver.go for the full account of the cycle this breaks.
-// Uses this file's own session: these drivers keep their own cookie jar.
+// resolveRelayPort: the shell's lsof is a hint, not a precondition. Without a
+// seeded source no relay socket exists until this driver creates one, so an
+// empty value means "ask the server", not "fail". The full account of the cycle
+// is in driverlib.ResolveRelayPort; this file cannot import it, because `go run`
+// resolves module imports against the cwd and these suites run from /tmp.
 func resolveRelayPort(fromShell string) int {
 	if p, err := strconv.Atoi(strings.TrimSpace(fromShell)); err == nil && p > 0 {
 		return p
 	}
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		if st := get("/stats"); st != nil {
-			if relay, ok := st["relay"].(map[string]any); ok {
-				if pf, ok := relay["port"].(float64); ok && pf > 0 {
-					fmt.Printf("relay port discovered from the server: %d\n", int(pf))
-					return int(pf)
-				}
-			}
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+		relay, _ := get("/stats")["relay"].(map[string]any)
+		if pf, ok := relay["port"].(float64); ok && pf > 0 {
+			return int(pf)
 		}
-		if time.Now().After(deadline) {
-			die("no relay port: the shell found none and GET /stats reported none within 30s. " +
-				"A relay exists only while an engine runs, and an engine runs only for a source -- " +
-				"so this usually means the source was never created, not that the port is missing.")
-		}
-		time.Sleep(500 * time.Millisecond)
 	}
+	die("no relay port after 30s; the source was probably never created")
+	return 0
 }

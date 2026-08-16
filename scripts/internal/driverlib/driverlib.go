@@ -280,46 +280,47 @@ func EnsureSource(name string) int64 {
 }
 
 // ResolveRelayPort returns the relay hub's UDP port, preferring what the shell
-// found and discovering it from the server when the shell found nothing.
+// found and asking the server when the shell found nothing.
 //
-// WHY THE SHELL CAN NOW COME UP EMPTY, and why that is not its fault. Each suite
-// reads the port off the running process with lsof BEFORE it starts this driver,
-// and then hands it over as argv. That worked because a seeded source meant an
+// WHY THE SHELL CAN COME UP EMPTY, and why that is not its fault. Each suite
+// reads the port off the running process with lsof BEFORE starting its driver,
+// then hands it over as argv. That worked because a seeded source meant an
 // engine -- and therefore a bound relay socket -- existed before anything asked.
 //
-// #387 removes the seed, and the ordering underneath is circular: the relay
+// #387 removes the seed and the ordering underneath is circular: the relay
 // socket exists only while an engine runs, an engine runs only for a source, and
-// the driver is what creates the source. The shell was requiring, four lines
-// before invoking this, a port that only this could bring into being.
+// the driver is what creates the source. The shell was requiring, moments before
+// invoking the driver, a port only that driver could bring into being.
 //
-// So the shell's lsof becomes a hint rather than a precondition, and the
-// authority moves here, after EnsureSource. GET /stats reports relay.port off
-// the running hub, which is the server's own answer rather than an inference
-// from a socket table -- and it is available the moment the engine is up.
+// IT TAKES THE CALLER'S `get` RATHER THAN USING driverlib's OWN SESSION, which
+// is the whole reason this is one function instead of six. Five of these drivers
+// keep their own cookie jar and are not logged in through driverlib, so the
+// obvious shared helper would have made an unauthenticated request. Inlining a
+// copy per driver was the first answer and it duplicated thirty lines five times
+// -- SonarCloud measured the result at 13.2% duplicated new lines against a 3%
+// gate, which is a fair description of copying a loop five times.
 //
 // Polled rather than read once: an engine that has just been created is still
 // binding, and a single read loses that race about as often as it wins it.
-func ResolveRelayPort(fromShell string) int {
+func ResolveRelayPort(fromShell string, get func(string) map[string]any) (int, error) {
 	if p, err := strconv.Atoi(strings.TrimSpace(fromShell)); err == nil && p > 0 {
-		return p
+		return p, nil
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		var st struct {
-			Relay struct {
-				Port int `json:"port"`
-			} `json:"relay"`
-		}
-		code, out := Do(http.MethodGet, "/stats", nil)
-		if code == http.StatusOK && json.Unmarshal(out, &st) == nil && st.Relay.Port > 0 {
-			fmt.Printf("RELAY_OK %d (discovered)\n", st.Relay.Port)
-			return st.Relay.Port
+		if st := get("/stats"); st != nil {
+			if relay, ok := st["relay"].(map[string]any); ok {
+				if pf, ok := relay["port"].(float64); ok && pf > 0 {
+					fmt.Printf("relay port discovered from the server: %d\n", int(pf))
+					return int(pf), nil
+				}
+			}
 		}
 		if time.Now().After(deadline) {
-			Die("no relay port: the shell found none and GET /stats reported none " +
-				"within 30s. A relay exists only while an engine runs, and an engine " +
-				"runs only for a source -- so this usually means the source was never " +
-				"created, not that the port is missing.")
+			return 0, fmt.Errorf("no relay port: the shell found none and GET /stats reported " +
+				"none within 30s. A relay exists only while an engine runs, and an engine runs " +
+				"only for a source -- so this usually means the source was never created, not " +
+				"that the port is missing")
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
