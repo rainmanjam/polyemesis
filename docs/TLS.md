@@ -12,6 +12,7 @@ interface is the single biggest practical exposure this product has.
 - [Upgrading from `tls.enabled`](#upgrading-from-tlsenabled)
 - [Worked configurations](#worked-configurations)
 - [Trusting the self-signed CA](#trusting-the-self-signed-ca)
+- [Switching to Let's Encrypt](#switching-to-lets-encrypt)
 - [ACME needs port 80](#acme-needs-port-80)
 - [HSTS is opt-in, and here is why](#hsts-is-opt-in-and-here-is-why)
 - [Binding, and the SSH tunnel](#binding-and-the-ssh-tunnel)
@@ -237,6 +238,68 @@ enable it as a trusted root (iOS: *Settings → General → About → Certificat
 Trust Settings*). If that is more than you want to do, use mode `acme`, or reach
 the UI over the [SSH tunnel](#binding-and-the-ssh-tunnel).
 
+## Switching to Let's Encrypt
+
+The awkward part of self-signed mode is not the browser warning. It is not
+knowing that you are one config change from not having it — a box with a real
+domain already pointed at it looks exactly like a box without one.
+
+**Settings → Security** answers that, in three parts and in this order:
+
+1. **What you are on now.** Five situations, one sentence each. A working ACME
+   certificate and a reverse proxy that owns TLS are both *nothing to do here*,
+   and the panel says so rather than nudging a correct install.
+2. **What a trusted certificate would need.** A hostname field, prefilled from
+   `tls.hostname` or, failing that, from the name in your address bar; and a
+   contact address, which is only ever written into the snippet below it.
+3. **What happens if you try.** A **Check this host** button, which is the part
+   most guides leave out.
+
+That third step is worth the button because trying is expensive. A restart into
+`acme` on a box that cannot answer a challenge leaves you with **no certificate
+at all** — the self-signed one you had is not a fallback — and Let's Encrypt
+allows five failed validations per hostname per hour, so the second attempt can
+be an hour away. The checks are `GET /api/v1/tls/acme-preflight`:
+
+| check | what a pass means |
+|---|---|
+| the name | it is the *shape* a public CA can issue for: dotted, not an IP literal, not `.local`/`.internal`/`.lan`/`.home`/`.arpa`/`localhost`. Whether you control it is between you and your registrar |
+| DNS | the name resolves, and to an address this machine holds |
+| port 80 | this process is holding `:80` and answering `/.well-known/acme-challenge/` on it |
+| contact | `tls.acmeEmail` is set. The address itself is never sent back to the browser |
+| last attempt | *acme mode only* — a certificate is in place, or the sentence Let's Encrypt sent the last time it refused |
+
+Each check is `pass`, `fail` or **`unknown`**, and `unknown` is not a soft
+failure. It is the answer where this process cannot see far enough, and only
+`fail` clears `ready`. Two of them are honestly unknowable from inside the box
+and say so instead of guessing:
+
+- **Whether the public internet reaches port 80.** Nothing on this side of the
+  NAT can establish that, and polyemesis does not ask a third party. It tells
+  you to run
+  `curl -sS http://<name>/.well-known/acme-challenge/probe` from another network.
+- **A name that resolves somewhere else.** Behind NAT, a floating IP or a load
+  balancer, the public record correctly points at something that is not an
+  interface on this box. That is indistinguishable from a record left pointing
+  at an old host, so the check reports where the name went and declines to call
+  it either way.
+
+**Nothing here writes anything.** `config.yaml` is `root:polyemesis` mode `0640`
+and this service cannot write it — and giving a service the power to rewrite its
+own transport security is a privilege decision, not a small convenience. It also
+cuts the wrong way for the person who needs this most: an operator on
+`tls.mode: off` is reading this page over plain HTTP, and a form that accepts a
+contact address and reconfigures the server is exactly the wrong thing to offer
+over that connection. Guidance is safe there; a write path is not. So the panel
+prints the YAML and the `systemctl restart` line, and a person with a shell does
+the rest.
+
+The snippet it prints leaves `hsts` **commented out**, unlike
+[worked configuration 1](#1-public-server-with-a-dns-name--the-recommended-deployment)
+above. That example describes a deployment where issuance already works; the
+snippet is handed to someone whose first ACME restart has not happened yet, and
+HSTS has no server-side undo. Turn it on afterwards.
+
 ## ACME needs port 80
 
 Let's Encrypt validates over **HTTP-01**, which means it must reach
@@ -389,7 +452,7 @@ Which status code it sends depends on whether it knows its own name:
 | `tls.hostname` | `GET`/`HEAD` | other methods |
 |---|---|---|
 | set | `301` | `308` |
-| empty | `302`, `Cache-Control: no-store` | `307` |
+| empty | `302` | `307` |
 
 The method split keeps an API client's verb and body across the hop; a `301` is
 allowed to be rewritten to `GET`, a `308` is not.
@@ -398,8 +461,24 @@ The permanent/temporary split is the more important half. With no `hostname`
 configured, the only available redirect target is the client's own `Host`
 header — so caching that permanently would let one request poison the redirect
 for everyone after it. The temporary form is uncacheable and varies on `Host`,
-and the header is checked for authority shape before it reaches `Location`.
-Setting `hostname` removes the guesswork and earns the permanent codes.
+and the header is checked for authority shape before it reaches `Location` (an
+authority that is not letters, digits, dots, hyphens or an IPv6 bracket-and-colon
+form is a `400`, not a redirect). Setting `hostname` removes the guesswork and
+earns the permanent codes.
+
+**`Cache-Control: no-store` and `Vary: Host` are not tied to that table**, and
+this page said they were until the walkthrough in Settings → Security was
+written against it. They are sent in the empty-`hostname` case for the reason
+above, AND in *either* case whenever the redirect could be carrying a
+credential — any request with a query string, or any path under the public
+playout origin or `/watch`. A `Location` reproduces the request URI verbatim,
+a watch token travels in that query string, and a `301` is permanently cacheable
+by definition: without this, an intermediary would hold a URL containing a live
+credential for as long as it liked. So `tls.hostname` set plus a query string is
+a `301` **with** `no-store`, which the old table ruled out. The test is
+deliberately over-broad — any query string, not one spelled `token` — because
+the cost of over-matching is one uncached redirect and the cost of
+under-matching already shipped once.
 
 It is skipped when `addr` is already port 80, and a failure to bind is a warning
 rather than a fatal error — you keep your HTTPS listener and your UI either way.

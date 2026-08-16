@@ -1642,6 +1642,35 @@ export interface TlsStatus {
   caFingerprint: string;
 }
 
+/** The prerequisites for a Let's Encrypt certificate, checked against this
+ *  host. See internal/api/acme_preflight.go. */
+export type AcmeCheckId = "name" | "dns" | "port80" | "email" | "issuance";
+
+/** `unknown` is not a soft failure. It is the answer where this server cannot
+ *  see far enough — whether the public internet reaches port 80, whether a
+ *  record pointing off-box is NAT or a mistake — and it must not read as a
+ *  fault, because the operator has no way to clear it from inside the box. */
+export type AcmeCheckStatus = "pass" | "fail" | "unknown";
+
+export interface AcmeCheck {
+  id: AcmeCheckId;
+  status: AcmeCheckStatus;
+  /** English prose from the server, like `TlsStatus.certificateError`: it names
+   *  config keys, systemd directives and paths, and is what an operator pastes
+   *  into a search. The UI translates the label, not this. */
+  detail: string;
+}
+
+export interface AcmePreflight {
+  /** The name the checks ran against. */
+  hostname: string;
+  mode: TlsMode;
+  /** Nothing the server can see would stop issuance. Not a promise that it
+   *  will succeed — see AcmeCheckStatus. */
+  ready: boolean;
+  checks: AcmeCheck[];
+}
+
 export type EventType =
   | "status"
   | "levels"

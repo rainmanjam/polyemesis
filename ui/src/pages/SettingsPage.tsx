@@ -55,12 +55,23 @@ import {
   tierInfo,
 } from "@/lib/capabilities";
 import { api } from "@/lib/api";
+import {
+  acmeStance,
+  acmeYaml,
+  offersPreflight,
+  suggestedHostname,
+  RESTART_COMMAND,
+  type AcmeStance,
+} from "@/lib/acme-guidance";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
 import { LIMITS } from "@/lib/limits";
 import { PULL_SCHEMES, RTSP_TRANSPORTS } from "@/lib/types";
 import type {
+  AcmeCheckId,
+  AcmeCheckStatus,
+  AcmePreflight,
   ApiToken,
   TokenScope,
   CertInfo,
@@ -2125,6 +2136,173 @@ function tlsYaml(tls: TlsStatus): string {
   }
 }
 
+/* ------------------------------------------------- the Let's Encrypt walkthrough */
+
+/** Tone for a preflight verdict. `unknown` is `warn`, never `down`: the server
+ *  says unknown exactly where it cannot see far enough — whether the public
+ *  internet reaches port 80, whether a record pointing off-box is NAT or a
+ *  mistake — and colouring that red would report a correct deployment as
+ *  broken while giving the operator nothing to fix. */
+const acmeCheckTone: Record<AcmeCheckStatus, SignalTone> = {
+  pass: "live",
+  fail: "down",
+  unknown: "warn",
+};
+
+/** The label is the UI's; the detail underneath it is the server's own English,
+ *  like `certificateError` above — those sentences name config keys, systemd
+ *  directives and paths, and are what an operator pastes into a search. */
+const acmeCheckLabel: Record<AcmeCheckId, TranslationKey> = {
+  name: "set.acmeCheckName",
+  dns: "set.acmeCheckDns",
+  port80: "set.acmeCheckPort80",
+  email: "set.acmeCheckEmail",
+  issuance: "set.acmeCheckIssuance",
+};
+
+/** Which of the five situations this operator is in, said in one sentence.
+ *  Getting this wrong in either direction is the expensive mistake: telling a
+ *  working reverse-proxy deployment to fix its TLS, or telling someone on a
+ *  self-signed certificate with a real domain that there is nothing to do. */
+const acmeStanceCopy: Record<AcmeStance, TranslationKey> = {
+  trusted: "set.acmeTrusted",
+  issuing: "set.acmeIssuing",
+  "own-cert": "set.acmeOwnCert",
+  proxy: "set.acmeProxy",
+  switchable: "set.acmeSwitchable",
+};
+
+/** Walks an operator from the certificate they have to one browsers trust.
+ *
+ *  IT WRITES NOTHING, and that is a decision rather than a missing feature.
+ *  config.yaml is root-owned and this service cannot write it; the power to
+ *  rewrite its own transport security is a privilege question, not a small
+ *  convenience. The operator who needs this panel most is also reaching it over
+ *  plain HTTP — self-signed certificates and `tls.mode: off` are exactly the
+ *  states it exists for — and a form that takes a contact address and
+ *  reconfigures the server is the wrong thing to offer over that connection.
+ *  Guidance is safe to show over HTTP. So: it says what to write, checks
+ *  whether it would work first, and leaves the writing to a person with a
+ *  shell. */
+function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
+  const t = useT();
+  const stance = acmeStance(tls);
+  // The address bar is the fallback source of the name, and only the browser
+  // knows it — which keeps the server from having to trust a Host header for
+  // something it will make a DNS query about.
+  const [hostname, setHostname] = useState(() =>
+    suggestedHostname(tls, window.location.hostname),
+  );
+  const [email, setEmail] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<AcmePreflight | null>(null);
+  const [checkError, setCheckError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const snippet = result ? `${acmeYaml(result.hostname, email)}\n\n# ${RESTART_COMMAND}` : "";
+
+  const run = async () => {
+    setChecking(true);
+    setCheckError("");
+    try {
+      setResult(await api.acmePreflight(hostname));
+    } catch (err) {
+      setResult(null);
+      setCheckError(err instanceof Error ? err.message : t("set.acmeFailed"));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const copySnippet = async () => {
+    await navigator.clipboard.writeText(snippet);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-border pt-2">
+      <span className="text-[11px] text-muted-foreground">{t("set.acmeTitle")}</span>
+      <p className="text-[10px] text-muted-foreground">{t(acmeStanceCopy[stance])}</p>
+
+      {offersPreflight(stance) && (
+        <>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="acme-host" className="text-[10px]">
+              {t("set.acmeHostname")}
+            </Label>
+            <Input
+              id="acme-host"
+              className="h-7 font-mono text-[11px]"
+              placeholder="stream.example.com"
+              value={hostname}
+              onChange={(e) => setHostname(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="acme-email" className="text-[10px]">
+              {t("set.acmeEmailLabel")}
+            </Label>
+            {/* Never sent to this server: it only ever appears in the YAML
+                below, which the operator copies into a file by hand. */}
+            <Input
+              id="acme-email"
+              type="email"
+              className="h-7 font-mono text-[11px]"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <p className="text-[10px] text-muted-foreground">{t("set.acmeEmailHint")}</p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-fit"
+            onClick={run}
+            disabled={checking || !hostname.trim()}
+          >
+            {checking ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
+            {checking ? t("set.acmeRunning") : t("set.acmeRun")}
+          </Button>
+
+          {checkError && <p className="text-[10px] text-down">{checkError}</p>}
+
+          {result && (
+            <>
+              <p className={`text-[10px] ${result.ready ? toneText.live : toneText.down}`}>
+                {result.ready ? t("set.acmeReady") : t("set.acmeBlocked")}
+              </p>
+              <ul className="flex flex-col gap-1.5">
+                {result.checks.map((c) => (
+                  <li key={c.id} className="flex flex-col">
+                    <span className={`text-[10px] font-medium ${toneText[acmeCheckTone[c.status]]}`}>
+                      {t(acmeCheckLabel[c.id])}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">{c.detail}</span>
+                  </li>
+                ))}
+              </ul>
+              {/* Said before the snippet, not after it: a failed order costs an
+                  hour, and the operator reads downward. */}
+              <p className="text-[10px] text-warn">{t("set.acmeRateLimit")}</p>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-muted-foreground">{t("set.acmeThen")}</span>
+                <Button size="sm" variant="ghost" onClick={copySnippet}>
+                  {copied ? <Check /> : <Copy />} {t("set.copy")}
+                </Button>
+              </div>
+              <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-[10px] text-muted-foreground">
+                {snippet}
+              </pre>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function TransportSecurity({ system }: { system: SystemInfo | null }) {
   const t = useT();
   const [tls, setTls] = useState<TlsStatus | null>(null);
@@ -2267,6 +2445,8 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
                 </p>
               </div>
             )}
+
+            <LetsEncryptWalkthrough tls={tls} />
 
             <div className="flex items-center justify-between border-t border-border pt-2">
               <span className="text-[11px] text-muted-foreground">config.yaml</span>

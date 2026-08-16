@@ -2,10 +2,10 @@ package db
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 /* ===========================================================================
@@ -40,59 +40,13 @@ import (
 
    =========================================================================== */
 
-// stripJSComments blanks out comments so a marker left behind in one cannot
-// satisfy a guard that is asking whether a control renders. That is not
-// hypothetical: the honest way to keep a substring guard green while deleting
-// the thing it watches is to leave the words in a comment, and this branch's
-// own audit records that temptation being declined by hand rather than by a
-// guard.
-//
-// Block comments (`/* */`, and the `{/* */}` JSX form, which is a block comment
-// inside an expression container) are removed outright. Line comments are
-// removed only when nothing before the `//` on that line is quoted, so
-// a URL in a string literal or a template literal is left alone rather than
-// truncated at the scheme separator.
-//
-// Newlines are preserved so a line number quoted in a failure still means
-// something to whoever goes to look.
-func stripJSComments(src string) string {
-	var b strings.Builder
-	b.Grow(len(src))
-	for i := 0; i < len(src); {
-		if strings.HasPrefix(src[i:], "/*") {
-			end := strings.Index(src[i+2:], "*/")
-			if end < 0 {
-				break // unterminated; the rest is comment
-			}
-			for _, r := range src[i : i+2+end+2] {
-				if r == '\n' {
-					b.WriteByte('\n')
-				}
-			}
-			i += 2 + end + 2
-			continue
-		}
-		if strings.HasPrefix(src[i:], "//") && !quotedBefore(src, i) {
-			end := strings.IndexByte(src[i:], '\n')
-			if end < 0 {
-				break
-			}
-			i += end // leave the newline for the next iteration
-			continue
-		}
-		b.WriteByte(src[i])
-		i++
-	}
-	return b.String()
-}
-
-// quotedBefore reports whether a quote character appears between the start of
-// the line containing i and i itself -- the cheap test for "this `//` is inside
-// a string literal or JSX attribute rather than starting a comment".
-func quotedBefore(src string, i int) bool {
-	start := strings.LastIndexByte(src[:i], '\n') + 1
-	return strings.ContainsAny(src[start:i], "\"'`")
-}
+// READING THE SOURCE AND BLANKING ITS COMMENTS both live in internal/testenv
+// now -- testenv.ReadUI and testenv.StripJSComments, #379. They were written
+// here, and they were the only copy, which is why the guards in internal/oauth
+// spent their whole life defeatable by a comment: the alternative to importing
+// them was pasting forty lines into a second package. The reasoning that used to
+// sit here in full is in internal/testenv/uisource.go, next to the code, so
+// there is one place to read it and one place to change it.
 
 // jsxBlockUnder returns the source of the subtree a JSX conditional renders,
 // given the WHOLE head of that conditional including its opening paren -- e.g.
@@ -113,7 +67,7 @@ func jsxBlockUnder(t *testing.T, src, head, file string) string {
 		t.Fatalf("guard bug: %q is not a whole conditional head; it must end with the "+
 			"opening paren so the block can be bounded", head)
 	}
-	stripped := stripJSComments(src)
+	stripped := testenv.StripJSComments(src)
 	switch n := strings.Count(stripped, head); {
 	case n == 0:
 		t.Fatalf("%s no longer contains %s\n\n"+
@@ -145,17 +99,6 @@ func jsxBlockUnder(t *testing.T, src, head, file string) string {
 	return ""
 }
 
-// readUI reads a file under ui/src, from internal/db.
-func readUI(t *testing.T, parts ...string) string {
-	t.Helper()
-	path := filepath.Join(append([]string{"..", "..", "ui", "src"}, parts...)...)
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("cannot read %s: %v", path, err)
-	}
-	return string(raw)
-}
-
 // The head of the Facebook create-time settings block. Everything the crosspost
 // list, the donate field and the backup toggle need is inside it, so all three
 // guards below bound themselves the same way.
@@ -176,7 +119,7 @@ const facebookBlockHead = `{platform === "facebook" && (`
 // searched the whole file for "Crosspost to Pages" and `id="dest-fb-donate"`,
 // both of which survive that mutation untouched, and stayed green.
 func TestFacebookCrosspostAndDonateAreOfferedByTheDestinationEditor(t *testing.T) {
-	src := readUI(t, "components", "DestinationDialog.tsx")
+	src := testenv.ReadUI(t, "components", "DestinationDialog.tsx")
 	block := jsxBlockUnder(t, src, facebookBlockHead, "DestinationDialog.tsx")
 
 	// The key, not the English. Where the WORDS live is a separate question,
@@ -212,7 +155,7 @@ func TestFacebookCrosspostAndDonateAreOfferedByTheDestinationEditor(t *testing.T
 //
 // This one was already bounded to the right span and is left as it was.
 func TestDestinationDialogSavePayloadCarriesTheFacebookBlock(t *testing.T) {
-	src := readUI(t, "components", "DestinationDialog.tsx")
+	src := testenv.ReadUI(t, "components", "DestinationDialog.tsx")
 
 	marker := "const payload: Partial<Destination> = {"
 	start := strings.Index(src, marker)
@@ -246,7 +189,7 @@ func TestDestinationDialogSavePayloadCarriesTheFacebookBlock(t *testing.T) {
 // whole card for the href template and stayed green through it, because the
 // href is still written inside the block that no longer renders.
 func TestTheCardLinksToTheScheduledBroadcast(t *testing.T) {
-	src := readUI(t, "components", "DestinationCard.tsx")
+	src := testenv.ReadUI(t, "components", "DestinationCard.tsx")
 	block := jsxBlockUnder(t, src, "{dest.facebookBroadcastId && (", "DestinationCard.tsx")
 
 	if !strings.Contains(block, "facebook.com/${dest.facebookBroadcastId}") {
@@ -285,7 +228,7 @@ func TestTheCardLinksToTheScheduledBroadcast(t *testing.T) {
 // regression -- a backup that died while the primary was offline is exactly the
 // case the operator needs to see.
 func TestTheCardShowsTheBackupFeedsState(t *testing.T) {
-	src := readUI(t, "components", "DestinationCard.tsx")
+	src := testenv.ReadUI(t, "components", "DestinationCard.tsx")
 
 	state := jsxBlockUnder(t, src, "{dest.backupProcess && (", "DestinationCard.tsx")
 	if !strings.Contains(state, "dest.backupProcess.state") {
@@ -312,7 +255,7 @@ func TestTheCardShowsTheBackupFeedsState(t *testing.T) {
 // destination beside the endpoint it gates, and a guard still spelling the old
 // shape would be a guard requiring the defect.
 func TestTheDialogOffersTheBackupIngestToggle(t *testing.T) {
-	src := readUI(t, "components", "DestinationDialog.tsx")
+	src := testenv.ReadUI(t, "components", "DestinationDialog.tsx")
 	block := jsxBlockUnder(t, src, facebookBlockHead, "DestinationDialog.tsx")
 
 	if !strings.Contains(block, "setBackupIngestWanted(e.target.checked)") {
@@ -362,7 +305,7 @@ func TestTheDialogOffersTheBackupIngestToggle(t *testing.T) {
 // twice the upload, and will find out during a broadcast.
 func TestTheFacebookCopyLivesInTheCatalogue(t *testing.T) {
 	var en map[string]string
-	if err := json.Unmarshal([]byte(readUI(t, "lib", "i18n", "en.json")), &en); err != nil {
+	if err := json.Unmarshal([]byte(testenv.ReadUI(t, "lib", "i18n", "en.json")), &en); err != nil {
 		t.Fatalf("en.json is not a flat string map: %v", err)
 	}
 

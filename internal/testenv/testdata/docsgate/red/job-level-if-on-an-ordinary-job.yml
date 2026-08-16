@@ -1,0 +1,19 @@
+# FLAGGED EVEN THOUGH IT WORKS TODAY, and that is the point of the rule being
+# flat. A skipped ordinary job reports `skipped` and branch protection accepts
+# it, so this file is correct right now. It becomes the file above the moment
+# somebody adds a `strategy:` block while thinking about Go versions rather than
+# about branch protection.
+name: red - job-level if on an ordinary job
+on: pull_request
+jobs:
+  build:
+    name: build
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        if: needs.changes.outputs.code == 'true'
+      - name: build
+        if: needs.changes.outputs.code == 'true'
+        run: make

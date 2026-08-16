@@ -1,4 +1,5 @@
 import type {
+  AcmePreflight,
   ApiToken,
   TokenScope,
   AutomodMatrixView,
@@ -365,6 +366,12 @@ export const api = {
    *  sessionless on the server so a user blocked by an untrusted certificate
    *  can still fetch the CA that unblocks them. 404s outside selfsigned mode. */
   caDownloadUrl: () => `${BASE}/tls/ca`,
+  /** What Let's Encrypt would need from this host, before the restart that
+   *  would otherwise be the way to find out. The hostname is sent rather than
+   *  inferred from the request: an operator on `tls.mode: off` has none
+   *  configured, and the browser already knows which name was typed. */
+  acmePreflight: (hostname: string) =>
+    get<AcmePreflight>(`/tls/acme-preflight?hostname=${encodeURIComponent(hostname)}`),
 
   // --- destinations ---
   listDestinations: () => get<DestinationWithRouting[]>("/destinations"),
