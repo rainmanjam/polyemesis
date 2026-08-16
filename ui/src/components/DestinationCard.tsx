@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { Link } from "react-router";
 import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
+  CircleStop,
   Info,
   KeyRound,
   MoreVertical,
@@ -23,11 +25,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusDot } from "@/components/signature/StatusDot";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { ExperimentalBadge } from "@/components/Experimental";
+import { FacebookStreamHealthPanel } from "@/components/FacebookStreamHealth";
+import { useFacebookStreamHealth } from "@/hooks/useFacebookStreamHealth";
 import { TrackSummary } from "@/components/signature/TrackRows";
 import { Stat } from "@/components/signature/Stat";
 import { duration, kbps } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
+import { reportingStreamCount } from "@/lib/stream-health";
 import type { DestStatus } from "@/lib/types";
 import { useT, useStateLabel } from "@/lib/i18n";
 
@@ -35,6 +41,11 @@ const PLATFORM_LABEL: Record<string, string> = {
   youtube: "YouTube",
   twitch: "Twitch",
   kick: "Kick",
+  // Facebook was missing, so a Facebook destination's subtitle read a bare
+  // lowercase "facebook" beside four properly capitalised siblings — the
+  // fallback firing where a label belongs, exactly the failure the i18n drift
+  // guard exists to catch one layer up.
+  facebook: "Facebook",
   custom: "Custom",
 };
 
@@ -54,6 +65,7 @@ export function DestinationCard({
   onEdit,
   onDelete,
   onRefreshKey,
+  onEndBroadcast,
   onMoveEarlier,
   onMoveLater,
   canMoveEarlier,
@@ -67,6 +79,10 @@ export function DestinationCard({
   onEdit: () => void;
   onDelete: () => void;
   onRefreshKey: () => void;
+  /** Ends the platform-side broadcast. Optional because only Facebook has one
+   *  to end, and a card for a destination that cannot do this is given no
+   *  handler rather than a handler it must remember not to call. */
+  onEndBroadcast?: () => void | Promise<void>;
   onMoveEarlier: () => void;
   onMoveLater: () => void;
   canMoveEarlier: boolean;
@@ -80,6 +96,53 @@ export function DestinationCard({
   const running = state === "running";
   const progress = dest.process?.progress;
   const warnings = dest.warnings ?? [];
+
+  /* --- Facebook broadcast lifecycle -------------------------------------
+   *
+   *  GATED ON PLATFORM SELECTION, NOT DISABLED, which is the rule this file's
+   *  kebab already follows one item up: "Refresh stream key" is HIDDEN for
+   *  custom and kick rather than greyed out, because a control that cannot do
+   *  anything is not made better by being visible and dead. Same here, plus
+   *  the id: without a live video there is no broadcast to end and nothing to
+   *  read health from, so the pair appears exactly when both are true. */
+  const isFacebook = dest.platform === "facebook";
+  const liveVideoId = dest.facebookBroadcastId;
+  const hasFacebookBroadcast = isFacebook && !!liveVideoId;
+  const canEndBroadcast = hasFacebookBroadcast && !!onEndBroadcast;
+
+  const [endOpen, setEndOpen] = useState(false);
+
+  // One poll per Facebook card with a broadcast, and the card owns it so the
+  // pane and the confirmation read the same reading rather than asking twice.
+  const health = useFacebookStreamHealth(dest.id, hasFacebookBroadcast);
+
+  /* The consequences panel, and every row in it is a number that was actually
+   * measured. THIS IS RULE ONE APPLIED TO A DIALOG: the pane below refuses to
+   * render an unreported bitrate as 0, and a confirmation that says
+   * "Minutes on air 0" over a stream that has been up for forty seconds is the
+   * same false report with a bigger button under it.
+   *
+   * So each row is conditional on knowing its number, and a dialog with no
+   * rows draws no panel at all — ConfirmDestructive already guards on length. */
+  const uptimeSec = running ? (dest.process?.uptimeSec ?? 0) : 0;
+  const streamCount =
+    health.kind === "ok" ? reportingStreamCount(health.streams) : 0;
+  const consequences: { label: string; count: number }[] = [];
+  // Below a minute this row is ABSENT rather than zero. `Math.floor(40/60)` is
+  // 0, and 0 in a panel headed "What this ends" says the broadcast has not
+  // started — which is exactly wrong at the moment somebody is ending it.
+  if (uptimeSec >= 60) {
+    consequences.push({
+      label: t("dash.minutesOnAir"),
+      count: Math.floor(uptimeSec / 60),
+    });
+  }
+  // Only when Facebook is describing at least one. A "0" here reads as "this
+  // does nothing", and that is false: the broadcast node still goes to VOD
+  // whether or not an ingest stream is currently attached to it.
+  if (streamCount > 0) {
+    consequences.push({ label: t("dash.ingestStreamsEnding"), count: streamCount });
+  }
 
   // No rendition id is passthrough. The id is checked rather than the name so a
   // status snapshot that arrives without one cannot make a re-encoded
@@ -137,6 +200,18 @@ export function DestinationCard({
                   <DropdownMenuItem onSelect={onRefreshKey}>
                     <RefreshCw /> Refresh stream key
                   </DropdownMenuItem>
+                )}
+                {/* Below the separator, with Delete, because this reaches the
+                    platform and the rest of this menu does not. Everything
+                    above changes what polyemesis sends; this ends a public
+                    broadcast that other people are watching. */}
+                {canEndBroadcast && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem destructive onSelect={() => setEndOpen(true)}>
+                      <CircleStop /> {t("dash.endBroadcast")}
+                    </DropdownMenuItem>
+                  </>
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem destructive onSelect={onDelete}>
@@ -323,6 +398,13 @@ export function DestinationCard({
           </a>
         )}
 
+        {/* Facebook's own view of the ingest, under the link to the artefact it
+            describes. Rendered only for Facebook, for the reason set out at the
+            top of that file: Twitch publishes no bitrate or frame rate at all,
+            so a pane on its card would be a control that cannot do anything and
+            an implication that Twitch is failing to answer. */}
+        {hasFacebookBroadcast && <FacebookStreamHealthPanel state={health} />}
+
         {/* --- the one action that matters, plus display order --- */}
         <div className="flex gap-1.5">
           {dest.enabled ? (
@@ -356,6 +438,76 @@ export function DestinationCard({
             <ChevronDown />
           </Button>
         </div>
+
+        {/* =================================================================
+            ENDING A BROADCAST: WHY THIS DOES NOT SET requireTyping.
+
+            requireTyping is reserved for things that do not come back, and
+            nothing in this tree has ever set it for a non-deletion. Ending a
+            live broadcast has an obvious claim on being the first — it is
+            public, it is irreversible in the sense that the moment does not
+            return, and it disconnects everyone currently watching. The claim
+            was taken seriously and rejected, for two reasons that both point
+            the same way.
+
+            ONE. ON FACEBOOK, ENDING IS A TRANSITION AND NOT A DELETION. Meta's
+            Broadcasting guide, verbatim: "This ends your broadcast and saves
+            it as a video on demand (VOD)." Nothing is destroyed. The link four
+            blocks above this one keeps resolving, to the same id, now playing
+            the recording. Every other requireTyping call site in this tree
+            takes something away that no longer exists afterwards — a
+            recording, an upload, a source, a clip, a settings reset. This one
+            leaves the artefact on the platform and changes its state. Typing
+            a destination's name to confirm a state change would say those two
+            things are the same weight, and the next time an operator meets a
+            real one they will type through it.
+
+            TWO, AND DECISIVE. THE SAME OUTCOME IS ALREADY ONE UNCONFIRMED
+            CLICK AWAY, ON THIS CARD. Facebook documents two ways to end a
+            broadcast, and the other one is the absence of bytes: "To end a
+            broadcast, stop streaming live video data from your encoder to the
+            stream URL or send a request to POST
+            /<LIVE_VIDEO_ID>?end_live_video=true." The Stop button directly
+            above ends this destination's encoder, and after Facebook's own
+            four-second timeout the show is over exactly as much as it is via
+            this menu item. Putting a typed challenge on the API path while the
+            identical consequence sits behind a plain button in the same
+            component does not add a control — it adds a ritual, and a ritual
+            that guards nothing is precisely how ConfirmDestructive's own note
+            says a control decays into a reflex.
+
+            SO THE FRICTION IS THE DIALOG AND THE NUMBERS, WHICH IS THE PART
+            THAT ACTUALLY HELPS. What goes wrong here is not "I did not mean to
+            end a broadcast", it is "I ended the WRONG destination's broadcast"
+            — and the fix for that is showing which one, with how long it has
+            been on air and how many ingest streams stop, on the card the
+            operator clicked. Confirming a number is a decision. Every number
+            in that panel is measured or absent; none is a zero standing in for
+            something we did not ask.
+
+            IF THIS EVER STOPS BEING TRUE, REVISIT IT. The argument leans on
+            two facts, both of them Facebook's: that the end produces a VOD
+            rather than a deletion, and that stopping the encoder ends the show
+            anyway. A platform where ending destroys the artefact, or where
+            only the API can do it, is a different decision and should get one.
+            ================================================================= */}
+        {canEndBroadcast && (
+          <ConfirmDestructive
+            open={endOpen}
+            onOpenChange={setEndOpen}
+            subject={dest.name}
+            title={t("dash.endBroadcastTitle", { name: dest.name })}
+            description={t("dash.endBroadcastDescription")}
+            consequences={consequences}
+            // Not "This also removes": ending removes nothing. See the prop's
+            // own comment in ConfirmDestructive.tsx.
+            consequencesLabel={t("dash.endBroadcastEnds")}
+            confirmLabel={t("dash.endBroadcast")}
+            onConfirm={async () => {
+              await onEndBroadcast?.();
+            }}
+          />
+        )}
       </CardContent>
     </Card>
   );

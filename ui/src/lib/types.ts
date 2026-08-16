@@ -688,6 +688,97 @@ export interface Divergence {
   detail: string;
 }
 
+/* ---------------------------------------------------------------- Facebook
+ *  broadcast lifecycle: ending one, and what its ingest looks like.
+ *
+ *  THESE LIVE HERE AND NOT IN DestinationCard.tsx for the reason MetaField
+ *  above does: a server response names these fields, so their spelling is an
+ *  API contract rather than a component detail, and a component that owns a
+ *  contract is one nothing else can be checked against.
+ *
+ *  Mirrors internal/oauth/facebook.go — BroadcastEnd at :831 and
+ *  IngestStreamHealth at :941. Read that file before changing anything here;
+ *  every awkward-looking choice below is copied from a decision made there for
+ *  a stated reason.
+ */
+
+/** What Facebook said after being asked to end a live video.
+ *
+ *  Mirrors oauth.BroadcastEnd. `ended` is true ONLY when Facebook read the
+ *  status back as VOD. A `false` with no error is an ordinary outcome and NOT
+ *  a failure — the POST succeeded and Facebook has not settled the node yet —
+ *  so a renderer must not report it as "the broadcast is still live". */
+export interface BroadcastEnd {
+  /** The status Facebook reported on the read-back. Absent means the read-back
+   *  failed or carried none, which is NOT the same as "still live". */
+  status?: string;
+  ended: boolean;
+  /** What was actually seen when `ended` is false. Same shape metadata pushes
+   *  use, so a caller renders them the same way. */
+  warnings?: string[] | null;
+}
+
+/** One ingest stream's health, as Facebook reports it.
+ *
+ *  Mirrors oauth.IngestStreamHealth.
+ *
+ *  `health` IS A BAG OF FACEBOOK'S OWN FIELD NAMES, NOT NAMED FIELDS, and that
+ *  is deliberate all the way down from the Go side: the LiveVideo node
+ *  reference that would settle the spellings 404s, so the evidence establishes
+ *  that stream_health carries bitrates and frame rates without naming the keys.
+ *  A `bitrateKbps?: number` here would be a guess at a spelling, and a wrong
+ *  guess reads back as `undefined` on a HEALTHY stream — a health pane with a
+ *  permanently blank "Bitrate" row, on a broadcast that is fine, is the same
+ *  false-report failure as rendering 0.
+ *
+ *  So a measurement that is absent is an ABSENT KEY. Never a zero, and never a
+ *  row this file declared in advance and then could not fill. */
+export interface IngestStreamHealth {
+  id: string;
+  health?: Record<string, number> | null;
+  /** stream_health fields that were not numbers, sorted. Recorded rather than
+   *  dropped because a field polyemesis cannot read looks exactly like a field
+   *  Facebook did not send, and one of those is a bug on this side. */
+  unparsed?: string[] | null;
+}
+
+/** The stream-health read for one destination.
+ *
+ *  `supported` is separate from an empty `streams` because they are different
+ *  answers: false is "this platform publishes no stream health at all", while
+ *  true with nothing in it is "Facebook publishes it and currently has no
+ *  ingest to describe" — a scheduled broadcast, an ended one, or a live one
+ *  inside Facebook's own four-second timeout. Collapsing the two would make
+ *  the pause between clicking Go Live and the first byte look like a refusal.
+ *
+ *  Same arrangement internal/api already answers viewer stats with: 200 and
+ *  supported:false, because "we cannot ask" and "the account is gone" are
+ *  different problems with different fixes. */
+export interface StreamHealthView {
+  supported: boolean;
+  streams?: IngestStreamHealth[] | null;
+}
+
+/** The floor on how often stream health may be polled, in milliseconds.
+ *
+ *  FACEBOOK'S NUMBER, NOT AN ESTIMATE OF ONE. Meta's Broadcasting guide, read
+ *  2026-08-16, verbatim:
+ *
+ *    "Stream health data refreshes every 2 seconds, so limit queries to no
+ *     more than once every 2 seconds. A stream timeout will be detected and
+ *     reported after 4 seconds of no data being received."
+ *
+ *  A published floor may be encoded; an unpublished one may not. Mirrors
+ *  oauth.FacebookStreamHealthInterval, which carries the same quote. */
+export const FACEBOOK_STREAM_HEALTH_INTERVAL_MS = 2000;
+
+/** How long Facebook itself waits before reporting a stream as timed out —
+ *  the second sentence of the quote above. It is here so that a pane deciding
+ *  "how long may this stay empty before the encoder is gone" reads Facebook's
+ *  four seconds instead of inventing a number. Mirrors
+ *  oauth.FacebookStreamTimeout. */
+export const FACEBOOK_STREAM_TIMEOUT_MS = 4000;
+
 /** One shared video encode's live state.
  *
  *  `consumers` is the ref count the engine acted on. A rendition with none has
