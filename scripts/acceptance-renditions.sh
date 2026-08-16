@@ -87,7 +87,17 @@ RELAY=$(lsof -nP -iUDP -a -p "$SRVPID" 2>/dev/null | awk '/UDP 127.0.0.1/{split(
 # --------------------------------------------------------------- 2. the app
 step "2. Setup, rendition and destinations (via the API the UI uses)"
 FACTS="$WORK/facts.env"
-go run "$SCRIPTS/acceptance_renditions_driver.go" "$PORT" "$RELAY" "$FACTS" 2>&1 | sed 's/^/  /'
+# driverhelpers.go IS NAMED HERE ON PURPOSE. waitUp/grabCSRF/call/get moved
+# there, and `go run` compiles a list of .go files from one directory as a
+# single package -- which is what lets these drivers share code from a
+# working directory that is inside no module.
+#
+# NO `--` SEPARATOR. It is tempting, and it is wrong: `go run` stops reading
+# source files at it but hands it to the program anyway, so the driver would
+# read "--" as its first argument and dial http://127.0.0.1:--. It is not
+# needed either -- only LEADING consecutive .go arguments are compiled, and
+# the first argument here is always a port number.
+go run "$SCRIPTS/acceptance_renditions_driver.go" "$SCRIPTS/driverhelpers.go" "$PORT" "$RELAY" "$FACTS" 2>&1 | sed 's/^/  /'
 
 [ -s "$FACTS" ] || { bad "driver wrote no facts"; step "Summary"; printf "  %d passed, %d failed\n\n" "$pass" "$fail"; exit 1; }
 # shellcheck disable=SC1090

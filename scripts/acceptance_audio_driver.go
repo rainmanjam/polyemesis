@@ -37,10 +37,7 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
@@ -78,6 +75,8 @@ const stereo = "aformat=channel_layouts=stereo"
 // to be able to hear that same track.
 const loudnessGain = 0.1
 
+// waitUp, grabCSRF, call and get live in driverhelpers.go, compiled in by
+// naming it on the `go run` line. See that file for why it is not a package.
 func main() {
 	if len(os.Args) < 3 {
 		die("usage: acceptance_audio_driver.go <http-port> <relay-port>")
@@ -317,67 +316,6 @@ func dest(name, kind, url string, prof map[string]any) map[string]any {
 		"name": name, "kind": kind, "platform": "custom", "url": url,
 		"enabled": true, "audioBitrate": 160, "profile": prof,
 	}
-}
-
-func waitUp() {
-	for i := 0; i < 60; i++ {
-		if r, err := client.Get(base + "/health"); err == nil {
-			r.Body.Close()
-			return
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-	die("server never came up")
-}
-
-func grabCSRF() {
-	req, _ := http.NewRequest("GET", base+"/health", nil)
-	for _, c := range client.Jar.Cookies(req.URL) {
-		if c.Name == "polyemesis_csrf" {
-			csrf = c.Value
-		}
-	}
-	if csrf == "" {
-		die("no CSRF cookie issued")
-	}
-}
-
-func call(method, path string, body any) map[string]any {
-	var r io.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
-		r = bytes.NewReader(b)
-	}
-	req, _ := http.NewRequest(method, base+path, r)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CSRF-Token", csrf)
-	resp, err := client.Do(req)
-	if err != nil {
-		die("%s %s: %v", method, path, err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		die("%s %s -> %d: %s", method, path, resp.StatusCode, raw)
-	}
-	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
-	return out
-}
-
-func get(path string) map[string]any {
-	resp, err := client.Get(base + path)
-	if err != nil {
-		die("GET %s: %v", path, err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		die("GET %s -> %d: %s", path, resp.StatusCode, raw)
-	}
-	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
-	return out
 }
 
 func die(f string, a ...any) {
