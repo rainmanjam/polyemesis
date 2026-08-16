@@ -24,6 +24,20 @@ import "testing"
 // This test is the join nobody wrote. It is deliberately a biconditional: the
 // method and the cell are two spellings of one fact, and either without the
 // other is a bug rather than a state worth allowing.
+//
+// ITS BLIND SPOT, RECORDED THE DAY IT APPEARED. The biconditional assumes there
+// is ONE way to report a viewer count -- a Provider implementing LiveStatter,
+// resolved by StatsFor. That was true when this was written and stopped being
+// true hours later: Rumble's count arrives on the chat poller instead, because
+// Rumble has no OAuth provider at all. So a platform can genuinely show an
+// operator a live viewer count while StatsFor(p) is false forever.
+//
+// Rumble's cell is therefore NOT SupportYes today, and that is a deliberate
+// conservative choice rather than a verdict this test reached: the /stats route
+// really does answer supported:false for it, so a Yes here would be true of the
+// chat pane and false of the API in the same breath. The fix, when somebody
+// wants that cell to read Works, is to decide which surface the matrix is
+// describing -- and then widen this test rather than route around it.
 func TestTheViewerStatsCellAgreesWithWhichProvidersActuallyImplementStats(t *testing.T) {
 	for _, row := range PlatformCapabilities() {
 		row := row
@@ -39,11 +53,20 @@ func TestTheViewerStatsCellAgreesWithWhichProvidersActuallyImplementStats(t *tes
 					"Set the cell to SupportYes and mirror it into the other three files.",
 					row.PresetID, row.Caps[CapViewerStats])
 			case claimed && !implemented:
-				t.Errorf("%s claims viewerStats works, but its provider has no Stats method "+
-					"satisfying LiveStatter.\n"+
-					"internal/api/oauth_handlers.go resolves this through StatsFor, so it will answer "+
-					"supported:false to an operator the matrix told to expect a viewer count. "+
-					"Either implement Stats or take the claim back.",
+				t.Errorf("%s claims viewerStats works, but no PROVIDER implements Stats.\n"+
+					"internal/api/oauth_handlers.go resolves the /stats route through StatsFor, "+
+					"so that route will answer supported:false to an operator the matrix told to "+
+					"expect a viewer count.\n\n"+
+					"BEFORE YOU 'FIX' THIS BY IMPLEMENTING LiveStatter, CHECK WHICH MECHANISM "+
+					"YOUR PLATFORM ACTUALLY USES. This test knows about exactly one, and Rumble "+
+					"already uses another: its count arrives on the chat poller "+
+					"(internal/chat/rumble.go, watching_now on the get-data snapshot) because "+
+					"Rumble has no OAuth provider to hang a Stats method on. A platform in that "+
+					"shape genuinely reports viewers to the operator while StatsFor stays false "+
+					"forever, and the honest cell for it is NOT decided by this assertion.\n"+
+					"Either implement Stats, take the claim back, or -- if the count reaches the "+
+					"operator by another route -- widen this test to know about it and say so "+
+					"here. Do not just make the assertion pass.",
 					row.PresetID)
 			}
 		})
