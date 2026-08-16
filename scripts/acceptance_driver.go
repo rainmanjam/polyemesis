@@ -42,6 +42,17 @@ func main() {
 	call("POST", "/setup", map[string]any{"username": "admin", "password": "acceptance-pw"})
 	grabCSRF()
 
+	// The programme everything below hangs off.
+	//
+	// A fresh install has none since #387: the migration used to seed a source
+	// called Main on first open, so every suite in this directory was silently
+	// inheriting a programme nobody had created. Creating it here is not a
+	// workaround for that removal -- it is the flow an operator actually
+	// performs, and it means these runs now exercise POST /sources, which no
+	// acceptance suite drove before because nothing ever needed to.
+	fmt.Println("creating the first source")
+	call("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+
 	// Recording off: this test is about destinations, and the recorder would
 	// only add noise to the disk check.
 	settings := get("/settings")

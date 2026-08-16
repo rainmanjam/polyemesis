@@ -196,6 +196,57 @@ func Setup(user, pass string) {
 	fmt.Println("SETUP_OK")
 }
 
+// EnsureSource creates this install's first programme if it has none.
+//
+// EVERY SUITE THAT PUBLISHES NEEDS THIS NOW, and until #387 none of them had to
+// ask. A fresh database arrived with a source called Main because the migration
+// seeded one on first open -- so a driver could run first-run setup and go
+// straight to creating destinations, against a programme nobody had made. That
+// seed is gone for fresh installs, deliberately: it was a migration deciding
+// product behaviour.
+//
+// So the step the suites were silently inheriting becomes a step they perform,
+// which is also the more honest test. "Install it, create a source, point an
+// encoder at it" is what an operator actually does, and it is now what these
+// runs actually exercise -- including POST /sources itself, which no acceptance
+// suite drove before because nothing ever needed to.
+//
+// Idempotent, because several drivers run more than one phase against the same
+// server and a second source would change which one "the default" resolves to
+// halfway through a measurement.
+func EnsureSource(name string) int64 {
+	var existing []struct {
+		ID int64 `json:"id"`
+	}
+	code, out := Do(http.MethodGet, "/sources", nil)
+	if code != http.StatusOK {
+		Die(fmt.Sprintf("list sources: %d %s", code, out))
+	}
+	if err := json.Unmarshal(out, &existing); err != nil {
+		Die(fmt.Sprintf("decode sources: %v: %s", err, out))
+	}
+	if len(existing) > 0 {
+		return existing[0].ID
+	}
+
+	// The ingest block is left at whatever the server defaults to. Each suite
+	// that cares about a mode sets it afterwards through PUT /sources/{id},
+	// which is the same door the UI uses; choosing one here would silently
+	// overrule them.
+	code, out = Do(http.MethodPost, "/sources", map[string]any{"name": name, "enabled": true})
+	if code != http.StatusOK && code != http.StatusCreated {
+		Die(fmt.Sprintf("create the first source: %d %s", code, out))
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(out, &created); err != nil {
+		Die(fmt.Sprintf("decode the created source: %v: %s", err, out))
+	}
+	fmt.Printf("SOURCE_OK %d\n", created.ID)
+	return created.ID
+}
+
 // LoadSettings reads the whole settings document.
 //
 // THE WHOLE DOCUMENT, ALWAYS, because PUT /settings REPLACES the settings.

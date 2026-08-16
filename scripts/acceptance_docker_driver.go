@@ -197,6 +197,13 @@ func setup() {
 		fmt.Println("SETUP_REPEATABLE")
 		return
 	}
+	// The programme every step below acts on. A fresh install has none since
+	// #387; see acceptance_driver.go for the full reason.
+	if code, out := do(http.MethodPost, "/sources",
+		map[string]any{"name": "Main", "enabled": true}); code != http.StatusOK &&
+		code != http.StatusCreated {
+		die(fmt.Sprintf("create the first source: %d %s", code, out))
+	}
 	fmt.Println("SETUP_OK")
 }
 

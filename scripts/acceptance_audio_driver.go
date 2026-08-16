@@ -92,6 +92,11 @@ func main() {
 	call("POST", "/setup", map[string]any{"username": "admin", "password": "acceptance-pw"})
 	grabCSRF()
 
+	// The programme everything below hangs off. A fresh install has none since
+	// #387; see acceptance_driver.go's copy of this note for the full reason.
+	fmt.Println("creating the first source")
+	call("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+
 	// Stems on. This is the one feature here that is a property of the
 	// RECORDER rather than of a destination, so it is switched on before the
 	// stream starts and read off disk at the end.
