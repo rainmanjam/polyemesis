@@ -52,7 +52,22 @@
 // itself, and chasing it would mean merging ten harnesses into one configurable
 // library. These are test harnesses whose near-identical shape is deliberate:
 // each suite is meant to be readable start to finish without chasing a shared
-// abstraction. sonar.cpd.exclusions is set to scripts/** project-side instead.
+// abstraction.
+//
+// AND THE EXCLUSION DOES NOT WORK, which is the part worth recording.
+// sonar.cpd.exclusions is set to scripts/** on the project -- verified through
+// the API, project-scoped rather than inherited, and the pattern is right
+// (Sonar documents `a/**` and `a/**/*` as equivalent, and `**` matches ZERO or
+// more directory segments, so it covers scripts/x.go). A real commit was then
+// analysed: the density moved 11.4% -> 11.3% purely because this comment
+// lengthened the denominator, and all ten files under scripts/ still reported
+// their 744 duplicated lines.
+//
+// So SonarCloud's AUTOMATIC analysis does not honour sonar.cpd.exclusions. That
+// is the second measured instance of the same defect in this repository --
+// sonar-project.properties already records that it ignores
+// sonar.issue.ignore.multicriteria, proven the same way. Settings only bind
+// under CI-based analysis, which this project does not run.
 
 package main
 
