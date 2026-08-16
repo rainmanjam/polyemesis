@@ -71,6 +71,46 @@ const sections = [
     alt: "polyemesis renditions page: shared video encodes with overlays and hardware encoder selection",
   },
   {
+    id: "failover",
+    eyebrow: "Failover",
+    title: "When the encoder dies, the destinations stay up",
+    body: [
+      "A ladder, not a switch. polyemesis picks the highest source that is actually delivering — your primary ingest, then a standby ingest, then scheduled programming from a file, then a generated slate — and it changes the source underneath a destination without restarting it. The platform sees one continuous connection while the thing feeding it changes.",
+      "That order is a decision rather than an accident: a scheduled file sits below a live encoder because it is a fallback for nobody streaming, and above the slate because it is still programming. A test pins the ladder so it cannot be reordered by accident.",
+      "You can also drive it by hand — pin the source to primary, backup, playlist or slate — which is what you want during a rehearsal, or when you know the good feed is the one the automation is not choosing.",
+    ],
+    shot: "05-sources.png",
+    caption: "Sources, their ingest state, and the selector that decides which one is on air.",
+    alt: "polyemesis sources page: ingest configuration and the failover source selector",
+  },
+  {
+    id: "platforms",
+    eyebrow: "Platform sign-in",
+    title: "Stop pasting stream keys",
+    body: [
+      "Connect YouTube, Twitch, Facebook or Kick and polyemesis fetches the ingest URL and the stream key itself, then pushes your title, category and description at go-live. On Facebook it creates the broadcast. On Kick it also reads viewer stats back.",
+      "No subscription gates any of it, and nothing proxies your video: the OAuth connection carries metadata and chat, while the stream goes straight from your box to the platform's ingest. There is no intermediary to rate-limit your bitrate or count your destinations.",
+      "It is not all-or-nothing, and the UI says which is which per platform rather than implying parity. A pasted key is a fully supported destination, not a degraded one — nineteen other presets in the catalogue work exactly that way, over RTMP, RTMPS or SRT.",
+    ],
+    note: "Instagram is listed and marked unsupported rather than shipped as a preset that quietly never connects: there is no Live broadcast API, and Live Producer's RTMP path was removed for most accounts. X and Rumble are key-paste platforms; Rumble chat needs a key from your account page because that API has no sign-in.",
+    shot: "13-automation.png",
+    caption: "Connected accounts, with what each platform can and cannot automate stated per capability.",
+    alt: "polyemesis automation page: connected platform accounts and their capabilities",
+  },
+  {
+    id: "player",
+    eyebrow: "Your own player",
+    title: "A page you can send someone, with no platform in the middle",
+    body: [
+      "Publish the stream to a player page polyemesis serves itself. Send the link and it plays — no account, no app, and nothing about who watches leaving your box.",
+      "Who may watch is a setting, not an afterthought: leave it public, or protect it with a playback token that rides in the URL, a header, a cookie or an HTTP password. An unpublished stream is a 404 for everyone except the signed-in console.",
+      "It runs beside the fan-out rather than instead of it. The same ingest still reaches Twitch and YouTube with their own mixes; this is one more destination, for the audience that does not have an account anywhere.",
+    ],
+    shot: "10-playout.png",
+    caption: "The player page, its publish state, and the playback token that gates it.",
+    alt: "polyemesis playout page: public player configuration and playback token",
+  },
+  {
     id: "monitoring",
     eyebrow: "Monitoring",
     title: "Every process, with its own FFmpeg output",
@@ -280,6 +320,51 @@ const sections = [
             destinations and mixes.
           </p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------- and also -- */}
+  {/* ONE LINE EACH, EACH LINKING ITS DOC, and that restraint is the point. Nine
+      real capabilities that do not each deserve a section: giving them one would
+      triple the page and bury the audio routing people come for. Giving them
+      none leaves the product looking smaller than it is, which is the complaint
+      that prompted this block.
+
+      GROUPED IN THREES rather than listed flat -- content, then integrations,
+      then operations -- because a flat nine reads as a grab-bag of whatever the
+      maintainer built last, which is the specific way this pattern fails.
+
+      Every line traces to a shipped package AND a published document. The audit
+      council rejected a proposed "Production-Ready Infrastructure" grid for
+      advertising phrases that appear nowhere in docs/; the transcription line
+      here first linked /docs/testing, which exists but does not document
+      transcription, and was moved to /docs/architecture. If a line cannot be
+      followed to a doc that supports it, it does not belong. */}
+  <section class="border-t border-line py-16 sm:py-20" data-reveal>
+    <div class="wrap">
+      <p class="eyebrow">And also</p>
+      <h2 class="mt-3 text-balance text-3xl font-medium">
+        The parts that stop it being a toy.
+      </h2>
+      <div class="mt-8 grid gap-x-10 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
+        {[
+          { h: "Transcription and search", p: "Whisper runs over the archive on a queue that yields to the live stream, and the transcript is searchable — find the moment somebody said it.", href: "/docs/architecture" },
+          { h: "Automated moderation", p: "Rules that act across all five chat platforms, and a moderator card showing what one person has said on every one of them at once.", href: "/docs/platforms" },
+          { h: "Broadcast from a file", p: "A file on a loop as the ingest, turned on by a schedule — so a programme can go out when nobody is at the desk.", href: "/docs/scheduled-broadcast" },
+          { h: "Home Assistant", p: "Retained MQTT telemetry with discovery, so the stream shows up as entities in a dashboard you already run — an on-air light is an automation, not a project.", href: "/docs/mqtt" },
+          { h: "Signed lifecycle webhooks", p: "One POST the moment a stream starts or a destination fails, in order, so a script can act on it. Alerts coalesce for a human; these deliberately do not.", href: "/docs/hooks" },
+          { h: "Alerts that page a human", p: "In-process rules with webhook delivery, so a destination that drops wakes somebody instead of waiting to be noticed.", href: "/docs/monitoring" },
+          { h: "TLS that configures itself", p: "Let's Encrypt when the box has a public name, a local CA when it does not, and out of the way when a proxy already terminates it.", href: "/docs/tls" },
+          { h: "Changes that do not drop the stream", p: "Most settings apply to the running process. The dividing line is mechanical, and saving tells you which side you landed on.", href: "/docs/hot-reload" },
+          { h: "Prometheus metrics", p: "Scraped like anything else you run, with the per-destination detail the dashboards show.", href: "/docs/monitoring" },
+        ].map((x) => (
+          <div>
+            <h3 class="text-sm font-medium text-fg">{x.h}</h3>
+            <p class="mt-2 text-sm leading-relaxed text-muted">{x.p}</p>
+            <a href={x.href} class="mt-2 inline-block text-sm text-primary underline-offset-4 hover:underline">Docs →</a>
+          </div>
+        ))}
       </div>
     </div>
   </section>
