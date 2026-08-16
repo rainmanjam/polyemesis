@@ -1081,12 +1081,14 @@
     {
       "method": "GET",
       "pattern": "/api/v1/tour",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/tour/complete",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
