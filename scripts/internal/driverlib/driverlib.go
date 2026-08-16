@@ -229,11 +229,42 @@ func EnsureSource(name string) int64 {
 		return existing[0].ID
 	}
 
-	// The ingest block is left at whatever the server defaults to. Each suite
-	// that cares about a mode sets it afterwards through PUT /sources/{id},
-	// which is the same door the UI uses; choosing one here would silently
-	// overrule them.
-	code, out = Do(http.MethodPost, "/sources", map[string]any{"name": name, "enabled": true})
+	// SRT, EXPLICITLY, RATHER THAN WHATEVER THE SERVER DEFAULTS TO.
+	//
+	// The server's default is IngestUnset, and that is correct for a product --
+	// db.IngestUnset exists precisely "so nothing is chosen on an operator's
+	// behalf", and a fresh install is supposed to ask. It is unusable as a TEST
+	// default: an unset mode raises no listener, so a suite that publishes gets
+	// no ingest and fails somewhere far from the cause.
+	//
+	// That is what broke six suites when the seeded source went away. The seed
+	// carried the settings blob's ingest, so every driver inherited a working
+	// mode without asking for one; creating a bare source inherits Unset
+	// instead. Every suite that had configured a mode kept passing
+	// (acceptance-pull, -synth, -postprod, -playlist) and every suite that had
+	// never needed to failed (acceptance, -audio, -renditions, -ladder,
+	// -encoders, -recording-stop). The correlation is exact.
+	//
+	// SRT because it is the operated path and what most suites publish over.
+	// A suite needing rtmp or pull still overrides it through PUT /sources/{id}
+	// or the settings document, exactly as the four passing ones already do --
+	// this sets a usable floor, it does not overrule anybody.
+	// The SERVER'S OWN default ingest block with the mode set on top, not a
+	// hand-written one. Sending {"mode":"srt"} alone leaves every other SRT
+	// field at its zero value and the create is refused with
+	// `srt latency 0ms out of range (20-8000)` -- so a literal here would have
+	// to carry a latency, a passphrase policy and whatever the block gains
+	// next, and would rot the first time one of them changed.
+	body := map[string]any{"name": name, "enabled": true}
+	if ing, ok := LoadSettings()["ingest"].(map[string]any); ok {
+		copied := map[string]any{}
+		for k, v := range ing {
+			copied[k] = v
+		}
+		copied["mode"] = "srt"
+		body["ingest"] = copied
+	}
+	code, out = Do(http.MethodPost, "/sources", body)
 	if code != http.StatusOK && code != http.StatusCreated {
 		Die(fmt.Sprintf("create the first source: %d %s", code, out))
 	}
