@@ -571,7 +571,9 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	var created fbLiveVideo
 	err = f.post(ctx, tgt.token, "/"+tgt.node+"/live_videos", params, &created)
 	if err != nil {
-		return nil, fbAdvice(err, "start a Facebook broadcast", f.publishScopes(tgt.kind))
+		// fbCreateAdvice rather than fbAdvice: this is the call Meta's go-live
+		// eligibility gate refuses, and it refuses it without saying so.
+		return nil, fbCreateAdvice(err, "start a Facebook broadcast", f.publishScopes(tgt.kind))
 	}
 	if created.ID == "" {
 		return nil, fmt.Errorf("Facebook accepted the broadcast but returned no live video id")
@@ -1289,6 +1291,80 @@ func fbAdvice(err error, what string, scopes []string) error {
 	}
 
 	return err
+}
+
+// fbEligibilityNote is the pair of account facts Meta requires of anybody going
+// live, quoted from the Live Video API overview (read 2026-08-16; in force
+// since 2024-06-10) and already recorded in this repository at
+// docs/roadmap/DESTINATION-SETTINGS.md and in internal/api/preannounce.go.
+//
+// It is APPENDED to a refusal, never used to explain one, and that distinction
+// is the entire point of it. Neither requirement is a permission or a scope, so
+// an operator can hold every scope, a valid token and a correct stream key and
+// still be refused -- and Graph names neither in the error it sends back. There
+// is no code, subcode or message marker that identifies this cause. If there
+// were, this would be a branch of fbAdvice beside the 190 one and it would say
+// "this IS why"; because there is not, it says "check this" and says so out
+// loud. Asserting the diagnosis would be the more useful message exactly as
+// often as it would be a lie, and an operator sent to count followers over a
+// crossposting typo loses more than the sentence saved.
+//
+// The two numbers are Meta's, not ours, and neither is a threshold this code
+// checks: nothing here counts a follower or measures an account's age. Graph
+// declines to report either on the surfaces we call, so there is nothing to
+// compare against and no version of this that could refuse the create itself.
+//
+// Wording note: "60 days" appears twice in this file for two unrelated reasons
+// -- an account's minimum age here, a token's approximate lifetime in the 190
+// branch of fbAdvice. fbCreateAdvice keeps them out of the same message.
+const fbEligibilityNote = "If the account, its permissions and the stream key all look correct, " +
+	"check the two things Facebook requires of the ACCOUNT before it may go live at all -- " +
+	"neither of them is a permission, and this error names neither: the Facebook account must " +
+	"be at least 60 days old, and the Facebook Page or professional-mode profile must have at " +
+	"least 100 followers. Meta has required both since 2024-06-10. This is a possibility to " +
+	"rule out in thirty seconds, not a diagnosis: the refusal above may have nothing to do " +
+	"with either."
+
+// fbCreateAdvice is fbAdvice plus fbEligibilityNote, for the one call that
+// creates a broadcast.
+//
+// ONLY the create gets it. Editing, listing and rescheduling all act on a
+// live_video that already exists, and its existence is proof the account was
+// eligible when it was made -- appending the note there would send an operator
+// to count followers over a failure that cannot be about follower count.
+//
+// The note is withheld unless Facebook itself REFUSED, because "the platform
+// said no" is the only premise the sentence rests on:
+//
+//   - a non-*statusError never reached Graph. A dialled-wrong host, a cut
+//     connection or a cancelled context is a transport failure, and no account
+//     property can be why.
+//   - a 5xx is Meta FAILING, not Meta refusing. Envelope or not, an eligibility
+//     gate does not answer 500, and the cure for one of these is to try again.
+//   - a body that is not Meta's error envelope came from somebody else -- a
+//     proxy, a load balancer, an HTML error page -- so we do not know the Live
+//     Video API was reached at all.
+//   - code 190 is the token, which fbAdvice has already diagnosed exactly and
+//     which has a one-button cure. Appending a hedge to a message that is
+//     certain would make the certain part read as a guess too.
+//
+// The note is APPENDED to fbAdvice's result rather than replacing it, so the
+// permission or App Review instruction an operator can actually act on stays
+// first and the hedge stays last. %w rather than %v because it costs nothing
+// and keeps whatever chain fbAdvice left behind -- which is the original
+// *statusError on the pass-through path, and only the formatted message on the
+// mapped ones, since fbAdvice's own branches do not wrap.
+func fbCreateAdvice(err error, what string, scopes []string) error {
+	advised := fbAdvice(err, what, scopes)
+	se, ok := err.(*statusError)
+	if !ok || se.Status < 400 || se.Status >= 500 {
+		return advised
+	}
+	ge, ok := decodeGraphError(se.Body)
+	if !ok || ge.Code == 190 {
+		return advised
+	}
+	return fmt.Errorf("%w\n\n%s", advised, fbEligibilityNote)
 }
 
 // metaMessage prefers the user-facing text when Meta supplies one, because it
