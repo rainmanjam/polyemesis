@@ -53,6 +53,18 @@ its first tagged release.
   the meters page and the media uploader carried the same kind of pointer and
   now say where the setting really is. (#387)
 
+- **The last source can be deleted.** The store refused it, on the grounds that
+  an install with none had no ingest and no way through the UI to get one back.
+  Neither half holds any more: zero sources is the state a fresh install boots
+  into, and the Sources page carries the form that ends it. The refusal was
+  standing between an operator and a place they can already be — most obviously
+  the one replacing their single source, who had to create the replacement
+  first and then work out which of two rows was which. The delete button on the
+  only source is no longer greyed out, and its confirmation says what the
+  install is left with: destinations and renditions go with the source,
+  recordings stay on disk, and nothing is publishing until another source
+  exists. A boot after that delete does not put "Main" back. (#387)
+
 ### Added
 - **An onboarding tour, offered once per install rather than once per browser.**
   A new operator finishes the signup screen and lands on an empty dashboard, and

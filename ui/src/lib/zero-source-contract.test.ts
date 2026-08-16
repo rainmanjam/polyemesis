@@ -240,4 +240,22 @@ describe("the screens that meet an install with no source", () => {
       .toMatch(/sources\.length === 0 \?/);
     expect(src, "the sources page no longer renders NoProgrammeYet").toContain("<NoProgrammeYet");
   });
+
+  it("lets the operator delete their only source, and says what that leaves", () => {
+    const src = read("ui/src/pages/SourcesPage.tsx");
+    /* The store refused this delete until the guard came off, so the button
+     * was disabled on the only source and the title said why. Both halves
+     * matter and only the first one is visible: re-adding `disabled` puts an
+     * operator back in front of a control that works, greyed out, with a
+     * sentence explaining a rule the server no longer has. */
+    expect(src, "the delete control is disabled again on the only source, for a delete " +
+      "the store now accepts").not.toMatch(/disabled=\{onlyOne\}/);
+    /* And the confirmation carries the consequence. Deleting the last source
+     * leaves the install with no programme at all -- a different outcome from
+     * every other delete on this page, and the one screen that can say so
+     * before it happens rather than after. */
+    expect(src, "the delete confirmation no longer distinguishes the last source, so the " +
+      "one delete that empties the install reads exactly like the others")
+      .toContain("sources.deleteLastDescription");
+  });
 });

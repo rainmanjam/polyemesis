@@ -217,7 +217,6 @@ export function SourcesPage() {
               key={s.id}
               source={s}
               busy={busyId === s.id}
-              onlyOne={sources.length === 1}
               onPatch={(c) => patch(s, c)}
               onRotate={() => setRotating(s)}
               onDelete={() => setDeleting(s)}
@@ -275,7 +274,13 @@ export function SourcesPage() {
         subject={deleting?.name ?? ""}
         title={t("sources.deleteTitle", { name: deleting?.name ?? "" })}
         description={
-t("sources.deleteDescription")
+          // The last source gets a second sentence, because deleting it is a
+          // different act: the cascade is the same, but what the install is
+          // left with is not. The store refused this delete until now, so
+          // nothing on this screen had ever had to describe it.
+          sources.length === 1
+            ? `${t("sources.deleteDescription")} ${t("sources.deleteLastDescription")}`
+            : t("sources.deleteDescription")
         }
         requireTyping
         consequences={[
@@ -292,14 +297,12 @@ t("sources.deleteDescription")
 function SourceCard({
   source,
   busy,
-  onlyOne,
   onPatch,
   onRotate,
   onDelete,
 }: {
   source: SourceView;
   busy: boolean;
-  onlyOne: boolean;
   onPatch: (changes: Partial<Source>) => void;
   onRotate: () => void;
   onDelete: () => void;
@@ -357,12 +360,17 @@ function SourceCard({
             onCheckedChange={(v) => onPatch({ enabled: v })}
             aria-label={t("sources.enableAria", { name: source.name })}
           />
+          {/* Enabled on the only source too. The store used to refuse that
+              delete, so a disabled button was the honest thing to show; it now
+              accepts it, and an install with no source is a state the whole
+              product answers in rather than one it falls over in. The weight
+              moved to the confirmation, which says what the install is left
+              with. */}
           <Button
             size="icon"
             variant="ghost"
             onClick={onDelete}
-            disabled={onlyOne}
-            title={onlyOne ? t("sources.lastSourceTitle") : t("sources.deleteThis")}
+            title={t("sources.deleteThis")}
             aria-label={t("sources.deleteAria", { name: source.name })}
           >
             <Trash2 className="h-3.5 w-3.5" />

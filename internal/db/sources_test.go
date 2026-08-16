@@ -299,10 +299,11 @@ func TestAFreshDatabaseComesUpWithNoSourceAndStaysThatWay(t *testing.T) {
 // read this database as "pre-sources" and put Main back -- on the install with
 // the largest library, every time it starts.
 //
-// Built against the store rather than through DeleteSource, which still refuses
-// to remove the only source. The route to this state arrives with that guard's
-// removal; the state itself is reachable now and the discriminator has to be
-// right about it before the button exists.
+// Built against the table rather than through DeleteSource, and deliberately
+// left that way now that the delete path can produce this state: what is under
+// test is the DISCRIMINATOR, and a fixture that reaches the state by the only
+// route that currently produces it stops proving anything the day a second
+// route appears. The counterpart below drives the real delete.
 func TestMigrationDoesNotResurrectASourceTheOperatorDeleted(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "deleted-last-source.db")
 
@@ -348,6 +349,56 @@ func TestMigrationDoesNotResurrectASourceTheOperatorDeleted(t *testing.T) {
 	}
 	if attached != nil {
 		t.Errorf("the orphan recording was attached to source %d, which the boot invented", *attached)
+	}
+}
+
+// The same boot, reached the way an operator reaches it.
+//
+// The test above pins the discriminator against a state built by hand. This one
+// pins the ROUTE to that state: DeleteSource used to refuse the only source, so
+// nothing an operator could click produced the database the discriminator is
+// right about, and a rule that is only ever exercised by a fixture is a rule
+// nobody has actually tried.
+//
+// Both are needed. Delete the fixture-built one and the discriminator is only
+// tested through whichever path happens to exist; delete this one and the
+// discriminator stays correct while the button that leads to it is untested.
+func TestDeletingTheLastSourceThroughTheStoreSurvivesTheNextBoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "operator-deleted-last-source.db")
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	src := &Source{Name: "Main camera", Enabled: true, Ingest: DefaultSettings().Ingest}
+	if err := d.CreateSource(src); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	if _, err := d.SQL().Exec(
+		`INSERT INTO recordings (filename, started_at, source_id) VALUES ('kept.mkv', 1000, ?)`,
+		src.ID); err != nil {
+		t.Fatalf("seed recording: %v", err)
+	}
+	if err := d.DeleteSource(src.ID); err != nil {
+		t.Fatalf("DeleteSource on the only source: %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { again.Close() })
+
+	got, err := again.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("%q came back on the boot after the operator deleted it through the "+
+			"delete route; the install argues with the last thing they did", got[0].Name)
 	}
 }
 
@@ -1070,35 +1121,80 @@ func TestDeletingASourceTakesItsDestinationsButKeepsItsRecordings(t *testing.T) 
 	}
 }
 
-func TestTheLastSourceCannotBeDeleted(t *testing.T) {
+// The last source goes when the operator says so.
+//
+// This asserted the refusal for as long as zero sources was a state the product
+// could not answer in. It is now the state a fresh install boots into, so the
+// refusal was standing between an operator and a place they can already be --
+// most obviously the operator replacing their one source, who had to create the
+// replacement first and then pick the right row out of two.
+//
+// The cascade is asserted alongside it because that is the part a confirmation
+// dialog has to be able to promise: the destination goes, the recording stays
+// with a NULL source_id and its file still on disk.
+func TestTheLastSourceCanBeDeleted(t *testing.T) {
 	d := testDB(t)
 	id, err := d.DefaultSourceID()
 	if err != nil {
 		t.Fatalf("DefaultSourceID: %v", err)
 	}
-	// An install with no sources has no ingest and no way back through the UI.
-	if err := d.DeleteSource(id); err == nil {
-		t.Fatal("deleted the only source; the install now has no ingest at all")
+	dst, err := d.CreateDestination(&Destination{
+		Name: "twitch", Kind: DestRTMP, URL: "rtmp://example.test/live", SourceID: &id})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	if _, err := d.SQL().Exec(
+		`INSERT INTO recordings (filename, started_at, source_id) VALUES ('kept.mkv', 1000, ?)`,
+		id); err != nil {
+		t.Fatalf("seed recording: %v", err)
+	}
+
+	if err := d.DeleteSource(id); err != nil {
+		t.Fatalf("DeleteSource on the only source: %v", err)
+	}
+
+	rows, err := d.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("got %d sources after deleting the only one, want 0", len(rows))
+	}
+	var dests int
+	if err := d.SQL().QueryRow(`SELECT COUNT(*) FROM destinations WHERE id = ?`, dst.ID).Scan(&dests); err != nil {
+		t.Fatalf("count destinations: %v", err)
+	}
+	if dests != 0 {
+		t.Error("destination survived its source; it points nowhere meaningful now")
+	}
+	var attached *int64
+	if err := d.SQL().QueryRow(
+		`SELECT source_id FROM recordings WHERE filename = 'kept.mkv'`).Scan(&attached); err != nil {
+		t.Fatalf("read recording source_id: %v", err)
+	}
+	if attached != nil {
+		t.Errorf("recording source_id = %d, want NULL: the file is still on disk and "+
+			"deleting the row would orphan its transcript and clips", *attached)
 	}
 }
 
-// And the state on the other side of that guard, which the zero-source work
-// makes reachable.
+// An install with no sources answers a delete with "that row is not there".
 //
 // The count check was `n <= 1`, so with NO sources the store answered "cannot
 // delete the only source: an install needs at least one ingest" -- a sentence
 // about an ingest the install does not have, shown to an operator on a fresh
 // install who clicked a stale row or to a client retrying a delete that already
 // succeeded. It also hid the true answer, which is that the row is not there.
+//
+// Through DeleteSource now rather than raw SQL: this state is one the delete
+// route reaches on its own, which is what the test above establishes.
 func TestDeletingASourceOnAnInstallWithNoneSaysTheRowIsMissing(t *testing.T) {
 	d := testDB(t)
 	id, err := d.DefaultSourceID()
 	if err != nil {
 		t.Fatalf("DefaultSourceID: %v", err)
 	}
-	// Straight to SQL: the guard above is exactly what stops the API producing
-	// this state today, and PR 6 is what removes it.
-	if _, err := d.SQL().Exec(`DELETE FROM sources`); err != nil {
+	if err := d.DeleteSource(id); err != nil {
 		t.Fatalf("empty the sources table: %v", err)
 	}
 
