@@ -197,6 +197,32 @@ func (r *RumbleAdapter) setHealth(state State, detail string) {
 	r.mu.Unlock()
 }
 
+// setLive records a healthy poll together with the viewer count that poll
+// carried.
+//
+// A SEPARATE SETTER RATHER THAN A THIRD PARAMETER ON setHealth, and that is the
+// whole design. setHealth builds a fresh Health on every call, so every other
+// state -- waiting for a broadcast, refused key, retryable failure -- drops the
+// count to nil without a line of code at those call sites, and cannot be made
+// to keep one by a later edit that forgets to. A viewer count is a claim about
+// this instant; showing the last live figure beside "waiting for a Rumble live
+// stream to start" would be worse than showing nothing.
+//
+// WHY THIS IS HERE AND NOT BEHIND oauth.LiveStatter. That interface embeds
+// Provider and takes (clientID, accessToken), because it answers for a
+// connected account. Rumble has no account to connect: the live-stream API has
+// no sign-in at all, its whole credential is RUMBLE_CHAT_API_KEY, and there is
+// no provider registered for db.PlatformRumble to hang a Stats method off. The
+// number also arrives with no extra request -- it is a field on the get-data
+// response this adapter already polls -- so routing it through a second
+// subsystem would mean a second call to an endpoint whose rate limit Rumble
+// does not publish, which is the one thing this file is most careful about.
+func (r *RumbleAdapter) setLive(viewers *int) {
+	r.mu.Lock()
+	r.health = Health{State: StateLive, Viewers: viewers}
+	r.mu.Unlock()
+}
+
 // pollInterval is the configured base, clamped. See rumbleMinPoll for why the
 // clamp is not negotiable.
 func (r *RumbleAdapter) pollInterval() time.Duration {
@@ -235,14 +261,33 @@ type rumbleChatEntry struct {
 // rumbleLivestream is one broadcast.
 //
 // Deliberately partial. Rumble's response also carries stream_key, likes,
-// dislikes, watching_now, categories and an id; none of them are decoded. The
-// stream_key omission is the important one and is not an oversight: a field
-// that is never unmarshalled cannot be accidentally logged, put in an error, or
-// serialised into a health detail by some later change. See #310.
+// dislikes, categories and an id; none of them are decoded. The stream_key
+// omission is the important one and is not an oversight: a field that is never
+// unmarshalled cannot be accidentally logged, put in an error, or serialised
+// into a health detail by some later change. See #310.
 type rumbleLivestream struct {
 	Title  string `json:"title"`
 	IsLive bool   `json:"is_live"`
-	Chat   struct {
+	// WatchingNow is Rumble's live viewer count, and a POINTER so that "Rumble
+	// sent no number" survives decoding as something other than zero.
+	//
+	// The distinction is not hypothetical on this platform. Rumble's article is
+	// explicit that everything under livestreams is "only populated during a
+	// live stream", so a plain int would decode every offline, ended or
+	// not-yet-started broadcast into an audience of exactly none -- a figure the
+	// UI would render as fact and which nobody ever sent. As *int an absent key
+	// stays nil, and a genuine 0 from a live stream stays 0, which is a real
+	// answer and a different one. Health.Viewers carries the same reasoning
+	// onward, and internal/oauth/stats.go's LiveStats.ViewerCount is the same
+	// decision taken for the same reason on the OAuth side.
+	//
+	// THIS IS NOT A PRECEDENT FOR DECODING stream_key. watching_now is one of
+	// the 15 fields Rumble publishes; stream_key is in the example payload only,
+	// is absent from that list, and is a live secret. Reading a documented
+	// number out of this response buys no licence to unmarshal the credential
+	// sitting beside it -- see the note above and #310.
+	WatchingNow *int `json:"watching_now"`
+	Chat        struct {
 		RecentMessages []rumbleChatEntry `json:"recent_messages"`
 		RecentRants    []rumbleChatEntry `json:"recent_rants"`
 	} `json:"chat"`
@@ -306,7 +351,10 @@ func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
 		}
 
 		delivered := r.deliver(live, cutoff, sink)
-		r.setHealth(StateLive, "")
+		// The viewer count is read from the poll that just succeeded rather
+		// than fetched, which is the entire cost of this feature: one field off
+		// a response already in hand, no second request, no second credential.
+		r.setLive(live.WatchingNow)
 
 		// Back off while nobody is talking and snap back the moment they are.
 		// A silent chat polled every ten seconds for eight hours is 2,880

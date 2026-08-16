@@ -757,3 +757,175 @@ func TestRumbleReArmsTheBackfillWindowForASecondBroadcast(t *testing.T) {
 		t.Fatalf("delivered %q, want only the first show's fresh message", got[0].Text)
 	}
 }
+
+// TestRumbleReportsTheViewerCountItWasAlreadyBeingSent pins the field read.
+//
+// watching_now is one of the 15 fields Rumble publishes, and it rides on the
+// SAME get-data response this adapter has always polled for chat -- so the
+// count costs no extra request against an endpoint whose rate limit Rumble
+// declines to state. That is also why it is read here rather than through
+// internal/oauth: there is no Rumble provider to hang a Stats method off,
+// because this API has no sign-in at all.
+//
+// Proven able to fail against the committed tree by changing the `watching_now`
+// json tag on rumbleLivestream.WatchingNow to `watching`, after which the
+// documented payload decodes to nil and the count never appears.
+func TestRumbleReportsTheViewerCountItWasAlreadyBeingSent(t *testing.T) {
+	s := rumbleOK(t, rumbleSample)
+	a := rumbleAdapter(t, s.URL, nil)
+
+	if _, err := rumbleRun(t, a, 1); err != nil {
+		t.Fatalf("Run = %v", err)
+	}
+	h := a.Health()
+	if h.State != StateLive {
+		t.Fatalf("state = %q, want %q -- the count is only meaningful on a live poll", h.State, StateLive)
+	}
+	if h.Viewers == nil {
+		t.Fatal("Viewers = nil, want 19 -- Rumble's documented payload carries watching_now")
+	}
+	if *h.Viewers != 19 {
+		t.Errorf("Viewers = %d, want 19 (the value in Rumble's own example payload)", *h.Viewers)
+	}
+}
+
+// TestRumbleReportsNoCountRatherThanAnAudienceOfNone is the absent-is-not-zero
+// test, and Rumble is where that rule stops being pedantry.
+//
+// Rumble's article is explicit that everything under livestreams is "only
+// populated during a live stream". A plain int would therefore decode every
+// offline, ended and not-yet-started broadcast into a viewer count of exactly
+// zero -- a number polyemesis would render as fact and which Rumble never sent.
+// The pointer is what keeps "no answer" and "an audience of none" apart, and
+// the last case is what stops the pointer being decoration: a live stream that
+// really does say 0 must still report 0.
+//
+// Proven able to fail against the committed tree by changing WatchingNow from
+// *int to int and setLive to take an int, after which the FIRST case reports a
+// count of 0 rather than no count at all. Only the first, and the reason is
+// worth recording: the offline and ended cases never reach setLive at all, so
+// they survive that mutation on Health's zero value rather than on the decision
+// this test is about. They are here because they pin the other half of the
+// contract -- that a stale or unmeasured count does not leak out of a poll that
+// found nothing live -- not because they would catch a plain int.
+func TestRumbleReportsNoCountRatherThanAnAudienceOfNone(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want *int // nil means "no count reported at all"
+	}{
+		{
+			name: "live but Rumble sent no watching_now",
+			body: `{"livestreams":[{"is_live":true,"title":"on air","chat":{"recent_messages":[
+			  {"username":"A","badges":[],"text":"hello","created_on":"2026-08-13T17:59:00+00:00"}]}}]}`,
+			want: nil,
+		},
+		{
+			name: "nothing is live, so the field is unpopulated",
+			body: `{"livestreams":[]}`,
+			want: nil,
+		},
+		{
+			// is_live is false, so liveStream skips the entry and the stale 400
+			// never reaches Health. A count from a finished broadcast is not a
+			// smaller audience; it is no audience being measured.
+			name: "an ended broadcast still carrying its last count",
+			body: `{"livestreams":[{"is_live":false,"title":"finished","watching_now":400,"chat":{}}]}`,
+			want: nil,
+		},
+		{
+			// Rumble SAID zero, so zero is the honest report.
+			name: "live and genuinely nobody watching",
+			body: `{"livestreams":[{"is_live":true,"title":"on air","watching_now":0,"chat":{"recent_messages":[
+			  {"username":"A","badges":[],"text":"hello","created_on":"2026-08-13T17:59:00+00:00"}]}}]}`,
+			want: rumbleViewers(0),
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			s := rumbleOK(t, tc.body)
+			a := rumbleAdapter(t, s.URL, nil)
+
+			if _, err := rumbleRun(t, a, 1); err != nil {
+				t.Fatalf("Run = %v", err)
+			}
+			got := a.Health().Viewers
+
+			switch {
+			case tc.want == nil && got != nil:
+				t.Fatalf("Viewers = %d, want no count at all -- Rumble reported none, and a zero "+
+					"here is polyemesis inventing an audience of none", *got)
+			case tc.want != nil && got == nil:
+				t.Fatalf("Viewers = nil, want %d -- Rumble sent a real number and it was dropped", *tc.want)
+			case tc.want != nil && *got != *tc.want:
+				t.Fatalf("Viewers = %d, want %d", *got, *tc.want)
+			}
+
+			// The wire form must say what the struct says: a nil count leaves
+			// the key OUT, so no client can read a default zero back out of it.
+			blob, err := json.Marshal(a.Health())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasKey := strings.Contains(string(blob), `"viewers"`); hasKey != (tc.want != nil) {
+				t.Errorf("health JSON = %s; viewers key present = %v, want %v",
+					blob, hasKey, tc.want != nil)
+			}
+		})
+	}
+}
+
+// TestRumbleReadsTheViewerCountWithoutDecodingTheStreamKeyBesideIt guards the
+// decision that reading one field out of this payload is not a licence to read
+// the secret next to it.
+//
+// watching_now and stream_key arrive in the same object from the same
+// unauthenticated GET. The defence for the key is still an ABSENCE -- no field
+// on rumbleLivestream -- and an absence is exactly what a later change adding
+// "just one more field" erodes without noticing.
+//
+// IT ASSERTS AT THE STRUCT LEVEL BECAUSE THE MESSAGE LEVEL HAS A HOLE.
+// TestRumbleNeverDecodesTheStreamKeyOutOfTheChatPayload checks what the adapter
+// EMITS, so it only fires once a decoded key is also used in a message or a
+// health detail. Measured while writing this: adding
+// `StreamKey string `+"`json:\"stream_key\"`"+` to rumbleLivestream and
+// touching nothing else leaves that test PASSING, with the key sitting decoded
+// in memory one field away from every error string. This one fails on the field
+// itself, which is where the #310 defence actually lives.
+//
+// Proven able to fail against the committed tree by adding
+// `StreamKey string `+"`json:\"stream_key\"`"+` to rumbleLivestream, which is
+// precisely the change this test exists to stop.
+func TestRumbleReadsTheViewerCountWithoutDecodingTheStreamKeyBesideIt(t *testing.T) {
+	const streamKey = "SUPER-SECRET-STREAM-KEY"
+	if !strings.Contains(rumbleSample, streamKey) {
+		t.Fatal("the fixture no longer carries a stream key; this test proves nothing")
+	}
+
+	var decoded rumbleResponse
+	if err := json.Unmarshal([]byte(rumbleSample), &decoded); err != nil {
+		t.Fatal(err)
+	}
+
+	// The count must actually have been read, or the assertion below would
+	// pass against a struct that decodes nothing at all.
+	live, ok := liveStream(decoded)
+	if !ok || live.WatchingNow == nil || *live.WatchingNow != 19 {
+		t.Fatalf("the viewer count was not decoded (%+v), so this test would pass for the wrong reason", live)
+	}
+
+	blob, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(blob), streamKey) {
+		t.Fatalf("rumbleLivestream now decodes the stream key that rides beside watching_now:\n%s", blob)
+	}
+}
+
+// rumbleViewers is the "Rumble said this number" spelling for the table above.
+// Package-local because internal/chat has no pointer helper, and the
+// alternative at each call site is a named variable per case.
+func rumbleViewers(v int) *int { return &v }
