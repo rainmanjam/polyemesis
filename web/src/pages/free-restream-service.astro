@@ -63,7 +63,7 @@ const plans = [
 const costs = [
   {
     title: "A box, and its upstream",
-    body: "One upload leaves your studio; the fan-out leaves the server. So the server needs roughly your bitrate multiplied by the number of destinations, in sustained upstream. CPU is rarely the wall — video is stream-copied, and a destination measures at about 4% of one core — but bandwidth is, and a domestic connection is usually the wrong place to put it.",
+    body: "One upload leaves your studio; the fan-out leaves the server. So the server needs roughly your bitrate multiplied by the number of destinations, in sustained upstream. CPU is rarely the wall, because video is stream-copied and only the audio is mixed and re-encoded; bandwidth is, and a domestic connection is usually the wrong place to put it.",
   },
   {
     title: "A domain and a certificate, if it leaves the LAN",
@@ -232,7 +232,7 @@ const costs = [
           [
             [
               "Destinations",
-              "No configured cap. There is no limit in the software, but upload bandwidth and CPU are real: a destination measures at roughly 4% of one core, so a four-core box runs out somewhere near 96. “No cap” is not the same word as “unlimited”, and the difference is the part that bites.",
+              "No configured cap. There is no limit in the software, but upload bandwidth and CPU are real, and sustained upstream is what runs out first. “No cap” is not the same word as “unlimited”, and the difference is the part that bites.",
             ],
             [
               "Custom RTMP",

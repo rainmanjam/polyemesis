@@ -74,11 +74,18 @@ of them can decide **what is in it**.
   resolves them through `Util::findTracks`, which also accepts `all` and `*`. So
   a MistServer push target genuinely can carry different tracks from the one
   before it, and anyone who tells you a media server cannot select tracks has
-  not read this file. It selects well. It does not mix: there is no `amix`, no
-  downmix, no `loudnorm` and no `ebur128` anywhere under `src/` or `lib/`. It is
-  not that it cannot touch audio — `src/process/process_av.cpp` decodes and
-  re-encodes it, and NVENC is wired up for video — but the audio path there is
-  `swr_alloc_set_opts`, a resampler. One track in, one track out. Nothing sums.
+  not read this file. It selects well. **Its routing server** does not mix:
+  there is no `amix`, no downmix, no `loudnorm` and no `ebur128` anywhere under
+  `src/` or `lib/`. The audio path in `src/process/process_av.cpp` is
+  `swr_alloc_set_opts`, a resampler — one track in, one track out.
+
+  **Scoped deliberately, because the unscoped version is wrong.** An external
+  Stream Process (`MistProcAV`, an FFmpeg pipeline) can decode, filter and inject
+  a track back into the buffer, so `amix` and `loudnorm` are reachable — just not
+  in the server that does the routing (competitor-facts §6, checked 2026-08-15).
+  Saying "MistServer does not mix" is the same error as saying the OBS plugins
+  cannot send different audio per destination: true of one layer, false of the
+  product.
 
 - **OBS itself** — the Twitch VOD track is
   `obs_audio_encoder_create(..., vodTrack, ...)`, and `VodTrackMixerIdx()`
@@ -132,9 +139,10 @@ users asking Restreamer for the thing polyemesis was built to be.
 
 ## What the OBS plugins have that polyemesis does not
 
-obs-multi-rtmp (GPL-2.0, ~4,975 stars, last pushed 2026-08-01) and Aitum
-Multistream (GPL-2.0, ~250 stars, last pushed 2026-05-19), both checked
-2026-08-09. They are the honest incumbent: free, installed in two minutes, and
+obs-multi-rtmp (GPL-2.0, last pushed 2026-08-01) and Aitum Multistream
+(GPL-2.0, last pushed 2026-05-19), both checked 2026-08-09. Star counts used to
+appear here and are gone: a number nobody re-checks is the kind of claim this
+document cannot afford, and it is not in the facts file. They are the honest incumbent: free, installed in two minutes, and
 already on the machine.
 
 | What they have | polyemesis |
@@ -201,8 +209,10 @@ it.
 ## What restream.io has that polyemesis does not
 
 restream.io is SaaS, so self-hosting beats it on cost, privacy and limits by
-construction — their plans cap *simultaneous channels* at 2/3/5/8 by tier
-(surveyed 2026-07-27), which is a billing artefact rather than a technical one.
+construction — their plans cap *simultaneous channels* at 2 free, 3 standard and 5
+professional (competitor-facts §2.D, checked 2026-08-15), which is a billing
+artefact rather than a technical one. This said "2/3/5/8" until 2026-08-15; the
+fourth number was wrong and contradicted the site's own table.
 
 | restream.io feature | polyemesis |
 |---|---|
@@ -226,7 +236,7 @@ reconnect when a platform drops, show you whether it is working.
 | | polyemesis | Restreamer | restream.io | MistServer |
 |---|---|---|---|---|
 | Self-hosted | Yes | Yes | No | Yes |
-| Simultaneous destinations | No configured cap<sup>1</sup> | Unlimited | 2–8 by plan tier | Unverified |
+| Simultaneous destinations | No configured cap<sup>1</sup> | not assessed | 2–5 by plan tier (checked 15 Aug 2026) | Unverified |
 | Video re-encoded per destination | **No** (`-c:v copy`) | Optional | Yes, server-side | Optional, as a process |
 | Recording | Multitrack, stream-copied | No built-in<sup>2</sup> | Yes | Yes, tracks selectable |
 | Unified chat | Yes | No | Yes | No |

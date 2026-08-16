@@ -1,10 +1,46 @@
 # Competitor facts, checked 2026-08-15
 
 Gathered by an independent research pass with a source URL required for every
-claim. **This file is the ONLY sanctioned source for competitor claims on the
-site.** Anything published about another product must trace to a line here, and
-the "checked" date above must be shown next to any figure that can move —
-pricing above all.
+claim.
+
+## What may be published about another product
+
+Every claim must trace to a **dated, citable source**, and the date must be shown
+to the reader next to any figure that can move — pricing above all.
+
+Two kinds of source qualify:
+
+1. **This file.** Secondhand research, a URL per claim, checked on the date in
+   the title.
+2. **A primary source, quoted.** A line from the product's own repository or
+   documentation, reproduced on the page with its file path and the date it was
+   read.
+
+**THE SECOND IS THE STRONGER OF THE TWO AND THIS RULE USED TO FORBID IT.** The
+header said this file was "the ONLY sanctioned source". Written to stop claims
+being invented from memory, it also outlawed the best evidence available: a
+comparison page that quotes a competitor's own source code, names the file and
+dates the read is showing a reader something they can verify themselves, which
+no summary of mine can do.
+
+`/comparison` was audited against the narrow rule and reported as a provenance
+breach. It is not. It reads competitors' repositories directly, quotes the line,
+prints the path, and stamps the date — a higher standard than this file meets. A
+rule that marks that as non-compliant is the rule that is wrong, and it has been
+corrected rather than the page.
+
+**A PAGE-LEVEL "WE SURVEYED THESE PRODUCTS" FOOTER IS NOT A SOURCE FOR A CELL.**
+The amended rule was checked adversarially and this is the hole it left: two
+capability rows on `/comparison` asserted "Yes" for both competitors on the
+strength of a general re-check stamp at the foot of the page. A footer says
+somebody looked at the products. It does not say anybody checked *that row*.
+Provenance is per claim or it is decoration.
+
+What remains forbidden is unchanged and is the thing that actually matters: a
+claim about another product with **no** dated source of either kind. A star
+count nobody re-checks, a plan limit from memory, a capability someone assumed.
+Those were found on `/comparison` and removed — and they were breaches under
+either version of this rule.
 
 ## THE CLAIM THAT MUST NOT BE MADE
 
@@ -133,3 +169,79 @@ ships, and it is a **local OBS Studio plugin**.
 * **F. LAST 12 MONTHS.** Canvas system expanded for simultaneous dual-format
   (16:9 + 9:16) output in one OBS session; Twitch Dual-Output Beta integration
   added. Actively supported, no deprecation. [Same source]
+
+
+---
+
+# 6. MistServer (OptiMist Video B.V. / DDVTech) — added 2026-08-15
+
+* **A. AUDIO — SELECTS, and the scoping matters.** The core routing server
+  selects among existing tracks (by track ID `i#`, codec, language, bitrate, or
+  the `optimal`/`first`/`last` heuristics). It does **not** natively sum tracks
+  into a new mix per destination.
+  [docs](https://docs.mistserver.org/) ·
+  [changelog](https://releases.mistserver.org/changelog)
+
+  **BUT IT IS NOT INCAPABLE OF MIXING, and any claim must say which.** Running an
+  external Stream Process (`MistProcAV`, an FFmpeg pipeline) decodes, filters and
+  injects a new track back into the buffer — so `amix`, `loudnorm` and `ebur128`
+  are reachable, just not in the routing server. Writing "MistServer has no
+  amix" without that scope is the same error as saying the OBS plugins cannot
+  send different audio per destination: true of one layer, false of the product.
+
+* **B. VIDEO.** Passthrough/copy by default — tracks land in a shared memory
+  buffer (DTSC) and are remuxed per output protocol without re-encoding.
+  Transcoding is a Stream Process whose output registers back into the shared
+  buffer, so a rendition is reachable from every output protocol at once rather
+  than transcoded per output. [docs](https://docs.mistserver.org/)
+
+* **C. INGEST.** SRT (`MistInSRT`; caller and listener, passphrase, raw TS) and
+  RTMP (`MistInRTMP`; RTMPS and Enhanced RTMP). **Multitrack audio ingest is
+  supported** — multiple audio tracks in one stream over SRT via MPEG-TS PID
+  demuxing, and over RTMP/E-RTMP/RTSP; all are retained as discrete tracks.
+  [docs](https://docs.mistserver.org/)
+
+* **D. PRICE. Free, with no stream limits or feature locks.** Optional paid SLAs,
+  custom development and consulting.
+  [download](https://mistserver.org/download)
+
+* **E. LICENCE / HOSTING. Self-hosted**, and **public domain (The Unlicense)** —
+  moved off the legacy aGPLv3 dual-licence.
+  [licence](https://mistserver.org/license_types) ·
+  [COPYING.md](https://github.com/DDVTECH/mistserver/blob/master/COPYING.md)
+
+* **F. LAST 12 MONTHS.** v3.11.2 (Jul 2026) `SRT_ACCEPT` trigger, libsrt 1.5.6;
+  v3.11 (Jul 2026) WebCodecs player, "Optimal" track sorting, `MistProcTSDemux`,
+  JWT stream access tags; v3.10 `MistProcComposer` (compositing, PiP, failover).
+  [changelog](https://releases.mistserver.org/changelog)
+
+---
+
+# 7. Castr — added 2026-08-15
+
+* **A. WHAT IT IS.** Hosted multi-CDN multistreaming SaaS. Ingests RTMP/SRT/WHIP
+  and restreams to 30+ platforms, plus an embeddable player, 24/7 playout and
+  live-to-VOD. [multistream](https://castr.com/multistream/)
+
+* **B. PRICE — THERE IS NO FREE TIER.** A 7-day trial on Starter (no card), then
+  access locks. As of Aug 2026: Starter $19.99/mo ($199.99/yr) — 2 concurrent
+  streams, 6 destinations, 200 GB/mo. Standard $49.99/mo — 10 destinations.
+  Premium $199.99/mo — 20 destinations, ABR, API. Ultra $349.99/mo — 30
+  destinations, failover ingest. [pricing](https://castr.com/pricing/)
+
+  This matters for any sentence pairing Castr with Restream: **restream.io has a
+  free tier and Castr does not.** Naming them together as interchangeable
+  "hosted options" is fine; implying a shared free tier is not.
+
+* **C. PER-DESTINATION AUDIO — NO.** All destinations receive identical stream
+  audio. A higher-tier transcoding "Filter Track" feature can isolate an
+  incoming track number and change its bitrate/volume, but cannot deliver
+  independent mixes to separate destinations from one ingest.
+  [multistream](https://castr.com/multistream/)
+
+* **D. LAST 12 MONTHS.** Pre-recorded live scheduling, automated live-to-VOD
+  replacing the manual recordings tab, and a repackaging into four self-serve
+  tiers with annual bandwidth pooling. [pricing](https://castr.com/pricing/)
+
+  *Uncertain and therefore unpublishable:* whether sub-second trial
+  configurations carry a watermark.

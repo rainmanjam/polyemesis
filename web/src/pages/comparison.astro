@@ -26,8 +26,15 @@ import CodeBlock from "../components/CodeBlock.astro";
  * are; that is the point of the section. */
 const shared = [
   ["Ingest once, fan out to several platforms", "Yes", "Yes", "Yes"],
-  ["Reconnects when a platform drops", "Yes", "Yes", "Yes"],
-  ["Live health and status you can watch", "Yes", "Yes", "Yes"],
+  // "not assessed" on the competitor columns, and this is the gap the amended
+  // sourcing rule was caught leaving open. Both rows asserted "Yes" for both
+  // products on the strength of the page's general re-check footer. A footer
+  // saying the page was surveyed is not a citable source for a specific cell:
+  // it says somebody looked at the products, not that anybody checked THIS.
+  // Neither row has a line in the facts file, and neither has a quoted primary
+  // source beside it, so neither may assert.
+  ["Reconnects when a platform drops", "Yes", "not assessed", "not assessed"],
+  ["Live health and status you can watch", "Yes", "not assessed", "not assessed"],
   // Restreamer's cell said "Yes" until 2026-08-09 and was wrong: recording is
   // an open feature request on their own tracker (datarhei/restreamer#692,
   // opened 2024-02-14, still open when checked). "No built-in" rather than a
@@ -39,8 +46,14 @@ const shared = [
   // own README advertises resource monitoring "optionally by Prom-Metrics" and
   // datarhei Core documents Prometheus support, and it serves GraphQL as well
   // as REST. Neither half of the old cell survived contact with their docs, so
-  // the row now states what we do and says nothing about what they do.
-  ["Metrics / API", "Prometheus + REST", "", ""],
+  // the row states what we do and does not characterise theirs.
+  //
+  // "not assessed" RATHER THAN BLANK, and the difference is the whole point. An
+  // empty cell in a table whose other cells say "Yes" and "n/a" does not read as
+  // "we did not look" -- it reads as "no", which is the false implication the
+  // comment above was written to avoid and which the blank quietly reintroduced.
+  // Saying nothing is only honest if the reader can tell that is what happened.
+  ["Metrics / API", "Prometheus + REST", "not assessed", "not assessed"],
   // All five are offered and all five are probed with a real one-frame encode
   // at startup. What is EXPERIMENTAL is narrower and does not belong in a table
   // cell: the per-encoder FLAGS handed to NVENC, QSV, VA-API and AMF were read
@@ -54,7 +67,7 @@ const shared = [
   // but upload bandwidth and CPU are real: measured at roughly 4% of one core
   // per destination, a 4-core box runs out somewhere near 96. Claiming
   // "unlimited" invites the one support thread nobody can answer.
-  ["Simultaneous destinations", "No configured cap", "Unlimited", "2–8 by plan"],
+  ["Simultaneous destinations", "No configured cap", "not assessed", "2–5 by plan (checked 15 Aug 2026)"],
   ["Cost", "Your hardware", "Your hardware", "Subscription"],
 ];
 
@@ -68,10 +81,26 @@ const wins = [
   // string `loudnorm`, taking FFmpeg's defaults for I, LRA and TP. That is the
   // real difference, so the row states it and leaves their cell alone.
   ["Per-destination loudness TARGET you set — I, LRA and TP, measured after routing", "Yes", "", ""],
-  ["Multitrack archive — every ingest track preserved, stream-copied", "Yes", "No", "No"],
-  ["Per-track stems as 24-bit WAV or FLAC, segment-aligned", "Yes", "No", "No"],
-  ["Track annotations — what each incoming track actually is", "Yes", "No", "No"],
-  ["Typed SRT rejections — the publisher is told why it was refused", "Yes", "No", "n/a"],
+  // "not assessed" ON FOUR ROWS BELOW, and it is not timidity.
+  //
+  // COPY-CONSTRAINTS is explicit: "If we cannot source them, the row states only
+  // what polyemesis does and leaves the others blank rather than asserting a No
+  // we have not checked." These four -- archive, stems, annotations, typed SRT
+  // rejections -- have no line in competitor-facts-2026-08-15.md for either
+  // product. They were asserted "No" from somebody's impression.
+  //
+  // NOT LEFT BLANK, though, which is what the rule literally says. A blank cell
+  // in a table whose neighbours read "Yes" and "n/a" is read as "No" by every
+  // visitor; the honesty of saying nothing is lost if nobody can tell you said
+  // nothing. Spelling it out is the same intent with the implication removed.
+  //
+  // The two mix rows ABOVE keep their "No": those trace to facts §1.A
+  // (Restreamer cannot sum tracks) and §2.A (restream.io duplicates one stereo
+  // track everywhere), which is exactly the sourcing these four lack.
+  ["Multitrack archive — every ingest track preserved, stream-copied", "Yes", "not assessed", "not assessed"],
+  ["Per-track stems as 24-bit WAV or FLAC, segment-aligned", "Yes", "not assessed", "not assessed"],
+  ["Track annotations — what each incoming track actually is", "Yes", "not assessed", "not assessed"],
+  ["Typed SRT rejections — the publisher is told why it was refused", "Yes", "not assessed", "n/a"],
   // "Yes" on its own was the wrong shape for this cell, and wiring the feature
   // is what made it matter: Twitch refuses Enhanced Broadcasting without a
   // supported GPU, so on the headless VPS this audience actually runs, ticking
@@ -93,15 +122,24 @@ const wins = [
  * Every `src` below was read in that project's own repository on 2026-08-09.
  * Sourced from docs/COMPARISON.md, "They select a track. polyemesis mixes." */
 /* `href` is optional and only two of the three have one: MistServer has no page
- * of its own, because the facts file that governs competitor claims does not
- * cover it and a comparison page cannot be written from the one line of source
- * quoted below. The card still earns its place here — it is the only tool in
- * this set that selects tracks WELL — it simply cannot carry a page yet. */
+ * of its own yet. It is now covered by the facts file (§6, added 2026-08-15),
+ * which is what it lacked — but a full page wants more than one section.
+ *
+ * `src` IS A QUOTATION OR IT IS ABSENT. The other two cards quote a real line
+ * from the project's own repository, which is why they carry a file path and a
+ * read date and why a reader can check them. MistServer's used to hold
+ * "Util::wouldSelect() resolves audio= off the target's query string" — a
+ * DESCRIPTION of what a function does, set in the same quoted-code treatment
+ * that gives the other two their authority. It looked sourced and was not.
+ *
+ * So this card cites the facts file instead, and says so. Two kinds of evidence
+ * on one page is fine; evidence that is dressed as a stronger kind than it is
+ * is not. */
 const selectors = [
   {
     href: "/vs/obs-multi-rtmp",
     name: "obs-multi-rtmp",
-    what: "An OBS plugin, around 4,975 stars. Each destination is another output from the stream PC, so N destinations is N uploads off one connection.",
+    what: "An OBS plugin. Each destination is another output from the stream PC, so N destinations is N uploads off one connection.",
     src: "struct AudioTrackConfig { int mixer_track; int output_track; };",
     file: "src/output-config.h",
     note: "Two integers: this mixer track goes in that output slot. No gain, no sum.",
@@ -109,17 +147,18 @@ const selectors = [
   {
     href: "/vs/aitum-multistream",
     name: "Aitum Multistream",
-    what: "An OBS plugin, around 250 stars. The destination's audio is picked in its output settings and stored as one number.",
+    what: "An OBS plugin. The destination's audio is picked in its output settings and stored as one number.",
     src: 'obs_audio_encoder_create(…, obs_data_get_int(settings, "audio_track"), …)',
     file: "multistream.cpp",
     note: "One mixer index per destination.",
   },
   {
     name: "MistServer",
-    what: "A media server, and the one here that genuinely can pick tracks per push target — by index, by codec, or all of them.",
-    src: "Util::wouldSelect() resolves audio= off the target's query string",
-    file: "lib/stream.cpp",
-    note: "It selects, and selects well. It has no amix, no loudnorm, no ebur128.",
+    what: "A media server, and the one here that genuinely can pick tracks per push target — by track ID, codec, language, bitrate, or a first/last/optimal heuristic.",
+    // No `src`/`file`: see the note above. This card's evidence is the facts
+    // file, not a line of their source, and the page says which.
+    source: "competitor-facts §6 · checked 15 Aug 2026",
+    note: "It selects, and selects well. Its ROUTING SERVER has no amix, no loudnorm, no ebur128 — but an external Stream Process (MistProcAV, an FFmpeg pipeline) can decode, filter and inject a track back into the buffer, so mixing is reachable, just not where the routing happens.",
   },
 ];
 ---
@@ -157,8 +196,8 @@ const selectors = [
       <p class="mt-3 text-pretty leading-relaxed text-muted">
         That is the case the whole product is arranged around: the routing
         matrix, the per-destination loudness targets, the multitrack archive and
-        the stems all exist because the audio is the hard part and everything
-        else in this space treats it as one stereo pair.
+        the stems all exist because the audio is the hard part — and because
+        everywhere else it is a track you pick rather than a mix you build.
       </p>
     </div>
   </section>
@@ -308,8 +347,9 @@ const selectors = [
           <div class="card p-5">
             <p class="font-medium text-fg">{s.name}</p>
             <p class="mt-2 text-sm leading-relaxed text-muted">{s.what}</p>
-            <CodeBlock code={s.src} variant="quote" />
-            <p class="mt-2 font-mono text-[11px] text-subtle">{s.file} · read 2026-08-09</p>
+            {s.src && <CodeBlock code={s.src} variant="quote" />}
+            {s.src && <p class="mt-2 font-mono text-[11px] text-subtle">{s.file} · read 2026-08-09</p>}
+            {s.source && <p class="mt-2 font-mono text-[11px] text-subtle">{s.source}</p>}
             <p class="mt-3 text-sm leading-relaxed text-muted">{s.note}</p>
             {s.href && (
               <p class="mt-4">
