@@ -282,10 +282,13 @@ func hevcCase(relay string) {
 // ------------------------------------------------------------------ helpers
 
 func startSource(relay string) *exec.Cmd {
-	relayPort, _ := strconv.Atoi(relay)
-	if relayPort == 0 {
-		die("no relay port; the ingest hub was not found")
-	}
+	// Its own copy of the resolution the other drivers got, because this one
+	// discovers the port here rather than in main. Same cycle: without a seeded
+	// source the shell's lsof may have found nothing, since the relay socket
+	// exists only while an engine runs and an engine runs only for a source.
+	// By the time this is called the source has been created, so the server can
+	// answer.
+	relayPort := resolveRelayPort(relay)
 	fmt.Println("starting synthetic 1080p30 source")
 	src := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
 		"-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=30",
@@ -535,4 +538,32 @@ func die(f string, a ...any) {
 	facts["DRIVER_FAILED"] = fmt.Sprintf(f, a...)
 	writeFacts()
 	os.Exit(1)
+}
+
+// resolveRelayPort returns the relay hub's UDP port, preferring what the shell
+// found and asking the server when the shell found nothing.
+//
+// See acceptance_audio_driver.go for the full account of the cycle this breaks.
+// Uses this file's own session: these drivers keep their own cookie jar.
+func resolveRelayPort(fromShell string) int {
+	if p, err := strconv.Atoi(strings.TrimSpace(fromShell)); err == nil && p > 0 {
+		return p
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if st := get("/stats"); st != nil {
+			if relay, ok := st["relay"].(map[string]any); ok {
+				if pf, ok := relay["port"].(float64); ok && pf > 0 {
+					fmt.Printf("relay port discovered from the server: %d\n", int(pf))
+					return int(pf)
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			die("no relay port: the shell found none and GET /stats reported none within 30s. " +
+				"A relay exists only while an engine runs, and an engine runs only for a source -- " +
+				"so this usually means the source was never created, not that the port is missing.")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }

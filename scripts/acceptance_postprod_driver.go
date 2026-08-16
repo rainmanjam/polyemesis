@@ -46,9 +46,6 @@ func main() {
 		die("usage: acceptance_postprod_driver.go <http-port> <relay-port>")
 	}
 	base = "http://127.0.0.1:" + os.Args[1] + "/api/v1"
-	// See driverlib.ResolveRelayPort: the shell may have found no socket,
-	// because without a seeded source none exists until this driver makes one.
-	relayPort = resolveRelayPort(os.Args[2])
 
 	jar, _ := cookiejar.New(nil)
 	client = &http.Client{Jar: jar, Timeout: 60 * time.Second}
@@ -61,6 +58,16 @@ func main() {
 	// #387; see acceptance_driver.go's copy of this note for the full reason.
 	fmt.Println("creating the first source")
 	call("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+
+	// AFTER the source, and after the client exists. Both matter and the first
+	// version of this got the second one wrong: resolving here used to sit above
+	// the cookiejar, so a shell that found no socket sent this straight into
+	// `net/http.(*Client).Get` on a nil client and the driver panicked before it
+	// had spoken to the server at all.
+	//
+	// The ordering is not incidental either way -- the relay exists only once an
+	// engine runs, and an engine runs only for the source created just above.
+	relayPort = resolveRelayPort(os.Args[2])
 
 	prepare()
 	recs := recordSomething()
