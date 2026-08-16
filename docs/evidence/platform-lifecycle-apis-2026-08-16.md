@@ -753,10 +753,23 @@ number, so unlike YouTube's concurrency cap it MAY be encoded.
 
 **TWO HARD CEILINGS ON EVERY FACEBOOK STREAM URL, BOTH STATED.** Verbatim: "The
 stream URL must be used within 24 hours before expiring. Once used, a stream URL
-can be streamed to for up to **8 hours**." polyemesis advertises 24/7 playout
-channels; a Facebook destination cannot be one on a single stream URL, and an
-operator running a continuous channel will be cut off at eight hours by the
-platform rather than by us. Nothing in the tree currently knows this.
+can be streamed to for up to **8 hours**."
+
+CORRECTION TO AN EARLIER DRAFT OF THIS PARAGRAPH, which claimed "nothing in the
+tree currently knows this". It does: `internal/db/platforms.go:540` carries
+"Eight hours maximum" in Facebook's video guidance note, sourced to
+facebook.com/business/help/162540111070395 and dated 2026-08-06. What is new
+here is the 24-hour unused-expiry and the fact that the 8 hours runs from FIRST
+USE of the URL rather than from the broadcast.
+
+The same draft said "polyemesis advertises 24/7 playout channels". It does not:
+that pitch appears in docs/internal/features-page-gaps.md as a PROPOSED
+/features section and in the keyword research, not in shipped copy -- web/src
+contains no such claim. So this is not a live broken promise. It is a
+constraint on copy that has not shipped yet: a 24/7 section that lists Facebook
+among its destinations without carving out the eight-hour cap would be false on
+the day it ships. The guidance note is prose in a preset, not a check, so
+nothing warns an operator who builds a continuous channel with a Facebook leg.
 
 **GOING LIVE HAS ACCOUNT ELIGIBILITY REQUIREMENTS THAT ARE NOT ABOUT SCOPES.**
 Since 2024-06-10: the account must be at least 60 days old, and the Page or
