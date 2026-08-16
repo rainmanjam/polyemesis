@@ -615,6 +615,15 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	if err != nil {
 		return err
 	}
+	// How many programmes this install has, which is a different question from
+	// what settings.ingest says. Nothing reads settings.ingest any more -- the
+	// engine takes its ingest from the source row -- so on an install with no
+	// source that block describes a listener nobody is behind. See the ingest
+	// line below.
+	sources, err := store.CountSources()
+	if err != nil {
+		return err
+	}
 
 	scheme := "http"
 	if provider.Enabled() {
@@ -632,10 +641,32 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 
 	fmt.Printf("\n  polyemesis %s\n", version)
 	fmt.Printf("  web ui      %s://%s\n", scheme, shown)
-	// An install that has not chosen yet prints that, rather than an empty mode
-	// beside a port number — which reads as "srt on 6000" to anyone skimming and
-	// is the one impression this must not give.
-	if settings.Ingest.Mode == db.IngestUnset {
+	// NO SOURCE, NO INGEST, whatever settings.ingest happens to say.
+	//
+	// This line is the entire user interface of a headless first run: nobody has
+	// opened the web UI yet, and these eight lines are the only thing telling an
+	// operator where to point an encoder. `ingest srt (port 6000)` on a box with
+	// no source is a false statement of exactly the kind that costs an evening —
+	// the port really is bound (both listeners bind unconditionally), so nothing
+	// downstream contradicts it, and the encoder is simply refused by a server
+	// that has no programme to admit it to.
+	//
+	// It is checked BEFORE the mode, because it outranks it: settings.ingest can
+	// carry a fully configured SRT block on an install with no source at all,
+	// and a mode is a statement about a programme that does not exist.
+	//
+	// Deliberately NOT extended to naming the DEFAULT SOURCE's ingest when there
+	// is one. That is the same settings-singleton read the rest of this line
+	// still does, it is wrong in a second way on a multi-source install, and it
+	// is a separate change with its own decision about which programme a banner
+	// speaks for.
+	if sources == 0 {
+		fmt.Printf("  ingest      no programme yet — create a source in the web UI\n")
+	} else if settings.Ingest.Mode == db.IngestUnset {
+		// An install that has a source but has not chosen a mode prints that,
+		// rather than an empty mode beside a port number — which reads as "srt
+		// on 6000" to anyone skimming and is the one impression this must not
+		// give.
 		fmt.Printf("  ingest      not chosen yet — pick SRT, RTMP or pull in the web UI\n")
 	} else if settings.Ingest.Mode == db.IngestPull {
 		// Pull DIALS OUT. It is the one mode with no inbound port, and printing
