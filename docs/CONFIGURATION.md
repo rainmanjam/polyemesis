@@ -122,8 +122,9 @@ That belief was wrong: config loading ignores unrecognised keys, so the
 declaration was buying nothing while presenting a knob an operator could set and
 watch have no effect. **A config file that still names `enhancedRtmp` loads
 exactly as before.** For multitrack ingest that is actually operated, use SRT:
-Enhanced RTMP's version dependency is real, and it has not been confirmed with
-OBS itself as the publisher. See `evidence/enhanced-rtmp-multitrack.md`.
+Enhanced RTMP's version dependency is real, and OBS does not send multitrack
+audio over it — measured against OBS 30.2.3, which emitted only legacy
+single-track tags. See `evidence/enhanced-rtmp-multitrack.md`.
 
 ## The data directory
 

@@ -220,8 +220,10 @@ which bundles one and asserts it at build time.
 A fourth exists if your encoder speaks **Enhanced RTMP**, which does carry
 multiple audio tracks: polyemesis ingests those and the routing works normally,
 with no libsrt anywhere. The caveat is what keeps it fourth rather than first —
-verified with FFmpeg 7.1+ publishing, broken on 6.1.1, and unconfirmed with OBS.
-If your encoder is OBS, fix the FFmpeg build instead.
+verified with FFmpeg 7.1+ publishing, broken on 6.1.1, and **OBS does not send
+it at all** — OBS 30.2.3 was measured sending only legacy single-track audio,
+and the multitrack path is gated on a capability no service in its
+`services.json` declares. If your encoder is OBS, use SRT.
 
 **Hardware encoders — nothing to install, nothing to configure.** Do *not* go
 looking for a build with NVENC or VA-API compiled in on the strength of

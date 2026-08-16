@@ -54,6 +54,12 @@ make build
 Open <http://localhost:8080>, complete first-run setup, and note the SRT port
 from **Settings → Listeners** (default 6000).
 
+Then **create a source**: Sources → Add source, name it `Main`, ingest mode
+SRT. A fresh install seeds none since 0.7.x, and every route that acts on the
+pipeline — Add destination included — answers `503` with `code: "no_source"`
+until one exists. Copy its publish token; it is the SRT `streamid` the commands
+below need, and `$TOKEN` throughout this document refers to it.
+
 It is on *Listeners* rather than *Ingest* because there is one SRT port for the
 whole install — every source shares it and is told apart by its publish token,
 so the port is not a property of any one source's ingest.
@@ -74,7 +80,7 @@ ffmpeg -hide_banner -re \
   -map 0:v -map 1:a -map 2:a -map 3:a \
   -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -b:v 2500k \
   -c:a aac -b:a 128k \
-  -f mpegts "srt://127.0.0.1:6000?mode=caller&transtype=live&latency=200000"
+  -f mpegts "srt://127.0.0.1:6000?mode=caller&transtype=live&latency=200000&streamid=$TOKEN"
 ```
 
 Notes on the flags that matter:
@@ -336,7 +342,7 @@ ffmpeg -hide_banner -re \
   -filter_complex "[1:a][2:a][3:a][4:a][5:a][6:a]join=inputs=6:channel_layout=5.1[surround]" \
   -map 0:v -map "[surround]" \
   -c:v libx264 -preset ultrafast -g 60 -b:v 2500k -c:a aac -b:a 384k \
-  -f mpegts "srt://127.0.0.1:6000?mode=caller&transtype=live&latency=200000"
+  -f mpegts "srt://127.0.0.1:6000?mode=caller&transtype=live&latency=200000&streamid=$TOKEN"
 ```
 
 Channel order is FL(300) FR(500) FC(700) LFE(100) BL(1500) BR(2500).

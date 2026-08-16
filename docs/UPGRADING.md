@@ -179,12 +179,16 @@ Two things worth knowing afterwards:
 
 ### Upgrading to one-port ingest
 
-**Off by default.** Nothing changes until you enable it. With it off, each
-source keeps its own port exactly as before.
+**There is no switch — one port is the only mode.** Every source arrives on the
+shared SRT listener (default `6000/udp`) and is told apart by its publish token,
+which is the SRT `streamid`; RTMP works the same way, addressed by the stream
+key.
 
-When you turn it on, publish URLs change: the token becomes the SRT streamid.
-The Sources page shows the new URL for each source. Update your encoders before
-switching, not after.
+An install upgraded from a pre-one-port build keeps its old RTMP stream key
+working through a grandfather clause — the Sources page shows it as
+`legacyRtmpKey` — but SRT publishers must present the token. Copy the new URL
+for each source from the **Sources** page and update your encoders **before**
+upgrading, not after.
 
 ### Session tokens gained an epoch
 
@@ -292,8 +296,14 @@ to look at after an upgrade or a restore, because it is the one failure that
 looks like success:
 
 ```sh
-curl -s localhost:8080/api/v1/destinations | grep -c keyUnreadable
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/v1/destinations \
+  | grep -o keyUnreadable | wc -l
 ```
+
+`$TOKEN` is an API token from **Settings → API tokens** (see
+[API.md](API.md)). Unauthenticated this endpoint answers `401`, and the count
+would be a meaningless zero — which reads as an all-clear for the very failure
+this check exists to find.
 
 Anything above zero means those destinations could not decrypt their stream key
 — almost always a restore that omitted `secret.key`. Re-enter the key on each,

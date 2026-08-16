@@ -275,9 +275,8 @@ The Docker image bundles Alpine's `ffmpeg` package as a convenience — Alpine's
 build has libsrt, which is why the image is Alpine rather than distroless. That
 bundling is aggregation in an image, and does not change the analysis above.
 
-> There is currently no `LICENSE` file at the repo root. The reasoning above
-> stands on its own, but the project's own licence should be stated explicitly
-> before any public release.
+> polyemesis is MIT licensed; see [LICENSE](../LICENSE). The arm's-length
+> posture above is what keeps a GPL FFmpeg build from propagating into that.
 
 ## Indirect Go dependencies
 
