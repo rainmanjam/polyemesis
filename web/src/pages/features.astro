@@ -92,7 +92,7 @@ const sections = [
       "No subscription gates any of it, and nothing proxies your video: the OAuth connection carries metadata and chat, while the stream goes straight from your box to the platform's ingest. There is no intermediary to rate-limit your bitrate or count your destinations.",
       "It is not all-or-nothing, and the UI says which is which per platform rather than implying parity. A pasted key is a fully supported destination, not a degraded one — nineteen other presets in the catalogue work exactly that way, over RTMP, RTMPS or SRT.",
     ],
-    note: "Instagram is listed and marked unsupported rather than shipped as a preset that quietly never connects: there is no Live broadcast API, and Live Producer's RTMP path was removed for most accounts. X and Rumble are key-paste platforms; Rumble chat needs a key from your account page because that API has no sign-in.",
+    note: "Instagram is listed and marked unsupported rather than shipped as a preset that quietly never connects — which looks like a bug in polyemesis when there is nothing to fix. There is no Live broadcast API, so nothing can create a broadcast, fetch a key, read chat or report viewers. If your account still has Live Producer, its URL and key work as a generic RTMPS destination, pasted by hand and changing every broadcast. X and Rumble are key-paste platforms; Rumble chat needs a key from your account page because that API has no sign-in.",
     shot: "13-automation.png",
     caption: "Connected accounts, with what each platform can and cannot automate stated per capability.",
     alt: "polyemesis automation page: connected platform accounts and their capabilities",
