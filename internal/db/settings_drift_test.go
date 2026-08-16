@@ -99,14 +99,61 @@ func walk(t *testing.T, rt reflect.Type, prefix string, visit func(path, name st
 	}
 	for i := range rt.NumField() {
 		f := rt.Field(i)
+		// UNEXPORTED USUALLY MEANS "NEVER ON THE WIRE", AND EMBEDDING IS THE
+		// EXCEPTION. encoding/json promotes the EXPORTED fields of an anonymous
+		// embedded struct even when the embedded type itself is unexported, so
+		// `struct{ announcementSet }` puts announcementSet's exported leaves in
+		// the enclosing object under their own names. Skipping the field would
+		// have hidden every one of them from this guard -- leaves that are
+		// stored, readable, and unchecked, which is the precise blind spot this
+		// walk exists to close.
+		//
+		// Only structs. An unexported embedded field of any other type really
+		// is dropped by encoding/json, and so is any ordinary unexported field.
 		if !f.IsExported() {
-			continue
+			et := f.Type
+			for et.Kind() == reflect.Pointer {
+				et = et.Elem()
+			}
+			if !f.Anonymous || et.Kind() != reflect.Struct {
+				continue
+			}
 		}
 		tag := f.Tag.Get("json")
 		if tag == "-" {
 			continue
 		}
 		name, _, _ := strings.Cut(tag, ",")
+		// An ANONYMOUS embedded struct whose json tag names nothing is INLINED
+		// by encoding/json: its leaves are keys of the enclosing object, and the
+		// type's own name appears in no JSON anywhere. Recursing under the
+		// PARENT's prefix is what keeps this walk agreeing with the bytes --
+		// FacebookSettings embeds db.AnnouncementSet, and without this the guard
+		// demands the UI name "facebook.AnnouncementSet.announcements", which
+		// nothing has ever sent or stored.
+		//
+		// Only when the tag names nothing: `json:"x"` on an embedded field DOES
+		// nest it, and then the block name is real.
+		// INLINED MEANS EMBEDDED STRUCT, AND encoding/json IS STRICTER THAN
+		// "anonymous with no tag". An embedded *struct is inlined too, but an
+		// embedded NAMED SLICE or MAP is not -- `type Tags []string` embedded
+		// anonymously nests under "Tags" and its elements are not keys of the
+		// enclosing object. The test below was computed BEFORE the deref loop,
+		// which strips slices and maps as well as pointers, so such a field
+		// would have been walked as inlined and every path under it would have
+		// been off by one segment.
+		//
+		// Nothing in the tree embeds a named slice today. This matters because
+		// THIS diff is what makes anonymous embedding the sharing pattern here:
+		// the next person to reach for it gets a walker that agrees with the
+		// bytes, or a guard that quietly checks the wrong paths.
+		//
+		// So the inline test sees through POINTERS ONLY and stops there.
+		embedded := f.Type
+		for embedded.Kind() == reflect.Pointer {
+			embedded = embedded.Elem()
+		}
+		inlined := f.Anonymous && name == "" && embedded.Kind() == reflect.Struct
 		if name == "" {
 			// An untagged exported field still serialises, under its Go name.
 			name = f.Name
@@ -123,7 +170,11 @@ func walk(t *testing.T, rt reflect.Type, prefix string, visit func(path, name st
 		if ft.Kind() == reflect.Struct && ft.PkgPath() != "time" && ft.Name() != "Time" {
 			// A nested block: the container name itself is not a control, so
 			// only its leaves are checked.
-			walk(t, ft, path, visit)
+			if inlined {
+				walk(t, ft, prefix, visit)
+			} else {
+				walk(t, ft, path, visit)
+			}
 			continue
 		}
 		visit(path, name)

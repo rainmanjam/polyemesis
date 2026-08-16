@@ -154,11 +154,24 @@ func TestAccountStatsReportsAbsenceRatherThanFailing(t *testing.T) {
 		}
 	}
 	if absent == "" {
-		// Not a failure of the product — it would mean every integrated
-		// platform reports viewers, which is the goal. But this test would then
-		// be asserting over nothing while still passing, so it says so out loud
-		// rather than going quietly green.
-		t.Skip("every integrated platform now reports viewer stats; nothing left to assert absence with")
+		// A FAILURE RATHER THAN A SKIP, AND THE SKIP LEDGER SETTLED THAT.
+		//
+		// This was t.Skip for one commit, on the reasoning that every integrated
+		// platform reporting viewers is the goal rather than a defect. The
+		// census in internal/testenv/skips_test.go rejected it, and its rule is
+		// the right one: "If it fires because the thing under test CHANGED, it
+		// is not a skip at all -- it is a failure, or a testenv.Quarantine
+		// entry." That is exactly this case, and a skip would have printed ok
+		// and been counted as coverage on the day the test stopped covering
+		// anything.
+		//
+		// So it fails, and the fix is a human decision rather than an automatic
+		// one: either this test is obsolete and should be deleted, or the
+		// supported:false envelope still needs proving and should be driven
+		// with a stub provider instead of a real platform.
+		t.Fatal("no integrated platform lacks viewer stats, so this test can no longer " +
+			"prove the supported:false envelope. Delete it, or drive it with a stub " +
+			"provider -- do not let it pass over an empty set.")
 	}
 	id := connectAccount(t, store, s.box, absent, "chan")
 
