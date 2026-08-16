@@ -407,6 +407,16 @@ func (d *DB) DefaultSourceID() (int64, error) {
 // ingest on the default port instead of theirs, which presents as "my encoder
 // cannot connect any more" -- a worse outcome than refusing to start, and much
 // harder to diagnose.
+//
+// An EXISTING blob decodes onto mergeBaseSettings, not DefaultSettings, for the
+// reason GetSettings gives about itself: DefaultSettings leaves the mode unset
+// so a first run has to ask, and a stored blob that predates the mode field, or
+// omits it, would inherit that and migrate onto a source that ingests nothing.
+// The installs where this function runs at all are the oldest ones -- the ones
+// whose blob is most likely to predate the field -- so the base that is right
+// for a fresh install is exactly the wrong one here. A MISSING blob still takes
+// the defaults, because there is nothing to preserve and nothing to ask on
+// behalf of.
 func (d *DB) ingestForMigration() (IngestSettings, error) {
 	var raw string
 	err := d.sql.QueryRow(`SELECT json FROM settings WHERE id = 1`).Scan(&raw)
@@ -416,7 +426,7 @@ func (d *DB) ingestForMigration() (IngestSettings, error) {
 	if err != nil {
 		return IngestSettings{}, err
 	}
-	s := DefaultSettings()
+	s := mergeBaseSettings()
 	if err := json.Unmarshal([]byte(raw), &s); err != nil {
 		return IngestSettings{}, fmt.Errorf("decode settings: %w", err)
 	}

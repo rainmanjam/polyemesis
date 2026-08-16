@@ -315,6 +315,44 @@ func TestMigrationDoesNotResurrectASourceTheOperatorDeleted(t *testing.T) {
 	}
 }
 
+// The oldest blob of all: one written before ingest had a mode field.
+//
+// GetSettings decodes an existing blob onto mergeBaseSettings for exactly this,
+// and says so: an omitted mode inheriting the unset default "would stop
+// ingesting on upgrade -- a silent regression on exactly the servers that were
+// working". The migration read the same blobs off the same base as a fresh
+// install and produced a source with no mode, which spawns no ingest. The
+// install it happens to is the pre-sources one, which is the oldest install
+// there is and therefore the likeliest to have such a blob.
+func TestMigrationGivesAModeToABlobWrittenBeforeThereWasOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-mode.db")
+	preSourcesDB(t, path, `{"ingest":{"srt":{"latencyMs":300}}}`)
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on a pre-sources database: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	got, err := d.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d sources, want exactly 1", len(got))
+	}
+	if got[0].Ingest.Mode != IngestSRT {
+		t.Errorf("mode = %q, want srt: a source with no mode spawns no ingest, "+
+			"so this install comes up unreachable by the encoder already pointed at it",
+			got[0].Ingest.Mode)
+	}
+	// The rest of the blob still has to arrive, or the mode is right and the
+	// port it listens on is not.
+	if got[0].Ingest.SRT.LatencyMS != 300 {
+		t.Errorf("srt latency = %d, want 300 carried across", got[0].Ingest.SRT.LatencyMS)
+	}
+}
+
 // The rotation columns are NOT evidence of a pre-sources install.
 //
 // prev_token and prev_token_until belong to the token-rotation release, which
