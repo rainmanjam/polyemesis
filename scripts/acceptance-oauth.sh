@@ -507,6 +507,7 @@ livecheck() {
     sk "$plat: the refreshed token's lifetime was not measured"
     sk "$plat: the granted scopes were not compared against what this build asks for"
     sk "$plat: the ingest URL and stream key were not fetched"
+    sk "$plat: the live viewer count was not read back"
     return
   fi
 
@@ -544,6 +545,31 @@ livecheck() {
     bad "$plat: the refreshed token is missing scopes this build asks for: $MISS"
   fi
 
+  # THE ONLY PLACE A REAL STATS BODY IS EVER READ. Every unit test in
+  # internal/oauth answers from a stub whose body this repo wrote, so they prove
+  # the decoder matches the fixture and never that the fixture matches the
+  # platform. Kick's stats fallback is the standing reminder: it shipped against
+  # a fixture shaped like the struct rather than like the endpoint, passed for as
+  # long as it existed, and could never have worked.
+  #
+  # LIVENESS IS REPORTED, NOT ASSERTED. Whether this account happens to be
+  # streaming is not the suite's business, and a check that failed because nobody
+  # was live at 3am would be switched off within a week. The shape IS asserted:
+  # the call has to succeed, and a viewer count has to be either a real number or
+  # honestly absent -- never the fabricated zero this phase exists to prevent.
+  case "$(val "$out" statsOK)" in
+    true)
+      if [ "$(val "$out" statsLive)" = true ]; then
+        ok "$plat: live now, $(val "$out" statsViewers) viewers per $(val "$out" statsSource)"
+      else
+        ok "$plat: not live, and said so without inventing a viewer count (viewers: $(val "$out" statsViewers))"
+      fi ;;
+    unsupported)
+      sk "$plat: polyemesis reads no viewer count from this platform" ;;
+    *)
+      bad "$plat: the viewer-count read FAILED: $(val "$out" statsError)" ;;
+  esac
+
   # THE #312 FIELD. This is the destination URL and stream key polyemesis fills
   # in automatically -- the same pair whose hand-typed equivalent shipped a
   # Kick preset that could not publish. Reported redacted: a suite that leaked
@@ -573,7 +599,7 @@ printf "  \033[1m%d passed, %d failed, %d skipped\033[0m\n\n" "$pass" "$fail" "$
 # as a failure, and step 4's refusal helper counts two on every path including
 # the one where a platform mints a token it should not. A floor that moved with
 # which credentials happened to be in the environment would be no floor at all.
-EXPECTED_CHECKS=46
+EXPECTED_CHECKS=50
 total=$((pass + fail + skip))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  only %d of %d checks ran; the run stopped early\n\n" \
