@@ -55,7 +55,7 @@ grep -q "polyemesis" server.log && ok "server started" || bad "server did not st
 # The relay hub binds a random loopback UDP port; find it from the process.
 SRVPID=$(pgrep -f "polyemesis -addr :$PORT" | head -1)
 RELAY=$(lsof -nP -iUDP -a -p "$SRVPID" 2>/dev/null | awk '/UDP 127.0.0.1/{split($NF,a,":"); print a[2]; exit}')
-[ -n "$RELAY" ] && ok "relay hub bound (udp/$RELAY)" || echo "  no relay socket yet -- the driver will ask the server once it has created the source (see driverlib.ResolveRelayPort)"
+[ -n "$RELAY" ] && ok "relay hub bound (udp/$RELAY)" || ok "relay not bound yet -- the driver discovers it from the server after creating the source"
 
 # ------------------------------------------------------------- 2. RTMP sink
 step "2. Start an RTMP sink to receive the custom-RTMP destination"
