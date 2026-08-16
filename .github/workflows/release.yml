@@ -257,6 +257,46 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # FIRST, BEFORE ANYTHING IS BUILT OR PUSHED. A release that has already
+      # uploaded assets and then discovers its notes are wrong is a release
+      # somebody has to go and delete.
+      #
+      # WHAT THIS CATCHES. [Unreleased] sits ABOVE the version sections, so under
+      # Keep a Changelog its contents are NEWER than the release below them.
+      # Every PR correctly appends there and nothing folds it forward, so the gap
+      # reopens after each merge -- twice on 2026-08-14 alone. The second time it
+      # stranded all seven security fixes from #366 and the VOD editor from #365:
+      # nine entries a tag would have omitted.
+      #
+      # That is not cosmetic. GHSA-7jqx points at these release notes, and the
+      # fix for its worst defect -- 0.7.0's seal-at-rest migration leaving
+      # plaintext keys in the WAL -- was in the section a tag would have skipped.
+      # An operator following the advisory to the notes would not have found it.
+      #
+      # WHAT IT DOES NOT CATCH, stated because the gap is real and a guard that
+      # is trusted for more than it does is worse than none. This fires when
+      # entries were written and not folded. It cannot fire when they were never
+      # written at all -- a merge that records nothing leaves [Unreleased] empty
+      # and passes here. #400 recorded nothing and would have sailed through.
+      # That second failure needs a different check, on the pull request rather
+      # than the tag.
+      - name: "[Unreleased] must be empty before a tag"
+        run: |
+          set -euo pipefail
+          body=$(awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md \
+                 | sed '/^[[:space:]]*$/d')
+          # "Nothing yet." is the deliberate empty state, not an entry.
+          real=$(printf '%s\n' "$body" | sed '/^Nothing yet\.$/d' | sed '/^[[:space:]]*$/d')
+          if [ -n "$real" ]; then
+            echo "::error::CHANGELOG.md still has entries under [Unreleased]. Fold them"
+            echo "::error::into the version being tagged before releasing -- they sit ABOVE"
+            echo "::error::the version sections, so a tag cut now omits every line below."
+            printf '%s\n' "$real" | head -40
+            exit 1
+          fi
+          echo "[Unreleased] is empty; nothing would be stranded by this tag."
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
