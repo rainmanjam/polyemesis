@@ -193,6 +193,9 @@ func main() {
 	driverlib.WaitUp()
 	fmt.Println("first-run setup")
 	driverlib.Setup("admin", "acceptance-pw")
+	// The programme the renditions and destinations below hang off. Since #387
+	// a fresh install has none; see driverlib.EnsureSource.
+	driverlib.EnsureSource("Main")
 
 	// Recording and metering off. Both spawn FFmpeg processes of their own, and
 	// this suite's central number is how much CPU the ENCODERS use; a recorder

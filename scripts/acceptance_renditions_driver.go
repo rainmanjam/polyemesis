@@ -71,6 +71,11 @@ func main() {
 	call("POST", "/setup", map[string]any{"username": "admin", "password": "acceptance-pw"})
 	grabCSRF()
 
+	// The programme everything below hangs off. A fresh install has none since
+	// #387; see acceptance_driver.go's copy of this note for the full reason.
+	fmt.Println("creating the first source")
+	call("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+
 	// Recording and metering off: neither is under test here, and both are
 	// extra FFmpeg processes competing with the encode this test is timing.
 	settings := get("/settings")
