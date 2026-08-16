@@ -1547,6 +1547,61 @@ export interface ReconnectReason {
   missing?: string[];
 }
 
+/** A point-in-time read of one connected channel's broadcast, from
+ *  GET /api/v1/platforms/accounts/{id}/stats.
+ *
+ *  Mirrors oauth.LiveStats. Kept HERE rather than in the component that renders
+ *  it, for the same reason MetaField is: the server names these fields, so the
+ *  shape is an API contract rather than a component detail.
+ *
+ *  EVERY OPTIONAL FIELD BELOW IS OPTIONAL ON PURPOSE AND `viewerCount` IS THE
+ *  ONE THAT MATTERS. Go declares it `*int` with `omitempty`, so a platform that
+ *  declined to say drops the key entirely rather than sending a zero — see the
+ *  comment on oauth.LiveStats.ViewerCount, which is the specification for this
+ *  type. Typing it `number` here would compile, and would then let any caller
+ *  write `{stats.viewerCount}` or `count || 0` and tell a streamer with an
+ *  audience that nobody is watching. `number | undefined` is what forces the
+ *  branch, and viewerReadout() in lib/viewerCount.ts is where that branch is
+ *  taken once for the whole app. */
+export interface LiveStats {
+  live: boolean;
+  /** ABSENT IS NOT ZERO. YouTube omits it when nobody is watching, when the
+   *  owner has hidden the count, and once the broadcast has ended; Kick
+   *  documents 0 as the streamer's opt-out value; Twitch sends no count at all
+   *  for a channel that is not live. Render "not reported", never 0. */
+  viewerCount?: number;
+  title?: string;
+  category?: string;
+  language?: string;
+  slug?: string;
+  /** RFC 3339. Absent for an offline channel and for a stamp the server could
+   *  not parse — Go makes it `*time.Time` because `omitempty` does nothing to a
+   *  struct, and the zero time used to serialise as a confident 0001-01-01. */
+  startedAt?: string;
+  /** The endpoint the numbers came from, so a count that disagrees with the
+   *  platform's own dashboard can be traced without a packet capture. */
+  source?: string;
+}
+
+/** The stats envelope, as a discriminated union on `supported`.
+ *
+ *  A union rather than `{supported: boolean; reason?: string; stats?: LiveStats}`
+ *  because the handler answers 200 in both cases and the two cases carry
+ *  different fields: "polyemesis cannot ask this platform" is a capability
+ *  answer with a reason to show, not an error and not an absent count. The union
+ *  makes reaching for `stats` without checking `supported` a type error, which
+ *  is the branch oauth.StatsFor's doc comment asks every caller to take. */
+export type AccountStats =
+  | {
+      supported: false;
+      /** Shown verbatim: the server writes the platform's name into it
+       *  ("polyemesis does not read a viewer count from facebook"), and an
+       *  operator deciding whether to wait for a number needs to know it is
+       *  never coming. */
+      reason: string;
+    }
+  | { supported: true; stats: LiveStats };
+
 export interface SetupGuide {
   platform: Platform;
   name: string;

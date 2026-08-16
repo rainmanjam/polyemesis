@@ -1228,5 +1228,10 @@
   "tour.routingNav.body": "Cel bez profilu routingu to zwykłe retransmitowanie, czyli to, co robi każde inne narzędzie. Profil decyduje, które przychodzące ścieżki dźwiękowe trafiają do którego celu i jak są miksowane: mikrofon komentatora ściszający podkład muzyczny dla jednej platformy, muzyka całkiem pominięta dla innej, każda z własnym celem głośności. Ustawia się to osobno dla każdego celu, więc jeden przychodzący sygnał może wyjść jako kilka różnych programów.",
   "tour.routingNav.title": "Routing to ta część, która nie jest retransmisją",
   "tour.sourcesNav.body": "Źródło to jeden przychodzący sygnał, a na tej stronie znajdują się jego adres publikacji i token. install.sh wypisał je dokładnie raz, przy uruchomieniu; jeśli tamten terminal został zamknięty, tutaj można je znaleźć ponownie. Każde źródło ma własny token, więc kilka koderów może publikować do jednej instalacji i pozostać oddzielone.",
-  "tour.sourcesNav.title": "Źródła: tutaj łączy się koder"
+  "tour.sourcesNav.title": "Źródła: tutaj łączy się koder",
+  "stats.checking": "Sprawdzanie…",
+  "stats.noCount": "Brak licznika widzów",
+  "stats.notReported": "Liczba widzów nie została podana",
+  "stats.unreadable": "Nie udało się odczytać liczby widzów.",
+  "stats.watching": "{count} ogląda"
 }

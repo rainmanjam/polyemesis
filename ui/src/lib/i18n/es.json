@@ -1228,5 +1228,10 @@
   "tour.routingNav.body": "Un destino sin perfil de enrutado es simple retransmisión, que es lo que hace cualquier otra herramienta. Un perfil decide qué pistas de audio entrantes llegan a qué destino y cómo se mezclan: un micrófono de comentarios que baja la base musical para una plataforma, la música excluida por completo en otra, cada una con su propio objetivo de sonoridad. Se configura por destino, así que un mismo feed entrante puede salir como varios programas distintos.",
   "tour.routingNav.title": "El enrutado es la parte que no es retransmitir",
   "tour.sourcesNav.body": "Una fuente es un feed entrante, y esta página es donde están su dirección de publicación y su token. install.sh los imprimió una sola vez, al ejecutarse; si esa terminal se cerró, aquí es donde volver a encontrarlos. Cada fuente lleva su propio token, de modo que varios codificadores pueden publicar en una instalación y seguir separados.",
-  "tour.sourcesNav.title": "Fuentes: donde se conecta un codificador"
+  "tour.sourcesNav.title": "Fuentes: donde se conecta un codificador",
+  "stats.checking": "Comprobando…",
+  "stats.noCount": "Sin recuento de espectadores",
+  "stats.notReported": "El recuento de espectadores no se ha informado",
+  "stats.unreadable": "No se pudo leer el recuento de espectadores.",
+  "stats.watching": "{count} viendo"
 }

@@ -1,4 +1,5 @@
 import type {
+  AccountStats,
   AcmePreflight,
   ApiToken,
   TokenScope,
@@ -864,6 +865,16 @@ export const api = {
   listAccounts: () => get<PlatformAccount[]>("/platforms/accounts"),
   deleteAccount: (id: number) =>
     del<{ status: string }>(`/platforms/accounts/${id}`),
+  /** The live viewer count for one connected account.
+   *
+   *  200 in every non-fatal case, including the two that look like failures and
+   *  are not: a platform polyemesis cannot ask answers `supported:false` with a
+   *  reason, and an offline channel answers `live:false`. Neither is an error,
+   *  so neither throws — only a real fault (the account is gone, the platform
+   *  refused the token) reaches the catch. `viewerCount` is absent rather than
+   *  zero when the platform declined to say; see AccountStats. */
+  accountStats: (id: number) =>
+    get<AccountStats>(`/platforms/accounts/${id}/stats`),
   /** A full-page navigation, not XHR: the platform's consent screen owns the tab. */
   connectUrl: (platform: string) => `${BASE}/oauth/${platform}/start`,
 
