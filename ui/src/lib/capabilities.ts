@@ -246,7 +246,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     presetId: "kick",
     name: "Kick",
     connect: "kick",
-    tier: "partial",
+    tier: "integrated",
     summary:
       "Sign in with Kick and polyemesis fetches the ingest URL and stream key, sets the title, category and tags, reads and replies to chat, and reads viewer stats.",
     caps: {

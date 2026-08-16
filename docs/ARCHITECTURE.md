@@ -43,7 +43,7 @@ any number of destinations select and that touches video only. See §3.
    │        │         │                           -map 0:a -f null -
    │        │         │                           astats → WS levels
    │        │         └─────────────────────────► preview ffmpeg
-   │        │                                     LL-HLS → hls.js
+   │        │                                     latency-tuned HLS (2.2–3.2 s) → hls.js
    │        └───────────────────────────────────► recorder ffmpeg
    │                                              -map 0 -c copy → MKV segments
    │                                              (ALL audio tracks kept)

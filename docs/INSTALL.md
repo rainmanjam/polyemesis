@@ -130,7 +130,7 @@ Everything past that floor is where they diverge:
 
 | Platform | Beyond the shared floor | Operationally |
 |---|---|---|
-| **Linux (server)** | The race detector, 11 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
+| **Linux (server)** | The race detector, 13 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
 | **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, bundling a pinned FFmpeg |
 | **macOS** | Nothing further | **Daily driver.** Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below |
 | **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and recording truncation on service stop is a known unresolved defect — see the note below |
@@ -376,7 +376,7 @@ path, since the FFmpeg problem stops being a host problem.
 
 ### Install the binary
 
-Prerequisites for building from source: **Go 1.26.5+** (the floor in `go.mod`;
+Prerequisites for building from source: **Go 1.26.6+ (the `go` directive in go.mod)** (the floor in `go.mod`;
 the official Go images set `GOTOOLCHAIN=local`, so an older toolchain fails
 rather than silently upgrading itself) and **Node 20.19+ or 22.12+** (Vite 8's
 requirement). Neither is needed to *run* the result.
@@ -439,7 +439,7 @@ server. Open those ports on the firewall so encoders reach polyemesis directly.
 Developed on daily, so it works — but read the SRT paragraph, because the
 default Homebrew install cannot do multitrack ingest.
 
-**Prerequisites.** Homebrew. Go 1.26.5+ and Node 20.19+/22.12+ if building from
+**Prerequisites.** Homebrew. Go 1.26.6+ (the `go` directive in go.mod) and Node 20.19+/22.12+ if building from
 source. Apple Silicon and Intel both fine.
 
 ### FFmpeg on macOS: the version is fine, SRT is not
@@ -547,7 +547,7 @@ unresolved problem. The Service Control Manager wrapper, process-group teardown
 and installer scripts have never been exercised on a live host. If this needs to
 work today, use Linux or Docker.
 
-**Prerequisites.** Windows 10 / Server 2019 or newer, x86-64. Go 1.26.5+ and
+**Prerequisites.** Windows 10 / Server 2019 or newer, x86-64. Go 1.26.6+ (the `go` directive in go.mod) and
 Node 20.19+/22.12+ if you are building the binary yourself.
 
 ### FFmpeg on Windows: this part is straightforward

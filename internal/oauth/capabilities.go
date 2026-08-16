@@ -77,7 +77,10 @@ const (
 	// TierIntegrated: sign in and polyemesis fetches the key.
 	TierIntegrated Tier = "integrated"
 	// TierPartial: sign in for everything except the key, which is pasted.
-	// Kick is the whole reason this tier exists.
+	// Kick was the reason this tier existed; it fetches its key now and moved to
+	// integrated. No platform is partial today. The tier is kept because the
+	// shape recurs -- a provider can ship SSO long before it exposes a key
+	// endpoint, which is exactly the state Kick was in.
 	TierPartial Tier = "partial"
 	// TierManual: paste a URL and a key; there is no integration to connect.
 	TierManual Tier = "manual"
@@ -262,7 +265,15 @@ var platformCapabilities = []PlatformCapability{
 	},
 	{
 		PresetID: "kick", Name: "Kick", Platform: db.PlatformKick,
-		Tier:    TierPartial,
+		// INTEGRATED, not partial. Kick answers SupportYes on all seven
+		// capabilities -- one more than YouTube or Twitch, both of which are
+		// integrated -- and the key is fetched over streamkey:read rather than
+		// pasted, which is the only thing the partial tier means. The row said
+		// partial for as long as the key really was manual and was not moved
+		// when that changed, so the UI badge told an operator to paste a key
+		// polyemesis fetches for them. db/platforms.go carries a comment asking
+		// for exactly this to be kept in step.
+		Tier:    TierIntegrated,
 		Summary: "Sign in with Kick and polyemesis fetches the ingest URL and stream key, sets the title, category and tags, reads and replies to chat, and reads viewer stats.",
 		HelpURL: "https://kick.com/dashboard/settings/stream",
 		Caps: map[Capability]Support{

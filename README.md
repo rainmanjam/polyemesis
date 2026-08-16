@@ -32,7 +32,7 @@ supports it, and it is a track it *selects*, not a mix it builds.
 
 polyemesis ingests once and lets you pick, per destination, which tracks get
 summed into the stereo feed that destination receives. YouTube gets the clean
-feed; your local archive keeps everything; your Discord restream keeps the mic
+feed; your local archive keeps everything; your Kick restream keeps the mic
 hot. One upload, one video encode, different audio per platform.
 
 ## What it does
@@ -115,7 +115,7 @@ What differs is everything after that:
 
 | Platform | Beyond the shared CI floor | Operationally |
 |---|---|---|
-| **Linux (server)** | The race detector, 11 acceptance suites, and 3 container suites — none of which run anywhere else | **Primary.** Developed against, deployed, exercised |
+| **Linux (server)** | The race detector, 13 acceptance suites, and 3 container suites — none of which run anywhere else | **Primary.** Developed against, deployed, exercised |
 | **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, FFmpeg pinned and bundled |
 | **macOS** | Nothing further | **Daily driver.** A good workstation and test rig, not a deployment target. Homebrew's FFmpeg has no SRT — [see INSTALL.md](docs/INSTALL.md#ffmpeg-on-macos-the-version-is-fine-srt-is-not) |
 | **Windows** | Nothing further | **Unproven.** Nobody runs it in earnest. The service wrapper and installer scripts have never been exercised on a live host, and recording truncation on service stop is a known unresolved defect |

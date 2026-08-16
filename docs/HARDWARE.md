@@ -275,9 +275,17 @@ And what polyemesis itself concluded, which is the same probe with the results
 already collected:
 
 ```bash
-curl -s localhost:8080/api/v1/encoders             # cached verdicts
-curl -s 'localhost:8080/api/v1/encoders?redetect=1'  # re-run everything
+curl -s -H "Authorization: Bearer $TOKEN" \
+  localhost:8080/api/v1/encoders                      # cached verdicts
+curl -s -H "Authorization: Bearer $TOKEN" \
+  'localhost:8080/api/v1/encoders?redetect=1'         # re-run everything
 ```
+
+`$TOKEN` is an API token from **Settings → API tokens**. This route sits behind
+authentication, so without the header both commands answer `401` and tell you
+nothing about your encoders. `?redetect=1` additionally needs a token with
+**admin** scope: re-running detection spawns a test encode per encoder, which is
+not something a read-only token is allowed to trigger.
 
 ---
 

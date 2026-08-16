@@ -408,7 +408,8 @@ done
 cd ui && npx tsc -b --noEmit && npx oxlint
 ```
 
-Plus the three acceptance scripts, which exercise the real binary against a
+Plus the thirteen host acceptance suites in CI's matrix — and three container
+suites besides — which exercise the real binary against a
 real FFmpeg: `scripts/acceptance.sh` (13/13),
 `scripts/acceptance-renditions.sh` (29/29), `scripts/acceptance-tls.sh` (35/35).
 
