@@ -483,21 +483,8 @@ func (k *Kick) PushMetadata(ctx context.Context, clientID, accessToken, accountR
 
 // --------------------------------------------------------------------- stats
 
-// KickStats is a point-in-time read of the connected channel's broadcast.
-// Offline is a normal answer, not an error: a channel that is not live has a
-// viewer count of zero and nothing has gone wrong.
-type KickStats struct {
-	Live        bool      `json:"live"`
-	ViewerCount int       `json:"viewerCount"`
-	Title       string    `json:"title,omitempty"`
-	Category    string    `json:"category,omitempty"`
-	Language    string    `json:"language,omitempty"`
-	Slug        string    `json:"slug,omitempty"`
-	StartedAt   time.Time `json:"startedAt,omitempty"`
-	// Source names the endpoint the numbers came from, so a viewer count that
-	// disagrees with the Kick dashboard can be traced without a packet capture.
-	Source string `json:"source,omitempty"`
-}
+// The stats type now lives in stats.go as LiveStats: Kick was the first
+// platform that could answer, not the only one that can.
 
 // kickLivestream is the livestream resource, shared by the user-scoped list and
 // the stats endpoint. Every field is optional; Kick documents the endpoints but
@@ -566,8 +553,8 @@ const (
 // count the first call left at zero. Only a failure of both is an error — one
 // endpoint being unavailable to a given app's scopes must not cost the operator
 // the number the other one returned.
-func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*KickStats, error) {
-	stats := &KickStats{}
+func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*LiveStats, error) {
+	stats := &LiveStats{}
 
 	users, userErr := k.livestreams(ctx, accessToken, kickUserLivestreamsPath)
 	if userErr == nil && len(users) > 0 {

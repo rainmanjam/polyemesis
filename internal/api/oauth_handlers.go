@@ -295,13 +295,10 @@ func urlEscape(s string) string {
 	).Replace(s)
 }
 
-// LiveStatter is the optional capability for a platform that will tell us how
-// many people are watching. Declared here rather than in internal/oauth because
-// it is the API layer that needs to discover it; the provider just has the
-// method. Kick is the only one today.
-type LiveStatter interface {
-	Stats(ctx context.Context, clientID, accessToken string) (*oauth.KickStats, error)
-}
+// The LiveStatter interface moved to internal/oauth (stats.go). It was declared
+// here because the API layer was the only consumer and Kick the only provider;
+// both stopped being true, and a capability interface outside the oauth package
+// cannot carry the Set twin endpoints.go requires.
 
 // handleAccountStats reads the live viewer count for one connected account.
 //
@@ -324,12 +321,14 @@ func (s *Server) handleAccountStats(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	provider, err := s.providers.Get(acct.Platform)
-	if err != nil {
+	if _, err := s.providers.Get(acct.Platform); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"supported": false, "reason": err.Error()})
 		return
 	}
-	st, ok := provider.(LiveStatter)
+	// Through the Set twin rather than a type assertion on a provider this
+	// handler resolved itself: a Server built with a stubbed Set must not fall
+	// through to a production provider for viewer numbers alone.
+	st, ok := s.providers.StatsFor(acct.Platform)
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"supported": false,

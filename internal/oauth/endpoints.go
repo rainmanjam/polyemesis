@@ -196,6 +196,18 @@ func (s Set) ManualKeyFor(p db.Platform) (ManualKey, bool) {
 	return mk, ok
 }
 
+// StatsFor is the Set twin of the package-level StatsFor in stats.go. Without
+// it a caller holding a stubbed Set would silently fall through to the
+// production providers for viewer numbers alone.
+func (s Set) StatsFor(p db.Platform) (LiveStatter, bool) {
+	pr, ok := s.All()[p]
+	if !ok {
+		return nil, false
+	}
+	ls, ok := pr.(LiveStatter)
+	return ls, ok
+}
+
 func (s Set) ScheduledBroadcastsFor(p db.Platform) (ScheduledBroadcaster, bool) {
 	pr, ok := s.All()[p]
 	if !ok {
