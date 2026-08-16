@@ -79,7 +79,35 @@ func template() ([]byte, error) {
 // apply, and the schema and migrations still run. They simply find nothing
 // left to do, because every CREATE is IF NOT EXISTS and every migration checks
 // for its column before adding it.
+// It also creates one source, and that is now an EXPLICIT act rather than
+// something the migration did on the way past.
+//
+// Until #387 a freshly opened database arrived with a source called Main that
+// nobody had asked for, because MigrateSources seeded one whenever the sources
+// table was empty -- which is true of an upgrading install and of a brand new
+// one alike. Hundreds of tests were written against that, and they were right
+// to be: they are about destinations, renditions, clips and chat on an install
+// that HAS a programme. What was wrong was where the programme came from.
+//
+// So the fixture creates it, in the open, and a test that wants the
+// fresh-install state asks for OpenEmptyAt instead.
 func OpenAt(t testing.TB, path string, opts ...db.Option) *db.DB {
+	t.Helper()
+	store := OpenEmptyAt(t, path, opts...)
+	CreateSource(t, store)
+	return store
+}
+
+// Open is OpenAt in a temporary directory the caller does not need to name.
+func Open(t testing.TB, opts ...db.Option) *db.DB {
+	t.Helper()
+	return OpenAt(t, filepath.Join(t.TempDir(), "polyemesis.db"), opts...)
+}
+
+// OpenEmptyAt is OpenAt without the source: a genuinely fresh install, which
+// since #387 is a supported state rather than one that only exists for the
+// instant before the migration fills it in.
+func OpenEmptyAt(t testing.TB, path string, opts ...db.Option) *db.DB {
 	t.Helper()
 	tmpl, err := template()
 	if err != nil {
@@ -96,10 +124,35 @@ func OpenAt(t testing.TB, path string, opts ...db.Option) *db.DB {
 	return store
 }
 
-// Open is OpenAt in a temporary directory the caller does not need to name.
-func Open(t testing.TB, opts ...db.Option) *db.DB {
+// OpenEmpty is OpenEmptyAt in a temporary directory the caller does not name.
+func OpenEmpty(t testing.TB, opts ...db.Option) *db.DB {
 	t.Helper()
-	return OpenAt(t, filepath.Join(t.TempDir(), "polyemesis.db"), opts...)
+	return OpenEmptyAt(t, filepath.Join(t.TempDir(), "polyemesis.db"), opts...)
+}
+
+// CreateSource adds the one source the pre-#387 seed used to leave behind.
+//
+// Same shape as that seed -- named Main, enabled, position 1, carrying the
+// default ingest -- so a test written against the seeded install sees what it
+// always saw.
+//
+// db.DefaultSettings().Ingest rather than store.GetSettings().Ingest because
+// GetSettings SEEDS a settings row when it finds none, and a fixture must not
+// materialise one: the production seed used the unexported ingestForMigration
+// for the same reason. On a database this package just created the two answers
+// are identical anyway.
+func CreateSource(t testing.TB, store *db.DB) *db.Source {
+	t.Helper()
+	src := &db.Source{
+		Name:     db.DefaultSourceName,
+		Enabled:  true,
+		Ingest:   db.DefaultSettings().Ingest,
+		Position: 1,
+	}
+	if err := store.CreateSource(src); err != nil {
+		t.Fatalf("fixture: create the %s source: %v", db.DefaultSourceName, err)
+	}
+	return src
 }
 
 // OpenCheap is Open with the bcrypt cost floored.

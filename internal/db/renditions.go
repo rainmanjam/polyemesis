@@ -1057,7 +1057,15 @@ func (d *DB) MigrateRenditionAspect() error {
 	return nil
 }
 
-func columnExists(sqldb *sql.DB, table, column string) (bool, error) {
+// columnExists reports whether table already has column, which is how every
+// ALTER-based migration in this package decides whether it has work to do.
+//
+// It takes an execQuerier rather than a *sql.DB so a migration running inside
+// a transaction can ask the same question. On a single-connection database
+// reaching for d.sql while a transaction holds that connection does not return
+// an error, it deadlocks -- see rowQuerier in jobs.go, which exists for the
+// same reason.
+func columnExists(sqldb execQuerier, table, column string) (bool, error) {
 	rows, err := sqldb.Query(`SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
 		return false, err

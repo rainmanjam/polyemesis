@@ -46,6 +46,11 @@ func keyDB(t *testing.T, path string, opts ...Option) *DB {
 		t.Fatalf("open %s: %v", path, err)
 	}
 	t.Cleanup(func() { d.Close() })
+	// These tests create destinations, and a destination resolves a default
+	// source. Since #387 the migration no longer manufactures one, so the
+	// fixture asks for it -- on first creation only, since this helper reopens
+	// the same file.
+	ensureFixtureSource(t, d)
 	return d
 }
 

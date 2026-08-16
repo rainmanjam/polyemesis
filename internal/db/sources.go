@@ -195,7 +195,16 @@ func (d *DB) GetSource(id int64) (*Source, error) {
 // install could carry exactly one RTMP source. internal/rtmpserver replaced it
 // with a real one-port server, which is what removed the rule rather than
 // merely stopping it from being enforced.
-func (d *DB) CreateSource(s *Source) error {
+func (d *DB) CreateSource(s *Source) error { return insertSource(d.sql, s) }
+
+// insertSource is CreateSource's body, taking the handle to run on.
+//
+// One implementation rather than two because MigrateSources creates a source
+// inside a transaction and cannot call CreateSource to do it: this database
+// runs on a single connection, so reaching for d.sql while a transaction holds
+// that connection deadlocks. A hand-written second INSERT there would be a
+// column list nobody updates when this one grows.
+func insertSource(ex execQuerier, s *Source) error {
 	if err := validateSource(s); err != nil {
 		return err
 	}
@@ -215,12 +224,12 @@ func (d *DB) CreateSource(s *Source) error {
 	// already on screen.
 	if s.Position == 0 {
 		var maxPos sql.NullInt64
-		_ = d.sql.QueryRow(`SELECT MAX(position) FROM sources`).Scan(&maxPos)
+		_ = ex.QueryRow(`SELECT MAX(position) FROM sources`).Scan(&maxPos)
 		s.Position = int(maxPos.Int64) + 1
 	}
 
 	now := time.Now().Unix()
-	res, err := d.sql.Exec(
+	res, err := ex.Exec(
 		`INSERT INTO sources (name, enabled, ingest, token, prev_token, prev_token_until, position, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, '', 0, ?, ?, ?)`,
 		s.Name, boolToInt(s.Enabled), string(blob), s.Token, s.Position, now, now)
@@ -397,9 +406,12 @@ func (d *DB) DefaultSourceID() (int64, error) {
 // ingest on the default port instead of theirs, which presents as "my encoder
 // cannot connect any more" -- a worse outcome than refusing to start, and much
 // harder to diagnose.
-func (d *DB) ingestForMigration() (IngestSettings, error) {
+// It takes a rowQuerier because MigrateSources runs inside a transaction on a
+// single-connection database: reaching for d.sql there deadlocks rather than
+// failing.
+func ingestForMigration(q rowQuerier) (IngestSettings, error) {
 	var raw string
-	err := d.sql.QueryRow(`SELECT json FROM settings WHERE id = 1`).Scan(&raw)
+	err := q.QueryRow(`SELECT json FROM settings WHERE id = 1`).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DefaultSettings().Ingest, nil
 	}
@@ -428,20 +440,79 @@ func (d *DB) ingestForMigration() (IngestSettings, error) {
 //  3. Backfill. Every destination, rendition and recording that predates
 //     sources belongs to that first source, because there was nowhere else for
 //     it to have come from.
+//
+// # Step 2 no longer fires on a fresh install
+//
+// It used to fire whenever the sources table was empty, which is true of an
+// upgrading install AND of a database being opened for the very first time. So
+// every new install got a source called Main that nobody created, and a
+// migration was quietly deciding product behaviour (#387).
+//
+// The two cases are told apart by asking whether this open is DOING the
+// upgrade, with a second witness for the open that follows one:
+//
+//   - migrating -- any of the three source_id columns was missing when we
+//     looked. Computed INSIDE the ALTER loop and nowhere else. Derived
+//     afterwards it is always false, every upgrading install skips the seed,
+//     and the operator's configured ingest is silently never carried across.
+//   - orphans -- a destinations or renditions row whose source_id is NULL.
+//     That is a row written before sources existed, on an install whose first
+//     open added the columns and then did not get to the source.
+//
+// RECORDINGS ARE DELIBERATELY NOT A WITNESS. recordings.source_id is
+// ON DELETE SET NULL by design (schema.sql), so orphan recordings are the
+// NORMAL state after an operator legitimately deletes a source. Counting them
+// would re-seed Main onto an install that had just removed its last one.
+//
+// # Why the whole thing is one transaction
+//
+// THIS IS NOT HOUSEKEEPING. It is what makes the discriminator above sound,
+// and removing it reopens a silent data-loss window.
+//
+// The ALTER loop runs first and the source is created afterwards. Without a
+// transaction there is a state in between: columns present, no source. A crash,
+// a SIGKILL, a `docker stop` or a power loss in that window leaves an upgrading
+// install looking exactly like a fresh one on its next open -- migrating is
+// false because the columns are now there, orphans is false because an install
+// with only recordings has nothing to backfill, and the count is zero. The
+// discriminator answers "fresh install", the seed does not run, the operator's
+// ingest is never carried onto a source, and all they see is that their encoder
+// stopped connecting.
+//
+// The transaction removes that state: either the columns and the source both
+// land, or neither does and the next open migrates from the beginning. SQLite's
+// DDL is transactional, so the ALTERs roll back with everything else.
+//
+// Every statement below therefore goes through tx. Reaching for d.sql inside
+// here would not merely escape the transaction, it would deadlock: the pool is
+// capped at one connection and the transaction is holding it.
 func (d *DB) MigrateSources() error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return fmt.Errorf("begin sources migration: %w", err)
+	}
+	// A rollback after a successful Commit is a no-op, so this is the whole
+	// error path: every return below leaves the database as it was found.
+	defer func() { _ = tx.Rollback() }()
+
+	// migrating is computed HERE, in the loop, from what was true BEFORE the
+	// ALTER ran. See the doc comment: derived after the loop it is always
+	// false and the seed never fires for the installs it exists for.
+	migrating := false
 	for _, c := range []struct{ table, ddl string }{
 		{"destinations", `ALTER TABLE destinations ADD COLUMN source_id INTEGER REFERENCES sources(id) ON DELETE CASCADE`},
 		{"renditions", `ALTER TABLE renditions ADD COLUMN source_id INTEGER REFERENCES sources(id) ON DELETE CASCADE`},
 		{"recordings", `ALTER TABLE recordings ADD COLUMN source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL`},
 	} {
-		has, err := columnExists(d.sql, c.table, "source_id")
+		has, err := columnExists(tx, c.table, "source_id")
 		if err != nil {
 			return fmt.Errorf("inspect %s columns: %w", c.table, err)
 		}
 		if has {
 			continue
 		}
-		if _, err := d.sql.Exec(c.ddl); err != nil {
+		migrating = true
+		if _, err := tx.Exec(c.ddl); err != nil {
 			return fmt.Errorf("add %s.source_id: %w", c.table, err)
 		}
 	}
@@ -449,18 +520,22 @@ func (d *DB) MigrateSources() error {
 	// The rotation grace columns, for a database whose sources table predates
 	// them. Plain columns with literal defaults, so unlike source_id they carry
 	// a NOT NULL that ALTER TABLE accepts.
+	//
+	// NOT a migrating witness: they were added after sources shipped, so a
+	// database missing them already has a sources table and does not need one
+	// seeding.
 	for _, c := range []struct{ name, ddl string }{
 		{"prev_token", `ALTER TABLE sources ADD COLUMN prev_token TEXT NOT NULL DEFAULT ''`},
 		{"prev_token_until", `ALTER TABLE sources ADD COLUMN prev_token_until INTEGER NOT NULL DEFAULT 0`},
 	} {
-		has, err := columnExists(d.sql, "sources", c.name)
+		has, err := columnExists(tx, "sources", c.name)
 		if err != nil {
 			return fmt.Errorf("inspect sources columns: %w", err)
 		}
 		if has {
 			continue
 		}
-		if _, err := d.sql.Exec(c.ddl); err != nil {
+		if _, err := tx.Exec(c.ddl); err != nil {
 			return fmt.Errorf("add sources.%s: %w", c.name, err)
 		}
 	}
@@ -473,36 +548,85 @@ func (d *DB) MigrateSources() error {
 		`CREATE INDEX IF NOT EXISTS idx_renditions_source ON renditions(source_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_recordings_source ON recordings(source_id)`,
 	} {
-		if _, err := d.sql.Exec(idx); err != nil {
+		if _, err := tx.Exec(idx); err != nil {
 			return fmt.Errorf("index source_id: %w", err)
 		}
 	}
 
+	orphans, err := hasPreSourcesRows(tx)
+	if err != nil {
+		return err
+	}
+
 	var n int
-	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&n); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&n); err != nil {
 		return fmt.Errorf("count sources: %w", err)
 	}
-	if n == 0 {
+	if n == 0 && (migrating || orphans) {
 		// Carry the existing ingest across verbatim.
-		ing, err := d.ingestForMigration()
+		ing, err := ingestForMigration(tx)
 		if err != nil {
 			return fmt.Errorf("read settings for source migration: %w", err)
 		}
 		src := &Source{Name: DefaultSourceName, Enabled: true, Ingest: ing, Position: 1}
-		if err := d.CreateSource(src); err != nil {
+		if err := insertSource(tx, src); err != nil {
 			return fmt.Errorf("create %s source: %w", DefaultSourceName, err)
 		}
 	}
 
-	id, err := d.DefaultSourceID()
-	if err != nil {
+	// The backfill is gated on A SOURCE EXISTING, not on orphans.
+	//
+	// Gating it on orphans loses recordings: a pre-sources install with
+	// recordings but no destinations and no renditions computes orphans =
+	// false, seeds on the migrating witness alone, and then skips the backfill
+	// -- leaving every recording the operator already had at source_id NULL.
+	// The UPDATE is idempotent and its own WHERE clause already makes it a
+	// no-op when there is nothing to do, so the only thing this gate ever
+	// needed to prevent was demanding a default source id on an install that
+	// has no source at all. Which, since #387, is a normal install.
+	var id int64
+	switch err := tx.QueryRow(
+		`SELECT id FROM sources ORDER BY position, id LIMIT 1`).Scan(&id); {
+	case errors.Is(err, sql.ErrNoRows):
+		// Zero sources. Nothing to backfill onto, and nothing that needs to
+		// be: rows keep their NULL until a source is created and adopts them.
+	case err != nil:
 		return fmt.Errorf("resolve default source: %w", err)
-	}
-	for _, table := range []string{"destinations", "renditions", "recordings"} {
-		if _, err := d.sql.Exec(
-			`UPDATE `+table+` SET source_id = ? WHERE source_id IS NULL`, id); err != nil {
-			return fmt.Errorf("backfill %s.source_id: %w", table, err)
+	default:
+		for _, table := range []string{"destinations", "renditions", "recordings"} {
+			if _, err := tx.Exec(
+				`UPDATE `+table+` SET source_id = ? WHERE source_id IS NULL`, id); err != nil {
+				return fmt.Errorf("backfill %s.source_id: %w", table, err)
+			}
 		}
 	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sources migration: %w", err)
+	}
 	return nil
+}
+
+// hasPreSourcesRows reports whether any destination or rendition is still
+// unattached to a source -- the second witness that this database predates the
+// sources model.
+//
+// RECORDINGS ARE EXCLUDED, and that exclusion is the whole point of the helper
+// existing rather than the query being written inline. recordings.source_id is
+// ON DELETE SET NULL, so an orphan recording is what a legitimate delete
+// LEAVES BEHIND. Including recordings here re-seeds Main onto the install of
+// the one operator who deliberately removed their last source, which is the
+// exact behaviour #387 exists to stop.
+func hasPreSourcesRows(q rowQuerier) (bool, error) {
+	for _, table := range []string{"destinations", "renditions"} {
+		var n int
+		if err := q.QueryRow(
+			`SELECT COUNT(*) FROM ` + table + ` WHERE source_id IS NULL`).Scan(&n); err != nil {
+			return false, fmt.Errorf("count unattached %s: %w", table, err)
+		}
+		if n > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }

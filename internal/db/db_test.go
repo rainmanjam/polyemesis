@@ -74,7 +74,51 @@ func testTemplate() ([]byte, error) {
 	return templateBytes, templateErr
 }
 
+// testDB is a migrated database WITH a source, because most of this package's
+// tests are about rows that hang off one.
+//
+// The source is created here rather than arriving from MigrateSources, which
+// is the whole of #387: a migration seeded one on every fresh open, so an
+// install nobody had configured came up with a programme called Main that
+// nobody had made. testEmptyDB is the same fixture without it, and that is now
+// what a fresh install actually looks like.
 func testDB(t *testing.T) *DB {
+	t.Helper()
+	d := testEmptyDB(t)
+	ensureFixtureSource(t, d)
+	return d
+}
+
+// ensureFixtureSource creates the source the pre-#387 seed used to leave
+// behind, if there is not one already.
+//
+// Idempotent because keyDB reopens the same file several times in one test and
+// a second source would change what "the default source" resolves to halfway
+// through.
+//
+// DefaultSettings().Ingest rather than GetSettings().Ingest, and the difference
+// matters: GetSettings SEEDS a settings row when it finds none, and several
+// tests in this package hand-insert a sparse settings blob to prove an older
+// shape still upgrades. A fixture that materialised the row first turned those
+// into a UNIQUE constraint failure. ingestForMigration exists for exactly this
+// reason on the production path.
+func ensureFixtureSource(t *testing.T, d *DB) {
+	t.Helper()
+	var n int
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&n); err != nil {
+		t.Fatalf("fixture: count sources: %v", err)
+	}
+	if n > 0 {
+		return
+	}
+	src := &Source{Name: DefaultSourceName, Enabled: true, Ingest: DefaultSettings().Ingest, Position: 1}
+	if err := d.CreateSource(src); err != nil {
+		t.Fatalf("fixture: create the %s source: %v", DefaultSourceName, err)
+	}
+}
+
+// testEmptyDB is a migrated database with no source: a fresh install.
+func testEmptyDB(t *testing.T) *DB {
 	t.Helper()
 	tmpl, err := testTemplate()
 	if err != nil {
