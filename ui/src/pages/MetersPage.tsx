@@ -144,7 +144,7 @@ export function MetersPage() {
           <CardContent className="flex items-start gap-2 py-3">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
             <div className="text-[11px] text-muted-foreground">
-              No stream is arriving. Point your encoder at the ingest URL shown on the dashboard;
+              No stream is arriving. Point your encoder at the publish URL on the Sources page;
               the track layout and meters appear automatically.
             </div>
           </CardContent>

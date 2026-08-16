@@ -58,8 +58,9 @@ func addSource(t *testing.T, store *db.DB, name string) *db.Source {
 // one to prove a two-term conjunction would be a worse trade than this comment.
 func TestAnInstallWithNoSourcesStartsRatherThanRefusing(t *testing.T) {
 	m, store := managerFixture(t)
-	// Through raw SQL: DeleteSource refuses to remove the last source, which is
-	// the guard that made this state unreachable in the first place.
+	// Through raw SQL: one statement empties the table whatever is in it. The
+	// store used to refuse the last source, which is what made this state
+	// unreachable by any route at all; it no longer does.
 	if _, err := store.SQL().Exec(`DELETE FROM sources`); err != nil {
 		t.Fatalf("empty the sources table: %v", err)
 	}

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ApiError, api } from "./api";
+import { ApiError, NO_SOURCE, api, isNoSource } from "./api";
 import { autoApi } from "./autoApi";
 
 /* The refusal an install with no source answers with, and the ONE thing about
@@ -104,5 +104,26 @@ describe("the no-source refusal", () => {
     const match = src.match(/codeNoSource\s*=\s*"([^"]+)"/);
     expect(match, "no codeNoSource constant in internal/api/api.go").not.toBeNull();
     expect(match?.[1]).toBe("no_source");
+    // And the TypeScript constant the empty states compare against, which is
+    // the half that is actually READ at runtime. Four pages branch on it, and
+    // a literal repeated four times is four chances to typo it into a
+    // comparison that is simply always false -- a failure that presents as the
+    // red toast the empty states were added to replace.
+    expect(NO_SOURCE, "lib/api.ts and internal/api/api.go disagree about the code")
+      .toBe(match?.[1]);
+  });
+
+  /* The predicate every empty state is drawn from.
+   *
+   * Asserted at the function rather than by each page repeating the condition,
+   * and the negative cases are the load-bearing ones: a helper that answered
+   * true for any 503 would blank the dashboard the first time a reconcile
+   * failed, which is the opposite of what the code exists for. */
+  it("recognises the refusal and nothing else", () => {
+    expect(isNoSource(new ApiError(503, "no programme", NO_SOURCE))).toBe(true);
+    expect(isNoSource(new ApiError(503, "reconcile failed"))).toBe(false);
+    expect(isNoSource(new ApiError(404, "no such destination"))).toBe(false);
+    expect(isNoSource(new Error("network down"))).toBe(false);
+    expect(isNoSource(undefined)).toBe(false);
   });
 });

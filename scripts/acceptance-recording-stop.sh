@@ -87,6 +87,29 @@ curl -fsS -m10 -b "$CJ" -X PUT -H 'Content-Type: application/json' \
   -H "X-CSRF-Token: $(csrf)" --data @settings.new.json "$API/settings" >/dev/null 2>&1 \
   && ok "recording enabled" || { bad "could not enable recording"; exit 1; }
 
+# THE SOURCE THIS SUITE PUBLISHES INTO. A fresh install has none since #387,
+# and this suite has no Go driver to create one for it -- it talks to the API
+# with curl throughout, so it creates its own here.
+#
+# The ingest block is lifted from the settings document rather than written
+# out. The server's default mode is IngestUnset, which is right for a product
+# that must ask an operator and useless to a suite that must publish; and a
+# literal SRT block here would have to carry a latency, a passphrase policy
+# and whatever the block gains next, and would rot the first time one changed.
+# settings.new.json is the document this install was just configured with, so
+# its ingest is the right one to start from.
+python3 - <<'SRCDOC' || { echo "could not build the source document"; exit 1; }
+import json
+s = json.load(open("settings.new.json"))
+ing = dict(s.get("ingest") or {})
+ing["mode"] = "srt"
+json.dump({"name": "Main", "enabled": True, "ingest": ing},
+          open("source.new.json", "w"))
+SRCDOC
+curl -fsS -m10 -b "$CJ" -X POST -H 'Content-Type: application/json' \
+  -H "X-CSRF-Token: $(csrf)" --data @source.new.json "$API/sources" >/dev/null 2>&1 \
+  && ok "created the first source" || { bad "could not create the source"; exit 1; }
+
 TOKEN=$(curl -fsS -m5 -b "$CJ" "$API/sources" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["token"])' 2>/dev/null)
 [ -n "$TOKEN" ] && ok "got the publish token" || { bad "no publish token"; exit 1; }

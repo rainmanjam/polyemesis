@@ -42,7 +42,13 @@ rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
 poly_watchdog_arm
 mkdir -p data/recordings
 
-drive() { go run "$SCRIPTS/acceptance_synth_driver.go" "http://127.0.0.1:$PORT" "$@" 2>&1; }
+# pullsynthhelpers.go IS NAMED HERE ON PURPOSE. This driver and the synth one
+# were forked copies of the same programme; the shared half now lives in that
+# file and `go run` compiles a list of .go files from one directory as a single
+# package, which is what lets them share it from a working directory that is
+# inside no module. No `--` separator: go run passes it straight through to the
+# program, and only LEADING consecutive .go arguments are compiled anyway.
+drive() { go run "$SCRIPTS/acceptance_synth_driver.go" "$SCRIPTS/pullsynthhelpers.go" "http://127.0.0.1:$PORT" "$@" 2>&1; }
 
 step "1. A VIDEO-ONLY source, which every platform refuses"
 # No -map for audio at all: this is the case the silence tier exists for.

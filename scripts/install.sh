@@ -1185,8 +1185,10 @@ print_summary() {
 
   echo "  ${BOLD}Point your encoder at${NC}"
   echo "    srt://${hostpart}:${SRT_PORT}?streamid=<token>"
-  echo "  The Sources page shows the token. It is the address, so every source"
-  echo "  shares this one port — adding another needs no new port and no restart."
+  echo "  Create a source on the Sources page first: a fresh install has none,"
+  echo "  and that source's publish token is the <token> above. The token is the"
+  echo "  address, so every source shares this one port — adding another needs"
+  echo "  no new port and no restart."
   echo
   echo "  In OBS, multitrack SRT does NOT go through the Stream tab. Use"
   echo "  Settings -> Output -> Advanced -> Recording, Type: Custom Output (FFmpeg),"

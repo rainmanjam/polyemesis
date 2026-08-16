@@ -1029,6 +1029,12 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// It never leaves this handler. changedSections compares it and returns
 	// section NAMES; nothing derived from these bytes reaches an alert.
 	var storedJSON []byte
+	// The stored ingest, and whether the save asked to change it on an install
+	// that has no source to change. Both are written inside the closure and
+	// read after it, which is the only place both the submitted document and
+	// the stored one exist at once.
+	var storedIngest db.IngestSettings
+	ingestRefused := false
 	settings, err := s.store.UpdateSettings(func(settings *db.Settings) error {
 		storedJSON, _ = json.Marshal(settings)
 		// The stored playlist, copied BEFORE the decode overwrites it.
@@ -1049,6 +1055,13 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// can rewrite in place. See pullSourceUploadProblems.
 		storedPullURL := settings.Ingest.Pull.URL
 		storedBackupPullURL := settings.Failover.Backup.Pull.URL
+		// The whole stored ingest block, copied the same way and for the same
+		// reason -- Annotations is a slice the decode can rewrite in place. It
+		// is what the write-through below compares against, and what it puts
+		// back when there is nothing to write it through TO.
+		storedIngest = settings.Ingest
+		storedIngest.Annotations = append(
+			[]routing.TrackAnnotation(nil), settings.Ingest.Annotations...)
 		if err := decodeJSONInto(body, settings); err != nil {
 			return err
 		}
@@ -1113,6 +1126,42 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		if err := s.pullSourceUploadProblems(*settings, storedPullURL, storedBackupPullURL); err != nil {
 			return badRequestError{err.Error()}
 		}
+		// AND THE INGEST BLOCK ON AN INSTALL WITH NOWHERE TO PUT IT.
+		//
+		// settings.ingest is not read by anything any more: the engine takes
+		// its ingest from the source row, and the write-through below is the
+		// only thing that gives this half of the form an effect. With no source
+		// there is nothing to write it through to, so an edit here would store,
+		// answer 200, and change nothing -- on the DEFAULT tab of the settings
+		// page, on a first-time operator's first screen. That is the exact bug
+		// the write-through was added to fix, arriving again from the other
+		// side, and it is the one this handler must never re-commit.
+		//
+		// So the stored block is PUT BACK and the handler refuses below. Two
+		// things follow from doing it here rather than at the top:
+		//
+		//   - every other setting in the same document is saved. Recording,
+		//     chat, automod, alerts and the listeners are all things an
+		//     operator legitimately configures before creating a source, which
+		//     is also why this route carries no requireSource.
+		//   - nothing that has no effect is stored. Refusing without this line
+		//     would leave the operator's dead ingest in the blob, and the form
+		//     would redisplay it on the next load as though it had taken.
+		//
+		// Scoped to a CHANGE. The settings page PUTs the whole document, so a
+		// save of anything else carries the ingest block along untouched, and
+		// refusing that would make every unrelated setting unreachable until a
+		// source exists.
+		if !ingestEqual(storedIngest, settings.Ingest) {
+			switch _, err := s.store.DefaultSourceID(); {
+			case err == nil:
+			case errors.Is(err, db.ErrSourceNotFound):
+				settings.Ingest = storedIngest
+				ingestRefused = true
+			default:
+				return err
+			}
+		}
 		return nil
 	})
 	var invalid db.InvalidSettingsError
@@ -1166,7 +1215,24 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// Writing it through to the default source restores the old meaning:
 	// settings.ingest edits the programme an unscoped request acts on, which is
 	// exactly what it edited when there was only one.
-	if id, err := s.store.DefaultSourceID(); err == nil {
+	//
+	// The three answers DefaultSourceID can give are now three branches, where
+	// this used to be one `err == nil` that treated all of them as "skip".
+	//
+	//   a source        write the block through, as before.
+	//   no source       nothing to write it through to. Silent HERE, because
+	//                   reaching this line at all means the ingest was
+	//                   unchanged -- a change was already refused in the
+	//                   closure -- so there is genuinely nothing to do and
+	//                   nothing to say. Every other setting in the document has
+	//                   just been saved and must not be undone by a 404 about a
+	//                   source the operator never asked about.
+	//   anything else   a store that cannot be read. Reported: swallowing it
+	//                   answered 200 for a save that silently never reached the
+	//                   pipeline, which is the failure this whole block exists
+	//                   to have stopped happening.
+	switch id, err := s.store.DefaultSourceID(); {
+	case err == nil:
 		if src, err := s.store.GetSource(id); err == nil && !ingestEqual(src.Ingest, settings.Ingest) {
 			src.Ingest = settings.Ingest
 			if err := s.store.UpdateSource(src); err != nil {
@@ -1174,6 +1240,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	case errors.Is(err, db.ErrSourceNotFound):
+	default:
+		writeStoreError(w, err)
+		return
 	}
 	// The MANAGER, not the default engine.
 	//
@@ -1201,6 +1271,24 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// and keeps chasing on the old count is the third instance of the silent
 	// no-op this handler now guards against three times.
 	ApplyAlertSettings(s.mgr, settings.Alerts)
+
+	// The refusal, LAST, after everything the same document asked for has
+	// actually been applied.
+	//
+	// Refusing earlier would have been tidier to read and wrong: the rest of
+	// the document is already stored by then, so returning above would leave a
+	// chat retention window in the database that the Hub is not sweeping on and
+	// an automod matrix that is not deciding on -- the silent no-op this
+	// handler warns about three times, reintroduced by the guard against a
+	// fourth one.
+	//
+	// codeNoSource, and the same sentence as every other refusal: this is the
+	// fresh-install empty state, not a fault, and the dashboard branches on the
+	// code rather than reading the English.
+	if ingestRefused {
+		writeNoSource(w)
+		return
+	}
 
 	// The EFFECT, not just the intent. "Saved" is a statement about the
 	// database; an operator whose destination card just went grey needs to know

@@ -177,7 +177,8 @@ export function MediaUploads() {
         <CardTitle>Media</CardTitle>
         <CardDescription>
           Upload a file to broadcast from it on a schedule, with no encoder
-          attached. Copy its pull URL into <em>Settings → Ingest → Pull</em>.
+          attached. Copy its pull URL into the source's ingest — <em>Settings → Ingest →
+          Pull</em> for the default source.
         </CardDescription>
       </CardHeader>
 

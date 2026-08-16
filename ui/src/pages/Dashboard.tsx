@@ -10,13 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
+import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { DestinationCard } from "@/components/DestinationCard";
 import { DestinationDialog } from "@/components/DestinationDialog";
 import { ChatPanel } from "@/components/ChatPanel";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
-import { api } from "@/lib/api";
+import { api, isNoSource } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
 import type { SignalTone } from "@/lib/signal";
@@ -583,6 +584,33 @@ export function Dashboard() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [pending, setPending] = useState<number[] | null>(null);
   const [moveNote, setMoveNote] = useState("");
+  const [sourceCount, setSourceCount] = useState<number | null>(null);
+
+  // How many programmes exist, which is what decides whether this page shows a
+  // pipeline or an empty state.
+  //
+  // `null` means NOT KNOWN, and the branch below tests `=== 0` rather than
+  // falsiness precisely so that unknown renders the ordinary dashboard. The
+  // cost is that a fresh install shows the pipeline for the length of one
+  // request before the empty state replaces it; the alternative is a spinner in
+  // front of the main screen on every load of every install, for a question
+  // only one install in a thousand answers differently.
+  //
+  // A count that cannot be read leaves the page rendering as it always did. The
+  // empty state is an improvement on a working dashboard, never a replacement
+  // for one, and drawing it because a request failed would tell an operator
+  // mid-broadcast that their programme is gone.
+  const readSourceCount = useCallback(async (): Promise<number | null> => {
+    try {
+      const { sources } = await api.setupStatus();
+      const n = sources ?? null;
+      setSourceCount(n);
+      return n;
+    } catch {
+      setSourceCount(null);
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
     api.system().then(setSystem).catch(() => {});
@@ -590,7 +618,23 @@ export function Dashboard() {
       .getSettings()
       .then((s) => setSettingsPreview(s.preview.enabled))
       .catch(() => {});
-  }, [refreshKey]);
+    readSourceCount();
+    // AND KEEP READING IT. The count used to be read once per refreshKey, and
+    // every control that bumps refreshKey is inside the pipeline this page
+    // stops drawing the moment the count reaches zero -- so a dashboard left
+    // open while the last source went away kept rendering a publish URL, a
+    // track count and a relay subscriber for a programme that no longer
+    // existed, with nothing on the page able to notice. The status socket
+    // cannot rescue it either: status events are published BY an engine, so an
+    // install with none simply stops sending them and the last frame stays on
+    // screen for ever.
+    //
+    // The setup status rather than the source list: it is the one endpoint
+    // whose entire job is this number, it is a single row count, and it is what
+    // the empty state was given a count for in the first place.
+    const poll = setInterval(readSourceCount, 10_000);
+    return () => clearInterval(poll);
+  }, [refreshKey, readSourceCount]);
 
   const act = useCallback(
     async (id: number, fn: () => Promise<unknown>, label: string) => {
@@ -598,12 +642,36 @@ export function Dashboard() {
       try {
         await fn();
       } catch (err) {
+        // THE RED TOAST THIS EXISTS TO REPLACE. Every destination control on
+        // this page is behind requireSource, so on an install whose last source
+        // has just gone the answer is a 503 -- and "Could not start the
+        // destination" over a scarlet background is a fault report for a state
+        // in which nothing is wrong and nothing is broken.
+        //
+        // RE-READ THE COUNT, DO NOT ASSUME IT, and the difference is a whole
+        // screen. requireSource refuses on "no engine is running", which is
+        // also the state of an install that HAS sources and whose engines all
+        // failed to build or start -- manager.go logs and continues, per
+        // source. Setting the count to 0 from this branch replaced that
+        // operator's entire dashboard with "create a source in the web UI",
+        // with a button to a Sources page listing the source they already have,
+        // and no way back: nothing left on screen bumps refreshKey. The real
+        // fault, an engine that did not come up, was then concealed by a screen
+        // asserting the opposite.
+        //
+        // So the refusal is a prompt to ask, not an answer. Zero draws the
+        // empty state; anything else says the true thing.
+        if (isNoSource(err)) {
+          const n = await readSourceCount();
+          if (n !== 0) toast.error(t("dash.noEngineRunning"));
+          return;
+        }
         toast.error(err instanceof Error ? err.message : `Could not ${label}.`);
       } finally {
         setBusyId(null);
       }
     },
-    [],
+    [readSourceCount, t],
   );
 
   const openEdit = async (id: number) => {
@@ -683,6 +751,27 @@ export function Dashboard() {
       toast.error(t("dash.clipboardUnavailable"));
     }
   };
+
+  // NO PROGRAMME YET. The whole page, not a strip above it.
+  //
+  // Everything below this line is about one: a preview of a stream nobody is
+  // sending, an ingest URL no encoder can publish to, a pipeline of processes
+  // that do not exist, and destination controls that answer 503. Rendering it
+  // over an empty install is not merely unhelpful -- it invites the operator to
+  // click the one button that cannot work, which is how they met the red toast
+  // in the first place.
+  //
+  // `=== 0` rather than `!sourceCount`, deliberately: null means the count has
+  // not arrived, and an operator mid-broadcast must never see their dashboard
+  // replaced because a request was slow.
+  if (sourceCount === 0) {
+    return (
+      <div className="p-3">
+        <PageHeader title={t("dash.title")} subtitle={t("dash.subtitle")} />
+        <NoProgrammeYet title={t("empty.dashTitle")} body={t("empty.dashBody")} />
+      </div>
+    );
+  }
 
   return (
     <div className="p-3">

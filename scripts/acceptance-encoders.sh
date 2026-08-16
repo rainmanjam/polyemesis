@@ -166,7 +166,17 @@ relay_port() {
 
 # run_driver <mode> <facts-file>
 run_driver() {
-  go run "$SCRIPTS/acceptance_encoders_driver.go" "$PORT" "$(relay_port)" "$1" "$2" 2>&1 | sed 's/^/  /'
+# driverhelpers.go IS NAMED HERE ON PURPOSE. waitUp/grabCSRF/call/get moved
+# there, and `go run` compiles a list of .go files from one directory as a
+# single package -- which is what lets these drivers share code from a
+# working directory that is inside no module.
+#
+# NO `--` SEPARATOR. It is tempting, and it is wrong: `go run` stops reading
+# source files at it but hands it to the program anyway, so the driver would
+# read "--" as its first argument and dial http://127.0.0.1:--. It is not
+# needed either -- only LEADING consecutive .go arguments are compiled, and
+# the first argument here is always a port number.
+  go run "$SCRIPTS/acceptance_encoders_driver.go" "$SCRIPTS/driverhelpers.go" "$PORT" "$(relay_port)" "$1" "$2" 2>&1 | sed 's/^/  /'
 }
 
 # fact <file> <key>

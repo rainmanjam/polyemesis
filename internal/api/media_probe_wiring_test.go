@@ -253,9 +253,10 @@ func TestTheUploadGateStillChecksWithNoEngineRunning(t *testing.T) {
 // before the manager starts, so it comes up with the listeners and the
 // detection and no engines at all.
 //
-// The sources go through raw SQL rather than db.DeleteSource because the store
-// still refuses to delete the last one -- that guard is the last commit in this
-// stack, and this fixture must not wait for it.
+// The sources go through raw SQL rather than db.DeleteSource -- one statement
+// for the whole table rather than a list to enumerate. The store no longer
+// refuses the last one, so this is now a convenience where it used to be the
+// only way to build the fixture at all.
 func managerServerWithoutEngines(t *testing.T, tools *ffmpeg.Tools) (*Server, http.Handler, *bytes.Buffer, func(*http.Request)) {
 	t.Helper()
 

@@ -92,12 +92,35 @@ var noSourceRefusalSites = map[string]string{
 		"TestTheSilenceCheckRefusesRatherThanReadingAnAbsentIngest.",
 	"destinationBaseArgv": "the three expert routes that write nothing -- GET " +
 		"/destinations/{id}/expert and the preview and dry-run POSTs -- which carry " +
-		"no requireSource by design. Not driveable through the router: source_id " +
-		"CASCADEs, so no destination row can exist on an install with no source and " +
-		"every one of those requests 404s at the store first. Driven at the helper " +
-		"by TestResolvingAnExpertCommandWithNoEngineRefusesRatherThanPanicking.",
+		"no requireSource by design. Driven at the helper by " +
+		"TestResolvingAnExpertCommandWithNoEngineRefusesRatherThanPanicking, and " +
+		"THROUGH THE ROUTER by " +
+		"TestEveryRegisteredRouteSurvivesEnginesThatDidNotStart. This entry used to " +
+		"say the router route was undriveable because source_id CASCADEs -- true of " +
+		"an install with no ROWS, and the wrong reading of what nil means: eng() is " +
+		"nil whenever no engine is running, which includes an install whose rows are " +
+		"all present and whose engines did not come up. On a fresh install those " +
+		"three requests do 404 at the store first, which is why the walk needs the " +
+		"second fixture to reach them at all.",
 	"writeExpertCommandError": "the lift for the entry above, at the five " +
 		"resolveExpertCommand call sites. Same test.",
+	"handlePutSettings": "PUT /settings, which carries NO requireSource and must " +
+		"not: the same document holds the listeners, recording, chat, automod and " +
+		"alerts, all of which an operator configures before creating a source. It " +
+		"refuses for ONE field -- an ingest block changed on an install with nowhere " +
+		"to write it through to -- and saves everything else in the request first. " +
+		"Driven through the router by " +
+		"TestChangingTheIngestWithNoSourceIsRefusedRatherThanSavedIntoNothing.",
+	"handleTestAlertRule": "POST /alerts/rules/{id}/test, which carries no " +
+		"requireSource because creating, editing and deleting a rule are all " +
+		"install-wide and work before the first source exists. Only the SEND needs " +
+		"a notifier, and Engine.Alerts() answers nil for exactly one reason -- there " +
+		"is no engine -- so the 503 it used to write (\"the alert notifier is not " +
+		"running\") was this refusal under a name that sent the operator looking for " +
+		"a subsystem to restart. Driven through the router by " +
+		"TestEveryRegisteredRouteSurvivesEnginesThatDidNotStart, which is where it " +
+		"was found: on a fresh install there is no rule to test and the route 404s " +
+		"before reaching it.",
 }
 
 // TestEveryNoSourceRefusalIsAGuardOrIsRecorded reads the package's own source.

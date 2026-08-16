@@ -37,15 +37,13 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -77,6 +75,8 @@ const stereo = "aformat=channel_layouts=stereo"
 // to be able to hear that same track.
 const loudnessGain = 0.1
 
+// waitUp, grabCSRF, call and get live in driverhelpers.go, compiled in by
+// naming it on the `go run` line. See that file for why it is not a package.
 func main() {
 	if len(os.Args) < 3 {
 		die("usage: acceptance_audio_driver.go <http-port> <relay-port>")
@@ -92,6 +92,11 @@ func main() {
 	call("POST", "/setup", map[string]any{"username": "admin", "password": "acceptance-pw"})
 	grabCSRF()
 
+	// The programme everything below hangs off. A fresh install has none since
+	// #387; see acceptance_driver.go's copy of this note for the full reason.
+	fmt.Println("creating the first source")
+	call("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+
 	// Stems on. This is the one feature here that is a property of the
 	// RECORDER rather than of a destination, so it is switched on before the
 	// stream starts and read off disk at the end.
@@ -105,7 +110,10 @@ func main() {
 	fmt.Println("recording with stems enabled (flac)")
 
 	fmt.Println("starting synthetic source (300 Hz music / 900 Hz control / 2000 Hz mic burst)")
-	relayPort, _ := strconv.Atoi(relay)
+	// The shell's lsof is a hint: with no seeded source there may have been
+	// no relay socket to find when it looked. ResolveRelayPort asks the
+	// server when the hint is empty -- see its comment for the cycle.
+	relayPort := resolveRelayPort(relay)
 	src := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
 		// White for the first half of every 8s cycle, black for the second —
 		// the same gate the mic runs on, so blackdetect and silencedetect are
@@ -310,68 +318,26 @@ func dest(name, kind, url string, prof map[string]any) map[string]any {
 	}
 }
 
-func waitUp() {
-	for i := 0; i < 60; i++ {
-		if r, err := client.Get(base + "/health"); err == nil {
-			r.Body.Close()
-			return
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-	die("server never came up")
-}
-
-func grabCSRF() {
-	req, _ := http.NewRequest("GET", base+"/health", nil)
-	for _, c := range client.Jar.Cookies(req.URL) {
-		if c.Name == "polyemesis_csrf" {
-			csrf = c.Value
-		}
-	}
-	if csrf == "" {
-		die("no CSRF cookie issued")
-	}
-}
-
-func call(method, path string, body any) map[string]any {
-	var r io.Reader
-	if body != nil {
-		b, _ := json.Marshal(body)
-		r = bytes.NewReader(b)
-	}
-	req, _ := http.NewRequest(method, base+path, r)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CSRF-Token", csrf)
-	resp, err := client.Do(req)
-	if err != nil {
-		die("%s %s: %v", method, path, err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		die("%s %s -> %d: %s", method, path, resp.StatusCode, raw)
-	}
-	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
-	return out
-}
-
-func get(path string) map[string]any {
-	resp, err := client.Get(base + path)
-	if err != nil {
-		die("GET %s: %v", path, err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		die("GET %s -> %d: %s", path, resp.StatusCode, raw)
-	}
-	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
-	return out
-}
-
 func die(f string, a ...any) {
 	fmt.Printf("FATAL: "+f+"\n", a...)
 	os.Exit(1)
+}
+
+// resolveRelayPort: the shell's lsof is a hint, not a precondition. Without a
+// seeded source no relay socket exists until this driver creates one, so an
+// empty value means "ask the server", not "fail". The full account of the cycle
+// is in driverlib.ResolveRelayPort; this file cannot import it, because `go run`
+// resolves module imports against the cwd and these suites run from /tmp.
+func resolveRelayPort(fromShell string) int {
+	if p, err := strconv.Atoi(strings.TrimSpace(fromShell)); err == nil && p > 0 {
+		return p
+	}
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+		relay, _ := get("/stats")["relay"].(map[string]any)
+		if pf, ok := relay["port"].(float64); ok && pf > 0 {
+			return int(pf)
+		}
+	}
+	die("no relay port after 30s; the source was probably never created")
+	return 0
 }

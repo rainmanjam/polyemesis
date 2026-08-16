@@ -8,6 +8,71 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Changed
+- **An install with no source is one somebody can actually use.** A fresh
+  database no longer manufactures a "Main" source nobody configured, so zero
+  sources is a normal state rather than a state the product had never been run
+  in — and every screen now behaves as though it were. Reads answer (the
+  dashboard, the telemetry socket and the Prometheus scrape used to nil-deref
+  together on the very first page load); the routes that act on a pipeline
+  refuse with `503` and `code: "no_source"` rather than falling over; and the
+  Dashboard, Sources and Settings pages draw an empty state naming the one next
+  action instead of a red toast.
+
+  Two things that were previously silent are now loud. The settings **ingest**
+  editor refuses a change on an install with nowhere to write it through to,
+  where it used to store the block, answer `200` and have no effect whatever;
+  every other setting in the same request is still saved, because `PUT
+  /settings` also holds the listeners, recording, chat, automod and alerts, all
+  of which an operator legitimately configures before creating a source. And
+  the startup banner says `ingest no programme yet` instead of naming a port
+  that is bound and will refuse the encoder aimed at it.
+
+  Upgrading installs are unaffected: the migration still carries an existing
+  single-ingest configuration onto a source called "Main", and now tells that
+  case apart from a first run rather than seeding both. (#387)
+
+- **The listener ports stay editable on an install with no source.** They belong
+  to the whole install rather than to a programme — one SRT listener serves
+  every source and tells them apart by publish token — so they lived on the
+  ingest tab, which the empty state had replaced wholesale. A first install
+  whose 1935 or 6000 was already taken therefore had no port control anywhere in
+  the UI, and was invited to create a source that would arrive on the port that
+  could not bind. (#387)
+
+- **`POST /alerts/rules/{id}/test` says which absence it is refusing for.** It
+  answered `503 the alert notifier is not running` on an install with no
+  programme, which sent the operator looking for a subsystem to restart:
+  `Engine.Alerts()` is nil for exactly one reason, and it is this one. It now
+  carries `code: "no_source"` like every other refusal of the same condition.
+  (#387)
+
+- **The startup SRT warning names a screen that exists on the boot that prints
+  it.** "switch Settings → Ingest to RTMP" was executable only because a seeded
+  source put an ingest form on that tab. `docs/QUICKSTART.md`, `docs/INSTALL.md`,
+  the meters page and the media uploader carried the same kind of pointer and
+  now say where the setting really is. (#387)
+
+- **The last source can be deleted.** The store refused it, on the grounds that
+  an install with none had no ingest and no way through the UI to get one back.
+  Neither half holds any more: zero sources is the state a fresh install boots
+  into, and the Sources page carries the form that ends it. The refusal was
+  standing between an operator and a place they can already be — most obviously
+  the one replacing their single source, who had to create the replacement
+  first and then work out which of two rows was which. The delete button on the
+  only source is no longer greyed out, and its confirmation says what the
+  install is left with: destinations and renditions go with the source,
+  recordings stay on disk, and nothing is publishing until another source
+  exists. A boot after that delete does not put "Main" back. (#387)
+
+- **The confirmation of a deleted source stopped disagreeing with the warning
+  that preceded it.** The dialog said renditions go with the source, which they
+  do; the message afterwards named destinations alone, so the operator who
+  wanted to keep a 720p encode for a replacement was told nothing had been lost
+  that they would have to build again. Both now name the same three things, and
+  deleting the LAST source says so — that message is the only thing on screen at
+  the moment the install stops having a programme. (#387)
+
 ### Added
 - **An onboarding tour, offered once per install rather than once per browser.**
   A new operator finishes the signup screen and lands on an empty dashboard, and

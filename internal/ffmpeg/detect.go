@@ -186,10 +186,17 @@ func (t *Tools) SRTWarning() string {
 	if t.HasLibSRT {
 		return ""
 	}
+	// THE SCREEN THIS NAMES HAS TO EXIST ON THE BOOT THAT PRINTS IT. This line
+	// used to say "switch Settings -> Ingest to RTMP", which was executable
+	// only because a seeded source put an ingest form on that tab. A fresh
+	// install has no source, so the ingest form is not there and the sentence
+	// sent a first-time operator to a screen that could not do what it said.
+	// The ingest belongs to the source, so the Sources page is the answer at
+	// zero sources and at twenty.
 	return fmt.Sprintf(
 		"%s (FFmpeg %s) was built without SRT support, so multi-track SRT ingest will not work. "+
-			"Install a build configured with --enable-libsrt, or switch Settings -> Ingest to RTMP "+
-			"(single audio track).", t.FFmpeg, t.Version)
+			"Install a build configured with --enable-libsrt, or set the source's ingest to RTMP "+
+			"(single audio track) on the Sources page.", t.FFmpeg, t.Version)
 }
 
 // checkEncoders records which video encoders this machine can actually use.
