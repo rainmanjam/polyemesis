@@ -318,16 +318,16 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     name: "X (Twitter) Live",
     tier: "manual",
     summary:
-      "Sign in and polyemesis can schedule the broadcast, take it live, and read, send and moderate its chat. The stream key is still pasted: X consumes one and hands it back, but publishes no way to create one.",
+      "Paste your ingest URL and stream key. X does publish a live-video API — broadcasts, chat and moderation — and polyemesis has not wired it up yet, so for now this is a paste-the-key destination that streams exactly as well as any other.",
     readFirst:
       "X's live-video API is real but its access tier is not published. Every capability here comes from X's own served OpenAPI spec, and no pricing page names the Broadcasts family — so whether your account can call them is a question only a live request answers. Paste the stream key from X's producer tooling; the rest is automatic once you connect.",
     caps: {
-      sso: "yes",
+      sso: "unknown",
       streamKey: "manual",
-      metadata: "yes",
-      chatRead: "yes",
-      chatSend: "yes",
-      moderation: "yes",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
       viewerStats: "unknown",
     },
     reasons: {

@@ -33,7 +33,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **Twitch** | Works | Works | Works | Works | Works | Works | Works |
 | **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified |
 | **Kick** | Works | Works | Works | Works | Works | Works | Works |
-| **X (Twitter) Live** | Works | By hand | Works | Works | Works | Works | Unverified |
+| **X (Twitter) Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Trovo** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |

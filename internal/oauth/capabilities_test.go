@@ -39,12 +39,14 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		{"youtube fetches its key", "youtube", CapStreamKey, SupportYes, "Data API ingestion"},
 		{"twitch fetches its key", "twitch", CapStreamKey, SupportYes, "Helix stream key"},
 
-		// This row asserted the opposite until 2026-08-16, on the belief that
-		// "the X API covers posts, not live-video ingest". X's served OpenAPI
-		// spec declares a Broadcasts family of 13 operations and a Chat family
-		// of 16, under broadcast.read and broadcast.write.
-		{"x can sign in, and the belief that it could not was wrong", "x", CapSSO, SupportYes,
-			"OAuth 2.0 with the broadcast scopes is in X's own served spec"},
+		// X's row said SupportNo on the false belief that "the X API covers
+		// posts, not live-video ingest". X's served spec declares a Broadcasts
+		// family of 13 operations and a Chat family of 16. It then said
+		// SupportYes for an hour, which was the opposite error: the API exists,
+		// the provider is not registered, and a "Works" an operator cannot act
+		// on is worse than an "Unverified" that invites them to try.
+		{"x sign-in is documented at the platform and unbuilt here", "x", CapSSO, SupportUnknown,
+			"the API is real; nothing wires it yet, and the enum cannot say that directly"},
 		{"x key is pasted", "x", CapStreamKey, SupportManual,
 			"the destination still works; only the automation is absent"},
 

@@ -314,7 +314,7 @@ var platformCapabilities = []PlatformCapability{
 	},
 	{
 		PresetID: "x", Name: "X (Twitter) Live", Tier: TierManual,
-		Summary:   "Sign in and polyemesis can schedule the broadcast, take it live, and read, send and moderate its chat. The stream key is still pasted: X consumes one and hands it back, but publishes no way to create one.",
+		Summary:   "Paste your ingest URL and stream key. X does publish a live-video API \u2014 broadcasts, chat and moderation \u2014 and polyemesis has not wired it up yet, so for now this is a paste-the-key destination that streams exactly as well as any other.",
 		ReadFirst: "X's live-video API is real but its access tier is not published. Every endpoint below is in X's own served OpenAPI spec, and no pricing or tier page names the Broadcasts family -- so whether your account can call them at all is a question only a live request answers. Get the stream key from X's producer tooling and paste it; everything else is automatic once you connect.",
 		Caps: map[Capability]Support{
 			// THIS ROW WAS SEVEN SupportNo CELLS AND ALMOST ALL OF THEM WERE
@@ -332,17 +332,34 @@ var platformCapabilities = []PlatformCapability{
 			// carry the word broadcast, including POST
 			// /2/broadcasts/scheduled/{id}/live and GET+POST
 			// /2/broadcasts/{id}/chat. See docs/evidence/facebook-chat-rumble-x-2026-08-16.md.
-			CapSSO: SupportYes,
+			// EVERY CELL BELOW WAS SupportYes FOR ABOUT AN HOUR, AND THAT WAS A
+			// PROMISE THE UI COULD NOT KEEP. X's API genuinely publishes all of
+			// it -- see docs/evidence/facebook-chat-rumble-x-2026-08-16.md, and
+			// the OpenAPI counts in this row's history -- but the provider is
+			// not registered, there is no connect affordance, and an operator
+			// reading "Works" would go looking for a sign-in button that does
+			// not exist.
+			//
+			// The house rule is the one Rumble's viewer-stats cell already
+			// states: a capability nothing implements is not a capability. It
+			// was applied there and broken here in the same commit.
+			//
+			// None of the four Support values says "the platform documents it
+			// and we have not built it" -- the same expressive gap that got
+			// Twitch predictions cut. SupportUnknown is the least wrong: it
+			// renders as Unverified, which is fail-open and invites the
+			// operator to try, rather than as a refusal or a lie.
+			CapSSO: SupportUnknown,
 			// Still pasted, and the reason is narrower than it looks: X
 			// CONSUMES a key (source_id is required at create) and echoes it
 			// back on every broadcast object, but publishes nothing that mints
 			// or enumerates one. So polyemesis can verify a binding it was
 			// given; it cannot obtain one.
 			CapStreamKey:   SupportManual,
-			CapMetadata:    SupportYes,
-			CapChatRead:    SupportYes,
-			CapChatSend:    SupportYes,
-			CapModeration:  SupportYes,
+			CapMetadata:    SupportUnknown,
+			CapChatRead:    SupportUnknown,
+			CapChatSend:    SupportUnknown,
+			CapModeration:  SupportUnknown,
 			CapViewerStats: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
