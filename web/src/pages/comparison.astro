@@ -115,10 +115,19 @@ const wins = [
  * Every `src` below was read in that project's own repository on 2026-08-09.
  * Sourced from docs/COMPARISON.md, "They select a track. polyemesis mixes." */
 /* `href` is optional and only two of the three have one: MistServer has no page
- * of its own, because the facts file that governs competitor claims does not
- * cover it and a comparison page cannot be written from the one line of source
- * quoted below. The card still earns its place here — it is the only tool in
- * this set that selects tracks WELL — it simply cannot carry a page yet. */
+ * of its own yet. It is now covered by the facts file (§6, added 2026-08-15),
+ * which is what it lacked — but a full page wants more than one section.
+ *
+ * `src` IS A QUOTATION OR IT IS ABSENT. The other two cards quote a real line
+ * from the project's own repository, which is why they carry a file path and a
+ * read date and why a reader can check them. MistServer's used to hold
+ * "Util::wouldSelect() resolves audio= off the target's query string" — a
+ * DESCRIPTION of what a function does, set in the same quoted-code treatment
+ * that gives the other two their authority. It looked sourced and was not.
+ *
+ * So this card cites the facts file instead, and says so. Two kinds of evidence
+ * on one page is fine; evidence that is dressed as a stronger kind than it is
+ * is not. */
 const selectors = [
   {
     href: "/vs/obs-multi-rtmp",
@@ -138,10 +147,11 @@ const selectors = [
   },
   {
     name: "MistServer",
-    what: "A media server, and the one here that genuinely can pick tracks per push target — by index, by codec, or all of them.",
-    src: "Util::wouldSelect() resolves audio= off the target's query string",
-    file: "lib/stream.cpp",
-    note: "It selects, and selects well. It has no amix, no loudnorm, no ebur128.",
+    what: "A media server, and the one here that genuinely can pick tracks per push target — by track ID, codec, language, bitrate, or a first/last/optimal heuristic.",
+    // No `src`/`file`: see the note above. This card's evidence is the facts
+    // file, not a line of their source, and the page says which.
+    source: "competitor-facts §6 · checked 15 Aug 2026",
+    note: "It selects, and selects well. Its ROUTING SERVER has no amix, no loudnorm, no ebur128 — but an external Stream Process (MistProcAV, an FFmpeg pipeline) can decode, filter and inject a track back into the buffer, so mixing is reachable, just not where the routing happens.",
   },
 ];
 ---
@@ -330,8 +340,9 @@ const selectors = [
           <div class="card p-5">
             <p class="font-medium text-fg">{s.name}</p>
             <p class="mt-2 text-sm leading-relaxed text-muted">{s.what}</p>
-            <CodeBlock code={s.src} variant="quote" />
-            <p class="mt-2 font-mono text-[11px] text-subtle">{s.file} · read 2026-08-09</p>
+            {s.src && <CodeBlock code={s.src} variant="quote" />}
+            {s.src && <p class="mt-2 font-mono text-[11px] text-subtle">{s.file} · read 2026-08-09</p>}
+            {s.source && <p class="mt-2 font-mono text-[11px] text-subtle">{s.source}</p>}
             <p class="mt-3 text-sm leading-relaxed text-muted">{s.note}</p>
             {s.href && (
               <p class="mt-4">
