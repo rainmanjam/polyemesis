@@ -156,9 +156,19 @@ export function SourcesPage() {
 
   const remove = async () => {
     if (!deleting) return;
+    // WAS it the only one, not IS it — asked of the list this render was drawn
+    // from, which still holds the row about to go. Safe wherever it sits in
+    // this function because load() installs new state rather than rewriting
+    // the array this closure captured; anyone replacing it with a fresh count
+    // from the server after the delete gets the opposite answer.
+    //
+    // The dialog spends a whole sentence saying that deleting the last source
+    // is a different act. The toast is what is left on screen once it is true,
+    // and saying the ordinary thing there takes that back.
+    const wasOnly = sources.length === 1;
     try {
       await api.deleteSource(deleting.id);
-      toast.success(t("sources.deleted", { name: deleting.name }));
+      toast.success(t(wasOnly ? "sources.deletedLast" : "sources.deleted", { name: deleting.name }));
       setDeleting(null);
       await load();
     } catch (e) {

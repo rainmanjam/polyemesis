@@ -65,6 +65,14 @@ its first tagged release.
   recordings stay on disk, and nothing is publishing until another source
   exists. A boot after that delete does not put "Main" back. (#387)
 
+- **The confirmation of a deleted source stopped disagreeing with the warning
+  that preceded it.** The dialog said renditions go with the source, which they
+  do; the message afterwards named destinations alone, so the operator who
+  wanted to keep a 720p encode for a replacement was told nothing had been lost
+  that they would have to build again. Both now name the same three things, and
+  deleting the LAST source says so — that message is the only thing on screen at
+  the moment the install stops having a programme. (#387)
+
 ### Added
 - **An onboarding tour, offered once per install rather than once per browser.**
   A new operator finishes the signup screen and lands on an empty dashboard, and
