@@ -345,28 +345,51 @@ func TestEveryCapabilityLookupHasASetTwinThatResolves(t *testing.T) {
 	base, guard := stubbedWorld(t)
 	set := NewSet(WithBaseURL(base))
 
-	// Kick was the first platform to implement the newest capability and Twitch
-	// is the second, which is the interesting case: a twin that resolves for one
-	// platform and not the rest is the same bug, later. Both are driven so a
-	// provider that resolves but is aimed at production still trips the guard
-	// below.
-	for _, p := range []db.Platform{db.PlatformKick, db.PlatformTwitch} {
-		ls, ok := set.StatsFor(p)
-		if !ok {
-			t.Errorf("Set.StatsFor(%s) did not resolve; it implements Stats, so the twin is not wired", p)
+	// BOTH ENDS ARE DRIVEN OFF THE MATRIX RATHER THAN OFF A NAMED PLATFORM.
+	//
+	// This used to hardcode "Kick implements it, YouTube does not", and the
+	// hardcoding had to be rewritten twice in one afternoon -- once when Twitch
+	// grew a Stats method and once when YouTube did, each time by editing the
+	// assertion to point at whichever platform had not been implemented yet.
+	// An assertion that has to be re-aimed every time the thing it guards
+	// changes is one somebody eventually re-aims wrongly, and the negative half
+	// silently stops covering anything the moment every platform implements the
+	// capability.
+	//
+	// The matrix is the right source: TestTheViewerStatsCellAgreesWithWhich-
+	// ProvidersActuallyImplementStats already pins it to the code, so reading it
+	// here cannot drift away from what the providers do.
+	var claimed, denied int
+	for _, row := range PlatformCapabilities() {
+		ls, ok := set.StatsFor(row.Platform)
+		if row.Caps[CapViewerStats] == SupportYes {
+			claimed++
+			if !ok {
+				t.Errorf("Set.StatsFor(%s) did not resolve; it implements Stats, so the twin is not wired",
+					row.Platform)
+				continue
+			}
+			// Driven, so a provider that resolves but is aimed at production
+			// still trips the escape guard below.
+			_, _ = ls.Stats(context.Background(), "cid", "tok")
 			continue
 		}
-		_, _ = ls.Stats(context.Background(), "cid", "tok")
+		// A platform without the capability must answer false rather than a nil
+		// interface that panics on use: internal/api branches on this bool to
+		// answer supported:false, and a nil-with-true would crash the handler.
+		denied++
+		if ok {
+			t.Errorf("Set.StatsFor(%s) resolved, but its viewerStats cell is %q — "+
+				"the assertion is matching something it should not",
+				row.Platform, row.Caps[CapViewerStats])
+		}
 	}
-
-	// A platform without the capability must answer false rather than a nil
-	// interface that panics on use: internal/api branches on this bool to
-	// answer supported:false, and a nil-with-true would crash the handler.
-	// YouTube holds this end of the assertion now that Twitch has grown Stats;
-	// its liveStreamingDetails read is a broadcast lookup, not this interface.
-	if _, ok := set.StatsFor(db.PlatformYouTube); ok {
-		t.Error("Set.StatsFor(youtube) resolved, but YouTube has no Stats method — " +
-			"the assertion is matching something it should not")
+	// Neither half may quietly cover nothing. A loop that asserts over an empty
+	// set passes for the wrong reason, and that is exactly how the negative half
+	// would have died unnoticed once every platform implemented Stats.
+	if claimed == 0 || denied == 0 {
+		t.Fatalf("this test needs both cases to mean anything: %d platforms claim viewer stats, %d deny it",
+			claimed, denied)
 	}
 
 	if got := guard.escapes(); len(got) > 0 {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -196,4 +198,191 @@ func (y *YouTube) Ingest(ctx context.Context, clientID, accessToken string) (*In
 		URL: created.CDN.IngestionInfo.IngestionAddress,
 		Key: created.CDN.IngestionInfo.StreamName,
 	}, nil
+}
+
+// --------------------------------------------------------------------- stats
+
+// The capability is resolved by type assertion in StatsFor, so a drifting
+// signature would make YouTube silently stop reporting viewers rather than fail
+// to build. See twitch.go for the same guard and the drift test that catches
+// the other direction.
+var _ LiveStatter = (*YouTube)(nil)
+
+const (
+	ytBroadcastsPath = "/liveBroadcasts"
+	ytVideosPath     = "/videos"
+)
+
+// ytConcurrentViewers decodes a field whose documented type and whose wire type
+// disagree, and neither spelling may be assumed.
+//
+// The videos resource representation says `concurrentViewers: unsigned long`.
+// Google's JSON convention serialises 64-bit values as QUOTED STRINGS, because
+// a uint64 does not survive a JavaScript number -- so the byte on the wire is
+// widely `"concurrentViewers": "1312"` rather than `1312`. The reference states
+// the logical type; it does not state the encoding, and nothing read on
+// 2026-08-16 settles which arrives.
+//
+// So this accepts both rather than betting on one. Betting wrong does not
+// degrade gracefully: json.Unmarshal fails the WHOLE videos response on a type
+// mismatch, so a viewer count would take the title, the start time and the
+// liveness answer down with it. Accepting both costs a type and cannot fail.
+//
+// Absent stays absent. This is only reached when the key is present, and the
+// caller distinguishes that -- see LiveStats.ViewerCount.
+type ytConcurrentViewers struct {
+	value   int
+	present bool
+}
+
+func (c *ytConcurrentViewers) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
+	if s == "" || s == "null" {
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		// A count we cannot parse is a count we were not given. Failing here
+		// would fail the entire read for one advisory number.
+		return nil
+	}
+	c.value, c.present = n, true
+	return nil
+}
+
+// Stats reads the channel's live broadcast and how many people are watching it.
+//
+// TWO CALLS, AND THE FIRST ONE EXISTS BECAUSE POLYEMESIS STORES NO VIDEO ID.
+// The viewer count lives on the video resource, keyed by video id, and nothing
+// in the database holds one. liveBroadcasts.list is what turns a token into
+// that id. The join is documented and is the load-bearing fact of this method,
+// verbatim from the Live Streaming API overview (read 2026-08-16): "In fact,
+// the liveBroadcast resource and the video resource share the same ID." Cite
+// that page rather than the liveBroadcasts resource, whose own gloss is weaker
+// and does not state the identity.
+//
+// broadcastType=all IS SENT DELIBERATELY. Verbatim: "The broadcastType
+// parameter filters the API response to only include broadcasts with the
+// specified type. The parameter should be used in requests that set the mine
+// parameter to true or that use the broadcastStatus parameter. The default
+// value is event." The default therefore returns only scheduled event
+// broadcasts and would hide a persistent one, reporting a live channel as dark.
+//
+// broadcastStatus and mine are MUTUALLY EXCLUSIVE -- "Filters (specify exactly
+// one of the following parameters)" -- so ownership cannot be asked for in the
+// same breath as liveness. "owned by the authenticated user" appears exactly
+// once on that page, in the mine row, and nothing scopes active to the caller.
+// Whether broadcastStatus=active can return somebody else's broadcast is
+// therefore UNVERIFIED, and the channelId filter below is the defence: it costs
+// one comparison and the alternative is reporting a stranger's audience as
+// yours.
+//
+// NO QUOTA NUMBER APPEARS HERE ON PURPOSE. The string "quota" occurs zero times
+// in the liveBroadcasts.list reference, so its cost is undocumented; videos.list
+// documents 1 unit. The project-wide ceiling is 10,000 units per day shared
+// across every YouTube feature polyemesis has -- metadata push and compliance
+// included -- so a caller polling this hard does not merely slow the viewer
+// count down, it takes title push down with it. The refusal to handle is
+// quotaExceeded; a hardcoded interval derived from a guessed cost would be the
+// invented number this whole evidence pass exists to prevent.
+func (y *YouTube) Stats(ctx context.Context, clientID, accessToken string) (*LiveStats, error) {
+	acct, err := y.Account(ctx, clientID, accessToken)
+	if err != nil {
+		return nil, err
+	}
+
+	var broadcasts struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Snippet struct {
+				ChannelID       string `json:"channelId"`
+				Title           string `json:"title"`
+				ActualStartTime string `json:"actualStartTime"`
+			} `json:"snippet"`
+		} `json:"items"`
+	}
+	err = getJSON(ctx,
+		y.apiEndpoint()+ytBroadcastsPath+"?part=id,snippet&broadcastStatus=active&broadcastType=all",
+		accessToken, nil, &broadcasts)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := &LiveStats{Source: ytBroadcastsPath}
+
+	// len first, never items[0] blind. Nothing in the reference states what an
+	// idle channel returns -- neither the Errors table nor the Response section
+	// says so -- and an empty items array is the structurally natural reading
+	// rather than a documented one. Indexing on that reading would panic on the
+	// day it is wrong.
+	var id, title, startedAt string
+	for _, b := range broadcasts.Items {
+		if b.Snippet.ChannelID != "" && b.Snippet.ChannelID != acct.Ref {
+			continue
+		}
+		id, title, startedAt = b.ID, b.Snippet.Title, b.Snippet.ActualStartTime
+		break
+	}
+	if id == "" {
+		// Not live. An answer, not an error -- the same contract every other
+		// provider here holds.
+		return stats, nil
+	}
+
+	stats.Live = true
+	stats.Title = title
+	stats.StartedAt = parseYouTubeTime(startedAt)
+
+	var videos struct {
+		Items []struct {
+			LiveStreamingDetails struct {
+				ConcurrentViewers ytConcurrentViewers `json:"concurrentViewers"`
+				ActualStartTime   string              `json:"actualStartTime"`
+			} `json:"liveStreamingDetails"`
+		} `json:"items"`
+	}
+	err = getJSON(ctx,
+		y.apiEndpoint()+ytVideosPath+"?part=liveStreamingDetails&id="+url.QueryEscape(id),
+		accessToken, nil, &videos)
+	if err != nil {
+		// THE BROADCAST IS STILL LIVE AND WE STILL KNOW IT. The first call
+		// already answered the question that matters; losing the second costs a
+		// number, and returning an error here would throw away a correct
+		// liveness answer to report the failure of an advisory one. Kick makes
+		// the same trade for the same reason.
+		return stats, nil
+	}
+	if len(videos.Items) == 0 {
+		return stats, nil
+	}
+
+	d := videos.Items[0].LiveStreamingDetails
+	// A MISSING KEY IS "UNKNOWN" AND NEVER ZERO, and YouTube omits it under
+	// three conditions that are indistinguishable from each other: no current
+	// viewers, the owner has HIDDEN the viewcount, and after the broadcast
+	// ends. An operator who hid their count would otherwise be shown an
+	// audience of none on a stream people are watching.
+	if d.ConcurrentViewers.present {
+		v := d.ConcurrentViewers.value
+		stats.ViewerCount = &v
+	}
+	// The video resource's actualStartTime is the better source when both
+	// answer: it is the broadcast's own record rather than the listing's.
+	if at := parseYouTubeTime(d.ActualStartTime); at != nil {
+		stats.StartedAt = at
+	}
+	stats.Source = ytVideosPath
+	return stats, nil
+}
+
+// parseYouTubeTime reads the one format YouTube commits to. liveStreamingDetails
+// timestamps are documented as ISO 8601, which RFC 3339 parses for the subset
+// Google emits; an unreadable stamp costs the timestamp rather than the read,
+// and nil keeps it out of the payload entirely rather than sending the year 1.
+func parseYouTubeTime(s string) *time.Time {
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
+	if err != nil {
+		return nil
+	}
+	return &parsed
 }

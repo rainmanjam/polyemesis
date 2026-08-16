@@ -623,3 +623,76 @@ file: `youtube` (or `youtube.force-ssl`).
 streaming carries none of the three thumbnail permissions. Any ScopeVersion
 covering Facebook thumbnails must request them explicitly or mint a second
 token.
+
+---
+
+## ADDENDUM: YouTube `liveBroadcasts.list`, checked 2026-08-16
+
+The first pass verified the viewer-count READ and never asked how polyemesis
+would find the id to read. It stores no video id and no broadcast id, so the
+verified endpoint had nothing to point at. This addendum is the missing link,
+and it carries far more than viewer stats: the whole Phase 2 broadcast record
+depends on knowing which broadcast is live, and `contentDetails.boundStreamId`
+is what joins it to the health readback.
+
+Written by a research pass and then corrected by an adversarial one, which
+refuted six sub-claims. The refutations are kept in place rather than deleted,
+because a wrong version silently removed is one the next reader re-derives.
+
+All seven pages below were fetched fresh, bodies read (not status codes), and every quote matched character-for-character against the rendered text. Footer dates recorded per page: **list `2025-08-28 UTC`**, getting-started `2026-06-01`, liveBroadcasts resource `2026-07-21`, life-of-a-broadcast `2026-06-01`, live errors `2025-12-12`, playlistItems.insert `2026-06-01`, videos.list `2026-07-08`.
+
+| capability | verdict | endpoint | scope | source |
+|---|---|---|---|---|
+| find the currently-live broadcast | documented | `GET https://www.googleapis.com/youtube/v3/liveBroadcasts?part=id,snippet,status&broadcastStatus=active&broadcastType=all` | `youtube.readonly` OR `youtube` OR `youtube.force-ssl` | [liveBroadcasts/list](https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/list), read 2026-08-16 |
+| own-channel filter | documented, mutually exclusive with `broadcastStatus` and `id` | `...&mine=true` | same three scopes | same page, filter-group header |
+| broadcast id == video id | documented, explicitly | `liveBroadcast.id` feeds `videos?id=<same string>` | n/a | [Live Streaming API Overview](https://developers.google.com/youtube/v3/live/getting-started), read 2026-08-16 |
+| viewer stats, end to end | documented chain, two calls | list → `GET .../videos?part=liveStreamingDetails&id=<that id>` | discovery: three scopes above; read: **undocumented — videos.list has no Authorization section** | both pages, read 2026-08-16 |
+| quota cost of `liveBroadcasts.list` | **undocumented** | — | — | list page — the string "quota" occurs **0 times in the raw HTML** |
+| quota cost of `videos.list` | **documented, 1 unit** — *original findings omitted this* | — | — | [videos/list](https://developers.google.com/youtube/v3/docs/videos/list), read 2026-08-16 |
+| refusals | documented, two rows only | — | — | list page Errors table |
+| behavior with no active broadcast | **undocumented** | — | — | see caveats |
+
+---
+
+## What was REFUTED, corrected in place
+
+**1. "Partially unread: the `persistent` gloss was cut off at the chunk boundary." — REFUTED.**
+The gloss is fully readable and the enumeration is complete at three values, verbatim: `all` – "Return all broadcasts."; `event` – "Return only scheduled event broadcasts."; `persistent` – "Return only persistent broadcasts." The original marked this UNRESOLVED on a retrieval artifact, not a documentary gap. **Was wrong:** the hedge itself. The operational advice (send `broadcastType=all`) stands and is now fully sourced.
+
+**2. "The default `broadcastType=event` will silently hide a Stream-Now broadcast." — REFUTED as sourced language; the mechanism survives.**
+The string **"Stream Now" occurs 0 times** across the list page, the resource page, the overview, life-of-a-broadcast, and the live errors page. The documented term is `persistent`, and **no page in this set defines what a persistent broadcast is** — the word appears only in the `broadcastType` enum on the list page (`persistent` occurs 0 times on the resource page, the overview, and life-of-a-broadcast). Correct statement: *the default `broadcastType=event` returns only scheduled event broadcasts, therefore excludes `persistent` broadcasts.* The equation persistent ≡ "Stream Now" is unsourced product folklore — **UNRESOLVED**; *resolve by:* a YouTube page that glosses `persistent`, or one live list call against a persistent broadcast comparing `broadcastType=event` vs `all`.
+Also note: the *consequence* ("a bare `broadcastStatus=active` returns only event broadcasts") is an inference from the documented default, not a quoted sentence. Sound, but it is inference.
+
+**3. "The live errors page carries the identical two rows." — REFUTED.**
+The error type/detail *pairs* match; the *description text does not*. On the reference page the second row ends "For more information, see **Feature eligibility**." On [live/docs/errors](https://developers.google.com/youtube/v3/live/docs/errors) it ends "The user can find more information at **https://www.youtube.com/features**." Do not treat the two tables as byte-identical sources for each other. Everything else in that caveat holds: `notFound(404)/liveBroadcastNotFound` sits under `liveBroadcasts.delete` ("The `id` property specified in the `liveBroadcast` resource did not identify a broadcast.") and **not** under `liveBroadcasts.list`.
+
+**4. "The existing `youtube.force-ssl` grant covers this call either way, so no new consent screen is needed." — REFUTED as unsourced.**
+`videos.list` documents no Authorization section at all (the word "authorization" appears on that page only inside the `onBehalfOfContentOwner` boilerplate; "requires authorization" occurs zero times). A page that names no scope cannot be cited as accepting one. The call may require no OAuth scope at all (API-key read) — that is equally consistent with the page. **UNRESOLVED**; *resolve by:* one live `videos.list?part=liveStreamingDetails` request with `youtube.readonly`, one with `youtube.force-ssl`, and one with an API key only; record which succeed. Practically the poller will already hold `force-ssl`, so shipping is unblocked — but do not record "covered" as documented.
+
+**5. The overview quote is real but the ellipsis hides a clause.**
+Original rendered: "A `liveBroadcast` resource is an extension of a YouTube video resource… As such…". Full text, verbatim: "A liveBroadcast resource is an extension of a YouTube video resource **and sets the video metadata that would be pertinent to a live broadcast but not to other YouTube videos.** As such, a liveBroadcast resource corresponds to exactly one YouTube video resource. In fact, the liveBroadcast resource and the video resource share the same ID." Elision, not fabrication.
+
+**6. The life-of-a-broadcast quote is verbatim but its context was dropped.**
+It is Step 6.1, "Poll the Data API for the video's status", inside the **Content ID reference** workflow, and is gated two sentences earlier on "you must have set the broadcast's `contentDetails.recordFromStart` property to `true`". The `part` it polls is `status`, not `liveStreamingDetails`. It corroborates the shared ID; it is **not** a documented precedent for the viewer-stats call.
+
+---
+
+## What SURVIVED refutation (verified verbatim, keep)
+
+**The crux is settled.** Present word for word on [getting-started](https://developers.google.com/youtube/v3/live/getting-started) (read 2026-08-16): **"In fact, the liveBroadcast resource and the video resource share the same ID."** — one occurrence, no hedge. The resource page's own `id` gloss is confirmed weaker and does not state the identity: "The ID that YouTube assigns to uniquely identify the broadcast." The `snippet.title` corroboration is verbatim: "The broadcast's title. Note that the broadcast represents exactly one YouTube video. You can set this field by modifying the broadcast resource or by setting the `title` field of the corresponding video resource." **Cite getting-started, not the resource page.** No number, no scope, and no HTTP-200 inference is involved in this claim.
+
+**Filters are mutually exclusive.** Header verbatim: "Filters (specify exactly one of the following parameters)" over `broadcastStatus`, `id`, `mine`. `broadcastStatus` verbatim: "The broadcastStatus parameter filters the API response to only include broadcasts with the specified status." Enum complete at four: `active` – "Return current live broadcasts."; `all` – "Return all broadcasts."; `completed` – "Return broadcasts that have already ended."; `upcoming` – "Return broadcasts that have not yet started." `mine` verbatim: "The mine parameter can be used to instruct the API to only return broadcasts owned by the authenticated user. Set the parameter value to true to only retrieve your own broadcasts."
+
+**`broadcastType` text, verbatim:** "The broadcastType parameter filters the API response to only include broadcasts with the specified type. The parameter should be used in requests that set the mine parameter to true or that use the broadcastStatus parameter. The default value is event."
+
+**`broadcastStatus=active` is not documented as owner-scoped.** Confirmed by count: "owned by the authenticated user" occurs **exactly once** on the page, in the `mine` row. Nothing scopes `active` to the caller. UNRESOLVED as stated; *resolve by:* a live call checking `items[].snippet.channelId`. Keep the defensive filter on `snippet.channelId`.
+
+**Authorization section.** Verbatim, and the original truncated the second sentence: "This request requires authorization with at least one of the following scopes. **To read more about authentication and authorization, see Implementing OAuth 2.0 authentication.**" Three rows, in page order: `https://www.googleapis.com/auth/youtube.readonly`, `https://www.googleapis.com/auth/youtube`, `https://www.googleapis.com/auth/youtube.force-ssl`.
+
+**Quota absence is real and now stronger.** Not merely "no Quota impact line" — the substring "quota" occurs **zero times in the entire 83,820-byte HTML** of the list page (and zero times on the liveBroadcasts resource page). The contrast holds verbatim on [playlistItems/insert](https://developers.google.com/youtube/v3/docs/playlistItems/insert): "Quota impact: A call to this method has a quota cost of 50 units." (3 occurrences of "quota" in that page's HTML). Cost of `liveBroadcasts.list` is **undocumented** — handle `quotaExceeded`, budget nothing. The one number the list page does literally state, verbatim: "The maxResults parameter specifies the maximum number of items that should be returned in the result set. Acceptable values are `0` to `50`, inclusive. The default value is `5`." (Verified — an earlier automated mismatch was my own whitespace normalization around the `<code>` tags, not a doc discrepancy.) Also literal and not previously recorded: `part` accepts "id, snippet, contentDetails, monetizationDetails, and status", so `part=id,snippet,status` is valid.
+
+**Errors table is exactly two rows**, verbatim from the reference page: `insufficientPermissions`/`insufficientLivePermissions` — "The request is not authorized to retrieve the live broadcast."; `insufficientPermissions`/`liveStreamingNotEnabled` — "The user that authorized the request is not enabled to stream live video on YouTube. For more information, see Feature eligibility."
+
+**No-active-broadcast behavior remains undocumented.** Neither the Errors table nor the Response section states it. Response shape verbatim: `{ "kind": "youtube#liveBroadcastListResponse", "etag": etag, "nextPageToken": string, "prevPageToken": string, "pageInfo": { "totalResults": integer, "resultsPerPage": integer }, "items": [ liveBroadcast Resource ] }`, with `items[]` glossed "A list of broadcasts that match the request criteria." Empty `items` is the structurally natural reading and no 404 row exists for this method — but no sentence says so. **UNRESOLVED**; branch on `len(items) == 0` first, never index `items[0]` blind. *Resolve by:* one authenticated call against a channel with no live broadcast, recording literal status code and body.
+
+**Operational shape.** Unchanged: two calls per viewer-count poll; cache the discovered id for the life of the broadcast; re-list only after a transition or a `videos.list` miss. With `videos.list` documented at 1 unit and `liveBroadcasts.list` at an unknown cost, the poll interval must be governed by the observed `quotaExceeded` refusal and the shared 10,000-unit/day project ceiling, not by a per-call estimate.

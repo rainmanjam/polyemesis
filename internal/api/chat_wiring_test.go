@@ -11,6 +11,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
 func TestKickBroadcasterIDRejectsARefThatIsNotAnID(t *testing.T) {
@@ -132,9 +133,34 @@ func TestAccountStatsReportsAbsenceRatherThanFailing(t *testing.T) {
 	s, h, store := testServer(t, config.Config{})
 	sign := login(t, h)
 
-	// YouTube has no viewer-count capability, and "we cannot ask" must not look
-	// like "the account is gone" — the two have different fixes.
-	id := connectAccount(t, store, s.box, db.PlatformYouTube, "chan")
+	// THE PLATFORM IS CHOSEN BY ASKING, NOT BY NAMING ONE.
+	//
+	// This test needs a platform that cannot report viewers, and it used to
+	// name YouTube. That held until YouTube grew a Stats method, at which point
+	// the test failed with a 412 about missing developer credentials — an error
+	// that says nothing about what actually changed, on a test whose subject is
+	// not YouTube at all but the SHAPE of the answer: 200 with supported:false,
+	// never a 404, because "we cannot ask" and "the account is gone" have
+	// different fixes and a client that cannot tell them apart shows the wrong
+	// one.
+	//
+	// So it asks oauth which platform lacks the capability. Naming one couples
+	// a test about an envelope to a roadmap it does not care about.
+	var absent db.Platform
+	for _, row := range oauth.PlatformCapabilities() {
+		if _, ok := oauth.StatsFor(row.Platform); !ok && row.Tier == oauth.TierIntegrated {
+			absent = row.Platform
+			break
+		}
+	}
+	if absent == "" {
+		// Not a failure of the product — it would mean every integrated
+		// platform reports viewers, which is the goal. But this test would then
+		// be asserting over nothing while still passing, so it says so out loud
+		// rather than going quietly green.
+		t.Skip("every integrated platform now reports viewer stats; nothing left to assert absence with")
+	}
+	id := connectAccount(t, store, s.box, absent, "chan")
 
 	r := jsonRequest(t, http.MethodGet, "/api/v1/platforms/accounts/"+strconv.FormatInt(id, 10)+"/stats", nil)
 	sign(r)
@@ -150,7 +176,7 @@ func TestAccountStatsReportsAbsenceRatherThanFailing(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if got.Supported {
-		t.Fatal("youtube claimed a viewer count polyemesis does not read")
+		t.Fatalf("%s claimed a viewer count polyemesis does not read", absent)
 	}
 	if got.Reason == "" {
 		t.Fatal("absence was reported with no explanation, so the UI has nothing to show")

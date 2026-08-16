@@ -182,9 +182,11 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatRead: "yes",
       chatSend: "yes",
       moderation: "yes",
-      viewerStats: "unknown",
+      viewerStats: "yes",
     },
     reasons: {
+      viewerStats:
+        "Live state, title, start time and concurrent viewer count, over the same auth/youtube scope everything else here uses — so an account connected before this existed can already do it, with no reconnect. It costs two calls: polyemesis stores no video id, so it asks which broadcast is live and then asks that video how many people are watching. YouTube omits the viewer count when the owner has hidden it, when nobody is watching, and once the broadcast ends — all three look identical, so polyemesis reports \"not reported\" rather than zero. The count shares the Data API's daily quota with title push and chat, which is why it is polled gently rather than live.",
       chatRead:
         "Polled against the Data API's daily quota, which polyemesis paces. A long broadcast can exhaust it; the chat pane says so with the reset time rather than going quiet.",
       moderation:
