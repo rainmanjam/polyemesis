@@ -41,12 +41,27 @@ import (
 // sources.
 func preSourcesDB(t *testing.T, path, settingsJSON string, extra ...string) {
 	t.Helper()
+	preSourcesTables(t, path, settingsJSON,
+		[]string{"destinations", "renditions", "recordings"}, extra...)
+}
+
+// preSourcesTables is preSourcesDB for an install that predates some of these
+// tables as well as sources.
+//
+// A table left out is not created at all, so schema.sql creates it on the next
+// Open -- WITH source_id, in schema.sql's shape. That is the real upgrade path
+// for a database older than renditions, and it is the only fixture in which
+// `migrating` is the sole witness: the tables schema.sql builds carry no
+// evidence of an upgrade, and the one that predates it carries no column to read
+// evidence from.
+func preSourcesTables(t *testing.T, path, settingsJSON string, tables []string, extra ...string) {
+	t.Helper()
 
 	old, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatalf("open raw sqlite: %v", err)
 	}
-	stmts := []string{`CREATE TABLE destinations (
+	ddl := map[string]string{"destinations": `CREATE TABLE destinations (
 		id             INTEGER PRIMARY KEY AUTOINCREMENT,
 		name           TEXT    NOT NULL,
 		kind           TEXT    NOT NULL,
@@ -62,7 +77,7 @@ func preSourcesDB(t *testing.T, path, settingsJSON string, extra ...string) {
 		position       INTEGER NOT NULL DEFAULT 0,
 		created_at     INTEGER NOT NULL,
 		updated_at     INTEGER NOT NULL
-	)`, `CREATE TABLE renditions (
+	)`, "renditions": `CREATE TABLE renditions (
 		id            INTEGER PRIMARY KEY AUTOINCREMENT,
 		name          TEXT    NOT NULL,
 		width         INTEGER NOT NULL DEFAULT 0,
@@ -76,7 +91,7 @@ func preSourcesDB(t *testing.T, path, settingsJSON string, extra ...string) {
 		deinterlace   TEXT    NOT NULL DEFAULT '',
 		created_at    INTEGER NOT NULL,
 		updated_at    INTEGER NOT NULL
-	)`, `CREATE TABLE recordings (
+	)`, "recordings": `CREATE TABLE recordings (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
 		filename    TEXT    NOT NULL UNIQUE,
 		started_at  INTEGER NOT NULL,
@@ -84,10 +99,18 @@ func preSourcesDB(t *testing.T, path, settingsJSON string, extra ...string) {
 		bytes       INTEGER NOT NULL DEFAULT 0,
 		duration_ms INTEGER NOT NULL DEFAULT 0,
 		tracks      INTEGER NOT NULL DEFAULT 0
-	)`, `CREATE TABLE settings (
+	)`}
+	stmts := []string{`CREATE TABLE settings (
 		id   INTEGER PRIMARY KEY CHECK (id = 1),
 		json TEXT    NOT NULL
 	)`}
+	for _, table := range tables {
+		create, ok := ddl[table]
+		if !ok {
+			t.Fatalf("no pre-sources DDL for %q", table)
+		}
+		stmts = append(stmts, create)
+	}
 	stmts = append(stmts, `INSERT INTO settings (id, json) VALUES (1, '`+settingsJSON+`')`)
 	stmts = append(stmts, extra...)
 	for _, s := range stmts {
@@ -99,7 +122,7 @@ func preSourcesDB(t *testing.T, path, settingsJSON string, extra ...string) {
 	// Prove the fixture is genuinely old before Open is ever called. Without
 	// this the whole file could pass against a database that already had the
 	// columns, which is the fresh case wearing a pre-sources costume.
-	for _, table := range []string{"destinations", "renditions", "recordings"} {
+	for _, table := range tables {
 		if _, err := old.Exec(`SELECT source_id FROM ` + table); err == nil {
 			t.Fatalf("%s.source_id already exists on the hand-built table; this test proves nothing", table)
 		}
@@ -232,6 +255,16 @@ func TestMigrationAttachesRecordingsOnAnInstallThatHadNothingElse(t *testing.T) 
 // Seeding one here is not a cosmetic difference. It hands a first-time operator
 // a programme they did not configure, on an ingest mode nobody chose, and it is
 // what the whole zero-source install exists to stop.
+//
+// GetSettings is called on every boot, and that is why it is called on every
+// boot HERE. It SEEDS a settings row when it finds none, so a real install has
+// one from its second start onwards -- main.go reads settings during startup,
+// and so does the settings page. A version of this test that only opens the
+// database never materialises that row, and then stays green against the
+// forbidden discriminator MUST NOT #4 names by name: widen the seed condition to
+// "or a settings row exists" and every fresh install grows Main on boot 2 with
+// the whole suite passing. The one line below is what makes this test able to
+// see that.
 func TestAFreshDatabaseComesUpWithNoSourceAndStaysThatWay(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fresh.db")
 
@@ -247,6 +280,9 @@ func TestAFreshDatabaseComesUpWithNoSourceAndStaysThatWay(t *testing.T) {
 		if len(got) != 0 {
 			t.Fatalf("open %d left %d sources on a fresh database; "+
 				"a new install must ask the operator for one, not invent it", i, len(got))
+		}
+		if _, err := d.GetSettings(); err != nil {
+			t.Fatalf("GetSettings on boot %d: %v", i, err)
 		}
 		if err := d.Close(); err != nil {
 			t.Fatalf("close %d: %v", i, err)
@@ -414,6 +450,15 @@ func TestTheRotationColumnsAreNotEvidenceOfAPreSourcesInstall(t *testing.T) {
 // Reachable from a release that added the columns in one pass and the source in
 // another, and from any database an operator hand-edited with the sqlite3 CLI,
 // where foreign keys default to OFF.
+//
+// The destination is written with the raw driver onto a database that has NEVER
+// held a source, and both halves of that are load-bearing. Building this state
+// by creating a source and deleting it again produces the DIFFERENT install --
+// the one that had a source and lost it, which sqlite_sequence remembers for
+// ever and which must not be reseeded. It would also leave `orphans` as the only
+// thing under test by accident rather than by design: here the column shapes are
+// schema.sql's, so the shape witness reads false and this destination is the
+// sole reason the seed fires.
 func TestMigrationSeedsWhenTheColumnsArrivedButTheSourceNeverDid(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "columns-without-source.db")
 
@@ -421,30 +466,21 @@ func TestMigrationSeedsWhenTheColumnsArrivedButTheSourceNeverDid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	src := &Source{Name: "Main camera", Enabled: true, Ingest: DefaultSettings().Ingest}
-	if err := d.CreateSource(src); err != nil {
-		t.Fatalf("CreateSource: %v", err)
-	}
-	dst, err := d.CreateDestination(&Destination{
-		Name: "pre-existing", Kind: DestRTMP, URL: "rtmp://example/live", SourceID: &src.ID})
-	if err != nil {
-		t.Fatalf("CreateDestination: %v", err)
-	}
 	if err := d.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
 	// The raw handle, because its DSN carries no pragmas: with foreign keys off
-	// the source can be removed without cascading the destination away, which
-	// is the state being reproduced.
+	// a destination can be written with no source to belong to, which is the
+	// state being reproduced and which the store itself refuses to create.
 	raw, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatalf("open raw sqlite: %v", err)
 	}
-	for _, s := range []string{`DELETE FROM sources`, `UPDATE destinations SET source_id = NULL`} {
-		if _, err := raw.Exec(s); err != nil {
-			t.Fatalf("%s: %v", s, err)
-		}
+	if _, err := raw.Exec(`INSERT INTO destinations
+		(name, kind, url, profile, created_at, updated_at)
+		VALUES ('pre-existing', 'rtmp', 'rtmp://example/live', '{}', 1000, 1000)`); err != nil {
+		t.Fatalf("insert an orphan destination: %v", err)
 	}
 	if err := raw.Close(); err != nil {
 		t.Fatalf("close raw sqlite: %v", err)
@@ -466,7 +502,7 @@ func TestMigrationSeedsWhenTheColumnsArrivedButTheSourceNeverDid(t *testing.T) {
 	}
 	var attached *int64
 	if err := again.SQL().QueryRow(
-		`SELECT source_id FROM destinations WHERE id = ?`, dst.ID).Scan(&attached); err != nil {
+		`SELECT source_id FROM destinations WHERE name = 'pre-existing'`).Scan(&attached); err != nil {
 		t.Fatalf("read back source_id: %v", err)
 	}
 	if attached == nil || *attached != got[0].ID {
@@ -530,6 +566,276 @@ func TestAnInterruptedMigrationStillCarriesTheIngestOnTheNextBoot(t *testing.T) 
 	}
 	if got[0].Ingest.RTMP.StreamKey != "secretkey" {
 		t.Errorf("stream key = %q, want it carried across", got[0].Ingest.RTMP.StreamKey)
+	}
+}
+
+// halfMigrateAsAnEarlierRelease replays exactly what a release older than this
+// one committed before it created the source, and nothing else: the sources
+// table its schema.sql created, and one ALTER TABLE per named table.
+//
+// Deliberately built with the raw driver on a database the store has never
+// opened, because the point is a half-finished migration performed by code that
+// no longer exists here. The sources table is the pre-rotation one -- no
+// prev_token -- since that is what an install this old actually has, and it
+// keeps the rotation columns on the path this fixture exercises.
+func halfMigrateAsAnEarlierRelease(t *testing.T, path string, tables ...string) {
+	t.Helper()
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	stmts := []string{`CREATE TABLE sources (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		name       TEXT    NOT NULL,
+		enabled    INTEGER NOT NULL DEFAULT 1,
+		ingest     TEXT    NOT NULL,
+		token      TEXT    NOT NULL DEFAULT '',
+		position   INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`}
+	onDelete := map[string]string{
+		"destinations": "CASCADE", "renditions": "CASCADE", "recordings": "SET NULL"}
+	for _, table := range tables {
+		stmts = append(stmts, `ALTER TABLE `+table+
+			` ADD COLUMN source_id INTEGER REFERENCES sources(id) ON DELETE `+onDelete[table])
+	}
+	for _, s := range stmts {
+		if _, err := raw.Exec(s); err != nil {
+			t.Fatalf("replay the earlier release (%.40s): %v", s, err)
+		}
+	}
+	// The state this fixture is: columns committed, sources empty. Asserted
+	// rather than assumed, because a fixture that quietly created a source would
+	// make every test built on it prove the opposite of what it claims.
+	var n int
+	if err := raw.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&n); err != nil {
+		t.Fatalf("count sources: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("the fixture created %d sources; an interrupted migration has none", n)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw sqlite: %v", err)
+	}
+}
+
+// THE UPGRADE INTERRUPTED ON A RELEASE OLDER THAN THIS ONE.
+//
+// The transaction above stops this state being created from here on. It cannot
+// repair a database already in it -- and that is the state this build meets on
+// its first boot, because the previous release committed the three ALTERs one at
+// a time and created the source afterwards. Anything in between left the columns
+// and no source: a crash, `docker stop`, or, with no crash at all, a stored
+// ingest that release's validator rejected, which failed Open with the columns
+// already committed.
+//
+// Every witness but one is blind to it. The columns are all present, so
+// `migrating` is false; an install whose history is an ingest and a library has
+// no destination or rendition to orphan; and the count is zero, which is the
+// question rather than the answer. What is left is the SHAPE of those columns,
+// which says ALTER wrote them and therefore that this database predates sources.
+//
+// Get this wrong and the operator repairs their settings, upgrades to the build
+// that was meant to fix it, and boots into a fresh install: their passphrase,
+// their latency, their whole ingest never reaches a source, and the only symptom
+// is that the encoder stops connecting.
+func TestAnUpgradeInterruptedByAnEarlierReleaseStillCarriesTheIngest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "half-migrated.db")
+	preSourcesDB(t, path,
+		`{"ingest":{"mode":"srt","srt":{"passphrase":"averylongpassphrase","latencyMs":1500}}}`,
+		`INSERT INTO recordings (filename, started_at) VALUES ('old.mkv', 1000)`)
+	halfMigrateAsAnEarlierRelease(t, path, "destinations", "renditions", "recordings")
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on a half-migrated database: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	got, err := d.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d sources: an upgrade the PREVIOUS release left half-done "+
+			"came up as a fresh install, so the operator's SRT ingest is gone", len(got))
+	}
+	if got[0].Ingest.Mode != IngestSRT {
+		t.Errorf("mode = %q, want srt carried across", got[0].Ingest.Mode)
+	}
+	if got[0].Ingest.SRT.Passphrase != "averylongpassphrase" {
+		t.Errorf("passphrase = %q, want it carried across", got[0].Ingest.SRT.Passphrase)
+	}
+	if got[0].Ingest.SRT.LatencyMS != 1500 {
+		t.Errorf("srt latency = %d, want 1500 carried across", got[0].Ingest.SRT.LatencyMS)
+	}
+	// The library the operator already had comes with it: this install is being
+	// given its first source, so nothing here can be the residue of a delete.
+	var attached *int64
+	if err := d.SQL().QueryRow(
+		`SELECT source_id FROM recordings WHERE filename = 'old.mkv'`).Scan(&attached); err != nil {
+		t.Fatalf("read back source_id: %v", err)
+	}
+	if attached == nil || *attached != got[0].ID {
+		t.Errorf("recording source_id = %v, want %d", attached, got[0].ID)
+	}
+}
+
+// The resurrection case on a MIGRATED install, which is the shape the fresh-
+// database version of it cannot reach.
+//
+// A migrated install carries two things a fresh one does not: destinations and
+// renditions that were backfilled onto Main and then taken by ON DELETE CASCADE,
+// and source_id columns whose shape says an upgrade wrote them. The second is a
+// witness that stays true for ever, so this database asks the discriminator the
+// hardest form of the question -- there IS evidence of a life before sources
+// here, and the answer must still be no, because this operator had a source and
+// removed it.
+func TestAMigratedInstallDoesNotResurrectMainAfterItsSourceIsDeleted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "migrated-then-deleted.db")
+	preSourcesDB(t, path, preSourcesIngestJSON,
+		`INSERT INTO destinations (name, kind, url, profile, created_at, updated_at)
+			VALUES ('twitch', 'rtmp', 'rtmp://example/live', '{}', 1000, 1000)`,
+		`INSERT INTO renditions (name, created_at, updated_at) VALUES ('720p', 1000, 1000)`,
+		`INSERT INTO recordings (filename, started_at) VALUES ('old.mkv', 1000)`)
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on a pre-sources database: %v", err)
+	}
+	got, err := d.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d sources, want the migration to have built one", len(got))
+	}
+	// Foreign keys are ON, so this takes the backfilled destination and
+	// rendition with it and leaves the recording behind -- the state a real
+	// delete produces on an install that has been through the migration.
+	if _, err := d.SQL().Exec(`DELETE FROM sources`); err != nil {
+		t.Fatalf("delete the last source: %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	for i := 1; i <= 3; i++ {
+		again, err := Open(path)
+		if err != nil {
+			t.Fatalf("reopen %d: %v", i, err)
+		}
+		back, err := again.ListSources()
+		if err != nil {
+			t.Fatalf("ListSources after reopen %d: %v", i, err)
+		}
+		if len(back) != 0 {
+			t.Fatalf("boot %d put %q back on a migrated install whose operator "+
+				"deleted their last source", i, back[0].Name)
+		}
+		if err := again.Close(); err != nil {
+			t.Fatalf("close %d: %v", i, err)
+		}
+	}
+}
+
+// An install older than renditions, which is where `migrating` has to be
+// OR-accumulated rather than assigned.
+//
+// Only destinations predates sources here; schema.sql creates renditions and
+// recordings on this very Open, WITH source_id and in its own shape. So the
+// shape witness reads false, there is nothing orphaned, and `migrating` is the
+// only thing left saying this install has a past -- and it says so on the FIRST
+// table of the three. Collapse the loop to an assignment and the last table's
+// answer wins, this database reads as fresh, and the ingest is dropped.
+//
+// The state is real: a database can predate two releases at once, and this is
+// the pair that produces it.
+func TestADatabaseOlderThanRenditionsStillMigratesOnItsDestinationsAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-renditions.db")
+	preSourcesTables(t, path, preSourcesIngestJSON, []string{"destinations"},
+		`INSERT INTO destinations (name, kind, url, profile, created_at, updated_at)
+			VALUES ('twitch', 'rtmp', 'rtmp://example/live', '{}', 1000, 1000)`)
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on a pre-renditions, pre-sources database: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	got, err := d.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d sources: the only table that predates sources here is "+
+			"destinations, and its answer was lost, so this upgrade read as a "+
+			"fresh install and dropped the operator's ingest", len(got))
+	}
+	if got[0].Ingest.RTMP.StreamKey != "secretkey" {
+		t.Errorf("stream key = %q, want it carried across", got[0].Ingest.RTMP.StreamKey)
+	}
+	var attached *int64
+	if err := d.SQL().QueryRow(
+		`SELECT source_id FROM destinations WHERE name = 'twitch'`).Scan(&attached); err != nil {
+		t.Fatalf("read back source_id: %v", err)
+	}
+	if attached == nil || *attached != got[0].ID {
+		t.Errorf("destination source_id = %v, want %d", attached, got[0].ID)
+	}
+}
+
+// The shape witness reads schema.sql, so schema.sql can silently disarm it.
+//
+// sourceColumnArrivedByUpgrade tells a column ALTER added from one the table was
+// created with, by the fact that schema.sql spells the reference as its own
+// FOREIGN KEY clause while ALTER TABLE can only write it inline. Respell it
+// inline in schema.sql and every FRESH database starts answering "this was an
+// upgrade" -- which, on an install that has never had a source, seeds Main on
+// the first boot: the one outcome the zero-source work exists to prevent.
+//
+// Nothing about that failure is visible in schema.sql, so it is asserted here
+// instead, in both directions.
+func TestTheFreshSchemaKeepsTheShapeTheUpgradeProbeReads(t *testing.T) {
+	tables := []string{"destinations", "renditions", "recordings"}
+
+	fresh, err := Open(filepath.Join(t.TempDir(), "fresh.db"))
+	if err != nil {
+		t.Fatalf("Open fresh: %v", err)
+	}
+	t.Cleanup(func() { fresh.Close() })
+	for _, table := range tables {
+		altered, err := sourceColumnArrivedByUpgrade(fresh.SQL(), table)
+		if err != nil {
+			t.Fatalf("probe fresh %s: %v", table, err)
+		}
+		if altered {
+			t.Errorf("%s.source_id reads as ALTER-added on a fresh database. "+
+				"schema.sql no longer declares it with its own FOREIGN KEY clause, so "+
+				"the probe cannot tell a new install from an upgraded one and a new "+
+				"install is about to be seeded a source it never asked for", table)
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "migrated.db")
+	preSourcesDB(t, path, preSourcesIngestJSON)
+	migrated, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open migrated: %v", err)
+	}
+	t.Cleanup(func() { migrated.Close() })
+	for _, table := range tables {
+		altered, err := sourceColumnArrivedByUpgrade(migrated.SQL(), table)
+		if err != nil {
+			t.Fatalf("probe migrated %s: %v", table, err)
+		}
+		if !altered {
+			t.Errorf("%s.source_id reads as original on a database this migration "+
+				"ALTERed; an upgrade interrupted before its source exists is now "+
+				"indistinguishable from a first run", table)
+		}
 	}
 }
 

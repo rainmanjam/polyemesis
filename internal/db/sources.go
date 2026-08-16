@@ -433,6 +433,82 @@ func (d *DB) ingestForMigration() (IngestSettings, error) {
 	return s.Ingest, nil
 }
 
+// sourceColumnArrivedByUpgrade reports whether table's source_id column was
+// added by this migration rather than created with the table.
+//
+// The two are textually distinguishable in sqlite_master and permanently so.
+// schema.sql declares source_id as a plain column and puts its reference in a
+// separate FOREIGN KEY clause; ALTER TABLE ADD COLUMN cannot write one of those,
+// so it appends the reference inline and SQLite rewrites the stored CREATE
+// statement that way. Dumping a fresh database and an upgraded one side by side
+// shows it: the fresh table keeps "FOREIGN KEY (source_id) REFERENCES ...", the
+// upgraded one ends "..., source_id INTEGER REFERENCES sources(id) ON DELETE
+// CASCADE)" and has no such clause.
+//
+// That makes it the one witness of a life before sources that needs no surviving
+// row and does not decay -- see the third witness in MigrateSources for what
+// that buys. The cost is a coupling to how schema.sql spells the constraint:
+// rewrite it inline there and every fresh install starts answering true here.
+// TestTheFreshSchemaKeepsTheShapeTheUpgradeProbeReads fails loudly if that
+// happens, because the failure it would otherwise cause is silent.
+//
+// Line comments are stripped before matching, since schema.sql's are prose and
+// prose about a foreign key is not a foreign key.
+func sourceColumnArrivedByUpgrade(sqldb *sql.DB, table string) (bool, error) {
+	var ddl string
+	err := sqldb.QueryRow(
+		`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&ddl)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var stripped strings.Builder
+	for _, line := range strings.Split(ddl, "\n") {
+		if i := strings.Index(line, "--"); i >= 0 {
+			line = line[:i]
+		}
+		stripped.WriteString(line)
+		stripped.WriteString(" ")
+	}
+	flat := strings.Join(strings.Fields(strings.ToLower(stripped.String())), "")
+	return !strings.Contains(flat, "foreignkey(source_id)"), nil
+}
+
+// sourceEverExisted reports whether a row was ever inserted into sources, at any
+// point in this database's life.
+//
+// sources.id is INTEGER PRIMARY KEY AUTOINCREMENT, so SQLite records the high
+// water mark in sqlite_sequence on the first insert and DELETE never takes it
+// away -- only dropping the table does. An install that had a source and lost it
+// is therefore distinguishable from one that never had one, which no other table
+// can tell you: after a delete the rows are gone and the migrated column shapes
+// are not.
+//
+// That distinction is the veto in the discriminator below. Both are states with
+// zero sources, and exactly one of them wants a source seeded.
+func sourceEverExisted(sqldb *sql.DB) (bool, error) {
+	// sqlite_sequence is created with the first AUTOINCREMENT table, so it is
+	// always there by the time schema.sql has run -- but a database that has
+	// never had one at all answers "no source was ever inserted", which is the
+	// truth, rather than "no such table".
+	var n int
+	if err := sqldb.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'`,
+	).Scan(&n); err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
+	if err := sqldb.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_sequence WHERE name = 'sources'`).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // MigrateSources brings a single-ingest database up to the sources model.
 //
 // Three steps, each idempotent, because this runs on every open:
@@ -553,15 +629,61 @@ func (d *DB) MigrateSources() error {
 		orphans = orphaned > 0
 	}
 
+	// The third witness: the SHAPE of the source_id columns that are already
+	// there. A column this migration added reads differently in sqlite_master
+	// from one schema.sql created -- see sourceColumnArrivedByUpgrade.
+	//
+	// It is the only witness that survives an interruption on a release OLDER
+	// than this one, and that is the state that matters on this build's first
+	// boot. Before the transaction below, the ALTERs committed one at a time and
+	// the source was created afterwards, so anything that stopped the process in
+	// between -- a crash, `docker stop`, or the release's own error path when the
+	// stored ingest no longer validated -- left the columns committed and the
+	// sources table empty. On such a database `migrating` is false because all
+	// three columns are present, and an install whose only history is a
+	// configured ingest has no destination or rendition to orphan. Without this
+	// the discriminator calls it a fresh install and the operator's ingest is
+	// dropped, which is the exact loss the whole discriminator exists to prevent.
+	//
+	// Asked only of tables that HAVE the column: one that does not is already
+	// `migrating`, and there is no shape to read.
+	addedByUpgrade := false
+	for _, table := range []string{"destinations", "renditions", "recordings"} {
+		if addedByUpgrade || !present[table] {
+			continue
+		}
+		altered, err := sourceColumnArrivedByUpgrade(d.sql, table)
+		if err != nil {
+			return fmt.Errorf("inspect %s shape: %w", table, err)
+		}
+		addedByUpgrade = altered
+	}
+
+	// And the veto. A database that ever held a source keeps that fact for ever
+	// in sqlite_sequence, and an operator who deleted their last source has said
+	// something the next boot must not undo (MUST NOT #4).
+	//
+	// The witnesses above cannot say it on their own: a migrated install keeps
+	// its upgrade-shaped columns after its source is deleted, so `addedByUpgrade`
+	// stays true and would put Main back on every start -- for ever, on the
+	// install with the longest history. This is what separates "never had one"
+	// from "had one and removed it", the two zero-source states that look
+	// identical in every table.
+	everHadASource, err := sourceEverExisted(d.sql)
+	if err != nil {
+		return fmt.Errorf("check for a source ever existing: %w", err)
+	}
+
 	var n int
 	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&n); err != nil {
 		return fmt.Errorf("count sources: %w", err)
 	}
 
 	// n == 0 is the question, not the answer: it is equally true of the fresh
-	// install that must come up with none. It takes a witness of a life before
-	// sources to turn it into a yes.
-	seed := n == 0 && (migrating || orphans)
+	// install that must come up with none, and of the install that deliberately
+	// deleted its last. It takes a witness of a life before sources to turn it
+	// into a yes, and no history of a source to keep it one.
+	seed := n == 0 && !everHadASource && (migrating || orphans || addedByUpgrade)
 
 	var ing IngestSettings
 	if seed {
@@ -569,7 +691,6 @@ func (d *DB) MigrateSources() error {
 		// when it is going to be used, because a settings blob that will not
 		// parse is a hard error and an install with sources already has no
 		// business being stopped from booting by one.
-		var err error
 		if ing, err = d.ingestForMigration(); err != nil {
 			return fmt.Errorf("read settings for source migration: %w", err)
 		}
@@ -595,20 +716,18 @@ func (d *DB) MigrateSources() error {
 
 	// ONE TRANSACTION over the ALTERs and the source they exist for.
 	//
-	// This is not housekeeping; it is what makes the discriminator above sound.
-	// Without it, an upgrade interrupted between the ALTER loop and the insert
-	// -- crash, SIGKILL, power loss, `docker stop` -- leaves a database whose
-	// source_id columns exist while no source does. On the next open `migrating`
-	// is false because the columns are there, `orphans` is false because a
-	// pre-sources install with no destinations or renditions has nothing to
-	// orphan, and n is 0: the discriminator says "fresh install", the ingest is
-	// never carried across, and the operator sees only that their encoder
-	// stopped connecting.
-	//
-	// SQLite's DDL is transactional, so the columns and the source arrive
+	// This is not housekeeping. Without it, an upgrade interrupted between the
+	// ALTER loop and the insert -- crash, SIGKILL, power loss, `docker stop` --
+	// leaves a database whose source_id columns exist while no source does, and
+	// nothing about that state says which of the two zero-source installs it is.
+	// SQLite's DDL is transactional, so the columns and the source now arrive
 	// together or neither does, and the next open tries again from a state it
-	// recognises. Do not unwind this for tidiness: removing it reopens a silent
-	// data-loss window that no error message would ever point at.
+	// recognises. Do not unwind this for tidiness.
+	//
+	// It stops the state being CREATED; it cannot repair a database already in
+	// it, and this build's first boot is exactly when those arrive. That is what
+	// `addedByUpgrade` above is for, and why removing either one on the grounds
+	// that the other covers it reopens a silent data-loss window.
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return fmt.Errorf("begin sources migration: %w", err)
