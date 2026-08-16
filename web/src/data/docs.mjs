@@ -174,7 +174,7 @@ const DOCS_BY_SECTION = {
      * §4 rules out the tempting version of this sentence as well — describe the
      * mechanism, do not promise an outcome nobody here controls. */
     ["AUDIO-ROUTING.md", "Audio routing: a different mix per destination",
-      "Up to 32 tracks in, one FFmpeg filter graph per destination out. The mix matrix, per-cell gain, and a second Twitch VOD track mix from one ingest."],
+      "Up to 32 tracks in, one FFmpeg filter graph per destination out. The mix matrix, per-cell gain, and the two-mix egress — including the experimental second Twitch VOD track."],
     ["RENDITIONS.md", "Renditions: one shared video encode",
       "A named video profile several destinations share, for platforms that refuse your source. What it re-encodes, when it runs, and what passthrough costs."],
     ["ENCODING.md", "Encoding: what is copied and what is encoded",

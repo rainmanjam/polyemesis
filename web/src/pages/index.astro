@@ -16,14 +16,14 @@ const features = [
   },
   {
     t: "One port per protocol, many programmes",
-    d: "Sources are told apart by a publish token on SRT and by the stream key on RTMP, so a second programme never means opening a second port either way. RTMP is still the single-track fallback: one stereo pair on anything below FFmpeg 7.1.",
+    d: "Sources are told apart by a publish token — supplied in OBS's Stream Key field on RTMP, and as the streamid on SRT — so a second programme never means opening a second port either way. RTMP is still the single-track fallback: one stereo pair on anything below FFmpeg 7.1.",
   },
   {
     t: "Live meters on every channel of every track",
     d: "How you verify the clean track really is clean before you go live, rather than after a copyright strike.",
   },
   {
-    t: "Chat moderation across all four platforms",
+    t: "Chat moderation across five platforms",
     d: "Delete everywhere, hide on Facebook, ban and timeout on YouTube, Twitch and Kick — and a moderator card showing what one person said across every platform at once.",
   },
   {
@@ -40,7 +40,7 @@ const features = [
     that the person with this problem searches for the problem. */}
 <Base
   title="Multistream, a different mix per platform — polyemesis"
-  description="Self-hosted multistreaming with a different audio mix per platform. One SRT ingest, up to 32 OBS split audio tracks — send the clean feed where music gets muted."
+  description="Self-hosted multistreaming with a different audio mix per platform. One SRT ingest carrying OBS's six split audio tracks — send the clean feed where music gets muted."
   path="/"
 >
   {/* ---------------------------------------------------------------- hero */}
@@ -217,7 +217,7 @@ const features = [
       <dl class="divide-y divide-line border-y border-line">
         {
           [
-            ["SRT carries every audio track", "One ingest, up to 32 tracks, and each destination takes the mix you route to it. It works on any FFmpeg above the floor and it is the path that is operated daily — so the feature this product exists for is the one with the most road behind it. RTMP and Enhanced RTMP are fully supported alongside it."],
+            ["SRT carries every audio track", "One ingest accepting up to 32 tracks — six is what OBS sends — and each destination takes the mix you route to it. It works on any FFmpeg above the floor and it is the path that is operated daily, so the feature this product exists for is the one with the most road behind it. RTMP sits alongside it as the single-track fallback; Enhanced RTMP carries more on FFmpeg 7.1+, though an OBS-as-publisher run has not been confirmed."],
             ["Routing audio never touches your picture", "Video is stream-copied end to end, so the frames a platform receives are the frames your encoder made, and the cost of routing scales with audio rather than resolution. Shared renditions re-encode video only when you ask for one, and the cost of that encode is shown before it starts."],
             ["One binary, one config file", "No database to run, no broker, no container required. It installs as a systemd service on hardware you control, with no hosted service behind it and no per-destination pricing — the only connections it makes are the ones you configure."],
             ["Built for the operator at the desk", "One account and full control — no permission model to configure and none to get wrong. Live ingest, destination and process state are on one screen, and the routing you compiled is shown as the FFmpeg filter graph it became."],
@@ -260,7 +260,7 @@ const features = [
           <ul class="mt-4 space-y-3 text-sm leading-relaxed text-muted">
             <li>
               You want somebody else to run it. There is no hosted tier, and no
-              plan for one — <a href="/comparison" class="underline decoration-line underline-offset-4 hover:text-fg">Restream and Castr</a>
+              plan for one — <a href="/comparison" class="underline decoration-line underline-offset-4 hover:text-fg">Restream and Castr</a>{" "}
               exist and are good at that.
             </li>
             <li>You need a browser studio, guest invites, or cloud recording storage.</li>
