@@ -193,6 +193,9 @@ func main() {
 	driverlib.WaitUp()
 	fmt.Println("first-run setup")
 	driverlib.Setup("admin", "acceptance-pw")
+	// The programme the renditions and destinations below hang off. Since #387
+	// a fresh install has none; see driverlib.EnsureSource.
+	driverlib.EnsureSource("Main")
 
 	// Recording and metering off. Both spawn FFmpeg processes of their own, and
 	// this suite's central number is how much CPU the ENCODERS use; a recorder
@@ -208,7 +211,10 @@ func main() {
 	driverlib.SaveSettings(settings, "disable recording and meters")
 
 	fmt.Printf("starting synthetic %sx%s@%s 3-tone source (300 / 900 / 2000 Hz)\n", srcW, srcH, srcFPS)
-	relayPort, _ := strconv.Atoi(relay)
+	// The shell's lsof is a hint: with no seeded source there may have been
+	// no relay socket to find when it looked. ResolveRelayPort asks the
+	// server when the hint is empty -- see its comment for the cycle.
+	relayPort := mustResolveRelayPort(relay)
 	fps, _ := strconv.Atoi(srcFPS)
 	src := exec.Command(ffmpegBin, "-hide_banner", "-loglevel", "error", "-re",
 		"-f", "lavfi", "-i", fmt.Sprintf("testsrc2=size=%sx%s:rate=%d", srcW, srcH, fps),
@@ -910,4 +916,27 @@ func die(f string, a ...any) {
 	// driverlib.Die's "driver: " prefix is load-bearing across the suites, so
 	// the exit goes through it rather than around it.
 	driverlib.Die(msg)
+}
+
+// mustResolveRelayPort is driverlib.ResolveRelayPort with this file's session
+// and die. See acceptance_audio_driver.go for why the shared function takes a
+// getter rather than using driverlib's own.
+func mustResolveRelayPort(fromShell string) int {
+	// driverlib.Do, because unlike the other five drivers this one has no `get`
+	// of its own -- its whole session is driverlib's.
+	p, err := driverlib.ResolveRelayPort(fromShell, func(path string) map[string]any {
+		code, out := driverlib.Do(http.MethodGet, path, nil)
+		if code != http.StatusOK {
+			return nil
+		}
+		var m map[string]any
+		if json.Unmarshal(out, &m) != nil {
+			return nil
+		}
+		return m
+	})
+	if err != nil {
+		die("%v", err)
+	}
+	return p
 }

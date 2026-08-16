@@ -2506,8 +2506,14 @@ type FailoverStatus struct {
 	Backup *supervisor.Status `json:"backup,omitempty"`
 }
 
-// Failover returns the tier's live state, or nil when there is none.
+// Failover returns the tier's live state, or nil when there is none — which is
+// also the answer when there is no engine to run one. See Engine.Status; the
+// first statement below reads settings under e.mu, so this cannot wait for the
+// selector check further down.
 func (e *Engine) Failover() *FailoverStatus {
+	if e == nil {
+		return nil
+	}
 	s := e.Settings()
 	now := time.Now()
 	grace := failoverGrace(s)

@@ -538,15 +538,25 @@ type Usage struct {
 }
 
 // Usage totals the clips on disk.
-func (c *Capturer) Usage() (Usage, error) {
-	list, err := List(c.cfg.Dir)
+func (c *Capturer) Usage() (Usage, error) { return UsageOf(c.cfg) }
+
+// UsageOf is Capturer.Usage for a caller that has no capturer.
+//
+// The directory outlives the buffer, and outlives the programme: clips are
+// files beside the recordings, so an install with the buffer switched off — or
+// with no engine at all — still has a listing and a retention to report it
+// against. One implementation rather than two, because the two used to be the
+// same fifteen lines in two packages and the API's copy is the one an operator
+// reads on a server with nothing running.
+func UsageOf(cfg Config) (Usage, error) {
+	list, err := List(cfg.Dir)
 	if err != nil {
 		return Usage{}, err
 	}
 	u := Usage{
 		Count:    len(list),
-		MaxBytes: int64(c.cfg.MaxDiskMB) << 20,
-		MaxClips: c.cfg.MaxClips,
+		MaxBytes: int64(cfg.MaxDiskMB) << 20,
+		MaxClips: cfg.MaxClips,
 	}
 	for _, cl := range list {
 		u.UsedBytes += cl.Bytes

@@ -39,10 +39,28 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	// sources is the second thing a browser needs before it can decide what to
+	// render, and this is the one endpoint it can ask before signing in.
+	//
+	// An install with no programme is a NORMAL state, not a failure: nothing is
+	// running, so the live endpoints answer with empty snapshots that look
+	// exactly like a broadcast that has not started. Only the count separates
+	// "nothing is on air" from "there is nothing to put on air", and only the
+	// second one has an answer the operator can act on.
+	//
+	// A count that cannot be read is reported as absent rather than as zero,
+	// because zero is the value the empty state keys off and inventing it from
+	// a failed query would send a working install to the wrong screen.
+	body := map[string]any{
 		"needsSetup":       !has,
 		"minPasswordChars": db.MinPasswordLength,
-	})
+	}
+	if n, err := s.store.CountSources(); err == nil {
+		body["sources"] = n
+	} else {
+		s.log.Warn("cannot count sources for the setup status", "err", err)
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
@@ -330,8 +348,15 @@ func (s *Server) storeSettingsWithDefaultIngest() (db.Settings, error) {
 // reason this endpoint stopped asking one.
 func (s *Server) defaultSourceID() (int64, error) {
 	if s.mgr != nil {
-		// Engine.SourceID dereferences its receiver, so the nil check is the
-		// call's precondition and not decoration.
+		// The nil check is NOT the precondition of the call any more --
+		// Engine.SourceID answers 0 on a nil receiver, as of the same commit
+		// this note is in -- and deleting it on those grounds would change
+		// what this function means. A nil engine returning 0 would be handed
+		// straight back as "the default source is id 0" and the store would
+		// never be consulted, so an install whose lowest-positioned source
+		// failed to build would advertise a source that does not exist
+		// instead of falling through to the row that does. The check is what
+		// selects between the two answers below, not armour around a deref.
 		if e := s.mgr.Default(); e != nil {
 			return e.SourceID(), nil
 		}
@@ -739,7 +764,7 @@ func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		s.log.Warn("annotations saved to the source but not mirrored to settings", "err", err)
 	}
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, "annotations saved but reconcile failed: "+err.Error())
 		return
 	}
@@ -774,8 +799,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		// describes the box, and an install running three sources used to have
 		// three samplers of it disagreeing by a tick.
 		"system":  s.hostSystem(),
-		"bitrate": s.eng().Monitor().Bitrate(),
-		"relay":   s.eng().Hub().Stats(),
+		"bitrate": s.ingestBitrate(),
+		"relay":   s.relayStats(),
 	})
 }
 
@@ -797,7 +822,6 @@ func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request) {
 // is already signed in can just open the URL.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	st := s.eng().Status()
-	mon := s.eng().Monitor()
 
 	snap := metrics.Snapshot{
 		Version:      s.version,
@@ -812,10 +836,26 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	// A scrape says how many programmes exist, so an alert can tell a server
+	// nobody has configured from one whose broadcast ended -- every other
+	// series reads zero in both cases.
+	//
+	// A count that will not read OMITS the series, the same rule the setup
+	// status follows. It is the one number here where a fabricated zero is not
+	// a smaller version of the truth but its opposite: 0 means "nobody has
+	// configured this install", so a sqlite hiccup would silence an outage
+	// alert and fire a first-run alert at a live broadcast. Absent is a state
+	// Prometheus can already ask about with absent(); a wrong 0 is not.
+	if n, err := s.store.CountSources(); err == nil {
+		snap.Sources = &n
+	} else {
+		s.log.Warn("metrics: source count unavailable", "err", err)
+	}
+
 	// The relay's own rate, not the ingest process's -progress line: this is
 	// the series the dashboard graphs, so the metric cannot disagree with what
 	// an operator is looking at while they read it.
-	if b := mon.Bitrate(); len(b) > 0 {
+	if b := s.ingestBitrate(); len(b) > 0 {
 		snap.Ingest.BitrateKbps = b[len(b)-1].Kbps
 	}
 	snap.Ingest.State = string(supervisor.StateStopped)
@@ -989,6 +1029,12 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// It never leaves this handler. changedSections compares it and returns
 	// section NAMES; nothing derived from these bytes reaches an alert.
 	var storedJSON []byte
+	// The stored ingest, and whether the save asked to change it on an install
+	// that has no source to change. Both are written inside the closure and
+	// read after it, which is the only place both the submitted document and
+	// the stored one exist at once.
+	var storedIngest db.IngestSettings
+	ingestRefused := false
 	settings, err := s.store.UpdateSettings(func(settings *db.Settings) error {
 		storedJSON, _ = json.Marshal(settings)
 		// The stored playlist, copied BEFORE the decode overwrites it.
@@ -1009,6 +1055,13 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// can rewrite in place. See pullSourceUploadProblems.
 		storedPullURL := settings.Ingest.Pull.URL
 		storedBackupPullURL := settings.Failover.Backup.Pull.URL
+		// The whole stored ingest block, copied the same way and for the same
+		// reason -- Annotations is a slice the decode can rewrite in place. It
+		// is what the write-through below compares against, and what it puts
+		// back when there is nothing to write it through TO.
+		storedIngest = settings.Ingest
+		storedIngest.Annotations = append(
+			[]routing.TrackAnnotation(nil), settings.Ingest.Annotations...)
 		if err := decodeJSONInto(body, settings); err != nil {
 			return err
 		}
@@ -1073,6 +1126,42 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		if err := s.pullSourceUploadProblems(*settings, storedPullURL, storedBackupPullURL); err != nil {
 			return badRequestError{err.Error()}
 		}
+		// AND THE INGEST BLOCK ON AN INSTALL WITH NOWHERE TO PUT IT.
+		//
+		// settings.ingest is not read by anything any more: the engine takes
+		// its ingest from the source row, and the write-through below is the
+		// only thing that gives this half of the form an effect. With no source
+		// there is nothing to write it through to, so an edit here would store,
+		// answer 200, and change nothing -- on the DEFAULT tab of the settings
+		// page, on a first-time operator's first screen. That is the exact bug
+		// the write-through was added to fix, arriving again from the other
+		// side, and it is the one this handler must never re-commit.
+		//
+		// So the stored block is PUT BACK and the handler refuses below. Two
+		// things follow from doing it here rather than at the top:
+		//
+		//   - every other setting in the same document is saved. Recording,
+		//     chat, automod, alerts and the listeners are all things an
+		//     operator legitimately configures before creating a source, which
+		//     is also why this route carries no requireSource.
+		//   - nothing that has no effect is stored. Refusing without this line
+		//     would leave the operator's dead ingest in the blob, and the form
+		//     would redisplay it on the next load as though it had taken.
+		//
+		// Scoped to a CHANGE. The settings page PUTs the whole document, so a
+		// save of anything else carries the ingest block along untouched, and
+		// refusing that would make every unrelated setting unreachable until a
+		// source exists.
+		if !ingestEqual(storedIngest, settings.Ingest) {
+			switch _, err := s.store.DefaultSourceID(); {
+			case err == nil:
+			case errors.Is(err, db.ErrSourceNotFound):
+				settings.Ingest = storedIngest
+				ingestRefused = true
+			default:
+				return err
+			}
+		}
 		return nil
 	})
 	var invalid db.InvalidSettingsError
@@ -1126,7 +1215,24 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// Writing it through to the default source restores the old meaning:
 	// settings.ingest edits the programme an unscoped request acts on, which is
 	// exactly what it edited when there was only one.
-	if id, err := s.store.DefaultSourceID(); err == nil {
+	//
+	// The three answers DefaultSourceID can give are now three branches, where
+	// this used to be one `err == nil` that treated all of them as "skip".
+	//
+	//   a source        write the block through, as before.
+	//   no source       nothing to write it through to. Silent HERE, because
+	//                   reaching this line at all means the ingest was
+	//                   unchanged -- a change was already refused in the
+	//                   closure -- so there is genuinely nothing to do and
+	//                   nothing to say. Every other setting in the document has
+	//                   just been saved and must not be undone by a 404 about a
+	//                   source the operator never asked about.
+	//   anything else   a store that cannot be read. Reported: swallowing it
+	//                   answered 200 for a save that silently never reached the
+	//                   pipeline, which is the failure this whole block exists
+	//                   to have stopped happening.
+	switch id, err := s.store.DefaultSourceID(); {
+	case err == nil:
 		if src, err := s.store.GetSource(id); err == nil && !ingestEqual(src.Ingest, settings.Ingest) {
 			src.Ingest = settings.Ingest
 			if err := s.store.UpdateSource(src); err != nil {
@@ -1134,6 +1240,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	case errors.Is(err, db.ErrSourceNotFound):
+	default:
+		writeStoreError(w, err)
+		return
 	}
 	// The MANAGER, not the default engine.
 	//
@@ -1143,7 +1253,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// default engine saved the setting and changed nothing: enabling shared
 	// ingest returned 200 while no listener ever bound, which is exactly the
 	// kind of silent no-op that is worse than an error.
-	if err := s.mgr.Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, "settings saved but reconcile failed: "+err.Error())
 		return
 	}
@@ -1161,6 +1271,24 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// and keeps chasing on the old count is the third instance of the silent
 	// no-op this handler now guards against three times.
 	ApplyAlertSettings(s.mgr, settings.Alerts)
+
+	// The refusal, LAST, after everything the same document asked for has
+	// actually been applied.
+	//
+	// Refusing earlier would have been tidier to read and wrong: the rest of
+	// the document is already stored by then, so returning above would leave a
+	// chat retention window in the database that the Hub is not sweeping on and
+	// an automod matrix that is not deciding on -- the silent no-op this
+	// handler warns about three times, reintroduced by the guard against a
+	// fourth one.
+	//
+	// codeNoSource, and the same sentence as every other refusal: this is the
+	// fresh-install empty state, not a fault, and the dashboard branches on the
+	// code rather than reading the English.
+	if ingestRefused {
+		writeNoSource(w)
+		return
+	}
 
 	// The EFFECT, not just the intent. "Saved" is a statement about the
 	// database; an operator whose destination card just went grey needs to know
@@ -1347,8 +1475,21 @@ func ingestEqual(a, b db.IngestSettings) bool {
 // would make it impossible to configure a destination before going live --
 // which is when most people configure them. Prove it wrong or allow it; never
 // guess.
+//
+// It answers for an absent programme rather than assuming its caller's route
+// carries requireSource. POST /destinations does; the point is that this is a
+// SECOND read of the engine set, after the middleware's, and one read cannot
+// speak for the other -- see engOrNil. The refusal is the middleware's, word
+// for word, so a create that loses its programme between the two answers the
+// same thing it would have answered an instant earlier rather than storing a
+// destination and reporting a reconcile it never performed.
 func (s *Server) refuseIfSilent(w http.ResponseWriter, profile routing.Profile) bool {
-	src := s.eng().Source()
+	e := s.engOrNil()
+	if e == nil {
+		writeNoSource(w)
+		return true
+	}
+	src := e.Source()
 	// No tracks means nothing has been probed yet, so there is nothing to
 	// evaluate the profile against.
 	if len(src.Tracks) == 0 {
@@ -1440,10 +1581,14 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	}
 	created, err := s.store.CreateDestination(&row)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		// Not a plain 400: a body that names no source is the NORMAL shape,
+		// and resolving it is the store's job, so "there is no source to
+		// resolve" is the install's condition rather than a fault in what was
+		// sent. See writeCreateError.
+		writeCreateError(w, err)
 		return
 	}
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after destination create", "err", err)
 	}
 	resp := map[string]any{"destination": created}
@@ -1501,7 +1646,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	}
 	// Reconcile restarts only this destination, and only if the change
 	// actually affects its command line.
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after destination update", "err", err)
 	}
 
@@ -1555,7 +1700,7 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		s.log.Warn("reconcile after destination delete", "err", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -1571,7 +1716,7 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.eng().Reconcile(); err != nil {
+	if err := s.reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1904,7 +2049,22 @@ func (s *Server) hlsHandler() http.Handler {
 			// A request that starts the encoder is answered 404 below, since
 			// ffmpeg has not written the playlist yet. hls.js retries a failed
 			// manifest load, so the player recovers within a segment or two.
-			s.eng().PreviewRequested()
+			//
+			// The nil branch is not hypothetical and it is not covered by the
+			// boundary guard: /hls is registered in its own group outside
+			// /api/v1, and Dashboard.tsx mounts PreviewPlayer with the preview
+			// ON before GET /settings has answered, so on an install with no
+			// source this is one of the FIRST requests the browser makes --
+			// and hls.js then retries it. PreviewRequested is a mutation and
+			// must keep panicking on a nil receiver, so the check is here.
+			//
+			// Falling through to the file server rather than refusing: the
+			// directory is real and possibly non-empty, and a 404 for a
+			// playlist nothing is writing is the same answer a live install
+			// gives in the seconds before the encoder starts.
+			if e := s.engOrNil(); e != nil {
+				e.PreviewRequested()
+			}
 		}
 		fs.ServeHTTP(w, r)
 	}))

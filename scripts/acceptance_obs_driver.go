@@ -86,6 +86,12 @@ func setup() {
 	if setupNeeded() {
 		post("/setup", map[string]any{"username": "admin", "password": password})
 		grabCSRF()
+		// The programme sourceToken() below reads the publish key off. A fresh
+		// install has none since #387; see acceptance_driver.go for the full
+		// reason. Inside the setupNeeded branch on purpose: the else branch is
+		// a re-run against a server that already has one, and a second source
+		// would change which token "the first" resolves to.
+		post("/sources", map[string]any{"name": "Main", "enabled": true})
 	} else {
 		login()
 	}

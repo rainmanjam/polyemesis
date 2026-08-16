@@ -9,6 +9,7 @@
   "inertCeiling": 6,
   "varianceExemptCeiling": 2,
   "shapeFloor": 27,
+  "guardedFloor": 20,
   "shapesNotInspectedCeiling": 3,
   "totals": {
     "methodPatternPairs": 216,
@@ -30,1082 +31,1298 @@
     {
       "method": "GET",
       "pattern": "/api/v1/alerts/meta",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/alerts/rules",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/alerts/rules",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/alerts/rules/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/alerts/rules/{id}",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/alerts/rules/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/alerts/rules/{id}/test",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/auth/login",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/auth/logout",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/auth/me",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/auth/password",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/auth/tokens",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/auth/tokens",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/auth/tokens/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/automod/matrix",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/automod/stats",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/chat",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/chat/bans",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/chat/bans",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "CONNECT",
       "pattern": "/api/v1/chat/kick/{secret}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/chat/kick/{secret}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/chat/kick/{secret}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "HEAD",
       "pattern": "/api/v1/chat/kick/{secret}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "OPTIONS",
       "pattern": "/api/v1/chat/kick/{secret}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PATCH",
       "pattern": "/api/v1/chat/kick/{secret}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/chat/kick/{secret}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/chat/kick/{secret}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "QUERY",
       "pattern": "/api/v1/chat/kick/{secret}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "TRACE",
       "pattern": "/api/v1/chat/kick/{secret}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/chat/messages",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/chat/messages",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/chat/messages/hide",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/chat/search",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/chat/send",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PATCH",
       "pattern": "/api/v1/chat/settings",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/chat/users",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/clipper/jobs/{id}/download",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/clipper/recordings/{id}",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/clipper/recordings/{id}/export",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/clipper/recordings/{id}/keyframes",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/clipper/recordings/{id}/plan",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/clipper/recordings/{id}/transcript",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/clips",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/clips",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/clips/buffer",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/clips/{name}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/clips/{name}/download",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/destinations",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/destinations",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/destinations/order",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/destinations/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/destinations/{id}",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/destinations/{id}",
-      "coverage": "denied-differential"
+      "coverage": "denied-differential",
+      "zeroSource": "guarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/destinations/{id}/expert",
-      "coverage": "denied-differential"
+      "coverage": "denied-differential",
+      "zeroSource": "guarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/destinations/{id}/expert",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/destinations/{id}/expert",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/expert/dry-run",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/expert/preview",
-      "coverage": "denied-differential"
+      "coverage": "denied-differential",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/refresh-key",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/restart",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/start",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/stop",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/encoders",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/failover/playlist",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/failover/source",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/fonts",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/health",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/hooks",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/hooks",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/hooks/meta",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/hooks/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/hooks/{id}",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/hooks/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/hooks/{id}/deliveries",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/hooks/{id}/test",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/jobs",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/jobs/overview",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/jobs/pause",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/jobs/policy",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/jobs/policy",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/jobs/purge",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/jobs/resume",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/jobs/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/jobs/{id}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/jobs/{id}/cancel",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/jobs/{id}/release",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/jobs/{id}/retry",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/levels",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/library",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/library/recordings/{id}",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/library/recordings/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/library/recordings/{id}/jobs/{kind}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/library/recordings/{id}/media/{file}",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/library/recordings/{id}/speaker",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/library/recordings/{id}/transcript",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/library/recordings/{id}/transcript",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/library/search",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/library/sessions",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/library/sessions/regroup",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/library/sessions/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/library/sessions/{id}",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/library/sessions/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/loudness",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/loudness",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/media",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/media",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/media/{name}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/media/{name}/verify",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/metadata",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/metadata/broadcast-window",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/metadata/push",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/metadata/push/{id}",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/metrics",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/oauth/{platform}/callback",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/oauth/{platform}/start",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/platforms/accounts",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/platforms/accounts/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/platforms/accounts/{id}/stats",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/platforms/capabilities",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/platforms/credentials",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/platforms/credentials/{platform}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/platforms/credentials/{platform}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/platforms/credentials/{platform}/check",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/platforms/guides",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/platforms/presets",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/playout",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/playout/analytics/reset",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/playout/poster.jpg",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/playout/public",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/playout/publish",
-      "coverage": "denied-differential"
+      "coverage": "denied-differential",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/playout/token",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/processes",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/processes/{name}/logs",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/recordings",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/recordings/stems",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/recordings/stems/{name}/download",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/recordings/usage",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/recordings/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/recordings/{id}/download",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/renditions",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/renditions",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/renditions/presets",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/renditions/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/renditions/{id}",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/renditions/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/renditions/{id}/restart",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/routing/compile",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "guarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/routing/presets",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/routing/presets/{preset}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/schedules",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/schedules",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/schedules/runs",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/schedules/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/schedules/{id}",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/schedules/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/services",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/settings",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/settings",
-      "coverage": "denied-differential"
+      "coverage": "denied-differential",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/settings/automod-key",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/settings/mqtt-password",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/setup",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/setup",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/source",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/source/annotations",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/sources",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/sources",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/api/v1/sources/{id}",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/sources/{id}",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/api/v1/sources/{id}",
-      "coverage": "denied-differential"
+      "coverage": "denied-differential",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/sources/{id}/token",
-      "coverage": "denied-differential"
+      "coverage": "denied-differential",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/stats",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/status",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/system",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/tls",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/tls/acme-preflight",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/tls/ca",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/tour",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/tour/complete",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/upgrade/plan",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/upgrade/rollback",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/upgrade/stage",
-      "coverage": "denied-by-method"
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/version",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/api/v1/version/check",
-      "coverage": "swept"
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/api/v1/ws",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/hls/*",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "HEAD",
       "pattern": "/hls/*",
-      "coverage": "denied"
+      "coverage": "denied",
+      "zeroSource": "unguarded"
     },
     {
       "method": "CONNECT",
       "pattern": "/playout/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/playout/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/playout/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "HEAD",
       "pattern": "/playout/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "OPTIONS",
       "pattern": "/playout/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PATCH",
       "pattern": "/playout/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/playout/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/playout/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "QUERY",
       "pattern": "/playout/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "TRACE",
       "pattern": "/playout/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "CONNECT",
       "pattern": "/watch",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/watch",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/watch",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "HEAD",
       "pattern": "/watch",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "OPTIONS",
       "pattern": "/watch",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PATCH",
       "pattern": "/watch",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/watch",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/watch",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "QUERY",
       "pattern": "/watch",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "TRACE",
       "pattern": "/watch",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "CONNECT",
       "pattern": "/watch/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "DELETE",
       "pattern": "/watch/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",
       "pattern": "/watch/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "HEAD",
       "pattern": "/watch/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "OPTIONS",
       "pattern": "/watch/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PATCH",
       "pattern": "/watch/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
       "pattern": "/watch/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "PUT",
       "pattern": "/watch/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "QUERY",
       "pattern": "/watch/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     },
     {
       "method": "TRACE",
       "pattern": "/watch/*",
-      "coverage": "excused"
+      "coverage": "excused",
+      "zeroSource": "unguarded"
     }
   ],
   "sweepVerdicts": [

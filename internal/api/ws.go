@@ -125,7 +125,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		{Type: events.TypeSource, Time: time.Now(), Data: s.eng().SourceInfo()},
 		{Type: events.TypeStats, Time: time.Now(), Data: map[string]any{
 			"system":  s.hostSystem(),
-			"bitrate": s.eng().Monitor().Bitrate(),
+			"bitrate": s.ingestBitrate(),
 		}},
 	}
 	// The initial burst goes through the same policy as the stream. It did not,

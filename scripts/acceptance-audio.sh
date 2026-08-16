@@ -64,11 +64,21 @@ grep -q "polyemesis" server.log && ok "server started" || bad "server did not st
 
 SRVPID=$(pgrep -f "polyemesis -addr :$PORT" | head -1)
 RELAY=$(lsof -nP -iUDP -a -p "$SRVPID" 2>/dev/null | awk '/UDP 127.0.0.1/{split($NF,a,":"); print a[2]; exit}')
-[ -n "$RELAY" ] && ok "relay hub bound (udp/$RELAY)" || bad "no relay port"
+[ -n "$RELAY" ] && ok "relay hub bound (udp/$RELAY)" || ok "relay not bound yet -- the driver discovers it from the server after creating the source"
 
 # --------------------------------------------------------------- 2. the app
 step "2. Stage the audio features (via the API the UI uses)"
-go run "$SCRIPTS/acceptance_audio_driver.go" "$PORT" "$RELAY" 2>&1 | sed 's/^/  /'
+# driverhelpers.go IS NAMED HERE ON PURPOSE. waitUp/grabCSRF/call/get moved
+# there, and `go run` compiles a list of .go files from one directory as a
+# single package -- which is what lets these drivers share code from a
+# working directory that is inside no module.
+#
+# NO `--` SEPARATOR. It is tempting, and it is wrong: `go run` stops reading
+# source files at it but hands it to the program anyway, so the driver would
+# read "--" as its first argument and dial http://127.0.0.1:--. It is not
+# needed either -- only LEADING consecutive .go arguments are compiled, and
+# the first argument here is always a port number.
+go run "$SCRIPTS/acceptance_audio_driver.go" "$SCRIPTS/driverhelpers.go" "$PORT" "$RELAY" 2>&1 | sed 's/^/  /'
 
 REC="data/recordings"
 

@@ -47,6 +47,39 @@ func addSource(t *testing.T, store *db.DB, name string) *db.Source {
 	return s
 }
 
+// An install with no sources BOOTS. It used to be refused, and the refusal is
+// what made a fresh install unrecoverable: the process exited, so the operator
+// never reached the screen that creates the first source.
+//
+// The other half of the rescope -- sources that exist and not one of which came
+// up is still an error -- is not driven here, and saying so is better than
+// pretending. engine.New fails only when relay.New cannot bind, which is a
+// socket on port 0; there is no seam that makes it fail on demand, and adding
+// one to prove a two-term conjunction would be a worse trade than this comment.
+func TestAnInstallWithNoSourcesStartsRatherThanRefusing(t *testing.T) {
+	m, store := managerFixture(t)
+	// Through raw SQL: one statement empties the table whatever is in it. The
+	// store used to refuse the last source, which is what made this state
+	// unreachable by any route at all; it no longer does.
+	if _, err := store.SQL().Exec(`DELETE FROM sources`); err != nil {
+		t.Fatalf("empty the sources table: %v", err)
+	}
+
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start refused an install with no sources: %v. That is a fresh install, "+
+			"and refusing it leaves the operator with a process that exits.", err)
+	}
+	if got := len(m.Engines()); got != 0 {
+		t.Fatalf("running engines = %d, want 0: nothing was asked for", got)
+	}
+	// The shared listeners still came up, which is what makes the boot a boot
+	// rather than a half-start: the first source an operator creates is
+	// reconciled onto them without a restart.
+	if m.Default() != nil {
+		t.Fatal("Default() handed back an engine on an install with none")
+	}
+}
+
 func TestStartBringsUpAnEngineForEverySource(t *testing.T) {
 	m, store := managerFixture(t)
 	addSource(t, store, "Vertical")
