@@ -282,27 +282,23 @@ func (d *DB) UpdateSource(s *Source) error {
 // DeleteSource removes a source. Its destinations and renditions go with it
 // (ON DELETE CASCADE); its recordings survive with a NULL source_id.
 //
-// The last source cannot be deleted. An install with none has no ingest at all
-// and no way through the UI to get one back, since the "add a source" form
-// still has to live somewhere.
+// THE LAST SOURCE MAY BE DELETED, and this used to refuse it: an install with
+// none had no ingest at all and no way through the UI to get one back, because
+// the add-a-source form lived on a page every other screen refused to reach.
+// None of that is true now. Zero sources is the state a fresh install boots
+// into -- Open no longer seeds a row -- so the whole product already answers in
+// it: the Sources page carries the create form, and every route that needs a
+// programme refuses with a 503 naming that page rather than panicking.
+//
+// Refusing the deliberate way into a state the install ships in was a rule
+// about nothing. What it cost was real: an operator replacing their one source
+// had to create the new one first and work out which of two rows was which,
+// and an operator winding an install down could not.
+//
+// Deleting a source that is not there is still ErrSourceNotFound, which is what
+// the API turns into a 404 -- for a stale row on a screen nobody reloaded, or a
+// client retrying a delete that already succeeded.
 func (d *DB) DeleteSource(id int64) error {
-	var n int
-	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&n); err != nil {
-		return err
-	}
-	// EXACTLY ONE, not "at most one". With none there is no only source to
-	// refuse to delete, and saying so described an ingest the install does not
-	// have while hiding the real answer: the row is not there. That state is
-	// unreachable today and stops being so with the zero-source work, where an
-	// operator on a fresh install clicking a stale row -- or a client retrying
-	// a delete that already succeeded -- would have been told a rule that no
-	// longer applies to them instead of "source not found".
-	//
-	// Falling through is what produces the right answer: no row matches, so the
-	// DELETE below affects nothing and returns ErrSourceNotFound.
-	if n == 1 {
-		return errors.New("cannot delete the only source: an install needs at least one ingest")
-	}
 	res, err := d.sql.Exec(`DELETE FROM sources WHERE id = ?`, id)
 	if err != nil {
 		return err

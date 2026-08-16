@@ -48,6 +48,33 @@ function fieldLine(iface: string, field: string): string {
   return (line as string).trim();
 }
 
+/** The opening tag of the `<tag ...>` whose attributes contain `needle`.
+ *
+ *  Written as a scan rather than a regexp so that an assertion can be made
+ *  about ONE element rather than about the file. A guard phrased as "this
+ *  spelling appears nowhere" only ever catches the spelling it was written
+ *  against; a guard phrased as "this element carries no such attribute, under
+ *  any name" survives the rename that a later refactor will reach for. The
+ *  scan tracks `{}` depth because a handler's `() =>` contains a `>` that a
+ *  naive search for the tag's end would stop at, silently truncating the text
+ *  every assertion below is made over -- which is the same failure mode in a
+ *  new place. */
+function jsxTagWith(src: string, tag: string, needle: string): string {
+  for (let at = src.indexOf(`<${tag}`); at !== -1; at = src.indexOf(`<${tag}`, at + 1)) {
+    let depth = 0;
+    let end = -1;
+    for (let i = at; i < src.length && end === -1; i++) {
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}") depth--;
+      else if (src[i] === ">" && depth === 0) end = i;
+    }
+    expect(end, `<${tag}> near offset ${at} is never closed`).toBeGreaterThan(-1);
+    const text = src.slice(at, end + 1);
+    if (text.includes(needle)) return text;
+  }
+  throw new Error(`no <${tag}> whose attributes contain ${needle}`);
+}
+
 describe("the status the dashboard renders on an install with no source", () => {
   it("is declared as arrays the UI may map over without a guard", () => {
     for (const field of ["renditions", "destinations"]) {
@@ -239,5 +266,68 @@ describe("the screens that meet an install with no source", () => {
       "is where every other screen's refusal sends the operator")
       .toMatch(/sources\.length === 0 \?/);
     expect(src, "the sources page no longer renders NoProgrammeYet").toContain("<NoProgrammeYet");
+  });
+
+  it("lets the operator delete their only source, and says what that leaves", () => {
+    const src = read("ui/src/pages/SourcesPage.tsx");
+    /* The store refused this delete until the guard came off, so the button
+     * was disabled on the only source and the title said why. Both halves
+     * matter and only the first one is visible: re-adding `disabled` puts an
+     * operator back in front of a control that works, greyed out, with a
+     * sentence explaining a rule the server no longer has.
+     *
+     * ASSERTED OVER THE ELEMENT, NOT OVER THE FILE, and deliberately: the
+     * first version of this pinned the literal `disabled={onlyOne}`, which is
+     * the ONE spelling that can no longer be written, because the same commit
+     * deleted the `onlyOne` prop. It would have caught a straight revert and
+     * nothing else -- `disabled={sources.length === 1}` under a renamed prop is
+     * what a later change would actually write, and it sailed through. Both
+     * assertions here are about the delete button and the card that renders it,
+     * so any name for the same rule fails them. */
+    const del = jsxTagWith(src, "Button", "onClick={onDelete}");
+    expect(del, "the delete control is disabled again on the only source, for a delete " +
+      "the store now accepts").not.toMatch(/\bdisabled\b/);
+    const card = jsxTagWith(src, "SourceCard", "source={s}");
+    expect(card, "the source card is being told again how many sources there are, which " +
+      "it has no remaining use for except to withhold the delete")
+      .not.toMatch(/sources\.length/);
+    /* And the confirmation carries the consequence. Deleting the last source
+     * leaves the install with no programme at all -- a different outcome from
+     * every other delete on this page, and the one screen that can say so
+     * before it happens rather than after.
+     *
+     * The condition is pinned beside the key rather than the key alone: a
+     * mention of `sources.deleteLastDescription` somewhere in the file proves
+     * only that the string is still imported, not that the branch selecting it
+     * is still the last-source branch. */
+    const confirm = jsxTagWith(src, "ConfirmDestructive", "open={deleting !== null}");
+    expect(confirm, "the delete confirmation no longer distinguishes the last source, so " +
+      "the one delete that empties the install reads exactly like the others")
+      .toMatch(/sources\.length === 1[\s\S]*?sources\.deleteLastDescription/);
+  });
+
+  /* The dialog and the toast are one sentence told twice, a second apart, and
+   * they used to disagree. The confirmation promised that renditions go with
+   * the source -- they do, `renditions.source_id` is ON DELETE CASCADE -- while
+   * the toast afterwards named destinations alone, so the operator who wanted
+   * to keep a 720p encode for a replacement source was told nothing had been
+   * lost that they would have to build again. */
+  it("says the same thing after the delete as it did before it", () => {
+    const en = JSON.parse(read("ui/src/lib/i18n/en.json")) as Record<string, string>;
+    for (const key of ["sources.deleted", "sources.deletedLast"]) {
+      expect(en[key], `${key} confirms a delete that took the renditions too without ` +
+        "naming them, contradicting the dialog the operator read a second earlier")
+        .toMatch(/renditions/i);
+    }
+    /* And the asymmetry the dialog exists to name survives the delete: an
+     * install with nothing left is not the same outcome as one with three
+     * sources still running, and the toast is the only thing on screen at the
+     * moment it becomes true. */
+    const src = read("ui/src/pages/SourcesPage.tsx");
+    expect(src, "the post-delete toast is the same neutral sentence whether or not the " +
+      "install still has a programme").toMatch(/wasOnly \? "sources\.deletedLast" : "sources\.deleted"/);
+    expect(src, "the toast branches on something other than the source count this render " +
+      "was drawn from, which is the only place that still knows there was one")
+      .toMatch(/const wasOnly = sources\.length === 1;/);
   });
 });
