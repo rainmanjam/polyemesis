@@ -211,7 +211,10 @@ func main() {
 	driverlib.SaveSettings(settings, "disable recording and meters")
 
 	fmt.Printf("starting synthetic %sx%s@%s 3-tone source (300 / 900 / 2000 Hz)\n", srcW, srcH, srcFPS)
-	relayPort, _ := strconv.Atoi(relay)
+	// The shell's lsof is a hint: with no seeded source there may have been
+	// no relay socket to find when it looked. ResolveRelayPort asks the
+	// server when the hint is empty -- see its comment for the cycle.
+	relayPort := driverlib.ResolveRelayPort(relay)
 	fps, _ := strconv.Atoi(srcFPS)
 	src := exec.Command(ffmpegBin, "-hide_banner", "-loglevel", "error", "-re",
 		"-f", "lavfi", "-i", fmt.Sprintf("testsrc2=size=%sx%s:rate=%d", srcW, srcH, fps),

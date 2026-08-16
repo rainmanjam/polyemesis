@@ -46,6 +46,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -110,7 +111,10 @@ func main() {
 	fmt.Println("recording with stems enabled (flac)")
 
 	fmt.Println("starting synthetic source (300 Hz music / 900 Hz control / 2000 Hz mic burst)")
-	relayPort, _ := strconv.Atoi(relay)
+	// The shell's lsof is a hint: with no seeded source there may have been
+	// no relay socket to find when it looked. ResolveRelayPort asks the
+	// server when the hint is empty -- see its comment for the cycle.
+	relayPort := resolveRelayPort(relay)
 	src := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
 		// White for the first half of every 8s cycle, black for the second —
 		// the same gate the mic runs on, so blackdetect and silencedetect are
@@ -379,4 +383,42 @@ func get(path string) map[string]any {
 func die(f string, a ...any) {
 	fmt.Printf("FATAL: "+f+"\n", a...)
 	os.Exit(1)
+}
+
+// resolveRelayPort returns the relay hub's UDP port, preferring what the shell
+// found and asking the server when the shell found nothing.
+//
+// THE SHELL CAN NOW COME UP EMPTY, and it is not the shell's fault. It reads the
+// port off the running process with lsof BEFORE starting this driver. That
+// worked while a seeded source guaranteed an engine -- and so a bound relay
+// socket -- existed before anything looked.
+//
+// #387 removes the seed and the ordering underneath is circular: the relay
+// exists only while an engine runs, an engine runs only for a source, and this
+// driver is what creates the source. The shell was requiring, moments before
+// invoking us, a port only we can bring into being.
+//
+// Uses this file's own session rather than driverlib's: these drivers keep their
+// own cookie jar, and driverlib's would not be logged in.
+func resolveRelayPort(fromShell string) int {
+	if p, err := strconv.Atoi(strings.TrimSpace(fromShell)); err == nil && p > 0 {
+		return p
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if st := get("/stats"); st != nil {
+			if relay, ok := st["relay"].(map[string]any); ok {
+				if pf, ok := relay["port"].(float64); ok && pf > 0 {
+					fmt.Printf("relay port discovered from the server: %d\n", int(pf))
+					return int(pf)
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			die("no relay port: the shell found none and GET /stats reported none within 30s. " +
+				"A relay exists only while an engine runs, and an engine runs only for a source -- " +
+				"so this usually means the source was never created, not that the port is missing.")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
