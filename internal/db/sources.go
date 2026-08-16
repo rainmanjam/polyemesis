@@ -195,7 +195,17 @@ func (d *DB) GetSource(id int64) (*Source, error) {
 // install could carry exactly one RTMP source. internal/rtmpserver replaced it
 // with a real one-port server, which is what removed the rule rather than
 // merely stopping it from being enforced.
-func (d *DB) CreateSource(s *Source) error {
+func (d *DB) CreateSource(s *Source) error { return createSource(d.sql, s) }
+
+// createSource is CreateSource with the handle passed in.
+//
+// It takes one rather than reaching for d.sql because MigrateSources creates
+// the first source INSIDE a transaction, and this database runs on a single
+// connection (db.go's SetMaxOpenConns(1)): an insert issued on d.sql while that
+// transaction holds the connection does not fail, it waits for a connection the
+// transaction will not release until it commits. The server would hang at
+// startup rather than report anything.
+func createSource(x execQuerier, s *Source) error {
 	if err := validateSource(s); err != nil {
 		return err
 	}
@@ -215,12 +225,12 @@ func (d *DB) CreateSource(s *Source) error {
 	// already on screen.
 	if s.Position == 0 {
 		var maxPos sql.NullInt64
-		_ = d.sql.QueryRow(`SELECT MAX(position) FROM sources`).Scan(&maxPos)
+		_ = x.QueryRow(`SELECT MAX(position) FROM sources`).Scan(&maxPos)
 		s.Position = int(maxPos.Int64) + 1
 	}
 
 	now := time.Now().Unix()
-	res, err := d.sql.Exec(
+	res, err := x.Exec(
 		`INSERT INTO sources (name, enabled, ingest, token, prev_token, prev_token_until, position, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, '', 0, ?, ?, ?)`,
 		s.Name, boolToInt(s.Enabled), string(blob), s.Token, s.Position, now, now)
@@ -428,31 +438,73 @@ func (d *DB) ingestForMigration() (IngestSettings, error) {
 //  3. Backfill. Every destination, rendition and recording that predates
 //     sources belongs to that first source, because there was nowhere else for
 //     it to have come from.
+//
+// Step 2 is UPGRADE-ONLY. A brand-new install finishes this function with no
+// source at all, because there is no ingest to carry and nothing to attach: it
+// asks the operator to create one. Telling the two apart is the whole of the
+// discriminator below, and getting it wrong in either direction is silent --
+// seed a fresh install and the operator inherits a programme they did not
+// configure; skip an upgrading one and their encoder stops connecting with no
+// visible cause.
 func (d *DB) MigrateSources() error {
-	for _, c := range []struct{ table, ddl string }{
+	// EVERY read happens before the transaction opens, and that is not
+	// stylistic. columnExists and the probes below query d.sql, and db.go sets
+	// SetMaxOpenConns(1) -- a read issued while a transaction holds the one
+	// connection waits for a connection the transaction will not release until
+	// it commits. It would not fail; it would hang on startup, for ever.
+	// MigrateDestinationExpertArgs carries the same warning over the same trap.
+	type column struct{ table, ddl string }
+	sourceColumns := []column{
 		{"destinations", `ALTER TABLE destinations ADD COLUMN source_id INTEGER REFERENCES sources(id) ON DELETE CASCADE`},
 		{"renditions", `ALTER TABLE renditions ADD COLUMN source_id INTEGER REFERENCES sources(id) ON DELETE CASCADE`},
 		{"recordings", `ALTER TABLE recordings ADD COLUMN source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL`},
-	} {
+	}
+
+	// migrating is decided HERE, in the probe loop, and never afterwards.
+	//
+	// schema.sql declares all three source_id columns and runs before this, so
+	// on a fresh database every check answers true and this is false. On a
+	// database that predates sources at least one answers false. Recompute the
+	// same checks after the ALTERs and the answer is true everywhere, for every
+	// install -- including the upgrading one this exists to recognise, which
+	// then never gets its ingest carried onto a source.
+	//
+	// OR-ed rather than assigned, because a database really can have one
+	// source_id column and not the others: releases before this commit ran the
+	// ALTERs outside a transaction, so a process killed part-way through the
+	// loop left exactly that. Keeping only the last table's answer would call
+	// such an install fresh.
+	var missing []column
+	migrating := false
+	present := make(map[string]bool, len(sourceColumns))
+	for _, c := range sourceColumns {
 		has, err := columnExists(d.sql, c.table, "source_id")
 		if err != nil {
 			return fmt.Errorf("inspect %s columns: %w", c.table, err)
 		}
+		present[c.table] = has
 		if has {
 			continue
 		}
-		if _, err := d.sql.Exec(c.ddl); err != nil {
-			return fmt.Errorf("add %s.source_id: %w", c.table, err)
-		}
+		migrating = true
+		missing = append(missing, c)
 	}
 
 	// The rotation grace columns, for a database whose sources table predates
 	// them. Plain columns with literal defaults, so unlike source_id they carry
 	// a NOT NULL that ALTER TABLE accepts.
-	for _, c := range []struct{ name, ddl string }{
+	//
+	// Deliberately NOT folded into `migrating`: they belong to the token
+	// rotation release, which is LATER than sources. A database that already
+	// migrated to sources but predates rotation would otherwise read as
+	// "pre-sources" for ever, and once an operator is allowed to delete their
+	// last source that flag resurrects Main on the next boot.
+	tokenColumns := []struct{ name, ddl string }{
 		{"prev_token", `ALTER TABLE sources ADD COLUMN prev_token TEXT NOT NULL DEFAULT ''`},
 		{"prev_token_until", `ALTER TABLE sources ADD COLUMN prev_token_until INTEGER NOT NULL DEFAULT 0`},
-	} {
+	}
+	var missingToken []struct{ name, ddl string }
+	for _, c := range tokenColumns {
 		has, err := columnExists(d.sql, "sources", c.name)
 		if err != nil {
 			return fmt.Errorf("inspect sources columns: %w", err)
@@ -460,7 +512,106 @@ func (d *DB) MigrateSources() error {
 		if has {
 			continue
 		}
-		if _, err := d.sql.Exec(c.ddl); err != nil {
+		missingToken = append(missingToken, c)
+	}
+
+	// The second witness: a row that has no source to belong to. It catches the
+	// install that already has its source_id columns -- an earlier release added
+	// them -- but never got a source, which `migrating` alone cannot see.
+	//
+	// DESTINATIONS AND RENDITIONS ONLY. recordings.source_id is ON DELETE SET
+	// NULL by design (schema.sql:226), so an orphan recording is the NORMAL
+	// state after a legitimate delete. Counting one would resurrect Main on the
+	// next boot of the install that deliberately removed its last source -- and
+	// would do it to the operator with the largest library.
+	//
+	// Probed only over tables whose column already exists, because a table
+	// still missing it cannot be asked about it: on a genuinely pre-sources
+	// database this SELECT is "no such column". Nothing is lost by skipping it
+	// there -- a missing column has already set `migrating`, so the seed
+	// condition is satisfied either way.
+	orphans := false
+	for _, table := range []string{"destinations", "renditions"} {
+		if orphans || !present[table] {
+			continue
+		}
+		var orphaned int
+		if err := d.sql.QueryRow(
+			`SELECT COUNT(*) FROM ` + table + ` WHERE source_id IS NULL`).Scan(&orphaned); err != nil {
+			return fmt.Errorf("count orphan %s: %w", table, err)
+		}
+		orphans = orphaned > 0
+	}
+
+	var n int
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&n); err != nil {
+		return fmt.Errorf("count sources: %w", err)
+	}
+
+	// n == 0 is the question, not the answer: it is equally true of the fresh
+	// install that must come up with none. It takes a witness of a life before
+	// sources to turn it into a yes.
+	seed := n == 0 && (migrating || orphans)
+
+	var ing IngestSettings
+	if seed {
+		// Read before Begin, for the connection reason above -- and read only
+		// when it is going to be used, because a settings blob that will not
+		// parse is a hard error and an install with sources already has no
+		// business being stopped from booting by one.
+		var err error
+		if ing, err = d.ingestForMigration(); err != nil {
+			return fmt.Errorf("read settings for source migration: %w", err)
+		}
+	}
+
+	// The backfill's target. Resolved here when a source already exists, and
+	// from the insert below when one is about to.
+	//
+	// Gated on a source EXISTING rather than on `orphans`: the UPDATE is
+	// idempotent and its own WHERE makes it a no-op when there is nothing to
+	// attach, so the only thing this ever needed to prevent was demanding a
+	// default source from an install that has none. Gating it on `orphans`
+	// instead strands the recordings of a pre-sources install that had no
+	// destinations or renditions -- it seeds Main and then never attaches them.
+	var backfillID int64
+	if n > 0 {
+		id, err := d.DefaultSourceID()
+		if err != nil {
+			return fmt.Errorf("resolve default source: %w", err)
+		}
+		backfillID = id
+	}
+
+	// ONE TRANSACTION over the ALTERs and the source they exist for.
+	//
+	// This is not housekeeping; it is what makes the discriminator above sound.
+	// Without it, an upgrade interrupted between the ALTER loop and the insert
+	// -- crash, SIGKILL, power loss, `docker stop` -- leaves a database whose
+	// source_id columns exist while no source does. On the next open `migrating`
+	// is false because the columns are there, `orphans` is false because a
+	// pre-sources install with no destinations or renditions has nothing to
+	// orphan, and n is 0: the discriminator says "fresh install", the ingest is
+	// never carried across, and the operator sees only that their encoder
+	// stopped connecting.
+	//
+	// SQLite's DDL is transactional, so the columns and the source arrive
+	// together or neither does, and the next open tries again from a state it
+	// recognises. Do not unwind this for tidiness: removing it reopens a silent
+	// data-loss window that no error message would ever point at.
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return fmt.Errorf("begin sources migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, c := range missing {
+		if _, err := tx.Exec(c.ddl); err != nil {
+			return fmt.Errorf("add %s.source_id: %w", c.table, err)
+		}
+	}
+	for _, c := range missingToken {
+		if _, err := tx.Exec(c.ddl); err != nil {
 			return fmt.Errorf("add sources.%s: %w", c.name, err)
 		}
 	}
@@ -473,36 +624,31 @@ func (d *DB) MigrateSources() error {
 		`CREATE INDEX IF NOT EXISTS idx_renditions_source ON renditions(source_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_recordings_source ON recordings(source_id)`,
 	} {
-		if _, err := d.sql.Exec(idx); err != nil {
+		if _, err := tx.Exec(idx); err != nil {
 			return fmt.Errorf("index source_id: %w", err)
 		}
 	}
 
-	var n int
-	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&n); err != nil {
-		return fmt.Errorf("count sources: %w", err)
-	}
-	if n == 0 {
+	if seed {
 		// Carry the existing ingest across verbatim.
-		ing, err := d.ingestForMigration()
-		if err != nil {
-			return fmt.Errorf("read settings for source migration: %w", err)
-		}
 		src := &Source{Name: DefaultSourceName, Enabled: true, Ingest: ing, Position: 1}
-		if err := d.CreateSource(src); err != nil {
+		if err := createSource(tx, src); err != nil {
 			return fmt.Errorf("create %s source: %w", DefaultSourceName, err)
+		}
+		backfillID = src.ID
+	}
+
+	if backfillID != 0 {
+		for _, table := range []string{"destinations", "renditions", "recordings"} {
+			if _, err := tx.Exec(
+				`UPDATE `+table+` SET source_id = ? WHERE source_id IS NULL`, backfillID); err != nil {
+				return fmt.Errorf("backfill %s.source_id: %w", table, err)
+			}
 		}
 	}
 
-	id, err := d.DefaultSourceID()
-	if err != nil {
-		return fmt.Errorf("resolve default source: %w", err)
-	}
-	for _, table := range []string{"destinations", "renditions", "recordings"} {
-		if _, err := d.sql.Exec(
-			`UPDATE `+table+` SET source_id = ? WHERE source_id IS NULL`, id); err != nil {
-			return fmt.Errorf("backfill %s.source_id: %w", table, err)
-		}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sources migration: %w", err)
 	}
 	return nil
 }

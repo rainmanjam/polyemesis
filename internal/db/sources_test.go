@@ -1,7 +1,9 @@
 package db
 
 import (
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -12,28 +14,119 @@ import (
 // their encoder is already pointed at a port, and if the first source does not
 // come up on exactly that port with exactly that protocol they have lost their
 // broadcast with no obvious cause. These tests exist for that.
+//
+// They also guard the other direction, which arrived with zero-source installs:
+// a FRESH database must finish Open with no source at all, so the operator
+// creates their own rather than inheriting a programme nobody configured. The
+// two cases are told apart by a discriminator that is invisible when it is
+// wrong -- both failure modes are silent -- so each branch of it has a test
+// here named after the state it protects.
+
+// preSourcesDB builds a database at path in the shape an install had before
+// sources existed, and leaves it closed and ready for Open.
+//
+// The three tables that later grow a source_id are hand-built WITHOUT one, and
+// the sources table is not created at all: schema.sql creates it empty on the
+// next Open. Everything else is left to Open, whose CREATEs are all IF NOT
+// EXISTS and whose earlier migrations add their own columns to these tables --
+// which is what makes this the real upgrade path rather than an imitation of
+// it. The DDL is schema.sql's own, minus source_id and its FOREIGN KEY line.
+//
+// The raw driver rather than db.Open, and that is load-bearing twice over: the
+// raw DSN carries no pragmas, so foreign keys are OFF and rows can be inserted
+// into tables whose sources table does not exist yet -- and Open is the thing
+// under test, which cannot also be the thing that builds the fixture.
+//
+// extra runs after the tables exist, for the rows a caller wants to predate
+// sources.
+func preSourcesDB(t *testing.T, path, settingsJSON string, extra ...string) {
+	t.Helper()
+
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	stmts := []string{`CREATE TABLE destinations (
+		id             INTEGER PRIMARY KEY AUTOINCREMENT,
+		name           TEXT    NOT NULL,
+		kind           TEXT    NOT NULL,
+		platform       TEXT    NOT NULL DEFAULT '',
+		account_id     INTEGER,
+		url            TEXT    NOT NULL DEFAULT '',
+		stream_key     TEXT    NOT NULL DEFAULT '',
+		stream_key_enc BLOB,
+		enabled        INTEGER NOT NULL DEFAULT 0,
+		audio_bitrate  INTEGER NOT NULL DEFAULT 160,
+		profile        TEXT    NOT NULL,
+		rendition_id   INTEGER,
+		position       INTEGER NOT NULL DEFAULT 0,
+		created_at     INTEGER NOT NULL,
+		updated_at     INTEGER NOT NULL
+	)`, `CREATE TABLE renditions (
+		id            INTEGER PRIMARY KEY AUTOINCREMENT,
+		name          TEXT    NOT NULL,
+		width         INTEGER NOT NULL DEFAULT 0,
+		height        INTEGER NOT NULL DEFAULT 0,
+		fps           INTEGER NOT NULL DEFAULT 0,
+		video_bitrate INTEGER NOT NULL DEFAULT 0,
+		encoder       TEXT    NOT NULL DEFAULT 'libx264',
+		preset        TEXT    NOT NULL DEFAULT 'veryfast',
+		gop_seconds   REAL    NOT NULL DEFAULT 2,
+		note          TEXT    NOT NULL DEFAULT '',
+		deinterlace   TEXT    NOT NULL DEFAULT '',
+		created_at    INTEGER NOT NULL,
+		updated_at    INTEGER NOT NULL
+	)`, `CREATE TABLE recordings (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		filename    TEXT    NOT NULL UNIQUE,
+		started_at  INTEGER NOT NULL,
+		finished_at INTEGER NOT NULL DEFAULT 0,
+		bytes       INTEGER NOT NULL DEFAULT 0,
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		tracks      INTEGER NOT NULL DEFAULT 0
+	)`, `CREATE TABLE settings (
+		id   INTEGER PRIMARY KEY CHECK (id = 1),
+		json TEXT    NOT NULL
+	)`}
+	stmts = append(stmts, `INSERT INTO settings (id, json) VALUES (1, '`+settingsJSON+`')`)
+	stmts = append(stmts, extra...)
+	for _, s := range stmts {
+		if _, err := old.Exec(s); err != nil {
+			t.Fatalf("build pre-sources database (%.40s): %v", s, err)
+		}
+	}
+
+	// Prove the fixture is genuinely old before Open is ever called. Without
+	// this the whole file could pass against a database that already had the
+	// columns, which is the fresh case wearing a pre-sources costume.
+	for _, table := range []string{"destinations", "renditions", "recordings"} {
+		if _, err := old.Exec(`SELECT source_id FROM ` + table); err == nil {
+			t.Fatalf("%s.source_id already exists on the hand-built table; this test proves nothing", table)
+		}
+	}
+	// Closed, and the error checked, because Open runs in WAL mode: until the
+	// last connection closes and checkpoints, the committed tables are still in
+	// the -wal file and the reopen would find an empty database.
+	if err := old.Close(); err != nil {
+		t.Fatalf("close raw sqlite: %v", err)
+	}
+}
+
+// A single-ingest install: RTMP with an app name and a stream key. If any of it
+// fails to survive, the encoder stops connecting.
+const preSourcesIngestJSON = `{"ingest":{"mode":"rtmp","rtmp":{"app":"live","streamKey":"secretkey"}}}`
 
 func TestMigrationCarriesAnExistingIngestOntoTheFirstSource(t *testing.T) {
-	d := testDB(t)
+	path := filepath.Join(t.TempDir(), "pre-sources.db")
+	preSourcesDB(t, path, preSourcesIngestJSON)
 
-	// A single-ingest install: RTMP on a non-default port, with a stream key.
-	// If any of this fails to survive, the encoder stops connecting.
-	want := DefaultSettings()
-	want.Ingest.Mode = IngestRTMP
-	want.Ingest.RTMP.App = "live"
-	want.Ingest.RTMP.StreamKey = "secretkey"
-	if err := d.PutSettings(want); err != nil {
-		t.Fatalf("seed settings: %v", err)
+	// Open, and only Open, is what an existing install actually runs on
+	// startup; it must migrate, because nothing else will.
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on a pre-sources database: %v", err)
 	}
-
-	// Drop the source the fresh-database open already created, so this test
-	// exercises the upgrade path rather than the first-run path.
-	if _, err := d.SQL().Exec(`DELETE FROM sources`); err != nil {
-		t.Fatalf("clear sources: %v", err)
-	}
-	if err := d.MigrateSources(); err != nil {
-		t.Fatalf("MigrateSources: %v", err)
-	}
+	t.Cleanup(func() { d.Close() })
 
 	got, err := d.ListSources()
 	if err != nil {
@@ -43,6 +136,8 @@ func TestMigrationCarriesAnExistingIngestOntoTheFirstSource(t *testing.T) {
 		t.Fatalf("got %d sources, want exactly 1", len(got))
 	}
 	s := got[0]
+	// Asserted only here, in the migrating case. A fresh install has no source
+	// to be named anything.
 	if s.Name != DefaultSourceName {
 		t.Errorf("name = %q, want %q", s.Name, DefaultSourceName)
 	}
@@ -51,6 +146,9 @@ func TestMigrationCarriesAnExistingIngestOntoTheFirstSource(t *testing.T) {
 	}
 	if s.Ingest.Mode != IngestRTMP {
 		t.Errorf("mode = %q, want rtmp", s.Ingest.Mode)
+	}
+	if s.Ingest.RTMP.App != "live" {
+		t.Errorf("rtmp app = %q, want it carried across", s.Ingest.RTMP.App)
 	}
 	if s.Ingest.RTMP.StreamKey != "secretkey" {
 		t.Errorf("stream key = %q, want it carried across", s.Ingest.RTMP.StreamKey)
@@ -89,6 +187,311 @@ func TestMigrationBackfillsExistingRowsOntoTheFirstSource(t *testing.T) {
 	}
 	if *got != want {
 		t.Errorf("source_id = %d, want %d", *got, want)
+	}
+}
+
+// The pre-sources install whose only history is recordings.
+//
+// It has no destinations and no renditions, so `orphans` is false and the seed
+// fires on `migrating` alone. The recordings must STILL be attached: gating the
+// backfill on `orphans` -- which counts destinations and renditions only, and
+// deliberately not recordings -- seeds Main and then leaves every recording the
+// operator ever made unattributed, with nothing to say so.
+func TestMigrationAttachesRecordingsOnAnInstallThatHadNothingElse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-sources-recordings.db")
+	preSourcesDB(t, path, preSourcesIngestJSON,
+		`INSERT INTO recordings (filename, started_at) VALUES ('old.mkv', 1000)`)
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on a pre-sources database: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	want, err := d.DefaultSourceID()
+	if err != nil {
+		t.Fatalf("DefaultSourceID: %v", err)
+	}
+	var got *int64
+	if err := d.SQL().QueryRow(
+		`SELECT source_id FROM recordings WHERE filename = 'old.mkv'`).Scan(&got); err != nil {
+		t.Fatalf("read back source_id: %v", err)
+	}
+	if got == nil {
+		t.Fatal("the recordings that predate sources came back unattached, " +
+			"so the library shows them belonging to nothing")
+	}
+	if *got != want {
+		t.Errorf("source_id = %d, want %d", *got, want)
+	}
+}
+
+// The other half of the discriminator: a database with nothing behind it must
+// come up with NO source, and stay that way however many times it is opened.
+//
+// Seeding one here is not a cosmetic difference. It hands a first-time operator
+// a programme they did not configure, on an ingest mode nobody chose, and it is
+// what the whole zero-source install exists to stop.
+func TestAFreshDatabaseComesUpWithNoSourceAndStaysThatWay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fresh.db")
+
+	for i := 1; i <= 3; i++ {
+		d, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open %d: %v", i, err)
+		}
+		got, err := d.ListSources()
+		if err != nil {
+			t.Fatalf("ListSources after open %d: %v", i, err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("open %d left %d sources on a fresh database; "+
+				"a new install must ask the operator for one, not invent it", i, len(got))
+		}
+		if err := d.Close(); err != nil {
+			t.Fatalf("close %d: %v", i, err)
+		}
+	}
+}
+
+// An operator who deletes their last source has said something. The next boot
+// must not undo it.
+//
+// This is the case that forbids counting recordings as orphans:
+// recordings.source_id is ON DELETE SET NULL by design, so a NULL recording is
+// the NORMAL state after a legitimate delete. A probe that included them would
+// read this database as "pre-sources" and put Main back -- on the install with
+// the largest library, every time it starts.
+//
+// Built against the store rather than through DeleteSource, which still refuses
+// to remove the only source. The route to this state arrives with that guard's
+// removal; the state itself is reachable now and the discriminator has to be
+// right about it before the button exists.
+func TestMigrationDoesNotResurrectASourceTheOperatorDeleted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deleted-last-source.db")
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	src := &Source{Name: "Main camera", Enabled: true, Ingest: DefaultSettings().Ingest}
+	if err := d.CreateSource(src); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	if _, err := d.SQL().Exec(
+		`INSERT INTO recordings (filename, started_at, source_id) VALUES ('kept.mkv', 1000, ?)`,
+		src.ID); err != nil {
+		t.Fatalf("seed recording: %v", err)
+	}
+	// Foreign keys are ON through this handle, so this is exactly what the
+	// delete route will do: the recording survives with a NULL source_id.
+	if _, err := d.SQL().Exec(`DELETE FROM sources`); err != nil {
+		t.Fatalf("delete the last source: %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { again.Close() })
+
+	got, err := again.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("%q came back after the operator deleted their last source", got[0].Name)
+	}
+	var attached *int64
+	if err := again.SQL().QueryRow(
+		`SELECT source_id FROM recordings WHERE filename = 'kept.mkv'`).Scan(&attached); err != nil {
+		t.Fatalf("read back source_id: %v", err)
+	}
+	if attached != nil {
+		t.Errorf("the orphan recording was attached to source %d, which the boot invented", *attached)
+	}
+}
+
+// The rotation columns are NOT evidence of a pre-sources install.
+//
+// prev_token and prev_token_until belong to the token-rotation release, which
+// came AFTER sources. Folding their absence into the same flag is an easy tidy
+// -- both loops are columnExists over an ALTER list -- and it reads as
+// "pre-sources" for ever on a database that migrated to sources before rotation
+// existed. Harmless while a source is there, and once the last-source delete
+// guard goes it puts Main back on every boot.
+func TestTheRotationColumnsAreNotEvidenceOfAPreSourcesInstall(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-rotation.db")
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Wind the sources table back to before rotation shipped, leaving every
+	// source_id column exactly where this release put it.
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	for _, s := range []string{
+		`ALTER TABLE sources DROP COLUMN prev_token`,
+		`ALTER TABLE sources DROP COLUMN prev_token_until`,
+	} {
+		if _, err := raw.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw sqlite: %v", err)
+	}
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { again.Close() })
+
+	got, err := again.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a missing rotation column seeded %q; that column says nothing "+
+			"about whether this install predates sources", got[0].Name)
+	}
+}
+
+// The columns arrived but the source never did. `migrating` cannot see this --
+// every column exists -- so the second witness has to: a destination or
+// rendition with a NULL source_id is a row from a life before sources, and an
+// install that has one is not a fresh install.
+//
+// Reachable from a release that added the columns in one pass and the source in
+// another, and from any database an operator hand-edited with the sqlite3 CLI,
+// where foreign keys default to OFF.
+func TestMigrationSeedsWhenTheColumnsArrivedButTheSourceNeverDid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "columns-without-source.db")
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	src := &Source{Name: "Main camera", Enabled: true, Ingest: DefaultSettings().Ingest}
+	if err := d.CreateSource(src); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	dst, err := d.CreateDestination(&Destination{
+		Name: "pre-existing", Kind: DestRTMP, URL: "rtmp://example/live", SourceID: &src.ID})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// The raw handle, because its DSN carries no pragmas: with foreign keys off
+	// the source can be removed without cascading the destination away, which
+	// is the state being reproduced.
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	for _, s := range []string{`DELETE FROM sources`, `UPDATE destinations SET source_id = NULL`} {
+		if _, err := raw.Exec(s); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw sqlite: %v", err)
+	}
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { again.Close() })
+
+	got, err := again.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d sources, want the migration to have built one for the "+
+			"destination that has none", len(got))
+	}
+	var attached *int64
+	if err := again.SQL().QueryRow(
+		`SELECT source_id FROM destinations WHERE id = ?`, dst.ID).Scan(&attached); err != nil {
+		t.Fatalf("read back source_id: %v", err)
+	}
+	if attached == nil || *attached != got[0].ID {
+		t.Errorf("destination source_id = %v, want %d", attached, got[0].ID)
+	}
+}
+
+// THE INTERRUPTED UPGRADE. This is the case the transaction exists for, and the
+// only test that fails if someone finds it inconvenient and unwinds it.
+//
+// Without one, MigrateSources adds the source_id columns, commits them, and
+// then creates the source. A process that dies in between -- crash, SIGKILL,
+// power loss, `docker stop` -- leaves a database where the columns exist and
+// the source does not. On the next open `migrating` is false because the
+// columns are there, `orphans` is false because this install had no
+// destinations or renditions to orphan, and the count is zero: the
+// discriminator says "fresh install", the operator's ingest is never carried
+// across, and all they see is that their encoder stopped connecting.
+//
+// The interruption here is a settings blob whose ingest no longer validates --
+// an RTMP app name, required since the publish URL was made copyable, that an
+// older release let through empty. It is a real failure, it happens after the
+// ALTERs, and it is the only lever this test needs: the migration must leave
+// the database in the state it found it, so the repaired install still
+// migrates.
+func TestAnInterruptedMigrationStillCarriesTheIngestOnTheNextBoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "interrupted.db")
+	preSourcesDB(t, path, `{"ingest":{"mode":"rtmp","rtmp":{"app":"","streamKey":"secretkey"}}}`)
+
+	if _, err := Open(path); err == nil {
+		t.Fatal("Open accepted an ingest that does not validate; " +
+			"this test needs the seed step to fail after the ALTER loop")
+	}
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	if _, err := raw.Exec(
+		`UPDATE settings SET json = '` + preSourcesIngestJSON + `' WHERE id = 1`); err != nil {
+		t.Fatalf("repair settings: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw sqlite: %v", err)
+	}
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open after repairing the settings blob: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	got, err := d.ListSources()
+	if err != nil {
+		t.Fatalf("ListSources: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d sources; the half-finished migration left the columns "+
+			"behind, so this boot read a pre-sources install as a fresh one and "+
+			"dropped its ingest", len(got))
+	}
+	if got[0].Ingest.RTMP.StreamKey != "secretkey" {
+		t.Errorf("stream key = %q, want it carried across", got[0].Ingest.RTMP.StreamKey)
 	}
 }
 
