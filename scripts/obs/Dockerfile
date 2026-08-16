@@ -3,7 +3,7 @@
 # Everything else that tests this path uses FFmpeg as the publisher. FFmpeg is
 # not OBS: what stays unverified is OBS's RTMP connect/handshake, the onMetaData
 # it sends (including audioTrackIdInfoMap), and which trackIds it assigns. That
-# is the gap docs/notes/enhanced-rtmp-multitrack.md calls "a confirmation, not
+# is the gap docs/evidence/enhanced-rtmp-multitrack.md calls "a confirmation, not
 # an investigation", and it is the last thing standing between this and a
 # claim we can make in the docs.
 #

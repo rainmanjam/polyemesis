@@ -439,9 +439,9 @@ Whether any PLATFORM accepts a second track is still the unanswered half, and
 still needs a real account to answer.
 
 Two more do **not** drive the built binary and need no `make build`. They drive
-one package against a socket, which is the gap `docs/notes/live-test-coverage-
-gaps.md` ranks: seventeen suites, and until these were written exactly one of
-them talked to anything outside the process.
+one package against a socket, which is the gap an internal coverage review
+ranks: seventeen suites, and until these were written exactly one of them talked
+to anything outside the process.
 
 ```bash
 ./scripts/acceptance-chat.sh         # the real Twitch and Kick, no credentials for 15 of 17 checks

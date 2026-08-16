@@ -215,7 +215,7 @@ primary and the standby evict each other, which is the failover feature failing
 in the one situation it exists for.
 
 The full record, including the options rejected, is in
-[notes/multi-source-rtmp.md](notes/multi-source-rtmp.md).
+[evidence/multi-source-rtmp.md](evidence/multi-source-rtmp.md).
 
 ## The failover backup needs an address too
 

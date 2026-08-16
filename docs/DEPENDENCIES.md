@@ -70,7 +70,7 @@ The same reasoning eventually applied to RTMP, and it is why
 `github.com/bluenviron/gortmplib` joined the tree on 2026-08-06: three
 transitive modules against go-rtmp's seven, at v1.0.0 rather than v0.0.7, from
 the people who maintain gortsplib and MediaMTX. Re-measured, not assumed —
-see `notes/multi-source-rtmp.md`.
+see `evidence/multi-source-rtmp.md`.
 
 > **The RTMP half of that comparison was retired on 2026-08-06.** It read "and
 > `ffmpeg -listen 1` was already a complete answer for RTMP", and that was the

@@ -123,7 +123,7 @@ declaration was buying nothing while presenting a knob an operator could set and
 watch have no effect. **A config file that still names `enhancedRtmp` loads
 exactly as before.** For multitrack ingest that is actually operated, use SRT:
 Enhanced RTMP's version dependency is real, and it has not been confirmed with
-OBS itself as the publisher. See `notes/enhanced-rtmp-multitrack.md`.
+OBS itself as the publisher. See `evidence/enhanced-rtmp-multitrack.md`.
 
 ## The data directory
 

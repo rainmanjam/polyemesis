@@ -481,8 +481,8 @@ step "8. A real refresh, and what the refreshed token can do"
 # proven against the committed tree by exporting POLY_OAUTH_KICK_* with a
 # secret generated at runtime: Kick refused it, this step reported four
 # failures instead of four skips, and the tally stayed at forty-six. The PASS
-# branch cannot be proven here, because no account is connected -- see
-# docs/notes/live-test-coverage-gaps.md, where platform_creds is still empty.
+# branch cannot be proven here, because no account is connected and
+# platform_creds is still empty.
 # It stays because it is the only thing that can ever speak to the hour-four
 # failure, and it is marked as unproven rather than described as covered.
 #

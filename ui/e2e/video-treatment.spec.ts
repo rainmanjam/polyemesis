@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 /* ===========================================================================
    How a destination's video treatment is chosen.
 
-   The redesign in docs/notes/video-treatment-ui.md replaced a single <Select>
+   The redesign in docs/evidence/video-treatment-ui.md replaced a single <Select>
    listing "passthrough" alongside every encode with two radio cards, on the
    argument that copying video is nearly free and a shared encode is the most
    expensive thing on the page — so they are not the same kind of choice and a

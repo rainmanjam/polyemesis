@@ -76,3 +76,10 @@ web/dist/
 docs/internal/
 docs/superpowers/
 docs/security/
+docs/notes/
+
+# docs/evidence/ is NOT here, deliberately. It holds the handful of notes
+# that public pages cite as the source for a factual claim -- the competitor
+# table's receipts, the Enhanced RTMP findings README depends on. Those have
+# to stay readable or the claims lose their evidence, which is worse than
+# either publishing or removing them cleanly.
