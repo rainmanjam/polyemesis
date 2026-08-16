@@ -325,3 +325,44 @@ func TestTheZeroSetIsProduction(t *testing.T) {
 		t.Errorf("a provider from the zero Set points at %q, want the production %q", got, fbGraphBase)
 	}
 }
+
+// TestEveryCapabilityLookupHasASetTwinThatResolves is the guard endpoints.go
+// asks for in prose and nothing enforced.
+//
+// The comment at endpoints.go:153 says "Every capability the package grows needs
+// its twin here", and the cost of forgetting is specific rather than cosmetic: a
+// caller holding a stubbed Set resolves the capability through the package-level
+// lookup instead, which reads the PRODUCTION providers. The test would still
+// pass, the stub would still be aimed correctly for every other call, and one
+// capability would quietly talk to the real internet.
+//
+// So this asserts the two things that make a twin real: it exists (the code does
+// not compile otherwise), and it resolves against the SET rather than the
+// package -- proven by building a Set whose members are stubbed and checking the
+// twin hands back a provider aimed at the stub.
+func TestEveryCapabilityLookupHasASetTwinThatResolves(t *testing.T) {
+	base, guard := stubbedWorld(t)
+	set := NewSet(WithBaseURL(base))
+
+	// Kick is the platform that implements the newest capability, so it is the
+	// one that proves the newest twin. The others are here because a twin that
+	// resolves for one platform and not the rest is the same bug, later.
+	if ls, ok := set.StatsFor(db.PlatformKick); !ok {
+		t.Error("Set.StatsFor(kick) did not resolve; Kick implements Stats, so the twin is not wired")
+	} else {
+		_, _ = ls.Stats(context.Background(), "cid", "tok")
+	}
+
+	// A platform without the capability must answer false rather than a nil
+	// interface that panics on use: internal/api branches on this bool to
+	// answer supported:false, and a nil-with-true would crash the handler.
+	if _, ok := set.StatsFor(db.PlatformTwitch); ok {
+		t.Error("Set.StatsFor(twitch) resolved, but Twitch has no Stats method — " +
+			"the assertion is matching something it should not")
+	}
+
+	if got := guard.escapes(); len(got) > 0 {
+		t.Fatalf("a capability resolved through a stubbed Set still reached real hosts:\n  %s",
+			strings.Join(got, "\n  "))
+	}
+}
