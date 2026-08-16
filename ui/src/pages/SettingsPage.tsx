@@ -81,15 +81,48 @@ import type {
 export function SettingsPage() {
   const t = useT();
   const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") ?? "ingest";
-
   const [settings, setSettings] = useState<Settings | null>(null);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [saving, setSaving] = useState(false);
+  // undefined while unknown, which is not the same as zero and must not be
+  // treated as it: the tab default below turns on this number, and guessing
+  // "no sources" for the instant before the answer arrives would move the tab
+  // under an operator who had already started reading it.
+  const [sourceCount, setSourceCount] = useState<number | undefined>(undefined);
+
+  // The ingest tab is the DEFAULT, and on an install with no source it is the
+  // one tab that cannot do anything.
+  //
+  // settings.ingest is written through to the default source (see
+  // handlePutSettings), and with no source there is nowhere for it to go, so
+  // the server refuses the save with code "no_source". Landing a first-time
+  // operator there means their first action on their first screen is one that
+  // is designed to fail. Pipeline is where recording, listeners and the rest
+  // live, all of which they can legitimately configure before creating a
+  // programme.
+  //
+  // An explicit ?tab= still wins, because a link somebody was sent must go
+  // where it says.
+  const tab = params.get("tab") ?? (sourceCount === 0 ? "pipeline" : "ingest");
 
   useEffect(() => {
-    api.getSettings().then(setSettings).catch(() => {});
-    api.system().then(setSystem).catch(() => {});
+    // The bare `.catch(() => {})` these three used to carry swallowed real
+    // regressions along with the noise: a settings endpoint that started
+    // failing left the page blank with nothing said, on screen or in the
+    // console. A failure here is worth a toast -- the operator is looking at a
+    // form whose contents did not load.
+    api
+      .getSettings()
+      .then(setSettings)
+      .catch((e) => toast.error(e instanceof Error ? e.message : String(e)));
+    api
+      .system()
+      .then(setSystem)
+      .catch((e) => toast.error(e instanceof Error ? e.message : String(e)));
+    // Not toasted. This one only chooses a default tab, and an install that
+    // cannot answer it has bigger problems that the two calls above will
+    // already have reported.
+    api.listSources().then((s) => setSourceCount(s.length)).catch(() => setSourceCount(undefined));
   }, []);
 
   // The OAuth round trip is a full navigation, so its outcome comes back in

@@ -1183,7 +1183,22 @@ print_summary() {
     echo
   fi
 
-  echo "  ${BOLD}Point your encoder at${NC}"
+  # The first line is now an instruction with a step in front of it, and the
+  # step is the change.
+  #
+  # A fresh install used to arrive with a source called Main that nobody
+  # created -- a migration seeded one on every first run (#387) -- so this text
+  # could hand over an address and a token that already existed. It no longer
+  # does: the operator makes their first programme, and the token is minted
+  # with it. Printing the URL as though it were live would send them to point
+  # an encoder at a streamid that has not been issued, and the failure they
+  # would see is a connection that is refused with no explanation.
+  echo "  ${BOLD}Create your first source${NC}"
+  echo "  Open the web UI and add one on the Sources page. That is what mints"
+  echo "  the publish token below; an install starts with no programme, so"
+  echo "  nothing is listening for an encoder until you have made one."
+  echo
+  echo "  ${BOLD}Then point your encoder at${NC}"
   echo "    srt://${hostpart}:${SRT_PORT}?streamid=<token>"
   echo "  The Sources page shows the token. It is the address, so every source"
   echo "  shares this one port — adding another needs no new port and no restart."

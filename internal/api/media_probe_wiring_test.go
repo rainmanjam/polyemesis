@@ -260,12 +260,16 @@ func managerServerWithoutEngines(t *testing.T, tools *ffmpeg.Tools) (*Server, ht
 	t.Helper()
 
 	dir := t.TempDir()
-	store := dbtest.OpenAt(t, filepath.Join(dir, "polyemesis.db"))
+	// OpenEmptyAt, not OpenAt followed by DELETE FROM sources.
+	//
+	// Since #387 PR 4 the migration no longer manufactures a source on a fresh
+	// database, so this fixture can BE a fresh install rather than imitate one.
+	// The difference is not cosmetic: an emptied database has had a source and
+	// carries whatever a create-then-delete left behind, and the state under
+	// test here is the one an operator meets on their first boot.
+	store := dbtest.OpenEmptyAt(t, filepath.Join(dir, "polyemesis.db"))
 	if _, err := store.CreateUser("admin", testPassword); err != nil {
 		t.Fatalf("create admin: %v", err)
-	}
-	if _, err := store.SQL().Exec(`DELETE FROM sources`); err != nil {
-		t.Fatalf("empty the sources table: %v", err)
 	}
 	box, err := secrets.New([]byte(strings.Repeat("k", 32)))
 	if err != nil {

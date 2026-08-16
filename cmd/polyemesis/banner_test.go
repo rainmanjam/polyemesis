@@ -88,6 +88,28 @@ func bannerFixture(t *testing.T, mode db.IngestMode) (config.Config, *db.DB, *ff
 	if err := store.PutSettings(s); err != nil {
 		t.Fatalf("PutSettings: %v", err)
 	}
+	// A source, because every case below is about an install that HAS an
+	// ingest and asks what the banner says about it.
+	//
+	// Since #387 a freshly opened database has none -- the migration stopped
+	// manufacturing one -- and with no source the banner correctly refuses to
+	// name a mode at all, which would make all four cases here assert the same
+	// sentence. TestTheStartupBannerDoesNotAnnounceAnIngestWithNoSourceToRunIt
+	// is where that state is tested, on purpose and by itself.
+	//
+	// The source carries the DEFAULT ingest rather than this case's mode, and
+	// that is deliberate on both counts. The banner reads settings.Ingest, so
+	// the source's own block is not what is under test here -- only its
+	// existence is. And CreateSource validates where PutSettings above does
+	// not: the pull case has no URL yet, which is exactly the half-configured
+	// state the banner must survive and exactly what a validating door refuses
+	// to arrange.
+	if err := store.CreateSource(&db.Source{
+		Name: db.DefaultSourceName, Enabled: true,
+		Ingest: db.DefaultSettings().Ingest, Position: 1,
+	}); err != nil {
+		t.Fatalf("fixture source: %v", err)
+	}
 
 	cfg := config.Default()
 	cfg.Addr = "127.0.0.1:8080"
@@ -196,5 +218,75 @@ func TestStartupBannerNamesTheIngestModeItActuallyRuns(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The banner on an install that has no source, which since #387 is every fresh
+// install and is also where an operator lands after deleting their last one.
+//
+// THE DEFECT THIS FIXES. reportStartup read settings.Ingest and nothing else,
+// and settings.Ingest is a stored blob that survives having no source to apply
+// it to. So a box with no programme could announce
+//
+//	ingest      srt (port 6000)
+//
+// on the strength of a default nobody chose, while no listener existed for it
+// and no encoder could ever connect. The same failure mode as the pull-mode
+// port above, and worse in one respect: there is no configuration an operator
+// can change to make that sentence true. They have to create a source, and the
+// banner was the one place that could have told them so.
+//
+// The ingest an engine actually reads lives on the source row. With no row
+// there is no ingest, and the only honest line names the thing that is missing.
+func TestTheStartupBannerDoesNotAnnounceAnIngestWithNoSourceToRunIt(t *testing.T) {
+	provider, err := tlsx.New(tlsx.Options{Mode: tlsx.ModeOff})
+	if err != nil {
+		t.Fatalf("tlsx.New(off): %v", err)
+	}
+
+	dir := t.TempDir()
+	store, err := db.Open(filepath.Join(dir, "polyemesis.db"))
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	// SRT stored in settings, and no source. This is the arrangement that used
+	// to print a port: a settings blob left over from an operator configuring
+	// listeners before creating their first programme, or from the one who
+	// deleted their last.
+	s := db.DefaultSettings()
+	s.Ingest.Mode = db.IngestSRT
+	if err := store.PutSettings(s); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+	if n, err := store.CountSources(); err != nil || n != 0 {
+		t.Fatalf("fixture has %d sources (err %v); this test is about having none", n, err)
+	}
+
+	cfg := config.Default()
+	cfg.Addr = "127.0.0.1:8080"
+	cfg.DataDir = dir
+	out := captureStdout(t, func() {
+		if err := reportStartup(newLogger("error"), cfg, provider,
+			store, &ffmpeg.Tools{Version: "test-ffmpeg"}); err != nil {
+			t.Errorf("reportStartup: %v", err)
+		}
+	})
+	line := bannerIngestLine(t, out)
+
+	if !strings.Contains(line, "no source yet") {
+		t.Errorf("ingest banner line on an install with no source =\n  %q\n"+
+			"want it to say there is no source yet", strings.TrimSpace(line))
+	}
+	for _, bad := range []string{"(port", "6000", "srt"} {
+		if strings.Contains(line, bad) {
+			t.Errorf("ingest banner line on an install with no source =\n  %q\n"+
+				"which contains %q.\n\nThere is no listener behind that number and no "+
+				"configuration the operator can change to make it true: the ingest an "+
+				"engine reads lives on the source row, and there is no row. Printing it "+
+				"sends them to their firewall to debug a port that was never in the path.",
+				strings.TrimSpace(line), bad)
+		}
 	}
 }

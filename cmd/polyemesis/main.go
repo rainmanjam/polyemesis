@@ -615,6 +615,10 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	if err != nil {
 		return err
 	}
+	sources, err := store.CountSources()
+	if err != nil {
+		return err
+	}
 
 	scheme := "http"
 	if provider.Enabled() {
@@ -635,7 +639,21 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	// An install that has not chosen yet prints that, rather than an empty mode
 	// beside a port number — which reads as "srt on 6000" to anyone skimming and
 	// is the one impression this must not give.
-	if settings.Ingest.Mode == db.IngestUnset {
+	//
+	// AND AN INSTALL WITH NO SOURCE PRINTS THAT, whatever the settings blob
+	// says. This line used to read settings.Ingest alone, so an install that
+	// had never created a source -- which, since #387, is every fresh install
+	// -- could announce `ingest srt (port 6000)` on the strength of a stored
+	// default while no listener existed and no encoder could ever connect.
+	//
+	// Not a crash, and worse for it: it is a false statement made to an
+	// operator at the exact moment they are working out what to do next, and it
+	// sends them to their firewall to debug a port that has nothing behind it.
+	// The ingest an engine actually reads lives on the source row now; with no
+	// row there is no ingest, and the only true thing to print is that.
+	if sources == 0 {
+		fmt.Printf("  ingest      no source yet — create one in the web UI to start ingesting\n")
+	} else if settings.Ingest.Mode == db.IngestUnset {
 		fmt.Printf("  ingest      not chosen yet — pick SRT, RTMP or pull in the web UI\n")
 	} else if settings.Ingest.Mode == db.IngestPull {
 		// Pull DIALS OUT. It is the one mode with no inbound port, and printing

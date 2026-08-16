@@ -1166,7 +1166,30 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// Writing it through to the default source restores the old meaning:
 	// settings.ingest edits the programme an unscoped request acts on, which is
 	// exactly what it edited when there was only one.
-	if id, err := s.store.DefaultSourceID(); err == nil {
+	//
+	// AND ON AN INSTALL WITH NO SOURCE THERE IS NOWHERE FOR IT TO GO, which is
+	// how the very bug above came back wearing the opposite face.
+	//
+	// The guard used to be `if id, err := ...; err == nil`, so zero sources took
+	// the silent branch: the endpoint accepted an ingest block, stored it in the
+	// settings document, answered 200, and had no effect -- precisely the dead
+	// editor this code was written to fix, now on the DEFAULT tab of a
+	// first-time operator's first screen. "No source" and "the store is broken"
+	// were the same branch, and both meant "carry on".
+	//
+	// So they are told apart, and the first one refuses OUT LOUD. Only when the
+	// submitted ingest actually DIFFERS from what is stored: an operator on a
+	// fresh install saving their SRT latency or their recording directory has
+	// touched no ingest field, and refusing that save would make the whole
+	// settings page unusable before a source exists. PUT /settings deliberately
+	// carries no requireSource for the same reason -- listeners, recording,
+	// chat, automod and alerts are all legitimately configured first.
+	//
+	// The other settings are already SAVED by the time this runs, and the
+	// sentence says so. A refusal that reads as "nothing was stored" would send
+	// the operator back to re-enter work that is on disk.
+	switch id, err := s.store.DefaultSourceID(); {
+	case err == nil:
 		if src, err := s.store.GetSource(id); err == nil && !ingestEqual(src.Ingest, settings.Ingest) {
 			src.Ingest = settings.Ingest
 			if err := s.store.UpdateSource(src); err != nil {
@@ -1174,6 +1197,18 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	case errors.Is(err, db.ErrSourceNotFound):
+		var stored db.Settings
+		if json.Unmarshal(storedJSON, &stored) == nil && !ingestEqual(stored.Ingest, settings.Ingest) {
+			writeErrorCode(w, http.StatusServiceUnavailable, codeNoSource,
+				"your other settings were saved, but the ingest could not be: this install "+
+					"has no source to apply it to. Create one on the Sources page, and set "+
+					"its ingest there.")
+			return
+		}
+	default:
+		writeStoreError(w, err)
+		return
 	}
 	// The MANAGER, not the default engine.
 	//
