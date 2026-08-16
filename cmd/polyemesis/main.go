@@ -635,7 +635,7 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	// engine takes its ingest from the source row -- so on an install with no
 	// source that block describes a listener nobody is behind. See the ingest
 	// line below.
-	sources, err := store.CountSources()
+	sources, err := store.ListSources()
 	if err != nil {
 		return err
 	}
@@ -656,53 +656,26 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 
 	fmt.Printf("\n  polyemesis %s\n", version)
 	fmt.Printf("  web ui      %s://%s\n", scheme, shown)
-	// NO SOURCE, NO INGEST, whatever settings.ingest happens to say.
+	// NO SOURCE, NO INGEST, whatever settings.ingest happens to say -- and when
+	// there IS one, the ingest reported is the SOURCE's, not the singleton's.
 	//
 	// This line is the entire user interface of a headless first run: nobody has
 	// opened the web UI yet, and these eight lines are the only thing telling an
 	// operator where to point an encoder. `ingest srt (port 6000)` on a box with
-	// no source is a false statement of exactly the kind that costs an evening —
+	// no source is a false statement of exactly the kind that costs an evening --
 	// the port really is bound (both listeners bind unconditionally), so nothing
 	// downstream contradicts it, and the encoder is simply refused by a server
 	// that has no programme to admit it to.
 	//
-	// It is checked BEFORE the mode, because it outranks it: settings.ingest can
-	// carry a fully configured SRT block on an install with no source at all,
-	// and a mode is a statement about a programme that does not exist.
-	//
-	// Deliberately NOT extended to naming the DEFAULT SOURCE's ingest when there
-	// is one. That is the same settings-singleton read the rest of this line
-	// still does, it is wrong in a second way on a multi-source install, and it
-	// is a separate change with its own decision about which programme a banner
-	// speaks for.
-	if sources == 0 {
-		fmt.Printf("  ingest      no programme yet — create a source in the web UI\n")
-	} else if settings.Ingest.Mode == db.IngestUnset {
-		// An install that has a source but has not chosen a mode prints that,
-		// rather than an empty mode beside a port number — which reads as "srt
-		// on 6000" to anyone skimming and is the one impression this must not
-		// give.
-		fmt.Printf("  ingest      not chosen yet — pick SRT, RTMP or pull in the web UI\n")
-	} else if settings.Ingest.Mode == db.IngestPull {
-		// Pull DIALS OUT. It is the one mode with no inbound port, and printing
-		// one is worse than printing nothing: `ingest pull (port 6000)` is read
-		// as "point the encoder at 6000", which in pull mode is an instruction
-		// that can never work and sends the operator to their firewall to debug
-		// a port that was never in the path.
-		//
-		// 6000 genuinely IS bound in pull mode -- both listeners bind
-		// unconditionally now (engine/manager.go, "BOTH LISTENERS BIND,
-		// ALWAYS"), so ingestPort's return value is not wrong and is left
-		// alone. What is wrong is attributing that port to THIS ingest.
-		// engine.Manager.ListenerBound(db.IngestPull) already returns false and
-		// says why in its own comment -- "pull dials out ... saying yes would
-		// tell an operator a token gates an ingest that no publisher ever
-		// reaches" -- and manager_test.go pins it. This banner was the last
-		// place still telling the operator the opposite.
-		fmt.Printf("  ingest      pull (dials out; no inbound port)\n")
-	} else {
-		fmt.Printf("  ingest      %s (port %d)\n", settings.Ingest.Mode, ingestPort(settings))
-	}
+	// The second half is what ingestLine now fixes, and this comment used to
+	// defer it: "deliberately NOT extended to naming the DEFAULT SOURCE's ingest
+	// when there is one ... a separate change with its own decision about which
+	// programme a banner speaks for". A deployment settled the decision. An
+	// upgraded box that had been streaming over SRT for weeks printed "ingest not
+	// chosen yet -- pick SRT, RTMP or pull in the web UI" on every boot, because
+	// its source carried the SRT block and the settings copy had never been
+	// written. The banner told a working install to reconfigure itself.
+	fmt.Printf("  ingest      %s\n", ingestLine(sources, settings))
 	fmt.Printf("  data dir    %s\n", cfg.DataDir)
 	fmt.Printf("  ffmpeg      %s\n", tools.Version)
 	reportTLS(cfg, provider, shown)
@@ -774,11 +747,82 @@ func reportTLS(cfg config.Config, provider *tlsx.Provider, shown string) {
 	}
 }
 
-func ingestPort(s db.Settings) int {
-	if s.Ingest.Mode == db.IngestRTMP {
-		return s.Listeners.RTMPPort
+// ingestLine describes the ingest an operator can actually publish to.
+//
+// IT READS THE SOURCES, NOT settings.Ingest, and that is the whole fix.
+//
+// Before sources existed the ingest configuration lived in the settings
+// singleton and this line read it there. Sources own their ingest now, and
+// settings.Ingest has quietly become something else: the DEFAULT a newly
+// created source starts from. Those are not the same fact, and on an upgraded
+// install they disagree.
+//
+// Observed on a real deployment, which is why this is a fix and not a tidy-up.
+// The box had been streaming over SRT for weeks -- its source carried
+// `{"mode":"srt", ...}` with a passphrase -- and the settings copy still held
+// `"mode":""`, because nothing had ever written a default there. Every boot the
+// banner said "ingest not chosen yet -- pick SRT, RTMP or pull in the web UI"
+// to an operator whose ingest was up and receiving. The advice was not merely
+// redundant, it was wrong: following it would have meant reconfiguring a
+// working programme.
+//
+// The no-source case keeps the wording it already had. "Create a source" is the
+// actual next step on a fresh install since #387, and it is the same language
+// the API's own zero-source refusal uses ("this install has no source yet").
+func ingestLine(sources []*db.Source, s db.Settings) string {
+	if len(sources) == 0 {
+		return "no programme yet — create a source in the web UI"
 	}
-	return s.Listeners.SRTPort
+	// Deduplicated in source order rather than through a map, so two sources
+	// sharing a mode print it once and the order does not change between boots.
+	var (
+		seen  = make(map[db.IngestMode]bool, len(sources))
+		parts = make([]string, 0, len(sources))
+	)
+	for _, src := range sources {
+		if seen[src.Ingest.Mode] {
+			continue
+		}
+		seen[src.Ingest.Mode] = true
+		parts = append(parts, describeIngest(src.Ingest.Mode, s))
+	}
+	line := strings.Join(parts, ", ")
+	// The count only when it changes the meaning. "srt (port 6000)" is complete
+	// for one source; with three it invites the reading that one programme is
+	// listening, when the port is shared by all of them.
+	if len(sources) > 1 {
+		line += fmt.Sprintf(" — %d sources", len(sources))
+	}
+	return line
+}
+
+// describeIngest names one mode, and the port a publisher aims at if there is
+// one.
+func describeIngest(mode db.IngestMode, s db.Settings) string {
+	switch mode {
+	case db.IngestUnset:
+		// A source that exists with no mode chosen. Reachable: a programme can
+		// be named before it is decided how the bytes arrive.
+		return "not chosen yet — pick SRT, RTMP or pull in the web UI"
+	case db.IngestPull:
+		// Pull DIALS OUT. It is the one mode with no inbound port, and printing
+		// one is worse than printing nothing: `ingest pull (port 6000)` is read
+		// as "point the encoder at 6000", which in pull mode is an instruction
+		// that can never work and sends the operator to their firewall to debug
+		// a port that was never in the path.
+		//
+		// 6000 genuinely IS bound in pull mode -- both listeners bind
+		// unconditionally (engine/manager.go, "BOTH LISTENERS BIND, ALWAYS") --
+		// so the port is not wrong, only its attribution to THIS ingest.
+		// engine.Manager.ListenerBound(db.IngestPull) already returns false and
+		// says why: "pull dials out ... saying yes would tell an operator a
+		// token gates an ingest that no publisher ever reaches".
+		return "pull (dials out; no inbound port)"
+	case db.IngestRTMP:
+		return fmt.Sprintf("rtmp (port %d)", s.Listeners.RTMPPort)
+	default:
+		return fmt.Sprintf("%s (port %d)", mode, s.Listeners.SRTPort)
+	}
 }
 
 func newLogger(level string) *slog.Logger {

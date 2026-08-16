@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -70,7 +71,7 @@ func captureStdout(t *testing.T, fn func()) string {
 // directory is removed. Reversed, Windows refuses to delete a directory holding
 // an open file and the test fails in cleanup with an error that names neither
 // the test nor the reason.
-func bannerFixture(t *testing.T, mode db.IngestMode) (config.Config, *db.DB, *ffmpeg.Tools) {
+func bannerFixture(t *testing.T, modes ...db.IngestMode) (config.Config, *db.DB, *ffmpeg.Tools) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -80,34 +81,43 @@ func bannerFixture(t *testing.T, mode db.IngestMode) (config.Config, *db.DB, *ff
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
+	// The settings ingest is left at its default and deliberately NOT set from
+	// the modes below. It is the template a new source copies, not the thing
+	// the banner reports, and a fixture that set both could not tell the two
+	// apart -- which is exactly the confusion the banner had.
 	s := db.DefaultSettings()
-	s.Ingest.Mode = mode
 	// PutSettings is the raw write and does NOT validate, which is what makes it
 	// the right fixture door: a pull mode with no URL yet is a state the banner
 	// must survive, and going through UpdateSettings would refuse to arrange it.
 	if err := store.PutSettings(s); err != nil {
 		t.Fatalf("PutSettings: %v", err)
 	}
-	// A SOURCE, because the ingest line is now a statement about one.
+	// THE SOURCES ARE THE FIXTURE NOW, one per mode the case asks for.
 	//
-	// db.Open stopped seeding one -- MigrateSources only builds "Main" for an
-	// install upgrading from single-ingest -- so a fresh database has none, and
-	// the banner says so rather than naming a mode nothing is running. Every
-	// case in the table below is about which mode a RUNNING install prints, so
-	// each one needs the programme that makes that question meaningful. The
-	// zero-source case has its own test, which is where the absence belongs.
-	//
-	// The source carries the DEFAULT ingest rather than this case's mode, and
-	// the two are unrelated on purpose: the banner reads the settings singleton,
-	// never a source row, so what this row ingests changes nothing it prints.
-	// Copying the mode across would only matter for one case and would break it
-	// -- CreateSource validates, and "pull with no URL yet" is precisely the
-	// state PutSettings is used above to arrange.
-	if err := store.CreateSource(&db.Source{
-		Name: db.DefaultSourceName, Enabled: true,
-		Ingest: db.DefaultSettings().Ingest, Position: 1,
-	}); err != nil {
-		t.Fatalf("create the fixture's source: %v", err)
+	// This block used to create a single db.DefaultSourceName source carrying the
+	// DEFAULT ingest, and said so: "the source carries the default ingest rather
+	// than this case's mode, and the two are unrelated on purpose: the banner
+	// reads the settings singleton, never a source row, so what this row ingests
+	// changes nothing it prints." That was true and is exactly the defect. The
+	// banner reads the source rows now, so the mode has to live on them, and a
+	// spare "Main" would be counted and named alongside the ones under test.
+	// One source per mode. No modes at all is the fresh-install case since #387.
+	for i, mode := range modes {
+		src := &db.Source{Name: fmt.Sprintf("S%d", i+1), Enabled: true}
+		src.Ingest = db.DefaultSettings().Ingest
+		src.Ingest.Mode = mode
+		if mode == db.IngestPull {
+			// CreateSource validates, and pull without a URL is refused. The
+			// old fixture reached PutSettings, which does not validate, and its
+			// comment said the banner "must survive a pull mode with no URL
+			// yet" -- true of the settings singleton, which could hold a
+			// half-filled form. A SOURCE cannot be created in that state at
+			// all, so the unreachable case is not worth arranging.
+			src.Ingest.Pull.URL = "srt://198.51.100.7:9000"
+		}
+		if err := store.CreateSource(src); err != nil {
+			t.Fatalf("seed source %d (%s): %v", i+1, mode, err)
+		}
 	}
 
 	cfg := config.Default()
@@ -147,10 +157,20 @@ func bannerIngestLine(t *testing.T, out string) string {
 // ingest that no publisher ever reaches", and manager_test.go pins it. The
 // banner was the last place still telling the operator the opposite.
 //
-// ingestPort itself is deliberately NOT changed. 6000 genuinely is bound in
-// pull mode -- both listeners bind unconditionally (engine/manager.go, "BOTH
-// LISTENERS BIND, ALWAYS") -- so its return value is not wrong. What was wrong
-// is attributing that port to this ingest, and that decision lives here.
+// THE SECOND DEFECT, AND WHY THIS READS SOURCES NOW. The banner used to report
+// settings.Ingest.Mode. Sources own their ingest since #387 and settings.Ingest
+// became the DEFAULT a new source copies -- two different facts that agree on a
+// fresh install and diverge on an upgraded one. Found on a real deployment: the
+// box had been streaming over SRT for weeks, its source carried
+// `{"mode":"srt", ...}` with a passphrase, the settings copy still held
+// `"mode":""`, and every boot told the operator "ingest not chosen yet -- pick
+// SRT, RTMP or pull in the web UI". Following that advice would have meant
+// reconfiguring a working programme.
+//
+// Every table row below is a regression test for it, because bannerFixture
+// leaves settings.Ingest at its default -- which IS IngestUnset -- and sets the
+// mode only on the source. A banner that reads settings says "not chosen yet"
+// for all of them.
 func TestStartupBannerNamesTheIngestModeItActuallyRuns(t *testing.T) {
 	provider, err := tlsx.New(tlsx.Options{Mode: tlsx.ModeOff})
 	if err != nil {
@@ -158,42 +178,64 @@ func TestStartupBannerNamesTheIngestModeItActuallyRuns(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name string
-		mode db.IngestMode
-		want string
+		name  string
+		modes []db.IngestMode
+		want  string
 		// absent is asserted against the ingest LINE, not the whole banner.
 		absent []string
 	}{
 		{
-			name: "a fresh install says so rather than naming a mode nobody chose",
-			mode: db.IngestUnset,
-			want: "not chosen yet",
+			name:  "a fresh install has no source at all, and says what to do about it",
+			modes: nil,
+			want:  "no programme yet — create a source in the web UI",
+			// "Not chosen yet" was the old wording and is wrong here: since #387
+			// there is nothing to choose a mode ON, and the form that would let
+			// you is not reachable until a source exists.
+			absent: []string{"(port", "not chosen"},
+		},
+		{
+			name:  "a source that exists with no mode chosen says so",
+			modes: []db.IngestMode{db.IngestUnset},
+			want:  "not chosen yet",
 			// An empty mode beside a port number reads as "srt on 6000" to
-			// anyone skimming, and that is the one impression a fresh install
-			// must not give.
+			// anyone skimming, and that is the one impression this must not give.
 			absent: []string{"(port"},
 		},
 		{
-			name: "srt names the SRT port",
-			mode: db.IngestSRT,
-			want: "srt (port 6000)",
+			name:  "srt names the SRT port, from the SOURCE and not the settings default",
+			modes: []db.IngestMode{db.IngestSRT},
+			want:  "srt (port 6000)",
+			// The regression assertion: settings.Ingest.Mode is IngestUnset in
+			// this fixture, so a banner still reading settings says this.
+			absent: []string{"not chosen"},
 		},
 		{
-			name: "rtmp names the RTMP port, not the SRT one",
-			mode: db.IngestRTMP,
-			want: "rtmp (port 1935)",
+			name:   "rtmp names the RTMP port, not the SRT one",
+			modes:  []db.IngestMode{db.IngestRTMP},
+			want:   "rtmp (port 1935)",
+			absent: []string{"not chosen"},
 		},
 		{
-			name: "pull names no port at all, because it dials out",
-			mode: db.IngestPull,
-			want: "pull (dials out; no inbound port)",
-			// THE ASSERTION THE FIX EXISTS FOR. Not merely "says pull" -- the
-			// old banner said pull too, and then printed a port beside it.
-			absent: []string{"(port", "6000", "1935"},
+			name:  "pull names no port at all, because it dials out",
+			modes: []db.IngestMode{db.IngestPull},
+			want:  "pull (dials out; no inbound port)",
+			// THE ASSERTION THE FIRST FIX EXISTED FOR. Not merely "says pull" --
+			// the old banner said pull too, and then printed a port beside it.
+			absent: []string{"(port", "6000", "1935", "not chosen"},
+		},
+		{
+			name:  "two sources sharing a mode name it once and say how many there are",
+			modes: []db.IngestMode{db.IngestSRT, db.IngestSRT},
+			want:  "srt (port 6000) — 2 sources",
+		},
+		{
+			name:  "two sources with different modes name both",
+			modes: []db.IngestMode{db.IngestSRT, db.IngestRTMP},
+			want:  "srt (port 6000), rtmp (port 1935) — 2 sources",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, store, tools := bannerFixture(t, tc.mode)
+			cfg, store, tools := bannerFixture(t, tc.modes...)
 			out := captureStdout(t, func() {
 				if err := reportStartup(newLogger("error"), cfg, provider, store, tools); err != nil {
 					t.Errorf("reportStartup: %v", err)
@@ -202,18 +244,18 @@ func TestStartupBannerNamesTheIngestModeItActuallyRuns(t *testing.T) {
 			line := bannerIngestLine(t, out)
 
 			if !strings.Contains(line, tc.want) {
-				t.Errorf("ingest banner line for mode %q =\n  %q\nwant it to contain %q",
-					tc.mode, strings.TrimSpace(line), tc.want)
+				t.Errorf("ingest banner line for modes %v =\n  %q\nwant it to contain %q",
+					tc.modes, strings.TrimSpace(line), tc.want)
 			}
 			for _, bad := range tc.absent {
 				if strings.Contains(line, bad) {
-					t.Errorf("ingest banner line for mode %q =\n  %q\nwhich contains %q.\n\n"+
+					t.Errorf("ingest banner line for modes %v =\n  %q\nwhich contains %q.\n\n"+
 						"In pull mode there is no inbound port: polyemesis DIALS the source. "+
 						"Printing one sends the operator to their firewall to open a port "+
 						"that was never in the path, and it contradicts "+
 						"engine.Manager.ListenerBound(db.IngestPull), which returns false "+
 						"and is pinned by manager_test.go.",
-						tc.mode, strings.TrimSpace(line), bad)
+						tc.modes, strings.TrimSpace(line), bad)
 				}
 			}
 		})
