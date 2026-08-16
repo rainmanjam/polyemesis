@@ -237,6 +237,23 @@ type Health struct {
 	// YouTube populates it, and only because exhausting it silently kills chat
 	// for the rest of the day.
 	Quota *QuotaStatus `json:"quota,omitempty"`
+	// Viewers is how many people the platform says are watching, for a platform
+	// whose CHAT TRANSPORT already carries that number. Only Rumble populates
+	// it. Nil means nobody told us.
+	//
+	// A POINTER, for the reason internal/oauth/stats.go sets out at length for
+	// LiveStats.ViewerCount: "nobody is watching" and "we were not told" are
+	// different answers, and an int can only spell the first. Rumble is the case
+	// that makes that concrete rather than theoretical -- its watching_now is
+	// populated only during a live stream, so an int would report an audience of
+	// exactly none for every channel that is offline, has ended, or has not gone
+	// live yet.
+	//
+	// It lives on Health, and NOT on the oauth LiveStatter capability, because
+	// the count arrives on a poll the chat adapter already makes. See the note
+	// on RumbleAdapter.setLive for why a platform with no sign-in cannot report
+	// through that interface at all.
+	Viewers *int `json:"viewers,omitempty"`
 }
 
 // Status is one platform's chat connection as reported to the UI.
@@ -258,6 +275,11 @@ type Status struct {
 	LastError string       `json:"lastError,omitempty"`
 	CanSend   bool         `json:"canSend"`
 	Quota     *QuotaStatus `json:"quota,omitempty"`
+	// Viewers is Health.Viewers as reported to the UI, and carries that field's
+	// meaning exactly: nil is "not reported", never zero. omitempty is what puts
+	// that on the wire -- the key is absent when the platform said nothing, so a
+	// client cannot read a silence as a number.
+	Viewers *int `json:"viewers,omitempty"`
 }
 
 // SendResult is one platform's outcome from a fan-out send. Partial failure is
