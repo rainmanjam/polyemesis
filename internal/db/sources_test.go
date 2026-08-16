@@ -683,6 +683,120 @@ func TestAnUpgradeInterruptedByAnEarlierReleaseStillCarriesTheIngest(t *testing.
 	}
 }
 
+// A recording orphaned by a legitimate delete belongs to nobody, and the next
+// boot must not hand it to whoever is left.
+//
+// recordings.source_id is ON DELETE SET NULL precisely so a recording outlives
+// its source: the file is still on disk and still playable. A backfill that
+// attaches every NULL recording to DefaultSourceID() therefore re-attributes one
+// programme's entire archive to an unrelated one, on the next start, permanently
+// and with nothing in the library to say it happened -- and DeleteSource's own
+// documentation promises the opposite.
+func TestTheBackfillDoesNotClaimTheRecordingsOfADeletedSource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "two-programmes.db")
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	studioA := &Source{Name: "Studio A", Enabled: true, Ingest: DefaultSettings().Ingest}
+	if err := d.CreateSource(studioA); err != nil {
+		t.Fatalf("CreateSource A: %v", err)
+	}
+	studioB := &Source{Name: "Studio B", Enabled: true, Ingest: DefaultSettings().Ingest}
+	if err := d.CreateSource(studioB); err != nil {
+		t.Fatalf("CreateSource B: %v", err)
+	}
+	if _, err := d.SQL().Exec(
+		`INSERT INTO recordings (filename, started_at, source_id) VALUES ('studio-a.mkv', 1000, ?)`,
+		studioA.ID); err != nil {
+		t.Fatalf("seed recording: %v", err)
+	}
+
+	// The real route. Two sources exist, so the last-source guard does not fire
+	// and this is exactly what an operator deleting a programme does today.
+	if err := d.DeleteSource(studioA.ID); err != nil {
+		t.Fatalf("DeleteSource: %v", err)
+	}
+	if orphaned := recordingSource(t, d, "studio-a.mkv"); orphaned != nil {
+		t.Fatalf("the delete left source_id = %d; this test needs the designed "+
+			"orphan state to exist before the reopen", *orphaned)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { again.Close() })
+
+	if got := recordingSource(t, again, "studio-a.mkv"); got != nil {
+		t.Errorf("the next boot gave a deleted programme's recording to source %d "+
+			"(Studio B is %d); the library now credits it to a programme that never made it",
+			*got, studioB.ID)
+	}
+}
+
+// And the same theft one step later: delete the last source, create a new one,
+// and the archive of the old must not follow the new one home.
+//
+// This is the state PR 6 hands an operator a button for, and the confirmation it
+// is contracted to show says their recordings survive as orphans. A backfill
+// that runs on every boot makes that sentence false one restart later.
+func TestANewSourceDoesNotInheritADeletedSourcesRecordings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "replaced-programme.db")
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	old := &Source{Name: "Studio A", Enabled: true, Ingest: DefaultSettings().Ingest}
+	if err := d.CreateSource(old); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	if _, err := d.SQL().Exec(
+		`INSERT INTO recordings (filename, started_at, source_id) VALUES ('studio-a.mkv', 1000, ?)`,
+		old.ID); err != nil {
+		t.Fatalf("seed recording: %v", err)
+	}
+	// Foreign keys are ON through this handle, so this is what the delete route
+	// will do once the last-source guard goes: the recording survives with a
+	// NULL source_id.
+	if _, err := d.SQL().Exec(`DELETE FROM sources`); err != nil {
+		t.Fatalf("delete the last source: %v", err)
+	}
+	replacement := &Source{Name: "Studio B", Enabled: true, Ingest: DefaultSettings().Ingest}
+	if err := d.CreateSource(replacement); err != nil {
+		t.Fatalf("CreateSource for the replacement: %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { again.Close() })
+
+	if got := recordingSource(t, again, "studio-a.mkv"); got != nil {
+		t.Errorf("the boot handed a deleted programme's recording to source %d, "+
+			"which is a programme created after that recording was made", *got)
+	}
+}
+
+func recordingSource(t *testing.T, d *DB, filename string) *int64 {
+	t.Helper()
+	var id *int64
+	if err := d.SQL().QueryRow(
+		`SELECT source_id FROM recordings WHERE filename = ?`, filename).Scan(&id); err != nil {
+		t.Fatalf("read source_id of %s: %v", filename, err)
+	}
+	return id
+}
+
 // The resurrection case on a MIGRATED install, which is the shape the fresh-
 // database version of it cannot reach.
 //

@@ -714,6 +714,27 @@ func (d *DB) MigrateSources() error {
 		backfillID = id
 	}
 
+	// WHICH tables the backfill covers, which is not the same question as
+	// whether it runs.
+	//
+	// destinations and renditions are ON DELETE CASCADE, so they never outlive
+	// their source: a NULL there is always a row from before sources existed and
+	// always wants attaching, on any boot.
+	//
+	// recordings are ON DELETE SET NULL by design (schema.sql:225-226), so a
+	// NULL there usually means the opposite -- the archive of a source the
+	// operator deleted, deliberately kept. Attaching those to whatever
+	// DefaultSourceID happens to answer hands one programme's recordings to
+	// another, on the next boot, permanently, with nothing in the library to say
+	// it happened. So recordings are attached only when the source below is
+	// SEEDED, which the discriminator only does on an install that never had one
+	// -- an install with no delete behind it, so its NULL recordings can only be
+	// the pre-sources ones A4 is about.
+	backfillTables := []string{"destinations", "renditions"}
+	if seed {
+		backfillTables = append(backfillTables, "recordings")
+	}
+
 	// ONE TRANSACTION over the ALTERs and the source they exist for.
 	//
 	// This is not housekeeping. Without it, an upgrade interrupted between the
@@ -768,7 +789,7 @@ func (d *DB) MigrateSources() error {
 	}
 
 	if backfillID != 0 {
-		for _, table := range []string{"destinations", "renditions", "recordings"} {
+		for _, table := range backfillTables {
 			if _, err := tx.Exec(
 				`UPDATE `+table+` SET source_id = ? WHERE source_id IS NULL`, backfillID); err != nil {
 				return fmt.Errorf("backfill %s.source_id: %w", table, err)
