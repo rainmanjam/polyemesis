@@ -1,11 +1,24 @@
 package oauth
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
+
+// dashboardSource is Dashboard.tsx with its comments blanked, #379.
+//
+// Both guards below are substring searches over a window of this file, and a
+// substring search is satisfied by a comment. Neither of them stripped, so
+// either could have been kept green by deleting the code and leaving the words
+// -- and for the compliance guard, whose window is the whole file, a comment
+// anywhere at all would have done it. Blanking happens here, once, so a third
+// guard added to this file cannot forget.
+func dashboardSource(t *testing.T) string {
+	t.Helper()
+	return testenv.StripJSComments(testenv.ReadUI(t, "pages", "Dashboard.tsx"))
+}
 
 // The composer must be able to SEND tags, not merely render them back.
 //
@@ -19,12 +32,7 @@ import (
 // Dashboard.tsx for unrelated reasons, so a whole-file search would pass on a
 // composer that still cannot send them.
 func TestTheComposerCanSendFacebookTags(t *testing.T) {
-	path := filepath.Join("..", "..", "ui", "src", "pages", "Dashboard.tsx")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("cannot read %s: %v", path, err)
-	}
-	src := string(raw)
+	src := dashboardSource(t)
 	body := strings.Index(src, `metaFetch<MetaJob>("/metadata/push"`)
 	if body < 0 {
 		t.Fatal("cannot find the metadata push call in Dashboard.tsx; this guard " +
@@ -54,12 +62,7 @@ func TestTheComposerCanSendFacebookTags(t *testing.T) {
 // Matches the derived list's use rather than its definition, because the name
 // appears at both and only the uses do anything.
 func TestTheComposerSaysWhenAPushCarriesStoredCompliance(t *testing.T) {
-	path := filepath.Join("..", "..", "ui", "src", "pages", "Dashboard.tsx")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("cannot read %s: %v", path, err)
-	}
-	src := string(raw)
+	src := dashboardSource(t)
 	if !strings.Contains(src, "withCompliance.length > 0") {
 		t.Error("the composer never mentions stored compliance, so a push sends a COPPA " +
 			"declaration or a privacy setting with nothing on screen having said so")

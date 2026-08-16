@@ -1,11 +1,11 @@
 package oauth
 
 import (
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // The capability matrix exists twice, and nothing was checking the copies agree.
@@ -26,13 +26,15 @@ import (
 // and each capability's support value -- and not the prose, because the reason
 // strings are written for two different audiences and forcing them identical
 // would make the guard fight the thing it protects.
+// COMMENTS ARE BLANKED FIRST, #379. This guard reads the TypeScript as text, so
+// until now a row deleted from the matrix and left behind as a comment satisfied
+// it exactly as well as a row that renders -- and a commented-out platform is
+// the single most likely way a row leaves this file. The stripper existed in
+// internal/db and this package had no way to reach it; it is testenv.
+// StripJSComments now.
 func TestTheUICapabilityMatrixAgreesWithGo(t *testing.T) {
-	path := filepath.Join("..", "..", "ui", "src", "lib", "capabilities.ts")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("cannot read %s: %v", path, err)
-	}
-	ui := parseUICapabilities(t, string(raw))
+	ui := parseUICapabilities(t, testenv.StripJSComments(
+		testenv.ReadUI(t, "lib", "capabilities.ts")))
 
 	for _, row := range platformCapabilities {
 		got, ok := ui[row.PresetID]
@@ -100,6 +102,11 @@ var (
 // which would make this guard skip itself on any machine where that is missing
 // -- and a guard that skips silently is worse than no guard, because the next
 // person reads green and believes it.
+//
+// src is expected to have been through testenv.StripJSComments. That is not
+// merely defensive: every regex below would otherwise read a commented-out row
+// as a live one, which turns "the UI still ships this platform" into "somebody
+// once typed this platform".
 func parseUICapabilities(t *testing.T, src string) map[string]uiRow {
 	t.Helper()
 

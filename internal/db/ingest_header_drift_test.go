@@ -3,6 +3,8 @@ package db
 import (
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // WHY THIS IS IN internal/db, stated rather than left to be discovered.
@@ -13,12 +15,16 @@ import (
 // owned by internal/engine (reconcileIngest, which returns early for SRT) and
 // internal/stats (the received-byte counter the bitrate series is sampled from).
 //
-// It lives here to reuse readUI and stripJSComments from facebook_ui_drift_test.go,
-// which is helper locality rather than a reason, and the honest consequence is
-// that someone changing engine's ingest reconciliation will not see a db test in
-// their package. `go test ./...` still runs it, so the guard holds; only its
-// discoverability is worse. Moving it to internal/engine means copying both
-// helpers there, so the fix is to promote them to a shared test helper first.
+// It landed here to reuse readUI and stripJSComments from
+// facebook_ui_drift_test.go, which is helper locality rather than a reason, and
+// the honest consequence is that someone changing engine's ingest reconciliation
+// will not see a db test in their package. `go test ./...` still runs it, so the
+// guard holds; only its discoverability is worse. What blocked the move was that
+// internal/engine would need its own copy of both helpers -- and #379 has now
+// removed that blocker: they are testenv.ReadUI and testenv.StripJSComments, and
+// any package can import them. What remains is the move itself, which is left to
+// a change of its own because it changes which package a failure points at, and
+// that is a decision about who gets paged rather than a tidy-up.
 //
 // The header's ingest indicator must not decide health from the ingest PROCESS.
 //
@@ -59,7 +65,7 @@ import (
 // removing the thing it watches is to leave the words behind, so the words are
 // not what is read.
 func TestTheHeaderAsksTheAppsOneQuestionAboutBeingLive(t *testing.T) {
-	src := stripJSComments(readUI(t, "components", "AppLayout.tsx"))
+	src := testenv.StripJSComments(testenv.ReadUI(t, "components", "AppLayout.tsx"))
 
 	if !strings.Contains(src, "useIngestLive()") {
 		t.Error("AppLayout no longer calls useIngestLive. An SRT source has no ingest " +
@@ -83,7 +89,7 @@ func TestTheHeaderAsksTheAppsOneQuestionAboutBeingLive(t *testing.T) {
 // at status.ingest.progress would silently restore the original bug in a place
 // nobody would think to look.
 func TestIngestLiveIsDerivedFromArrivingBytes(t *testing.T) {
-	src := stripJSComments(readUI(t, "hooks", "useLiveData.ts"))
+	src := testenv.StripJSComments(testenv.ReadUI(t, "hooks", "useLiveData.ts"))
 
 	// Not `src[strings.Index(...):]` unguarded: a rename made that a slice-bounds
 	// panic rather than a failure anyone could read, which is the guard going

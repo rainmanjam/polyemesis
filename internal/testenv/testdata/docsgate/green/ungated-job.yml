@@ -1,0 +1,13 @@
+# A job that never asked for the gate. Rule two applies only to jobs that
+# declare `needs: changes`, so an ordinary always-runs job -- the `changes` job
+# itself, gitleaks, anything in another workflow -- is none of this rule's
+# business and must not be flagged.
+name: green - a job with no gate at all
+on: pull_request
+jobs:
+  always:
+    name: always runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: make lint

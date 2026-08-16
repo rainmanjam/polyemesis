@@ -1,0 +1,29 @@
+# The shape ci.yml uses: the matrix always expands, every leg reports, and the
+# notice step is what stops a green check that did no work from being mistaken
+# for a green check that did.
+#
+# Note the notice step's condition is the NEGATION of the gate. It still names
+# the gate, which is all this rule asks -- a step that mentions the gate has had
+# a decision made about it, which is the property being enforced.
+name: green - every step carries the gate
+on: pull_request
+jobs:
+  build:
+    name: "build: ${{ matrix.os }}"
+    needs: changes
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Documentation-only change, so this job did no work
+        if: needs.changes.outputs.code != 'true'
+        run: echo "::notice title=build::this check did no work."
+      - uses: actions/checkout@v5
+        if: needs.changes.outputs.code == 'true'
+      - name: build
+        if: needs.changes.outputs.code == 'true'
+        run: make
+      - name: upload logs
+        if: always() && needs.changes.outputs.code == 'true'
+        run: cat log
