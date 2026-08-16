@@ -696,3 +696,84 @@ It is Step 6.1, "Poll the Data API for the video's status", inside the **Content
 **No-active-broadcast behavior remains undocumented.** Neither the Errors table nor the Response section states it. Response shape verbatim: `{ "kind": "youtube#liveBroadcastListResponse", "etag": etag, "nextPageToken": string, "prevPageToken": string, "pageInfo": { "totalResults": integer, "resultsPerPage": integer }, "items": [ liveBroadcast Resource ] }`, with `items[]` glossed "A list of broadcasts that match the request criteria." Empty `items` is the structurally natural reading and no 404 row exists for this method — but no sentence says so. **UNRESOLVED**; branch on `len(items) == 0` first, never index `items[0]` blind. *Resolve by:* one authenticated call against a channel with no live broadcast, recording literal status code and body.
 
 **Operational shape.** Unchanged: two calls per viewer-count poll; cache the discovered id for the life of the broadcast; re-list only after a transition or a `videos.list` miss. With `videos.list` documented at 1 unit and `liveBroadcasts.list` at an unknown cost, the poll interval must be governed by the observed `quotaExceeded` refusal and the shared 10,000-unit/day project ceiling, not by a per-call estimate.
+
+---
+
+## ADDENDUM 2: Facebook, re-checked 2026-08-16 on a documentation tree the first pass never found
+
+The first pass recorded six unresolved Facebook questions and a reproduced
+404 on the LiveVideo node reference. Most of them are now answered, and the
+reason is worth more than the answers: **there are TWO Facebook documentation
+trees and the pass only knocked on one.**
+
+* `/docs/graph-api/reference/live-video` — the node reference. Genuinely gone.
+  A real HTTP 404 on re-check, not the soft variety. Meta still links to it.
+* `/documentation/live-video-api/...` — a separate, maintained guide tree,
+  updated **Jul 2, 2026**, that answers most of what the node reference would
+  have. The first pass never requested it.
+
+The lesson generalises past Facebook: an absence established against one URL
+prefix is an absence in that prefix, not in the platform. The enumeration rule
+this file already carries has to name the tree it enumerated.
+
+| capability | verdict | endpoint | scope | source |
+|---|---|---|---|---|
+| end a broadcast | **documented** — first pass said unresolved | `POST /<LIVE_VIDEO_ID>?end_live_video=true` | `publish_video` (User) / `pages_manage_posts`+`pages_read_engagement` (Page) | [Broadcasting](https://developers.facebook.com/documentation/live-video-api/guides/streaming), read 2026-08-16 |
+| confirm the end took | documented | `GET /<LIVE_VIDEO_ID>?fields=status` → `VOD` | same | same page |
+| stream health readback | **documented** | `GET /<LIVE_VIDEO_ID>?fields=ingest_streams` → `stream_health` | `publish_video` | same page, and [live-video-input-stream](https://developers.facebook.com/docs/graph-api/reference/live-video-input-stream/) |
+| schedule a broadcast | documented, scalar form | `POST /<ID>/live_videos?status=SCHEDULED_UNPUBLISHED&event_params=1541539800` | as above | [scheduling guide](https://developers.facebook.com/docs/live-video-api/guides/scheduling), read 2026-08-16 |
+| create a poll | documented | `POST /LIVE_VIDEO_ID/polls` | as above | [overview](https://developers.facebook.com/documentation/live-video-api/overview) |
+| read error detail | documented | `GET /<LIVE_VIDEO_ID>?fields=errors` | as above | Broadcasting guide |
+| **SEND a chat message** | **STRUCK** | `POST /{live-video-id}/comments` | — | [live-video/comments](https://developers.facebook.com/docs/graph-api/reference/live-video/comments/), read 2026-08-16 |
+| viewer count (`live_views`) | **still UNRESOLVED** | — | — | node reference 404s for real |
+
+### Caveats an implementer must carry
+
+**Chat send is refused in Facebook's own words.** The comments edge reference
+has a "Creating" section whose entire content is: *"You can't perform this
+operation on this endpoint."* That is a stated refusal, not a missing page, and
+it is the strongest kind of negative evidence available. **Narrow scope: this
+settles the LIVE-VIDEO comments edge**, which is the one a live chat pane would
+use. Whether the associated *post* object accepts a comment on its own edge was
+NOT checked, and that is a different object with a different reference.
+
+**ENDING A BROADCAST HAS TWO MECHANISMS AND ONLY ONE IS AN API CALL.** Verbatim:
+"To end a broadcast, stop streaming live video data from your encoder to the
+stream URL **or** send a request to `POST /<LIVE_VIDEO_ID>?end_live_video=true`."
+Facebook ends the broadcast on its own when the bytes stop. This matters for the
+END policy: on Facebook, unlike YouTube, an encoder crash ALREADY ends the
+show, so there is no "leave it live and let it recover" option to preserve.
+
+**Facebook publishes encoder health and Twitch does not.** `stream_health` on
+`ingest_streams` carries bitrates and frame rates. The pacing is documented and
+must be obeyed: *"Stream health data refreshes every 2 seconds, so limit
+queries to no more than once every 2 seconds. A stream timeout will be detected
+and reported after 4 seconds of no data being received."* This is a stated
+number, so unlike YouTube's concurrency cap it MAY be encoded.
+
+**TWO HARD CEILINGS ON EVERY FACEBOOK STREAM URL, BOTH STATED.** Verbatim: "The
+stream URL must be used within 24 hours before expiring. Once used, a stream URL
+can be streamed to for up to **8 hours**." polyemesis advertises 24/7 playout
+channels; a Facebook destination cannot be one on a single stream URL, and an
+operator running a continuous channel will be cut off at eight hours by the
+platform rather than by us. Nothing in the tree currently knows this.
+
+**GOING LIVE HAS ACCOUNT ELIGIBILITY REQUIREMENTS THAT ARE NOT ABOUT SCOPES.**
+Since 2024-06-10: the account must be at least 60 days old, and the Page or
+professional-mode profile must have at least 100 followers. A brand-new account
+with every permission granted still cannot go live, and the refusal will arrive
+as a generic API error. This belongs in the setup guide, not in a retry loop.
+
+**The scheduling contradiction is resolved in favour of the scalar.** The first
+pass found `event_params` documented two ways and could not settle it. The
+guide carries a literal, copy-pasteable request using the scalar UNIX timestamp
+(`event_params=1541539800`). That is what to send. The structured
+`{start_time, cover}` object appears on the v26.0 edge reference; if the scalar
+is refused, that is the next thing to try, and the read-back test in the first
+pass's UNRESOLVED #1 still stands as the way to confirm.
+
+**`live_views` remains genuinely unknown.** The node reference that carries the
+field list is a real 404 in every form tried across both passes. Do not build
+Facebook viewer stats. *Resolve by:* one authenticated
+`GET /<LIVE_VIDEO_ID>?fields=live_views` against a live broadcast, recording
+whether the field returns, errors, or is silently dropped.
