@@ -31,10 +31,33 @@
 # So no rule may set a header that a later rule also sets. The security headers
 # stay on /* because they belong on everything; Cache-Control is now stated once
 # per path class, and the HTML rule is scoped to the HTML rather than to /*.
+# CLOUDFLARE WEB ANALYTICS IS ALLOWED HERE, AND IT IS A DECISION RATHER THAN A
+# FORMALITY. Read this before keeping it.
+#
+# Lighthouse (desktop, 2026-08-16) failed two audits on the live homepage --
+# errors-in-console and inspector-issues -- for one reason:
+#
+#   Loading the script 'https://static.cloudflareinsights.com/beacon.min.js/...'
+#   violates the following Content Security Policy directive:
+#   "script-src 'self' 'unsafe-inline'"
+#
+# Cloudflare injects that beacon at the edge because Web Analytics is enabled on
+# the Pages project. The CSP was never told, so every visitor's browser fetched
+# it, refused it, and logged an error. The analytics collected nothing either --
+# so the site was paying the console noise and getting no data for it.
+#
+# THE OTHER FIX IS ONE TOGGLE AND KEEPS THIS POLICY TIGHTER: turn Web Analytics
+# off in the Cloudflare dashboard, revert this block, and no third-party origin
+# appears in the CSP at all. For a project whose whole pitch is that you run it
+# yourself and nothing leaves your network, that is a defensible preference and
+# it is NOT obviously the wrong one.
+#
+# What is not defensible is the state this replaces: analytics enabled, blocked
+# by policy, erroring on every page load, and collecting nothing.
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
-  Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; font-src 'self'; base-uri 'self'; frame-ancestors 'none'
 
 # HTML must revalidate, or a deploy is invisible until caches expire. Scoped to
 # the built pages rather than /*, so it cannot leak onto a hashed asset.
