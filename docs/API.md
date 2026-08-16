@@ -253,9 +253,19 @@ does not get to change what another operator's console shows them.
 | `PUT` | `/settings/mqtt-password` |
 | `PUT` | `/settings/automod-key` |
 | `GET` | `/tls`, `/fonts` |
+| `GET` | `/tls/acme-preflight` |
 
 `PUT /settings` takes the whole blob. Read it, change what you want, write it
 back — a partial object will clear what it omits.
+
+`GET /tls/acme-preflight?hostname=…` reports what Let's Encrypt would need from
+this host — a name it can issue for, a DNS record, port 80, a contact address —
+and, in `acme` mode, what it said the last time it refused. Each check is
+`pass`, `fail` or `unknown`; `unknown` is the honest answer where this process
+cannot see far enough, and only `fail` clears `ready`. **It changes nothing.**
+`config.yaml` is not writable by this service and this route does not pretend
+otherwise: it tells you what to write. Omitting `hostname` checks
+`tls.hostname`. See [TLS.md](TLS.md#switching-to-lets-encrypt).
 
 The MQTT password has its own route because it is the one setting `GET
 /settings` will not give back. Writing it through the blob would mean reading

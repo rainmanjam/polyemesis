@@ -339,7 +339,19 @@ func run(h *hooks) error {
 	// proxy owns port 80.
 	var redirectServer *http.Server
 	if provider.Enabled() {
-		redirectServer = startHTTPHelper(log, cfg, provider)
+		var bindErr error
+		redirectServer, bindErr = startHTTPHelper(log, cfg, provider)
+		// Told to the API as well as to the log, because the log is not where
+		// anyone is looking. "Nothing is listening on :80" is the single most
+		// common reason Let's Encrypt issuance never completes, and until now
+		// the only record of it was one line at startup — which the operator
+		// reading a certificate warning in a browser three weeks later has no
+		// reason to go back and find. See internal/api/acme_preflight.go.
+		if bindErr != nil {
+			srv.SetHTTPHelperStatus(false, bindErr.Error())
+		} else {
+			srv.SetHTTPHelperStatus(true, "")
+		}
 	}
 
 	if err := reportStartup(log, cfg, provider, store, tools); err != nil {
@@ -427,12 +439,15 @@ func newTLSProvider(cfg config.Config) (*tlsx.Provider, error) {
 //
 // It fails soft on purpose. Port 80 is unbindable for an unprivileged process
 // and is often already taken; aborting startup over it would leave the operator
-// with no UI in which to fix the setting that broke startup. Returns nil when
-// no helper is running, which the caller treats as "nothing to shut down".
-func startHTTPHelper(log *slog.Logger, cfg config.Config, provider *tlsx.Provider) *http.Server {
+// with no UI in which to fix the setting that broke startup. Returns a nil
+// server when no helper is running, which the caller treats as "nothing to shut
+// down", and the bind error separately — a failure to take :80 is something the
+// ACME preflight has to be able to report, and "no server" alone does not
+// distinguish it from "the main listener already owns the port".
+func startHTTPHelper(log *slog.Logger, cfg config.Config, provider *tlsx.Provider) (*http.Server, error) {
 	const addr = ":80"
 	if listenPort(cfg.Addr) == "80" {
-		return nil // the TLS listener already owns it
+		return nil, nil // the TLS listener already owns it
 	}
 
 	ln, err := net.Listen("tcp", addr)
@@ -443,7 +458,7 @@ func startHTTPHelper(log *slog.Logger, cfg config.Config, provider *tlsx.Provide
 		} else {
 			log.Warn("cannot bind :80 to redirect plain http to https; serving https only", "error", err)
 		}
-		return nil
+		return nil, err
 	}
 
 	srv := &http.Server{
@@ -452,7 +467,7 @@ func startHTTPHelper(log *slog.Logger, cfg config.Config, provider *tlsx.Provide
 	}
 	go func() { _ = srv.Serve(ln) }()
 	log.Info("http redirect listening", "addr", addr, "acmeChallenge", provider.Mode() == tlsx.ModeACME)
-	return srv
+	return srv, nil
 }
 
 // redirectToHTTPS sends everything that is not an ACME challenge to the TLS
