@@ -86,7 +86,7 @@ does), and OBS's connect, handshake and stream are accepted and probed
 correctly — but if you need multiple audio tracks out of OBS today, use SRT.
 SRT remains the operated path.
 
-See `notes/enhanced-rtmp-multitrack.md`.
+See `evidence/enhanced-rtmp-multitrack.md`.
 
 The `enhancedRtmp` config key is still gone, and still does not need to come
 back: this needs no flag. A config file that names it keeps loading; the key is

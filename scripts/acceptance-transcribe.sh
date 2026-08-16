@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Transcription, against the real model host and the real binaries.
 #
-# WHAT THIS PACKAGE ACTUALLY IS. docs/notes/live-test-coverage-gaps.md ranked
+# WHAT THIS PACKAGE ACTUALLY IS. An internal coverage review ranked
 # internal/transcribe third on "7,661 lines, 2 external hosts", and the host
 # count came from grepping for URLs. One of the two is a github.com link inside
 # an error message that is never fetched. Transcription itself is LOCAL: a

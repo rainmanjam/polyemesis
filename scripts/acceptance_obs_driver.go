@@ -4,7 +4,7 @@
 //
 // Everything else that exercises the E-RTMP multitrack path uses FFmpeg as the
 // publisher. This one uses OBS, which is the encoder the feature exists for and
-// the one thing docs/notes/enhanced-rtmp-multitrack.md still lists as
+// the one thing docs/evidence/enhanced-rtmp-multitrack.md still lists as
 // unconfirmed: OBS's RTMP connect/handshake, the onMetaData it sends, and the
 // trackIds it assigns are its own code, not FFmpeg's.
 //

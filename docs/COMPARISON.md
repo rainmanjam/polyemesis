@@ -2,10 +2,9 @@
 
 An honest comparison, including the parts where polyemesis loses.
 
-Sourced from [RESEARCH-COMPETITIVE.md](RESEARCH-COMPETITIVE.md) — a survey of
-Restreamer's issue trackers (263 open, 548 closed) and restream.io's published
-plan comparison, done 2026-07-27 — with the polyemesis column verified against
-the code rather than assumed.
+Sourced from a survey of Restreamer's issue trackers (263 open, 548 closed) and
+restream.io's published plan comparison, done 2026-07-27 — with the polyemesis
+column verified against the code rather than assumed.
 
 > **The polyemesis column was re-verified 2026-07-30**, and three rows had gone
 > stale in the product's favour: overlays and MQTT had shipped while still
@@ -294,7 +293,5 @@ pass. See [ENCODING.md § Per-encoder flags](ENCODING.md#per-encoder-flags).
 
 ## See also
 
-- [RESEARCH-COMPETITIVE.md](RESEARCH-COMPETITIVE.md) — the underlying survey,
-  with reaction counts and the gap ranking
 - [AUDIO-ROUTING.md](AUDIO-ROUTING.md) — the capability the comparison turns on
 - [RENDITIONS.md](RENDITIONS.md) — how per-destination video specs work here

@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/fsperm"
@@ -106,6 +107,13 @@ type Provider struct {
 	caCert *x509.Certificate
 
 	acme *autocert.Manager
+
+	// The last thing Let's Encrypt said when it refused. Written from
+	// handshake goroutines and read from an HTTP handler, so it is guarded —
+	// this is a real race, not a theoretical one.
+	issuanceMu  sync.Mutex
+	issuanceErr string
+	issuanceAt  time.Time
 }
 
 // Dir is where generated TLS material lives under a data directory.
@@ -192,14 +200,57 @@ func (p *Provider) initACME(opts Options) error {
 		return err
 	}
 	conf := baseTLSConfig()
-	conf.GetCertificate = m.GetCertificate
+	p.acme = m
+	conf.GetCertificate = p.getCertificate
 	// Advertising the ACME ALPN protocol lets Let's Encrypt validate over 443
 	// alone. It is the fallback that keeps issuance working on a box where
 	// port 80 is taken or firewalled.
 	conf.NextProtos = append(conf.NextProtos, acme.ALPNProto)
 	p.conf = conf
-	p.acme = m
 	return nil
+}
+
+// getCertificate is autocert's GetCertificate with the outcome remembered.
+//
+// WHY THE WRAPPER. Issuance is lazy: it happens inside a handshake, in a
+// goroutine nobody is watching, and when Let's Encrypt refuses — the name does
+// not resolve here, nothing answered the challenge on port 80, the account is
+// rate limited — the whole of the evidence is an aborted connection in whatever
+// browser triggered it. The Settings page could say no more than "no
+// certificate yet", which is exactly the answer that sends an operator to a
+// forum. Keeping the last refusal lets the UI show the sentence Let's Encrypt
+// actually sent, which usually names the problem outright.
+//
+// ONLY THE CONFIGURED NAME COUNTS. A scanner opening TLS to the bare IP, or a
+// stranger sending someone else's SNI, gets refused by hostPolicy — correctly,
+// that is what stops a public port burning this account's rate limit. Those
+// refusals say nothing about whether OUR certificate can be issued, and
+// recording them would fill the operator's diagnosis with other people's port
+// scans.
+func (p *Provider) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	cert, err := p.acme.GetCertificate(hello)
+	if normalizeHost(hello.ServerName) != normalizeHost(p.hostname) {
+		return cert, err
+	}
+	p.issuanceMu.Lock()
+	defer p.issuanceMu.Unlock()
+	if err != nil {
+		p.issuanceErr, p.issuanceAt = err.Error(), p.now()
+	} else {
+		// Cleared on success, so a problem the operator has since fixed stops
+		// being reported as though it were still true.
+		p.issuanceErr, p.issuanceAt = "", time.Time{}
+	}
+	return cert, err
+}
+
+// LastIssuanceError is the most recent refusal from Let's Encrypt for this
+// server's own hostname, and when it happened. Empty when issuance has never
+// been attempted, or has since succeeded.
+func (p *Provider) LastIssuanceError() (string, time.Time) {
+	p.issuanceMu.Lock()
+	defer p.issuanceMu.Unlock()
+	return p.issuanceErr, p.issuanceAt
 }
 
 // baseTLSConfig pins the handshake policy. Go's server default already floors

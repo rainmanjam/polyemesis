@@ -1,0 +1,18 @@
+# The quiet one. The job looks gated -- it depends on `changes` and two of its
+# three steps carry the condition -- and a documentation-only run still pays for
+# the third. Nothing reports anything unusual; the job is simply slower than the
+# checks list suggests it should be.
+name: red - a job that gates some of its steps
+on: pull_request
+jobs:
+  build:
+    name: build
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        if: needs.changes.outputs.code == 'true'
+      - name: build
+        if: needs.changes.outputs.code == 'true'
+        run: make
+      - run: make test

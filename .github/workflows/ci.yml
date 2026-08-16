@@ -52,20 +52,31 @@ permissions:
   contents: read
 
 jobs:
-  # Does this pull request contain anything an acceptance suite could break?
+  # Does this pull request contain anything any suite in here could break?
   #
   # THE EXPENSIVE HALF OF THIS WORKFLOW RAN ON MARKDOWN. Three documentation-only
   # PRs on 2026-08-14 each fired all 28 checks -- the full acceptance matrix,
   # three-OS builds, Docker and browser suites -- to validate files no job reads.
   # One of them was a single file. See #350.
   #
-  # WHY THIS GATES STEPS AND NOT JOBS. The acceptance suites are REQUIRED status
-  # checks -- twelve of them when this was written, thirteen since
-  # acceptance-ladder joined the matrix, and a leg's context has to be added to
-  # the branch-protection ruleset by hand or it reports without gating anything.
-  # A workflow-level `paths:` filter stops the workflow
-  # running at all, so a required check never reports and the pull request stays
-  # pending forever with no way to merge it.
+  # WHAT THIS GATES, and #378 is the second half of it. #351/#357 stopped the
+  # acceptance matrix; the three-OS test matrix, the go job and the cross-compile
+  # kept running, which is most of the twenty minutes #350 was actually
+  # complaining about. All five now read this output:
+  #
+  #	go                go build, vet, test
+  #	crossplatform     test: ubuntu-latest / macos-latest / windows-latest
+  #	ui                ui typecheck, lint, build
+  #	cross             cross-compile all release targets
+  #	acceptance        acceptance: <thirteen suites>
+  #
+  # Every name in the right-hand column is a required status context in the
+  # branch-protection ruleset. That is the whole reason for the shape below.
+  #
+  # WHY THIS GATES STEPS AND NOT JOBS. A leg's context has to be added to the
+  # ruleset by hand or it reports without gating anything. A workflow-level
+  # `paths:` filter stops the workflow running at all, so a required check never
+  # reports and the pull request stays pending forever with no way to merge it.
   #
   # A JOB-LEVEL `if:` ON A MATRIX IS THE SAME BUG WEARING A DISGUISE, and #351
   # shipped it. A skipped ordinary job does report, and a skip does satisfy the
@@ -79,6 +90,18 @@ jobs:
   # So the matrix always expands and every leg reports. What is conditional is
   # the WORK: each step carries the `if:`, the job costs a runner allocation and
   # nothing else, and the required context reports success either way.
+  #
+  # ONE SHAPE FOR ALL FIVE, INCLUDING THE THREE THAT HAVE NO MATRIX. `go`, `ui`
+  # and `cross` are ordinary jobs today, and a job-level `if:` on them would be
+  # correct today: a skipped ordinary job reports skipped and satisfies its
+  # requirement. It is not written that way, because the difference between the
+  # safe spelling and the outage is one `strategy:` block that nobody would think
+  # to connect to branch protection while adding it -- a Go-version matrix on
+  # `go`, a Node-version matrix on `ui`. The rule is therefore flat, has no
+  # exceptions to remember, and is enforced rather than remembered:
+  # internal/testenv/docsgate_test.go fails if this output is ever read from a
+  # job-level `if:`. The price is four runner allocations that do nothing on a
+  # documentation-only PR, against twenty minutes of compute they replace.
   #
   # IT FAILS TOWARD RUNNING. `code` is false only when EVERY changed path is
   # documentation; anything unrecognised makes it true. A new top-level directory
@@ -123,6 +146,10 @@ jobs:
 
   go:
     name: go build, vet, test
+    # The documentation gate, #378. On every STEP below, never on this job --
+    # see the `changes` job for why that distinction is load-bearing and for
+    # what it cost the one time it was got wrong.
+    needs: changes
     runs-on: ubuntu-latest
     # Above the 15m per-package go test timeout below, so Go's diagnostic
     # panic wins the race against this.
@@ -143,8 +170,16 @@ jobs:
       # change once someone has watched the three images pass with it.
       POLYEMESIS_REQUIRE_FFMPEG: "1"
     steps:
+      # Says out loud why a green check did no work, so a reader of the
+      # checks list is never left guessing whether this ran or no-opped.
+      - name: Documentation-only change, so this job did no work
+        if: needs.changes.outputs.code != 'true'
+        run: |
+          echo "::notice title=go build, vet, test::this check did no work -- every changed path was documentation. See the 'which changes' job."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.code == 'true'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
           cache: true
@@ -176,12 +211,14 @@ jobs:
       #
       # Bump the -v1 suffix to take a newer build on purpose.
       - name: Cache FFmpeg
+        if: needs.changes.outputs.code == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/ffcache
           key: ffmpeg-${{ runner.os }}-n8.1-latest-linux64-gpl-8.1-v1
 
       - name: Install FFmpeg
+        if: needs.changes.outputs.code == 'true'
         timeout-minutes: 6
         env:
           FFCACHE: /tmp/ffcache
@@ -271,6 +308,7 @@ jobs:
       # now fails the step, and the emptiness of its output is a separate
       # question asked afterwards.
       - name: gofmt
+        if: needs.changes.outputs.code == 'true'
         run: |
           set -euo pipefail
           unformatted=$(gofmt -l ./cmd ./internal)
@@ -280,8 +318,10 @@ jobs:
             exit 1
           fi
           echo "gofmt: clean"
-      - run: go build ./...
-      - run: go vet ./...
+      - if: needs.changes.outputs.code == 'true'
+        run: go build ./...
+      - if: needs.changes.outputs.code == 'true'
+        run: go vet ./...
 
       # THE PREFLIGHT'S OWN LIVENESS, and it runs HERE because it was not
       # running anywhere.
@@ -299,6 +339,7 @@ jobs:
       # about. ~4s; it runs the package three times with a filter that selects
       # almost nothing.
       - name: The route-coverage preflight is still wired
+        if: needs.changes.outputs.code == 'true'
         run: make preflight-guard
 
       # THE OTHER HALF OF THE SAME MECHANISM. #217/#223.
@@ -334,6 +375,7 @@ jobs:
       # before this fires. Below the job's 25 either way, which is the property
       # being claimed.
       - name: internal/api coverage measures the tests, not the preflight
+        if: needs.changes.outputs.code == 'true'
         timeout-minutes: 14
         run: make coverage-instrument-guard
 
@@ -355,7 +397,8 @@ jobs:
       # filter matching one of the two tests and not the other would leave every
       # counterpart undischarged while still printing ok. The full suite runs
       # here with no filter, so strict mode costs nothing and closes that door.
-      - run: POLYEMESIS_LEDGER=strict go test -race -timeout 15m ./...
+      - if: needs.changes.outputs.code == 'true'
+        run: POLYEMESIS_LEDGER=strict go test -race -timeout 15m ./...
 
       # The acceptance suites' shared diagnostic helpers, tested here rather
       # than in their own job: it is pure shell, needs nothing installed and
@@ -382,7 +425,8 @@ jobs:
       # belonging to whatever else is running on it. So these are blast-radius
       # ceilings, not fitted bounds: sized to be unreachable by a healthy run and
       # far below the job's 25, which is the only property being claimed.
-      - run: ./scripts/test-lib-observe.sh
+      - if: needs.changes.outputs.code == 'true'
+        run: ./scripts/test-lib-observe.sh
         timeout-minutes: 6
 
       # The acceptance suites' own deadline, which fires below this workflow's
@@ -390,7 +434,8 @@ jobs:
       # Tested here for the reason above and one that is specific to it: the
       # watchdog is a background process holding the suite's stdout, so a bug
       # in it does not merely fail to report -- it becomes the hang.
-      - run: ./scripts/test-lib-watchdog.sh
+      - if: needs.changes.outputs.code == 'true'
+        run: ./scripts/test-lib-watchdog.sh
         timeout-minutes: 6
 
       # The SBOM guard, which only ever runs for real inside a release. That is
@@ -399,7 +444,8 @@ jobs:
       # comment described, and no one could discover that without cutting a
       # release. Running its tests on every PR is the part that makes the fix
       # a fix rather than a better guess. Pure jq and shell, about a second.
-      - run: ./scripts/test-sbom-guard.sh
+      - if: needs.changes.outputs.code == 'true'
+        run: ./scripts/test-sbom-guard.sh
         timeout-minutes: 5
 
       # The termination guard, and its tests, alongside the SBOM pair above for
@@ -414,9 +460,11 @@ jobs:
       # fixtures. The guard without its fixtures is a check nobody has watched
       # fail; the fixtures without the guard oblige nothing. Pure shell, under a
       # second each.
-      - run: ./scripts/termination-guard.sh
+      - if: needs.changes.outputs.code == 'true'
+        run: ./scripts/termination-guard.sh
         timeout-minutes: 5
-      - run: ./scripts/test-termination-guard.sh
+      - if: needs.changes.outputs.code == 'true'
+        run: ./scripts/test-termination-guard.sh
         timeout-minutes: 5
 
       # The OBS container entrypoint's stop path. #208 was FILED rather than
@@ -425,7 +473,8 @@ jobs:
       # Both ways are about a process, not about OBS, so the stop logic moved
       # into scripts/obs/lib-stop.sh and this drives it with `sleep` and a
       # SIGTERM-deaf stand-in. No OBS, no Xvfb, no container, about six seconds.
-      - run: ./scripts/test-obs-stop.sh
+      - if: needs.changes.outputs.code == 'true'
+        run: ./scripts/test-obs-stop.sh
         timeout-minutes: 6
 
       # Outbound webhooks over a real socket. IN THIS JOB RATHER THAN THE
@@ -442,7 +491,8 @@ jobs:
       # nothing to be flaky about. Its credentialed step skips here; no
       # POLY_HOOKS_URL is configured for this workflow and none is needed --
       # 29 of its 31 checks run without one.
-      - run: ./scripts/acceptance-hooks.sh
+      - if: needs.changes.outputs.code == 'true'
+        run: ./scripts/acceptance-hooks.sh
         timeout-minutes: 6
 
       # The acceptance suites' shared teardown. Same argument as the guard
@@ -452,6 +502,7 @@ jobs:
       # harness, because a real regression gets dismissed as "that suite is
       # flaky". Needs lsof, which this job does not otherwise install.
       - name: ./scripts/test-lib-cleanup.sh
+        if: needs.changes.outputs.code == 'true'
         timeout-minutes: 10
         run: |
           sudo apt-get install -y --no-install-recommends lsof
@@ -474,6 +525,10 @@ jobs:
   # platforms.
   crossplatform:
     name: "test: ${{ matrix.os }}"
+    # The documentation gate, #378. On every STEP below, never on this job --
+    # see the `changes` job for why that distinction is load-bearing and for
+    # what it cost the one time it was got wrong.
+    needs: changes
     runs-on: ${{ matrix.os }}
     # Above the 15m per-package go test timeout below. Windows needs the room:
     # internal/db alone has been measured at 265-300s and once past 600s.
@@ -485,8 +540,16 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
+      # Says out loud why a green check did no work, so a reader of the
+      # checks list is never left guessing whether this ran or no-opped.
+      - name: Documentation-only change, so this job did no work
+        if: needs.changes.outputs.code != 'true'
+        run: |
+          echo "::notice title=test: ${{ matrix.os }}::this check did no work -- every changed path was documentation. See the 'which changes' job."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.code == 'true'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
           cache: true
@@ -515,11 +578,11 @@ jobs:
         # Linux only: macOS installs from brew and Windows caches its own
         # zip below. Without this the step runs on all three and stores an
         # empty directory under two keys that nothing ever reads.
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && needs.changes.outputs.code == 'true'
 
       - name: Install FFmpeg (Linux)
         timeout-minutes: 6
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && needs.changes.outputs.code == 'true'
         env:
           FFCACHE: /tmp/ffcache
         run: |
@@ -588,7 +651,7 @@ jobs:
           ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
           ffmpeg -hide_banner -version | head -1
       - name: Install FFmpeg (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && needs.changes.outputs.code == 'true'
         # BREW CANNOT SUPPLY 8.1, AND THAT IS RECORDED RATHER THAN HIDDEN.
         # `ffmpeg` is 9.0 and there is no `ffmpeg@8` formula -- the versioned ones
         # jump from 7.1 straight to 9.0 -- and BtbN publishes no macOS build. So
@@ -606,13 +669,13 @@ jobs:
       # is gated to runner.os == 'Linux'.
       - name: Cache FFmpeg (Windows)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && needs.changes.outputs.code == 'true'
         with:
           path: ${{ runner.temp }}/ffcache
           key: ffmpeg-${{ runner.os }}-n8.1-latest-win64-gpl-8.1-v1
 
       - name: Install FFmpeg (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && needs.changes.outputs.code == 'true'
         # THE SAME BUILD THE LINUX ARM INSTALLS, not choco, for two reasons and
         # the second is the important one.
         #
@@ -670,12 +733,16 @@ jobs:
       # ffmpeg's -- the same discarded-exit-status shape as the gofmt pipeline in
       # the go job. A step boundary checks each one.
       - name: FFmpeg version
+        if: needs.changes.outputs.code == 'true'
         run: ffmpeg -hide_banner -version
       - name: ffprobe version
+        if: needs.changes.outputs.code == 'true'
         run: ffprobe -hide_banner -version
 
-      - run: go build ./...
-      - run: go vet ./...
+      - if: needs.changes.outputs.code == 'true'
+        run: go build ./...
+      - if: needs.changes.outputs.code == 'true'
+        run: go vet ./...
       # Go's default timeout is 10 minutes PER PACKAGE, and internal/db lands
       # close enough to it on Windows that ordinary runner variance decides the
       # build. Measured on ONE unchanged tree: 264s, 297s, and once past 600s,
@@ -712,7 +779,8 @@ jobs:
       # a goroutine dump naming the running test; the job timeout just kills the
       # runner and tells you nothing. Whichever fires first decides how much you
       # learn, so Go's has to.
-      - run: go test -timeout 15m ./...
+      - if: needs.changes.outputs.code == 'true'
+        run: go test -timeout 15m ./...
 
       # Build and RUN it. Compiling proves the code is valid for the platform;
       # it does not prove the process comes up.
@@ -738,6 +806,7 @@ jobs:
       # -cover, so the smoke run MEASURES itself. See the covdata step at the
       # end of this job for what that is for and what it costs.
       - name: Build the smoke binary
+        if: needs.changes.outputs.code == 'true'
         timeout-minutes: 8
         shell: bash
         run: go build -cover -o polyemesis-smoke ./cmd/polyemesis
@@ -749,6 +818,7 @@ jobs:
       # :154-158 and :305-311 -- whichever timeout fires first decides how much
       # you learn, so the narrowest one has to.
       - name: Start the server and check it serves
+        if: needs.changes.outputs.code == 'true'
         timeout-minutes: 2
         shell: bash
         run: |
@@ -811,6 +881,7 @@ jobs:
       # it is below the job's 30 on purpose -- a step timeout names the step
       # that hung, a job timeout names nothing.
       - name: Push a broadcast through it and measure the output
+        if: needs.changes.outputs.code == 'true'
         timeout-minutes: 8
         shell: bash
         run: |
@@ -900,7 +971,7 @@ jobs:
       # touches little of internal/*, so that number would be low, meaningless,
       # and immediately mistaken for the project's coverage.
       - name: Report what the smoke run executed in cmd/polyemesis
-        if: always()
+        if: always() && needs.changes.outputs.code == 'true'
         shell: bash
         run: |
           set -uo pipefail
@@ -927,7 +998,7 @@ jobs:
             echo "(no cmd/polyemesis rows in the profile)"
 
       - name: Upload broadcast artefacts on failure
-        if: failure()
+        if: failure() && needs.changes.outputs.code == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: broadcast-${{ matrix.os }}
@@ -939,52 +1010,86 @@ jobs:
 
   ui:
     name: ui typecheck, lint, build
+    # The documentation gate, #378. On every STEP below, never on this job --
+    # see the `changes` job for why that distinction is load-bearing and for
+    # what it cost the one time it was got wrong.
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
         working-directory: ui
     steps:
+      # Says out loud why a green check did no work, so a reader of the
+      # checks list is never left guessing whether this ran or no-opped.
+      - name: Documentation-only change, so this job did no work
+        if: needs.changes.outputs.code != 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          echo "::notice title=ui typecheck, lint, build::this check did no work -- every changed path was documentation. See the 'which changes' job."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.code == 'true'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.changes.outputs.code == 'true'
         with:
           # Keep in step with the Dockerfiles' node tag and @types/node major.
           node-version: 24
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - run: npm ci --ignore-scripts
-      - run: npx --no-install tsc -b --noEmit
-      - run: npm run lint
-      - run: npm run build
+      - if: needs.changes.outputs.code == 'true'
+        run: npm ci --ignore-scripts
+      - if: needs.changes.outputs.code == 'true'
+        run: npx --no-install tsc -b --noEmit
+      - if: needs.changes.outputs.code == 'true'
+        run: npm run lint
+      - if: needs.changes.outputs.code == 'true'
+        run: npm run build
       # Unit tests for the pure logic the browser suite cannot enumerate --
       # platform link construction has five platforms times several missing-field
       # cases, and driving each through a real browser would cost minutes to
       # assert what a millisecond of vitest does.
-      - run: npm test
+      - if: needs.changes.outputs.code == 'true'
+        run: npm test
       # A vulnerable direct dependency should fail the build, not sit in a
       # report nobody opens. --audit-level=high so a low-severity transitive
       # advisory does not block a hotfix.
-      - run: npm audit --audit-level=high
+      - if: needs.changes.outputs.code == 'true'
+        run: npm audit --audit-level=high
 
   cross:
     name: cross-compile all release targets
+    # The documentation gate, #378. On every STEP below, never on this job --
+    # see the `changes` job for why that distinction is load-bearing and for
+    # what it cost the one time it was got wrong.
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
+      # Says out loud why a green check did no work, so a reader of the
+      # checks list is never left guessing whether this ran or no-opped.
+      - name: Documentation-only change, so this job did no work
+        if: needs.changes.outputs.code != 'true'
+        run: |
+          echo "::notice title=cross-compile all release targets::this check did no work -- every changed path was documentation. See the 'which changes' job."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.code == 'true'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
           cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.changes.outputs.code == 'true'
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: ui/package-lock.json
       # `make release` depends on the ui target, which needs the built assets
       # for go:embed. Building them here keeps the check honest end to end.
-      - run: make release
-      - run: ls -lh dist/
+      - if: needs.changes.outputs.code == 'true'
+        run: make release
+      - if: needs.changes.outputs.code == 'true'
+        run: ls -lh dist/
 
   # Which container suites this run needs.
   #
@@ -1401,8 +1506,14 @@ jobs:
       #
       # if: failure() rather than always(): on a green run there is no process
       # left to signal and nothing to explain.
+      #
+      # The gate is ANDed on for completeness rather than for effect -- #357
+      # missed this one step, and it was harmless only because a documentation
+      # -only run has no suite step to fail, so `failure()` was never true. That
+      # is a coincidence of this job's shape, not a property, and the rule in
+      # internal/testenv/docsgate_test.go found it.
       - name: Diagnostics (what was it waiting for)
-        if: failure()
+        if: failure() && needs.changes.outputs.code == 'true'
         # Never fail the job from here. This step exists to describe a failure
         # that already happened; a diagnostic that turns a legible suite
         # failure into a confusing one about ps flags is worse than none.

@@ -209,6 +209,5 @@ Where an estimate is a guess rather than a measurement, the document says so.
 
 - [../COMPARISON.md](../COMPARISON.md) — how these gaps look against Restreamer
   and restream.io
-- [../RESEARCH-COMPETITIVE.md](../RESEARCH-COMPETITIVE.md) — the demand evidence
   the ordering rests on
 - [../ARCHITECTURE.md](../ARCHITECTURE.md)

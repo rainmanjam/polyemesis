@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OBS acceptance: does what REAL OBS publishes arrive intact?
 #
-# This is the run docs/notes/enhanced-rtmp-multitrack.md listed as the last
+# This is the run docs/evidence/enhanced-rtmp-multitrack.md listed as the last
 # unconfirmed thing, and it went looking for one answer and found another.
 #
 # WHAT IT CONFIRMED. OBS's own RTMP connect and handshake are accepted by the
@@ -264,7 +264,7 @@ elif [ "$COUNT" -lt "$OBS_SENDS" ] 2>/dev/null; then
 else
   bad "OBS now sends $COUNT tracks, not $OBS_SENDS — its multitrack gate has opened"
   note "This is GOOD NEWS and a real change: re-run the wire capture, then update"
-  note "OBS_SENDS here, docs/FAQ.md and docs/notes/enhanced-rtmp-multitrack.md."
+  note "OBS_SENDS here, docs/FAQ.md and docs/evidence/enhanced-rtmp-multitrack.md."
 fi
 
 printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n\n" "$pass" "$fail"

@@ -9,7 +9,7 @@ import {
 /** The four states of the consequence line.
  *
  *  Two of them — what happens to the encode you are LEAVING — are the novel
- *  part of this design; nothing surveyed in docs/notes/video-treatment-ui.md
+ *  part of this design; nothing surveyed in docs/evidence/video-treatment-ui.md
  *  tells an operator that at all. They are also the two that were untested,
  *  which is how "N other destinations stay on it" shipped without anyone
  *  confirming N is right.

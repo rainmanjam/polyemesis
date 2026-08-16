@@ -102,7 +102,7 @@ touching anything above it.
 ### Why a Go RTMP server (`internal/rtmpserver`), not `ffmpeg -listen 1`
 
 RTMP is the *fallback* ingest (one audio track on classic RTMP — see
-`notes/enhanced-rtmp-multitrack.md` for what changes on FFmpeg 7.1+), and for a
+`evidence/enhanced-rtmp-multitrack.md` for what changes on FFmpeg 7.1+), and for a
 long time the bar was "robust and cheap": `ffmpeg -listen 1` demuxed FLV and
 emitted MPEG-TS with `-c copy`, which was the exact same code path as SRT
 ingest, and the supervisor's respawn-with-backoff made "wait for the next

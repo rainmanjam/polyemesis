@@ -74,6 +74,75 @@ its first tagged release.
   the moment the install stops having a programme. (#387)
 
 ### Added
+- **polyemesis.com publishes the documentation.** The site went from 6 pages to
+  35: the 23 user-facing documents in `docs/` are rendered at `/docs/<slug>`
+  rather than linked to GitHub, four comparison pages sit under `/vs/`, and
+  `/free-restream-service` and `/how-to-multistream-from-obs` answer the two
+  queries with the most measured search demand this project can address.
+
+  The documents were invisible to search before this — 63,000 words reachable
+  only on github.com, so the authority accrued to Microsoft's domain and the
+  pages had no title, description or internal linking under our control.
+
+  Publishing is an **allowlist**, not a glob with exclusions. `docs/` also holds
+  `RESEARCH-COMPETITIVE.md` and `COPY-CONSTRAINTS.md`, and a glob would make the
+  next internal note public by default. A build check fails when a file in that
+  directory appears in neither list, so adding a document is a decision somebody
+  writes down.
+
+- **`llms.txt`, `/.well-known/security.txt`, an apple-touch-icon, `HowTo`
+  structured data on the install steps, and `lastmod` in the sitemap.** The
+  `lastmod` dates come from `git log -1` per page rather than the clock: a
+  build-time stamp marks every page as modified on every deploy, which is a lie
+  a crawler discounts, costing the signal it was meant to give.
+
+  `security.txt` carries the mandatory RFC 9116 `Expires` field, and the build
+  now fails when it is past and warns 30 days out. An expired security contact
+  reads as an abandoned one to the person deciding between reporting privately
+  and going public.
+
+### Fixed
+- **Four of six pages were shipping with no cache revalidation.**
+  `web/public/_headers` scoped `no-cache` to `/` and `/*.html`, and its comment
+  claimed that covered the built pages. It did not: with
+  `build.format: "file"` and `trailingSlash: "never"` a page is BUILT as
+  `features.html` and SERVED as `/features`, and Cloudflare matches the request
+  path. The failure that block exists to prevent — "a deploy is invisible until
+  caches expire" — was live on `/features`, `/comparison`, `/docs` and
+  `/download`. A build check now derives the expectation from the built output.
+
+- **114 Copy buttons did nothing.** The click handler shipped inside
+  `CodeBlock.astro`, which the rendered documentation pages never mount. Styled,
+  focusable, labelled and inert.
+
+- **Eleven copy defects**, found by three independent reviewers with different
+  lenses. The ones that mattered were claims about other people's products:
+  a sentence whose "either" retroactively negated the clause before it, turning
+  a correct statement into the overclaim it was written to avoid; a wrong
+  restream.io plan limit that contradicted a sibling page; four capability cells
+  asserted "No" for competitors with nothing behind them; and a card presenting a
+  DESCRIPTION of a function in the quoted-source treatment that gives its
+  neighbours their authority.
+
+  Also removed: a per-destination CPU figure that appears nowhere but in prose,
+  and a claim that the second Twitch audio track works, which
+  `docs/AUDIO-ROUTING.md` marks EXPERIMENTAL because no broadcast has ever been
+  published through a key Enhanced Broadcasting minted.
+
+- **An engine test asked for three contiguous UDP ports and checked one.**
+  `testenv.FreeUDPPort` probes a port, releases it, and returns the number, so a
+  three-port allocator built on it had two numbers nobody had checked and one
+  that was already nobody's. It failed CI three times in one day on three
+  different ranges, each time blaming the code under test for a port it never
+  held. `testenv.FreeUDPWindow` reserves the window and holds it.
+
+### Changed
+- **Install-wide state comes off the engine** (first of six changes for #387).
+  Tools, recording paths, the host sampler and the settings read no longer route
+  through whichever engine happens to be default. No behaviour change intended,
+  with one exception worth stating: `GET /system` now reads settings from the
+  store rather than the engine's snapshot, so it stops lagging a settings save.
+
 - **An onboarding tour, offered once per install rather than once per browser.**
   A new operator finishes the signup screen and lands on an empty dashboard, and
   everything they need next is either in a terminal they have closed or in
@@ -1928,8 +1997,7 @@ became `backupIngestWanted` with no compatibility alias, which breaks any client
 that *writes* that field. Everything else here is a fix.
 
 An adversarial audit of the 0.2.0 release, and the fixes for everything it
-found. The full record, with a numbered finding behind every change below, is
-[docs/roadmap/ADVERSARIAL-AUDIT-0.2.0.md](docs/roadmap/ADVERSARIAL-AUDIT-0.2.0.md).
+found. Every change below traces to a numbered finding in that audit.
 
 ### Security
 

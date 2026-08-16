@@ -64,3 +64,22 @@ docs/media/.playwright/
 # without this line web/dist ships a second copy of every screenshot and the
 # 1.4 MB tour video that web/public already holds.
 web/dist/
+
+# Internal working documents. They stay on disk and are deliberately not
+# tracked, because this repository is public and "not linked from the website"
+# is not the same property as "not on the internet".
+#
+# Directories rather than filenames ON PURPOSE. A public .gitignore is itself
+# published, so a list of individual filenames would be an index of exactly the
+# material this is meant to withhold -- and every one of them is still reachable
+# in this repository's history, which is where that index would point.
+docs/internal/
+docs/superpowers/
+docs/security/
+docs/notes/
+
+# docs/evidence/ is NOT here, deliberately. It holds the handful of notes
+# that public pages cite as the source for a factual claim -- the competitor
+# table's receipts, the Enhanced RTMP findings README depends on. Those have
+# to stay readable or the claims lose their evidence, which is worse than
+# either publishing or removing them cleanly.

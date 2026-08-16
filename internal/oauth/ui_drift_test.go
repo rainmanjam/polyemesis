@@ -1,11 +1,11 @@
 package oauth
 
 import (
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // The same guard internal/db keeps over Rendition, one layer over.
@@ -23,15 +23,10 @@ import (
 // or a blank -- it is a row that reports nothing, on the screen an operator is
 // looking at seconds before going live.
 func TestUITypesCanNameEveryMetadataField(t *testing.T) {
-	path := filepath.Join("..", "..", "ui", "src", "lib", "types.ts")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("cannot read %s: %v", path, err)
-	}
-	union, ok := tsUnion(string(raw), "MetaField")
+	union, ok := tsUnion(testenv.StripJSComments(testenv.ReadUI(t, "lib", "types.ts")), "MetaField")
 	if !ok {
-		t.Fatalf("no `export type MetaField = ...` in %s. It was moved there from "+
-			"Dashboard.tsx precisely so this guard has one canonical place to read", path)
+		t.Fatal("no `export type MetaField = ...` in ui/src/lib/types.ts. It was moved " +
+			"there from Dashboard.tsx precisely so this guard has one canonical place to read")
 	}
 
 	for _, f := range AllMetadataFields {
@@ -100,11 +95,28 @@ func TestEveryMetadataFieldIsAdvertisedBySomePlatform(t *testing.T) {
 	}
 }
 
-// tsUnion returns the body of `export type <name> = ...;`, comments included.
+// tsUnion returns the body of `export type <name> = ...;`.
 //
-// Comments are kept deliberately: the union carries a note per group explaining
-// which push path produces those fields, and a helper that stripped them would
-// make the file harder to read in exchange for nothing.
+// IT USED TO SAY comments were kept deliberately, on the grounds that the union
+// carries a note per group about which push path produces those fields and that
+// stripping them "would make the file harder to read in exchange for nothing".
+// That reasoning was wrong twice over and #379 is the correction.
+//
+// It was not in exchange for nothing. The forward check below is
+// `strings.Contains(union, "\"tags\"")`, so deleting a member and leaving
+// `// "tags" -- removed, see ...` behind kept this guard green over a union that
+// could no longer name the field. That is the whole failure mode this family of
+// guards exists to catch, and this one was open to it.
+//
+// It also was not free in the other direction: the body is bounded by the first
+// `;` after the type name, and a semicolon inside one of those explanatory
+// comments truncates the union early, hiding every member after it from a check
+// that would then fail while naming the wrong cause.
+//
+// Callers pass source that has already been through testenv.StripJSComments, so
+// what is returned is the union as the compiler sees it. Nobody's reading
+// experience changes -- the notes are still in types.ts, this just stops them
+// counting as declarations.
 func tsUnion(src, name string) (string, bool) {
 	start := strings.Index(src, "export type "+name+" =")
 	if start < 0 {

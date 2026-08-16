@@ -415,6 +415,13 @@ func leakRoutes() []string {
 		"/api/v1/schedules",
 		"/api/v1/schedules/runs",
 		"/api/v1/tls",
+		// The Let's Encrypt walkthrough's checks. Swept rather than excused: a
+		// read token reaches it and it answers 200 with a body, and the body is
+		// the point of the sweep -- it describes this host's own name, the
+		// addresses that name resolves to, and whether :80 is held. None of
+		// that is a stored credential, and the one field that could have been a
+		// contact address deliberately is not: see acmeEmailCheck.
+		"/api/v1/tls/acme-preflight",
 		// The onboarding tour's completion flag. Swept rather than excused: a
 		// read token genuinely reaches it and it genuinely answers 200 with a
 		// body, so the discharge rule leaves no excuse available. The body is

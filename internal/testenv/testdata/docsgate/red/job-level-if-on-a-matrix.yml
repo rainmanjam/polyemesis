@@ -1,0 +1,22 @@
+# The outage itself: #351 in miniature.
+#
+# The matrix never expands, so `build: ubuntu-latest` and `build: macos-latest`
+# are never created. If either is a required context the pull request is stuck
+# for ever, showing green everywhere else.
+name: red - job-level if on a matrix job
+on: pull_request
+jobs:
+  build:
+    name: "build: ${{ matrix.os }}"
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+        if: needs.changes.outputs.code == 'true'
+      - name: build
+        if: needs.changes.outputs.code == 'true'
+        run: make

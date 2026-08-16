@@ -10,12 +10,14 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -294,6 +296,20 @@ type Server struct {
 	version string
 	// startedAt is the process start, which is what the uptime metric reports.
 	startedAt time.Time
+
+	// httpHelper is whether the plain-HTTP companion on :80 got the port, set
+	// by cmd/polyemesis after it tries. Nil means nothing tried in this
+	// process, which is a different answer from "tried and failed" and the
+	// ACME preflight reports it as such. See SetHTTPHelperStatus.
+	httpHelper atomic.Pointer[httpHelperStatus]
+
+	// resolveHost and localAddrs are the ACME preflight's two windows onto the
+	// machine — where a name points, and which addresses this host holds. Nil
+	// means ask the real resolver and the real interfaces, which is what a
+	// running server wants; a test supplies its own so the checks can be driven
+	// without a network. See acme_preflight.go.
+	resolveHost func(context.Context, string) ([]net.IP, error)
+	localAddrs  func() ([]net.Addr, error)
 
 	// upgradeMethod and execPath are how this install was put on the box and
 	// what an upgrade would replace. Both are settled ONCE, in New, because
@@ -783,6 +799,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Put("/settings/mqtt-password", s.handlePutMQTTPassword)
 
 			r.Get("/tls", s.handleTLSStatus)
+			// What Let's Encrypt would need from this host, checked against
+			// this host. Authenticated, unlike /tls/ca above: it reads the
+			// configuration and makes a DNS query, neither of which a stranger
+			// gets to ask for. See acme_preflight.go.
+			r.Get("/tls/acme-preflight", s.handleACMEPreflight)
 
 			// The platform registry: ingest servers, encoder ceilings and
 			// codecs, so the operator picks "Twitch" instead of typing a URL.
