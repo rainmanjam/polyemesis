@@ -280,7 +280,17 @@ func (d *DB) DeleteSource(id int64) error {
 	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&n); err != nil {
 		return err
 	}
-	if n <= 1 {
+	// EXACTLY ONE, not "at most one". With none there is no only source to
+	// refuse to delete, and saying so described an ingest the install does not
+	// have while hiding the real answer: the row is not there. That state is
+	// unreachable today and stops being so with the zero-source work, where an
+	// operator on a fresh install clicking a stale row -- or a client retrying
+	// a delete that already succeeded -- would have been told a rule that no
+	// longer applies to them instead of "source not found".
+	//
+	// Falling through is what produces the right answer: no row matches, so the
+	// DELETE below affects nothing and returns ErrSourceNotFound.
+	if n == 1 {
 		return errors.New("cannot delete the only source: an install needs at least one ingest")
 	}
 	res, err := d.sql.Exec(`DELETE FROM sources WHERE id = ?`, id)

@@ -2,7 +2,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ApiError, api } from "./api";
+import { autoApi } from "./autoApi";
 
 /* The refusal an install with no source answers with, and the ONE thing about
  * it a screen is allowed to branch on.
@@ -18,6 +20,12 @@ import { ApiError, api } from "./api";
  * Two halves, because either alone passes while the feature is broken: that
  * request() actually lifts the field off the body, and that the string the UI
  * will compare against is the one Go emits.
+ *
+ * BOTH CLIENTS, and that is the third half. This app has two: lib/api.ts and
+ * lib/autoApi.ts, and the second is not a legacy corner -- POST /clips, PUT
+ * /clips/buffer, DELETE /clips/{name} and PUT /loudness are reachable from the
+ * UI through it and no other way. A contract that holds on one client and not
+ * the other reads as satisfied, because the test only ever asked the one.
  */
 
 afterEach(() => {
@@ -54,11 +62,43 @@ describe("the no-source refusal", () => {
     );
   });
 
+  // THE SECOND CLIENT. autoApi is the only route the Clips and Meters pages
+  // have to four of the endpoints the guard refuses, and it threw a bare Error
+  // -- no status, no code, nothing but the sentence -- while the assertion
+  // above went green on lib/api.ts. `instanceof ApiError` is the point of the
+  // assertion, not decoration: a client that carries `code` on some other shape
+  // still makes every consumer special-case which client it called.
+  it("arrives on ApiError.code from the automation client too", async () => {
+    // The suite runs on the node environment, and a non-GET reads the CSRF
+    // cookie off document before it ever reaches fetch.
+    vi.stubGlobal("document", { cookie: "" });
+    respondWith(503, {
+      error: "this install has no source yet, so there is no programme to act on.",
+      code: "no_source",
+    });
+    await expect(autoApi.post("/clips", { seconds: 30 })).rejects.toSatisfy(
+      (e: unknown) => e instanceof ApiError && e.status === 503 && e.code === "no_source",
+    );
+  });
+
+  it("leaves code empty on the automation client for the errors that carry none", async () => {
+    respondWith(400, { error: "invalid id" });
+    await expect(autoApi.get("/clips")).rejects.toSatisfy(
+      (e: unknown) => e instanceof ApiError && e.status === 400 && e.code === "",
+    );
+  });
+
   it("agrees with the constant the server emits", () => {
     // The Go side, read rather than restated. A test that compared "no_source"
     // with "no_source" would pass on the day somebody changed one of them.
+    //
+    // fileURLToPath rather than new URL(...).pathname: a pathname is
+    // percent-encoded, so a checkout under a directory with a space in its name
+    // resolved to a path that does not exist and this test failed with ENOENT
+    // rather than asserting anything. The reaction to the one test tying these
+    // two constants together going red for no reason is to delete it.
     const src = readFileSync(
-      join(new URL("../../../", import.meta.url).pathname, "internal/api/api.go"),
+      join(fileURLToPath(new URL("../../../", import.meta.url)), "internal/api/api.go"),
       "utf8",
     );
     const match = src.match(/codeNoSource\s*=\s*"([^"]+)"/);

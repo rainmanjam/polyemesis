@@ -4,11 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -54,6 +60,108 @@ func guardedPairs(t *testing.T, s *Server) []coverageRoute {
 			"gone blind rather than the guard having shrunk.", len(out))
 	}
 	return out
+}
+
+// noSourceRefusalSites is every function in this package that can answer the
+// zero-source refusal, and WHY it is not the middleware.
+//
+// The route ledger's zeroSource word is derived from the middleware chain, so it
+// sees requireSource and nothing else. That is exactly right for what it claims
+// and it is not the whole of the behaviour: four other functions here can put
+// the same 503 with the same code on the wire, and a route that refuses through
+// one of them is recorded `unguarded` -- indistinguishable, in the artifact,
+// from GET /setup, which genuinely must answer. Adding a third word was the
+// obvious repair and is refused: a word in that vocabulary is DRIVEN, and none
+// of these refusals can be driven through the router today (see each entry).
+//
+// So the instrument is this list instead. It is a Go map rather than a number in
+// the committed JSON on purpose -- there is no `-update-coverage` that can
+// regenerate it, and adding an entry is a sentence somebody writes on purpose.
+// A new helper refusal fails this test until its route's zero-source behaviour
+// is stated, which is the obligation the ledger's derived population cannot
+// impose.
+var noSourceRefusalSites = map[string]string{
+	"requireSource": "the middleware. This is the one the ledger's zeroSource word " +
+		"IS, and every pair carrying it is driven by the test below.",
+	"writeCreateError": "POST /destinations and POST /renditions, both of which " +
+		"carry requireSource as well. Reached only when the install loses its " +
+		"sources between the middleware and the store, which is why it is driven " +
+		"at the function rather than through the router.",
+	"refuseIfSilent": "POST /destinations, likewise guarded, likewise a SECOND read " +
+		"of the engine set. Driven at the function by " +
+		"TestTheSilenceCheckRefusesRatherThanReadingAnAbsentIngest.",
+	"destinationBaseArgv": "the three expert routes that write nothing -- GET " +
+		"/destinations/{id}/expert and the preview and dry-run POSTs -- which carry " +
+		"no requireSource by design. Not driveable through the router: source_id " +
+		"CASCADEs, so no destination row can exist on an install with no source and " +
+		"every one of those requests 404s at the store first. Driven at the helper " +
+		"by TestResolvingAnExpertCommandWithNoEngineRefusesRatherThanPanicking.",
+	"writeExpertCommandError": "the lift for the entry above, at the five " +
+		"resolveExpertCommand call sites. Same test.",
+}
+
+// TestEveryNoSourceRefusalIsAGuardOrIsRecorded reads the package's own source.
+//
+// Source-derived rather than listed twice: the set of functions that can emit
+// this refusal is a property of the code, and a hand-list of it would be
+// complete on the day it was written -- the failure the route ledger next door
+// is a monument to.
+func TestEveryNoSourceRefusalIsAGuardOrIsRecorded(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parse the api package: %v", err)
+	}
+	pkg, ok := pkgs["api"]
+	if !ok {
+		t.Fatal("no `api` package parsed from this directory, so the scan below would " +
+			"report zero refusal sites and pass having read nothing")
+	}
+
+	found := map[string]bool{}
+	for _, f := range pkg.Files {
+		for _, d := range f.Decls {
+			fn, isFunc := d.(*ast.FuncDecl)
+			if !isFunc || fn.Body == nil {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				id, isIdent := n.(*ast.Ident)
+				if isIdent && (id.Name == "writeNoSource" || id.Name == "errNoSource") {
+					found[fn.Name.Name] = true
+				}
+				return true
+			})
+		}
+	}
+	// A scan that finds nothing agrees with any list at all.
+	if len(found) == 0 {
+		t.Fatal("the scan found no function emitting the no-source refusal, in the " +
+			"package that defines it. The identifiers were renamed and this test went " +
+			"vacuous rather than red.")
+	}
+
+	for name := range found {
+		if _, recorded := noSourceRefusalSites[name]; !recorded {
+			t.Errorf("%s can answer the zero-source refusal and is not in "+
+				"noSourceRefusalSites. Every route it refuses for is recorded `unguarded` "+
+				"in testdata/route-coverage.json -- the same word GET /api/v1/setup "+
+				"carries, and that route must ANSWER -- so nothing derived from that "+
+				"artifact will notice a 503 arriving on a screen an operator recovers "+
+				"through. Add an entry saying which routes it can refuse for and how "+
+				"those are driven at zero source; if the answer is \"they are guarded\", "+
+				"then this function is defence in depth and the entry says so.", name)
+		}
+	}
+	for name := range noSourceRefusalSites {
+		if !found[name] {
+			t.Errorf("noSourceRefusalSites records %s and nothing in this package's source "+
+				"emits the refusal from it. A stale entry is a reader being told a route "+
+				"is covered by a branch that is gone.", name)
+		}
+	}
 }
 
 // TestEveryGuardedRouteRefusesOnAnInstallWithNoSource is the guard itself.
@@ -129,6 +237,69 @@ func TestNoGuardedRouteRefusesOnceASourceExists(t *testing.T) {
 					pair.Method, path, codeNoSource, w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+// The clip DELETE is the one that was first decided the other way, and this is
+// the consequence that decided it back.
+//
+// Guarding it left an install with no source able to list clips and download
+// them and never remove them. That is not a stalemate that resolves itself: the
+// clips directory is install-wide and outlives every programme, so once the
+// last-source delete becomes possible a box with a full one would have had no
+// API that could clear it -- while DELETE /recordings/{id}, three routes up and
+// over material that outlives its source in exactly the same way, has always
+// answered. An operator whose disk is full and whose only remedy is a shell is
+// worse off than one who never had the button.
+//
+// What the guard was protecting is kept: with a capturer running the engine
+// still owns the delete, because it owns the index the listing is built from.
+// This drives the OTHER side, where there is no capturer to race.
+func TestAClipOnDiskCanBeDeletedOnAnInstallWithNoSource(t *testing.T) {
+	s, h, auth := zeroSourceServer(t)
+
+	if err := os.MkdirAll(s.clipDir(), 0o755); err != nil {
+		t.Fatalf("create the clips directory: %v", err)
+	}
+	name := clips.Prefix + "20260301-201500" + clips.Ext
+	path := filepath.Join(s.clipDir(), name)
+	if err := os.WriteFile(path, []byte("a clip that outlived its programme"), 0o644); err != nil {
+		t.Fatalf("plant a clip: %v", err)
+	}
+
+	r := jsonRequest(t, http.MethodDelete, "/api/v1/clips/"+name, nil)
+	auth(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DELETE the clip returned %d on an install with no source. A 503 here is "+
+			"a listing an operator can see and cannot act on, and a disk that only "+
+			"fills: %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("the route answered 200 and the file is still on disk (%v), which is the "+
+			"success report for something that did not happen that the guard exists to "+
+			"prevent -- arriving from the other side", err)
+	}
+}
+
+// And the confinement, which the fallback must still go through.
+//
+// Same shape as the download's, and the same limit on what it proves:
+// clips.Resolve refuses a name that is not a clip name BEFORE it joins
+// anything, so this passes against any base including "". That the base is a
+// REAL directory is what the test above pins, by removing a file it planted
+// under recordings/clips. The pair is why this is a re-plumb and not a nil-safe
+// accessor -- see MUST NOT #6.
+func TestTheClipDeleteStillRefusesToEscapeItsDirectoryWithNoSource(t *testing.T) {
+	_, h, auth := zeroSourceServer(t)
+
+	for _, name := range []string{"..%2f..%2fpolyemesis.db", "polyemesis.db"} {
+		r := jsonRequest(t, http.MethodDelete, "/api/v1/clips/"+name, nil)
+		auth(r)
+		if w := do(t, h, r); w.Code == http.StatusOK {
+			t.Fatalf("the delete answered 200 for %q, so the name was confined against "+
+				"nothing: %s", name, w.Body.String())
+		}
 	}
 }
 
@@ -231,14 +402,27 @@ func TestACreateThatCannotResolveASourceIsNotABadRequest(t *testing.T) {
 			t.Fatalf("code = %q, want %q", body.Code, codeNoSource)
 		}
 	})
-	// The same lift on the general store mapping, which is what the handlers
-	// that read a source through writeStoreError go through.
-	t.Run("through writeStoreError", func(t *testing.T) {
+	// AND THE PLACE THE LIFT MUST NOT REACH. db.ErrSourceNotFound means two
+	// things -- "no row with this id" and "this install has no source" -- and
+	// only the creates can be sure which. Every caller of writeStoreError asked
+	// for a row by id, so a 503 there tells an install with four sources that it
+	// has none, and the UI draws the fresh-install empty state over it.
+	t.Run("but not through writeStoreError, which is about one row", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		writeStoreError(w, db.ErrSourceNotFound)
-		if w.Code != http.StatusServiceUnavailable {
-			t.Fatalf("status = %d, want 503: a store that cannot find a source on an "+
-				"install with none is not a broken server: %s", w.Code, w.Body.String())
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404: writeStoreError is reached by handlers that "+
+				"resolved ONE source by id -- PUT /source/annotations among them -- and the "+
+				"install-wide refusal there is a false statement about every other source "+
+				"on the box: %s", w.Code, w.Body.String())
+		}
+		var body apiError
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode: %v: %s", err, w.Body.String())
+		}
+		if body.Code == codeNoSource {
+			t.Fatalf("code = %q: a client branching on it renders \"no programme yet\" for a "+
+				"row that is merely missing", body.Code)
 		}
 	})
 	t.Run("every other failure", func(t *testing.T) {

@@ -9,6 +9,7 @@
   "inertCeiling": 6,
   "varianceExemptCeiling": 2,
   "shapeFloor": 27,
+  "guardedFloor": 20,
   "shapesNotInspectedCeiling": 3,
   "totals": {
     "methodPatternPairs": 215,
@@ -301,7 +302,7 @@
       "method": "DELETE",
       "pattern": "/api/v1/clips/{name}",
       "coverage": "denied-by-method",
-      "zeroSource": "guarded"
+      "zeroSource": "unguarded"
     },
     {
       "method": "GET",

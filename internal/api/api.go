@@ -985,26 +985,32 @@ func (s *Server) registerRoutes(r chi.Router) {
 			//
 			// The LISTING is files on disk under recordings/clips, one
 			// directory per install, so it outlives the programme that
-			// captured them and stays open. The other three act on the ring
-			// buffer, which lives on an engine: capturing from a buffer that
-			// does not exist, or reporting a buffer switched on when nothing
-			// is running, is a 200 for something that did not happen.
+			// captured them and stays open. The two that act on the ring
+			// buffer are guarded: capturing from a buffer that does not exist,
+			// or reporting a buffer switched on when nothing is running, is a
+			// 200 for something that did not happen.
 			//
-			// THE DELETE IS THE ARGUABLE ONE and the call is recorded rather
-			// than left to inference. Engine.DeleteClip falls back to removing
-			// the file when no capturer is running, so a disk-only delete
-			// would be meaningful here -- the same argument that keeps
-			// DELETE /recordings/{id} open. It is guarded anyway, because with
-			// a buffer running the capturer owns the index the file is listed
-			// from, and a delete that goes around it while a capture is
-			// evicting is the race the engine method exists to serialise. The
-			// cost is bounded and reversible: an operator with no source can
-			// still list and download, and re-plumbing this onto s.clipDir()
-			// the way the listing already is would be the fix if anyone asks.
+			// THE DELETE WAS THE ARGUABLE ONE and it is on the file side, with
+			// the argument recorded because it was first decided the other
+			// way. Guarding it left an install with no source able to list and
+			// download clips it could never remove -- and after the last-source
+			// delete becomes possible, a box with a full clips directory would
+			// have had no API that could clear it and no remedy but a shell.
+			// That is the opposite of the ruling three routes up on
+			// DELETE /recordings/{id}, for material that outlives its
+			// programme in exactly the same way.
+			//
+			// The capturer stays authoritative while there IS one, which is
+			// the reason the guard looked right: with a buffer running the
+			// capturer owns the index the listing comes from, and a delete
+			// going around it while the ring is evicting is the race
+			// Engine.DeleteClip exists to serialise. So the handler prefers
+			// the engine and falls back to the directory, exactly as the
+			// listing and the download already do.
 			r.Get("/clips", s.handleListClips)
 			r.With(s.requireSource).Post("/clips", s.handleCaptureClip)
 			r.With(s.requireSource).Put("/clips/buffer", s.handleSetClipBuffer)
-			r.With(s.requireSource).Delete("/clips/{name}", s.handleDeleteClip)
+			r.Delete("/clips/{name}", s.handleDeleteClip)
 
 			// Loudness compliance: the READ is the meters page, which answers
 			// with no measurements; the PUT switches a monitor on inside a
@@ -1688,9 +1694,12 @@ func writeNoSource(w http.ResponseWriter) {
 // It is deliberately NOT applied to the routes an operator recovers through --
 // /setup, /auth/*, /sources*, /settings, /status, /system, /stats, /levels,
 // /ws, /metrics -- nor to the ones over files that outlive a programme:
-// /library*, /recordings*, /clipper* and the clip LISTING. Those answer for an
-// install with no source, which is a different sentence from answering as if
-// it had one.
+// /library*, /recordings*, /clipper* and the FILE side of /clips -- the
+// listing, the download and the delete. Those answer for an install with no
+// source, which is a different sentence from answering as if it had one. Only
+// the two routes that act on the rolling buffer itself are guarded; a delete
+// that an operator can see the target of and never perform is a disk that
+// only fills.
 func (s *Server) requireSource(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.engOrNil() == nil {
@@ -1743,12 +1752,27 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not found")
-	// The store was asked to resolve a source and there is none. A 500 here
-	// reads as "this server is broken" for a condition the operator creates and
-	// ends deliberately, and the 404 next door would name the ROW rather than
-	// the install.
+	// A 404 ABOUT THE ROW, and it is deliberately NOT the install-wide refusal.
+	//
+	// db.ErrSourceNotFound serves two meanings -- "no row with this id", from
+	// every single-row getter, and "this install has no source at all", from
+	// DefaultSourceID -- and this mapping cannot tell them apart. It was the
+	// 503 briefly, which meant a lookup that failed for ONE id reported that
+	// the whole install had no source: PUT /source/annotations resolves the
+	// default engine's row through GetSource, so an install with four sources
+	// whose default row had gone would answer "this install has no source yet,
+	// create one on the Sources page" while the Sources page listed four. The
+	// UI branches on that code, correctly, and would have drawn the
+	// fresh-install empty state over a populated install.
+	//
+	// The install-wide meaning arrives at the HTTP surface from exactly two
+	// places, both creates, both through writeCreateError, which lifts it
+	// there and only there. Everything reaching this function resolved a row by
+	// id, so the row is what the answer is about. This also puts the mapping
+	// back in agreement with sources.go's own sourceStatus(), which has always
+	// answered 404 for this sentinel.
 	case errors.Is(err, db.ErrSourceNotFound):
-		writeNoSource(w)
+		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, db.ErrNoUser):
 		writeError(w, http.StatusConflict, "setup has not been completed")
 	case errors.Is(err, db.ErrStateConflict):

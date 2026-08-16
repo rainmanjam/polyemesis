@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -217,6 +218,35 @@ func TestTheLastSourceCannotBeDeleted(t *testing.T) {
 	// An install with no sources has no ingest and no way back through the UI.
 	if err := d.DeleteSource(id); err == nil {
 		t.Fatal("deleted the only source; the install now has no ingest at all")
+	}
+}
+
+// And the state on the other side of that guard, which the zero-source work
+// makes reachable.
+//
+// The count check was `n <= 1`, so with NO sources the store answered "cannot
+// delete the only source: an install needs at least one ingest" -- a sentence
+// about an ingest the install does not have, shown to an operator on a fresh
+// install who clicked a stale row or to a client retrying a delete that already
+// succeeded. It also hid the true answer, which is that the row is not there.
+func TestDeletingASourceOnAnInstallWithNoneSaysTheRowIsMissing(t *testing.T) {
+	d := testDB(t)
+	id, err := d.DefaultSourceID()
+	if err != nil {
+		t.Fatalf("DefaultSourceID: %v", err)
+	}
+	// Straight to SQL: the guard above is exactly what stops the API producing
+	// this state today, and PR 6 is what removes it.
+	if _, err := d.SQL().Exec(`DELETE FROM sources`); err != nil {
+		t.Fatalf("empty the sources table: %v", err)
+	}
+
+	err = d.DeleteSource(id)
+	if !errors.Is(err, ErrSourceNotFound) {
+		t.Fatalf("DeleteSource on an install with no sources returned %v, want "+
+			"ErrSourceNotFound. The old answer described the last source of an install "+
+			"that has none, and the API maps that sentinel to the 404 the row deserves.",
+			err)
 	}
 }
 
