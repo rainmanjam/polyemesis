@@ -183,7 +183,18 @@ func (s *Server) handleTestAlertRule(w http.ResponseWriter, r *http.Request) {
 	}
 	n := s.eng().Alerts()
 	if n == nil {
-		writeError(w, http.StatusServiceUnavailable, "the alert notifier is not running")
+		// IT IS THE NO-SOURCE REFUSAL WEARING A SUBSYSTEM'S NAME. Engine.New
+		// always builds an alerter, so Alerts() answers nil for exactly one
+		// reason: there is no engine, which on this install means there is no
+		// programme. "The alert notifier is not running" sent the operator
+		// looking for a subsystem to restart; the code is what lets the rule
+		// editor say the true thing instead.
+		//
+		// The route carries no requireSource because everything else about an
+		// alert rule -- creating it, editing it, deleting it -- is install-wide
+		// and works perfectly well before the first source exists. Only the
+		// SEND needs a notifier.
+		writeNoSource(w)
 		return
 	}
 	if err := n.Test(r.Context(), *rule); err != nil {

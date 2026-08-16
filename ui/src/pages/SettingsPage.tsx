@@ -96,6 +96,13 @@ export function SettingsPage() {
   // gate waits on this rather than on the count, so a failed read stops the
   // spinner instead of leaving it turning for ever.
   const [sourcesResolved, setSourcesResolved] = useState(false);
+  // The same question for the system read, and it exists so that `system ===
+  // null` means one thing rather than two. FfmpegBadges renders nothing at all
+  // for a null, which inside a titled card is a box with a heading and no
+  // content -- and the operator docs/INSTALL.md sends here to check whether
+  // FFmpeg has SRT is told nothing, with no way to tell "still loading" from
+  // "could not read". Gating the page on this makes the null unambiguous.
+  const [systemResolved, setSystemResolved] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
@@ -120,7 +127,11 @@ export function SettingsPage() {
     // The system read is the one that may legitimately fail on an install that
     // is otherwise fine -- it is the widest read on this page -- so it stays
     // non-fatal, but it says so now instead of vanishing.
-    api.system().then(setSystem).catch(() => setSystem(null));
+    api
+      .system()
+      .then(setSystem)
+      .catch(() => setSystem(null))
+      .finally(() => setSystemResolved(true));
   }, []);
 
   // WHICH TAB OPENS, when the URL does not say.
@@ -208,8 +219,9 @@ export function SettingsPage() {
 
   // The source count is waited for as well as the settings, because the tab
   // above turns on it. Rendering before it lands would open the ingest tab and
-  // then move the operator to another one under their cursor.
-  if (!settings || !sourcesResolved) {
+  // then move the operator to another one under their cursor. The system read
+  // is waited for so that a null means "could not read" and never "not yet".
+  if (!settings || !sourcesResolved || !systemResolved) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -248,6 +260,17 @@ export function SettingsPage() {
           {sourceCount === 0 ? (
             <div className="flex flex-col gap-3">
               <NoProgrammeYet title={t("empty.ingestTitle")} body={t("empty.ingestBody")} />
+              {/* THE LISTENER PORTS STAY, and they are not a detail. They are
+                  install-wide -- one SRT listener for every source, one RTMP
+                  listener for at most one -- so PUT /settings deliberately
+                  carries no requireSource and the server binds a changed port
+                  on an install with no source at all. This card lived inside
+                  IngestSettings, which the branch above replaces wholesale, and
+                  that left the only port control in the product unreachable on
+                  exactly the boot that logs `bind: address already in use`. The
+                  operator was then told to create a source that would arrive on
+                  the port that cannot bind. */}
+              <ListenerPortsOnly settings={settings} onSave={save} saving={saving} />
               {/* The FFmpeg badges STAY. docs/INSTALL.md's verification step
                   sends a first-time operator here to read them, and that
                   operator has not created a source yet by definition -- so
@@ -319,36 +342,7 @@ function IngestSettings({
 
   return (
     <div className="grid gap-3 lg:grid-cols-2">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("set.listeners")}</CardTitle>
-          <CardDescription>{t("set.listenersDesc")}          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-2">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="listener-srt">{t("set.srtPort")}</Label>
-            <Input
-              id="listener-srt"
-              type="number"
-              min={LIMITS.port.min}
-              max={LIMITS.port.max}
-              value={listeners.srtPort}
-              onChange={(e) => setListeners({ srtPort: Number(e.target.value) })}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="listener-rtmp">{t("set.rtmpPort")}</Label>
-            <Input
-              id="listener-rtmp"
-              type="number"
-              min={LIMITS.port.min}
-              max={LIMITS.port.max}
-              value={listeners.rtmpPort}
-              onChange={(e) => setListeners({ rtmpPort: Number(e.target.value) })}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <ListenerPortsCard listeners={listeners} setListeners={setListeners} />
 
       <Card>
         <CardHeader>
@@ -513,6 +507,103 @@ function IngestSettings({
   );
 }
 
+/** Where the server binds, for the whole install.
+ *
+ *  Its own component for the reason FfmpegBadges is one: it has to render on an
+ *  install with NO source. These two ports are not a property of a programme --
+ *  one SRT listener serves every source and tells them apart by their publish
+ *  token -- which is exactly why PUT /settings carries no requireSource and why
+ *  the server binds a changed port with nothing configured behind it. */
+function ListenerPortsCard({
+  listeners,
+  setListeners,
+  footer,
+}: {
+  listeners: { srtPort: number; rtmpPort: number };
+  setListeners: (patch: Partial<{ srtPort: number; rtmpPort: number }>) => void;
+  footer?: React.ReactNode;
+}) {
+  const t = useT();
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("set.listeners")}</CardTitle>
+        <CardDescription>{t("set.listenersDesc")}          </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="listener-srt">{t("set.srtPort")}</Label>
+            <Input
+              id="listener-srt"
+              type="number"
+              min={LIMITS.port.min}
+              max={LIMITS.port.max}
+              value={listeners.srtPort}
+              onChange={(e) => setListeners({ srtPort: Number(e.target.value) })}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="listener-rtmp">{t("set.rtmpPort")}</Label>
+            <Input
+              id="listener-rtmp"
+              type="number"
+              min={LIMITS.port.min}
+              max={LIMITS.port.max}
+              value={listeners.rtmpPort}
+              onChange={(e) => setListeners({ rtmpPort: Number(e.target.value) })}
+            />
+          </div>
+        </div>
+        {footer}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The listener ports on an install with no source, where they are the only
+ *  thing on this tab that can be saved.
+ *
+ *  It carries its own Save button because the one in IngestSettings belongs to
+ *  the ingest form, and that form is not on this screen. The saved document is
+ *  the stored settings with only `listeners` replaced: the ingest block goes
+ *  back exactly as it arrived, which is what keeps the server's refusal --
+ *  "the ingest changed and there is no source to write it through to" -- off a
+ *  request that is not about the ingest at all. */
+function ListenerPortsOnly({
+  settings,
+  onSave,
+  saving,
+}: {
+  settings: Settings;
+  onSave: (s: Settings) => void;
+  saving: boolean;
+}) {
+  const t = useT();
+  const [listeners, setListeners] = useState(settings.listeners ?? { srtPort: 6000, rtmpPort: 1935 });
+  useEffect(
+    () => setListeners(settings.listeners ?? { srtPort: 6000, rtmpPort: 1935 }),
+    [settings],
+  );
+  return (
+    <ListenerPortsCard
+      listeners={listeners}
+      setListeners={(patch) => setListeners({ ...listeners, ...patch })}
+      footer={
+        <Button
+          size="sm"
+          className="self-start"
+          onClick={() => onSave({ ...settings, listeners })}
+          disabled={saving}
+        >
+          {saving ? <Loader2 className="animate-spin" /> : <Save />}
+          {t("set.saveListeners")}
+        </Button>
+      }
+    />
+  );
+}
+
 /** What this box can actually do, as three or four badges.
  *
  *  Its own component because it has to render on an install with NO source as
@@ -524,7 +615,14 @@ function IngestSettings({
  *  one person the check was written for. */
 function FfmpegBadges({ system }: { system: SystemInfo | null }) {
   const t = useT();
-  if (!system) return null;
+  /* NOT `return null`. This renders inside a card whose only other content is
+   * its title, so nothing meant an empty box with a heading on it and no way
+   * to tell a failed read from a slow one. The page waits for systemResolved
+   * before it renders at all, so a null here means the read FAILED and saying
+   * so is the whole difference between a blank panel and an answer. */
+  if (!system) {
+    return <span className="text-[11px] text-muted-foreground">{t("set.ffmpegUnknown")}</span>;
+  }
   return (
     <div className="mt-1 flex flex-wrap gap-1">
       <Badge variant="outline">ffmpeg {system.ffmpeg.version}</Badge>

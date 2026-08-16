@@ -59,8 +59,13 @@ A **source** is one ingested programme — one feed from one encoder. A fresh
 install has none, so this is the step that turns a running server into one
 anything can publish to.
 
-Open the **Sources** page and add one. A name is all it asks for; the ingest
-settings are filled in with the defaults and you can change them afterwards.
+Open the **Sources** page and add one. The dialog asks for a name and nothing
+else.
+
+Then pick its **protocol** on the card — **SRT** for multitrack, **RTMP** for a
+single audio track — and press **Apply**. A source is created with no protocol
+chosen, which is deliberate: nothing is listening for it yet, so the card shows
+a publish token and no publish URL. The URL appears when the protocol does.
 
 Until you do this, the dashboard says "no programme yet" rather than showing an
 empty pipeline, and anything that acts on a programme — starting a destination,
@@ -69,9 +74,9 @@ telling you which step you are on, not an error.
 
 ## 4. Point OBS at it
 
-The **Sources** page shows the publish URL for the source you just created. Copy
-it — it looks like this, and the `streamid` is that source's publish token,
-which is what tells polyemesis which source you are:
+The **Sources** page shows the publish URL for the source you just created, once
+its protocol is set. Copy it — it looks like this, and the `streamid` is that
+source's publish token, which is what tells polyemesis which source you are:
 
 ```
 srt://your-host:6000?streamid=<token>

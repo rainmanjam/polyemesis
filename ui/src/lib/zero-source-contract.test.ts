@@ -123,11 +123,24 @@ describe("the screens that meet an install with no source", () => {
   it("the dashboard draws the empty state instead of an empty pipeline", () => {
     const src = read("ui/src/pages/Dashboard.tsx");
     expect(src, "the dashboard no longer reads how many sources exist, so it cannot " +
-      "tell a fresh install from a running one").toContain("api\n      .listSources()");
+      "tell a fresh install from a running one").toContain("await api.setupStatus()");
     expect(src, "the dashboard renders its pipeline unconditionally again: a preview of " +
       "a stream nobody is sending, an ingest URL no encoder can publish to, and an Add " +
       "destination button that answers 503").toMatch(/sourceCount === 0/);
     expect(src, "the dashboard no longer renders NoProgrammeYet").toContain("<NoProgrammeYet");
+  });
+
+  it("the dashboard keeps re-reading the count rather than reading it once", () => {
+    const src = read("ui/src/pages/Dashboard.tsx");
+    /* Status events are published BY an engine, so an install that loses its
+     * last source stops sending them and the last frame stays on screen. Every
+     * control that bumps refreshKey is inside the pipeline the empty state
+     * replaces, so a count read once per refreshKey is a count that can never
+     * be re-read once it matters. */
+    expect(src, "the dashboard reads the source count once and never again, so a tab " +
+      "left open while the last source went away goes on drawing a publish URL and a " +
+      "track count for a programme that no longer exists")
+      .toMatch(/setInterval\(readSourceCount/);
   });
 
   it("the dashboard treats the refusal as an empty state rather than a fault", () => {
@@ -138,6 +151,26 @@ describe("the screens that meet an install with no source", () => {
      * state in which nothing has failed. */
     expect(src, "the destination controls no longer branch on the no-source code, so a " +
       "503 that means \"this install has nothing yet\" is drawn as a failure")
+      .toContain("isNoSource(err)");
+    /* AND IT ASKS RATHER THAN ASSUMING. requireSource refuses on "no engine is
+     * running", which is also the state of an install whose sources are all
+     * present and whose engines failed to start. `setSourceCount(0)` there told
+     * that operator to create a source they already have, on a screen with no
+     * way back to the one that could have explained it. */
+    expect(src, "the dashboard forces the count to zero from the refusal instead of " +
+      "re-reading it, so an install whose engines did not start is told it has no source")
+      .not.toMatch(/isNoSource\(err\)\)\s*\{\s*setSourceCount\(0\)/);
+    expect(src, "the refusal branch does not re-read the count")
+      .toMatch(/isNoSource\(err\)\)\s*\{\s*const n = await readSourceCount\(\)/);
+  });
+
+  it("the destination dialog does not raise a fault toast for an empty install", () => {
+    const src = read("ui/src/components/DestinationDialog.tsx");
+    /* The one control that survives on the dashboard long enough to be clicked
+     * after the last source has gone. A bare toast.error there reinstates the
+     * scarlet "this install has no source yet" the empty state exists to
+     * replace. */
+    expect(src, "the destination dialog red-toasts the no-source refusal again")
       .toContain("isNoSource(err)");
   });
 
@@ -157,6 +190,44 @@ describe("the screens that meet an install with no source", () => {
     expect(src, "the FFmpeg capability badges are no longer rendered on the zero-source " +
       "ingest tab, so the check docs/INSTALL.md sends a first-time operator to make is " +
       "on a screen they cannot reach yet").toMatch(/<FfmpegBadges system=\{system\} \/>[\s\S]*<FfmpegBadges/);
+  });
+
+  it("the settings page keeps the install-wide controls it can still save", () => {
+    const src = read("ui/src/pages/SettingsPage.tsx");
+    /* THE PORT. settings.listeners is install-wide, PUT /settings carries no
+     * requireSource, and the server binds a changed port with no source at all
+     * -- so a first install whose 1935 is already taken has to be able to move
+     * it. The listener card lived inside IngestSettings, which the zero-source
+     * branch replaces wholesale, and that left the only port control in the
+     * product unreachable on exactly the boot that logs the bind failure. */
+    expect(src, "the zero-source ingest tab no longer offers the listener ports, so a " +
+      "fresh install whose port is already taken cannot change it anywhere in the UI")
+      .toMatch(/<ListenerPortsOnly/);
+    expect(src, "the listener port inputs are gone from the file entirely")
+      .toMatch(/id="listener-rtmp"/);
+  });
+
+  /* THE BRANCHES THAT REPLACED `.catch(() => {})`.
+   *
+   * Both were added because an empty catch hid a real regression: a settings
+   * read that fails leaves the page spinning for ever with no message, and a
+   * source count that fails must NOT read as zero or it replaces the ingest
+   * form on an install with several. Neither was pinned by anything, so
+   * reverting either one -- including back to the exact empty catch the plan
+   * named -- passed vitest, tsc and oxlint. */
+  it("the settings page's failed reads are branches rather than empty catches", () => {
+    const src = read("ui/src/pages/SettingsPage.tsx");
+    expect(src, "the settings read swallows its failure again, so the page spins for " +
+      "ever and says nothing").toMatch(/api\.getSettings\(\)\.then\(setSettings\)\.catch\(\(\) => setLoadFailed\(true\)\)/);
+    expect(src, "a source count that could not be read is being reported as zero, which " +
+      "replaces the ingest form with \"create a source\" on an install that has several")
+      .toMatch(/\.catch\(\(\) => setSourceCount\(null\)\)/);
+    expect(src, "the system read no longer records that it resolved, so `system === null` " +
+      "means both \"could not read\" and \"not yet\" and the FFmpeg card is a titled box " +
+      "with nothing in it").toMatch(/\.finally\(\(\) => setSystemResolved\(true\)\)/);
+    expect(src, "the FFmpeg badges render nothing for an unreadable system, which inside " +
+      "a card is a heading with no content and no message")
+      .toMatch(/if \(!system\) \{\s*return <span[^>]*>\{t\("set\.ffmpegUnknown"\)\}/);
   });
 
   it("the sources page says what to do rather than showing nothing", () => {

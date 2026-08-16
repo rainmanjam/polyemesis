@@ -5,12 +5,21 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/chat"
+	"github.com/rainmanjam/polyemesis/internal/config"
+	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
+	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
+	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
@@ -47,7 +56,17 @@ import (
 //	         codeNoSource, or one of the subsystem refusals recorded below.
 //
 // Anything else is the failure, and on this fixture it is not hypothetical:
-// every handler here holds a nil *engine.Engine.
+// walkEveryRoute asserts before every single request that s.eng() is still nil,
+// so each of the statuses above was produced by a handler holding one.
+//
+// WHAT A 404 DOES NOT PROVE, and this is the sentence that was wrong here and
+// is worth reading before adding anything: concretePath fills every {param}
+// with "1", and on an install with no rows about seventy of these pairs stop at
+// their store lookup. Those routes were REACHED; their bodies were not RUN, so
+// a dereference below the lookup would not fail this walk. That blind spot is
+// not left to a comment -- TestEveryRegisteredRouteSurvivesEnginesThatDidNotStart
+// below walks the same population against a fixture whose rows exist and whose
+// engines still do not, which is where those bodies run.
 //
 // WHAT IS DELIBERATELY NOT ASSERTED is which of the three a given route gives.
 // Pinning that would make this a second, worse copy of the route ledger -- one
@@ -57,14 +76,126 @@ import (
 func TestEveryRegisteredRouteSurvivesAFreshInstall(t *testing.T) {
 	s, h, auth := freshInstallServer(t)
 
-	// The fixture's premise, asserted rather than assumed. dbtest's template
-	// creates a source and managerServerWithoutEngines empties the table again;
-	// if either end ever stops doing its half, this becomes a tour of an
-	// ordinary install and every assertion below holds for the wrong reason.
+	// The fixture's premise, asserted rather than assumed. This one opens a
+	// database file that has never existed before, so the count is the
+	// migration's own verdict on a first run -- if the seed ever comes back,
+	// this walk stops being about a fresh install and says so here rather than
+	// passing for the wrong reason.
 	if n, err := s.store.CountSources(); err != nil || n != 0 {
 		t.Fatalf("the fixture has %d sources (err %v); this walk proves nothing about a "+
 			"fresh install unless there are none", n, err)
 	}
+
+	counts := walkEveryRoute(t, s, h, auth, nil)
+	t.Logf("fresh install: %d answered, %d refused, %d rejected the request "+
+		"(%d of those rejections were a 404 at a store lookup, so the handler below it "+
+		"did not run here -- see the engines-that-did-not-start walk)",
+		counts.answered, counts.refused, counts.rejected, counts.notFound)
+	if counts.answered == 0 || counts.refused == 0 {
+		t.Fatalf("the walk found %d answering and %d refusing routes. An install with no "+
+			"source must do both: refuse what it cannot do, and answer everything an "+
+			"operator recovers through.", counts.answered, counts.refused)
+	}
+}
+
+// THE SECOND WALK: rows exist, engines do not.
+//
+// The first walk cannot see below a store lookup, and the guards that live
+// there are not decorative. destinationBaseArgv reads s.eng().Tools(),
+// s.eng().Processes() and s.eng().Source() behind `if e == nil { errNoSource }`
+// (expert.go), and the three expert routes that carry no requireSource have
+// nothing else standing between an engine-less install and a segfault. On a
+// fresh install every one of them answers 404 before a line of that function
+// runs, so deleting the guard changed nothing anybody could observe.
+//
+// THE STATE THIS STANDS IN FOR IS NOT INVENTED. Manager.reconcile logs and
+// continues when engine.New or eng.Start fails (manager.go), so an install with
+// rows and no engines is what one unbuildable source produces -- and it is the
+// state PR 6's delete leaves behind for as long as a browser tab stays open on
+// it. The eng() contract says so in as many words: nil is a normal state, and
+// it does not imply an empty database.
+//
+// The population is the same enumerateRoutes walk, so the two cannot drift into
+// covering different route sets.
+func TestEveryRegisteredRouteSurvivesEnginesThatDidNotStart(t *testing.T) {
+	s, h, auth := enginelessServerWithRows(t)
+
+	if n, err := s.store.CountSources(); err != nil || n != 1 {
+		t.Fatalf("the fixture has %d sources (err %v); the whole point of this walk is "+
+			"rows that outlived their engine, and with none it is the walk above wearing "+
+			"a different name", n, err)
+	}
+
+	// THE WALK DELETES AS WELL AS READS, and without this the walk's ORDER
+	// would decide which guards it covers. DELETE /api/v1/alerts/rules/{id} is
+	// a registered route and it is issued against the one rule that gets
+	// POST /alerts/rules/{id}/test past its lookup, so that route went back to
+	// 404 -- silently, and only because chi walks DELETE first. Every id column
+	// is AUTOINCREMENT, so a row simply recreated after a delete comes back as
+	// 2 while concretePath only ever asks for 1; restoring means putting the
+	// sequence back too.
+	reached := walkEveryRoute(t, s, h, auth, func(t *testing.T) {
+		restoreTheSeededRows(t, s.store)
+	})
+	t.Logf("engines that did not start: %d answered, %d refused, %d rejected (%d 404)",
+		reached.answered, reached.refused, reached.rejected, reached.notFound)
+
+	// The routes this fixture exists to unblock, asserted by name. A 404 here
+	// means the row it needed stopped being seeded, and the guard behind that
+	// lookup went quietly back to being unproven -- which is exactly the state
+	// this test was written to end, so it must not be able to return in silence.
+	for _, pair := range mustRunTheirBodyWithNoEngine {
+		if reached.status[pair] == 0 {
+			t.Errorf("%s was not walked at all; the list below has drifted from the router",
+				pair)
+			continue
+		}
+		if reached.status[pair] == http.StatusNotFound {
+			t.Errorf("%s still answered 404 with its row present, so the engine read below "+
+				"its lookup was not executed and this walk covers it in name only. Body: %s",
+				pair, truncateForFailure(reached.body[pair]))
+		}
+	}
+}
+
+// mustRunTheirBodyWithNoEngine is every {param} route whose handler reads the
+// engine AFTER its store lookup, and which therefore proves nothing on an
+// install with no rows.
+//
+// Derived by hand from the s.eng()/s.engOrNil() call sites, and short on
+// purpose: it is the set whose coverage depends on the fixture seeding a
+// particular row, so each entry is a claim that the row is still being seeded.
+// Everything else behind a lookup reaches the store or the disk and never the
+// engine -- /jobs/{id}, /hooks/{id}, /media/{name}, /platforms/accounts/{id} --
+// and adding them here would be asking the fixture to carry rows for a property
+// they do not have.
+var mustRunTheirBodyWithNoEngine = []string{
+	// destinationBaseArgv, the three that carry no requireSource by design.
+	"GET /api/v1/destinations/{id}/expert",
+	"POST /api/v1/destinations/{id}/expert/preview",
+	"POST /api/v1/destinations/{id}/expert/dry-run",
+	// handleTestAlertRule -> s.eng().Alerts().
+	"POST /api/v1/alerts/rules/{id}/test",
+	// handleClipSource -> clipTracks -> s.engOrNil().SourceKnown().
+	"GET /api/v1/clipper/recordings/{id}",
+}
+
+// walkCounts is the three-way split, plus the two things a failing run needs
+// that a count cannot give: which status each pair produced, and its body.
+type walkCounts struct {
+	answered, refused, rejected, notFound int
+	status                                map[string]int
+	body                                  map[string]string
+}
+
+// walkEveryRoute issues one request per registered (method, pattern) and
+// asserts the floor. Shared by both walks so that the population, the
+// exceptions and the meaning of each status cannot diverge between them.
+//
+// before, when it is not nil, runs ahead of each request. It is how the rows
+// walk keeps its fixture from being dismantled by the walk itself.
+func walkEveryRoute(t *testing.T, s *Server, h http.Handler, auth func(*http.Request), before func(*testing.T)) walkCounts {
+	t.Helper()
 
 	routes, _ := enumerateRoutes(t, s)
 	// A walk that finds nothing satisfies every claim below. The floor is well
@@ -77,7 +208,7 @@ func TestEveryRegisteredRouteSurvivesAFreshInstall(t *testing.T) {
 			len(routes))
 	}
 
-	var answered, refused, rejected int
+	out := walkCounts{status: map[string]int{}, body: map[string]string{}}
 	for _, route := range routes {
 		pair := route.Method + " " + route.Pattern
 		if why, skip := freshInstallNotWalked[pair]; skip {
@@ -86,6 +217,19 @@ func TestEveryRegisteredRouteSurvivesAFreshInstall(t *testing.T) {
 		}
 		path := concretePath(route.Pattern)
 		t.Run(pair, func(t *testing.T) {
+			if before != nil {
+				before(t)
+			}
+			// The premise, re-checked per request rather than once per fixture.
+			// Both walks are meaningless the moment an engine exists, and both
+			// issue mutations -- PUT /settings reconciles -- so "no engine" has
+			// to be a property of THIS request and not of the setup that ran
+			// two hundred requests ago.
+			if s.eng() != nil {
+				t.Fatalf("an engine came up during the walk, so %s and everything after it "+
+					"is a test of the ordinary path. Nothing below this line proves "+
+					"anything about an install with no programme.", pair)
+			}
 			// A JSON object body for every method, including GET. The handlers
 			// that read a body get a well-formed one they will reject on its
 			// CONTENTS rather than on its syntax, which is what keeps a 400
@@ -94,37 +238,31 @@ func TestEveryRegisteredRouteSurvivesAFreshInstall(t *testing.T) {
 			r := jsonRequest(t, route.Method, path, map[string]any{})
 			auth(r)
 			w := do(t, h, r)
+			out.status[pair] = w.Code
+			out.body[pair] = w.Body.String()
 
 			switch {
 			case w.Code/100 == 2, w.Code/100 == 3:
-				answered++
+				out.answered++
 			case w.Code == http.StatusServiceUnavailable:
 				if assertFreshInstallRefusal(t, pair, path, w.Body.Bytes()) {
-					refused++
+					out.refused++
 				}
 			case w.Code/100 == 4:
-				rejected++
+				out.rejected++
+				if w.Code == http.StatusNotFound {
+					out.notFound++
+				}
 			default:
-				t.Fatalf("%s returned %d on an install that has never had a source. Every "+
-					"handler here holds a nil *engine.Engine, so this is the dereference -- "+
-					"and it arrives on the first screen a new operator opens, with no other "+
+				t.Fatalf("%s returned %d on an install whose engine set is empty, which is "+
+					"the dereference this stack exists to prevent -- and on a fresh install "+
+					"it arrives on the first screen a new operator opens, with no other "+
 					"screen left to explain it.\nbody: %s",
 					pair, w.Code, truncateForFailure(w.Body.String()))
 			}
 		})
 	}
-
-	// The three-way split, logged rather than asserted, for whoever reads a
-	// failing run: a walk that suddenly refuses everything is a middleware
-	// applied one level too high, and the counts say so at a glance where two
-	// hundred subtests do not.
-	t.Logf("fresh install: %d answered, %d refused, %d rejected the request",
-		answered, refused, rejected)
-	if answered == 0 || refused == 0 {
-		t.Fatalf("the walk found %d answering and %d refusing routes. An install with no "+
-			"source must do both: refuse what it cannot do, and answer everything an "+
-			"operator recovers through.", answered, refused)
-	}
+	return out
 }
 
 // assertFreshInstallRefusal checks that a 503 SAYS WHICH ABSENCE it is about,
@@ -139,7 +277,14 @@ func TestEveryRegisteredRouteSurvivesAFreshInstall(t *testing.T) {
 //
 // What the registry buys is the property the walk would otherwise lose: a NEW
 // uncoded 503 -- a handler that starts refusing because it met something it did
-// not expect -- fails here instead of being counted as fine.
+// not expect -- fails here instead of being counted as fine. It bought exactly
+// that: POST /alerts/rules/{id}/test answered "the alert notifier is not
+// running", which is this refusal under a name that sends the operator looking
+// for a subsystem to restart, and no walk could see it until one of them had a
+// rule to test.
+//
+// Shared by both walks. "Fresh install" in the registry names is the case the
+// list was written for, not a claim that the rows walk is one.
 func assertFreshInstallRefusal(t *testing.T, pair, path string, body []byte) bool {
 	t.Helper()
 	var refusal apiError
@@ -160,7 +305,7 @@ func assertFreshInstallRefusal(t *testing.T, pair, path string, body []byte) boo
 	}
 	why, recorded := freshInstallSubsystemRefusals[pair]
 	if !recorded {
-		t.Fatalf("%s returned 503 with code %q on a fresh install. Either it is refusing "+
+		t.Fatalf("%s returned 503 with code %q on an install with no engine. Either it is refusing "+
 			"for want of a SOURCE, in which case it needs codeNoSource so the dashboard "+
 			"can draw an empty state instead of a red toast, or it is refusing for want of "+
 			"something else -- in which case say so in freshInstallSubsystemRefusals, "+
@@ -199,79 +344,223 @@ var freshInstallNotWalked = map[string]string{
 		"neither the engine nor a source.",
 }
 
-// freshInstallServer is the zero-source fixture with the OPTIONAL subsystems a
-// running server wires, and wiring them is the difference between walking a
-// route and knocking on a door nobody is behind.
+// freshInstallServer is the walk's fixture: a database file that has never
+// existed before, opened through the production db.Open, with no engines.
 //
-// api.Options documents Jobs and Chat as optional, and their handlers answer
-// 503 when they are absent. That answer is correct and it is also a
-// short-circuit: it is returned before anything reads a recording, resolves a
-// tool path or compiles a clip, so a walk against a fixture without them would
-// record nineteen routes as covered while never reaching the code that holds
-// the nil engine. cmd/polyemesis builds both unconditionally -- "a Hub with
-// nothing attached is the difference between no platform is connected and this
-// build has no chat" -- so a fresh install genuinely has them.
+// IT DOES NOT GO THROUGH dbtest. That template is built by db.Open plus a
+// CreateSource, and the shared no-engine fixture next door deletes the row
+// afterwards with raw SQL -- which means MigrateSources always ran with a
+// source present and the genuine first-run path was never the thing under
+// walk. If PR 4's discriminator regressed and started seeding "Main" on a truly
+// fresh open, a fixture that deletes whatever row it finds would still be
+// green. This one would not: the premise assertion at the top of the walk reads
+// the count the migration itself left.
 //
-// Assigned after New rather than passed through Options because the fixture
-// that empties the sources table is shared with the guard tests, and those want
-// the plain server. The handler closes over *Server, so a field set here is the
-// field the request reads.
+// The optional subsystems are wired because a running server wires them.
+// api.Options documents Jobs and Chat as optional and their handlers answer 503
+// when they are absent -- correct, and also a short-circuit returned before
+// anything reads a recording, resolves a tool path or compiles a clip, so a
+// fixture without them would record nineteen routes as covered while never
+// reaching the code that holds the nil engine. cmd/polyemesis builds both
+// unconditionally.
 func freshInstallServer(t *testing.T) (*Server, http.Handler, func(*http.Request)) {
 	t.Helper()
-	s, h, auth := zeroSourceServer(t)
-	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	if s.jobq != nil || s.chat != nil {
-		t.Fatal("the zero-source fixture grew a queue or a chat hub of its own; the " +
-			"assignments below would be overwriting somebody else's wiring")
-	}
-	s.jobq = jobs.New(quiet, s.store)
-	s.chat = chat.New(chat.WithStore(s.store), chat.WithLogger(quiet))
-	t.Cleanup(s.chat.Close)
-	repairTheListenerPortsForSaving(t, s)
-
-	return s, h, auth
+	return enginelessServer(t, nil)
 }
 
-// repairTheListenerPortsForSaving puts the fixture's settings document back
-// into a state PUT /settings can accept.
-//
-// managerServerWithoutEngines stores rtmpPort 0 to keep a unit test off 1935,
-// and the engine Manager reads 0 as "this protocol is off" -- but
-// ListenerSettings.problems() requires 1..65535, so Settings.Validate refuses
-// the document the fixture itself stored. PutSettings does not validate, which
-// is how the two ever came to disagree.
-//
-// The consequence for this walk is specific and would have been invisible: PUT
-// /api/v1/settings answers 400 for that reason alone, and the walk would record
-// the one unguarded mutation an operator makes before they have anything else
-// to do as "rejected the request" while never reaching a line of the handler.
-//
-// A free port rather than the 1935 default, because the manager really does
-// bind: the reconcile at the end of a settings save opens both listeners, and
-// on a developer machine 1935 is very often somebody else's.
-func repairTheListenerPortsForSaving(t *testing.T, s *Server) {
+// enginelessServerWithRows is the same install after somebody's source, its
+// destination, its rendition, an alert rule and a recording exist -- and the
+// engines still do not.
+func enginelessServerWithRows(t *testing.T) (*Server, http.Handler, func(*http.Request)) {
 	t.Helper()
-	st, err := s.store.GetSettings()
+	return enginelessServer(t, seedTheRowsAnEngineWouldHaveCarried)
+}
+
+// enginelessServer builds a Server on a first-run database whose Manager holds
+// no engines, and keeps holding none for the life of the test.
+//
+// THE MANAGER IS DELIBERATELY NOT STARTED, and that is the whole construction
+// rather than a shortcut. Manager.reconcile returns before it builds anything
+// while started is false, so the engine set stays empty across every reconcile
+// a walked route triggers -- and the walk triggers several, PUT /settings among
+// them. A fixture that started the manager and then inserted rows would have
+// built the very engine the walk is written to do without, silently, about
+// forty routes in. What it costs is the shared listeners, which no route under
+// walk reads.
+//
+// rows runs after the store is open and before the server is built, so a caller
+// decides whether the walk meets an install that has never had a row or one
+// whose rows outlived their engines.
+func enginelessServer(t *testing.T, rows func(*testing.T, *db.DB)) (*Server, http.Handler, func(*http.Request)) {
+	t.Helper()
+
+	dir := t.TempDir()
+	store, err := db.Open(filepath.Join(dir, "polyemesis.db"))
+	if err != nil {
+		t.Fatalf("db.Open on a path nothing has ever written: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if _, err := store.CreateUser("admin", testPassword); err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+
+	// Real ports rather than the defaults, because a test suite must not open
+	// 6000 and 1935 on the machine running it -- and real ones rather than the
+	// 0 the shared no-engine fixture stores, because Settings.Validate refuses
+	// 0 while the Manager reads it as "off", so PUT /settings would answer 400
+	// for a reason with nothing to do with sources and the walk would record
+	// the one unguarded mutation a new operator makes as "rejected".
+	st, err := store.GetSettings()
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
-	if st.Listeners.RTMPPort != 0 {
-		t.Fatalf("the fixture's rtmp port is %d; this repair was written for the 0 that "+
-			"Settings.Validate refuses, and repairing something else would be silently "+
-			"changing what the walk exercises", st.Listeners.RTMPPort)
-	}
+	st.Listeners.SRTPort = freeUDPPort(t)
 	st.Listeners.RTMPPort = testenv.FreeTCPPort(t)
 	if err := st.Validate(); err != nil {
-		t.Fatalf("the repaired settings still will not validate, so PUT /settings would "+
-			"400 for a fixture reason and this walk would prove nothing about it: %v", err)
+		t.Fatalf("the fixture's own settings will not validate, so PUT /settings would "+
+			"400 for a fixture reason and the walk would prove nothing about it: %v", err)
 	}
-	if err := s.store.PutSettings(st); err != nil {
+	if err := store.PutSettings(st); err != nil {
 		t.Fatalf("PutSettings: %v", err)
+	}
+
+	if rows != nil {
+		rows(t, store)
+	}
+
+	box, err := secrets.New([]byte(strings.Repeat("k", 32)))
+	if err != nil {
+		t.Fatalf("secrets.New: %v", err)
+	}
+	cfg := config.Config{DataDir: dir}
+	if err := cfg.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+
+	bus := events.NewBroker()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	mgr := engine.NewManager(quiet, cfg, store, defaultTools(), bus)
+	t.Cleanup(mgr.Stop)
+
+	s := New(Options{
+		Log: quiet, Config: cfg, DB: store, Secrets: box,
+		Engine: mgr, Events: bus, Version: "test",
+	})
+	s.jobq = jobs.New(quiet, store)
+	s.chat = chat.New(chat.WithStore(store), chat.WithLogger(quiet))
+	t.Cleanup(s.chat.Close)
+
+	h := s.Handler()
+	lastTestServer = s
+	if s.eng() != nil {
+		t.Fatal("the fixture came up with an engine, so nothing walked through it would " +
+			"be testing an install with no programme")
+	}
+	return s, h, login(t, h)
+}
+
+// seedTheRowsAnEngineWouldHaveCarried creates one of each thing a {param} route
+// looks up before it reads the engine.
+//
+// One of each, and no more. Every row here exists to get a specific handler
+// past its lookup -- see mustRunTheirBodyWithNoEngine -- and a fixture that
+// grew a second destination or a populated session would start asserting
+// something about list ordering that this walk has no business owning.
+func seedTheRowsAnEngineWouldHaveCarried(t *testing.T, store *db.DB) {
+	t.Helper()
+
+	src := &db.Source{Name: "Main", Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	if err := store.CreateSource(src); err != nil {
+		t.Fatalf("create the source whose engine did not come up: %v", err)
+	}
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "A platform", Kind: db.DestRTMP, URL: "rtmp://example.invalid/live",
+		StreamKey: "k", Enabled: true, AudioBitrate: 128,
+		Profile:  routing.DefaultProfile(),
+		SourceID: &src.ID,
+	}); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+	if _, err := store.CreateRendition(&db.Rendition{
+		Name: "720p", Width: 1280, Height: 720, FPS: 30, VideoBitrate: 3000,
+		Encoder: db.EncoderX264, Preset: "veryfast", GOPSeconds: 2,
+		SourceID: &src.ID,
+	}); err != nil {
+		t.Fatalf("create rendition: %v", err)
+	}
+	if _, err := store.CreateAlertRule(&alerts.Rule{
+		Name: "A rule", Enabled: true, URL: "https://example.invalid/hook",
+		Format: alerts.FormatJSON, Events: []alerts.Type{alerts.TypeDestinationDown},
+		MinSeverity: alerts.SeverityWarning,
+	}); err != nil {
+		t.Fatalf("create alert rule: %v", err)
+	}
+	// A measured segment, because clipTimeline refuses an unmeasured one and
+	// the clipper routes would go on 404ing for that reason instead. No file on
+	// disk: the timeline tolerates a missing path and the walk is not about
+	// what the clipper can cut.
+	if err := store.UpsertRecording(&db.Recording{
+		Filename: "2026-01-01_00-00-00.ts", DurationMS: 5000, Bytes: 1024, Tracks: 2,
+		StartedAt: time.Now().Add(-time.Minute), FinishedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("create recording: %v", err)
+	}
+
+	// concretePath asks for id 1 and nothing else, so a row that came back at 2
+	// is a row this walk cannot reach. It happens the moment somebody seeds
+	// something twice, or restores without resetting the AUTOINCREMENT
+	// sequence, and the only symptom otherwise is a 404 that reads exactly like
+	// the empty fixture it replaced.
+	for name, get := range map[string]func() error{
+		"source":      func() error { _, err := store.GetSource(1); return err },
+		"destination": func() error { _, err := store.GetDestination(1); return err },
+		"rendition":   func() error { _, err := store.GetRendition(1); return err },
+		"alert rule":  func() error { _, err := store.GetAlertRule(1); return err },
+		"recording":   func() error { _, err := store.GetRecording(1); return err },
+	} {
+		if err := get(); err != nil {
+			t.Fatalf("the seeded %s is not id 1 (%v), so every route this fixture exists "+
+				"to unblock is still answering 404 at its lookup", name, err)
+		}
 	}
 }
 
-// TestTheFreshInstallRegistriesStillNameRegisteredRoutes keeps both lists from
+// restoreTheSeededRows puts the fixture back to one of each, with id 1, when a
+// walked route has taken one away.
+//
+// ALL FIVE OR NOTHING, because the source CASCADEs: a DELETE that reached it
+// took the destination and the rendition with it, and repairing them one at a
+// time would rebuild a destination against a source id that no longer exists.
+// The sqlite_sequence rows go with them -- the ids are AUTOINCREMENT, so
+// without that reset the replacement rows come back as 2 and every {param}
+// route in this walk is asking for 1.
+//
+// The common case is that nothing was removed and this is five point reads.
+func restoreTheSeededRows(t *testing.T, store *db.DB) {
+	t.Helper()
+	if _, err := store.GetSource(1); err == nil {
+		if _, err := store.GetDestination(1); err == nil {
+			if _, err := store.GetRendition(1); err == nil {
+				if _, err := store.GetAlertRule(1); err == nil {
+					if _, err := store.GetRecording(1); err == nil {
+						return
+					}
+				}
+			}
+		}
+	}
+	for _, table := range []string{"destinations", "renditions", "alert_rules", "recordings", "sources"} {
+		if _, err := store.SQL().Exec("DELETE FROM " + table); err != nil {
+			t.Fatalf("clear %s before reseeding: %v", table, err)
+		}
+		if _, err := store.SQL().Exec("DELETE FROM sqlite_sequence WHERE name = ?", table); err != nil {
+			t.Fatalf("reset the %s sequence: %v", table, err)
+		}
+	}
+	seedTheRowsAnEngineWouldHaveCarried(t, store)
+}
+
+// TestTheFreshInstallRegistriesStillNameRegisteredRoutes keeps the lists from
 // decaying into folklore.
 //
 // An entry whose route no longer exists is a reader being told a decision was
@@ -298,5 +587,17 @@ func TestTheFreshInstallRegistriesStillNameRegisteredRoutes(t *testing.T) {
 				"or the route is gone and the entry is folklore.",
 				name, strings.Join(stale, ", "))
 		}
+	}
+	var stale []string
+	for _, pair := range mustRunTheirBodyWithNoEngine {
+		if !seen[pair] {
+			stale = append(stale, pair)
+		}
+	}
+	sort.Strings(stale)
+	if len(stale) > 0 {
+		t.Errorf("mustRunTheirBodyWithNoEngine names routes this router does not serve: "+
+			"%s. The guard each one stands for is now covered by nothing.",
+			strings.Join(stale, ", "))
 	}
 }

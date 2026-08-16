@@ -32,6 +32,27 @@ its first tagged release.
   single-ingest configuration onto a source called "Main", and now tells that
   case apart from a first run rather than seeding both. (#387)
 
+- **The listener ports stay editable on an install with no source.** They belong
+  to the whole install rather than to a programme — one SRT listener serves
+  every source and tells them apart by publish token — so they lived on the
+  ingest tab, which the empty state had replaced wholesale. A first install
+  whose 1935 or 6000 was already taken therefore had no port control anywhere in
+  the UI, and was invited to create a source that would arrive on the port that
+  could not bind. (#387)
+
+- **`POST /alerts/rules/{id}/test` says which absence it is refusing for.** It
+  answered `503 the alert notifier is not running` on an install with no
+  programme, which sent the operator looking for a subsystem to restart:
+  `Engine.Alerts()` is nil for exactly one reason, and it is this one. It now
+  carries `code: "no_source"` like every other refusal of the same condition.
+  (#387)
+
+- **The startup SRT warning names a screen that exists on the boot that prints
+  it.** "switch Settings → Ingest to RTMP" was executable only because a seeded
+  source put an ingest form on that tab. `docs/QUICKSTART.md`, `docs/INSTALL.md`,
+  the meters page and the media uploader carried the same kind of pointer and
+  now say where the setting really is. (#387)
+
 ### Added
 - **An onboarding tour, offered once per install rather than once per browser.**
   A new operator finishes the signup screen and lands on an empty dashboard, and

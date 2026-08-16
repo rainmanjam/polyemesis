@@ -666,14 +666,15 @@ tls mode=… hostname=…
 | Port | Protocol | Needed when |
 |---|---|---|
 | 8080 | TCP | always — web UI and API. Configurable via `addr`. |
-| 6000 | **UDP** | SRT ingest. The default; changeable in *Settings → Ingest*. |
+| 6000 | **UDP** | SRT ingest. The default; changeable in *Settings → Ingest → Listeners*, which is install-wide and editable before any source exists. |
 | 1935 | TCP | RTMP ingest, only if you use the fallback. One port however many RTMP sources you run. |
 | 80 | TCP | only for `tls.mode: acme` (HTTP-01 validation), plus the HTTP→HTTPS redirect whenever polyemesis terminates TLS |
 | 443 | TCP | only if you set `addr` to `:443` rather than serving TLS on 8080 |
 
 The ingest listeners bind `0.0.0.0` regardless of `addr`, so restricting `addr`
 to loopback for a reverse-proxy deployment does not restrict ingest. Set an SRT
-passphrase on the source's ingest (*Settings → Ingest* for the default one):
+passphrase on the source's ingest (the **Sources** page, or *Settings → Ingest*
+for the default one):
 without one your stream crosses the network in the clear. RTMP has no equivalent — its stream key authenticates the
 publisher but encrypts nothing, so the RTMP port is the one to keep off the
 public internet if you have the choice.

@@ -586,30 +586,55 @@ export function Dashboard() {
   const [moveNote, setMoveNote] = useState("");
   const [sourceCount, setSourceCount] = useState<number | null>(null);
 
+  // How many programmes exist, which is what decides whether this page shows a
+  // pipeline or an empty state.
+  //
+  // `null` means NOT KNOWN, and the branch below tests `=== 0` rather than
+  // falsiness precisely so that unknown renders the ordinary dashboard. The
+  // cost is that a fresh install shows the pipeline for the length of one
+  // request before the empty state replaces it; the alternative is a spinner in
+  // front of the main screen on every load of every install, for a question
+  // only one install in a thousand answers differently.
+  //
+  // A count that cannot be read leaves the page rendering as it always did. The
+  // empty state is an improvement on a working dashboard, never a replacement
+  // for one, and drawing it because a request failed would tell an operator
+  // mid-broadcast that their programme is gone.
+  const readSourceCount = useCallback(async (): Promise<number | null> => {
+    try {
+      const { sources } = await api.setupStatus();
+      const n = sources ?? null;
+      setSourceCount(n);
+      return n;
+    } catch {
+      setSourceCount(null);
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     api.system().then(setSystem).catch(() => {});
     api
       .getSettings()
       .then((s) => setSettingsPreview(s.preview.enabled))
       .catch(() => {});
-    // How many programmes exist, which is what decides whether this page shows
-    // a pipeline or an empty state.
+    readSourceCount();
+    // AND KEEP READING IT. The count used to be read once per refreshKey, and
+    // every control that bumps refreshKey is inside the pipeline this page
+    // stops drawing the moment the count reaches zero -- so a dashboard left
+    // open while the last source went away kept rendering a publish URL, a
+    // track count and a relay subscriber for a programme that no longer
+    // existed, with nothing on the page able to notice. The status socket
+    // cannot rescue it either: status events are published BY an engine, so an
+    // install with none simply stops sending them and the last frame stays on
+    // screen for ever.
     //
-    // `null` means NOT KNOWN, and the branch below tests `=== 0` rather than
-    // falsiness precisely so that unknown renders the ordinary dashboard. The
-    // cost is that a fresh install shows the pipeline for the length of one
-    // request before the empty state replaces it; the alternative is a spinner
-    // in front of the main screen on every load of every install, for a
-    // question only one install in a thousand answers differently.
-    api
-      .listSources()
-      .then((rows) => setSourceCount(rows.length))
-      // A count that cannot be read leaves the page rendering as it always did.
-      // The empty state is an improvement on a working dashboard, never a
-      // replacement for one, and drawing it because a request failed would tell
-      // an operator mid-broadcast that their programme is gone.
-      .catch(() => setSourceCount(null));
-  }, [refreshKey]);
+    // The setup status rather than the source list: it is the one endpoint
+    // whose entire job is this number, it is a single row count, and it is what
+    // the empty state was given a count for in the first place.
+    const poll = setInterval(readSourceCount, 10_000);
+    return () => clearInterval(poll);
+  }, [refreshKey, readSourceCount]);
 
   const act = useCallback(
     async (id: number, fn: () => Promise<unknown>, label: string) => {
@@ -623,11 +648,22 @@ export function Dashboard() {
         // destination" over a scarlet background is a fault report for a state
         // in which nothing is wrong and nothing is broken.
         //
-        // Rendering the empty state instead means re-reading the count rather
-        // than assuming it: the refusal says this install has no programme, and
-        // the page below is built from that number.
+        // RE-READ THE COUNT, DO NOT ASSUME IT, and the difference is a whole
+        // screen. requireSource refuses on "no engine is running", which is
+        // also the state of an install that HAS sources and whose engines all
+        // failed to build or start -- manager.go logs and continues, per
+        // source. Setting the count to 0 from this branch replaced that
+        // operator's entire dashboard with "create a source in the web UI",
+        // with a button to a Sources page listing the source they already have,
+        // and no way back: nothing left on screen bumps refreshKey. The real
+        // fault, an engine that did not come up, was then concealed by a screen
+        // asserting the opposite.
+        //
+        // So the refusal is a prompt to ask, not an answer. Zero draws the
+        // empty state; anything else says the true thing.
         if (isNoSource(err)) {
-          setSourceCount(0);
+          const n = await readSourceCount();
+          if (n !== 0) toast.error(t("dash.noEngineRunning"));
           return;
         }
         toast.error(err instanceof Error ? err.message : `Could not ${label}.`);
@@ -635,7 +671,7 @@ export function Dashboard() {
         setBusyId(null);
       }
     },
-    [],
+    [readSourceCount, t],
   );
 
   const openEdit = async (id: number) => {
