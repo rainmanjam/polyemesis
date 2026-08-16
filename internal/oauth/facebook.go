@@ -32,6 +32,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -419,6 +420,19 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	// event_params carries the start time. Facebook accepts at most seven days
 	// ahead; the bound is enforced by the caller, which is the only layer that
 	// knows the occurrence.
+	//
+	// A BARE UNIX SCALAR, and the alternative was rejected rather than
+	// overlooked. Meta documents event_params two ways: the scheduling guide's
+	// own copy-pasteable request sends the scalar
+	// (...&event_params=1541539800), while the v26.0 edge reference types it as
+	// a structured Live Video Event Parameter object ({start_time, cover})
+	// scoped to Live Online Events. They cannot both be the wire format. The
+	// literal sample in the guide that describes THIS call is the stronger
+	// evidence, so the scalar is what goes out. If a live account ever answers
+	// this with a refusal naming event_params, the object is the next thing to
+	// try -- and the read-back,
+	// GET /<ID>/live_videos?broadcast_status=["SCHEDULED_UNPUBLISHED"], is how
+	// to tell which one Facebook actually took.
 	params := url.Values{"status": {"LIVE_NOW"}}
 	if !opts.ScheduledFor.IsZero() {
 		params.Set("status", "SCHEDULED_UNPUBLISHED")
@@ -787,12 +801,257 @@ func (f *Facebook) RescheduleBroadcast(ctx context.Context, accessToken, liveVid
 	if liveVideoID == "" {
 		return fmt.Errorf("reschedule: no live video id")
 	}
+	// The same bare unix scalar the create sends, for the same reason and with
+	// the same fallback if it is ever refused -- see IngestFor. The two
+	// spellings must not diverge: a create and a move that disagreed about the
+	// wire format would work until the day one of them stopped.
 	params := url.Values{"event_params": {strconv.FormatInt(at.Unix(), 10)}}
 	var out struct{}
 	if err := f.post(ctx, accessToken, "/"+liveVideoID, params, &out); err != nil {
 		return fbAdvice(err, "reschedule a Facebook broadcast", nil)
 	}
 	return nil
+}
+
+// ------------------------------------------------ ending and stream health
+
+// fbStatusVOD is what a Facebook broadcast becomes when it ends. Broadcasting
+// guide, read 2026-08-16: "This ends your broadcast and saves it as a video on
+// demand (VOD)." It is the only value that confirms an end.
+const fbStatusVOD = "VOD"
+
+// fbEndReadFields is the read-back after an end. Deliberately not
+// fbLiveVideoFields: that constant exists to fetch ingest URLs, and asking for
+// a stream key to answer "did this stop" would pull a credential into a call
+// that has no use for one.
+const fbEndReadFields = "id,status"
+
+// BroadcastEnd is what EndBroadcast observed after asking Facebook to stop.
+type BroadcastEnd struct {
+	// Status is the status Facebook reported on the read-back. Empty means the
+	// read-back failed or carried no status, which is NOT the same as the
+	// broadcast still being live and must never be rendered as though it were.
+	Status string
+	// Ended is true only when Facebook reported VOD. A false here with no error
+	// means "Facebook accepted the end and has not yet said it took", which is
+	// an ordinary outcome -- the POST succeeded.
+	Ended bool
+	// Warnings name what was actually seen when Ended is false, in the shape
+	// MetadataResult uses, so a caller can render them the same way.
+	Warnings []string
+}
+
+// EndBroadcast ends one live video and reports what Facebook says it became.
+//
+// ENDING ON FACEBOOK IS NOT ENDING ON YOUTUBE, and that difference is the whole
+// design of this method. Meta's Broadcasting guide, read 2026-08-16, verbatim:
+// "To end a broadcast, stop streaming live video data from your encoder to the
+// stream URL or send a request to POST /<LIVE_VIDEO_ID>?end_live_video=true."
+// Two mechanisms, and one of them is the ABSENCE OF BYTES -- so on Facebook an
+// encoder that crashes has already ended the show. The policy YouTube needs,
+// where a crash deliberately leaves the broadcast live so a reconnecting
+// encoder can rejoin it, has nothing to preserve here and is not imported: by
+// the time anything noticed the crash, Facebook had already ended it. This
+// method is for a DELIBERATE end -- the operator stopped the show.
+//
+// A refused POST is an ERROR, unlike the refused privacy push below which is a
+// Skipped. The asymmetry is the consequence: a privacy push that fails leaves
+// the value chosen at create time already applied, while an end that fails
+// leaves a broadcast ON AIR that the operator believes is over.
+//
+// The end is confirmed by reading the status back, and Ended is reported only
+// on VOD. A different status is not an error and not a lie either -- Facebook
+// documents that it saves the VOD, not how quickly the node settles, so
+// PROCESSING or a stale LIVE is reported as "accepted, not yet confirmed" with
+// the value that was seen. Inventing a retry loop around that would mean
+// inventing the settling time nobody published.
+func (f *Facebook) EndBroadcast(ctx context.Context, accessToken, targetRef, liveVideoID string) (*BroadcastEnd, error) {
+	// Refused before any call, for the reason RescheduleBroadcast is: an empty
+	// id makes this a POST to "/", which Graph answers in a way that reads as
+	// success -- and here that would report a still-live broadcast as ended.
+	if strings.TrimSpace(liveVideoID) == "" {
+		return nil, fmt.Errorf("no Facebook live video id was recorded for this destination")
+	}
+	// Resolved rather than posted with the user token: a Page's live video is
+	// addressable only with that Page's token, and the failure without it is a
+	// permission error on a call the operator is watching for the end of.
+	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
+	if err != nil {
+		return nil, err
+	}
+
+	// The node, not the /live_videos edge, and end_live_video=true is the whole
+	// request. Nothing else is sent: this call is not a place to also fix a
+	// title, and a second parameter Graph did not expect would fail the end.
+	if err := f.post(ctx, tgt.token, "/"+liveVideoID,
+		url.Values{"end_live_video": {"true"}}, nil); err != nil {
+		return nil, fbAdvice(err, "end the Facebook broadcast", f.publishScopes(tgt.kind))
+	}
+
+	out := &BroadcastEnd{}
+	var confirm struct {
+		Status string `json:"status"`
+	}
+	getErr := f.get(ctx, tgt.token, "/"+liveVideoID,
+		url.Values{"fields": {fbEndReadFields}}, &confirm)
+	switch {
+	case getErr != nil:
+		out.Warnings = append(out.Warnings,
+			"Facebook accepted the end but it could not be confirmed: "+getErr.Error())
+	case strings.EqualFold(strings.TrimSpace(confirm.Status), fbStatusVOD):
+		out.Status, out.Ended = confirm.Status, true
+	case strings.TrimSpace(confirm.Status) == "":
+		out.Warnings = append(out.Warnings,
+			"Facebook accepted the end but the read-back carried no status to confirm it")
+	default:
+		out.Status = confirm.Status
+		out.Warnings = append(out.Warnings, fmt.Sprintf(
+			"Facebook accepted the end but still reports this broadcast as %s rather than %s",
+			confirm.Status, fbStatusVOD))
+	}
+	return out, nil
+}
+
+// FacebookStreamHealthInterval is the floor on how often StreamHealth may be
+// called. It is FACEBOOK'S number, not an estimate of one -- Broadcasting
+// guide, read 2026-08-16, verbatim: "Stream health data refreshes every 2
+// seconds, so limit queries to no more than once every 2 seconds. A stream
+// timeout will be detected and reported after 4 seconds of no data being
+// received."
+//
+// A published floor may be encoded; an unpublished ceiling may not, which is
+// why YouTube's concurrency limit is nowhere in this tree and this is here.
+//
+// It is not enforced inside StreamHealth, and that is deliberate: enforcement
+// means either sleeping inside a caller's call or keeping a last-polled clock
+// per broadcast in a provider that is otherwise stateless. The poll loop owns
+// its own pacing; this constant is what it paces against, so the number is
+// written down once instead of at every call site.
+const FacebookStreamHealthInterval = 2 * time.Second
+
+// FacebookStreamTimeout is how long Facebook itself waits before it reports a
+// stream as timed out -- the second sentence of the same quote. It is here so a
+// caller deciding "how long may a health read stay empty before the encoder is
+// gone" reads Facebook's four seconds instead of inventing a number, which is
+// the mistake this codebase repeats most.
+const FacebookStreamTimeout = 4 * time.Second
+
+// IngestStreamHealth is one ingest stream's health as Facebook reports it.
+type IngestStreamHealth struct {
+	// ID identifies which ingest stream this describes. A broadcast created
+	// with IngestOptions.BackupIngest has more than one.
+	ID string
+	// Health carries stream_health's numeric fields under FACEBOOK'S OWN names
+	// rather than fields named here.
+	//
+	// A map because the evidence establishes that stream_health "carries
+	// bitrates and frame rates" and does not name the keys: the node reference
+	// that would is the one that returns a real 404. Named Go fields would be a
+	// guess at spellings, and a guess that is wrong reads back as zero on a
+	// healthy stream -- a dropped-frames pane showing 0 for a field we misspelt
+	// is worse than one showing nothing.
+	//
+	// An absent measurement is an ABSENT KEY, never a zero: a map lookup's
+	// second return is what tells those apart, the same reason stats carries a
+	// viewer count as a pointer.
+	Health map[string]float64
+	// Unparsed names the stream_health fields that were not numbers, sorted.
+	// They are recorded rather than dropped because a field polyemesis cannot
+	// read looks exactly like a field Facebook did not send, and one of those
+	// is a bug here.
+	Unparsed []string
+}
+
+// fbIngestStream is one entry of the ingest_streams read.
+type fbIngestStream struct {
+	ID string `json:"id"`
+	// map[string]any, not a typed struct, for the reason IngestStreamHealth.Health
+	// is a map: the field names are not established.
+	StreamHealth map[string]any `json:"stream_health"`
+}
+
+// fbIngestStreams tolerates both spellings of a list-valued Graph field: the
+// {"data": [...]} envelope this file already decodes on /me/accounts and
+// /live_videos, and a bare array.
+//
+// Tolerance rather than a choice because nothing reachable settles which one
+// ingest_streams uses when it is read as a FIELD of the node -- the LiveVideo
+// node reference 404s, which is the same absence that keeps the health field
+// names out of this file. Guessing one spelling would turn a healthy stream
+// into an empty pane, and the two shapes cannot be confused for each other.
+type fbIngestStreams struct {
+	Streams []fbIngestStream
+}
+
+func (s *fbIngestStreams) UnmarshalJSON(b []byte) error {
+	var env struct {
+		Data []fbIngestStream `json:"data"`
+	}
+	// An array does not unmarshal into a struct, so this branch cannot swallow
+	// the bare form; null unmarshals into it as no streams, which is correct.
+	if err := json.Unmarshal(b, &env); err == nil {
+		s.Streams = env.Data
+		return nil
+	}
+	var bare []fbIngestStream
+	if err := json.Unmarshal(b, &bare); err != nil {
+		return err
+	}
+	s.Streams = bare
+	return nil
+}
+
+// StreamHealth reads what Facebook's ingest sees of the encoder feed.
+//
+// Facebook is the only platform here that publishes this: Twitch's Helix
+// reference carries no bitrate, framerate or dropped-frame field at all, so
+// this is not a gap in the other providers to be filled by symmetry.
+//
+// AN EMPTY RESULT IS NOT AN ERROR AND NOT A FAILURE. A scheduled broadcast has
+// no ingest yet, an ended one has none any more, and a live one whose encoder
+// went quiet reports nothing until Facebook's own four-second timeout fires --
+// see FacebookStreamTimeout. All three are "no ingest stream to describe", and
+// turning them into an error would make a health pane shout during the pause
+// between clicking Go Live and the first byte arriving.
+//
+// Callers must respect FacebookStreamHealthInterval between calls.
+func (f *Facebook) StreamHealth(ctx context.Context, accessToken, targetRef, liveVideoID string) ([]IngestStreamHealth, error) {
+	if strings.TrimSpace(liveVideoID) == "" {
+		return nil, fmt.Errorf("no Facebook live video id was recorded for this destination")
+	}
+	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
+	if err != nil {
+		return nil, err
+	}
+
+	var read struct {
+		IngestStreams fbIngestStreams `json:"ingest_streams"`
+	}
+	if err := f.get(ctx, tgt.token, "/"+liveVideoID,
+		url.Values{"fields": {"ingest_streams"}}, &read); err != nil {
+		return nil, fbAdvice(err, "read the Facebook stream health", f.publishScopes(tgt.kind))
+	}
+
+	out := make([]IngestStreamHealth, 0, len(read.IngestStreams.Streams))
+	for _, s := range read.IngestStreams.Streams {
+		h := IngestStreamHealth{ID: s.ID}
+		for name, v := range s.StreamHealth {
+			n, ok := v.(float64)
+			if !ok {
+				h.Unparsed = append(h.Unparsed, name)
+				continue
+			}
+			if h.Health == nil {
+				h.Health = make(map[string]float64, len(s.StreamHealth))
+			}
+			h.Health[name] = n
+		}
+		// Sorted because map iteration order is random, and a warning list that
+		// reorders itself between two identical reads reads as a change.
+		sort.Strings(h.Unparsed)
+		out = append(out, h)
+	}
+	return out, nil
 }
 
 // UpdateLiveVideoPrivacy changes a broadcast's audience after it is already
