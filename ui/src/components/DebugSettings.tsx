@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
+import { bytes as formatBytes } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 import type { DebugState } from "@/lib/types";
 
@@ -121,6 +122,11 @@ export function DebugSettings() {
   const held = state?.held ?? 0;
   const seen = state?.seen ?? 0;
   const truncated = seen > held;
+  const size = state?.bytes ?? 0;
+  // Lines cut at the per-record cap. A DIFFERENT CLAIM from `truncated` above,
+  // which counts whole lines the ring dropped: one explains a missing line, the
+  // other a line that stops mid-sentence, and an engineer needs both.
+  const cutLines = state?.recordsTruncated ?? 0;
 
   return (
     <Card>
@@ -150,6 +156,19 @@ export function DebugSettings() {
 
         <div className="text-sm tnum">
           {t("debug.held")}: {held.toLocaleString()}
+          {/* The SIZE beside the count, because the count is what the ring
+              bounds and the size is what the operator is about to send. */}
+          {size > 0 ? (
+            <span className="ml-2 text-xs text-muted-foreground">{formatBytes(size)}</span>
+          ) : null}
+          {cutLines > 0 ? (
+            // Long lines were shortened to fit the per-record cap. Said here as
+            // well as in the bundle, so an engineer told "the log just stops" has
+            // the explanation before they ask.
+            <span className="ml-2 text-xs text-muted-foreground">
+              {t("debug.linesCut", { count: cutLines.toLocaleString() })}
+            </span>
+          ) : null}
           {truncated ? (
             // SAID OUT LOUD. A buffer that dropped its oldest records and shows
             // the rest as though they were all of them is how an engineer reads
@@ -185,7 +204,16 @@ export function DebugSettings() {
         onOpenChange={setConfirming}
         subject={t("debug.title")}
         title={t("debug.confirmTitle")}
-        description={t("debug.confirmBody")}
+        description={
+          <>
+            {t("debug.confirmBody")}{" "}
+            {/* THE SIZE IS PART OF THE DECISION. "Confirming a number is a
+                decision, confirming a vibe is a click" is why the count is
+                here; how large the file is decides whether it can be attached
+                to the thread they were going to attach it to. */}
+            {size > 0 ? t("debug.confirmSize", { size: formatBytes(size) }) : null}
+          </>
+        }
         consequences={[{ label: t("debug.consequenceRecords"), count: held }]}
         consequencesLabel={t("debug.consequencesLabel")}
         confirmLabel={t("debug.confirmAction")}

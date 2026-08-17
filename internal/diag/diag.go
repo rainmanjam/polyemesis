@@ -32,6 +32,7 @@ package diag
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -102,6 +103,11 @@ type Record struct {
 	Level   string         `json:"level"`
 	Message string         `json:"message"`
 	Attrs   map[string]any `json:"attrs,omitempty"`
+	// Truncated marks a record that exceeded MaxRecordBytes and was cut. Stated
+	// on the record itself rather than only counted in the capture, because the
+	// engineer reading line 4,812 needs to know THAT line is short -- a total at
+	// the top of the file does not tell them which ones.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // Recorder is the bounded ring, plus the secret set every record passes
@@ -117,6 +123,15 @@ type Recorder struct {
 	// the bundle so a thin capture is visibly a thin capture rather than
 	// silently one.
 	seen uint64
+	// sizes is the measured cost of each slot, parallel to buf, so eviction can
+	// subtract what it evicts. Without it the running total only grows and would
+	// report a capture as enormous long after the ring dropped the records that
+	// made it so.
+	sizes []int
+	bytes int
+	// truncated counts records that were cut to fit MaxRecordBytes, cumulative
+	// like seen rather than per-slot: it describes the CAPTURE, not the bundle.
+	truncated uint64
 }
 
 // NewRecorder returns a recorder holding at most capacity records.
@@ -124,7 +139,11 @@ func NewRecorder(capacity int, secrets *alerts.SecretSet) *Recorder {
 	if capacity <= 0 {
 		capacity = DefaultCapacity
 	}
-	return &Recorder{buf: make([]Record, capacity), secrets: secrets}
+	return &Recorder{
+		buf:     make([]Record, capacity),
+		sizes:   make([]int, capacity),
+		secrets: secrets,
+	}
 }
 
 // SetSecrets replaces the declared secrets.
@@ -166,6 +185,10 @@ func (r *Recorder) Recording() bool {
 func (r *Recorder) Reset() {
 	r.mu.Lock()
 	r.next, r.full, r.seen = 0, false, 0
+	r.bytes, r.truncated = 0, 0
+	for i := range r.sizes {
+		r.sizes[i] = 0
+	}
 	r.mu.Unlock()
 }
 
@@ -200,12 +223,49 @@ func (r *Recorder) Observe(rec Record) {
 		}
 		rec.Attrs = out
 	}
+	// THE CAP RUNS HERE, AFTER THE SCRUB AND NEVER BEFORE. Cutting first would
+	// strand the front half of a credential as text the secret set no longer
+	// matches -- it matches whole literals -- and send it to a stranger in
+	// plaintext. See capRecord.
+	rec, cut := capRecord(rec)
+	rec.Truncated = cut
+	if cut {
+		r.truncated++
+	}
+
+	// Subtract what this slot held before overwriting it, so the total tracks
+	// the ring rather than accumulating.
+	r.bytes -= r.sizes[r.next]
+	size := recordBytes(rec)
+	r.sizes[r.next] = size
+	r.bytes += size
+
 	r.buf[r.next] = rec
 	r.next = (r.next + 1) % len(r.buf)
 	if r.next == 0 {
 		r.full = true
 	}
 	r.seen++
+}
+
+// Bytes reports the measured size of what the ring currently holds.
+//
+// APPROXIMATE, AND DELIBERATELY SO. It counts the payload -- messages, keys and
+// values -- not the JSON syntax and indentation wrapped around them at export.
+// It exists so the confirmation dialog can state a size before an operator
+// sends the bundle to somebody else, and for that a number that is right to
+// within the envelope overhead is the whole requirement.
+func (r *Recorder) Bytes() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.bytes
+}
+
+// TruncatedCount reports how many captured records were cut to fit the cap.
+func (r *Recorder) TruncatedCount() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.truncated
 }
 
 // scrubValue walks a value, because slog attributes are not all strings and a
@@ -234,26 +294,112 @@ func scrubValue(r *Recorder, v any) any {
 	case fmt.Stringer:
 		return r.scrub(t.String())
 	default:
-		// Numbers, bools, times. Anything with a String or Error method is
-		// handled above; what is left cannot carry a credential without having
-		// been formatted first, and formatting is what the string cases cover.
-		return v
+		// EVERYTHING ELSE IS RENDERED AND THEN SCRUBBED, and the previous comment
+		// here was wrong in a way that leaked credentials. It claimed what reached
+		// this branch "cannot carry a credential without having been formatted
+		// first". slog.Any("detail", map[string]string{"token": key}) reaches it,
+		// carries the key, and was passed through untouched: the declared set
+		// never saw it and neither did the residual pass. Found by codex; present
+		// on main, not introduced with the size cap.
+		//
+		// Rendering to JSON also gives the size cap something to measure. An
+		// unrecognised value was priced at a flat 8 bytes, so a 1 MiB []byte made
+		// a record measure about sixteen and capRecord waved it through as already
+		// small.
+		if isScalar(v) {
+			return v
+		}
+		if b, err := json.Marshal(v); err == nil {
+			return r.scrub(string(b))
+		}
+		return r.scrub(fmt.Sprint(v))
 	}
+}
+
+// isScalar reports whether a value is small, unshortenable, and incapable of
+// hiding a credential inside itself.
+//
+// Anything with a String or Error method is handled before this is reached, so
+// what is left is genuinely a number or a bool. Those are kept in their own JSON
+// form rather than stringified, because an engineer filtering on `"attempt": 3`
+// should not have to match `"3"`.
+func isScalar(v any) bool {
+	switch v.(type) {
+	case nil, bool,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64:
+		return true
+	}
+	return false
 }
 
 // Records returns what is held, oldest first.
 func (r *Recorder) Records() []Record {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.full {
-		out := make([]Record, r.next)
-		copy(out, r.buf[:r.next])
-		return out
-	}
+	return r.recordsLocked()
+}
+
+// recordsLocked is Records without the lock, so Snapshot can take the records
+// and the counters describing them in one critical section.
+func (r *Recorder) recordsLocked() []Record {
 	out := make([]Record, 0, len(r.buf))
-	out = append(out, r.buf[r.next:]...)
-	out = append(out, r.buf[:r.next]...)
+	if !r.full {
+		out = append(out, r.buf[:r.next]...)
+	} else {
+		out = append(out, r.buf[r.next:]...)
+		out = append(out, r.buf[:r.next]...)
+	}
+	// THE ATTRIBUTE MAPS ARE COPIED, NOT SHARED. Copying the Record struct alone
+	// left every caller holding the ring's own map: mutating it changed a
+	// retained record while its recorded size did not move, so the accounting
+	// silently stopped describing the contents.
+	for i := range out {
+		if len(out[i].Attrs) == 0 {
+			continue
+		}
+		m := make(map[string]any, len(out[i].Attrs))
+		for k, v := range out[i].Attrs {
+			m[k] = v
+		}
+		out[i].Attrs = m
+	}
 	return out
+}
+
+// Snapshot returns the held records together with the counters that describe
+// them, taken in one critical section.
+//
+// BECAUSE FOUR SEPARATE READS DESCRIBED FOUR DIFFERENT MOMENTS. Build called
+// Records, Bytes, Seen and TruncatedCount in turn, each taking the lock on its
+// own, so an Observe landing between them produced a bundle whose stated size
+// belonged to a ring state its records did not come from -- and a Reset landing
+// between them produced records with a size of zero. The number an operator is
+// shown before sending a file has to be that file's number.
+func (r *Recorder) Snapshot() Snapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return Snapshot{
+		Records:   r.recordsLocked(),
+		Bytes:     r.bytes,
+		Seen:      r.seen,
+		Truncated: r.truncated,
+		Capacity:  len(r.buf),
+		Recording: r.on,
+	}
+}
+
+// Snapshot is one consistent view of the ring. A struct rather than six return
+// values because every field here is a number and positional returns would be
+// swappable without the compiler noticing.
+type Snapshot struct {
+	Records   []Record
+	Bytes     int
+	Seen      uint64
+	Truncated uint64
+	Capacity  int
+	Recording bool
 }
 
 // Seen reports how many records were captured, which may exceed what is held.

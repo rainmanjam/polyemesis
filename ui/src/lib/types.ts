@@ -816,6 +816,14 @@ export interface DebugState {
   held: number;
   seen: number;
   capacity: number;
+  /** Measured payload size of the held records. Stated in the confirmation
+   *  dialog so the decision to send a bundle to somebody else is made against a
+   *  number. Approximate — it excludes the JSON envelope. */
+  bytes: number;
+  /** How many captured lines were cut at the per-record cap. A different claim
+   *  from `seen > held`, which counts whole lines the ring dropped: one explains
+   *  a missing line, the other a line that stops mid-sentence. */
+  recordsTruncated: number;
 }
 
 export interface StreamHealthView {
