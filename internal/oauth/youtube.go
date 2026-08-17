@@ -172,6 +172,11 @@ func (y *YouTube) Ingest(ctx context.Context, clientID, accessToken string) (*In
 // reusableStream finds or creates the channel's reusable RTMP stream and
 // returns the WHOLE resource, id included.
 //
+// The zero IngestOptions is what makes this the SAME function it always was:
+// no held key to match, no dedicated stream asked for, so streamFor takes the
+// first reusable RTMP stream on the channel exactly as this did. Provider.Ingest
+// has nowhere to carry an option, so it stays on this path for good.
+//
 // Split out of Ingest rather than copied beside it because the scheduled-broadcast
 // path needs the stream's ID as well as its key: liveBroadcasts.bind takes a
 // streamId, and Ingest discarded it. Written twice, the two would be two chances
@@ -183,6 +188,76 @@ func (y *YouTube) Ingest(ctx context.Context, clientID, accessToken string) (*In
 // broadcast" (liveBroadcasts/bind, read 2026-08-16), and it is what keeps a
 // destination's stream key stable across a pre-announce.
 func (y *YouTube) reusableStream(ctx context.Context, accessToken string) (*ytLiveStream, error) {
+	return y.streamFor(ctx, accessToken, IngestOptions{})
+}
+
+// streamFor picks the liveStream ONE DESTINATION should publish to, which is
+// not always the channel's reusable one.
+//
+// THE THREE ANSWERS, IN THE ORDER THEY ARE TRIED, AND THE ORDER IS THE WHOLE
+// DESIGN:
+//
+//  1. The stream this destination is ALREADY publishing with, matched on
+//     opts.HeldKey. It wins over everything below, including
+//     opts.DedicatedIngest, because a key that changes under a running
+//     configuration is the one outcome this change is not allowed to have:
+//     somebody has that key pasted into OBS right now. It also means the
+//     destination holding the channel's shared stream keeps holding it however
+//     the caller's first/not-first arithmetic comes out later -- deleting a
+//     neighbour cannot re-point an established destination.
+//  2. The channel's existing reusable RTMP stream, when nothing dedicated was
+//     asked for. Today's behaviour, unchanged, for the destination the caller
+//     nominated as the account's first.
+//  3. A NEW stream, titled for the destination. This is the fix: its key is
+//     its own, so the broadcast it feeds is its own ingestion source rather
+//     than the fourth tenant of somebody else's.
+//
+// A HELD KEY THE CHANNEL NO LONGER LISTS FALLS THROUGH, and that is deliberate
+// rather than an oversight to fix later. The stream was deleted in Studio, or
+// the account was reconnected to a different channel; either way the key in the
+// encoder is already dead, so re-provisioning is the only outcome available and
+// arriving at it silently beats failing a refresh the operator pressed exactly
+// because something was wrong.
+//
+// NOTHING HERE COUNTS ANYTHING. It does not ask how many streams the channel
+// has, or how many broadcasts are live, and it must not learn to: YouTube
+// publishes neither ceiling, so any pre-flight check would be enforcing an
+// invented number. The refusal is handled where it arrives -- see
+// ytBroadcastCreateAdvice and RefusalSharedIngestionFull.
+func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts IngestOptions) (*ytLiveStream, error) {
+	streams, err := y.listStreams(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
+
+	// Byte for byte, with no trimming and no case folding. This is the
+	// destination's stored key being compared against the platform's spelling
+	// of the same key, and #306 is what a "helpful" normalisation between
+	// those two costs.
+	if opts.HeldKey != "" {
+		for i := range streams {
+			if streams[i].CDN.IngestionInfo.StreamName == opts.HeldKey {
+				return &streams[i], nil
+			}
+		}
+	}
+
+	if !opts.DedicatedIngest {
+		// Prefer an existing reusable RTMP stream; that is the one the creator's
+		// scheduled broadcasts are already bound to.
+		for i := range streams {
+			if strings.EqualFold(streams[i].CDN.IngestionType, "rtmp") &&
+				streams[i].CDN.IngestionInfo.StreamName != "" {
+				return &streams[i], nil
+			}
+		}
+	}
+
+	return y.createStream(ctx, accessToken, opts.IngestLabel)
+}
+
+// listStreams reads the channel's liveStreams.
+func (y *YouTube) listStreams(ctx context.Context, accessToken string) ([]ytLiveStream, error) {
 	var list struct {
 		Items []ytLiveStream `json:"items"`
 	}
@@ -201,28 +276,76 @@ func (y *YouTube) reusableStream(ctx context.Context, accessToken string) (*ytLi
 	if err != nil {
 		return nil, err
 	}
+	return list.Items, nil
+}
 
-	// Prefer an existing reusable RTMP stream; that is the one the creator's
-	// scheduled broadcasts are already bound to.
-	for i, s := range list.Items {
-		if strings.EqualFold(s.CDN.IngestionType, "rtmp") && s.CDN.IngestionInfo.StreamName != "" {
-			return &list.Items[i], nil
-		}
+const (
+	// ytStreamTitleBase is what every stream polyemesis creates is called, so an
+	// operator scanning YouTube Studio can see at a glance which streams are
+	// ours.
+	ytStreamTitleBase = "polyemesis"
+	// ytStreamTitleMax is DOCUMENTED rather than chosen, which is the only
+	// reason a number appears in this file at all. The liveStreams create
+	// caveats in docs/evidence/platform-lifecycle-apis-2026-08-16.md, read
+	// 2026-08-16: "Title 1-128 chars, description <= 10000 chars." Contrast the
+	// concurrency ceilings in the same file, which are a support transcript and
+	// are deliberately enforced nowhere.
+	//
+	// It is CHARACTERS, so the cut is by rune. Cutting 128 bytes out of a
+	// destination named in Japanese would send a title ending in half a
+	// character.
+	ytStreamTitleMax = 128
+)
+
+// ytStreamTitle names a created stream after the destination that will publish
+// to it.
+//
+// THE NAME IS FOR A HUMAN IN YOUTUBE STUDIO, and that is the whole requirement:
+// a channel with five streams on it all called "polyemesis" is unmanageable,
+// and the destination's name is the only string polyemesis holds that the
+// operator chose themselves. It is display metadata, never an identifier --
+// nothing matches on it, so a rename in either place breaks nothing.
+//
+// NO SECRET GOES IN IT. The caller passes a destination NAME; it must never
+// pass a key, and streamFor never passes opts.HeldKey here.
+//
+// THE LABEL IS WHAT GETS CUT, never the base, so an over-long name still
+// produces a title that reads as polyemesis's. A cut title is worth more than a
+// refused create: the alternative to trimming is a required field YouTube
+// rejects, and the operator would be told their destination's NAME broke a
+// stream key fetch.
+func ytStreamTitle(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return ytStreamTitleBase
 	}
+	title := ytStreamTitleBase + " - " + label
+	if r := []rune(title); len(r) > ytStreamTitleMax {
+		title = string(r[:ytStreamTitleMax])
+	}
+	return title
+}
 
-	// None exists: create a reusable variable-resolution stream. variable/variable
+// createStream provisions a new reusable RTMP stream, and therefore a NEW
+// STREAM KEY.
+//
+// Every caller has to have decided it wants one. Called where a destination
+// already has a working key, this is a rotation an operator did not ask for --
+// which is why streamFor tries opts.HeldKey before it gets here.
+func (y *YouTube) createStream(ctx context.Context, accessToken, label string) (*ytLiveStream, error) {
+	// Create a reusable variable-resolution stream. variable/variable
 	// is what lets polyemesis pass through whatever OBS is sending without
 	// YouTube rejecting a resolution mismatch.
 	created := ytLiveStream{}
 	payload := map[string]any{
-		"snippet": map[string]any{"title": "polyemesis"},
+		"snippet": map[string]any{"title": ytStreamTitle(label)},
 		"cdn": map[string]any{
 			"ingestionType": "rtmp",
 			"resolution":    "variable",
 			"frameRate":     "variable",
 		},
 	}
-	err = postJSON(ctx,
+	err := postJSON(ctx,
 		y.apiEndpoint()+ytStreamsPath+"?part=id,snippet,cdn",
 		accessToken, payload, nil, &created)
 	if err != nil {
