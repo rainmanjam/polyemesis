@@ -288,8 +288,16 @@ type Engine struct {
 	//
 	// Both may be nil on an Engine assembled field by field, which is how the
 	// tests build one; every use is nil-safe.
-	hooks      *hooks.Dispatcher
-	hookWatch  *hooks.Watcher
+	hooks     *hooks.Dispatcher
+	hookWatch *hooks.Watcher
+	// lifecycle is the THIRD consumer of the edges hookWatch derives, and it is
+	// a consumer rather than a second sampler on purpose -- see observeLoop.
+	// It decides when a platform's broadcast goes live and when it ends.
+	//
+	// An interface rather than a concrete type because the implementation lives
+	// in internal/api, which imports this package. Nil on an engine assembled
+	// field by field, which is how the tests build one; every use is nil-safe.
+	lifecycle  LifecycleObserver
 	alertWatch *alerts.Watcher
 	// sched flips destinations' enabled flags on a timetable, through the same
 	// path a human uses.
@@ -3806,6 +3814,86 @@ func (e *Engine) SetHooks(d *hooks.Dispatcher) {
 	e.mu.Unlock()
 }
 
+// LifecycleObserver is told about the same UP/DOWN edges the webhook dispatcher
+// receives, so something outside this package can decide when a PLATFORM's
+// broadcast goes live and when it ends.
+//
+// WHY AN OBSERVER AND NOT A CALL IN startDest/teardownDest, because that is the
+// first question anybody reading this will have and both answers are facts
+// about other people's code rather than preferences:
+//
+//   - startDest cannot work. YouTube refuses transition(status=live) with
+//     errorStreamInactive until data is arriving at the bound ingest, and
+//     proc.Start() is the LAST statement of startDest -- not one byte has left
+//     the box. Succeeding would need a wait-for-ingest loop sitting between an
+//     operator pressing a button and anything reaching a viewer, which is
+//     exactly what multitrackDeadline's comment forbids.
+//   - teardownDest cannot be trusted. It fires on a COMMAND-LINE CHANGE, not
+//     only on a stop -- its own noteReload says "its command line changed, or
+//     it was disabled or removed". Ending a broadcast there would mean that
+//     nudging a bitrate ends the show and creates a new watch URL mid-stream,
+//     which is what every destination edit does.
+//
+// The edge, by contrast, already distinguishes them: a torn-down-and-restarted
+// destination crosses no edge at all, because the DOWN direction has a 10s
+// dwell (hooks.DefaultDestinationDownAfter) and one reconcile completes well
+// inside it.
+type LifecycleObserver interface {
+	// Observe receives one edge the observeLoop derived.
+	//
+	// IT MUST NOT BLOCK. This is called from observeLoop, which is the same
+	// goroutine that raises every alert and publishes every webhook for this
+	// programme, on a 2s tick. An implementation enqueues and returns: no HTTP,
+	// no database write, no engine lock, no sleep. A full queue must DROP the
+	// event rather than wait -- which is safe precisely because the event is
+	// only a WAKEUP, and the durable answer is re-derived from the destination
+	// row by a sweep that runs anyway.
+	Observe(ev hooks.Event)
+	// Wanted reports whether any destination currently needs these edges, and
+	// must be cheap enough to call on every 2s tick -- a cached atomic, not a
+	// query.
+	//
+	// It exists to keep a promise observeLoop makes in as many words: an install
+	// with no alert rule and no webhook pays for two cached lookups and nothing
+	// else, no status snapshot and no disk read. Wiring a coordinator that
+	// always answered true would quietly repeal that for every install on
+	// earth, including the ones with no lifecycle platform configured at all.
+	Wanted() bool
+}
+
+// SetLifecycle attaches the broadcast-lifecycle coordinator.
+//
+// A setter rather than a New parameter, for SetHooks' reason: engines are
+// created whenever a source is added, long after main built the coordinator,
+// and a programme whose broadcasts silently never go live is a bug nobody
+// reports -- they report "YouTube says starting soon", days later, about a show
+// that has already been and gone.
+func (e *Engine) SetLifecycle(o LifecycleObserver) {
+	e.mu.Lock()
+	e.lifecycle = o
+	e.mu.Unlock()
+}
+
+// lifecycleWanted is the nil-safe read of the observer's own gate, in the shape
+// hooks.Dispatcher.HasHooks uses: the nil check lives here rather than at the
+// call site, because a guard written at the call site is the one that diverges
+// from its sibling the next time somebody adds a consumer.
+func (e *Engine) lifecycleWanted() bool {
+	o := e.lifecycleObserver()
+	return o != nil && o.Wanted()
+}
+
+// lifecycleObserver reads the field under the lock, so observeLoop never touches
+// it directly. SetLifecycle can land at any moment -- the manager pushes it into
+// every engine when the API server is built, and into engines created later by
+// Sync -- and an unsynchronised read of an interface field is a data race the
+// detector finds only when the timing happens to line up.
+func (e *Engine) lifecycleObserver() LifecycleObserver {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.lifecycle
+}
+
 // Scheduler exposes the schedule runner for the same reason, and answers nil
 // for the same two reasons Alerts does. scheduler.Runner.Last is nil-receiver
 // safe, so the runs page renders an empty report. See Engine.Status.
@@ -3908,7 +3996,19 @@ func (e *Engine) onSchedule(r scheduler.Result) {
 // silent: this loop used to skip everything when no ALERT rules existed, and a
 // hook is a second consumer of the same snapshot, so an install with hooks and
 // no alert rules would have observed nothing at all.
-func observeWanted(alertRules, hookRules bool) bool { return alertRules || hookRules }
+//
+// THE THIRD BOOL IS THE SAME BUG A THIRD TIME, and it costs more than the first
+// two did. The broadcast-lifecycle coordinator consumes these edges; leave it
+// out of this gate and an install with no alert rules and no webhooks -- which
+// is a default install -- takes the `continue` below on every sweep. No
+// snapshot is built, so hookWatch never observes, so no edgeState ever
+// advances, so no UP or DOWN edge is ever crossed, so Observe is never called.
+// The visible result is not an error anywhere: it is every YouTube broadcast on
+// that box sitting in "testing" for ever while the watch page says "starting
+// soon" and the stream itself is perfectly healthy.
+func observeWanted(alertRules, hookRules, lifecycleWanted bool) bool {
+	return alertRules || hookRules || lifecycleWanted
+}
 
 // observeLoop samples the pipeline and hands each snapshot to BOTH watchers.
 //
@@ -3924,6 +4024,14 @@ func observeWanted(alertRules, hookRules bool) bool { return alertRules || hookR
 // needs somewhere to remember the previous state. Sweeping also guarantees an
 // alert is never raised while e.mu is held by the thing it is about.
 func (e *Engine) observeLoop(ctx context.Context) {
+	// THIS GUARD GATES ALL THREE CONSUMERS, including the two that have nothing
+	// to do with alerting. Production always builds both watchers together (see
+	// New), so on a real install it only ever means "this engine was never
+	// started". An Engine assembled field by field -- which is how the tests
+	// build one -- with a lifecycle observer and no alerter observes NOTHING,
+	// and that is the existing contract rather than a new bug: a test that
+	// wires a coordinator to a hand-built engine and waits for an edge will
+	// wait for ever.
 	if e.alerter == nil || e.alertWatch == nil {
 		return
 	}
@@ -3958,7 +4066,7 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			// e.hooks may be nil; HasHooks is nil-safe, the same discipline
 			// alerts.Notifier and transcribe.Tools use. Guarding at the call
 			// site instead is what makes the two diverge.
-			if !observeWanted(e.alerter.HasRules(), e.hooks.HasHooks()) {
+			if !observeWanted(e.alerter.HasRules(), e.hooks.HasHooks(), e.lifecycleWanted()) {
 				haveDisk = false
 				continue
 			}
@@ -3977,8 +4085,21 @@ func (e *Engine) observeLoop(ctx context.Context) {
 				// script which programme but not which one an operator would
 				// recognise.
 				e.hookWatch.SetSource(hooks.SourceRef{ID: e.sourceID, Name: e.SourceName()})
+				// ONE DERIVATION, THREE CONSUMERS. The lifecycle coordinator
+				// sees exactly the events the webhook dispatcher sees, from the
+				// same Observe call on the same watcher over the same snapshot.
+				// A second sampler would mean two Status() calls at two
+				// cadences that could disagree about what they saw -- and the
+				// disagreement that matters is "was this destination disabled
+				// or did it crash", which is the difference between ending a
+				// broadcast and leaving it alone.
+				lc := e.lifecycleObserver()
 				for _, ev := range e.hookWatch.Observe(snap) {
 					e.hooks.Publish(ev)
+					if lc != nil {
+						// Contractually non-blocking; see LifecycleObserver.
+						lc.Observe(ev)
+					}
 				}
 			}
 		}

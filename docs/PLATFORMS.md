@@ -27,22 +27,22 @@ below. The table is what each platform's **published API** allows today.
 The same matrix is rendered in `Settings → Platform credentials` and served from
 `GET /api/v1/platforms/capabilities`.
 
-| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers |
-|---|---|---|---|---|---|---|---|
-| **YouTube Live** | Works | Works | Works | Works | Works | Works | Unverified |
-| **Twitch** | Works | Works | Works | Works | Works | Works | Unverified |
-| **Facebook Live** | Works | Works | Works | Works | Unverified | Works | Unverified |
-| **Kick** | Works | Works | Works | Works | Works | Works | Works |
-| **X (Twitter) Live** | Not possible | By hand | Not possible | Not possible | Not possible | Not possible | Not possible |
-| **Rumble** | Unverified | By hand | Unverified | Works | Unverified | Unverified | Unverified |
-| **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Trovo** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Vimeo Livestream** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **TikTok LIVE** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Instagram Live** | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible |
+| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers  Start / end |
+|---|---|---|---|---|---|---|---|---|
+| **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works |
+| **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible |
+| **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works |
+| **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible |
+| **X (Twitter) Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible |
+| **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Trovo** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Vimeo Livestream** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **TikTok LIVE** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Instagram Live** | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible |
 | *Everything else* | — | By hand | — | — | — | — | — |
 
 | Term | Means |
@@ -218,6 +218,65 @@ exact redirect URI to whitelist. In summary:
 Scope requested: `https://www.googleapis.com/auth/youtube`. Write access is
 needed because polyemesis creates a reusable ingest stream if your channel has
 none.
+
+**How many YouTube destinations can be live at once depends on their stream
+keys.** Since February 2026 YouTube applies two concurrency limits together:
+
+* **3** live streams sharing one stream key
+* **10** live streams on one channel
+
+polyemesis now gives each YouTube destination after the first its own ingest
+stream, so they are separate ingestion sources and the channel limit is the one
+that binds. The first destination on an account keeps using whatever reusable
+stream the channel already has — that is the key your Studio-scheduled events
+are bound to, and changing it would break a setup that works.
+
+**If you already have several YouTube destinations, they are still sharing one
+key until you say otherwise.** Nothing rotates a key on its own: a stream key
+is pasted into an encoder, and moving it while somebody is broadcasting sends
+their video to a stream nobody is watching. So an install set up before this
+version keeps the ceiling it had until you press **Refresh stream key** on the
+extra destinations — one at a time, and not while they are live. Destinations
+that already have their own key are left alone when you do.
+
+You will not see the refusal when you *create* a destination. YouTube applies
+these limits only to streams that are actually live: a broadcast sitting in the
+`upcoming` state does not count, and a channel already running its limit can
+still hold many more scheduled. The refusal arrives at the moment a broadcast
+tries to start.
+
+If you do hit it, which of the two you hit tells you what to do. A full
+*channel* means ending a broadcast that is running. A full *ingestion source*
+means two destinations are still sharing a key — refresh one of them.
+
+There are two ways past it that need no keys from us at all, and both work
+whatever version you are on.
+
+**Schedule, if your programmes do not need to overlap.** Staggered broadcasts
+are not concurrent ones: only the streams actually live count. polyemesis keeps
+a separate broadcast per schedule and per occurrence, so a weekly show gets a
+new broadcast each week rather than reusing one.
+
+**Or paste your own keys.** Create the broadcasts yourself in YouTube Studio —
+each one gets its own stream key — and add a destination per key. Nothing about
+a YouTube destination requires a connected account: the account is what lets
+polyemesis FETCH a key for you, and a pasted one works exactly as well.
+
+What that gives up is the automation, and it is worth knowing which parts. You
+create and name each broadcast by hand, you paste and rotate each key by hand,
+and **each broadcast still has to be started.** Whether pushing video to a
+scheduled broadcast takes it live depends on that broadcast's auto-start
+setting in Studio: with it off, YouTube marks the stream ready and waits for
+someone to press Go Live. polyemesis can be publishing to all of them while
+none is broadcasting.
+
+These two numbers came from YouTube support rather than from Google's published
+API documentation, which states that both limits exist and gives neither
+figure. They are recorded here because knowing the order of magnitude is better
+than being surprised, and they are deliberately not enforced anywhere in
+polyemesis: a limit that is not published can change without notice, and may
+depend on your channel's standing. YouTube's refusal is what decides, and
+polyemesis reports it rather than predicting it.
 
 **Broadcast settings have an editing window.** Alongside title, description and
 category, polyemesis can push tags, the scheduled start, and YouTube's DVR,

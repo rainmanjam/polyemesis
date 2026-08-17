@@ -1,10 +1,13 @@
 import type {
+  AccountStats,
   AcmePreflight,
   ApiToken,
   TokenScope,
   AutomodMatrixView,
   AutomodModelStats,
   BitrateSample,
+  BroadcastEnd,
+  BulkDestReport,
   ChatMessage,
   ChatModerationResult,
   ChatOverview,
@@ -62,6 +65,7 @@ import type {
   SourceInfo,
   SourceView,
   Status,
+  StreamHealthView,
   SystemInfo,
   SystemStats,
   TlsStatus,
@@ -436,8 +440,73 @@ export const api = {
     post<{ enabled: boolean }>(`/destinations/${id}/stop`),
   restartDestination: (id: number) =>
     post<{ status: string }>(`/destinations/${id}/restart`),
+
+  /* --- every destination at once ----------------------------------------
+   *
+   *  These are startDestination/stopDestination run over every row on the
+   *  server, not a new capability: same handler code, same reconcile, same
+   *  read-back. There is no id list because there is no selection — the
+   *  routes act on the whole install.
+   *
+   *  SLOW ON PURPOSE. Starts are paced server-side, so this resolves after
+   *  the last destination has been dealt with rather than on acknowledgement.
+   *  A caller that aborts leaves the untouched tail reported as `skipped`.
+   *
+   *  STOPPING ENDS EVERY YOUTUBE BROADCAST ON THE INSTALL, PERMANENTLY: stop
+   *  and disable are one thing on the server, and the broadcast lifecycle
+   *  coordinator ends the broadcast of a disabled destination. Starting again
+   *  puts video back on the wire; it does not bring the broadcasts back. See
+   *  internal/api/destinations_bulk.go. */
+  startAllDestinations: () => post<BulkDestReport>("/destinations/start-all"),
+  stopAllDestinations: () => post<BulkDestReport>("/destinations/stop-all"),
   refreshStreamKey: (id: number) =>
     post<{ destination: Destination }>(`/destinations/${id}/refresh-key`),
+
+  /* --- Facebook broadcast lifecycle -------------------------------------
+   *
+   *  NEITHER ROUTE BELOW EXISTS ON THE SERVER YET, AND THAT IS STATED HERE
+   *  RATHER THAN DISCOVERED AT RUNTIME. internal/oauth/facebook.go has both
+   *  capabilities — EndBroadcast at :870 and StreamHealth at :1020 — and
+   *  internal/api exposes neither: grepping the package for `EndBroadcast`,
+   *  `StreamHealth` or `end_live_video` returns nothing. The UI was the half
+   *  that was missing, so the UI is what was built; the handlers are a
+   *  separate change and were deliberately NOT written here, because adding a
+   *  route that reaches a live platform is not a side effect of building a
+   *  card.
+   *
+   *  So these two functions are the CONTRACT REQUEST, written down in the one
+   *  place a handler author will look. The shapes are the Go types as they
+   *  already stand, so nothing has to be redesigned to satisfy them:
+   *
+   *    POST /api/v1/destinations/{id}/facebook/end-broadcast  -> BroadcastEnd
+   *      Resolves the destination's Facebook account and live video id, calls
+   *      EndBroadcast, and answers its BroadcastEnd verbatim. A refused POST
+   *      is a 4xx/5xx with the provider's message, per EndBroadcast's own
+   *      note that a failed end is an error rather than a skip — it leaves a
+   *      broadcast ON AIR that the operator believes is over.
+   *
+   *    GET  /api/v1/destinations/{id}/facebook/stream-health -> StreamHealthView
+   *      { supported, streams }. supported:false with 200 for a destination on
+   *      a platform that publishes no stream health, exactly as the viewer
+   *      stats endpoint already answers, so "we cannot ask" stays separable
+   *      from "the account is gone". An EMPTY streams list is a 200 and not an
+   *      error: a scheduled broadcast has no ingest yet and a live one inside
+   *      Facebook's four-second timeout reports nothing.
+   *
+   *  Until those land, the panel below treats a 404 or 501 as "this server
+   *  does not expose it" — a stated absence in muted text, not a fault, and it
+   *  stops polling rather than knocking on a missing door every two seconds.
+   */
+  /** Ends the destination's Facebook live video. See the block above: the
+   *  route is not implemented server-side yet. */
+  endFacebookBroadcast: (id: number) =>
+    post<BroadcastEnd>(`/destinations/${id}/facebook/end-broadcast`),
+  /** Reads Facebook's view of the encoder feed. Callers must not poll faster
+   *  than FACEBOOK_STREAM_HEALTH_INTERVAL_MS — that is Facebook's published
+   *  floor, quoted beside the constant in types.ts. See the block above: the
+   *  route is not implemented server-side yet. */
+  facebookStreamHealth: (id: number) =>
+    get<StreamHealthView>(`/destinations/${id}/facebook/stream-health`),
 
   // --- sources ---
   // A source is one ingested programme. Everything else -- destinations,
@@ -864,6 +933,16 @@ export const api = {
   listAccounts: () => get<PlatformAccount[]>("/platforms/accounts"),
   deleteAccount: (id: number) =>
     del<{ status: string }>(`/platforms/accounts/${id}`),
+  /** The live viewer count for one connected account.
+   *
+   *  200 in every non-fatal case, including the two that look like failures and
+   *  are not: a platform polyemesis cannot ask answers `supported:false` with a
+   *  reason, and an offline channel answers `live:false`. Neither is an error,
+   *  so neither throws — only a real fault (the account is gone, the platform
+   *  refused the token) reaches the catch. `viewerCount` is absent rather than
+   *  zero when the platform declined to say; see AccountStats. */
+  accountStats: (id: number) =>
+    get<AccountStats>(`/platforms/accounts/${id}/stats`),
   /** A full-page navigation, not XHR: the platform's consent screen owns the tab. */
   connectUrl: (platform: string) => `${BASE}/oauth/${platform}/start`,
 

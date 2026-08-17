@@ -196,6 +196,32 @@ func (s Set) ManualKeyFor(p db.Platform) (ManualKey, bool) {
 	return mk, ok
 }
 
+// StatsFor is the Set twin of the package-level StatsFor in stats.go. Without
+// it a caller holding a stubbed Set would silently fall through to the
+// production providers for viewer numbers alone.
+func (s Set) StatsFor(p db.Platform) (LiveStatter, bool) {
+	pr, ok := s.All()[p]
+	if !ok {
+		return nil, false
+	}
+	ls, ok := pr.(LiveStatter)
+	return ls, ok
+}
+
+// LifecycleFor is the Set twin of the package-level LifecycleFor in
+// lifecycle.go. The twin matters more here than for a read: without it a caller
+// holding a stubbed Set would resolve the production YouTube provider and send a
+// real transition -- a POST that starts or ENDS a broadcast on somebody's actual
+// channel -- from a test that believed everything was pointed at a stub.
+func (s Set) LifecycleFor(p db.Platform) (BroadcastLifecycler, bool) {
+	pr, ok := s.All()[p]
+	if !ok {
+		return nil, false
+	}
+	bl, ok := pr.(BroadcastLifecycler)
+	return bl, ok
+}
+
 func (s Set) ScheduledBroadcastsFor(p db.Platform) (ScheduledBroadcaster, bool) {
 	pr, ok := s.All()[p]
 	if !ok {

@@ -295,13 +295,10 @@ func urlEscape(s string) string {
 	).Replace(s)
 }
 
-// LiveStatter is the optional capability for a platform that will tell us how
-// many people are watching. Declared here rather than in internal/oauth because
-// it is the API layer that needs to discover it; the provider just has the
-// method. Kick is the only one today.
-type LiveStatter interface {
-	Stats(ctx context.Context, clientID, accessToken string) (*oauth.KickStats, error)
-}
+// The LiveStatter interface moved to internal/oauth (stats.go). It was declared
+// here because the API layer was the only consumer and Kick the only provider;
+// both stopped being true, and a capability interface outside the oauth package
+// cannot carry the Set twin endpoints.go requires.
 
 // handleAccountStats reads the live viewer count for one connected account.
 //
@@ -324,12 +321,14 @@ func (s *Server) handleAccountStats(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	provider, err := s.providers.Get(acct.Platform)
-	if err != nil {
+	if _, err := s.providers.Get(acct.Platform); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"supported": false, "reason": err.Error()})
 		return
 	}
-	st, ok := provider.(LiveStatter)
+	// Through the Set twin rather than a type assertion on a provider this
+	// handler resolved itself: a Server built with a stubbed Set must not fall
+	// through to a production provider for viewer numbers alone.
+	st, ok := s.providers.StatsFor(acct.Platform)
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"supported": false,
@@ -392,7 +391,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b, err := s.ingestFor(ctx, provider, creds.ClientID, acct, ingestOptionsFor(dest, time.Time{}))
+	b, err := s.ingestFor(ctx, provider, creds.ClientID, acct, s.ingestOptionsForRefresh(dest))
 	if err != nil {
 		// A platform that publishes no key endpoint is not a transport
 		// failure, and 502 invites a retry that can never succeed. The
@@ -477,7 +476,301 @@ func ingestOptionsFor(dest *db.Destination, scheduledFor time.Time) oauth.Ingest
 		// Facebook's own enable_backup_ingest, which is a platform fact and
 		// stays named for the platform. Only the READ moved.
 		BackupIngest: dest.BackupIngestWanted,
+		// The key this destination is already publishing with, so a provider
+		// that can re-find the stream behind it hands the SAME one back. A
+		// refresh must not be a rotation: somebody has this pasted into OBS.
+		// Empty for a destination that has never fetched one, which is the
+		// only case where a new key is the right answer.
+		HeldKey: dest.StreamKey,
+		// The operator's own name for this destination, which is the only
+		// string here that will mean anything to them in a platform's studio.
+		// Never a key -- see oauth.IngestOptions.IngestLabel.
+		IngestLabel: dest.Name,
 	}
+}
+
+// ingestOptions is ingestOptionsFor plus the one create-time choice that CANNOT
+// be read off a single destination: whether this one needs an ingest stream of
+// its own.
+//
+// IT IS A METHOD BECAUSE THE ANSWER IS ABOUT THE OTHER DESTINATIONS. A provider
+// is stateless about destinations and ingestOptionsFor sees exactly one row, so
+// neither of them can answer "is somebody else already using the account's
+// shared stream". This layer owns the table, so this layer decides; everything
+// below it just carries the flag.
+//
+// Both callers go through this rather than through ingestOptionsFor directly.
+// A go-live that skipped it would hand the shared stream to every destination
+// again, which is the defect, and it would do so silently.
+func (s *Server) ingestOptions(dest *db.Destination, scheduledFor time.Time) oauth.IngestOptions {
+	opts := ingestOptionsFor(dest, scheduledFor)
+	opts.DedicatedIngest = s.needsOwnIngestStream(dest)
+	return opts
+}
+
+// ingestOptionsForRefresh is ingestOptions for the one caller that may change a
+// destination's key: handleRefreshKey, driven by an operator pressing a button
+// named Refresh stream key.
+//
+// Separate from ingestOptions rather than a bool parameter, because the
+// distinction is about AUTHORITY and a bool at a call site does not read as
+// one. preannounce.go sweeps every five minutes and must never move a key an
+// encoder is publishing with; this path exists because somebody asked. Anything
+// new that rotates keys should have to come here and say so.
+func (s *Server) ingestOptionsForRefresh(dest *db.Destination) oauth.IngestOptions {
+	opts := s.ingestOptions(dest, time.Time{})
+	// ROTATE ONLY WHAT IS ACTUALLY SHARED. Being asked is necessary and not
+	// sufficient: a destination that already has a stream of its own gains
+	// nothing from a new one, and every needless rotation leaves an orphaned
+	// liveStream on the operator's channel that nothing cleans up.
+	//
+	// Setting this unconditionally was measured doing exactly that -- the
+	// end-to-end refresh test caught a second destination being moved off its
+	// own perfectly good stream onto a freshly created one.
+	opts.RotateKey = s.keyIsSharedWithASibling(dest)
+	return opts
+}
+
+// keyIsSharedWithASibling reports whether another destination on the same
+// account publishes with this destination's key.
+//
+// That is the whole condition under which a key may be moved: it is what
+// distinguishes an upgraded install, where every YouTube destination holds the
+// same key, from one already provisioned correctly. A destination with a key
+// nobody else uses is already its own ingestion source and must be left alone.
+func (s *Server) keyIsSharedWithASibling(dest *db.Destination) bool {
+	if dest == nil || dest.AccountID == nil || strings.TrimSpace(dest.StreamKey) == "" {
+		return false
+	}
+	rows, err := s.store.ListDestinations()
+	if err != nil {
+		// Unknown is treated as NOT shared, so a store failure never rotates a
+		// key. The cost of guessing wrong that way is a ceiling that stays
+		// where it is; the cost of guessing the other way is a live encoder
+		// publishing to a stream nothing is watching.
+		return false
+	}
+	for _, other := range rows {
+		if other.ID == dest.ID || other.AccountID == nil {
+			continue
+		}
+		if *other.AccountID == *dest.AccountID && other.StreamKey == dest.StreamKey {
+			return true
+		}
+	}
+	return false
+}
+
+// needsOwnIngestStream answers whether this destination should be given an
+// ingest stream of its own rather than the one its account already shares.
+//
+// WHY THE QUESTION EXISTS: YouTube counts concurrent broadcasts per stream key
+// as well as per channel, and the per-key ceiling is the smaller one. Every
+// YouTube destination in an install has been handed the same key, so they all
+// count as one ingestion source and the fourth show to start is refused with
+// sharedIngestionBroadcastsExceedLimit -- polyemesis's own doing. Neither
+// number is published by YouTube, and neither is written down here or anywhere
+// else in the code: nothing counts, nothing caps, nothing pre-flights. This
+// decides ONE thing -- which destination keeps the shared stream -- and the
+// platform stays the only party that says no.
+//
+// THE ANSWER IS KEYED ON THE DESTINATION ID, LOWEST WINS. The first
+// destination on an account keeps today's behaviour exactly: it reuses whatever
+// reusable stream the channel already has, because that is the key an
+// operator's Studio-scheduled events are bound to and changing it would break a
+// working setup for a feature they never asked for. Every later one gets its
+// own.
+//
+// A ROW ID RATHER THAN A COUNT, A TIMESTAMP OR A FLAG, and each rejected
+// alternative is a hazard:
+//
+//   - A COUNT RACES. "Am I the first?" answered by counting siblings is decided
+//     at refresh time, so two destinations created in the same minute and
+//     refreshed together can both answer yes and both take the shared stream --
+//     the exact defect, reintroduced under the fix. Ids are assigned by the
+//     database at insert, are distinct, and are already decided before either
+//     refresh starts, so the comparison gives the same answer no matter who
+//     asks first or how many ask at once.
+//   - A TIMESTAMP TIES. Two rows created in the same second sort equally.
+//   - A STORED "this one is the anchor" FLAG needs a migration, a writer, and
+//     an answer for what happens when the row holding it is deleted.
+//
+// WHAT DELETING THE FIRST DESTINATION DOES, said plainly because it is the case
+// this rule does not settle on its own: the lowest surviving id becomes lowest,
+// so this function starts answering false for a destination it used to answer
+// true for. That does NOT rotate its key, and the reason is one layer down --
+// IngestOptions.HeldKey is matched before DedicatedIngest is consulted, so a
+// destination that already holds a stream keeps it whatever this returns. The
+// promotion is also harmless on its own terms: the shared stream can only be
+// claimed by the lowest id on the account, so a destination is only ever
+// promoted onto it once the destination that was holding it is gone. The one
+// case that does re-point is a promoted destination whose OWN stream YouTube no
+// longer lists -- deleted in Studio -- and there the key in the encoder was
+// already dead.
+//
+// A destination with no account is not asked about: it has no shared stream to
+// contend for, and its key is typed by hand.
+func (s *Server) needsOwnIngestStream(dest *db.Destination) bool {
+	if dest == nil || dest.AccountID == nil {
+		return false
+	}
+	rows, err := s.store.ListDestinations()
+	if err != nil {
+		// Today's behaviour is the safe fallback: sharing the account's stream
+		// is a ceiling an operator can hit, and provisioning a stream for a
+		// destination that did not need one hands a single-destination operator
+		// a key their scheduled events are not bound to. The first is a refusal
+		// with a message; the second is a broken setup.
+		s.log.Warn("could not read the other destinations on this account, so this one "+
+			"falls back to the account's shared ingest stream",
+			"destination", dest.ID, "err", err)
+		return false
+	}
+	for _, other := range rows {
+		if other == nil || other.ID == dest.ID || other.AccountID == nil {
+			continue
+		}
+		if *other.AccountID == *dest.AccountID && other.ID < dest.ID {
+			return true
+		}
+	}
+	return false
+}
+
+// ------------------------------------------------- the streams left behind
+//
+// WHY DELETING A DESTINATION DOES NOT DELETE ITS YouTube liveStream, AND WHY
+// THAT IS THE ANSWER RATHER THAN A TODO.
+//
+// The leak is real and is stated plainly so nobody has to rediscover it: every
+// destination beyond the first on an account gets a liveStream of its own
+// (needsOwnIngestStream above), and deleting the destination leaves that stream
+// on the channel, unused, one per deletion, for ever.
+//
+// A cleanup was designed against the YouTube documentation and NOT BUILT. Three
+// things have to be true before a delete is safe, and polyemesis can prove none
+// of them:
+//
+//  1. THAT THE STREAM IS POLYEMESIS'S TO DELETE. Nothing records that. The
+//     destination row stores the KEY, not the stream's id, and no column
+//     anywhere says "polyemesis created this". The only mark on the object is
+//     its title, and oauth.ytStreamTitle documents that title as display
+//     metadata for a human in Studio -- "never an identifier -- nothing matches
+//     on it, so a rename in either place breaks nothing". Matching on it would
+//     make a rename in Studio into a silent failure in one direction, and would
+//     delete a creator's own stream that happens to be named after us in the
+//     other. "A stream polyemesis did not create is not polyemesis's to delete"
+//     is not a preference here; it is a fact this process cannot establish.
+//
+//  2. THAT IT IS NOT THE CHANNEL'S SHARED STREAM. The shared one is chosen
+//     positionally -- the first reusable RTMP stream the channel lists -- so it
+//     is not identifiable after the fact either, and an operator's
+//     Studio-scheduled events are bound to it. Deleting it breaks things
+//     polyemesis did not create.
+//
+//  3. THAT NO BROADCAST IS BOUND TO IT. YouTube DOES refuse this, and the
+//     refusal is documented: liveStreams.delete answers 403
+//     liveStreamDeletionNotAllowed, "The specified live stream cannot be deleted
+//     because it is bound to a broadcast that has still not completed"
+//     (developers.google.com/youtube/v3/live/docs/liveStreams/delete, read
+//     2026-08-16). But whether a broadcast that is LIVE RIGHT NOW is inside that
+//     condition is NOT documented: it requires equating the refusal's English
+//     "completed" with the lifeCycleStatus enum value `complete`, which no page
+//     states, and no page states that `live` is therefore covered. That is an
+//     unresolved inference, and the cost of it being wrong is a show going off
+//     air, so it is not something to lean on. The alternative -- proving the
+//     stream unbound ourselves -- needs a whole-channel liveBroadcasts.list scan
+//     carrying broadcastType=all (the default is `event`, which silently omits
+//     every persistent broadcast) whose per-call quota cost YouTube does not
+//     publish. internal/api/lifecycle.go is already rationing a shared
+//     10,000-a-day allocation down to 288 calls per destination per day; adding
+//     an unbounded paginated scan to a delete path is the wrong direction.
+//
+// And the thing being cleaned up is CLUTTER. An unused liveStream costs the
+// operator nothing but a longer list in Studio, so every one of those
+// ambiguities resolves the same way: leave it alone.
+//
+// WHAT WOULD SETTLE IT, in the order it would have to be settled:
+//
+//   - Record the created stream's id and the fact that polyemesis created it, at
+//     the moment oauth.YouTube.createStream returns. That is a schema change and
+//     a migration, and it fixes (1) and (2) outright for every destination
+//     provisioned afterwards -- and for no destination provisioned before, which
+//     is why it is a change with a story rather than a patch.
+//   - One delete attempt against a stream bound to a `live` broadcast, recording
+//     the literal error.errors[].reason, to settle whether the server refuses.
+//   - The same against a `revoked` broadcast and against a pre-2020 channel's
+//     default stream, which the liveStreams resource page documents as
+//     undeletable in prose with no error code named anywhere.
+//
+// Until then this file does the one honest thing available: it NAMES what is
+// being left behind, so the operator can remove it in Studio if the clutter ever
+// bothers them.
+
+// noteOrphanedIngestStream tells the operator that deleting this destination
+// probably leaves a YouTube liveStream on their channel.
+//
+// IT COSTS NO API CALL AND MAKES NO CLAIM IT CANNOT SUPPORT. Both questions are
+// answered from the destination table alone, and the answer is "probably", which
+// is what the wording says:
+//
+//   - a sibling on the same account publishing with the same key means the
+//     stream is still in use, so nothing is orphaned;
+//   - a destination that was NOT given a stream of its own is holding the
+//     channel's shared one, which must never be touched by anybody.
+//
+// Only what survives both is worth mentioning, and even then only as something
+// the operator may want to look at -- polyemesis cannot prove it created the
+// stream, which is the whole reason nothing is deleted here. See the block
+// above.
+//
+// A LOG LINE RATHER THAN A RESPONSE FIELD, for the reason forgetPlatformSwitch
+// gives for the same choice: it is the only place a statement this hedged can go
+// without becoming an API somebody depends on.
+//
+// THE KEY NEVER APPEARS. The stream is named by its TITLE, which is what an
+// operator actually reads in Studio and is derived from the destination's own
+// name, and titles are the one string about a stream that is safe to log.
+func (s *Server) noteOrphanedIngestStream(dest *db.Destination) {
+	if !s.leavesAnOrphanedIngestStream(dest) {
+		return
+	}
+	s.log.Warn("deleting this destination leaves its YouTube ingest stream on the channel. "+
+		"polyemesis does not delete it, because it cannot prove the stream is one it created "+
+		"and not one of yours, and a stream that is still bound to a broadcast must not be "+
+		"removed. Delete it in YouTube Studio if you want it gone",
+		"destination", dest.Name, "streamTitle", oauth.YouTubeStreamTitle(dest.Name))
+}
+
+// leavesAnOrphanedIngestStream is the decision behind that notice, split out so
+// it can be asserted without reading log output.
+//
+// IT IS DELIBERATELY THE NARROWER OF THE TWO ERRORS. Saying nothing about a
+// stream that was in fact orphaned costs an operator one extra line in Studio;
+// saying "this is yours to delete" about the channel's shared stream, or about a
+// stream a sibling is publishing to, would point somebody at an object whose
+// removal breaks a working setup. So both of those answer false, and so does
+// every case where the row cannot support the claim at all.
+func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination) bool {
+	if dest == nil || dest.Platform != db.PlatformYouTube || dest.AccountID == nil {
+		// No account means the key was typed in by hand: polyemesis provisioned
+		// nothing and has nothing to say about it.
+		return false
+	}
+	if strings.TrimSpace(dest.StreamKey) == "" {
+		// Never fetched one, so nothing was ever created for it.
+		return false
+	}
+	// A sibling publishing with the same key means the stream stays in use --
+	// this is what an upgraded install looks like, where every YouTube
+	// destination was handed the account's one shared key.
+	if s.keyIsSharedWithASibling(dest) {
+		return false
+	}
+	// And a destination that was never given a stream of its own is holding the
+	// channel's shared one, which an operator's Studio-scheduled events are bound
+	// to. Never name that as removable.
+	return s.needsOwnIngestStream(dest)
 }
 
 // ingestFor fetches an ingest, preferring the connected target over the login's

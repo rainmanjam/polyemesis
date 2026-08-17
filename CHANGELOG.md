@@ -74,6 +74,58 @@ its first tagged release.
   the moment the install stops having a programme. (#387)
 
 ### Added
+- **One control starts or stops every destination.** An operator with eight
+  destinations was pressing eight buttons; `POST /destinations/start-all` and
+  `POST /destinations/stop-all` now act on the whole install, with a matching
+  pair of buttons beside the destination list on the dashboard. There is no id
+  list and no per-card selection: the routes act on everything, deliberately,
+  because a bulk control with a selection is the per-destination control with
+  extra steps and one more thing that can be stale by the time it is pressed.
+
+  Each row is driven through the same code as the per-destination start and
+  stop, so the bulk control can never be more destructive than the button it
+  replaces — and **the answer is a list, never a boolean**. One row per
+  destination, naming which it was, what happened (`started`, `stopped`,
+  `warned`, `failed` or `skipped`) and why when something did not happen. Eight
+  destinations of which two refuse is not "failed", and the operator should not
+  have to open eight cards to find out which two.
+
+  **Starts are paced**, one destination at a time with a gap between them, so a
+  burst of encoder processes does not contend on the box and the same
+  connections do not arrive at a platform as one clap. That is a pacing choice
+  about this machine; it encodes no platform's published ceiling, counts
+  nothing and caps nothing. Stops are not paced — tearing down is local.
+
+  Stopping asks for confirmation, and the confirmation says what stopping
+  actually costs: **stop and disable are one thing on the server**, so stopping
+  ends every YouTube broadcast on the install and a completed YouTube broadcast
+  cannot return to live. Starting again puts the video back on the wire; it does
+  not bring the broadcasts back. That was already true of the per-destination
+  Stop button one row at a time — the wording is new, not the consequence.
+
+- **The viewer count is on screen, and a withheld one does not read as zero.**
+  Three platforms implement `GET /platforms/accounts/{id}/stats`, the route
+  answered, and nothing in the UI called it — so the capability matrix said
+  "Viewers: Works" while no operator could see a number anywhere. Every
+  connected account in Settings → Platforms now carries its live state, polled
+  once a minute while the tab is visible and stopped entirely for a platform
+  that has said it cannot answer.
+
+  The distinction the round is actually about: a live stream whose count the
+  platform DECLINED to give reads "Viewer count not reported", never `0` and
+  never a dash. YouTube omits the number when nobody is watching, when the owner
+  has hidden it, and once the broadcast ends — three states, one absent key —
+  and the one that matters is the streamer with an audience who would otherwise
+  be told nobody is there. A reported `0` still renders as `0`, because on a
+  live stream that is a fact. A platform polyemesis cannot ask shows the
+  server's own sentence naming it rather than an empty space, and an offline
+  channel says offline rather than reporting an audience of none.
+
+  The interval is a quota decision. One YouTube stats read is three requests
+  against a project-wide ceiling of 10,000 units a day that title push,
+  compliance and chat all draw from, so polling harder does not merely slow this
+  panel down — it takes metadata push down with it.
+
 - **polyemesis.com publishes the documentation.** The site went from 6 pages to
   35: the 23 user-facing documents in `docs/` are rendered at `/docs/<slug>`
   rather than linked to GitHub, four comparison pages sit under `/vs/`, and

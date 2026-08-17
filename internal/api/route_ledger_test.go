@@ -581,7 +581,11 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/destinations/{id}/expert":          denied(),
 	"GET /api/v1/clipper/recordings/{id}/keyframes": denied(),
 	"GET /api/v1/platforms/accounts/{id}/stats":     denied(),
-	"GET /api/v1/metadata/broadcast-window":         denied(),
+	// Same reason as the stats route above it, and the reason is the outbound
+	// call rather than the bytes: reaching this spends the operator's Graph
+	// budget on somebody holding a read token.
+	"GET /api/v1/destinations/{id}/facebook/stream-health": denied(),
+	"GET /api/v1/metadata/broadcast-window":                denied(),
 
 	// ---- session-only: no bearer of either scope reaches these. 403, driven.
 	"GET /api/v1/auth/tokens":               sessionOnly(),

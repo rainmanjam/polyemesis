@@ -1227,6 +1227,11 @@ func (r *runner) status() Status {
 			st.Detail = hl.Detail
 		}
 		st.Quota = hl.Quota
+		// Only inside the `live` branch, with Quota, and deliberately so: a
+		// viewer count is a claim about right now, and carrying one out of a
+		// stopped or failed adapter would put a number beside a pane that is
+		// not receiving anything.
+		st.Viewers = hl.Viewers
 	}
 	return st
 }

@@ -107,6 +107,13 @@ type Manager struct {
 	// created after Start whenever a source is added, and a programme whose
 	// hooks silently never fire is a bug nobody reports.
 	hooks *hooks.Dispatcher
+
+	// lifecycle is remembered for the same reason and against a worse failure.
+	// A source added after the API server was built would otherwise have no
+	// lifecycle observer, so nothing on that programme ever crosses an edge the
+	// coordinator can see -- and its YouTube destinations would stream perfectly
+	// while their broadcasts stayed in "testing" for the whole show.
+	lifecycle LifecycleObserver
 }
 
 // NewManager builds the manager. No engines exist until Start.
@@ -269,6 +276,7 @@ func (m *Manager) Sync() error {
 		tw, dir, nice := m.tw, m.modelsDir, m.nice
 		attempts := m.alertAttempts
 		hookd := m.hooks
+		lifecycle := m.lifecycle
 		m.mu.RUnlock()
 		if tw != nil {
 			eng.SetTranscriber(tw, dir, nice)
@@ -281,6 +289,13 @@ func (m *Manager) Sync() error {
 		}
 		if hookd != nil {
 			eng.SetHooks(hookd)
+		}
+		// The half that is easy to forget, and forgetting it is the exact
+		// failure SetAlertRetry's comment names: a value pushed only into the
+		// engines running at wiring time is silently lost the moment an
+		// operator adds a source.
+		if lifecycle != nil {
+			eng.SetLifecycle(lifecycle)
 		}
 		if err := eng.Start(ctx); err != nil {
 			m.log.Error("cannot start engine for source", "source", id, "err", err)
@@ -957,6 +972,18 @@ func (m *Manager) SetHooks(d *hooks.Dispatcher) {
 	m.mu.Unlock()
 	for _, eng := range m.Engines() {
 		eng.SetHooks(d)
+	}
+}
+
+// SetLifecycle attaches the broadcast-lifecycle coordinator to every engine, now
+// and to any created later. The Sync half is in reconcile above; without it a
+// source added later observes nothing.
+func (m *Manager) SetLifecycle(o LifecycleObserver) {
+	m.mu.Lock()
+	m.lifecycle = o
+	m.mu.Unlock()
+	for _, eng := range m.Engines() {
+		eng.SetLifecycle(o)
 	}
 }
 

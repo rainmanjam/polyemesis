@@ -39,8 +39,14 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		{"youtube fetches its key", "youtube", CapStreamKey, SupportYes, "Data API ingestion"},
 		{"twitch fetches its key", "twitch", CapStreamKey, SupportYes, "Helix stream key"},
 
-		{"x cannot sign in", "x", CapSSO, SupportNo,
-			"the X API covers posts, not live-video ingest"},
+		// X's row said SupportNo on the false belief that "the X API covers
+		// posts, not live-video ingest". X's served spec declares a Broadcasts
+		// family of 13 operations and a Chat family of 16. It then said
+		// SupportYes for an hour, which was the opposite error: the API exists,
+		// the provider is not registered, and a "Works" an operator cannot act
+		// on is worse than an "Unverified" that invites them to try.
+		{"x sign-in is documented at the platform and unbuilt here", "x", CapSSO, SupportUnknown,
+			"the API is real; nothing wires it yet, and the enum cannot say that directly"},
 		{"x key is pasted", "x", CapStreamKey, SupportManual,
 			"the destination still works; only the automation is absent"},
 
@@ -49,8 +55,12 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		{"instagram has no sign-in", "instagram", CapSSO, SupportNo,
 			"Instagram publishes no Live broadcast API"},
 
-		{"rumble sign-in is unverified, not refused", "rumble", CapSSO, SupportUnknown,
-			"the API sits behind a login wall; undocumented is not the same as absent"},
+		// Was SupportUnknown on the sound argument that undocumented is not
+		// absent. Now refused on affirmative evidence rather than more looking:
+		// rumble.com/oauth/authorize answers an honest 404, and Rumble's one
+		// API article states authentication is not required for it.
+		{"rumble sign-in is refused, on a probe rather than a search", "rumble", CapSSO, SupportNo,
+			"oauth/authorize is a genuine 404 and the published API declares no auth"},
 		{"rumble key is pasted", "rumble", CapStreamKey, SupportManual, "Rumble Studio issues both fields"},
 		// Rumble's chat came from the live-stream API, which is a different
 		// surface from the account API page the row used to be written about.
@@ -59,14 +69,46 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		// The half of that row that did NOT move, and the more important half to
 		// pin: shipping chat read is not evidence about sending, and this row
 		// must not drift into a yes because the platform now feels integrated.
-		{"rumble chat send stays unverified rather than becoming a refusal", "rumble", CapChatSend, SupportUnknown,
-			"get-data returns data; no send endpoint is published, which is not the same as one being known absent"},
-		{"rumble moderation stays unverified", "rumble", CapModeration, SupportUnknown,
-			"nothing was checked either way, and a wrong 'no' becomes a refusal an operator cannot argue with"},
+		// Both were SupportUnknown because the surface had "barely been seen".
+		// It has now been enumerated -- a complete 158-article knowledge base,
+		// whose entire published API is one read-only snapshot GET -- so the
+		// absence is read off a small surface fully covered, not a large one
+		// sampled.
+		{"rumble chat send is refused once the whole surface has been read", "rumble", CapChatSend, SupportNo,
+			"the published API is a single read-only request; no send path exists to document"},
+		{"rumble moderation is refused, and Rumble says so in its own words", "rumble", CapModeration, SupportNo,
+			"Rumble documents moderation as clicking three dots in live chat, and never mentions an API"},
+		{"rumble metadata is a template set in the account UI", "rumble", CapMetadata, SupportManual,
+			"no write API exists, but a live-stream template applies title and category automatically"},
 
 		{"dlive sign-in is unverified, not refused", "dlive", CapSSO, SupportUnknown,
 			"the developer portal does not resolve, which tells us nothing about the API itself"},
 		{"dlive key is pasted", "dlive", CapStreamKey, SupportManual, "dashboard → stream settings"},
+
+		// ---- broadcastLifecycle. The column exists because the answer differs
+		// per platform in a way that changes which platform somebody picks, and
+		// these four rows are that difference.
+		{"facebook can be told to end a broadcast", "facebook", CapBroadcastLifecycle, SupportYes,
+			"end_live_video is documented, wired to a route, and reachable from the destination card"},
+		// Documented and NOT WIRED. TransitionBroadcast exists in
+		// internal/oauth with no caller: no route, no UI, nothing that can
+		// invoke it. The house rule this matrix keeps -- a capability nothing
+		// implements is not a capability -- is why this is not SupportYes, and
+		// it is the same rule that held Rumble's viewer stats at unverified and
+		// that rolled X's five cells back after they were briefly set to yes.
+		// Was SupportUnknown for exactly as long as TransitionBroadcast had no
+		// caller. internal/api's coordinator is that caller now, wired from
+		// main.go and driven by the edges the engine already derives.
+		{"youtube can be told to go live and to end", "youtube", CapBroadcastLifecycle, SupportYes,
+			"the coordinator transitions it, and a failure never stops the stream"},
+		// Established by ENUMERATION, which is what this matrix requires before
+		// a cell may read Not possible: all 149 endpoints in the Helix
+		// reference were listed and swept, and all 27 operations in Kick's
+		// published API were parsed. Neither has a lifecycle call to build.
+		{"twitch cannot be told to go live", "twitch", CapBroadcastLifecycle, SupportNo,
+			"149 Helix endpoints enumerated; the stream itself is the trigger"},
+		{"kick cannot be told to go live", "kick", CapBroadcastLifecycle, SupportNo,
+			"27 documented operations parsed; no lifecycle scope or endpoint exists"},
 	}
 
 	for _, tc := range tests {

@@ -88,6 +88,87 @@ jobs:
           # which lines are new, and the gate is then measuring something else.
           fetch-depth: 0
 
+      # COVERAGE, WITHOUT WHICH THE GATE MEASURES NOTHING AND FAILS ANYWAY.
+      #
+      # The comment above enumerates the conditions this project's gate was
+      # believed to carry, and new_coverage is not among them. It is: the first
+      # PR analysed after the swap failed on
+      #
+      #     ERROR  new_coverage  actual=0.0  LT  80
+      #
+      # 0.0 is not a measurement, it is the absence of one. Nothing here was
+      # producing a Go coverage profile and nothing was pointing the scanner at
+      # a report, so Sonar was told nothing and recorded a zero, on a repository
+      # whose test suite is the largest thing in it. A gate reading that number
+      # either blocks every change or teaches everybody to ignore it, and both
+      # are worse than having no gate.
+      #
+      # WITHOUT -race, deliberately. The race detector costs this suite roughly
+      # six times its runtime -- internal/api alone measured 702s under it
+      # against 116s without -- and it detects nothing that a coverage profile
+      # records. The race run happens in ci.yml, where it belongs.
+      #
+      # A failure here does NOT fail the job. A coverage profile that could not
+      # be produced should leave the analysis to run without it, exactly as it
+      # did before this step existed, rather than turning a reporting gap into a
+      # red build for a reason nobody can act on.
+      - name: Set up Go
+        if: steps.gate.outputs.ready == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v6.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Go coverage for the scanner
+        if: steps.gate.outputs.ready == 'true'
+        continue-on-error: true
+        timeout-minutes: 20
+        run: go test -coverprofile=coverage.out -covermode=count ./... || true
+
+      - name: Set up Node
+        if: steps.gate.outputs.ready == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # THE UI'S COVERAGE, WHICH SONAR MEASURED AS ZERO AND WHICH IS NOT ZERO.
+      #
+      # Same defect as the Go side and a smaller correction: several modules
+      # here are fully covered by vitest -- viewerCount.ts and stream-health.ts
+      # are both at 100% -- and Sonar was told nothing, so it counted every line
+      # of them against the gate.
+      #
+      # WHAT THIS DOES NOT CLAIM. Overall vitest coverage of ui/src is about
+      # 4%, and that number is honest rather than alarming: this UI is exercised
+      # by the Playwright suite in ui/e2e, which drives the real container and
+      # which Sonar cannot see. Dashboard.tsx reads 0% here and is one of the
+      # most heavily exercised files in the browser suite. So this step raises
+      # the numbers it can legitimately raise and leaves the rest visibly
+      # unmeasured, rather than reporting e2e as unit coverage.
+      #
+      # continue-on-error for the reason the Go step has it: a report that
+      # could not be produced must leave the analysis running, not turn a
+      # reporting gap into a red build.
+      - name: UI coverage for the scanner
+        if: steps.gate.outputs.ready == 'true'
+        continue-on-error: true
+        timeout-minutes: 10
+        working-directory: ui
+        # --ignore-scripts: a CI job holding a SONAR_TOKEN must not run arbitrary
+        # postinstall scripts from the dependency tree. That is the standard
+        # supply-chain hardening, and Sonar flagged its absence here as a MAJOR
+        # vulnerability against this very file -- correctly, since this job runs
+        # on a token-bearing runner.
+        #
+        # VERIFIED RATHER THAN ASSUMED SAFE: installing with --ignore-scripts and
+        # then running the coverage suite passes 210/210 in this tree, so nothing
+        # vitest needs is produced by a lifecycle hook. If a future dependency
+        # does need one, this step fails visibly rather than silently reporting
+        # less coverage -- which is the failure mode worth guarding.
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run coverage || true
+
       - name: SonarQube Scan
         if: steps.gate.outputs.ready == 'true'
         uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1

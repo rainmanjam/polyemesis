@@ -83,6 +83,26 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.facebook.donateCharityId":           sPublic,
 	"destination.facebook.scheduledFor":              sPublic,
 	"destination.id":                                 sPublic,
+	// The broadcast-lifecycle coordinator's bookkeeping. All four are public,
+	// and each for its own reason rather than by association:
+	//
+	// broadcastId is the id in the public watch URL -- the same value
+	// destination.facebook.broadcastId already carries, and the one string an
+	// operator needs to find the broadcast in the platform's own console.
+	// phase is the platform's own word, visible in that console to anyone who
+	// can see the channel. attempts is a counter.
+	//
+	// fault is the only one worth arguing about, because it is free text built
+	// from platform errors -- and it is public because it EXISTS to be read: it
+	// is what the destination card shows when a broadcast will not start, so
+	// masking it would leave an operator with a blank space instead of a
+	// sentence telling them their channel is at its concurrent-broadcast limit.
+	// Nothing on the path that builds it touches a key: see
+	// TestALifecycleFaultCarriesNoCredential.
+	"destination.lifecycle.attempts":    sPublic,
+	"destination.lifecycle.broadcastId": sPublic,
+	"destination.lifecycle.fault":       sPublic,
+	"destination.lifecycle.phase":       sPublic,
 	// The reason a stream key could not be decrypted on this machine. sPublic
 	// despite sitting next to two sSecret leaves and despite the word "key"
 	// being in it: it is a fixed instruction to the operator -- re-enter the
@@ -831,8 +851,25 @@ func leafWalk(t *testing.T, rt reflect.Type, prefix string, visit func(path stri
 	}
 	for i := range rt.NumField() {
 		f := rt.Field(i)
+		// UNEXPORTED USUALLY MEANS "NEVER ON THE WIRE", AND EMBEDDING IS THE
+		// EXCEPTION. encoding/json promotes the EXPORTED fields of an anonymous
+		// embedded struct even when the embedded type itself is unexported, so
+		// `struct{ announcementSet }` puts announcementSet's exported leaves in
+		// the enclosing object under their own names. Skipping the field would
+		// have hidden every one of them from this guard -- leaves that are
+		// stored, readable, and unchecked, which is the precise blind spot this
+		// walk exists to close.
+		//
+		// Only structs. An unexported embedded field of any other type really
+		// is dropped by encoding/json, and so is any ordinary unexported field.
 		if !f.IsExported() {
-			continue
+			et := f.Type
+			for et.Kind() == reflect.Pointer {
+				et = et.Elem()
+			}
+			if !f.Anonymous || et.Kind() != reflect.Struct {
+				continue
+			}
 		}
 		tag := f.Tag.Get("json")
 		// json:"-" never reaches the wire, which is the pattern platform client
@@ -841,6 +878,36 @@ func leafWalk(t *testing.T, rt reflect.Type, prefix string, visit func(path stri
 			continue
 		}
 		name, _, _ := strings.Cut(tag, ",")
+		// An ANONYMOUS embedded struct whose json tag names nothing is INLINED
+		// by encoding/json, so its leaves are keys of the ENCLOSING object and
+		// the type's name is on no wire. The classification table is an
+		// inventory of stored leaf PATHS, so a walk that invented a segment here
+		// would retire every real entry as dead and demand the same leaves be
+		// classified again under a name that cannot be read back --
+		// destination.facebook embeds db.AnnouncementSet.
+		//
+		// Only when the tag names nothing: an embedded field tagged `json:"x"`
+		// really is nested one level down.
+		// INLINED MEANS EMBEDDED STRUCT, AND encoding/json IS STRICTER THAN
+		// "anonymous with no tag". An embedded *struct is inlined too, but an
+		// embedded NAMED SLICE or MAP is not -- `type Tags []string` embedded
+		// anonymously nests under "Tags" and its elements are not keys of the
+		// enclosing object. The test below was computed BEFORE the deref loop,
+		// which strips slices and maps as well as pointers, so such a field
+		// would have been walked as inlined and every path under it would have
+		// been off by one segment.
+		//
+		// Nothing in the tree embeds a named slice today. This matters because
+		// THIS diff is what makes anonymous embedding the sharing pattern here:
+		// the next person to reach for it gets a walker that agrees with the
+		// bytes, or a guard that quietly checks the wrong paths.
+		//
+		// So the inline test sees through POINTERS ONLY and stops there.
+		embedded := f.Type
+		for embedded.Kind() == reflect.Pointer {
+			embedded = embedded.Elem()
+		}
+		inlined := f.Anonymous && name == "" && embedded.Kind() == reflect.Struct
 		if name == "" {
 			name = f.Name
 		}
@@ -853,7 +920,11 @@ func leafWalk(t *testing.T, rt reflect.Type, prefix string, visit func(path stri
 			ft = ft.Elem()
 		}
 		if ft.Kind() == reflect.Struct && ft.PkgPath() != "time" && ft.Name() != "Time" {
-			leafWalk(t, ft, path, visit)
+			if inlined {
+				leafWalk(t, ft, prefix, visit)
+			} else {
+				leafWalk(t, ft, path, visit)
+			}
 			continue
 		}
 		visit(path)

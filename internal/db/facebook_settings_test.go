@@ -15,7 +15,9 @@ func TestTheAnnouncedMarkerDistinguishesOneOccurrenceFromTheNext(t *testing.T) {
 	week1 := time.Date(2026, 8, 9, 20, 0, 0, 0, time.UTC)
 	week2 := week1.AddDate(0, 0, 7)
 
-	f := FacebookSettings{ScheduledFor: week1, BroadcastID: "777"}
+	f := FacebookSettings{AnnouncementSet: AnnouncementSet{
+		ScheduledFor: week1, BroadcastID: "777",
+	}}
 	if !f.AnnouncedFor(week1) {
 		t.Error("the occurrence it was announced for reads as not announced")
 	}
@@ -30,7 +32,7 @@ func TestTheAnnouncedMarkerDistinguishesOneOccurrenceFromTheNext(t *testing.T) {
 // suppress every later attempt for that occurrence.
 func TestATimeWithNoBroadcastIsNotAnAnnouncement(t *testing.T) {
 	at := time.Date(2026, 8, 9, 20, 0, 0, 0, time.UTC)
-	f := FacebookSettings{ScheduledFor: at}
+	f := FacebookSettings{AnnouncementSet: AnnouncementSet{ScheduledFor: at}}
 	if f.AnnouncedFor(at) {
 		t.Error("a marker with no broadcast id reads as announced, so nothing " +
 			"would ever try again for this occurrence")
@@ -48,7 +50,9 @@ func TestTheAnnouncedMarkerSurvivesTheDatabase(t *testing.T) {
 	created, err := d.CreateDestination(&Destination{
 		Name: "fb", Kind: "rtmp", Platform: PlatformFacebook,
 		URL: "rtmps://live.example/rtmp", StreamKey: "k",
-		Facebook: FacebookSettings{ScheduledFor: at, BroadcastID: "777"},
+		Facebook: FacebookSettings{AnnouncementSet: AnnouncementSet{
+			ScheduledFor: at, BroadcastID: "777",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("CreateDestination: %v", err)
@@ -73,10 +77,10 @@ func TestTheAnnouncedMarkerSurvivesTheDatabase(t *testing.T) {
 // announced destination look like one with crossposting configured -- and
 // dropUnsendableSettings would then refuse to clear it on a platform change.
 func TestTheMarkerDoesNotMakeSettingsLookNonEmpty(t *testing.T) {
-	f := FacebookSettings{
+	f := FacebookSettings{AnnouncementSet: AnnouncementSet{
 		ScheduledFor: time.Date(2026, 8, 9, 20, 0, 0, 0, time.UTC),
 		BroadcastID:  "777",
-	}
+	}}
 	if !f.Empty() {
 		t.Error("a destination with only an announcement marker reads as having " +
 			"create-time settings to send")
@@ -343,6 +347,113 @@ func TestThePerShowMarkersSurviveTheDatabase(t *testing.T) {
 	two, ok := got.Facebook.AnnouncementFor(2)
 	if !ok || two.BroadcastID != "thursday-show" {
 		t.Errorf("schedule 2 holds %q after a reload, want thursday-show", two.BroadcastID)
+	}
+}
+
+// THE STORED SHAPE, PINNED TO THE BYTE.
+//
+// The markers moved out of FacebookSettings into an embedded AnnouncementSet,
+// and the ONLY thing between that move and every operator's announcements
+// silently vanishing is the embedding being anonymous and untagged -- which is
+// what inlines announcements/scheduledFor/broadcastId as top-level keys instead
+// of nesting them one level down.
+//
+// Nesting is not a hypothetical slip. Giving the embedded field a struct tag of
+// json:"announcements" reads as the obvious tidy-up to anyone who meets this
+// struct without the history; it compiles, and every other test here still
+// passes, because they build a row through Announce() and round-trip it through
+// the same wrong shape. What breaks is only the rows ALREADY ON DISK: they
+// decode to an empty set, AnnouncedFor says no for shows that have been
+// announced, and the next five-minute sweep creates a second public event page
+// for every scheduled show on the install -- beside the pages people are already
+// subscribed to, with no error anywhere.
+//
+// So this does not round-trip a struct through itself, which would agree with
+// any shape as long as it agreed with itself. It starts from the exact bytes a
+// stored `facebook` column holds and re-encodes them: the input is the
+// assertion, and key order is included because holding it is what makes a
+// byte comparison legitimate.
+//
+// Mutation: in facebook.go, tag the embedded field json:"announcementSet".
+// Observed FAIL: "a stored row lost its announcements ([])".
+func TestAStoredFacebookBlockReEncodesByteForByte(t *testing.T) {
+	// A row from an install that crossposts, collects for a charity and has two
+	// shows announced. Written by the build before AnnouncementSet existed.
+	const stored = `{"crosspost":[{"pageId":"1234","createPost":true}],` +
+		`"donateCharityId":"9876",` +
+		`"announcements":[` +
+		`{"scheduleId":1,"occurrence":"2026-08-10T20:00:00Z","broadcastId":"tuesday-show"},` +
+		`{"scheduleId":2,"occurrence":"2026-08-12T20:00:00Z","broadcastId":"thursday-show"}],` +
+		`"scheduledFor":"2026-08-10T20:00:00Z","broadcastId":"tuesday-show"}`
+
+	var f FacebookSettings
+	if err := json.Unmarshal([]byte(stored), &f); err != nil {
+		t.Fatalf("decode a stored facebook column: %v", err)
+	}
+
+	tuesday := time.Date(2026, 8, 10, 20, 0, 0, 0, time.UTC)
+	thursday := time.Date(2026, 8, 12, 20, 0, 0, 0, time.UTC)
+	if !f.AnnouncedFor(tuesday) || !f.AnnouncedFor(thursday) {
+		t.Fatalf("a stored row lost its announcements (%+v) -- the next sweep would "+
+			"create a second event page for both shows", f.Announcements)
+	}
+	if f.DonateCharityID != "9876" || len(f.Crosspost) != 1 {
+		t.Errorf("the create-time settings beside the markers were lost: %+v", f)
+	}
+
+	out, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("re-encode: %v", err)
+	}
+	if string(out) != stored {
+		t.Errorf("re-encoded shape changed.\n got %s\nwant %s", out, stored)
+	}
+}
+
+// The same guarantee through the REAL read path, from bytes this build never
+// wrote. The test above proves the struct tags; this proves nothing between the
+// column and Destination.Facebook -- scanDestination's unmarshal, chiefly --
+// quietly needs a shape only the current build produces.
+//
+// The blob is the 0.2.0 one: the single pair, with no `announcements` key at
+// all, which is what an install that has never run a per-show build still holds.
+// It is written with a raw UPDATE precisely because no API in this package can
+// produce it any more.
+//
+// Mutation: in destinations.go, change scanDestination's `if facebookJSON != ""`
+// to `if false`, which is the column being read and thrown away. Observed FAIL:
+// "the stored pair did not survive the read".
+func TestARowStoredBeforePerShowMarkersStillReadsAsAnnounced(t *testing.T) {
+	d := testDB(t)
+	at := time.Date(2026, 8, 9, 20, 0, 0, 0, time.UTC)
+
+	created, err := d.CreateDestination(&Destination{
+		Name: "fb", Kind: "rtmp", Platform: PlatformFacebook,
+		URL: "rtmps://live.example/rtmp", StreamKey: "k",
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	const legacy = `{"scheduledFor":"2026-08-09T20:00:00Z","broadcastId":"777"}`
+	if _, err := d.sql.Exec(
+		`UPDATE destinations SET facebook=? WHERE id=?`, legacy, created.ID); err != nil {
+		t.Fatalf("plant a 0.2.0 facebook column: %v", err)
+	}
+
+	got, err := d.GetDestination(created.ID)
+	if err != nil {
+		t.Fatalf("GetDestination: %v", err)
+	}
+	if got.Facebook.BroadcastID != "777" || !got.Facebook.ScheduledFor.Equal(at) {
+		t.Fatalf("the stored pair did not survive the read: %+v", got.Facebook)
+	}
+	if !got.Facebook.AnnouncedFor(at) {
+		t.Fatal("an upgraded row reads as never announced, so the next sweep " +
+			"creates a second event page for a show already announced")
+	}
+	held, ok := got.Facebook.AnnouncementFor(5)
+	if !ok || held.BroadcastID != "777" {
+		t.Fatalf("the existing broadcast was not offered to a schedule, got %+v", held)
 	}
 }
 

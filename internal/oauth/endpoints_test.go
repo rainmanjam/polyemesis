@@ -140,18 +140,34 @@ func TestAStubbedProviderReachesNoRealHost(t *testing.T) {
 		"youtube": func(t *testing.T, base string) map[string]func() {
 			y := NewYouTube(WithBaseURL(base))
 			return map[string]func(){
-				"Exchange":     func() { _, _ = y.Exchange(ctx, cid, secret, "https://r.test/cb", "code", "v") },
-				"Refresh":      func() { _, _ = y.Refresh(ctx, cid, secret, "refresh") },
-				"Account":      func() { _, _ = y.Account(ctx, cid, tok) },
-				"Ingest":       func() { _, _ = y.Ingest(ctx, cid, tok) },
-				"PushMetadata": func() { _, _ = y.PushMetadata(ctx, cid, tok, "4242", Metadata{Title: "x", Category: "Gaming"}) },
+				"Exchange":   func() { _, _ = y.Exchange(ctx, cid, secret, "https://r.test/cb", "code", "v") },
+				"Refresh":    func() { _, _ = y.Refresh(ctx, cid, secret, "refresh") },
+				"Account":    func() { _, _ = y.Account(ctx, cid, tok) },
+				"AccountFor": func() { _, _ = y.AccountFor(ctx, cid, tok, "") },
+				"Targets":    func() { _, _ = y.Targets(ctx, cid, tok) },
+				"Ingest":     func() { _, _ = y.Ingest(ctx, cid, tok) },
+				"IngestFor":  func() { _, _ = y.IngestFor(ctx, cid, tok, "", IngestOptions{}) },
+				// Scheduled as well as live-now: the two take different paths
+				// through IngestFor and only the scheduled one reaches
+				// liveBroadcasts.insert and liveBroadcasts.bind, so a stub that
+				// only ever sees the live-now path proves nothing about them.
+				"IngestForScheduled":  func() { _, _ = y.IngestFor(ctx, cid, tok, "", IngestOptions{ScheduledFor: at}) },
+				"RescheduleBroadcast": func() { _ = y.RescheduleBroadcast(ctx, tok, "9", at) },
+				"Stats":               func() { _, _ = y.Stats(ctx, cid, tok) },
+				"PushMetadata":        func() { _, _ = y.PushMetadata(ctx, cid, tok, "4242", Metadata{Title: "x", Category: "Gaming"}) },
 				"PushCompliance": func() {
 					_, _ = y.PushCompliance(ctx, cid, tok, ComplianceTarget{}, db.Compliance{Privacy: db.PrivacyUnlisted})
 				},
 				"BroadcastWindow": func() { _, _ = y.BroadcastWindow(ctx, tok) },
+				"BroadcastState":  func() { _, _ = y.BroadcastState(ctx, tok, "bcast-1") },
+				"TransitionBroadcast": func() {
+					_, _ = y.TransitionBroadcast(ctx, tok, "bcast-1", PhaseComplete)
+				},
 				"PushBroadcastSettings": func() {
 					_, _ = y.PushBroadcastSettings(ctx, cid, tok, BroadcastSettings{EnableDvr: ptrBool(true)})
 				},
+				"SetVODPrivacy":    func() { _ = y.SetVODPrivacy(ctx, tok, "vid", db.PrivacyUnlisted) },
+				"AddVODToPlaylist": func() { _, _ = y.AddVODToPlaylist(ctx, tok, "PL123", "vid") },
 			}
 		},
 		"twitch": func(t *testing.T, base string) map[string]func() {
@@ -161,6 +177,7 @@ func TestAStubbedProviderReachesNoRealHost(t *testing.T) {
 				"Refresh":      func() { _, _ = tw.Refresh(ctx, cid, secret, "refresh") },
 				"Account":      func() { _, _ = tw.Account(ctx, cid, tok) },
 				"Ingest":       func() { _, _ = tw.Ingest(ctx, cid, tok) },
+				"Stats":        func() { _, _ = tw.Stats(ctx, cid, tok) },
 				"PushMetadata": func() { _, _ = tw.PushMetadata(ctx, cid, tok, "4242", Metadata{Title: "x", Category: "Chess"}) },
 				"PushCompliance": func() {
 					_, _ = tw.PushCompliance(ctx, cid, tok, ComplianceTarget{AccountRef: "4242"}, db.Compliance{Labels: map[string]bool{"x": true}})
@@ -323,5 +340,76 @@ func TestTheZeroSetIsProduction(t *testing.T) {
 	}
 	if got := fb.graphEndpoint(); got != fbGraphBase {
 		t.Errorf("a provider from the zero Set points at %q, want the production %q", got, fbGraphBase)
+	}
+}
+
+// TestEveryCapabilityLookupHasASetTwinThatResolves is the guard endpoints.go
+// asks for in prose and nothing enforced.
+//
+// The comment at endpoints.go:153 says "Every capability the package grows needs
+// its twin here", and the cost of forgetting is specific rather than cosmetic: a
+// caller holding a stubbed Set resolves the capability through the package-level
+// lookup instead, which reads the PRODUCTION providers. The test would still
+// pass, the stub would still be aimed correctly for every other call, and one
+// capability would quietly talk to the real internet.
+//
+// So this asserts the two things that make a twin real: it exists (the code does
+// not compile otherwise), and it resolves against the SET rather than the
+// package -- proven by building a Set whose members are stubbed and checking the
+// twin hands back a provider aimed at the stub.
+func TestEveryCapabilityLookupHasASetTwinThatResolves(t *testing.T) {
+	base, guard := stubbedWorld(t)
+	set := NewSet(WithBaseURL(base))
+
+	// BOTH ENDS ARE DRIVEN OFF THE MATRIX RATHER THAN OFF A NAMED PLATFORM.
+	//
+	// This used to hardcode "Kick implements it, YouTube does not", and the
+	// hardcoding had to be rewritten twice in one afternoon -- once when Twitch
+	// grew a Stats method and once when YouTube did, each time by editing the
+	// assertion to point at whichever platform had not been implemented yet.
+	// An assertion that has to be re-aimed every time the thing it guards
+	// changes is one somebody eventually re-aims wrongly, and the negative half
+	// silently stops covering anything the moment every platform implements the
+	// capability.
+	//
+	// The matrix is the right source: TestTheViewerStatsCellAgreesWithWhich-
+	// ProvidersActuallyImplementStats already pins it to the code, so reading it
+	// here cannot drift away from what the providers do.
+	var claimed, denied int
+	for _, row := range PlatformCapabilities() {
+		ls, ok := set.StatsFor(row.Platform)
+		if row.Caps[CapViewerStats] == SupportYes {
+			claimed++
+			if !ok {
+				t.Errorf("Set.StatsFor(%s) did not resolve; it implements Stats, so the twin is not wired",
+					row.Platform)
+				continue
+			}
+			// Driven, so a provider that resolves but is aimed at production
+			// still trips the escape guard below.
+			_, _ = ls.Stats(context.Background(), "cid", "tok")
+			continue
+		}
+		// A platform without the capability must answer false rather than a nil
+		// interface that panics on use: internal/api branches on this bool to
+		// answer supported:false, and a nil-with-true would crash the handler.
+		denied++
+		if ok {
+			t.Errorf("Set.StatsFor(%s) resolved, but its viewerStats cell is %q — "+
+				"the assertion is matching something it should not",
+				row.Platform, row.Caps[CapViewerStats])
+		}
+	}
+	// Neither half may quietly cover nothing. A loop that asserts over an empty
+	// set passes for the wrong reason, and that is exactly how the negative half
+	// would have died unnoticed once every platform implemented Stats.
+	if claimed == 0 || denied == 0 {
+		t.Fatalf("this test needs both cases to mean anything: %d platforms claim viewer stats, %d deny it",
+			claimed, denied)
+	}
+
+	if got := guard.escapes(); len(got) > 0 {
+		t.Fatalf("a capability resolved through a stubbed Set still reached real hosts:\n  %s",
+			strings.Join(got, "\n  "))
 	}
 }

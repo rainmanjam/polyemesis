@@ -2,7 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
-import { Copy, Megaphone, Plus, Radio } from "lucide-react";
+import { Copy, Megaphone, Play, Plus, Radio, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +21,13 @@ import { api, isNoSource } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
 import type { SignalTone } from "@/lib/signal";
-import type { Destination, MetaField, SystemInfo } from "@/lib/types";
+import type {
+  BulkDestOutcome,
+  BulkDestReport,
+  Destination,
+  MetaField,
+  SystemInfo,
+} from "@/lib/types";
 import { useT, useStateLabel } from "@/lib/i18n";
 
 // hls.js is a few hundred kilobytes that only the preview needs, and the
@@ -572,6 +578,197 @@ function GoLiveComposer() {
   );
 }
 
+// ------------------------------------------------------ bulk start and stop
+//
+// One control that acts on EVERY destination. An operator with eight of them
+// was pressing eight buttons.
+//
+// There are no per-card checkboxes and no selection state, deliberately: a bulk
+// control with a selection is the per-destination control with extra steps, and
+// a selection made thirty seconds ago is one more thing that can be stale when
+// the button is finally pressed.
+//
+// WHAT "STOP ALL" DOES TO A YOUTUBE BROADCAST, because the button cannot say it
+// and the operator has to know before they press it: on the server, stop and
+// disable are ONE thing -- POST /destinations/{id}/stop clears the row's enabled
+// column, and internal/api/lifecycle.go ends the broadcast of any destination
+// that is disabled. A completed YouTube broadcast cannot return to live.
+// Starting everything again puts the video back on the wire; it does not bring
+// the broadcasts back, and a new one has to be created or announced. The
+// confirmation below therefore names that outcome rather than reassuring the
+// operator that they can simply start again.
+//
+// The confirmation is a plain one -- no requireTyping. That is reserved for the
+// irreversible, and this control's own action is not: what it does to the
+// PROCESSES is undone by pressing start. The irreversible part is a consequence
+// the per-destination stop button already has, one row at a time, so making the
+// bulk form harder to complete than eight presses of the control it replaces
+// would train the caution out where it matters. The prose carries the warning;
+// the friction stays proportional. See ConfirmDestructive's header.
+//
+// STARTING NEEDS NO CONFIRMATION. Nothing is lost by starting a destination.
+
+// A bulk result is reported per destination, never as one boolean, so each
+// outcome needs its own place in the signal language -- the same table the
+// metadata composer keeps for the same reason. Tokens only: there is no
+// text-ok, and DestinationCard.tsx:302-305 records what a hand-written colour
+// class cost.
+//
+// `skipped` is armed rather than idle because "we never got to this one" is a
+// thing still waiting to happen, not a thing at rest.
+const bulkTone: Record<BulkDestOutcome, SignalTone> = {
+  started: "live",
+  stopped: "idle",
+  warned: "warn",
+  failed: "down",
+  skipped: "armed",
+};
+
+function BulkDestinationControl({
+  count,
+  onFinished,
+}: Readonly<{ count: number; onFinished: () => void }>) {
+  const t = useT();
+  const [report, setReport] = useState<BulkDestReport | null>(null);
+  const [busy, setBusy] = useState<"start" | "stop" | null>(null);
+  const confirmStopAll = useConfirm<true>();
+
+  const bulkLabel: Record<BulkDestOutcome, string> = {
+    started: t("dash.bulkStarted"),
+    stopped: t("dash.bulkStopped"),
+    warned: t("dash.bulkWarned"),
+    failed: t("dash.bulkFailed"),
+    skipped: t("dash.bulkSkipped"),
+  };
+
+  const run = async (action: "start" | "stop") => {
+    setBusy(action);
+    // Cleared rather than left standing: a list from the previous press sitting
+    // under a spinner reads as this press's answer, and the row that has not
+    // been touched yet is exactly the one an operator would misread.
+    setReport(null);
+    try {
+      const res =
+        action === "start" ? await api.startAllDestinations() : await api.stopAllDestinations();
+      setReport(res);
+      // The count, not a verdict. "Six of eight started" is a sentence an
+      // operator can act on; "failed" over eight destinations of which two
+      // refused is one they have to go and decode.
+      const done = res.results.filter(
+        (r) => r.outcome === "started" || r.outcome === "stopped",
+      ).length;
+      const params = { done, total: res.results.length };
+      if (done === res.results.length) {
+        toast.success(
+          action === "start" ? t("dash.bulkStartDone", params) : t("dash.bulkStopDone", params),
+        );
+      } else {
+        // Not an error toast: the request succeeded and every destination has
+        // an answer. The rows below say which ones did not take.
+        toast.warning(
+          action === "start"
+            ? t("dash.bulkStartPartial", params)
+            : t("dash.bulkStopPartial", params),
+        );
+      }
+      onFinished();
+    } catch (err) {
+      // A refusal of the WHOLE request -- no engine, no permission. Nothing was
+      // reported per destination because nothing got that far.
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : action === "start"
+            ? t("dash.bulkStartFailed")
+            : t("dash.bulkStopFailed"),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (count === 0) return null;
+
+  return (
+    <div className="mb-3 flex flex-col gap-2 rounded-md border border-border p-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" disabled={busy !== null} onClick={() => void run("start")}>
+          <Play /> {busy === "start" ? t("dash.bulkStarting") : t("dash.startAll")}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy !== null}
+          onClick={() => confirmStopAll.ask(true)}
+        >
+          <Square /> {busy === "stop" ? t("dash.bulkStopping") : t("dash.stopAll")}
+        </Button>
+        <span className="text-[10px] text-muted-foreground">
+          {t("dash.bulkAppliesTo", { count })}
+        </span>
+      </div>
+
+      {/* Starts are paced on the server, so the button stays busy for a while
+          on a long list. Saying why turns a stuck-looking dashboard into one
+          that is visibly working. */}
+      <p className="text-[10px] text-muted-foreground">
+        Starts are spread out rather than fired together, so a long list takes a
+        while and the outcomes below arrive all at once at the end.
+      </p>
+
+      {/* ---------- what each destination did ---------- */}
+      <div aria-live="polite" className="flex flex-col gap-1.5">
+        {report === null ? (
+          <p className="text-[11px] text-muted-foreground">{t("dash.bulkResultsEmpty")}</p>
+        ) : (
+          report.results.map((res) => {
+            const tone = bulkTone[res.outcome];
+            return (
+              <div
+                key={res.id}
+                className="flex flex-col gap-0.5 rounded border border-border px-2 py-1.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <StatusDot tone={tone} size="sm" />
+                    <span className="truncate text-[11px] font-medium">{res.name}</span>
+                    <span className="truncate font-mono text-[10px] text-muted-foreground">
+                      {res.platform}
+                    </span>
+                  </div>
+                  <Badge variant={toneBadge[tone]}>{bulkLabel[res.outcome]}</Badge>
+                </div>
+                {/* WHY, on every row that is not a clean start or stop. A row
+                    that only says "Failed" sends the operator to the card to
+                    find out what this request already knows. */}
+                {res.message && (
+                  <p
+                    className={`text-[10px] ${
+                      res.outcome === "failed" ? "text-down" : "text-warn"
+                    }`}
+                  >
+                    {res.message}
+                  </p>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      <ConfirmDestructive
+        open={confirmStopAll.open}
+        onOpenChange={confirmStopAll.onOpenChange}
+        subject={t("dash.stopAll")}
+        title={t("dash.stopAllTitle", { count })}
+        description={t("dash.stopAllConsequence", { count: String(count) })}
+        confirmLabel={t("dash.stopAll")}
+        onConfirm={() => run("stop")}
+      />
+    </div>
+  );
+}
+
 export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
@@ -961,6 +1158,14 @@ export function Dashboard() {
           </h2>
         </div>
 
+        {/* Beside the list it acts on, not in the header row: the outcome list
+            below the buttons needs the full width to put a destination name and
+            a refusal on one line. */}
+        <BulkDestinationControl
+          count={destinations.length}
+          onFinished={() => setRefreshKey((k) => k + 1)}
+        />
+
         {/* A card that jumps position is invisible to a screen reader unless
             the move is announced. */}
         <output aria-live="polite" className="sr-only">
@@ -1012,6 +1217,41 @@ export function Dashboard() {
                     "refresh the stream key",
                   );
                 }}
+                /* Handed over only for Facebook, so the card's kebab is given
+                 * nothing to show on the platforms that have no broadcast to
+                 * end — the gate is the platform, not a disabled item. */
+                onEndBroadcast={
+                  d.platform === "facebook"
+                    ? async () => {
+                        await act(
+                          d.id,
+                          async () => {
+                            const r = await api.endFacebookBroadcast(d.id);
+                            /* THREE OUTCOMES, NOT TWO, and the middle one is
+                             * why this is not `r.ended ? success : error`.
+                             * EndBroadcast reports Ended only when Facebook
+                             * read the status back as VOD; a false with no
+                             * error means the POST SUCCEEDED and the node has
+                             * not settled yet. Facebook documents that it
+                             * saves the VOD, not how fast — so reporting that
+                             * as a failure would send an operator to end a
+                             * broadcast that is already ending, and reporting
+                             * it as a clean success would claim a confirmation
+                             * nobody gave. It gets its own sentence. */
+                            if (r.ended) toast.success(t("dash.broadcastEnded"));
+                            else toast.info(t("dash.broadcastEndAccepted"));
+                            /* Warnings name what was actually seen — a
+                             * read-back that failed, a status that is still
+                             * LIVE. Advisory beside the sentence above, not
+                             * errors: the end was accepted either way. */
+                            for (const w of r.warnings ?? []) toast.warning(w);
+                          },
+                          "end the Facebook broadcast",
+                        );
+                        setRefreshKey((k) => k + 1);
+                      }
+                    : undefined
+                }
               />
             ))}
           </div>

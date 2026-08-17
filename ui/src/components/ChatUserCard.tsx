@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useT } from "@/lib/i18n";
 import { toast } from "sonner";
 import { Ban, EyeOff, Loader2, Shield, Timer, Undo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +54,7 @@ export function ChatUserCard({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useT();
   const [card, setCard] = useState<CardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState("");
@@ -164,7 +166,7 @@ export function ChatUserCard({
             misled by a window that only ever showed them a slice. */}
         {card?.retentionNote && (
           <p className="text-[10px] leading-relaxed text-subtle-foreground">
-            {card.truncated && <strong>Showing the most recent only. </strong>}
+            {card.truncated && <strong>{t("chatpage.showingRecentOnly")}</strong>}
             {card.retentionNote}
           </p>
         )}

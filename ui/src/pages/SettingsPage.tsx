@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useIngestLive } from "@/hooks/useLiveData";
+import { AccountLiveStats } from "@/components/AccountLiveStats";
 import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
@@ -2103,6 +2104,14 @@ function PlatformCredCard({
                         )}
                       </div>
                       <div className="font-mono text-[10px] text-muted-foreground">{a.accountRef}</div>
+                      {/* What the capability matrix two cards up promises, on
+                          the account it is a promise about. "Viewers: Works"
+                          read as a claim nobody could check until this was
+                          here, because the route existed and nothing called
+                          it. Polled while this tab is visible; see
+                          lib/viewerCount.ts for why the interval is what it
+                          is. */}
+                      <AccountLiveStats accountId={a.id} />
                       {/* Said in full rather than as a bare badge. "Reconnect"
                           with no reason reads as a fault the operator caused;
                           the point is that a token cannot gain a permission it

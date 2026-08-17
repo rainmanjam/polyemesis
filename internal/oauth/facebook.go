@@ -32,6 +32,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -178,119 +179,9 @@ func (f *Facebook) Refresh(ctx context.Context, clientID, clientSecret, refreshT
 
 // --------------------------------------------------------------- targets
 
-// BroadcastTarget is one place a single connected account may publish to.
-//
-// This and TargetedProvider live in this file because Facebook is the only
-// platform that has ever needed them; if a second one appears they belong in
-// oauth.go next to Provider.
-type BroadcastTarget struct {
-	// Ref is what gets stored in PlatformAccount.AccountRef and handed back to
-	// AccountFor/IngestFor. See parseTargetRef for the spellings.
-	Ref string `json:"ref"`
-	// Kind is "user" or "page", so the UI can group and badge them.
-	Kind string `json:"kind"`
-	Name string `json:"name"`
-	// Category is the Page's own category, empty for a profile. It is the one
-	// thing that distinguishes two Pages with similar names in a dropdown.
-	Category string `json:"category,omitempty"`
-}
-
-// Broadcast is an ingest plus the platform's identifier for the broadcast
-// object that issued it.
-//
-// The ingest fields carry a stream key, so they are json:"-": nothing should
-// ever serialise this struct outward, and if something does, it must not be the
-// key that leaks. ID and Target are safe to persist and to show.
-type Broadcast struct {
-	// ID is Facebook's live_video id. It is the handle for ending the
-	// broadcast, editing its metadata and reading its comments, so a caller
-	// that discards it has to create a new broadcast to get another one.
-	ID string `json:"id"`
-	// Target is the ref this was created on, which is what makes the id
-	// addressable later: a Page's live video needs the Page's token.
-	Target string `json:"target"`
-	Ingest Ingest `json:"-"`
-	// Backups are the platform's secondary ingest endpoints, for a redundant
-	// encoder feed. Exposed even though nothing consumes them yet, because they
-	// arrive in the same response and re-fetching them means creating a second
-	// broadcast.
-	Backups []Ingest `json:"-"`
-}
-
-// IngestOptions carries what a platform needs when the broadcast is CREATED,
-// which is not the same set the composer pushes afterwards.
-//
-// A struct rather than more parameters because the create-time surface is going
-// to grow: scheduling (event_params) and backup ingest both land here, and three
-// signature changes to one interface is three chances to miss a call site. The
-// zero value sends nothing, which is what every caller without a destination in
-// hand passes.
-type IngestOptions struct {
-	Privacy         db.FacebookPrivacy
-	Crosspost       []db.CrosspostTarget
-	DonateCharityID string
-	// BackupIngest asks Facebook to provision a secondary ingest endpoint, so
-	// a redundant feed can be published alongside the primary.
-	//
-	// This flag is what PROVISIONS the backup url; without it the secondary
-	// lists come back empty. Meta's live_videos edge reference:
-	//
-	//	enable_backup_ingest  boolean
-	//	Set this to true to enable a backup ingest url.
-	//	stop_on_delete_stream defaults to false when set
-	//
-	// and the getting-started response shows "secure_stream_secondary_urls":
-	// [] on a create without it. An earlier version of this comment said the
-	// relationship was "not established" -- it is, and the source is the EDGE
-	// reference rather than the LiveVideo node reference, which 404s.
-	//
-	// A caller must still handle an empty Backups even when it asked: eligibility
-	// and account state can refuse what the flag requests.
-	BackupIngest bool
-	// ScheduledFor makes this a SCHEDULED_UNPUBLISHED broadcast at that
-	// instant rather than a LIVE_NOW one, which is what gives a show a
-	// Facebook event page before it starts.
-	//
-	// Zero means live now. That is what every existing caller passes and what
-	// they keep doing -- turning those into scheduled creates would produce
-	// broadcasts that never go live.
-	//
-	// Facebook accepts a start time at most SEVEN DAYS ahead and that bound is
-	// not ours to widen. It is enforced by the caller, which is the only layer
-	// that knows the occurrence; this struct carries whatever it is given.
-	ScheduledFor time.Time
-}
-
-// TargetedProvider is the optional capability for a platform where one
-// connected login can publish to more than one destination. Discover it with
-// TargetsFor; never type-assert Provider at a call site, because "absent" is
-// the answer for every other platform and has to be handled once.
-type TargetedProvider interface {
-	Provider
-	// Targets lists everywhere this token may publish. It reports an error only
-	// when the identity itself cannot be read: a token that cannot see Pages
-	// returns the profile alone, because that is a legitimate connection rather
-	// than a failure.
-	Targets(ctx context.Context, clientID, accessToken string) ([]BroadcastTarget, error)
-	// AccountFor identifies one chosen target, for storing as a connected
-	// account. An empty targetRef means the default.
-	AccountFor(ctx context.Context, clientID, accessToken, targetRef string) (*Account, error)
-	// IngestFor creates (or fetches) the ingest for one target and returns the
-	// broadcast object behind it. opts carries the create-time fields a stored
-	// destination may have chosen; its zero value sends none of them.
-	IngestFor(ctx context.Context, clientID, accessToken, targetRef string, opts IngestOptions) (*Broadcast, error)
-}
-
-// TargetsFor returns the multi-target capability for a platform, or false when
-// that platform has none. Mirrors MetadataFor.
-func TargetsFor(p db.Platform) (TargetedProvider, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	tp, ok := pr.(TargetedProvider)
-	return tp, ok
-}
+// Facebook's implementation of TargetedProvider. The interface itself, and
+// BroadcastTarget/Broadcast/IngestOptions with it, moved to oauth.go beside
+// Provider -- see the note there.
 
 // Target ref spellings. A bare id with no prefix is treated as "look it up",
 // which is what keeps a ref stored by an older build working.
@@ -529,6 +420,19 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	// event_params carries the start time. Facebook accepts at most seven days
 	// ahead; the bound is enforced by the caller, which is the only layer that
 	// knows the occurrence.
+	//
+	// A BARE UNIX SCALAR, and the alternative was rejected rather than
+	// overlooked. Meta documents event_params two ways: the scheduling guide's
+	// own copy-pasteable request sends the scalar
+	// (...&event_params=1541539800), while the v26.0 edge reference types it as
+	// a structured Live Video Event Parameter object ({start_time, cover})
+	// scoped to Live Online Events. They cannot both be the wire format. The
+	// literal sample in the guide that describes THIS call is the stronger
+	// evidence, so the scalar is what goes out. If a live account ever answers
+	// this with a refusal naming event_params, the object is the next thing to
+	// try -- and the read-back,
+	// GET /<ID>/live_videos?broadcast_status=["SCHEDULED_UNPUBLISHED"], is how
+	// to tell which one Facebook actually took.
 	params := url.Values{"status": {"LIVE_NOW"}}
 	if !opts.ScheduledFor.IsZero() {
 		params.Set("status", "SCHEDULED_UNPUBLISHED")
@@ -571,7 +475,9 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	var created fbLiveVideo
 	err = f.post(ctx, tgt.token, "/"+tgt.node+"/live_videos", params, &created)
 	if err != nil {
-		return nil, fbAdvice(err, "start a Facebook broadcast", f.publishScopes(tgt.kind))
+		// fbCreateAdvice rather than fbAdvice: this is the call Meta's go-live
+		// eligibility gate refuses, and it refuses it without saying so.
+		return nil, fbCreateAdvice(err, "start a Facebook broadcast", f.publishScopes(tgt.kind))
 	}
 	if created.ID == "" {
 		return nil, fmt.Errorf("Facebook accepted the broadcast but returned no live video id")
@@ -867,72 +773,8 @@ type fbLiveVideoPrivacy struct {
 
 // ------------------------------------------------- scheduled broadcasts
 
-// ScheduledBroadcaster is the optional capability for a platform that can
-// create a broadcast BEFORE the show and move it afterwards -- what gives a
-// scheduled show an event page people can subscribe to. Discover it with
-// ScheduledBroadcastsFor; never type-assert Provider at a call site, because
-// "absent" is the answer for every other platform and has to be handled once.
-//
-// It exists because that rule was being broken in the plainest possible way.
-// internal/api reached RescheduleBroadcast with a CONCRETE-type assertion --
-// `fb, ok := p.(*oauth.Facebook)` -- on a method that was on no interface at
-// all, so the one place that knew a platform could not do this was an `ok`
-// check against a struct pointer. A second platform with a schedulable
-// broadcast would have had to be added to that assertion by hand, and the
-// compiler would not have said a word.
-//
-// It lives in this file for the same reason TargetedProvider does: Facebook is
-// the only platform that has ever had it. If a second one appears, both belong
-// in oauth.go next to Provider. Nothing here is stubbed onto YouTube, Twitch or
-// Kick -- the value of the interface is that ABSENT is a supported answer,
-// handled once by the caller, not that every provider grows a method that
-// returns an error.
-//
-// CREATING the scheduled broadcast is deliberately NOT on this interface. That
-// is TargetedProvider.IngestFor with IngestOptions.ScheduledFor set, and has
-// been since that field was added. A Create method here would be a second
-// mechanism for one concept, which is exactly how endpoints.go records the
-// graphBase seam growing up beside WithBaseURL and covering one endpoint out of
-// thirteen. What is here is the pair a caller cannot get any other way: the
-// bound it has to respect, and the move.
-type ScheduledBroadcaster interface {
-	Provider
-	// ScheduleHorizon is how far ahead of now this platform will accept a
-	// start time. A caller must refuse an occurrence beyond it rather than
-	// send it, because the platform's refusal arrives as a generic Graph
-	// error that reads like every other one.
-	//
-	// A method rather than a constant at the call site because it is a fact
-	// about the PLATFORM. internal/api spells Facebook's seven days out as
-	// facebookScheduleHorizon in preannounce.go, inside a loop already gated
-	// on `d.Platform != db.PlatformFacebook` -- which is the same defect as
-	// the type assertion wearing a different hat. Read here, a caller enforces
-	// "this platform's bound" without knowing which platform it is holding.
-	ScheduleHorizon() time.Duration
-	// RescheduleBroadcast moves an already-created broadcast to a new start
-	// time. broadcastID is the id the create returned and the caller stored;
-	// an empty one is an error rather than a no-op, because a platform can
-	// answer a write to no object in a way that reads as success.
-	RescheduleBroadcast(ctx context.Context, accessToken, broadcastID string, at time.Time) error
-}
-
-// ScheduledBroadcastsFor returns the pre-announce capability for a platform, or
-// false when that platform has none. Mirrors TargetsFor and MetadataFor, both
-// in shape and in what false means: it covers "this platform cannot schedule"
-// and "there is no provider for this platform at all", because neither caller
-// does anything different about them.
-//
-// Named for the thing rather than shortened to SchedulesFor because the only
-// caller holds a scheduler.Schedule in the same function, and two unrelated
-// senses of "schedule" one line apart is how a reader loses the thread.
-func ScheduledBroadcastsFor(p db.Platform) (ScheduledBroadcaster, bool) {
-	pr, ok := Providers()[p]
-	if !ok {
-		return nil, false
-	}
-	sb, ok := pr.(ScheduledBroadcaster)
-	return sb, ok
-}
+// Facebook's implementation of ScheduledBroadcaster. The interface moved to
+// oauth.go with TargetedProvider -- see the note there.
 
 // ScheduleHorizon is Facebook's own bound, and it is not ours to widen: Graph
 // refuses a live_video whose event_params is more than seven days out, at
@@ -961,12 +803,257 @@ func (f *Facebook) RescheduleBroadcast(ctx context.Context, accessToken, liveVid
 	if liveVideoID == "" {
 		return fmt.Errorf("reschedule: no live video id")
 	}
+	// The same bare unix scalar the create sends, for the same reason and with
+	// the same fallback if it is ever refused -- see IngestFor. The two
+	// spellings must not diverge: a create and a move that disagreed about the
+	// wire format would work until the day one of them stopped.
 	params := url.Values{"event_params": {strconv.FormatInt(at.Unix(), 10)}}
 	var out struct{}
 	if err := f.post(ctx, accessToken, "/"+liveVideoID, params, &out); err != nil {
 		return fbAdvice(err, "reschedule a Facebook broadcast", nil)
 	}
 	return nil
+}
+
+// ------------------------------------------------ ending and stream health
+
+// fbStatusVOD is what a Facebook broadcast becomes when it ends. Broadcasting
+// guide, read 2026-08-16: "This ends your broadcast and saves it as a video on
+// demand (VOD)." It is the only value that confirms an end.
+const fbStatusVOD = "VOD"
+
+// fbEndReadFields is the read-back after an end. Deliberately not
+// fbLiveVideoFields: that constant exists to fetch ingest URLs, and asking for
+// a stream key to answer "did this stop" would pull a credential into a call
+// that has no use for one.
+const fbEndReadFields = "id,status"
+
+// BroadcastEnd is what EndBroadcast observed after asking Facebook to stop.
+type BroadcastEnd struct {
+	// Status is the status Facebook reported on the read-back. Empty means the
+	// read-back failed or carried no status, which is NOT the same as the
+	// broadcast still being live and must never be rendered as though it were.
+	Status string
+	// Ended is true only when Facebook reported VOD. A false here with no error
+	// means "Facebook accepted the end and has not yet said it took", which is
+	// an ordinary outcome -- the POST succeeded.
+	Ended bool
+	// Warnings name what was actually seen when Ended is false, in the shape
+	// MetadataResult uses, so a caller can render them the same way.
+	Warnings []string
+}
+
+// EndBroadcast ends one live video and reports what Facebook says it became.
+//
+// ENDING ON FACEBOOK IS NOT ENDING ON YOUTUBE, and that difference is the whole
+// design of this method. Meta's Broadcasting guide, read 2026-08-16, verbatim:
+// "To end a broadcast, stop streaming live video data from your encoder to the
+// stream URL or send a request to POST /<LIVE_VIDEO_ID>?end_live_video=true."
+// Two mechanisms, and one of them is the ABSENCE OF BYTES -- so on Facebook an
+// encoder that crashes has already ended the show. The policy YouTube needs,
+// where a crash deliberately leaves the broadcast live so a reconnecting
+// encoder can rejoin it, has nothing to preserve here and is not imported: by
+// the time anything noticed the crash, Facebook had already ended it. This
+// method is for a DELIBERATE end -- the operator stopped the show.
+//
+// A refused POST is an ERROR, unlike the refused privacy push below which is a
+// Skipped. The asymmetry is the consequence: a privacy push that fails leaves
+// the value chosen at create time already applied, while an end that fails
+// leaves a broadcast ON AIR that the operator believes is over.
+//
+// The end is confirmed by reading the status back, and Ended is reported only
+// on VOD. A different status is not an error and not a lie either -- Facebook
+// documents that it saves the VOD, not how quickly the node settles, so
+// PROCESSING or a stale LIVE is reported as "accepted, not yet confirmed" with
+// the value that was seen. Inventing a retry loop around that would mean
+// inventing the settling time nobody published.
+func (f *Facebook) EndBroadcast(ctx context.Context, accessToken, targetRef, liveVideoID string) (*BroadcastEnd, error) {
+	// Refused before any call, for the reason RescheduleBroadcast is: an empty
+	// id makes this a POST to "/", which Graph answers in a way that reads as
+	// success -- and here that would report a still-live broadcast as ended.
+	if strings.TrimSpace(liveVideoID) == "" {
+		return nil, fmt.Errorf("no Facebook live video id was recorded for this destination")
+	}
+	// Resolved rather than posted with the user token: a Page's live video is
+	// addressable only with that Page's token, and the failure without it is a
+	// permission error on a call the operator is watching for the end of.
+	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
+	if err != nil {
+		return nil, err
+	}
+
+	// The node, not the /live_videos edge, and end_live_video=true is the whole
+	// request. Nothing else is sent: this call is not a place to also fix a
+	// title, and a second parameter Graph did not expect would fail the end.
+	if err := f.post(ctx, tgt.token, "/"+liveVideoID,
+		url.Values{"end_live_video": {"true"}}, nil); err != nil {
+		return nil, fbAdvice(err, "end the Facebook broadcast", f.publishScopes(tgt.kind))
+	}
+
+	out := &BroadcastEnd{}
+	var confirm struct {
+		Status string `json:"status"`
+	}
+	getErr := f.get(ctx, tgt.token, "/"+liveVideoID,
+		url.Values{"fields": {fbEndReadFields}}, &confirm)
+	switch {
+	case getErr != nil:
+		out.Warnings = append(out.Warnings,
+			"Facebook accepted the end but it could not be confirmed: "+getErr.Error())
+	case strings.EqualFold(strings.TrimSpace(confirm.Status), fbStatusVOD):
+		out.Status, out.Ended = confirm.Status, true
+	case strings.TrimSpace(confirm.Status) == "":
+		out.Warnings = append(out.Warnings,
+			"Facebook accepted the end but the read-back carried no status to confirm it")
+	default:
+		out.Status = confirm.Status
+		out.Warnings = append(out.Warnings, fmt.Sprintf(
+			"Facebook accepted the end but still reports this broadcast as %s rather than %s",
+			confirm.Status, fbStatusVOD))
+	}
+	return out, nil
+}
+
+// FacebookStreamHealthInterval is the floor on how often StreamHealth may be
+// called. It is FACEBOOK'S number, not an estimate of one -- Broadcasting
+// guide, read 2026-08-16, verbatim: "Stream health data refreshes every 2
+// seconds, so limit queries to no more than once every 2 seconds. A stream
+// timeout will be detected and reported after 4 seconds of no data being
+// received."
+//
+// A published floor may be encoded; an unpublished ceiling may not, which is
+// why YouTube's concurrency limit is nowhere in this tree and this is here.
+//
+// It is not enforced inside StreamHealth, and that is deliberate: enforcement
+// means either sleeping inside a caller's call or keeping a last-polled clock
+// per broadcast in a provider that is otherwise stateless. The poll loop owns
+// its own pacing; this constant is what it paces against, so the number is
+// written down once instead of at every call site.
+const FacebookStreamHealthInterval = 2 * time.Second
+
+// FacebookStreamTimeout is how long Facebook itself waits before it reports a
+// stream as timed out -- the second sentence of the same quote. It is here so a
+// caller deciding "how long may a health read stay empty before the encoder is
+// gone" reads Facebook's four seconds instead of inventing a number, which is
+// the mistake this codebase repeats most.
+const FacebookStreamTimeout = 4 * time.Second
+
+// IngestStreamHealth is one ingest stream's health as Facebook reports it.
+type IngestStreamHealth struct {
+	// ID identifies which ingest stream this describes. A broadcast created
+	// with IngestOptions.BackupIngest has more than one.
+	ID string
+	// Health carries stream_health's numeric fields under FACEBOOK'S OWN names
+	// rather than fields named here.
+	//
+	// A map because the evidence establishes that stream_health "carries
+	// bitrates and frame rates" and does not name the keys: the node reference
+	// that would is the one that returns a real 404. Named Go fields would be a
+	// guess at spellings, and a guess that is wrong reads back as zero on a
+	// healthy stream -- a dropped-frames pane showing 0 for a field we misspelt
+	// is worse than one showing nothing.
+	//
+	// An absent measurement is an ABSENT KEY, never a zero: a map lookup's
+	// second return is what tells those apart, the same reason stats carries a
+	// viewer count as a pointer.
+	Health map[string]float64
+	// Unparsed names the stream_health fields that were not numbers, sorted.
+	// They are recorded rather than dropped because a field polyemesis cannot
+	// read looks exactly like a field Facebook did not send, and one of those
+	// is a bug here.
+	Unparsed []string
+}
+
+// fbIngestStream is one entry of the ingest_streams read.
+type fbIngestStream struct {
+	ID string `json:"id"`
+	// map[string]any, not a typed struct, for the reason IngestStreamHealth.Health
+	// is a map: the field names are not established.
+	StreamHealth map[string]any `json:"stream_health"`
+}
+
+// fbIngestStreams tolerates both spellings of a list-valued Graph field: the
+// {"data": [...]} envelope this file already decodes on /me/accounts and
+// /live_videos, and a bare array.
+//
+// Tolerance rather than a choice because nothing reachable settles which one
+// ingest_streams uses when it is read as a FIELD of the node -- the LiveVideo
+// node reference 404s, which is the same absence that keeps the health field
+// names out of this file. Guessing one spelling would turn a healthy stream
+// into an empty pane, and the two shapes cannot be confused for each other.
+type fbIngestStreams struct {
+	Streams []fbIngestStream
+}
+
+func (s *fbIngestStreams) UnmarshalJSON(b []byte) error {
+	var env struct {
+		Data []fbIngestStream `json:"data"`
+	}
+	// An array does not unmarshal into a struct, so this branch cannot swallow
+	// the bare form; null unmarshals into it as no streams, which is correct.
+	if err := json.Unmarshal(b, &env); err == nil {
+		s.Streams = env.Data
+		return nil
+	}
+	var bare []fbIngestStream
+	if err := json.Unmarshal(b, &bare); err != nil {
+		return err
+	}
+	s.Streams = bare
+	return nil
+}
+
+// StreamHealth reads what Facebook's ingest sees of the encoder feed.
+//
+// Facebook is the only platform here that publishes this: Twitch's Helix
+// reference carries no bitrate, framerate or dropped-frame field at all, so
+// this is not a gap in the other providers to be filled by symmetry.
+//
+// AN EMPTY RESULT IS NOT AN ERROR AND NOT A FAILURE. A scheduled broadcast has
+// no ingest yet, an ended one has none any more, and a live one whose encoder
+// went quiet reports nothing until Facebook's own four-second timeout fires --
+// see FacebookStreamTimeout. All three are "no ingest stream to describe", and
+// turning them into an error would make a health pane shout during the pause
+// between clicking Go Live and the first byte arriving.
+//
+// Callers must respect FacebookStreamHealthInterval between calls.
+func (f *Facebook) StreamHealth(ctx context.Context, accessToken, targetRef, liveVideoID string) ([]IngestStreamHealth, error) {
+	if strings.TrimSpace(liveVideoID) == "" {
+		return nil, fmt.Errorf("no Facebook live video id was recorded for this destination")
+	}
+	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
+	if err != nil {
+		return nil, err
+	}
+
+	var read struct {
+		IngestStreams fbIngestStreams `json:"ingest_streams"`
+	}
+	if err := f.get(ctx, tgt.token, "/"+liveVideoID,
+		url.Values{"fields": {"ingest_streams"}}, &read); err != nil {
+		return nil, fbAdvice(err, "read the Facebook stream health", f.publishScopes(tgt.kind))
+	}
+
+	out := make([]IngestStreamHealth, 0, len(read.IngestStreams.Streams))
+	for _, s := range read.IngestStreams.Streams {
+		h := IngestStreamHealth{ID: s.ID}
+		for name, v := range s.StreamHealth {
+			n, ok := v.(float64)
+			if !ok {
+				h.Unparsed = append(h.Unparsed, name)
+				continue
+			}
+			if h.Health == nil {
+				h.Health = make(map[string]float64, len(s.StreamHealth))
+			}
+			h.Health[name] = n
+		}
+		// Sorted because map iteration order is random, and a warning list that
+		// reorders itself between two identical reads reads as a change.
+		sort.Strings(h.Unparsed)
+		out = append(out, h)
+	}
+	return out, nil
 }
 
 // UpdateLiveVideoPrivacy changes a broadcast's audience after it is already
@@ -1247,7 +1334,7 @@ func fbAdvice(err error, what string, scopes []string) error {
 	if !ok {
 		return err
 	}
-	ge, ok := decodeGraphError(se.Body)
+	ge, ok := decodeGraphError(se.payload())
 	if !ok {
 		return err
 	}
@@ -1289,6 +1376,85 @@ func fbAdvice(err error, what string, scopes []string) error {
 	}
 
 	return err
+}
+
+// fbEligibilityNote is the pair of account facts Meta requires of anybody going
+// live, quoted from the Live Video API overview (read 2026-08-16; in force
+// since 2024-06-10) and already recorded in this repository at
+// docs/roadmap/DESTINATION-SETTINGS.md and in internal/api/preannounce.go.
+//
+// It is APPENDED to a refusal, never used to explain one, and that distinction
+// is the entire point of it. Neither requirement is a permission or a scope, so
+// an operator can hold every scope, a valid token and a correct stream key and
+// still be refused -- and Graph names neither in the error it sends back. There
+// is no code, subcode or message marker that identifies this cause. If there
+// were, this would be a branch of fbAdvice beside the 190 one and it would say
+// "this IS why"; because there is not, it says "check this" and says so out
+// loud. Asserting the diagnosis would be the more useful message exactly as
+// often as it would be a lie, and an operator sent to count followers over a
+// crossposting typo loses more than the sentence saved.
+//
+// The two numbers are Meta's, not ours, and neither is a threshold this code
+// checks: nothing here counts a follower or measures an account's age. Graph
+// declines to report either on the surfaces we call, so there is nothing to
+// compare against and no version of this that could refuse the create itself.
+//
+// Wording note: "60 days" appears twice in this file for two unrelated reasons
+// -- an account's minimum age here, a token's approximate lifetime in the 190
+// branch of fbAdvice. fbCreateAdvice keeps them out of the same message.
+const fbEligibilityNote = "If the account, its permissions and the stream key all look correct, " +
+	"check the two things Facebook requires of the ACCOUNT before it may go live at all -- " +
+	"neither of them is a permission, and this error names neither: the Facebook account must " +
+	"be at least 60 days old, and the Facebook Page or professional-mode profile must have at " +
+	"least 100 followers. Meta has required both since 2024-06-10. This is a possibility to " +
+	"rule out in thirty seconds, not a diagnosis: the refusal above may have nothing to do " +
+	"with either."
+
+// fbCreateAdvice is fbAdvice plus fbEligibilityNote, for the one call that
+// creates a broadcast.
+//
+// ONLY the create gets it. Editing, listing and rescheduling all act on a
+// live_video that already exists, and its existence is proof the account was
+// eligible when it was made -- appending the note there would send an operator
+// to count followers over a failure that cannot be about follower count.
+//
+// The note is withheld unless Facebook itself REFUSED, because "the platform
+// said no" is the only premise the sentence rests on:
+//
+//   - a non-*statusError never reached Graph. A dialled-wrong host, a cut
+//     connection or a cancelled context is a transport failure, and no account
+//     property can be why.
+//   - a 5xx is Meta FAILING, not Meta refusing. Envelope or not, an eligibility
+//     gate does not answer 500, and the cure for one of these is to try again.
+//   - a body that is not Meta's error envelope came from somebody else -- a
+//     proxy, a load balancer, an HTML error page -- so we do not know the Live
+//     Video API was reached at all.
+//   - code 190 is the token, which fbAdvice has already diagnosed exactly and
+//     which has a one-button cure. Appending a hedge to a message that is
+//     certain would make the certain part read as a guess too.
+//
+// The note is APPENDED to fbAdvice's result rather than replacing it, so the
+// permission or App Review instruction an operator can actually act on stays
+// first and the hedge stays last. %w rather than %v because it costs nothing
+// and keeps whatever chain fbAdvice left behind -- which is the original
+// *statusError on the pass-through path, and only the formatted message on the
+// mapped ones, since fbAdvice's own branches do not wrap.
+func fbCreateAdvice(err error, what string, scopes []string) error {
+	advised := fbAdvice(err, what, scopes)
+	se, ok := err.(*statusError)
+	if !ok || se.Status < 400 || se.Status >= 500 {
+		return advised
+	}
+	// payload(), never Body. Body is truncated to 300 characters for display and
+	// a realistic Meta refusal is longer, so parsing it fails, `ok` is false,
+	// and this returns WITHOUT the note -- withholding it from the exact
+	// refusal it was written for. This call site arrived on a branch that
+	// forked before the fix in fbAdvice and reintroduced the bug on merge.
+	ge, ok := decodeGraphError(se.payload())
+	if !ok || ge.Code == 190 {
+		return advised
+	}
+	return fmt.Errorf("%w\n\n%s", advised, fbEligibilityNote)
 }
 
 // metaMessage prefers the user-facing text when Meta supplies one, because it

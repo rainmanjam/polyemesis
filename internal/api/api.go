@@ -352,6 +352,17 @@ type Server struct {
 	// -- which is the difference an operator needs to see.
 	hooks *hooks.Dispatcher
 
+	// lifecycle drives platform broadcast state -- when a broadcast goes live,
+	// and when it ends. Nil when the server was built without a store, which is
+	// how several tests in this package build one.
+	//
+	// It is reached from outside this package only as an engine.LifecycleObserver
+	// (see Lifecycle) and as two loop entry points. Everything it is allowed to
+	// do is fixed at construction in New: a store handle whose only lifecycle
+	// method writes one column, a provider set, a token refresher and an
+	// escalation callback. See the header of lifecycle.go.
+	lifecycle *lifecycleCoordinator
+
 	// kickKeys caches Kick's webhook signing key. One per server rather than
 	// one per adapter: the key belongs to Kick, not to an account, so two
 	// connected Kick channels share the fetch.
@@ -585,6 +596,15 @@ func New(o Options) *Server {
 	// UPGRADE, which is exactly what an empty path makes upgrade.PlanFor do.
 	if p, err := os.Executable(); err == nil {
 		s.execPath = p
+	}
+	// The broadcast-lifecycle coordinator. Built here rather than in main so
+	// that everything it can reach is chosen in one place and is visible in one
+	// expression -- a store, a provider set, a token refresher, an escalation
+	// callback. Nothing about an engine, a process or a reconcile is available
+	// to be passed in, which is the point.
+	if o.DB != nil {
+		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
+			s.tokenFor, s.escalateBroadcastFault)
 	}
 	return s
 }
@@ -825,6 +845,17 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Order is display state and deliberately does NOT reconcile (see
 			// handleReorderDestinations), so it needs no programme either.
 			r.Put("/destinations/order", s.handleReorderDestinations)
+			// The bulk pair, beside the per-destination controls they drive.
+			// Static segments again, so they do not collide with {id} below.
+			//
+			// Same requireSource as /destinations/{id}/start and /stop: they
+			// are those routes, run once per row, and they reconcile after
+			// every one of them. See destinations_bulk.go -- and read its
+			// header before touching them, because "stop all" ends every
+			// YouTube broadcast on the install and that is not visible from
+			// here.
+			r.With(s.requireSource).Post("/destinations/start-all", s.handleStartAllDestinations)
+			r.With(s.requireSource).Post("/destinations/stop-all", s.handleStopAllDestinations)
 			r.Get("/destinations/{id}", s.handleGetDestination)
 			r.With(s.requireSource).Put("/destinations/{id}", s.handleUpdateDestination)
 			r.With(s.requireSource).Delete("/destinations/{id}", s.handleDeleteDestination)
@@ -1058,6 +1089,19 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Live viewer count, for the platforms that publish one. Absent is
 			// a 200 saying so rather than a 404; see handleAccountStats.
 			r.Get("/platforms/accounts/{id}/stats", s.handleAccountStats)
+
+			// Facebook's broadcast surface, scoped to a DESTINATION rather
+			// than an account: one account can hold several broadcasts, and
+			// the live video these act on is the one recorded against this
+			// destination. See facebook_broadcast.go.
+			//
+			// The end is a POST because it is an irreversible outbound write,
+			// which puts it behind requireCSRF with the rest of the
+			// state-changing group. The health read answers 200 with
+			// supported:false when there is nothing to report, exactly as the
+			// stats route above does.
+			r.Post("/destinations/{id}/facebook/end-broadcast", s.handleEndFacebookBroadcast)
+			r.Get("/destinations/{id}/facebook/stream-health", s.handleFacebookStreamHealth)
 
 			// Go-live metadata. The push is a job rather than a request so a
 			// slow platform API cannot hold the dashboard open; the composer
@@ -1538,7 +1582,11 @@ var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/destinations/{id}/expert/preview":  true,
 	"/api/v1/clipper/recordings/{id}/keyframes": true,
 	"/api/v1/platforms/accounts/{id}/stats":     true,
-	"/api/v1/metadata/broadcast-window":         true,
+	// Both make an outbound call to Facebook on the caller's token, which is
+	// the property this list is about rather than anything in the path.
+	"/api/v1/destinations/{id}/facebook/stream-health": true,
+	"/api/v1/destinations/{id}/facebook/end-broadcast": true,
+	"/api/v1/metadata/broadcast-window":                true,
 
 	// #154: content, not metadata. Media bytes.
 	"/api/v1/recordings/{id}/download":             true,

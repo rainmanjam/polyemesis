@@ -211,6 +211,14 @@ export interface Destination {
    *  charity's donate button to attach. Always present in a server response
    *  and empty for a destination that has not set any. */
   facebook?: FacebookSettings;
+  /** What the server knows about this destination's current platform broadcast.
+   *  Always present in a server response and empty for every destination on a
+   *  platform whose broadcast is a side effect of bytes arriving rather than an
+   *  object with a state machine — which today is everything except YouTube.
+   *
+   *  READ-ONLY. The server writes it through one narrow path of its own and
+   *  ignores it on a destination save, so sending it back changes nothing. */
+  lifecycle?: BroadcastControl;
   kind: DestKind;
   platform: Platform;
   accountId?: number | null;
@@ -421,6 +429,49 @@ export type MetaField =
   | "scheduledStart"
   | "contentDetails"
   | "tags";
+
+/** What happened to ONE destination in a bulk start or stop.
+ *
+ *  Mirrors api.bulkOutcome in internal/api/destinations_bulk.go.
+ *
+ *  - `started` / `stopped`  the intent was written, the pipeline reconciled and
+ *                           the process state read back.
+ *  - `warned`               it happened and something about it was NOT observed.
+ *                           Today only the unreaped stop (#209): SIGKILL issued,
+ *                           nobody waited, a child that may still be publishing.
+ *  - `failed`               refused, with `message` saying why.
+ *  - `skipped`              never attempted, so this destination is exactly as
+ *                           it was. Reached when the request is cancelled part
+ *                           way through a paced start.
+ *
+ *  Five words rather than four because "it happened but not cleanly" and "it did
+ *  not happen at all" are different things to an operator, and both differ from
+ *  a failure. */
+export type BulkDestOutcome = "started" | "stopped" | "warned" | "failed" | "skipped";
+
+/** One destination's row of a POST /destinations/start-all or /stop-all answer.
+ *
+ *  A BULK RESULT IS REPORTED PER DESTINATION, NEVER AS ONE BOOLEAN — the same
+ *  doctrine the metadata composer states for a push. Eight destinations of which
+ *  two refuse must not read as "failed", so this lives here beside MetaField
+ *  rather than inside the page: it is an API contract, not a component detail. */
+export interface BulkDestResult {
+  id: number;
+  name: string;
+  platform: string;
+  outcome: BulkDestOutcome;
+  /** The supervisor's word for the process afterwards. Absent when the engine
+   *  carries no process for this row. */
+  state?: string;
+  /** Why, on every outcome that is not a clean start or stop. */
+  message?: string;
+}
+
+/** The whole answer to a bulk start or stop. */
+export interface BulkDestReport {
+  action: "start" | "stop";
+  results: BulkDestResult[];
+}
 
 /** One font available to a text overlay, from GET /api/v1/fonts. */
 export interface FontInfo {
@@ -687,6 +738,97 @@ export interface Divergence {
   field: string;
   detail: string;
 }
+
+/* ---------------------------------------------------------------- Facebook
+ *  broadcast lifecycle: ending one, and what its ingest looks like.
+ *
+ *  THESE LIVE HERE AND NOT IN DestinationCard.tsx for the reason MetaField
+ *  above does: a server response names these fields, so their spelling is an
+ *  API contract rather than a component detail, and a component that owns a
+ *  contract is one nothing else can be checked against.
+ *
+ *  Mirrors internal/oauth/facebook.go — BroadcastEnd at :831 and
+ *  IngestStreamHealth at :941. Read that file before changing anything here;
+ *  every awkward-looking choice below is copied from a decision made there for
+ *  a stated reason.
+ */
+
+/** What Facebook said after being asked to end a live video.
+ *
+ *  Mirrors oauth.BroadcastEnd. `ended` is true ONLY when Facebook read the
+ *  status back as VOD. A `false` with no error is an ordinary outcome and NOT
+ *  a failure — the POST succeeded and Facebook has not settled the node yet —
+ *  so a renderer must not report it as "the broadcast is still live". */
+export interface BroadcastEnd {
+  /** The status Facebook reported on the read-back. Absent means the read-back
+   *  failed or carried none, which is NOT the same as "still live". */
+  status?: string;
+  ended: boolean;
+  /** What was actually seen when `ended` is false. Same shape metadata pushes
+   *  use, so a caller renders them the same way. */
+  warnings?: string[] | null;
+}
+
+/** One ingest stream's health, as Facebook reports it.
+ *
+ *  Mirrors oauth.IngestStreamHealth.
+ *
+ *  `health` IS A BAG OF FACEBOOK'S OWN FIELD NAMES, NOT NAMED FIELDS, and that
+ *  is deliberate all the way down from the Go side: the LiveVideo node
+ *  reference that would settle the spellings 404s, so the evidence establishes
+ *  that stream_health carries bitrates and frame rates without naming the keys.
+ *  A `bitrateKbps?: number` here would be a guess at a spelling, and a wrong
+ *  guess reads back as `undefined` on a HEALTHY stream — a health pane with a
+ *  permanently blank "Bitrate" row, on a broadcast that is fine, is the same
+ *  false-report failure as rendering 0.
+ *
+ *  So a measurement that is absent is an ABSENT KEY. Never a zero, and never a
+ *  row this file declared in advance and then could not fill. */
+export interface IngestStreamHealth {
+  id: string;
+  health?: Record<string, number> | null;
+  /** stream_health fields that were not numbers, sorted. Recorded rather than
+   *  dropped because a field polyemesis cannot read looks exactly like a field
+   *  Facebook did not send, and one of those is a bug on this side. */
+  unparsed?: string[] | null;
+}
+
+/** The stream-health read for one destination.
+ *
+ *  `supported` is separate from an empty `streams` because they are different
+ *  answers: false is "this platform publishes no stream health at all", while
+ *  true with nothing in it is "Facebook publishes it and currently has no
+ *  ingest to describe" — a scheduled broadcast, an ended one, or a live one
+ *  inside Facebook's own four-second timeout. Collapsing the two would make
+ *  the pause between clicking Go Live and the first byte look like a refusal.
+ *
+ *  Same arrangement internal/api already answers viewer stats with: 200 and
+ *  supported:false, because "we cannot ask" and "the account is gone" are
+ *  different problems with different fixes. */
+export interface StreamHealthView {
+  supported: boolean;
+  streams?: IngestStreamHealth[] | null;
+}
+
+/** The floor on how often stream health may be polled, in milliseconds.
+ *
+ *  FACEBOOK'S NUMBER, NOT AN ESTIMATE OF ONE. Meta's Broadcasting guide, read
+ *  2026-08-16, verbatim:
+ *
+ *    "Stream health data refreshes every 2 seconds, so limit queries to no
+ *     more than once every 2 seconds. A stream timeout will be detected and
+ *     reported after 4 seconds of no data being received."
+ *
+ *  A published floor may be encoded; an unpublished one may not. Mirrors
+ *  oauth.FacebookStreamHealthInterval, which carries the same quote. */
+export const FACEBOOK_STREAM_HEALTH_INTERVAL_MS = 2000;
+
+/** How long Facebook itself waits before reporting a stream as timed out —
+ *  the second sentence of the quote above. It is here so that a pane deciding
+ *  "how long may this stay empty before the encoder is gone" reads Facebook's
+ *  four seconds instead of inventing a number. Mirrors
+ *  oauth.FacebookStreamTimeout. */
+export const FACEBOOK_STREAM_TIMEOUT_MS = 4000;
 
 /** One shared video encode's live state.
  *
@@ -1547,6 +1689,61 @@ export interface ReconnectReason {
   missing?: string[];
 }
 
+/** A point-in-time read of one connected channel's broadcast, from
+ *  GET /api/v1/platforms/accounts/{id}/stats.
+ *
+ *  Mirrors oauth.LiveStats. Kept HERE rather than in the component that renders
+ *  it, for the same reason MetaField is: the server names these fields, so the
+ *  shape is an API contract rather than a component detail.
+ *
+ *  EVERY OPTIONAL FIELD BELOW IS OPTIONAL ON PURPOSE AND `viewerCount` IS THE
+ *  ONE THAT MATTERS. Go declares it `*int` with `omitempty`, so a platform that
+ *  declined to say drops the key entirely rather than sending a zero — see the
+ *  comment on oauth.LiveStats.ViewerCount, which is the specification for this
+ *  type. Typing it `number` here would compile, and would then let any caller
+ *  write `{stats.viewerCount}` or `count || 0` and tell a streamer with an
+ *  audience that nobody is watching. `number | undefined` is what forces the
+ *  branch, and viewerReadout() in lib/viewerCount.ts is where that branch is
+ *  taken once for the whole app. */
+export interface LiveStats {
+  live: boolean;
+  /** ABSENT IS NOT ZERO. YouTube omits it when nobody is watching, when the
+   *  owner has hidden the count, and once the broadcast has ended; Kick
+   *  documents 0 as the streamer's opt-out value; Twitch sends no count at all
+   *  for a channel that is not live. Render "not reported", never 0. */
+  viewerCount?: number;
+  title?: string;
+  category?: string;
+  language?: string;
+  slug?: string;
+  /** RFC 3339. Absent for an offline channel and for a stamp the server could
+   *  not parse — Go makes it `*time.Time` because `omitempty` does nothing to a
+   *  struct, and the zero time used to serialise as a confident 0001-01-01. */
+  startedAt?: string;
+  /** The endpoint the numbers came from, so a count that disagrees with the
+   *  platform's own dashboard can be traced without a packet capture. */
+  source?: string;
+}
+
+/** The stats envelope, as a discriminated union on `supported`.
+ *
+ *  A union rather than `{supported: boolean; reason?: string; stats?: LiveStats}`
+ *  because the handler answers 200 in both cases and the two cases carry
+ *  different fields: "polyemesis cannot ask this platform" is a capability
+ *  answer with a reason to show, not an error and not an absent count. The union
+ *  makes reaching for `stats` without checking `supported` a type error, which
+ *  is the branch oauth.StatsFor's doc comment asks every caller to take. */
+export type AccountStats =
+  | {
+      supported: false;
+      /** Shown verbatim: the server writes the platform's name into it
+       *  ("polyemesis does not read a viewer count from facebook"), and an
+       *  operator deciding whether to wait for a number needs to know it is
+       *  never coming. */
+      reason: string;
+    }
+  | { supported: true; stats: LiveStats };
+
 export interface SetupGuide {
   platform: Platform;
   name: string;
@@ -2069,6 +2266,30 @@ export interface FacebookSettings {
   scheduledFor?: string;
   /** The Facebook live video created for it — what the card links to. */
   broadcastId?: string;
+}
+
+/** What the server knows about one destination's current platform broadcast.
+ *  Mirrors db.BroadcastControl field for field.
+ *
+ *  Everything here is a RECORD OF WHAT THE PLATFORM SAID, never a belief about
+ *  what polyemesis asked for — which is what makes it worth showing an operator
+ *  whose broadcast will not start. */
+export interface BroadcastControl {
+  /** Which broadcast the rest of this describes. */
+  broadcastId?: string;
+  /** The platform's own word for where the broadcast is — for YouTube:
+   *  created, ready, testing, testStarting, live, liveStarting, complete,
+   *  revoked. Passed through unmapped so it can be compared against what the
+   *  platform's own console shows. */
+  phase?: string;
+  /** How many consecutive sweeps have failed. */
+  attempts?: number;
+  /** What went wrong, in the operator's words, or absent when nothing has.
+   *
+   *  A fault here NEVER means the stream stopped: the server does not stop a
+   *  stream because a broadcast transition failed. It means the bytes are going
+   *  out and the platform has not put them in front of an audience. */
+  fault?: string;
 }
 
 // ------------------------------------------------------------------- expert
@@ -2705,7 +2926,12 @@ export type HookTrigger =
   | "ingest.published"
   | "ingest.disconnected"
   | "destination.up"
-  | "destination.down";
+  | "destination.down"
+  /** A platform refused to move a broadcast's state and somebody has to act.
+   *  NOT a destination.down: the stream is fine and is still being delivered —
+   *  what failed is the platform's idea of the broadcast. A script that mirrors
+   *  "what are we live to" must not tear anything down when it hears this. */
+  | "broadcast.fault";
 
 /** A stored lifecycle webhook. `url` is always masked and `secret` is never
  *  present: the plaintext key is returned once, by the create call, and cannot

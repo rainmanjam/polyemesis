@@ -667,16 +667,24 @@ func TestKickMetadataCapsDescribeWhatKickActuallyAccepts(t *testing.T) {
 
 // ------------------------------------------------------------------- stats
 
+// THE FALLBACK USED TO BE /public/v1/livestreams/stats AND THESE TESTS PASSED
+// AGAINST A BODY IT DOES NOT RETURN. That endpoint answers a single
+// platform-wide `total_count`; the fixtures below used to hand it
+// livestream-shaped objects with per-channel viewer counts, so the suite proved
+// the decoder agreed with itself and never that Kick agrees with either. The
+// fallback is now GET /public/v1/channels, whose shape is documented, and the
+// fixtures are that shape.
 func TestKickStatsReadsTheLiveChannelAndFallsBackWhenAnEndpointIsUnavailable(t *testing.T) {
 	const live = `{"data":[{"slug":"nightowl","stream_title":"late","language":"en",` +
 		`"started_at":"2026-07-27T20:00:00Z","viewer_count":417,"category":{"id":15,"name":"Just Chatting"}}]}`
+	viewers := func(n int) *int { return &n }
 
 	tests := []struct {
 		name        string
 		users       func(w http.ResponseWriter)
-		stats       func(w http.ResponseWriter)
+		channels    func(w http.ResponseWriter)
 		wantLive    bool
-		wantViewers int
+		wantViewers *int
 		wantTitle   string
 		wantSource  string
 		wantErr     bool
@@ -684,40 +692,75 @@ func TestKickStatsReadsTheLiveChannelAndFallsBackWhenAnEndpointIsUnavailable(t *
 		{
 			name:        "the user livestream carries the whole picture",
 			users:       func(w http.ResponseWriter) { _, _ = w.Write([]byte(live)) },
-			stats:       func(w http.ResponseWriter) { t.Error("the stats endpoint was called needlessly") },
+			channels:    func(w http.ResponseWriter) { t.Error("the channels endpoint was called needlessly") },
 			wantLive:    true,
-			wantViewers: 417,
+			wantViewers: viewers(417),
 			wantTitle:   "late",
 			wantSource:  kickUserLivestreamsPath,
 		},
 		{
-			name:  "an offline channel is an answer, not an error",
-			users: func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"data":[]}`)) },
-			stats: func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"data":{"viewer_count":0}}`)) },
+			name:     "an offline channel is an answer, not an error",
+			users:    func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"data":[]}`)) },
+			channels: func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"data":[{"stream":{"is_live":false}}]}`)) },
 		},
 		{
-			name:  "a single stats object is accepted as readily as a list",
+			name:  "the channel resource supplies liveness the livestream list missed",
 			users: func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"data":[]}`)) },
-			stats: func(w http.ResponseWriter) {
-				_, _ = w.Write([]byte(`{"data":{"viewer_count":88}}`))
+			channels: func(w http.ResponseWriter) {
+				_, _ = w.Write([]byte(`{"data":[{"slug":"nightowl","stream_title":"late",` +
+					`"stream":{"is_live":true,"viewer_count":88}}]}`))
 			},
 			wantLive:    true,
-			wantViewers: 88,
-			wantSource:  kickLivestreamStatsPath,
+			wantViewers: viewers(88),
+			wantTitle:   "late",
+			wantSource:  kickChannelsPath,
 		},
 		{
-			name:        "a scope-refused user list still yields the aggregate count",
-			users:       func(w http.ResponseWriter) { w.WriteHeader(http.StatusForbidden) },
-			stats:       func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"data":[{"viewers":12}]}`)) },
+			name:  "a scope-refused user list still yields the channel count",
+			users: func(w http.ResponseWriter) { w.WriteHeader(http.StatusForbidden) },
+			channels: func(w http.ResponseWriter) {
+				_, _ = w.Write([]byte(`{"data":[{"stream":{"is_live":true,"viewer_count":12}}]}`))
+			},
 			wantLive:    true,
-			wantViewers: 12,
-			wantSource:  kickLivestreamStatsPath,
+			wantViewers: viewers(12),
+			wantSource:  kickChannelsPath,
 		},
 		{
-			name:    "both endpoints failing is a real error",
-			users:   func(w http.ResponseWriter) { w.WriteHeader(http.StatusForbidden) },
-			stats:   func(w http.ResponseWriter) { w.WriteHeader(http.StatusInternalServerError) },
-			wantErr: true,
+			name:     "both endpoints failing is a real error",
+			users:    func(w http.ResponseWriter) { w.WriteHeader(http.StatusForbidden) },
+			channels: func(w http.ResponseWriter) { w.WriteHeader(http.StatusInternalServerError) },
+			wantErr:  true,
+		},
+		{
+			// The regression this whole change exists for. Kick documents 0 as
+			// the opt-out value, so this operator IS live and IS being watched;
+			// the count is simply not ours to know. Reading it as an audience of
+			// none reported them offline.
+			name: "a streamer who hides the count is live with no number, not offline with zero",
+			users: func(w http.ResponseWriter) {
+				_, _ = w.Write([]byte(`{"data":[{"slug":"nightowl","stream_title":"late","viewer_count":0}]}`))
+			},
+			channels: func(w http.ResponseWriter) {
+				_, _ = w.Write([]byte(`{"data":[{"stream":{"is_live":true,"viewer_count":0}}]}`))
+			},
+			wantLive:    true,
+			wantViewers: nil,
+			wantTitle:   "late",
+			wantSource:  kickUserLivestreamsPath,
+		},
+		{
+			// is_live outranks an inference upward only. A stream seconds old is
+			// in the token's livestream list before the channel resource agrees,
+			// and letting the second call win would flicker it offline.
+			name: "the channel resource may promote liveness but never demote it",
+			users: func(w http.ResponseWriter) {
+				_, _ = w.Write([]byte(`{"data":[{"slug":"nightowl","viewer_count":0}]}`))
+			},
+			channels: func(w http.ResponseWriter) {
+				_, _ = w.Write([]byte(`{"data":[{"stream":{"is_live":false,"viewer_count":0}}]}`))
+			},
+			wantLive:    true,
+			wantViewers: nil,
 		},
 	}
 
@@ -727,8 +770,8 @@ func TestKickStatsReadsTheLiveChannelAndFallsBackWhenAnEndpointIsUnavailable(t *
 				switch r.URL.Path {
 				case kickUserLivestreamsPath:
 					tc.users(w)
-				case kickLivestreamStatsPath:
-					tc.stats(w)
+				case kickChannelsPath:
+					tc.channels(w)
 				default:
 					t.Errorf("unexpected request to %s", r.URL.Path)
 				}
@@ -747,8 +790,13 @@ func TestKickStatsReadsTheLiveChannelAndFallsBackWhenAnEndpointIsUnavailable(t *
 			if got.Live != tc.wantLive {
 				t.Errorf("Live = %v, want %v", got.Live, tc.wantLive)
 			}
-			if got.ViewerCount != tc.wantViewers {
-				t.Errorf("ViewerCount = %d, want %d", got.ViewerCount, tc.wantViewers)
+			switch {
+			case tc.wantViewers == nil && got.ViewerCount != nil:
+				t.Errorf("ViewerCount = %d, want no count reported at all", *got.ViewerCount)
+			case tc.wantViewers != nil && got.ViewerCount == nil:
+				t.Errorf("ViewerCount was not reported, want %d", *tc.wantViewers)
+			case tc.wantViewers != nil && *got.ViewerCount != *tc.wantViewers:
+				t.Errorf("ViewerCount = %d, want %d", *got.ViewerCount, *tc.wantViewers)
 			}
 			if tc.wantTitle != "" && got.Title != tc.wantTitle {
 				t.Errorf("Title = %q, want %q", got.Title, tc.wantTitle)
@@ -784,11 +832,15 @@ func TestKickStatsParsesTheStartTimeAndSurvivesOneItCannotRead(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Stats: %v", err)
 			}
-			if got.StartedAt.IsZero() != tc.wantZero {
-				t.Fatalf("StartedAt = %v (zero=%v), want zero=%v", got.StartedAt, got.StartedAt.IsZero(), tc.wantZero)
+			// Nil, not the zero time. A start time we could not read is now
+			// absent from the payload rather than serialised as the year 1,
+			// and calling IsZero on the pointer would panic rather than
+			// report that -- which is how this assertion found the change.
+			if (got.StartedAt == nil) != tc.wantZero {
+				t.Fatalf("StartedAt = %v, want absent=%v", got.StartedAt, tc.wantZero)
 			}
-			if got.ViewerCount != 3 {
-				t.Errorf("ViewerCount = %d, want the read to survive the timestamp", got.ViewerCount)
+			if got.ViewerCount == nil || *got.ViewerCount != 3 {
+				t.Errorf("ViewerCount = %v, want the read to survive the timestamp", got.ViewerCount)
 			}
 		})
 	}

@@ -322,6 +322,19 @@ func run(h *hooks) error {
 	// ahead of the stream and nothing downstream waits on it, so a failure
 	// here never delays or blocks a go-live.
 	go srv.PreannounceLoop(ctx)
+	// Drives a platform's broadcast lifecycle: puts a YouTube broadcast on air
+	// once bytes are arriving, and ends it when the operator turns the
+	// destination off or deletes it.
+	//
+	// TWO STATEMENTS AND BOTH ARE REQUIRED. SetLifecycle gives it the UP/DOWN
+	// edges the engine already derives, which is only latency; LifecycleLoop is
+	// the sweep that re-derives everything from the destination rows and is what
+	// actually makes it work. Wire the loop without the seam and a go-live waits
+	// up to fifteen seconds; wire the seam without the loop and NOTHING
+	// HAPPENS AT ALL -- a dropped edge is never recovered, a restart never
+	// reconciles, and every broadcast on the box sits in "testing" for ever.
+	eng.SetLifecycle(srv.Lifecycle())
+	go srv.LifecycleLoop(ctx)
 
 	// After the API, because the adapters refresh their tokens through it.
 	// Nothing here fails the start: a platform that will not connect is a line
@@ -410,6 +423,18 @@ func run(h *hooks) error {
 	_ = httpServer.Shutdown(shutdownCtx)
 
 	cancel()
+	// AFTER cancel, BEFORE eng.Stop, and both halves of that placement matter.
+	// After, because the sweep loop must not be running concurrently with this
+	// pass. Before, because eng.Stop tears every destination down, and a clean
+	// stop deliberately produces no DOWN edge that means "the operator ended
+	// this" -- so this is the last moment at which a broadcast the operator DID
+	// ask to end can still be ended.
+	//
+	// It has its own whole-drain budget (lifecycleDrainBudget) and it never puts
+	// a broadcast live. An unclean shutdown -- a kill, a power cut -- is covered
+	// instead by the platform's enableAutoStop plus the boot reconciliation the
+	// next start performs before its first tick.
+	srv.DrainLifecycle()
 	eng.Stop()
 	log.Info("goodbye")
 	return nil

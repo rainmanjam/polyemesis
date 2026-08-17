@@ -43,6 +43,18 @@ const (
 	CapModeration Capability = "moderation"
 	// CapViewerStats is the live viewer count read back from the platform.
 	CapViewerStats Capability = "viewerStats"
+	// CapBroadcastLifecycle is whether polyemesis can tell the PLATFORM to
+	// start and stop, as opposed to merely sending it video.
+	//
+	// IT IS A COLUMN BECAUSE THE ANSWER DIFFERS AND CHANGES WHICH PLATFORM YOU
+	// PICK, which is the bar this matrix sets for one. Twitch and Kick publish
+	// nothing -- established by enumerating all 149 Helix endpoints and all 27
+	// Kick operations, not by failing to find a page -- so on those two the
+	// stream IS the trigger and liveness can only be observed. YouTube has a
+	// documented state machine, Facebook has an end call, X has both and is
+	// unbuilt. An operator choosing where to run an unattended channel is
+	// choosing on exactly this.
+	CapBroadcastLifecycle Capability = "broadcastLifecycle"
 )
 
 // Support is how well one platform does one thing.
@@ -107,6 +119,7 @@ func CapabilityColumns() []CapabilityInfo {
 		{CapChatSend, "Chat send", "You can reply from the chat pane."},
 		{CapModeration, "Moderation", "Delete a message or time a viewer out."},
 		{CapViewerStats, "Viewer stats", "Live viewer count read back from the platform."},
+		{CapBroadcastLifecycle, "Start / end", "Tell the platform to go live and to end, rather than only sending it video."},
 	}
 }
 
@@ -195,15 +208,25 @@ var platformCapabilities = []PlatformCapability{
 		Summary: "Connect a Google account and polyemesis fetches the ingest URL and stream key, pushes your title and description at go-live, and reads and replies to live chat.",
 		HelpURL: "https://support.google.com/youtube/answer/2907883",
 		Caps: map[Capability]Support{
-			CapSSO:         SupportYes,
-			CapStreamKey:   SupportYes,
-			CapMetadata:    SupportYes,
-			CapChatRead:    SupportYes,
-			CapChatSend:    SupportYes,
-			CapModeration:  SupportYes,
-			CapViewerStats: SupportUnknown,
+			CapSSO:                SupportYes,
+			CapStreamKey:          SupportYes,
+			CapMetadata:           SupportYes,
+			CapChatRead:           SupportYes,
+			CapChatSend:           SupportYes,
+			CapModeration:         SupportYes,
+			CapViewerStats:        SupportYes,
+			CapBroadcastLifecycle: SupportYes,
 		},
 		Reasons: map[Capability]string{
+			CapBroadcastLifecycle: "Goes live on YouTube when video actually starts arriving, and ends when you disable or delete the destination \u2014 never when the encoder merely crashes, because a completed YouTube broadcast cannot return to live and a crash is recoverable. A refused transition raises a fault and never stops the stream.",
+			CapViewerStats: "Live state, title, start time and concurrent viewer count, over the same auth/youtube " +
+				"scope everything else here uses \u2014 so an account connected before this existed can already " +
+				"do it, with no reconnect. It costs two calls: polyemesis stores no video id, so it asks which " +
+				"broadcast is live and then asks that video how many people are watching. YouTube omits the " +
+				"viewer count when the owner has hidden it, when nobody is watching, and once the broadcast " +
+				"ends \u2014 all three look identical, so polyemesis reports \"not reported\" rather than zero. " +
+				"The count shares the Data API's daily quota with title push and chat, which is why it is " +
+				"polled gently rather than live.",
 			CapChatRead: "Polled against the Data API's daily quota, which polyemesis paces. A long broadcast can exhaust it; the chat pane says so with the reset time rather than going quiet.",
 			CapModeration: "Delete a message, over the same auth/youtube scope everything else here uses — so an account " +
 				"connected before this existed can already do it, with no reconnect. The connected account still has to " +
@@ -217,16 +240,23 @@ var platformCapabilities = []PlatformCapability{
 		Summary: "Connect a Twitch account and polyemesis fetches the stream key, sets your title and category at go-live, and joins chat over IRC.",
 		HelpURL: "https://dev.twitch.tv/console/apps",
 		Caps: map[Capability]Support{
-			CapSSO:         SupportYes,
-			CapStreamKey:   SupportYes,
-			CapMetadata:    SupportYes,
-			CapChatRead:    SupportYes,
-			CapChatSend:    SupportYes,
-			CapModeration:  SupportYes,
-			CapViewerStats: SupportUnknown,
+			CapSSO:                SupportYes,
+			CapStreamKey:          SupportYes,
+			CapMetadata:           SupportYes,
+			CapChatRead:           SupportYes,
+			CapChatSend:           SupportYes,
+			CapModeration:         SupportYes,
+			CapViewerStats:        SupportYes,
+			CapBroadcastLifecycle: SupportNo,
 		},
 		Reasons: map[Capability]string{
 			CapMetadata: "Title and category, over the channel:manage:broadcast scope.",
+			CapViewerStats: "Live state, viewer count, title, category and start time from Helix Get Streams. It needs " +
+				"no scope of its own — Twitch asks only for an app or user access token — so every account " +
+				"already connected can answer without reconnecting. A channel that is not live returns no " +
+				"count at all rather than a count of zero, and polyemesis reports the difference. Twitch " +
+				"publishes no encoder health on this endpoint: there is no bitrate, framerate or " +
+				"dropped-frame figure to show beside the viewer number.",
 			CapModeration: "Delete a message, over moderator:manage:chat_messages. An account connected before this " +
 				"existed holds a token without that scope — the account list says so and asks you to reconnect, " +
 				"rather than letting the delete button fail on the message you needed gone. Twitch refuses to delete " +
@@ -242,19 +272,38 @@ var platformCapabilities = []PlatformCapability{
 		// Up front, not in step six. Meta's review is measured in days and it
 		// is the operator's to do — a setup guide that mentions it late has
 		// already wasted their evening.
-		ReadFirst: "Meta requires App Review before anyone other than you can connect an account. Your own account works immediately as a developer or tester of your app, which is all a single-operator setup needs — but publishing on someone else's behalf needs Advanced Access to publish_video (profiles) or pages_manage_posts plus pages_read_engagement (Pages). Budget days, not minutes, and start it before you need it.",
+		ReadFirst: "Meta requires App Review before anyone other than you can connect an account. Your own account works immediately as a developer or tester of your app, which is all a single-operator setup needs — but publishing on someone else's behalf needs Advanced Access to publish_video (profiles) or pages_manage_posts plus pages_read_engagement (Pages). Budget days, not minutes, and start it before you need it. Separately, and NOT a permission: Meta refuses go-live on account properties no scope can satisfy. Since 2024-06-10 the account must be at least 60 days old and the Page or professional-mode profile must have at least 100 followers. A connection with every scope granted still fails both, and the Graph error names neither \u2014 so if everything looks correct and it still will not start, check those two first.",
 		HelpURL:   "https://developers.facebook.com/apps",
 		Caps: map[Capability]Support{
-			CapSSO:         SupportYes,
-			CapStreamKey:   SupportYes,
-			CapMetadata:    SupportYes,
-			CapChatRead:    SupportYes,
-			CapChatSend:    SupportUnknown,
-			CapModeration:  SupportYes,
-			CapViewerStats: SupportUnknown,
+			CapSSO:       SupportYes,
+			CapStreamKey: SupportYes,
+			CapMetadata:  SupportYes,
+			CapChatRead:  SupportYes,
+			// Refused in Facebook's own words rather than merely absent: the
+			// live-video comments edge has a "Creating" section whose entire
+			// content is "You can't perform this operation on this endpoint."
+			// A sweep of all five readable LiveVideo edge references finds no
+			// comment POST. The generic /{object-id}/comments page lists Live
+			// Video among its nodes, but it never writes that path and a
+			// page-level implication does not outrank a per-endpoint refusal.
+			CapChatSend:           SupportNo,
+			CapModeration:         SupportYes,
+			CapViewerStats:        SupportUnknown,
+			CapBroadcastLifecycle: SupportYes,
 		},
 		Reasons: map[Capability]string{
-			CapStreamKey: "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
+			// WHY THIS CELL NEEDS A SENTENCE AND DID NOT HAVE ONE. Facebook and
+			// YouTube both read "Works" here, and they mean different things.
+			// YouTube is DRIVEN: the lifecycle coordinator transitions it to live
+			// and ends it on its own. Facebook is COMMANDED BY HAND -- connecting
+			// the account creates the live video, and ending it is a menu item the
+			// operator presses. Both are real, so SupportYes is right for both;
+			// but an operator comparing the two cells with only YouTube's sentence
+			// in front of them would reasonably read Facebook's bare Works as the
+			// same automation, and then leave an unattended channel expecting an
+			// end that nothing is going to issue.
+			CapBroadcastLifecycle: "Creating the broadcast and ending it both work, but they are things YOU do — connecting the account creates the live video, and \"End broadcast\" is on the destination menu. Nothing ends a Facebook broadcast on its own, unlike YouTube.",
+			CapStreamKey:          "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
 			CapModeration: "Delete a comment, or HIDE one — Facebook is the only platform here that can take a message off " +
 				"the public thread without destroying it, because its live chat is a comment thread. Acting on a " +
 				"Page's comments needs the MODERATE task permission, which is separate from being able to read them, " +
@@ -277,13 +326,14 @@ var platformCapabilities = []PlatformCapability{
 		Summary: "Sign in with Kick and polyemesis fetches the ingest URL and stream key, sets the title, category and tags, reads and replies to chat, and reads viewer stats.",
 		HelpURL: "https://kick.com/dashboard/settings/stream",
 		Caps: map[Capability]Support{
-			CapSSO:         SupportYes,
-			CapStreamKey:   SupportYes,
-			CapMetadata:    SupportYes,
-			CapChatRead:    SupportYes,
-			CapChatSend:    SupportYes,
-			CapModeration:  SupportYes,
-			CapViewerStats: SupportYes,
+			CapSSO:                SupportYes,
+			CapStreamKey:          SupportYes,
+			CapMetadata:           SupportYes,
+			CapChatRead:           SupportYes,
+			CapChatSend:           SupportYes,
+			CapModeration:         SupportYes,
+			CapViewerStats:        SupportYes,
+			CapBroadcastLifecycle: SupportNo,
 		},
 		Reasons: map[Capability]string{
 			CapSSO: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
@@ -304,21 +354,63 @@ var platformCapabilities = []PlatformCapability{
 	},
 	{
 		PresetID: "x", Name: "X (Twitter) Live", Tier: TierManual,
-		Summary:   "Paste your ingest URL and stream key. There is no API to connect: X's developer platform covers posts, users, media and the post firehose, not live-video ingest.",
-		ReadFirst: "\"Streaming\" in X's API documentation means streaming posts, not ingesting video. No documented third-party live-video ingest endpoint exists, and access to what is documented is credit-based and paid. Set the source up in X's own producer tooling and copy both fields across.",
+		Summary:   "Paste your ingest URL and stream key. X does publish a live-video API \u2014 broadcasts, chat and moderation \u2014 and polyemesis has not wired it up yet, so for now this is a paste-the-key destination that streams exactly as well as any other.",
+		ReadFirst: "X's live-video API is real but its access tier is not published. Every endpoint below is in X's own served OpenAPI spec, and no pricing or tier page names the Broadcasts family -- so whether your account can call them at all is a question only a live request answers. Get the stream key from X's producer tooling and paste it; everything else is automatic once you connect.",
 		Caps: map[Capability]Support{
-			CapSSO:       SupportNo,
-			CapStreamKey: SupportManual,
-			// Everything below hangs off a live broadcast object that the X API
-			// does not expose to third parties in the first place.
-			CapMetadata:    SupportNo,
-			CapChatRead:    SupportNo,
-			CapChatSend:    SupportNo,
-			CapModeration:  SupportNo,
-			CapViewerStats: SupportNo,
+			// THIS ROW WAS SEVEN SupportNo CELLS AND ALMOST ALL OF THEM WERE
+			// WRONG. The summary used to say "There is no API to connect: X's
+			// developer platform covers posts, users, media and the post
+			// firehose, not live-video ingest", and a comment here claimed
+			// everything below "hangs off a live broadcast object that the X
+			// API does not expose to third parties in the first place".
+			// GET /2/broadcasts/{id} is that object.
+			//
+			// Established by counting, not by reading: api.x.com/2/openapi.json
+			// (856,423 bytes, "X API v2" 2.167) declares 149 paths and 178
+			// operations, of which the Broadcasts tag holds 13 and Chat 16,
+			// under the scopes broadcast.read and broadcast.write. Nine paths
+			// carry the word broadcast, including POST
+			// /2/broadcasts/scheduled/{id}/live and GET+POST
+			// /2/broadcasts/{id}/chat. See docs/evidence/facebook-chat-rumble-x-2026-08-16.md.
+			// EVERY CELL BELOW WAS SupportYes FOR ABOUT AN HOUR, AND THAT WAS A
+			// PROMISE THE UI COULD NOT KEEP. X's API genuinely publishes all of
+			// it -- see docs/evidence/facebook-chat-rumble-x-2026-08-16.md, and
+			// the OpenAPI counts in this row's history -- but the provider is
+			// not registered, there is no connect affordance, and an operator
+			// reading "Works" would go looking for a sign-in button that does
+			// not exist.
+			//
+			// The house rule is the one Rumble's viewer-stats cell already
+			// states: a capability nothing implements is not a capability. It
+			// was applied there and broken here in the same commit.
+			//
+			// None of the four Support values says "the platform documents it
+			// and we have not built it" -- the same expressive gap that got
+			// Twitch predictions cut. SupportUnknown is the least wrong: it
+			// renders as Unverified, which is fail-open and invites the
+			// operator to try, rather than as a refusal or a lie.
+			CapSSO: SupportUnknown,
+			// Still pasted, and the reason is narrower than it looks: X
+			// CONSUMES a key (source_id is required at create) and echoes it
+			// back on every broadcast object, but publishes nothing that mints
+			// or enumerates one. So polyemesis can verify a binding it was
+			// given; it cannot obtain one.
+			CapStreamKey:          SupportManual,
+			CapMetadata:           SupportUnknown,
+			CapChatRead:           SupportUnknown,
+			CapChatSend:           SupportUnknown,
+			CapModeration:         SupportUnknown,
+			CapViewerStats:        SupportUnknown,
+			CapBroadcastLifecycle: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
-			CapSSO: "Nothing to sign into for live video. An OAuth app here would grant access to posts, which is not what a restreamer needs.",
+			CapSSO:         "OAuth 2.0 authorization code at api.x.com/2/oauth2/authorize with the broadcast.read and broadcast.write scopes, declared in X's served OpenAPI spec. PKCE is X's documented practice elsewhere but is not stated in the spec for this flow.",
+			CapStreamKey:   "X consumes a stream key and hands it back -- source_id is required when the broadcast is created and is read back on every broadcast object -- but nothing mints or lists one. Paste it once from X's producer tooling; polyemesis can then confirm the binding rather than trust its stored copy.",
+			CapMetadata:    "Title, description, language and the chat option are set on a SCHEDULED broadcast, over POST and PUT /2/broadcasts/scheduled. There is no metadata update on an already-live broadcast, so a title change mid-show is not possible here.",
+			CapChatRead:    "Chat history over GET /2/broadcasts/{id}/chat with broadcast.read. Real-time push needs two separate auth objects -- a user-context subscription for the broadcast.chat event, plus an app-only bearer token on the activity stream.",
+			CapChatSend:    "POST /2/broadcasts/{id}/chat with broadcast.read and broadcast.write. Messages are limited to 140 characters, which is X's own bound and not ours.",
+			CapModeration:  "Mute a viewer, lift the mute, and delete a message, over /2/broadcasts/{id}/chat/mutes and chat/{message_id}. X publishes no error taxonomy for any of the three -- every Broadcasts operation declares only a success code and a generic default -- so a refusal arrives without a reason to show you.",
+			CapViewerStats: "total_watching and total_watched are on the broadcast object, and X documents NOTHING about what they mean. Every one of the 26 fields in that schema is an undescribed string, so the numbers are readable but their unit, freshness and whether either counts unique people are all unstated. A viewer count shown to an operator asserts a meaning, so this stays unverified until X documents them or a live broadcast calibrates them.",
 		},
 	},
 	{
@@ -328,28 +420,43 @@ var platformCapabilities = []PlatformCapability{
 		ReadFirst: "The chat key is NOT the stream key and is not pasted into polyemesis's UI. It comes from rumble.com/account/livestream-api and is supplied in the RUMBLE_CHAT_API_KEY environment variable, because there is no account to store it against — this API has no sign-in. Treat that URL as a secret: it is the whole credential, and anyone holding it can read your chat.",
 		HelpURL:   "https://rumble.com/account/livestream-api",
 		Caps: map[Capability]Support{
-			// Unchanged, and still unverified rather than refused: this key is
-			// not a sign-in and tells us nothing about whether Rumble has OAuth.
-			CapSSO: SupportUnknown,
 			// Unchanged. Note that the live-stream API response DOES carry
 			// livestreams[].stream_key, so a key fetch may well be possible —
 			// but nothing here reads that field, deliberately, and a capability
 			// nothing implements is not a capability. Recorded rather than
 			// quietly claimed.
 			CapStreamKey: SupportManual,
-			CapMetadata:  SupportUnknown,
+			CapMetadata:  SupportManual,
 			CapChatRead:  SupportYes,
-			// SupportUnknown, not SupportNo, and the sourcing rule at the top of
-			// this file is why. get-data returns data and Rumble publishes no
-			// endpoint for posting a message or removing one — but "I looked and
-			// did not find it" on an API this thinly documented is not the same
-			// as reading a published spec and finding the thing absent. A wrong
-			// SupportNo here would become a refusal an operator cannot argue
-			// with, on a platform whose surface we have barely seen.
-			CapChatSend:   SupportUnknown,
-			CapModeration: SupportUnknown,
-			// Also present in the payload as watching_now, also unread.
-			CapViewerStats: SupportUnknown,
+			// THESE WERE SupportUnknown AND THE ARGUMENT FOR THAT WAS GOOD.
+			// It ran: "'I looked and did not find it' on an API this thinly
+			// documented is not the same as reading a published spec and
+			// finding the thing absent. A wrong SupportNo here would become a
+			// refusal an operator cannot argue with, on a platform whose
+			// surface we have barely seen."
+			//
+			// That bar is now met, and by affirmative evidence rather than by
+			// more looking. Rumble's complete 158-article knowledge base was
+			// enumerated. Its single API article states, published and in
+			// Rumble's own words, "Authentication is not required for this
+			// version of the API"; rumble.com/oauth/authorize answers an
+			// HONEST 404, which is a probe rather than a search; and the
+			// moderation article describes the mechanism as "Select the three
+			// dots next to a message in live chat" and contains the word API
+			// zero times. The published API is one read-only snapshot GET, so
+			// the surface is not barely seen -- it is small and fully read.
+			//
+			// See docs/evidence/facebook-chat-rumble-x-2026-08-16.md.
+			CapSSO:        SupportNo,
+			CapChatSend:   SupportNo,
+			CapModeration: SupportNo,
+			// Documented but unread, and it stays unverified for exactly that
+			// reason: watching_now sits in the same get-data response the chat
+			// poller already fetches, so this is a field read away rather than
+			// an integration away. The stats drift test is a biconditional --
+			// a SupportYes here with no Stats method would fail it, correctly.
+			CapViewerStats:        SupportUnknown,
+			CapBroadcastLifecycle: SupportNo,
 		},
 		Reasons: map[Capability]string{
 			CapChatRead: "Polled from rumble.com/-livestream-api/get-data, which needs no sign-in — the key from your " +
@@ -358,7 +465,11 @@ var platformCapabilities = []PlatformCapability{
 				"no message id, so polyemesis derives one from the content, and two identical messages from one " +
 				"person inside the same second are indistinguishable and show as one. And Rumble publishes no rate " +
 				"limit, so the poll is deliberately conservative at ten seconds rather than as fast as it could be.",
-			CapStreamKey: "Rumble Studio issues both fields per stream; copy them across by hand.",
+			CapStreamKey:  "Rumble Studio issues both fields; copy them across by hand. There is a Static Stream Key that does not change between broadcasts, which makes this a one-time paste rather than a per-stream chore -- but it is obtainable only through Rumble's own settings UI, never over the API.",
+			CapSSO:        "Rumble publishes no OAuth and no developer sign-in. Its one API article says authentication is not required for that API, and rumble.com/oauth/authorize is a genuine 404 -- only an unpublished partner agreement could change this.",
+			CapMetadata:   "No write API exists. Rumble's own mechanism is a live-stream template chosen in your account settings, which it applies automatically each time the static key goes live -- so set the title and category there, before the broadcast, rather than expecting polyemesis to push them.",
+			CapChatSend:   "The entire published API is one read-only snapshot request; no send path, method or request body is documented anywhere. Chat bots that appear to work drive Rumble's private frontend with a stored account password, which polyemesis will not do.",
+			CapModeration: "Rumble documents moderation as a UI action -- three dots next to a message in live chat -- and its moderation article does not mention an API at all.",
 		},
 	},
 	manualUnverified(
@@ -404,12 +515,13 @@ var platformCapabilities = []PlatformCapability{
 			CapSSO: SupportNo,
 			// Not SupportManual: for most accounts there is no key to paste,
 			// so offering the paste field as the answer would be its own lie.
-			CapStreamKey:   SupportNo,
-			CapMetadata:    SupportNo,
-			CapChatRead:    SupportNo,
-			CapChatSend:    SupportNo,
-			CapModeration:  SupportNo,
-			CapViewerStats: SupportNo,
+			CapStreamKey:          SupportNo,
+			CapMetadata:           SupportNo,
+			CapChatRead:           SupportNo,
+			CapChatSend:           SupportNo,
+			CapModeration:         SupportNo,
+			CapViewerStats:        SupportNo,
+			CapBroadcastLifecycle: SupportNo,
 		},
 	},
 }
@@ -442,6 +554,10 @@ func manualUnverified(presetID, name, summary, readFirst string) PlatformCapabil
 			CapChatSend:    SupportUnknown,
 			CapModeration:  SupportUnknown,
 			CapViewerStats: SupportUnknown,
+			// Unknown rather than No: nobody has read these platforms' APIs
+			// for a lifecycle call, and this matrix's own rule is that a No
+			// must trace to something checked.
+			CapBroadcastLifecycle: SupportUnknown,
 		},
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -195,6 +196,165 @@ func (t *Twitch) Ingest(ctx context.Context, clientID, accessToken string) (*Ing
 			strings.Join(t.Scopes(), " "))
 	}
 	return &Ingest{URL: twitchIngestURL, Key: out.Data[0].StreamKey}, nil
+}
+
+// --------------------------------------------------------------------- stats
+
+// twitchStreamsPath is Get Streams, and it is a READ AND NOTHING ELSE.
+//
+// Twitch publishes no endpoint that starts, stops or transitions a broadcast --
+// all 149 Helix endpoints were enumerated on 2026-08-16 and there is no such
+// thing -- so a future agent looking to "finish" this by adding a start call
+// will not find one to add. The stream begins when the encoder connects to
+// ingest. See docs/evidence/platform-lifecycle-apis-2026-08-16.md.
+const twitchStreamsPath = "/streams"
+
+// The capability is resolved by type assertion in StatsFor, so a signature that
+// drifts would make Twitch silently stop reporting viewers rather than fail to
+// build. This turns that into a compile error, next to the method it constrains
+// -- TestTheViewerStatsCellAgreesWithWhichProvidersActuallyImplementStats then
+// catches the other half, where the method exists but the matrix denies it.
+var _ LiveStatter = (*Twitch)(nil)
+
+// twitchStream is the subset of a Get Streams entry polyemesis reads.
+//
+// ViewerCount IS A POINTER HERE FOR THE SAME REASON IT IS ONE ON LiveStats: a
+// viewer_count Twitch omitted and a viewer_count of 0 decode into the same int,
+// and the first is "we were not told" while the second is a real audience of
+// none. Twitch documents no opt-out for the field -- its whole description is
+// "The number of users watching the stream", with none of the withholding
+// language Kick's carries -- so unlike Kick, whose 0 IS the opt-out value and
+// is therefore discarded there, a zero that actually arrives on the wire is
+// taken at its word and reported as zero.
+//
+// THERE IS NO HEALTH FIELD TO ADD BELOW. The word "bitrate" does not appear
+// once in the 1.4 MB Helix reference, and no framerate, dropped-frame,
+// resolution or ingest-health field exists on Get Streams. It reports liveness
+// and metadata; anything quality-shaped here would have to be invented, and an
+// invented encoder-health number is worse than none at all.
+//
+// Every tag below was read off the Get Streams Response Body table at
+// https://dev.twitch.tv/docs/api/reference/#get-streams on 2026-08-16 rather
+// than inferred from the example JSON, and the descriptions that matter are
+// quoted where they are relied on. That distinction is not pedantry here: the
+// sibling fix in kick.go exists because a fixture written from a struct instead
+// of from a response kept a broken decode green for as long as it shipped.
+type twitchStream struct {
+	UserLogin string `json:"user_login"`
+	// Decoded but deliberately never read -- see the liveness comment in Stats.
+	// It is kept so the shape of what Twitch sends stays visible here.
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	GameName  string `json:"game_name"`
+	Language  string `json:"language"`
+	StartedAt string `json:"started_at"`
+	// "The number of users watching the stream." Integer, and absent rather
+	// than zero when Twitch has nothing to say -- hence the pointer.
+	ViewerCount *int `json:"viewer_count"`
+}
+
+// Stats reads the connected channel's live state and viewer count.
+//
+// NO NEW SCOPE, WHICH IS THE WHOLE REASON THIS COULD LAND. Get Streams,
+// verbatim: "Requires an app access token or user access token." Every Twitch
+// account already connected can answer it, so ScopeVersion does not move and
+// nobody has to disconnect and reconnect -- which for a viewer count would have
+// cost more than the feature gives.
+//
+// Two round trips, because Get Streams is keyed by broadcaster and a bearer
+// token does not name one. Account resolves the id from /users, exactly as
+// Ingest does; that id is what /streams is then asked about.
+//
+// AN EMPTY data ARRAY IS THE OFFLINE ANSWER, NOT AN ERROR, AND IT CARRIES NO
+// COUNT. Twitch drops the channel from the response entirely when it is not
+// live, so there is no number to report and ViewerCount stays nil rather than
+// becoming a pointer to zero. See the field's comment in stats.go: a false zero
+// and a blank mean opposite things to an operator.
+//
+// Nothing here reads Twitch's rate-limit budget. Helix uses a token bucket and
+// returns Ratelimit-Limit, Ratelimit-Remaining and Ratelimit-Reset on every
+// response; the 800 in its guide is an example value, not a contract, so a
+// caller that wants to poll hard must read those headers rather than trust a
+// constant written here.
+func (t *Twitch) Stats(ctx context.Context, clientID, accessToken string) (*LiveStats, error) {
+	acct, err := t.Account(ctx, clientID, accessToken)
+	if err != nil {
+		return nil, err
+	}
+
+	var out struct {
+		Data []twitchStream `json:"data"`
+	}
+	// user_id rather than user_login: the id survives a channel rename and
+	// Account already holds it. Client-Id rides alongside the bearer token, as
+	// it must on every Helix call -- see helixHeaders.
+	//
+	// type=live IS SENT EXPLICITLY BECAUSE THE DEFAULT IS NOT IT. Verbatim from
+	// the Get Streams query-parameter table: "The type of stream to filter the
+	// list of streams by. Possible values are: all, live. The default is all."
+	// Liveness below is read off PRESENCE in the response, so leaving the
+	// default in place would have made any non-live entry Twitch chose to
+	// return -- the reruns and vodcasts that "all" has covered historically --
+	// report the channel as live, with that entry's viewer count. Asking the
+	// server for live streams only costs nothing and removes the assumption
+	// rather than documenting it.
+	//
+	// Deliberately unpaginated. Get Streams warns that "it's possible to find
+	// duplicate or missing streams in the list as you page through the
+	// results", which is a hazard of the directory-wide query and irrelevant to
+	// one broadcaster: they are in the first page or they are not live.
+	err = getJSON(ctx,
+		t.apiEndpoint()+twitchStreamsPath+"?type=live&user_id="+url.QueryEscape(acct.Ref),
+		accessToken, helixHeaders(clientID), &out)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := &LiveStats{Source: twitchStreamsPath}
+	if len(out.Data) == 0 {
+		return stats, nil
+	}
+
+	s := out.Data[0]
+	// Presence in the response is the liveness signal, NOT type == "live".
+	// Twitch's own description of that field, verbatim: "The type of stream.
+	// Possible values are: live. If an error occurs, this field is set to an
+	// empty string." Reading liveness off a field the platform blanks on error
+	// would report a live channel as offline on precisely the response we
+	// understand least. The query above already asked for live streams only, so
+	// presence is the server's answer rather than an inference.
+	stats.Live = true
+	if s.ViewerCount != nil {
+		v := *s.ViewerCount
+		stats.ViewerCount = &v
+	}
+	stats.Title = s.Title
+	// game_name is what Twitch calls a category everywhere an operator sees one,
+	// including the picker in PushMetadata; the API name is the older word.
+	stats.Category = s.GameName
+	stats.Language = s.Language
+	// user_login is the channel's URL slug (twitch.tv/<user_login>), which is
+	// what Slug means on Kick too -- not the display name, which changes case
+	// and cannot be linked to.
+	stats.Slug = s.UserLogin
+	stats.StartedAt = parseTwitchTime(s.StartedAt)
+	return stats, nil
+}
+
+// parseTwitchTime is forgiving for the reason parseKickTime is: a timestamp we
+// cannot read costs the timestamp, not the stats read that is otherwise fine.
+//
+// One layout, unlike Kick's three, and the difference is documentary rather
+// than stylistic. Twitch states the format: "The UTC date and time (in RFC3339
+// format) of when the broadcast began." Kick states none, which is why it
+// carries fallbacks. Adding fallbacks here would be guessing at formats the
+// platform has committed in writing not to send.
+func parseTwitchTime(s string) *time.Time {
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
+	if err != nil {
+		return nil
+	}
+	return &parsed
 }
 
 // CheckCredentials proves both halves of the pair via a client-credentials

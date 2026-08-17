@@ -117,6 +117,7 @@ are `403` because of what they *do*. The last eight are `403` because of what
 | `POST /destinations/{id}/expert/preview` | the same argv |
 | `GET /clipper/recordings/{id}/keyframes` | spawns `ffprobe`, once per timeline part |
 | `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
+| `GET /destinations/{id}/facebook/stream-health` | the same, for what Facebook sees arriving at its ingest |
 | `GET /metadata/broadcast-window` | the same, once per connected account |
 | `GET /recordings/{id}/download` | the recording itself |
 | `GET /recordings/stems/{name}/download` | a separated audio stem |
@@ -329,14 +330,68 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 |---|---|
 | `GET` `POST` | `/destinations` |
 | `PUT` | `/destinations/order` |
+| `POST` | `/destinations/start-all`, `/stop-all` |
 | `GET` `PUT` `DELETE` | `/destinations/{id}` |
 | `POST` | `/destinations/{id}/start`, `/stop`, `/restart` |
 | `POST` | `/destinations/{id}/refresh-key` |
 | `GET` `PUT` `DELETE` | `/destinations/{id}/expert` |
 | `POST` | `/destinations/{id}/expert/preview`, `/dry-run` |
+| `POST` | `/destinations/{id}/facebook/end-broadcast` |
+| `GET` | `/destinations/{id}/facebook/stream-health` |
 
 List rows arrive wrapped as `{"destination": ..., "routing": ...}` so the UI
 gets the compiled routing without a second round trip.
+
+`start-all` and `stop-all` act on **every** destination — there is no id list
+and no selection. Each row is driven through the same code as
+`/destinations/{id}/start` and `/stop`, so the bulk control is exactly N presses
+of the per-destination button and can never be more destructive than it.
+
+The answer is a list, never a boolean:
+
+```json
+{"action": "start", "results": [
+  {"id": 3, "name": "YouTube main", "platform": "youtube",
+   "outcome": "started", "state": "running"},
+  {"id": 4, "name": "Backup RTMP", "platform": "custom",
+   "outcome": "failed", "message": "connection refused"}
+]}
+```
+
+`outcome` is one of `started`, `stopped`, `warned` (it happened and something
+about it was not observed — today only the unreaped stop), `failed` (with
+`message` saying why) or `skipped` (the caller went away before this row was
+reached, so it was not touched). The status is `200` whenever every row was
+reached, including when some of them failed: two refusals out of eight is not
+"the request failed".
+
+Starts are **paced** — a gap between one destination and the next, so a burst of
+FFmpeg children and a burst of near-simultaneous connections to the same platform
+do not arrive as one clap. It is a pacing choice about this box, not a limit
+derived from any platform's published ceiling. Stops are not paced: tearing down
+is local. A paced start of a long destination list is therefore a long request,
+and the response is the finished record of what happened.
+
+**`stop-all` ends every YouTube broadcast on the install, permanently.** Stop and
+disable are one thing here — `/stop` clears `destinations.enabled`, and the
+broadcast lifecycle coordinator ends the broadcast of any destination that is
+disabled. A completed YouTube broadcast cannot return to live. Starting again
+puts the video back on the wire but does not bring the broadcasts back; a new one
+has to be created or announced. This is true of the per-destination `/stop` too —
+the bulk route just does it to every row at once.
+
+The two `facebook/` routes act on the live video recorded against THAT
+destination rather than on the account, because one account can hold several
+broadcasts at once and "end the broadcast" would otherwise be ambiguous in the
+exact situation an operator reaches for it.
+
+`end-broadcast` turns the live video into a VOD; the artefact survives, the
+broadcast does not come back, and `ended: false` with no error is an ordinary
+outcome meaning Facebook accepted the end and has not yet reported it took.
+`stream-health` answers `200 {"supported": false, "reason": ...}` when the
+destination has never gone live — Facebook is the only platform here that
+publishes bitrate and frame rate at all, so its absence elsewhere is a fact
+about the platform rather than a gap.
 
 **A create, update or `refresh-key` may return `warnings`**, an array of
 sentences meant to be shown to the operator. It is present only when something
@@ -592,7 +647,7 @@ told so. The schedule still saves and still runs.
 | `GET` | `/platforms/credentials` |
 | `PUT` `DELETE` | `/platforms/credentials/{platform}` |
 | `POST` | `/platforms/credentials/{platform}/check` |
-| `GET` | `/platforms/accounts`, `/platforms/accounts/{id}/stats` |
+| `GET` | `/platforms/accounts`, `/platforms/accounts/{id}/stats`, `/destinations/{id}/facebook/stream-health` |
 | `DELETE` | `/platforms/accounts/{id}` |
 | `GET` | `/oauth/{platform}/start`, `/callback` |
 | `GET` | `/metadata`, `/metadata/broadcast-window` |

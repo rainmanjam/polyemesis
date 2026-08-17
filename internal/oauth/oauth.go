@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -137,6 +138,318 @@ func Get(p db.Platform) (Provider, error) {
 		return pr, nil
 	}
 	return nil, fmt.Errorf("no OAuth provider for platform %q", p)
+}
+
+// ------------------------------------------ optional platform capabilities
+
+// TargetedProvider is the optional capability for a platform where one
+// connected login can publish to more than one destination. Discover it with
+// TargetsFor; never type-assert Provider at a call site, because "absent" is
+// the answer for every other platform and has to be handled once.
+//
+// FACEBOOK IS STILL THE ONLY IMPLEMENTATION AND THIS LIVES HERE ANYWAY, which
+// is deliberate. An interface that moves out of a platform file in the same
+// commit that adds its second implementer arrives together with that
+// implementer, and nothing afterwards can say which was shaped to fit the
+// other. Sited first and alone, the next platform has to fit what is already
+// written down.
+//
+// It is not a general rule that one implementation is too few. It is a rule
+// about the ones a caller DISCOVERS rather than calls: the value of these is
+// that ABSENT is a supported answer handled once, and a capability sitting in a
+// platform's own file reads as that platform's private business until somebody
+// checks.
+type TargetedProvider interface {
+	Provider
+	// Targets lists everywhere this token may publish. It reports an error only
+	// when the identity itself cannot be read: a token that cannot see Pages
+	// returns the profile alone, because that is a legitimate connection rather
+	// than a failure.
+	Targets(ctx context.Context, clientID, accessToken string) ([]BroadcastTarget, error)
+	// AccountFor identifies one chosen target, for storing as a connected
+	// account. An empty targetRef means the default.
+	AccountFor(ctx context.Context, clientID, accessToken, targetRef string) (*Account, error)
+	// IngestFor creates (or fetches) the ingest for one target and returns the
+	// broadcast object behind it. opts carries the create-time fields a stored
+	// destination may have chosen; its zero value sends none of them.
+	IngestFor(ctx context.Context, clientID, accessToken, targetRef string, opts IngestOptions) (*Broadcast, error)
+}
+
+// TargetsFor returns the multi-target capability for a platform, or false when
+// that platform has none. Mirrors MetadataFor.
+func TargetsFor(p db.Platform) (TargetedProvider, bool) {
+	pr, ok := Providers()[p]
+	if !ok {
+		return nil, false
+	}
+	tp, ok := pr.(TargetedProvider)
+	return tp, ok
+}
+
+// BroadcastTarget is one place a single connected account may publish to.
+type BroadcastTarget struct {
+	// Ref is what gets stored in PlatformAccount.AccountRef and handed back to
+	// AccountFor/IngestFor. See parseTargetRef for the spellings.
+	Ref string `json:"ref"`
+	// Kind is the platform's own word for what this target is, so the UI can
+	// group and badge them: "user" or "page" on Facebook, "channel" on YouTube.
+	// Not normalised to a shared vocabulary, because a Page is not a channel and
+	// an operator comparing this against the platform's own UI has to see the
+	// term that platform uses.
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	// Category is the Page's own category, empty for a profile. It is the one
+	// thing that distinguishes two Pages with similar names in a dropdown.
+	Category string `json:"category,omitempty"`
+}
+
+// Broadcast is an ingest plus the platform's identifier for the broadcast
+// object that issued it.
+//
+// The ingest fields carry a stream key, so they are json:"-": nothing should
+// ever serialise this struct outward, and if something does, it must not be the
+// key that leaks. ID and Target are safe to persist and to show.
+type Broadcast struct {
+	// ID is the platform's id for the broadcast object -- Facebook's live_video
+	// id today. It is the handle for ending the broadcast, editing its metadata
+	// and reading its comments, so a caller that discards it has to create a new
+	// broadcast to get another one.
+	ID string `json:"id"`
+	// Target is the ref this was created on, which is what makes the id
+	// addressable later: a Page's live video needs the Page's token.
+	Target string `json:"target"`
+	Ingest Ingest `json:"-"`
+	// Backups are the platform's secondary ingest endpoints, for a redundant
+	// encoder feed. Exposed even though nothing consumes them yet, because they
+	// arrive in the same response and re-fetching them means creating a second
+	// broadcast.
+	Backups []Ingest `json:"-"`
+}
+
+// IngestOptions carries what a platform needs when the broadcast is CREATED,
+// which is not the same set the composer pushes afterwards.
+//
+// A struct rather than more parameters because the create-time surface is going
+// to grow: scheduling (event_params) and backup ingest both land here, and three
+// signature changes to one interface is three chances to miss a call site. The
+// zero value sends nothing, which is what every caller without a destination in
+// hand passes.
+//
+// THE FIELD NAMES ARE STILL FACEBOOK'S, and moving the type here did not change
+// that or intend to. Privacy, BackupIngest and the seven-day bound on
+// ScheduledFor are facts about one platform's API, and renaming them to
+// something platform-neutral is a design question -- what is the union of what
+// two platforms accept at create time -- not a question a file move gets to
+// answer in passing.
+type IngestOptions struct {
+	Privacy         db.FacebookPrivacy
+	Crosspost       []db.CrosspostTarget
+	DonateCharityID string
+	// BackupIngest asks Facebook to provision a secondary ingest endpoint, so
+	// a redundant feed can be published alongside the primary.
+	//
+	// This flag is what PROVISIONS the backup url; without it the secondary
+	// lists come back empty. Meta's live_videos edge reference:
+	//
+	//	enable_backup_ingest  boolean
+	//	Set this to true to enable a backup ingest url.
+	//	stop_on_delete_stream defaults to false when set
+	//
+	// and the getting-started response shows "secure_stream_secondary_urls":
+	// [] on a create without it. An earlier version of this comment said the
+	// relationship was "not established" -- it is, and the source is the EDGE
+	// reference rather than the LiveVideo node reference, which 404s.
+	//
+	// A caller must still handle an empty Backups even when it asked: eligibility
+	// and account state can refuse what the flag requests.
+	BackupIngest bool
+	// ScheduledFor makes this a SCHEDULED_UNPUBLISHED broadcast at that
+	// instant rather than a LIVE_NOW one, which is what gives a show a
+	// Facebook event page before it starts.
+	//
+	// Zero means live now. That is what every existing caller passes and what
+	// they keep doing -- turning those into scheduled creates would produce
+	// broadcasts that never go live.
+	//
+	// Facebook accepts a start time at most SEVEN DAYS ahead and that bound is
+	// not ours to widen. It is enforced by the caller, which is the only layer
+	// that knows the occurrence; this struct carries whatever it is given.
+	ScheduledFor time.Time
+	// DedicatedIngest asks the platform for an ingest stream that belongs to
+	// THIS destination rather than the one the account already shares.
+	//
+	// It exists because YouTube counts concurrency two ways at once -- per
+	// stream key and per channel -- and the per-key ceiling is the smaller of
+	// the two, so every destination handed the same key counts as one
+	// ingestion source and the channel ceiling is unreachable. A refused
+	// broadcast comes back as sharedIngestionBroadcastsExceedLimit, which
+	// youtube_lifecycle.go classifies as RefusalSharedIngestionFull precisely
+	// because it is polyemesis's doing and not the operator's. Neither number
+	// is published by YouTube and neither is written down here: this is the
+	// shape of the fix, not a count.
+	//
+	// IT IS AN OPTION RATHER THAN A PROVIDER DECISION BECAUSE A PROVIDER
+	// CANNOT MAKE IT. Answering "does this destination need its own stream"
+	// means knowing whether some OTHER destination already holds the account's
+	// shared one, and a provider is handed a token and a target ref -- it has
+	// never heard of a destination. The caller owns the destination table, so
+	// the caller decides; see internal/api's ingestOptions.
+	//
+	// False keeps today's behaviour EXACTLY: the account's existing reusable
+	// stream, created only if there is none. That is what protects the common
+	// case -- one destination, whose key an operator's Studio-scheduled events
+	// are already bound to and which must not change under them.
+	//
+	// HeldKey outranks it. A destination that already holds a key keeps that
+	// stream whatever this says, so flipping the flag on an established
+	// destination does not mint a second stream for it.
+	DedicatedIngest bool
+	// RotateKey says the OPERATOR ASKED FOR A NEW KEY, which is the one
+	// circumstance in which the key on a destination may change.
+	//
+	// WITHOUT IT THE DEDICATED-STREAM FEATURE IS INERT ON EVERY INSTALL THAT
+	// NEEDS IT, and that was measured rather than argued. HeldKey is matched
+	// first so an automatic sweep can never move a key out from under somebody
+	// mid-broadcast. But in production EVERY YouTube destination already holds
+	// the same shared key -- that is precisely the defect -- so the match
+	// always succeeds, the dedicated branch is never reached, and nothing is
+	// created. Three destinations were driven through the real refresh handler
+	// and produced zero new streams.
+	//
+	// The two requirements are the same line of code: "never move a key" and
+	// "move this destination to its own stream" cannot both hold for a
+	// destination that already holds the shared one. What separates them is not
+	// a rule, it is WHO ASKED. A five-minute sweep has no right to rotate a key
+	// an encoder is publishing with; an operator pressing Refresh stream key
+	// has asked for exactly that and would be puzzled to get the old one back.
+	//
+	// So this is set on the explicit path and nowhere else.
+	RotateKey bool
+	// HeldKey is the stream key this destination is ALREADY publishing with,
+	// empty for one that has never fetched an ingest.
+	//
+	// It is an input to a create so that a re-fetch is not a rotation. Refresh
+	// key is a button an operator presses when they think something is stale,
+	// and a platform whose streams are addressable by key can answer it by
+	// handing back the same stream instead of provisioning another one --
+	// which would leave the key in their encoder pointing at a stream nothing
+	// publishes to. It is the mechanism behind DedicatedIngest's last
+	// paragraph, and it is the only thing that keeps the destination holding
+	// the shared stream on the shared stream once its neighbours have moved
+	// off it.
+	//
+	// A KEY IN, NEVER A KEY OUT. This is matched byte for byte against what
+	// the platform lists and is never logged, echoed in an error or sent as a
+	// request parameter; #306 is what happens when a stored key and the key on
+	// the wire are allowed to differ, so nothing here trims or normalises it.
+	HeldKey string
+	// IngestLabel is the destination's name, for platforms that let a
+	// provisioned stream be titled.
+	//
+	// A channel with five polyemesis streams on it, all called "polyemesis",
+	// is a channel whose operator cannot tell which one their second show
+	// publishes to -- and these are visible in YouTube Studio, which is where
+	// they will go looking. The destination's own name is the only material
+	// polyemesis has that means anything to them.
+	//
+	// NOT A SECRET AND NOT A KEY. It is a display string that reaches the
+	// platform's public-ish metadata, so a caller must never put a key, a
+	// token or an ingest URL in it.
+	IngestLabel string
+}
+
+// ScheduledBroadcaster is the optional capability for a platform that can
+// create a broadcast BEFORE the show and move it afterwards -- what gives a
+// scheduled show an event page people can subscribe to. Discover it with
+// ScheduledBroadcastsFor; never type-assert Provider at a call site, because
+// "absent" is the answer for every other platform and has to be handled once.
+//
+// It exists because that rule was being broken in the plainest possible way.
+// internal/api reached RescheduleBroadcast with a CONCRETE-type assertion --
+// `fb, ok := p.(*oauth.Facebook)` -- on a method that was on no interface at
+// all, so the one place that knew a platform could not do this was an `ok`
+// check against a struct pointer. A second platform with a schedulable
+// broadcast would have had to be added to that assertion by hand, and the
+// compiler would not have said a word.
+//
+// It came here together with TargetedProvider and not one at a time, because
+// half of this capability is over there: CREATING the scheduled broadcast is
+// TargetedProvider.IngestFor with IngestOptions.ScheduledFor set, deliberately
+// not a method here -- a Create on this interface would be a second mechanism
+// for one concept, which is exactly how endpoints.go records the graphBase seam
+// growing up beside WithBaseURL and covering one endpoint out of thirteen. A
+// platform holding one half of the pair can pre-announce nothing, so leaving
+// either half behind would have been a move that looked done and was not.
+//
+// Nothing here is stubbed onto YouTube, Twitch or Kick. The value of the
+// interface is that ABSENT is a supported answer, handled once by the caller,
+// not that every provider grows a method that returns an error.
+type ScheduledBroadcaster interface {
+	Provider
+	// ScheduleHorizon is how far ahead of now this platform will accept a
+	// start time. A caller must refuse an occurrence beyond it rather than
+	// send it, because the platform's refusal arrives as a generic API error
+	// that reads like every other one.
+	//
+	// A method rather than a constant at the call site because it is a fact
+	// about the PLATFORM. internal/api USED to spell Facebook's seven days out
+	// as a facebookScheduleHorizon constant, inside a loop already gated on
+	// `d.Platform != db.PlatformFacebook` -- the same defect as a type
+	// assertion wearing a different hat. Both are gone: preannounce.go:116 and
+	// automation.go:288 now read this method, so a caller enforces "this
+	// platform's bound" without knowing which platform it is holding, and the
+	// two paths cannot disagree about the bound the way two constants could.
+	ScheduleHorizon() time.Duration
+	// RescheduleBroadcast moves an already-created broadcast to a new start
+	// time. broadcastID is the id the create returned and the caller stored;
+	// an empty one is an error rather than a no-op, because a platform can
+	// answer a write to no object in a way that reads as success.
+	RescheduleBroadcast(ctx context.Context, accessToken, broadcastID string, at time.Time) error
+}
+
+// ScheduleHorizonUnbounded is what ScheduleHorizon returns for a platform that
+// PUBLISHES NO BOUND on how far ahead a broadcast may be scheduled.
+//
+// It exists so that "the docs state no limit" and "the limit happens to be some
+// number I chose" cannot be spelled the same way. Facebook's seven days is a
+// documented sentence -- Graph refuses an event_params further out -- and is a
+// real number for that reason. YouTube's liveBroadcasts.insert reference names
+// snippet.scheduledStartTime as required and says nothing whatever about how far
+// ahead it may point; the live errors page lists invalidScheduledStartTime with
+// no bound attached (both read 2026-08-16). Returning 30 days, or 90, or a year
+// would be this repository's most-repeated defect -- a guessed number encoded as
+// though it were documented -- and it would silently drop every occurrence past
+// the guess, with no error anywhere, because the caller SKIPS rather than fails
+// when an occurrence is out of range.
+//
+// The maximum Duration and not zero, because of how a caller reads this: both
+// gates -- preannounce.go's `at.Sub(now) > sb.ScheduleHorizon()` and
+// automation.go's `at.Sub(now) <= sb.ScheduleHorizon()` -- treat a SMALLER
+// horizon as a tighter refusal, so zero would mean "refuse everything" rather
+// than "no bound to enforce". time.Time.Sub saturates at this value instead of
+// overflowing, so the comparison is well defined for any two instants.
+//
+// It asserts nothing about what YouTube will accept. A start time YouTube
+// refuses still comes back as invalidScheduledStartTime from the create, which
+// is the right place for a bound only the platform knows to be enforced.
+const ScheduleHorizonUnbounded = time.Duration(math.MaxInt64)
+
+// ScheduledBroadcastsFor returns the pre-announce capability for a platform, or
+// false when that platform has none. Mirrors TargetsFor and MetadataFor, both
+// in shape and in what false means: it covers "this platform cannot schedule"
+// and "there is no provider for this platform at all", because neither caller
+// does anything different about them.
+//
+// Named for the thing rather than shortened to SchedulesFor because the only
+// caller holds a scheduler.Schedule in the same function, and two unrelated
+// senses of "schedule" one line apart is how a reader loses the thread.
+func ScheduledBroadcastsFor(p db.Platform) (ScheduledBroadcaster, bool) {
+	pr, ok := Providers()[p]
+	if !ok {
+		return nil, false
+	}
+	sb, ok := pr.(ScheduledBroadcaster)
+	return sb, ok
 }
 
 // httpClient is shared; the timeout keeps a hung platform API from wedging a

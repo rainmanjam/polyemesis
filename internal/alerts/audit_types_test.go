@@ -62,10 +62,15 @@ func TestAllTypesKeepsTheOperationalPickerOrderItAlreadyHad(t *testing.T) {
 	// exists: they belong beside the other destination events by meaning, and
 	// putting them there would move eight established rows.
 	health := []Type{TypeDestinationFallingBehind, TypeDestinationCaughtUp}
+	// Appended after those for the same stability reason, and it is the case
+	// that reads most like a mistake: broadcast.fault belongs beside the
+	// destination events by meaning, and putting it there would move twenty
+	// rows an operator has already learned.
+	lifecycle := []Type{TypeBroadcastFault}
 	all := AllTypes()
-	if len(all) != len(operational)+len(auditTypes)+len(health) {
-		t.Fatalf("AllTypes has %d entries, want %d operational + %d audit + %d health",
-			len(all), len(operational), len(auditTypes), len(health))
+	if len(all) != len(operational)+len(auditTypes)+len(health)+len(lifecycle) {
+		t.Fatalf("AllTypes has %d entries, want %d operational + %d audit + %d health + %d lifecycle",
+			len(all), len(operational), len(auditTypes), len(health), len(lifecycle))
 	}
 	for i, want := range operational {
 		if all[i] != want {

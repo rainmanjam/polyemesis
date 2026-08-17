@@ -40,6 +40,7 @@ const TRIGGER_LABELS: Record<string, TranslationKey> = {
   "ingest.disconnected": "hooks.triggerIngestDisconnected",
   "destination.up": "hooks.triggerDestinationUp",
   "destination.down": "hooks.triggerDestinationDown",
+  "broadcast.fault": "hooks.triggerBroadcastFault",
 };
 
 const errText = (err: unknown, fallback: string) =>

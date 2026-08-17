@@ -31,7 +31,8 @@ export type Capability =
   | "chatRead"
   | "chatSend"
   | "moderation"
-  | "viewerStats";
+  | "viewerStats"
+  | "broadcastLifecycle";
 
 /** Four values rather than a boolean, because the interesting platforms are
  *  not binary. Kick's stream key is not "unsupported" — it works perfectly,
@@ -72,14 +73,51 @@ export interface PlatformCapability {
   reasons?: Partial<Record<Capability, string>>;
 }
 
-export const CAPABILITY_COLUMNS: { key: Capability; label: string; help: string }[] = [
-  { key: "sso", label: "Sign in", help: "Connect the account with OAuth instead of pasting secrets." },
-  { key: "streamKey", label: "Stream key", help: "polyemesis fetches the ingest URL and key for you." },
-  { key: "metadata", label: "Metadata", help: "Set the title, description or category when you go live." },
-  { key: "chatRead", label: "Chat read", help: "Messages appear in the unified chat pane." },
-  { key: "chatSend", label: "Chat send", help: "You can reply from the chat pane." },
-  { key: "moderation", label: "Moderation", help: "Delete a message or time a viewer out." },
-  { key: "viewerStats", label: "Viewers", help: "Live viewer count read back from the platform." },
+export const CAPABILITY_COLUMNS: {
+  key: Capability;
+  label: string;
+  help: string;
+}[] = [
+  {
+    key: "sso",
+    label: "Sign in",
+    help: "Connect the account with OAuth instead of pasting secrets.",
+  },
+  {
+    key: "streamKey",
+    label: "Stream key",
+    help: "polyemesis fetches the ingest URL and key for you.",
+  },
+  {
+    key: "metadata",
+    label: "Metadata",
+    help: "Set the title, description or category when you go live.",
+  },
+  {
+    key: "chatRead",
+    label: "Chat read",
+    help: "Messages appear in the unified chat pane.",
+  },
+  {
+    key: "chatSend",
+    label: "Chat send",
+    help: "You can reply from the chat pane.",
+  },
+  {
+    key: "moderation",
+    label: "Moderation",
+    help: "Delete a message or time a viewer out.",
+  },
+  {
+    key: "viewerStats",
+    label: "Viewers",
+    help: "Live viewer count read back from the platform.",
+  },
+  {
+    key: "broadcastLifecycle",
+    label: "Start / end",
+    help: "Tell the platform to go live and to end, rather than only sending it video.",
+  },
 ];
 
 export const SUPPORT_LEGEND: {
@@ -88,7 +126,12 @@ export const SUPPORT_LEGEND: {
   help: string;
   variant: "live" | "default" | "outline" | "warn";
 }[] = [
-  { key: "yes", label: "Works", help: "polyemesis does this for you today.", variant: "live" },
+  {
+    key: "yes",
+    label: "Works",
+    help: "polyemesis does this for you today.",
+    variant: "live",
+  },
   {
     key: "manual",
     label: "By hand",
@@ -163,6 +206,7 @@ function manualUnverified(
       chatSend: "unknown",
       moderation: "unknown",
       viewerStats: "unknown",
+      broadcastLifecycle: "unknown",
     },
   };
 }
@@ -182,9 +226,14 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatRead: "yes",
       chatSend: "yes",
       moderation: "yes",
-      viewerStats: "unknown",
+      viewerStats: "yes",
+      broadcastLifecycle: "yes",
     },
     reasons: {
+      broadcastLifecycle:
+        "Goes live on YouTube when video actually starts arriving, and ends when you disable or delete the destination — never when the encoder merely crashes, because a completed YouTube broadcast cannot return to live and a crash is recoverable. A refused transition raises a fault and never stops the stream.",
+      viewerStats:
+        'Live state, title, start time and concurrent viewer count, over the same auth/youtube scope everything else here uses — so an account connected before this existed can already do it, with no reconnect. It costs two calls: polyemesis stores no video id, so it asks which broadcast is live and then asks that video how many people are watching. YouTube omits the viewer count when the owner has hidden it, when nobody is watching, and once the broadcast ends — all three look identical, so polyemesis reports "not reported" rather than zero. The count shares the Data API\'s daily quota with title push and chat, which is why it is polled gently rather than live.',
       chatRead:
         "Polled against the Data API's daily quota, which polyemesis paces. A long broadcast can exhaust it; the chat pane says so with the reset time rather than going quiet.",
       moderation:
@@ -205,10 +254,13 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatRead: "yes",
       chatSend: "yes",
       moderation: "yes",
-      viewerStats: "unknown",
+      viewerStats: "yes",
+      broadcastLifecycle: "no",
     },
     reasons: {
       metadata: "Title and category, over the channel:manage:broadcast scope.",
+      viewerStats:
+        "Live state, viewer count, title, category and start time from Helix Get Streams. It needs no scope of its own — Twitch asks only for an app or user access token — so every account already connected can answer without reconnecting. A channel that is not live returns no count at all rather than a count of zero, and polyemesis reports the difference. Twitch publishes no encoder health on this endpoint: there is no bitrate, framerate or dropped-frame figure to show beside the viewer number.",
       moderation:
         "Delete a message, over moderator:manage:chat_messages. An account connected before this existed holds a token without that scope — the account list says so and asks you to reconnect, rather than letting the delete button fail on the message you needed gone. Twitch refuses to delete anything older than six hours, and refuses the broadcaster's own messages and other moderators'. Banning and timing out work over moderator:manage:banned_users, which is a separate scope from deletion because removing a person is a bigger ask than removing a message.",
     },
@@ -221,17 +273,24 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     summary:
       "Connect a Facebook profile or Page and polyemesis creates the broadcast, splits out the RTMPS ingest and key, pushes the title and description, and reads the comment thread.",
     readFirst:
-      "Meta requires App Review before anyone other than you can connect an account. Your own account works immediately as a developer or tester of your app, which is all a single-operator setup needs — but publishing on someone else's behalf needs Advanced Access to publish_video (profiles) or pages_manage_posts plus pages_read_engagement (Pages). Budget days, not minutes, and start it before you need it.",
+      "Meta requires App Review before anyone other than you can connect an account. Your own account works immediately as a developer or tester of your app, which is all a single-operator setup needs — but publishing on someone else's behalf needs Advanced Access to publish_video (profiles) or pages_manage_posts plus pages_read_engagement (Pages). Budget days, not minutes, and start it before you need it. Separately, and NOT a permission: Meta refuses go-live on account properties no scope can satisfy. Since 2024-06-10 the account must be at least 60 days old and the Page or professional-mode profile must have at least 100 followers. A connection with every scope granted still fails both, and the Graph error names neither — so if everything looks correct and it still will not start, check those two first.",
     caps: {
       sso: "yes",
       streamKey: "yes",
       metadata: "yes",
       chatRead: "yes",
-      chatSend: "unknown",
+      chatSend: "no",
       moderation: "yes",
       viewerStats: "unknown",
+      broadcastLifecycle: "yes",
     },
     reasons: {
+      // Facebook and YouTube both read "Works" here and mean different things:
+      // YouTube is driven by the lifecycle coordinator, Facebook is commanded by
+      // hand. Without this sentence an operator reads the two cells as equal and
+      // expects an automatic end that nothing issues. Mirrors capabilities.go.
+      broadcastLifecycle:
+        'Creating the broadcast and ending it both work, but they are things YOU do — connecting the account creates the live video, and "End broadcast" is on the destination menu. Nothing ends a Facebook broadcast on its own, unlike YouTube.',
       streamKey:
         "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
       moderation:
@@ -257,17 +316,20 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatSend: "yes",
       moderation: "yes",
       viewerStats: "yes",
+      broadcastLifecycle: "no",
     },
     reasons: {
       sso: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
       streamKey:
         "Fetched from the channels resource, over the streamkey:read scope. This was recorded here as impossible for a long time and the reasoning is worth keeping: the key rides as stream.key on the very same GET /public/v1/channels response that channel:read already fetches, but the field is omitted unless streamkey:read was granted too. There is no /streamkey endpoint, so reading the endpoint list suggests the capability does not exist. An account connected before that scope was requested holds a token without it and sees no key — reconnect it in Settings → Platforms.",
-      metadata: "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
+      metadata:
+        "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
       chatRead:
         "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
       moderation:
         "Delete a message, over moderation:chat_message:manage. Banning and timing out work over moderation:ban. Note that Kick counts timeouts in MINUTES where YouTube and Twitch count seconds, and caps them at 7 days; polyemesis converts, so you give it one unit everywhere.",
-      viewerStats: "Live state and viewer count from Kick's livestreams endpoints.",
+      viewerStats:
+        "Live state and viewer count from Kick's livestreams endpoints.",
     },
   },
   {
@@ -275,17 +337,18 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     name: "X (Twitter) Live",
     tier: "manual",
     summary:
-      "Paste your ingest URL and stream key. There is no API to connect: X's developer platform covers posts, users, media and the post firehose, not live-video ingest.",
+      "Paste your ingest URL and stream key. X does publish a live-video API — broadcasts, chat and moderation — and polyemesis has not wired it up yet, so for now this is a paste-the-key destination that streams exactly as well as any other.",
     readFirst:
-      "“Streaming” in X's API documentation means streaming posts, not ingesting video. No documented third-party live-video ingest endpoint exists, and access to what is documented is credit-based and paid. Set the source up in X's own producer tooling and copy both fields across.",
+      "X's live-video API is real but its access tier is not published. Every capability here comes from X's own served OpenAPI spec, and no pricing page names the Broadcasts family — so whether your account can call them is a question only a live request answers. Paste the stream key from X's producer tooling; the rest is automatic once you connect.",
     caps: {
-      sso: "no",
+      sso: "unknown",
       streamKey: "manual",
-      metadata: "no",
-      chatRead: "no",
-      chatSend: "no",
-      moderation: "no",
-      viewerStats: "no",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+      broadcastLifecycle: "unknown",
     },
     reasons: {
       sso: "Nothing to sign into for live video. An OAuth app here would grant access to posts, which is not what a restreamer needs.",
@@ -300,20 +363,22 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     readFirst:
       "The chat key is NOT the stream key and is not pasted into polyemesis's UI. It comes from rumble.com/account/livestream-api and is supplied in the RUMBLE_CHAT_API_KEY environment variable, because there is no account to store it against — this API has no sign-in. Treat that URL as a secret: it is the whole credential, and anyone holding it can read your chat.",
     caps: {
-      sso: "unknown",
+      sso: "no",
       streamKey: "manual",
-      metadata: "unknown",
+      metadata: "manual",
       chatRead: "yes",
-      chatSend: "unknown",
-      moderation: "unknown",
+      chatSend: "no",
+      moderation: "no",
       viewerStats: "unknown",
+      broadcastLifecycle: "no",
     },
     reasons: {
       chatRead:
         "Polled from rumble.com/-livestream-api/get-data, which needs no sign-in — the key from your account settings is the whole credential. Chat only exists while you are live, and the pane says it is waiting rather than going quiet. Two caveats worth knowing before you rely on it: Rumble sends no message id, so polyemesis derives one from the content, and two identical messages from one person inside the same second are indistinguishable and show as one. And Rumble publishes no rate limit, so the poll is deliberately conservative at ten seconds rather than as fast as it could be.",
       chatSend:
         "Unverified rather than impossible. Rumble's get-data endpoint returns data and no endpoint for posting or deleting a message is published — but this API is documented thinly enough that “we could not find it” is not the same as “it is not there”, so polyemesis does not refuse on the strength of it.",
-      streamKey: "Rumble Studio issues both fields per stream; copy them across by hand.",
+      streamKey:
+        "Rumble Studio issues both fields per stream; copy them across by hand.",
     },
   },
   manualUnverified(
@@ -376,6 +441,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatSend: "no",
       moderation: "no",
       viewerStats: "no",
+      broadcastLifecycle: "no",
     },
   },
 ];
@@ -388,7 +454,10 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
  *  `supportOf` as "unknown", which is the fail-open answer: claiming "no"
  *  about an API nobody here has read is how a capability check starts refusing
  *  things that work. */
-export function capabilityFor(presetId: string, name?: string): PlatformCapability {
+export function capabilityFor(
+  presetId: string,
+  name?: string,
+): PlatformCapability {
   const row = PLATFORM_CAPABILITIES.find((p) => p.presetId === presetId);
   if (row) return row;
   return {

@@ -209,7 +209,7 @@ func (k *Kick) channel(ctx context.Context, accessToken string) (*kickChannel, e
 		Data []kickChannel `json:"data"`
 	}
 	// No parameters: Kick reads the channel belonging to the token.
-	if err := getJSON(ctx, k.apiEndpoint()+"/public/v1/channels", accessToken, nil, &out); err != nil {
+	if err := getJSON(ctx, k.apiEndpoint()+kickChannelsPath, accessToken, nil, &out); err != nil {
 		return nil, err
 	}
 	if len(out.Data) == 0 {
@@ -483,21 +483,8 @@ func (k *Kick) PushMetadata(ctx context.Context, clientID, accessToken, accountR
 
 // --------------------------------------------------------------------- stats
 
-// KickStats is a point-in-time read of the connected channel's broadcast.
-// Offline is a normal answer, not an error: a channel that is not live has a
-// viewer count of zero and nothing has gone wrong.
-type KickStats struct {
-	Live        bool      `json:"live"`
-	ViewerCount int       `json:"viewerCount"`
-	Title       string    `json:"title,omitempty"`
-	Category    string    `json:"category,omitempty"`
-	Language    string    `json:"language,omitempty"`
-	Slug        string    `json:"slug,omitempty"`
-	StartedAt   time.Time `json:"startedAt,omitempty"`
-	// Source names the endpoint the numbers came from, so a viewer count that
-	// disagrees with the Kick dashboard can be traced without a packet capture.
-	Source string `json:"source,omitempty"`
-}
+// The stats type now lives in stats.go as LiveStats: Kick was the first
+// platform that could answer, not the only one that can.
 
 // kickLivestream is the livestream resource, shared by the user-scoped list and
 // the stats endpoint. Every field is optional; Kick documents the endpoints but
@@ -519,11 +506,26 @@ type kickLivestream struct {
 	} `json:"category"`
 }
 
-func (l kickLivestream) viewers() int {
+// viewers reports the count and whether Kick actually gave one.
+//
+// ZERO IS NOT AN AUDIENCE OF NONE ON THIS PLATFORM. Kick documents it as the
+// opt-out value, verbatim: "Viewer count will be 0 if the streamer has opted
+// not to share their viewer count."
+// (https://docs.kick.com/apis/livestreams.md, read 2026-08-16.) A genuinely
+// unwatched stream sends the same 0, so the two are indistinguishable on the
+// wire and the honest report is "not told" rather than a number. Returning
+// false for 0 is therefore not defensive coding; it is the only reading the
+// documentation permits.
+//
+// Both spellings are still checked -- see the Viewers field's comment.
+func (l kickLivestream) viewers() (int, bool) {
 	if l.ViewerCount > 0 {
-		return l.ViewerCount
+		return l.ViewerCount, true
 	}
-	return l.Viewers
+	if l.Viewers > 0 {
+		return l.Viewers, true
+	}
+	return 0, false
 }
 
 // decodeKickData accepts both shapes Kick's envelopes use: a list of
@@ -556,8 +558,32 @@ func (k *Kick) livestreams(ctx context.Context, accessToken, endpoint string) ([
 
 const (
 	kickUserLivestreamsPath = "/public/v1/users/livestreams"
-	kickLivestreamStatsPath = "/public/v1/livestreams/stats"
+	kickChannelsPath        = "/public/v1/channels"
 )
+
+// THE OLD FALLBACK WAS /public/v1/livestreams/stats AND IT COULD NEVER HAVE
+// WORKED. That endpoint returns a single platform-wide `total_count` -- every
+// livestream on Kick -- and nothing per channel. This code decoded it into a
+// livestream list and read `viewer_count` off it, so on a live channel with a
+// hidden count the fallback contributed either nothing (the real body has no
+// such field, and the zero-value decode was silently discarded) or, had the
+// body ever matched the struct, the number of concurrent broadcasts on Kick
+// reported to one operator as their own audience.
+//
+// It passed its tests because the tests served a fixture shaped like the
+// struct rather than like the endpoint. That is the failure this whole
+// evidence pass exists to catch: a fake that agrees with the code instead of
+// with the platform proves only that the code agrees with itself.
+//
+// GET /public/v1/channels replaces it and is strictly better on three counts:
+// `stream.is_live` is an authoritative liveness boolean rather than an
+// inference from a count, `stream.viewer_count` is genuinely per-channel, and
+// channel:read is already in Scopes() so no token has to be reissued. The
+// helper is k.channel, which Account and Ingest already use.
+//
+// Source: https://docs.kick.com/apis/livestreams.md and
+// https://docs.kick.com/apis/channels.md, both read 2026-08-16; recorded in
+// docs/evidence/platform-lifecycle-apis-2026-08-16.md.
 
 // Stats reads the connected channel's live state and viewer count.
 //
@@ -566,14 +592,19 @@ const (
 // count the first call left at zero. Only a failure of both is an error — one
 // endpoint being unavailable to a given app's scopes must not cost the operator
 // the number the other one returned.
-func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*KickStats, error) {
-	stats := &KickStats{}
+func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*LiveStats, error) {
+	stats := &LiveStats{}
 
 	users, userErr := k.livestreams(ctx, accessToken, kickUserLivestreamsPath)
 	if userErr == nil && len(users) > 0 {
 		l := users[0]
+		// Presence in the token's own livestream list is the liveness signal.
+		// It used to be joined by "and the count is above zero", which made a
+		// streamer who hides their viewer count read as offline.
 		stats.Live = true
-		stats.ViewerCount = l.viewers()
+		if v, ok := l.viewers(); ok {
+			stats.ViewerCount = &v
+		}
 		stats.Title = l.StreamTitle
 		stats.Category = l.Category.Name
 		stats.Language = l.Language
@@ -584,50 +615,72 @@ func (k *Kick) Stats(ctx context.Context, clientID, accessToken string) (*KickSt
 
 	// The second call is skipped once the first one has both a live channel and
 	// a count: it exists to fill gaps, not to spend a round trip proving the
-	// first answer.
-	if stats.Live && stats.ViewerCount > 0 {
+	// first answer. A withheld count is not a gap -- asking again cannot
+	// unhide it -- but a channel absent from the list still might be live, so
+	// the condition stays on Live rather than on the count.
+	if stats.Live && stats.ViewerCount != nil {
 		return stats, nil
 	}
 
-	agg, aggErr := k.livestreams(ctx, accessToken, kickLivestreamStatsPath)
-	if aggErr != nil {
+	ch, chErr := k.channel(ctx, accessToken)
+	if chErr != nil {
 		if userErr != nil {
 			return nil, userErr
 		}
-		// The user list answered; the aggregate one not answering is not the
+		// The user list answered; the channels call not answering is not the
 		// operator's problem.
 		return stats, nil
 	}
-	for _, l := range agg {
-		if v := l.viewers(); v > stats.ViewerCount {
-			stats.ViewerCount = v
-			if stats.Source == "" {
-				stats.Source = kickLivestreamStatsPath
-			}
-		}
-		if v := l.viewers(); v > 0 {
-			stats.Live = true
-		}
+
+	// is_live is the platform's own answer and outranks an inference, so it
+	// may promote a channel the first call missed. It may NOT demote one the
+	// first call found: the two reads are seconds apart and a stream that just
+	// started can be in the list before the channel resource catches up.
+	if ch.Stream.IsLive {
+		stats.Live = true
 	}
-	if userErr != nil && stats.Source == "" {
-		stats.Source = kickLivestreamStatsPath
+	if stats.ViewerCount == nil && ch.Stream.ViewerCount > 0 {
+		v := ch.Stream.ViewerCount
+		stats.ViewerCount = &v
+	}
+	if stats.Title == "" {
+		stats.Title = ch.StreamTitle
+	}
+	if stats.Category == "" {
+		stats.Category = ch.Category.Name
+	}
+	if stats.Language == "" {
+		stats.Language = ch.Stream.Language
+	}
+	if stats.Slug == "" {
+		stats.Slug = ch.Slug
+	}
+	if stats.StartedAt == nil {
+		stats.StartedAt = parseKickTime(ch.Stream.StartTime)
+	}
+	if stats.Source == "" {
+		stats.Source = kickChannelsPath
 	}
 	return stats, nil
 }
 
-// parseKickTime is deliberately forgiving: an unparseable timestamp yields the
-// zero time rather than failing a stats read that is otherwise fine.
-func parseKickTime(s string) time.Time {
+// parseKickTime is deliberately forgiving: an unparseable timestamp costs the
+// timestamp rather than failing a stats read that is otherwise fine.
+//
+// Nil rather than the zero time, so the caller reports "not known" instead of
+// the year 1. Kick documents no format for started_at, which is why three
+// layouts are tried here and only one is tried for Twitch.
+func parseKickTime(s string) *time.Time {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return time.Time{}
+		return nil
 	}
 	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
 		if t, err := time.Parse(layout, s); err == nil {
-			return t
+			return &t
 		}
 	}
-	return time.Time{}
+	return nil
 }
 
 // CheckCredentials proves the pair through Kick's app-access-token flow, which

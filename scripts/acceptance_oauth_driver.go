@@ -758,6 +758,47 @@ func live(name string) {
 		emit("accountNameLen", len(acct.Name))
 	}
 
+	// THE ONE MEASUREMENT THE UNIT TESTS CANNOT MAKE. Every stats test in
+	// internal/oauth answers from an httptest stub whose body this repo wrote,
+	// so all of them prove the decoder matches the fixture and none prove the
+	// fixture matches the platform. That gap is not hypothetical here: Kick's
+	// stats fallback shipped against a fixture shaped like the struct instead
+	// of like the endpoint, stayed green for as long as it existed, and could
+	// never have worked. This step is the only place the real body is read.
+	//
+	// It is reported, not asserted, for everything except the shape. Whether
+	// the account is live at 3am on a Sunday is not this suite's business, and
+	// a check that failed because nobody was streaming would be turned off
+	// within a week. What IS asserted: that the call succeeds, and that a
+	// viewer count is either absent or a real number -- never the fabricated
+	// zero this whole phase exists to prevent.
+	// Asserted on p rather than resolved through oauth.StatsFor, which would
+	// look up the PACKAGE singleton and ignore the provider this driver built.
+	// Same distinction endpoints.go draws with the Set twin.
+	if st, ok := p.(oauth.LiveStatter); ok {
+		stats, serr := st.Stats(ctx, clientID, tok.AccessToken)
+		switch {
+		case serr != nil:
+			emit("statsOK", false)
+			emit("statsError", serr.Error())
+		default:
+			emit("statsOK", true)
+			emit("statsLive", stats.Live)
+			// Absent and zero are DIFFERENT and the whole point is that the
+			// wire preserves the difference. Reported as a string so the shell
+			// can tell "not reported" from "0" without a second field, which a
+			// numeric zero would have made indistinguishable.
+			if stats.ViewerCount == nil {
+				emit("statsViewers", "not-reported")
+			} else {
+				emit("statsViewers", strconv.Itoa(*stats.ViewerCount))
+			}
+			emit("statsSource", stats.Source)
+		}
+	} else {
+		emit("statsOK", "unsupported")
+	}
+
 	ing, err := p.Ingest(ctx, clientID, tok.AccessToken)
 	if err != nil {
 		emit("ingestOK", false)
