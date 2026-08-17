@@ -409,6 +409,20 @@ func (s IngestSpec) PublicIngestURL(host string) string {
 		// api.publishURLs emits the key as its own field for that reason.
 		return fmt.Sprintf("rtmp://%s:%d/%s", host, s.RTMPPort, strings.Trim(s.RTMPApp, "/"))
 	default:
+		// url.Values.Encode(), and it is SAFE ONLY BECAUSE THE PASSPHRASE ALPHABET
+		// IS BOUNDED. THE CONSUMER DOES NOT PERCENT-DECODE: FFmpeg's libsrt reads
+		// these options with av_find_info_tag, which copies the raw bytes after
+		// `=`. So any character Encode() escapes would arrive as its %XX text and
+		// be compared, literally, against the cleartext in the database -- which
+		// is how a passphrase containing `;` refused every connection from an
+		// operator who had typed it correctly.
+		//
+		// db.IngestSettings.problems() restricts the passphrase to unreserved
+		// characters, so nothing here can encode and Encode() is a no-op over the
+		// value. It is kept rather than replaced with string concatenation for
+		// the parameter added in two years: a hand-built query is safe until
+		// somebody appends a dynamic value to it, and this one already carries a
+		// credential.
 		q := url.Values{}
 		q.Set("mode", "caller")
 		q.Set("transtype", "live")
