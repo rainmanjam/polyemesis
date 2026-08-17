@@ -672,15 +672,24 @@ func TestFacebookTargetsOffersEveryPageAndSurvivesHavingNone(t *testing.T) {
 	}
 }
 
-func TestFacebookIsDiscoverableAsATargetedProviderAndOthersAreNot(t *testing.T) {
+// YouTube MOVED FROM false TO true HERE, and the row is worth reading twice.
+// It is not a multi-target platform -- one Google account addresses one channel
+// -- but the capability it needed is IngestFor's, not Targets': a scheduled
+// broadcast has an id, and Provider.Ingest has nowhere to put one. Its Targets
+// answers with a single entry rather than pretending to a choice, and every
+// absent case below is untouched, so the half of this test that matters (a
+// lookup answering "yes" for a platform that cannot do it hands the caller a nil
+// interface) still has three platforms holding it up.
+func TestTheTargetedProviderCapabilityIsFoundOnlyWhereItExists(t *testing.T) {
 	tests := []struct {
 		name     string
 		platform db.Platform
 		want     bool
 	}{
 		{"facebook publishes to a profile or a Page", db.PlatformFacebook, true},
-		{"youtube has one channel per account", db.PlatformYouTube, false},
+		{"youtube creates the broadcast that carries the ingest", db.PlatformYouTube, true},
 		{"twitch has one channel per account", db.PlatformTwitch, false},
+		{"kick has one channel per account", db.PlatformKick, false},
 		{"an unknown platform is absent rather than an error", db.Platform("mystery"), false},
 	}
 	for _, tc := range tests {
@@ -1552,12 +1561,18 @@ func TestAnUnscheduledBroadcastIsStillLiveNowAndSendsNoEventParams(t *testing.T)
 	}
 }
 
-// The capability must be DISCOVERABLE on Facebook and ABSENT everywhere else,
-// and the second half is the half that matters. A guard that only checked that
-// Facebook is found would pass with the absent branch broken -- and a lookup
-// that answers "yes" for YouTube hands the caller a nil ScheduledBroadcaster
-// that panics on the first call, which is strictly worse than the concrete
-// type assertion this interface replaced.
+// The capability must be DISCOVERABLE where it exists and ABSENT where it does
+// not, and the second half is the half that matters. A guard that only checked
+// that Facebook is found would pass with the absent branch broken -- and a
+// lookup that answers "yes" for Twitch hands the caller a nil
+// ScheduledBroadcaster that panics on the first call, which is strictly worse
+// than the concrete type assertion this interface replaced.
+//
+// The comment below was written when Facebook was the only implementer and its
+// mutation record is kept verbatim rather than rewritten, because a mutation
+// observed once is evidence and a mutation re-described later is a claim. What
+// changed is which platforms sit on which side: YouTube moved to the found half
+// when it grew ScheduleHorizon and RescheduleBroadcast.
 //
 // MUTATION M1 (absent branch), internal/oauth/facebook.go, in
 // ScheduledBroadcastsFor: `return sb, ok` -> `return sb, true`.
@@ -1568,14 +1583,18 @@ func TestAnUnscheduledBroadcastIsStillLiveNowAndSendsNoEventParams(t *testing.T)
 // Observed: FAIL -- facebook reported no capability, while every absent case
 // stayed green. M1 leaves this half green and M2 leaves the other half green,
 // which is why both halves are here.
-func TestOnlyFacebookIsDiscoverableAsAScheduledBroadcaster(t *testing.T) {
+func TestTheScheduledBroadcastCapabilityIsFoundOnlyWhereItExists(t *testing.T) {
 	tests := []struct {
 		name     string
 		platform db.Platform
 		want     bool
 	}{
 		{"facebook creates the broadcast ahead of the show", db.PlatformFacebook, true},
-		{"youtube has no pre-announce path here yet", db.PlatformYouTube, false},
+		// YouTube arrived after this test did. Both halves of the guard survive
+		// it: Twitch, Kick and the unknown platform still prove the absent
+		// branch, and two platforms now prove the found branch, so M2 (resolving
+		// every lookup against one hard-coded platform) still fails here.
+		{"youtube creates a broadcast with a scheduledStartTime", db.PlatformYouTube, true},
 		{"twitch has no broadcast object to schedule", db.PlatformTwitch, false},
 		{"kick has no broadcast object to schedule", db.PlatformKick, false},
 		{"an unknown platform is absent rather than an error", db.Platform("mystery"), false},

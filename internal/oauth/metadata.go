@@ -326,8 +326,15 @@ func (y *YouTube) MetadataCaps() MetadataCaps {
 type ytBroadcast struct {
 	ID      string `json:"id"`
 	Snippet struct {
-		Title              string `json:"title"`
-		Description        string `json:"description"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		// ChannelID is read so a write can refuse a broadcast that is not this
+		// token's. liveBroadcasts.list documents "owned by the authenticated
+		// user" exactly once, in the `mine` row -- nothing scopes the `id` or
+		// `broadcastStatus` filters to the caller -- so ownership is UNVERIFIED
+		// and checked here rather than assumed. Stats does the same on the
+		// liveness read, for the same reason.
+		ChannelID          string `json:"channelId"`
 		ScheduledStartTime string `json:"scheduledStartTime"`
 	} `json:"snippet"`
 	Status struct {
