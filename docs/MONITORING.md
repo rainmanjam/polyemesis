@@ -79,7 +79,7 @@ not up is a platform you think you are streaming to and are not.
 
 If you do not want to run Prometheus, polyemesis has its own alert rules with
 webhook delivery — the same conditions, evaluated in-process, posted to a URL
-you supply. Configure them under *Settings → Alerts*, or through
+you supply. Configure them under *Automation → Alerts*, or through
 `/api/v1/alerts` ([API.md](API.md#alerts-and-schedules)).
 
 Webhook URLs often carry their credential in the path, so they are masked in

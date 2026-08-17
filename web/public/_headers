@@ -31,6 +31,33 @@
 # So no rule may set a header that a later rule also sets. The security headers
 # stay on /* because they belong on everything; Cache-Control is now stated once
 # per path class, and the HTML rule is scoped to the HTML rather than to /*.
+# CLOUDFLARE WEB ANALYTICS IS NOT ALLOWED HERE, AND A TEST DECIDED THAT.
+#
+# Lighthouse (desktop, 2026-08-16) failed two audits on the live homepage --
+# errors-in-console and inspector-issues -- for one reason:
+#
+#   Loading the script 'https://static.cloudflareinsights.com/beacon.min.js/...'
+#   violates the following Content Security Policy directive:
+#   "script-src 'self' 'unsafe-inline'"
+#
+# Cloudflare injects that beacon at the edge because Web Analytics is enabled on
+# the Pages project. The first fix here added static.cloudflareinsights.com to
+# script-src and cloudflareinsights.com to connect-src, and it was WRONG --
+# TestThePagesHeadersRestateEverySecurityHeaderTheNginxConfigDeclares failed
+# immediately, because this policy is required to match deploy/nginx.conf.example
+# byte for byte. Its message is the whole argument:
+#
+#   "A header that is present and weakened is worse than one that is missing,
+#    because it reads as covered."
+#
+# Matching the weakening into nginx would have been worse still: nginx never
+# serves that beacon, so it would carry an exception for a script it cannot
+# receive, purely to keep two files equal.
+#
+# THE FIX IS THEREFORE NOT HERE. Turn Web Analytics off in the Cloudflare
+# dashboard. The beacon stops being injected, the console errors stop, and this
+# policy stays as tight as the nginx one it mirrors. Nothing is lost: the
+# analytics was collecting nothing anyway -- every request for it was blocked.
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
@@ -95,6 +122,10 @@
   Cache-Control: no-cache
 /how-to-multistream-from-obs
   Cache-Control: no-cache
+/multistream
+  Cache-Control: no-cache
+/twitch-vod-track
+  Cache-Control: no-cache
 /404
   Cache-Control: no-cache
 # The comparison pages are nested, so they are SERVED at /vs/<name> and built as
@@ -109,6 +140,8 @@
 /vs/restreamer
   Cache-Control: no-cache
 /vs/streamelements
+  Cache-Control: no-cache
+/vs/streamlabs
   Cache-Control: no-cache
 /*.html
   Cache-Control: no-cache

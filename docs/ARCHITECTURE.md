@@ -15,7 +15,8 @@ any number of destinations select and that touches video only. See §3.
 ```
   OBS / synthetic source
         │
-        │  SRT (mpegts): 1 video + up to 6 AAC tracks
+        │  SRT (mpegts): 1 video + up to 32 AAC tracks
+        │  (routing.MaxTracks; six is what OBS sends)
         │  or RTMP (1 video + 1 AAC track)
         │
         │  Both land on ONE shared listener per protocol, addressed by the
@@ -42,7 +43,7 @@ any number of destinations select and that touches video only. See §3.
    │        │         │                           -map 0:a -f null -
    │        │         │                           astats → WS levels
    │        │         └─────────────────────────► preview ffmpeg
-   │        │                                     LL-HLS → hls.js
+   │        │                                     latency-tuned HLS (2.2–3.2 s) → hls.js
    │        └───────────────────────────────────► recorder ffmpeg
    │                                              -map 0 -c copy → MKV segments
    │                                              (ALL audio tracks kept)

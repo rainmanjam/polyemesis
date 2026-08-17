@@ -291,7 +291,8 @@ So the state is **recorded**, not merely logged:
   signal** — that is also how an upload from before this feature looks.
 - `GET /api/v1/media` also carries `"outcome"`, always present, and it is the
   field to branch on. `verified` is still true only for "inspected and
-  accepted", but **false covers four situations with different remedies**:
+  accepted", so **false covers three situations with different remedies** — and
+  `outcome` is the field that tells them apart. Here are all four of its values:
 
   | `outcome` | what it means | what to do |
   | --- | --- | --- |

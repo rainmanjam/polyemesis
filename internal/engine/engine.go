@@ -2200,6 +2200,13 @@ func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig, dataDir string
 		strconv.Itoa(r.Width), strconv.Itoa(r.Height), strconv.Itoa(r.FPS),
 		strconv.Itoa(r.VideoBitrate), string(r.Encoder), r.Preset,
 		strconv.FormatFloat(r.GOPSeconds, 'g', -1, 64),
+		// The rest of the rate-control triple. Both reach the command line --
+		// rendition.go writes `-maxrate` and `-bufsize` from them -- so a
+		// ceiling or buffer edit is a different encode. They were missing, which
+		// meant the UI accepted the change, the row stored it, and the running
+		// encoder kept the old ceiling until something else happened to restart
+		// it. Exactly the Deinterlace defect above, in a different field.
+		strconv.Itoa(r.MaxrateKbps), strconv.Itoa(r.BufsizeKbps),
 		// Aspect conversion changes the filter chain without changing any
 		// dimension, so it has to be named here or picking a mode would be
 		// saved and never encoded.
