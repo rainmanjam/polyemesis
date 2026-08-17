@@ -285,6 +285,12 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       broadcastLifecycle: "yes",
     },
     reasons: {
+      // Facebook and YouTube both read "Works" here and mean different things:
+      // YouTube is driven by the lifecycle coordinator, Facebook is commanded by
+      // hand. Without this sentence an operator reads the two cells as equal and
+      // expects an automatic end that nothing issues. Mirrors capabilities.go.
+      broadcastLifecycle:
+        'Creating the broadcast and ending it both work, but they are things YOU do — connecting the account creates the live video, and "End broadcast" is on the destination menu. Nothing ends a Facebook broadcast on its own, unlike YouTube.',
       streamKey:
         "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
       moderation:

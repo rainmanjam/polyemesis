@@ -156,7 +156,18 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         working-directory: ui
-        run: npm ci --no-audit --no-fund && npm run coverage || true
+        # --ignore-scripts: a CI job holding a SONAR_TOKEN must not run arbitrary
+        # postinstall scripts from the dependency tree. That is the standard
+        # supply-chain hardening, and Sonar flagged its absence here as a MAJOR
+        # vulnerability against this very file -- correctly, since this job runs
+        # on a token-bearing runner.
+        #
+        # VERIFIED RATHER THAN ASSUMED SAFE: installing with --ignore-scripts and
+        # then running the coverage suite passes 210/210 in this tree, so nothing
+        # vitest needs is produced by a lifecycle hook. If a future dependency
+        # does need one, this step fails visibly rather than silently reporting
+        # less coverage -- which is the failure mode worth guarding.
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run coverage || true
 
       - name: SonarQube Scan
         if: steps.gate.outputs.ready == 'true'

@@ -292,7 +292,18 @@ var platformCapabilities = []PlatformCapability{
 			CapBroadcastLifecycle: SupportYes,
 		},
 		Reasons: map[Capability]string{
-			CapStreamKey: "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
+			// WHY THIS CELL NEEDS A SENTENCE AND DID NOT HAVE ONE. Facebook and
+			// YouTube both read "Works" here, and they mean different things.
+			// YouTube is DRIVEN: the lifecycle coordinator transitions it to live
+			// and ends it on its own. Facebook is COMMANDED BY HAND -- connecting
+			// the account creates the live video, and ending it is a menu item the
+			// operator presses. Both are real, so SupportYes is right for both;
+			// but an operator comparing the two cells with only YouTube's sentence
+			// in front of them would reasonably read Facebook's bare Works as the
+			// same automation, and then leave an unattended channel expecting an
+			// end that nothing is going to issue.
+			CapBroadcastLifecycle: "Creating the broadcast and ending it both work, but they are things YOU do — connecting the account creates the live video, and \"End broadcast\" is on the destination menu. Nothing ends a Facebook broadcast on its own, unlike YouTube.",
+			CapStreamKey:          "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
 			CapModeration: "Delete a comment, or HIDE one — Facebook is the only platform here that can take a message off " +
 				"the public thread without destroying it, because its live chat is a comment thread. Acting on a " +
 				"Page's comments needs the MODERATE task permission, which is separate from being able to read them, " +
