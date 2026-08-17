@@ -42,9 +42,15 @@ func TestPlatformsDocMatrixMatchesTheCapabilityMatrix(t *testing.T) {
 	}
 
 	// Columns in the order the table renders them.
+	// EIGHT NOW, AND THE COUNT IS LOAD-BEARING TWICE OVER. This slice says
+	// which columns are compared, and len(cells) == len(cols) below is also how
+	// the capability table is TOLD APART from every other table on the page --
+	// so a column added to the document without being added here does not
+	// merely go unchecked, it can make a different table parse as this one.
 	cols := []Capability{
 		CapSSO, CapStreamKey, CapMetadata,
 		CapChatRead, CapChatSend, CapModeration, CapViewerStats,
+		CapBroadcastLifecycle,
 	}
 
 	rowRe := regexp.MustCompile(`(?m)^\|\s*\*\*([^*]+)\*\*\s*\|(.+)\|\s*$`)

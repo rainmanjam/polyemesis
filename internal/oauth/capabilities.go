@@ -43,6 +43,18 @@ const (
 	CapModeration Capability = "moderation"
 	// CapViewerStats is the live viewer count read back from the platform.
 	CapViewerStats Capability = "viewerStats"
+	// CapBroadcastLifecycle is whether polyemesis can tell the PLATFORM to
+	// start and stop, as opposed to merely sending it video.
+	//
+	// IT IS A COLUMN BECAUSE THE ANSWER DIFFERS AND CHANGES WHICH PLATFORM YOU
+	// PICK, which is the bar this matrix sets for one. Twitch and Kick publish
+	// nothing -- established by enumerating all 149 Helix endpoints and all 27
+	// Kick operations, not by failing to find a page -- so on those two the
+	// stream IS the trigger and liveness can only be observed. YouTube has a
+	// documented state machine, Facebook has an end call, X has both and is
+	// unbuilt. An operator choosing where to run an unattended channel is
+	// choosing on exactly this.
+	CapBroadcastLifecycle Capability = "broadcastLifecycle"
 )
 
 // Support is how well one platform does one thing.
@@ -104,6 +116,7 @@ func CapabilityColumns() []CapabilityInfo {
 		{CapChatSend, "Chat send", "You can reply from the chat pane."},
 		{CapModeration, "Moderation", "Delete a message or time a viewer out."},
 		{CapViewerStats, "Viewer stats", "Live viewer count read back from the platform."},
+		{CapBroadcastLifecycle, "Start / end", "Tell the platform to go live and to end, rather than only sending it video."},
 	}
 }
 
@@ -192,13 +205,14 @@ var platformCapabilities = []PlatformCapability{
 		Summary: "Connect a Google account and polyemesis fetches the ingest URL and stream key, pushes your title and description at go-live, and reads and replies to live chat.",
 		HelpURL: "https://support.google.com/youtube/answer/2907883",
 		Caps: map[Capability]Support{
-			CapSSO:         SupportYes,
-			CapStreamKey:   SupportYes,
-			CapMetadata:    SupportYes,
-			CapChatRead:    SupportYes,
-			CapChatSend:    SupportYes,
-			CapModeration:  SupportYes,
-			CapViewerStats: SupportYes,
+			CapSSO:                SupportYes,
+			CapStreamKey:          SupportYes,
+			CapMetadata:           SupportYes,
+			CapChatRead:           SupportYes,
+			CapChatSend:           SupportYes,
+			CapModeration:         SupportYes,
+			CapViewerStats:        SupportYes,
+			CapBroadcastLifecycle: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapViewerStats: "Live state, title, start time and concurrent viewer count, over the same auth/youtube " +
@@ -222,13 +236,14 @@ var platformCapabilities = []PlatformCapability{
 		Summary: "Connect a Twitch account and polyemesis fetches the stream key, sets your title and category at go-live, and joins chat over IRC.",
 		HelpURL: "https://dev.twitch.tv/console/apps",
 		Caps: map[Capability]Support{
-			CapSSO:         SupportYes,
-			CapStreamKey:   SupportYes,
-			CapMetadata:    SupportYes,
-			CapChatRead:    SupportYes,
-			CapChatSend:    SupportYes,
-			CapModeration:  SupportYes,
-			CapViewerStats: SupportYes,
+			CapSSO:                SupportYes,
+			CapStreamKey:          SupportYes,
+			CapMetadata:           SupportYes,
+			CapChatRead:           SupportYes,
+			CapChatSend:           SupportYes,
+			CapModeration:         SupportYes,
+			CapViewerStats:        SupportYes,
+			CapBroadcastLifecycle: SupportNo,
 		},
 		Reasons: map[Capability]string{
 			CapMetadata: "Title and category, over the channel:manage:broadcast scope.",
@@ -267,9 +282,10 @@ var platformCapabilities = []PlatformCapability{
 			// comment POST. The generic /{object-id}/comments page lists Live
 			// Video among its nodes, but it never writes that path and a
 			// page-level implication does not outrank a per-endpoint refusal.
-			CapChatSend:    SupportNo,
-			CapModeration:  SupportYes,
-			CapViewerStats: SupportUnknown,
+			CapChatSend:           SupportNo,
+			CapModeration:         SupportYes,
+			CapViewerStats:        SupportUnknown,
+			CapBroadcastLifecycle: SupportYes,
 		},
 		Reasons: map[Capability]string{
 			CapStreamKey: "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
@@ -287,13 +303,14 @@ var platformCapabilities = []PlatformCapability{
 		Summary: "Sign in with Kick and polyemesis fetches the ingest URL and stream key, sets the title, category and tags, reads and replies to chat, and reads viewer stats.",
 		HelpURL: "https://kick.com/dashboard/settings/stream",
 		Caps: map[Capability]Support{
-			CapSSO:         SupportYes,
-			CapStreamKey:   SupportYes,
-			CapMetadata:    SupportYes,
-			CapChatRead:    SupportYes,
-			CapChatSend:    SupportYes,
-			CapModeration:  SupportYes,
-			CapViewerStats: SupportYes,
+			CapSSO:                SupportYes,
+			CapStreamKey:          SupportYes,
+			CapMetadata:           SupportYes,
+			CapChatRead:           SupportYes,
+			CapChatSend:           SupportYes,
+			CapModeration:         SupportYes,
+			CapViewerStats:        SupportYes,
+			CapBroadcastLifecycle: SupportNo,
 		},
 		Reasons: map[Capability]string{
 			CapSSO: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
@@ -355,12 +372,13 @@ var platformCapabilities = []PlatformCapability{
 			// back on every broadcast object, but publishes nothing that mints
 			// or enumerates one. So polyemesis can verify a binding it was
 			// given; it cannot obtain one.
-			CapStreamKey:   SupportManual,
-			CapMetadata:    SupportUnknown,
-			CapChatRead:    SupportUnknown,
-			CapChatSend:    SupportUnknown,
-			CapModeration:  SupportUnknown,
-			CapViewerStats: SupportUnknown,
+			CapStreamKey:          SupportManual,
+			CapMetadata:           SupportUnknown,
+			CapChatRead:           SupportUnknown,
+			CapChatSend:           SupportUnknown,
+			CapModeration:         SupportUnknown,
+			CapViewerStats:        SupportUnknown,
+			CapBroadcastLifecycle: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
 			CapSSO:         "OAuth 2.0 authorization code at api.x.com/2/oauth2/authorize with the broadcast.read and broadcast.write scopes, declared in X's served OpenAPI spec. PKCE is X's documented practice elsewhere but is not stated in the spec for this flow.",
@@ -414,7 +432,8 @@ var platformCapabilities = []PlatformCapability{
 			// poller already fetches, so this is a field read away rather than
 			// an integration away. The stats drift test is a biconditional --
 			// a SupportYes here with no Stats method would fail it, correctly.
-			CapViewerStats: SupportUnknown,
+			CapViewerStats:        SupportUnknown,
+			CapBroadcastLifecycle: SupportNo,
 		},
 		Reasons: map[Capability]string{
 			CapChatRead: "Polled from rumble.com/-livestream-api/get-data, which needs no sign-in — the key from your " +
@@ -473,12 +492,13 @@ var platformCapabilities = []PlatformCapability{
 			CapSSO: SupportNo,
 			// Not SupportManual: for most accounts there is no key to paste,
 			// so offering the paste field as the answer would be its own lie.
-			CapStreamKey:   SupportNo,
-			CapMetadata:    SupportNo,
-			CapChatRead:    SupportNo,
-			CapChatSend:    SupportNo,
-			CapModeration:  SupportNo,
-			CapViewerStats: SupportNo,
+			CapStreamKey:          SupportNo,
+			CapMetadata:           SupportNo,
+			CapChatRead:           SupportNo,
+			CapChatSend:           SupportNo,
+			CapModeration:         SupportNo,
+			CapViewerStats:        SupportNo,
+			CapBroadcastLifecycle: SupportNo,
 		},
 	},
 }
@@ -511,6 +531,10 @@ func manualUnverified(presetID, name, summary, readFirst string) PlatformCapabil
 			CapChatSend:    SupportUnknown,
 			CapModeration:  SupportUnknown,
 			CapViewerStats: SupportUnknown,
+			// Unknown rather than No: nobody has read these platforms' APIs
+			// for a lifecycle call, and this matrix's own rule is that a No
+			// must trace to something checked.
+			CapBroadcastLifecycle: SupportUnknown,
 		},
 	}
 }

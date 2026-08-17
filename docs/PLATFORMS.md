@@ -27,22 +27,22 @@ below. The table is what each platform's **published API** allows today.
 The same matrix is rendered in `Settings → Platform credentials` and served from
 `GET /api/v1/platforms/capabilities`.
 
-| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers |
-|---|---|---|---|---|---|---|---|
-| **YouTube Live** | Works | Works | Works | Works | Works | Works | Works |
-| **Twitch** | Works | Works | Works | Works | Works | Works | Works |
-| **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified |
-| **Kick** | Works | Works | Works | Works | Works | Works | Works |
-| **X (Twitter) Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified |
-| **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Trovo** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Vimeo Livestream** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **TikTok LIVE** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Instagram Live** | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible |
+| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers  Start / end |
+|---|---|---|---|---|---|---|---|---|
+| **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Unverified |
+| **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible |
+| **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works |
+| **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible |
+| **X (Twitter) Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible |
+| **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Trovo** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Vimeo Livestream** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **TikTok LIVE** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Instagram Live** | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible |
 | *Everything else* | — | By hand | — | — | — | — | — |
 
 | Term | Means |

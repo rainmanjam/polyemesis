@@ -31,7 +31,8 @@ export type Capability =
   | "chatRead"
   | "chatSend"
   | "moderation"
-  | "viewerStats";
+  | "viewerStats"
+  | "broadcastLifecycle";
 
 /** Four values rather than a boolean, because the interesting platforms are
  *  not binary. Kick's stream key is not "unsupported" — it works perfectly,
@@ -111,6 +112,11 @@ export const CAPABILITY_COLUMNS: {
     key: "viewerStats",
     label: "Viewers",
     help: "Live viewer count read back from the platform.",
+  },
+  {
+    key: "broadcastLifecycle",
+    label: "Start / end",
+    help: "Tell the platform to go live and to end, rather than only sending it video.",
   },
 ];
 
@@ -200,6 +206,7 @@ function manualUnverified(
       chatSend: "unknown",
       moderation: "unknown",
       viewerStats: "unknown",
+      broadcastLifecycle: "unknown",
     },
   };
 }
@@ -220,6 +227,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatSend: "yes",
       moderation: "yes",
       viewerStats: "yes",
+      broadcastLifecycle: "unknown",
     },
     reasons: {
       viewerStats:
@@ -245,6 +253,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatSend: "yes",
       moderation: "yes",
       viewerStats: "yes",
+      broadcastLifecycle: "no",
     },
     reasons: {
       metadata: "Title and category, over the channel:manage:broadcast scope.",
@@ -271,6 +280,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatSend: "no",
       moderation: "yes",
       viewerStats: "unknown",
+      broadcastLifecycle: "yes",
     },
     reasons: {
       streamKey:
@@ -298,6 +308,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatSend: "yes",
       moderation: "yes",
       viewerStats: "yes",
+      broadcastLifecycle: "no",
     },
     reasons: {
       sso: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
@@ -329,6 +340,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatSend: "unknown",
       moderation: "unknown",
       viewerStats: "unknown",
+      broadcastLifecycle: "unknown",
     },
     reasons: {
       sso: "Nothing to sign into for live video. An OAuth app here would grant access to posts, which is not what a restreamer needs.",
@@ -350,6 +362,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatSend: "no",
       moderation: "no",
       viewerStats: "unknown",
+      broadcastLifecycle: "no",
     },
     reasons: {
       chatRead:
@@ -420,6 +433,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       chatSend: "no",
       moderation: "no",
       viewerStats: "no",
+      broadcastLifecycle: "no",
     },
   },
 ];

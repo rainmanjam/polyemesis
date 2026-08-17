@@ -84,6 +84,28 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		{"dlive sign-in is unverified, not refused", "dlive", CapSSO, SupportUnknown,
 			"the developer portal does not resolve, which tells us nothing about the API itself"},
 		{"dlive key is pasted", "dlive", CapStreamKey, SupportManual, "dashboard → stream settings"},
+
+		// ---- broadcastLifecycle. The column exists because the answer differs
+		// per platform in a way that changes which platform somebody picks, and
+		// these four rows are that difference.
+		{"facebook can be told to end a broadcast", "facebook", CapBroadcastLifecycle, SupportYes,
+			"end_live_video is documented, wired to a route, and reachable from the destination card"},
+		// Documented and NOT WIRED. TransitionBroadcast exists in
+		// internal/oauth with no caller: no route, no UI, nothing that can
+		// invoke it. The house rule this matrix keeps -- a capability nothing
+		// implements is not a capability -- is why this is not SupportYes, and
+		// it is the same rule that held Rumble's viewer stats at unverified and
+		// that rolled X's five cells back after they were briefly set to yes.
+		{"youtube lifecycle is documented and unwired", "youtube", CapBroadcastLifecycle, SupportUnknown,
+			"the transition call exists as a provider method with no caller"},
+		// Established by ENUMERATION, which is what this matrix requires before
+		// a cell may read Not possible: all 149 endpoints in the Helix
+		// reference were listed and swept, and all 27 operations in Kick's
+		// published API were parsed. Neither has a lifecycle call to build.
+		{"twitch cannot be told to go live", "twitch", CapBroadcastLifecycle, SupportNo,
+			"149 Helix endpoints enumerated; the stream itself is the trigger"},
+		{"kick cannot be told to go live", "kick", CapBroadcastLifecycle, SupportNo,
+			"27 documented operations parsed; no lifecycle scope or endpoint exists"},
 	}
 
 	for _, tc := range tests {
