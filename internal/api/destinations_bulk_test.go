@@ -182,7 +182,23 @@ func TestBulkStartIsPacedAndBulkStopIsNot(t *testing.T) {
 	// (n-1) gaps. A lower bound only: reconciles and spawns take their own time
 	// on top, and asserting an upper bound would make this flake on a loaded
 	// machine for no gain.
-	want := (n - 1) * bulkStartPacing
+	// A LITERAL FLOOR, NOT ONE DERIVED FROM bulkStartPacing, AND THAT WAS THE
+	// WHOLE DEFECT. This bound used to read (n-1)*bulkStartPacing, which moves
+	// with the thing it is measuring: weakening the interval a hundredfold, from
+	// two seconds to twenty milliseconds, destroyed the property and the test
+	// still passed, because the expectation shrank with it. Only exactly zero
+	// was caught, and then only by the stop assertion below.
+	//
+	// Three destinations at the intended pace cost two gaps, so four seconds is
+	// the honest floor with a second of slack for a loaded machine. If the
+	// interval is deliberately changed, this number is changed by hand -- which
+	// is the reviewable act, and the reason it is written out rather than
+	// computed.
+	const wantFloor = 3 * time.Second
+	want := wantFloor
+	if n != 3 {
+		t.Fatalf("this test's literal floor assumes 3 destinations, got %d", n)
+	}
 	if got := timed("/api/v1/destinations/start-all"); got < want {
 		t.Errorf("starting %d destinations took %v, want at least %v. The starts are "+
 			"NOT being paced: %d children spawning inside one scheduler tick contend "+
@@ -196,9 +212,81 @@ func TestBulkStartIsPacedAndBulkStopIsNot(t *testing.T) {
 	// Tearing down is local: a stop signals a child this box owns and waits for
 	// it, and doing that n times reaches nobody else's server. A gap here would
 	// be pure delay in front of an operator who has decided to come off air.
-	if got := timed("/api/v1/destinations/stop-all"); got >= bulkStartPacing {
+	// Also literal. Bounded against the constant, this passed while the constant
+	// was 20ms and the stops were taking longer than a real pacing interval.
+	const stopCeiling = 1500 * time.Millisecond
+	if got := timed("/api/v1/destinations/stop-all"); got >= stopCeiling {
 		t.Errorf("stopping %d destinations took %v, which is at least one pacing "+
 			"interval (%v). Stops are deliberately not paced -- there is nothing for a "+
-			"gap to spread out.", n, got, bulkStartPacing)
+			"gap to spread out.", n, got, stopCeiling)
+	}
+}
+
+// THE TEST THE SHAPE TEST WAS NOT. Its sibling above proves the response is a
+// list with one row per destination and no top-level boolean, which is worth
+// proving and is not the same claim as "the rows say what happened".
+//
+// It could not make that second claim: its three fixtures are identical, so
+// every row takes one branch. Two mutations survived it — making a refusing
+// destination report as cleanly started, and making EVERY row report failed —
+// and either would have shipped a control whose per-row reporting, the entire
+// reason this is not one boolean, was decorative.
+//
+// Constructed effects rather than fixtures, because the interesting cases are
+// exactly the ones a healthy test rig will not produce on demand.
+func TestBulkOutcomesSayWhatActuallyHappened(t *testing.T) {
+	tests := []struct {
+		name        string
+		effectErr   string
+		effectWarn  string
+		enabled     bool
+		wantOutcome bulkOutcome
+		wantMessage string
+	}{
+		{"a refused destination is failed, and carries the platform's words",
+			"connection refused by rtmp://example.invalid", "", true, bulkFailed,
+			"connection refused by rtmp://example.invalid"},
+		{"a refusal while stopping is still a failure",
+			"could not signal the child", "", false, bulkFailed, "could not signal the child"},
+		{"an unreaped stop is a warning, not a failure",
+			"", "the process did not exit within the grace period", false, bulkWarned,
+			"the process did not exit within the grace period"},
+		{"a clean start says started and says nothing else", "", "", true, bulkStarted, ""},
+		{"a clean stop says stopped", "", "", false, bulkStopped, ""},
+		{"an error outranks a warning, because the error is the thing that stopped it working",
+			"refused", "also slow", true, bulkFailed, "refused"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, msg := classifyBulkEffect(tc.effectErr, tc.effectWarn, tc.enabled)
+			if got != tc.wantOutcome {
+				t.Errorf("outcome = %q, want %q. An operator reads this word to decide "+
+					"whether to go and look at that destination.", got, tc.wantOutcome)
+			}
+			if msg != tc.wantMessage {
+				t.Errorf("message = %q, want %q", msg, tc.wantMessage)
+			}
+		})
+	}
+}
+
+// The mixed case stated as one assertion, because it is the sentence the
+// feature exists for: eight destinations where two refuse must read as neither
+// "worked" nor "failed".
+func TestAMixedBulkResultIsNeitherSuccessNorFailure(t *testing.T) {
+	rows := []struct{ errText string }{{""}, {"refused"}, {""}, {"refused"}, {""}}
+	var started, failed int
+	for _, r := range rows {
+		switch out, _ := classifyBulkEffect(r.errText, "", true); out {
+		case bulkStarted:
+			started++
+		case bulkFailed:
+			failed++
+		}
+	}
+	if started != 3 || failed != 2 {
+		t.Fatalf("started=%d failed=%d, want 3 and 2. A bulk result that collapses to "+
+			"one verdict hides which destinations an operator has to go and fix.",
+			started, failed)
 	}
 }

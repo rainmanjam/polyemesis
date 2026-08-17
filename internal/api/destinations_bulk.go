@@ -229,18 +229,33 @@ func (s *Server) bulkOne(row *db.Destination, enabled bool) bulkDestResult {
 	}
 
 	res.State = ctl.Effect.State
+	res.Outcome, res.Message = classifyBulkEffect(ctl.Effect.Error, ctl.Effect.Warning, enabled)
+	return res
+}
+
+// classifyBulkEffect turns one destination's outcome into the word the operator
+// reads, and it is a FUNCTION so that it can be tested against constructed
+// effects rather than against whatever three identical fixtures happen to do.
+//
+// That is not a style preference. Inline, this was covered by a test that
+// asserted only the SHAPE of the response -- row count, ids, that the outcome
+// was one of five known words -- with three identical destinations that all
+// took the same branch. Two mutations survived it: making a refusing
+// destination report as cleanly started, and making every row report failed.
+// Either would have shipped a bulk control whose per-row reporting, the entire
+// reason the feature is not one boolean, was decorative.
+func classifyBulkEffect(effectErr, effectWarn string, enabled bool) (bulkOutcome, string) {
 	switch {
-	case ctl.Effect.Error != "":
+	case effectErr != "":
 		// The destination's own fault text -- a URL the platform refuses, an
 		// encoder that would not build. The write and the reconcile both
 		// succeeded; this row still is not delivering.
-		res.Outcome, res.Message = bulkFailed, ctl.Effect.Error
-	case ctl.Effect.Warning != "":
-		res.Outcome, res.Message = bulkWarned, ctl.Effect.Warning
+		return bulkFailed, effectErr
+	case effectWarn != "":
+		return bulkWarned, effectWarn
 	case enabled:
-		res.Outcome = bulkStarted
+		return bulkStarted, ""
 	default:
-		res.Outcome = bulkStopped
+		return bulkStopped, ""
 	}
-	return res
 }

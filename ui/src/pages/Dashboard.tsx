@@ -761,19 +761,7 @@ function BulkDestinationControl({
         onOpenChange={confirmStopAll.onOpenChange}
         subject={t("dash.stopAll")}
         title={t("dash.stopAllTitle", { count })}
-        description={
-          <>
-            Every destination stops publishing. The video comes off air on all of
-            them, and pressing Start all puts it back.{" "}
-            <strong>
-              Any YouTube broadcast on this install is ENDED, and a completed
-              YouTube broadcast cannot return to live
-            </strong>{" "}
-            — starting again streams to a new one you have to create or announce.
-            That is what the per-destination Stop button already does, one row at
-            a time; this does it to all {count}.
-          </>
-        }
+        description={t("dash.stopAllConsequence", { count: String(count) })}
         confirmLabel={t("dash.stopAll")}
         onConfirm={() => run("stop")}
       />
