@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -190,7 +191,11 @@ type BroadcastTarget struct {
 	// Ref is what gets stored in PlatformAccount.AccountRef and handed back to
 	// AccountFor/IngestFor. See parseTargetRef for the spellings.
 	Ref string `json:"ref"`
-	// Kind is "user" or "page", so the UI can group and badge them.
+	// Kind is the platform's own word for what this target is, so the UI can
+	// group and badge them: "user" or "page" on Facebook, "channel" on YouTube.
+	// Not normalised to a shared vocabulary, because a Page is not a channel and
+	// an operator comparing this against the platform's own UI has to see the
+	// term that platform uses.
 	Kind string `json:"kind"`
 	Name string `json:"name"`
 	// Category is the Page's own category, empty for a profile. It is the one
@@ -320,6 +325,33 @@ type ScheduledBroadcaster interface {
 	// answer a write to no object in a way that reads as success.
 	RescheduleBroadcast(ctx context.Context, accessToken, broadcastID string, at time.Time) error
 }
+
+// ScheduleHorizonUnbounded is what ScheduleHorizon returns for a platform that
+// PUBLISHES NO BOUND on how far ahead a broadcast may be scheduled.
+//
+// It exists so that "the docs state no limit" and "the limit happens to be some
+// number I chose" cannot be spelled the same way. Facebook's seven days is a
+// documented sentence -- Graph refuses an event_params further out -- and is a
+// real number for that reason. YouTube's liveBroadcasts.insert reference names
+// snippet.scheduledStartTime as required and says nothing whatever about how far
+// ahead it may point; the live errors page lists invalidScheduledStartTime with
+// no bound attached (both read 2026-08-16). Returning 30 days, or 90, or a year
+// would be this repository's most-repeated defect -- a guessed number encoded as
+// though it were documented -- and it would silently drop every occurrence past
+// the guess, with no error anywhere, because the caller SKIPS rather than fails
+// when an occurrence is out of range.
+//
+// The maximum Duration and not zero, because of how a caller reads this: both
+// gates -- preannounce.go's `at.Sub(now) > sb.ScheduleHorizon()` and
+// automation.go's `at.Sub(now) <= sb.ScheduleHorizon()` -- treat a SMALLER
+// horizon as a tighter refusal, so zero would mean "refuse everything" rather
+// than "no bound to enforce". time.Time.Sub saturates at this value instead of
+// overflowing, so the comparison is well defined for any two instants.
+//
+// It asserts nothing about what YouTube will accept. A start time YouTube
+// refuses still comes back as invalidScheduledStartTime from the create, which
+// is the right place for a bound only the platform knows to be enforced.
+const ScheduleHorizonUnbounded = time.Duration(math.MaxInt64)
 
 // ScheduledBroadcastsFor returns the pre-announce capability for a platform, or
 // false when that platform has none. Mirrors TargetsFor and MetadataFor, both

@@ -140,11 +140,21 @@ func TestAStubbedProviderReachesNoRealHost(t *testing.T) {
 		"youtube": func(t *testing.T, base string) map[string]func() {
 			y := NewYouTube(WithBaseURL(base))
 			return map[string]func(){
-				"Exchange":     func() { _, _ = y.Exchange(ctx, cid, secret, "https://r.test/cb", "code", "v") },
-				"Refresh":      func() { _, _ = y.Refresh(ctx, cid, secret, "refresh") },
-				"Account":      func() { _, _ = y.Account(ctx, cid, tok) },
-				"Ingest":       func() { _, _ = y.Ingest(ctx, cid, tok) },
-				"PushMetadata": func() { _, _ = y.PushMetadata(ctx, cid, tok, "4242", Metadata{Title: "x", Category: "Gaming"}) },
+				"Exchange":   func() { _, _ = y.Exchange(ctx, cid, secret, "https://r.test/cb", "code", "v") },
+				"Refresh":    func() { _, _ = y.Refresh(ctx, cid, secret, "refresh") },
+				"Account":    func() { _, _ = y.Account(ctx, cid, tok) },
+				"AccountFor": func() { _, _ = y.AccountFor(ctx, cid, tok, "") },
+				"Targets":    func() { _, _ = y.Targets(ctx, cid, tok) },
+				"Ingest":     func() { _, _ = y.Ingest(ctx, cid, tok) },
+				"IngestFor":  func() { _, _ = y.IngestFor(ctx, cid, tok, "", IngestOptions{}) },
+				// Scheduled as well as live-now: the two take different paths
+				// through IngestFor and only the scheduled one reaches
+				// liveBroadcasts.insert and liveBroadcasts.bind, so a stub that
+				// only ever sees the live-now path proves nothing about them.
+				"IngestForScheduled":  func() { _, _ = y.IngestFor(ctx, cid, tok, "", IngestOptions{ScheduledFor: at}) },
+				"RescheduleBroadcast": func() { _ = y.RescheduleBroadcast(ctx, tok, "9", at) },
+				"Stats":               func() { _, _ = y.Stats(ctx, cid, tok) },
+				"PushMetadata":        func() { _, _ = y.PushMetadata(ctx, cid, tok, "4242", Metadata{Title: "x", Category: "Gaming"}) },
 				"PushCompliance": func() {
 					_, _ = y.PushCompliance(ctx, cid, tok, ComplianceTarget{}, db.Compliance{Privacy: db.PrivacyUnlisted})
 				},

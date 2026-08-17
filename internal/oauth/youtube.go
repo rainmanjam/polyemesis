@@ -152,11 +152,35 @@ type ytLiveStream struct {
 // This is the payoff of the OAuth flow: the user never sees, copies or
 // mistypes a stream key.
 func (y *YouTube) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error) {
+	s, err := y.reusableStream(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	return &Ingest{
+		URL: s.CDN.IngestionInfo.IngestionAddress,
+		Key: s.CDN.IngestionInfo.StreamName,
+	}, nil
+}
+
+// reusableStream finds or creates the channel's reusable RTMP stream and
+// returns the WHOLE resource, id included.
+//
+// Split out of Ingest rather than copied beside it because the scheduled-broadcast
+// path needs the stream's ID as well as its key: liveBroadcasts.bind takes a
+// streamId, and Ingest discarded it. Written twice, the two would be two chances
+// to pick different streams -- the encoder publishing to one and the broadcast
+// bound to another -- and nothing would say so, because both calls succeed and
+// the failure only shows up as a scheduled show that stays dark. Binding to the
+// SAME reusable stream is documented as allowed: "A broadcast can only be bound
+// to one video stream, though a video stream may be bound to more than one
+// broadcast" (liveBroadcasts/bind, read 2026-08-16), and it is what keeps a
+// destination's stream key stable across a pre-announce.
+func (y *YouTube) reusableStream(ctx context.Context, accessToken string) (*ytLiveStream, error) {
 	var list struct {
 		Items []ytLiveStream `json:"items"`
 	}
 	err := getJSON(ctx,
-		y.apiEndpoint()+"/liveStreams?part=snippet,cdn&mine=true&maxResults=50",
+		y.apiEndpoint()+ytStreamsPath+"?part=id,snippet,cdn&mine=true&maxResults=50",
 		accessToken, nil, &list)
 	if err != nil {
 		return nil, err
@@ -164,12 +188,9 @@ func (y *YouTube) Ingest(ctx context.Context, clientID, accessToken string) (*In
 
 	// Prefer an existing reusable RTMP stream; that is the one the creator's
 	// scheduled broadcasts are already bound to.
-	for _, s := range list.Items {
+	for i, s := range list.Items {
 		if strings.EqualFold(s.CDN.IngestionType, "rtmp") && s.CDN.IngestionInfo.StreamName != "" {
-			return &Ingest{
-				URL: s.CDN.IngestionInfo.IngestionAddress,
-				Key: s.CDN.IngestionInfo.StreamName,
-			}, nil
+			return &list.Items[i], nil
 		}
 	}
 
@@ -186,7 +207,7 @@ func (y *YouTube) Ingest(ctx context.Context, clientID, accessToken string) (*In
 		},
 	}
 	err = postJSON(ctx,
-		y.apiEndpoint()+"/liveStreams?part=snippet,cdn",
+		y.apiEndpoint()+ytStreamsPath+"?part=id,snippet,cdn",
 		accessToken, payload, nil, &created)
 	if err != nil {
 		return nil, fmt.Errorf("could not create a YouTube ingest stream: %w", err)
@@ -194,10 +215,7 @@ func (y *YouTube) Ingest(ctx context.Context, clientID, accessToken string) (*In
 	if created.CDN.IngestionInfo.StreamName == "" {
 		return nil, fmt.Errorf("YouTube created a stream but returned no stream key")
 	}
-	return &Ingest{
-		URL: created.CDN.IngestionInfo.IngestionAddress,
-		Key: created.CDN.IngestionInfo.StreamName,
-	}, nil
+	return &created, nil
 }
 
 // --------------------------------------------------------------------- stats
@@ -211,6 +229,11 @@ var _ LiveStatter = (*YouTube)(nil)
 const (
 	ytBroadcastsPath = "/liveBroadcasts"
 	ytVideosPath     = "/videos"
+	ytStreamsPath    = "/liveStreams"
+	// ytBindPath is liveBroadcasts.bind, which is a SEPARATE method rather than
+	// a parameter on the create: a broadcast and the stream that feeds it are
+	// two resources and joining them is a third call.
+	ytBindPath = ytBroadcastsPath + "/bind"
 )
 
 // ytConcurrentViewers decodes a field whose documented type and whose wire type
