@@ -81,19 +81,21 @@ func (s *Server) handleGetDebug(w http.ResponseWriter, r *http.Request) {
 
 // handleSetDebug turns recording on or off.
 //
-// A session OR AN ADMIN API TOKEN authorises this, and the earlier comment here
-// said "the session is the authorisation", which was wrong. requireScope
-// (api.go:1648) passes an admin-scoped token straight through, so anything
-// holding one can toggle recording and export a bundle WITHOUT the UI
-// confirmation ever being drawn.
+// A session OR AN ADMIN API TOKEN authorises THE TOGGLE, and only a session can
+// EXPORT. This comment has now been wrong twice, in opposite directions, which
+// is worth leaving on the record: it first claimed "the session is the
+// authorisation" when requireScope let an admin token through, and was then
+// corrected to say a token could also export -- which was true and should not
+// have been. The export moved inside requireSession in the v0.7.0 pre-tag
+// review; see the route registration in api.go.
 //
-// That is the correct behaviour -- an admin token is admin -- but it means the
-// confirmation dialog is a courtesy to a human, not a control on the route. The
-// control on the route is the audit entry, which fires either way.
+// The split that stands: toggling changes what THIS box writes down, nothing
+// leaves it, and the operator can already read every one of those lines with
+// journalctl -- so a machine credential is enough. Taking the FILE is the
+// product's largest disclosure and needs a human.
 //
-// The toggle itself is still cheap to authorise: it changes what THIS box
-// records, nothing leaves it, and the operator can already read every one of
-// those lines with journalctl.
+// The confirmation dialog remains a courtesy to that human rather than a
+// control on the route. The control on the route is the audit entry.
 func (s *Server) handleSetDebug(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Recording *bool `json:"recording"`
@@ -146,17 +148,23 @@ func (s *Server) handleSetDebug(w http.ResponseWriter, r *http.Request) {
 			dests, dErr := s.store.ListDestinations()
 			srcs, sErr := s.store.ListSources()
 			accts, aErr := s.store.ListPlatformAccounts()
-			if dErr == nil && sErr == nil && aErr == nil {
+			// AND THE INSTALL-WIDE INGEST, INCLUDING THE FAILOVER BACKUP. The
+			// selector logs the backup pull URL in full at the moment it switches
+			// to it -- which is exactly when an operator is recording, because
+			// switching to backup is the fault they are capturing.
+			set, gErr := s.store.GetSettings()
+			if dErr == nil && sErr == nil && aErr == nil && gErr == nil {
 				lits := append(engine.DestinationSecrets(dests), engine.SourceSecrets(srcs)...)
 				lits = append(lits, engine.AccountSecrets(accts)...)
+				lits = append(lits, engine.SettingsSecrets(set)...)
 				s.diag.SetSecrets(alerts.NewSecretSet(s.log, lits...))
 			} else {
 				// Refused rather than recorded: turning on a recorder whose
 				// scrub cannot be built is how a bundle full of stream keys
 				// gets made, and the operator would have no way to know.
 				writeError(w, http.StatusServiceUnavailable,
-					"could not read the destinations, sources and connected accounts "+
-						"needed to build the redaction set, so recording "+
+					"could not read the destinations, sources, connected accounts and "+
+						"ingest settings needed to build the redaction set, so recording "+
 						"was not started")
 				return
 			}

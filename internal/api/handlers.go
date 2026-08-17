@@ -1785,8 +1785,18 @@ func (s *Server) applyDestinationEnabled(id int64, enabled bool) destControl {
 	// asked: the second means a process that may still be running is still
 	// holding, and still publishing to, what this response has just declared
 	// free. So a stop reports `reaped`, and says why when it is false.
+	// EVERY ENGINE, NOT THE DEFAULT ONE. s.eng() is s.mgr.Default(), so on an
+	// install with more than one source this read looked for the destination in
+	// the wrong programme's engine, found nothing, and reported Found=false --
+	// which the caller renders as "started" for an enable that failed and as a
+	// clean stop for one that left a process holding the port. The bug is
+	// invisible on a single-source install, which is every development box.
 	var eff destEffect
-	for _, d := range s.eng().Status().Destinations {
+	var statuses []engine.DestStatus
+	for _, e := range s.mgr.Engines() {
+		statuses = append(statuses, e.Status().Destinations...)
+	}
+	for _, d := range statuses {
 		if d.ID != id {
 			continue
 		}

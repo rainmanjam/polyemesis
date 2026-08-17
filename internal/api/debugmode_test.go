@@ -2,12 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/diag"
 )
 
@@ -232,5 +234,138 @@ func TestTheDebugRoutesNeedASession(t *testing.T) {
 				t.Fatalf("status = %d, want 401 or 403 (body %s)", w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+// THE EXPORT NEEDS A HUMAN; THE READ AND THE TOGGLE DO NOT.
+//
+// An admin-scoped API token passes requireScope, and for most of this API that
+// is correct — a token is a machine acting as the operator. The export is the
+// exception, and the reason is not privilege but disclosure: it mints a copy of
+// the server's own logs to send to somebody who does not have the box. Every
+// other route of that weight (/upgrade/stage, /auth/tokens, /media) already
+// sits inside requireSession; this one did not.
+//
+// The split is the point of the test. A dashboard polling GET /debug and an
+// automation starting a capture with PUT /debug both keep working; only taking
+// the FILE requires a session.
+func TestOnlyASessionCanExportTheBundle(t *testing.T) {
+	rec := diag.NewRecorder(32, alerts.NewSecretSet(nil))
+	sw := diag.NewSwitch(slog.LevelInfo)
+	_, h, _ := testServerWith(t, Options{Diag: rec, DiagLevel: sw})
+	sign := login(t, h)
+	plaintext := createToken(t, h, sign, "ci runner")
+
+	bearer := func(r *http.Request) *http.Request {
+		r.Header.Set("Authorization", "Bearer "+plaintext)
+		return r
+	}
+
+	// The token CAN read state and start a capture.
+	for _, tc := range []struct {
+		name, method, path string
+		body               any
+	}{
+		{"read state", http.MethodGet, "/api/v1/debug", nil},
+		{"start recording", http.MethodPut, "/api/v1/debug", map[string]any{"recording": true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := do(t, h, bearer(jsonRequest(t, tc.method, tc.path, tc.body)))
+			if w.Code != http.StatusOK {
+				t.Errorf("status = %d, want 200 — a machine credential must still be "+
+					"able to drive a capture (body %s)", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	// It CANNOT take the file.
+	t.Run("export", func(t *testing.T) {
+		w := do(t, h, bearer(jsonRequest(t, http.MethodPost, "/api/v1/debug/export", nil)))
+		if w.Code == http.StatusOK {
+			t.Error("an API token exported the server's logs with no operator session. " +
+				"This route is the product's largest disclosure and belongs beside " +
+				"/upgrade/stage and /auth/tokens inside requireSession.")
+		}
+		if w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want 401 or 403 (body %s)", w.Code, w.Body.String())
+		}
+	})
+
+	// And a real session still can.
+	t.Run("a session still can", func(t *testing.T) {
+		rec.SetRecording(true)
+		rec.Observe(diag.Record{Message: "something happened", Level: "INFO"})
+		r := jsonRequest(t, http.MethodPost, "/api/v1/debug/export", nil)
+		sign(r)
+		if w := do(t, h, r); w.Code != http.StatusOK {
+			t.Errorf("the operator's own session was refused: %d (%s)", w.Code, w.Body.String())
+		}
+	})
+}
+
+// THE SET THE HANDLER ACTUALLY BUILDS, NOT ONE A TEST HANDED ITSELF.
+//
+// internal/diag's TestAPullSourceCredentialDoesNotReachTheExport constructs its
+// SecretSet with alerts.NewSecretSet(nil, camPass, cdnToken, publishToken) —
+// the literals written out by hand. That proves the SCRUBBER works on values it
+// was given, and says nothing about whether the EXTRACTOR gives it the right
+// ones. It passed throughout the period when engine.SourceSecrets was reading a
+// pull URL with the publish-URL rule and declaring the filename instead of the
+// credential.
+//
+// This drives the real path: a source row in the store, recording started
+// through the handler (which is what assembles the set), a line logged in the
+// shape engine.go logs it, and the bundle fetched through the router.
+func TestTheHandlerBuiltSetCoversAPullSourceCredential(t *testing.T) {
+	const pathSeg = "SUPERSECRETPATHSEGREVIEW"
+
+	rec := diag.NewRecorder(64, alerts.NewSecretSet(nil))
+	sw := diag.NewSwitch(slog.LevelInfo)
+	srv, h, _ := testServerWith(t, Options{Diag: rec, DiagLevel: sw})
+	sign := login(t, h)
+
+	// A pull source whose credential lives in the URL, both spellings.
+	// Borrow the store's own defaults so the row validates; only the pull URL
+	// matters to this test.
+	base, err := srv.store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	ing := base.Ingest
+	ing.Mode = db.IngestPull
+	// A CDN URL WHOSE CREDENTIAL IS A PATH SEGMENT, deliberately: no userinfo and
+	// no query, so alerts.Redact does not recognise it by shape and the DECLARED
+	// set is the only thing that can mask it. An rtsp://user:pass@ URL would be
+	// caught by the residual pass whatever the extractor did, which is why the
+	// first version of this test could not fail.
+	ing.Pull.URL = "https://cdn.example/live/" + pathSeg + "/stream1/index.m3u8"
+	src := &db.Source{Name: "camera", Enabled: true, Ingest: ing}
+	if err := srv.store.CreateSource(src); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+
+	// Start recording THROUGH THE HANDLER — this is the step that builds the set.
+	r := jsonRequest(t, http.MethodPut, "/api/v1/debug", map[string]any{"recording": true})
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusOK {
+		t.Fatalf("enable = %d (%s)", w.Code, w.Body.String())
+	}
+
+	// The shape engine.go logs when it dials a pull source.
+	log := slog.New(diag.NewHandler(slog.NewTextHandler(io.Discard, nil), rec))
+	log.Info("ingest started", "mode", "pull", "url", src.Ingest.Pull.URL)
+
+	r = jsonRequest(t, http.MethodPost, "/api/v1/debug/export", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("export = %d (%s)", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, secret := range []string{pathSeg} {
+		if strings.Contains(body, secret) {
+			t.Errorf("the exported bundle carries %q. The set the handler assembled did "+
+				"not declare it, which a test that builds its own set cannot detect.", secret)
+		}
 	}
 }

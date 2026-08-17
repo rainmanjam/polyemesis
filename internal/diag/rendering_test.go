@@ -158,3 +158,42 @@ func TestControlCharactersCannotInflateTheEncodedBundle(t *testing.T) {
 		t.Fatalf("bundle does not decode: %v", err)
 	}
 }
+
+// A GROUPED ATTRIBUTE'S VALUES MUST REACH THE BUNDLE.
+//
+// slog.Value has only unexported fields, so []slog.Attr marshalled to {} and
+// every value inside a group vanished while its key names survived. The
+// engineer reading the capture sees the field that would have explained the
+// fault, present and empty.
+func TestAGroupedAttributeKeepsItsValues(t *testing.T) {
+	r := NewRecorder(8, alerts.NewSecretSet(nil, sentinelKey))
+	r.SetRecording(true)
+
+	r.Observe(Record{Level: "INFO", Message: "starting", Attrs: map[string]any{
+		"g": []slog.Attr{
+			slog.String("destination", "Main YouTube"),
+			slog.Int("attempt", 3),
+		},
+	}})
+
+	out := encodeBundle(t, r)
+	if strings.Contains(out, `"g":"[{`) || strings.Contains(out, `Value\":{}`) {
+		t.Errorf("the group marshalled to empty values: %.160q", out[strings.Index(out, `"g"`):])
+	}
+	if !strings.Contains(out, "Main YouTube") {
+		t.Errorf("the grouped value is missing from the bundle entirely: %.160q",
+			out[max(strings.Index(out, `"g"`), 0):])
+	}
+}
+
+// And a credential inside a group is still scrubbed.
+func TestACredentialInsideAGroupIsScrubbed(t *testing.T) {
+	r := NewRecorder(8, alerts.NewSecretSet(nil, sentinelKey))
+	r.SetRecording(true)
+	r.Observe(Record{Level: "INFO", Message: "publishing", Attrs: map[string]any{
+		"g": []slog.Attr{slog.String("key", sentinelKey)},
+	}})
+	if out := encodeBundle(t, r); strings.Contains(out, sentinelKey) {
+		t.Error("a declared credential inside a slog group reached the bundle verbatim")
+	}
+}

@@ -451,6 +451,25 @@ func DestinationSecrets(rows []*db.Destination) []string {
 //
 // PrevToken travels too. Rotation keeps the old one working for five minutes,
 // so during that window it is a live credential that log lines may still carry.
+// SettingsSecrets collects the install-wide ingest credentials.
+//
+// THE FOURTH INVENTORY. Sources carry a per-programme ingest; Settings carries
+// the install's own, AND the failover BACKUP ingest, and neither was ever
+// handed to the debug recorder. internal/engine/selector.go logs the backup
+// pull URL in full when it switches to it -- which is the moment an operator is
+// most likely to be recording, because switching to backup is the fault they
+// are trying to capture.
+//
+// Both blocks go through ingestSecrets, so the pull URL is read with
+// pullURLSecrets rather than the publish-URL rule. That distinction is the one
+// SourceSecrets got wrong (#229).
+func SettingsSecrets(s db.Settings) []string {
+	out := ingestSecrets(s.Ingest.SRT, s.Ingest.RTMP, s.Ingest.Pull, "")
+	b := s.Failover.Backup
+	out = append(out, ingestSecrets(b.SRT, b.RTMP, b.Pull, "")...)
+	return wireSpellings(out)
+}
+
 // AccountSecrets collects every credential a connected platform account holds.
 //
 // THE THIRD INVENTORY, AND THE ONE THAT WAS MISSING. The debug recorder's

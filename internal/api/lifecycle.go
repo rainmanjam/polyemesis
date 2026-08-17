@@ -231,6 +231,23 @@ const (
 // in a way that cannot be walked back. YouTube documents no transition out of
 // either, and a completed broadcast cannot return to live -- which is the whole
 // reason the coordinator refuses to send `complete` on a crash.
+// endableFromPhase reports whether a broadcast in this phase is one this
+// process confirmed on air, and therefore one it may end.
+//
+// The empty phase is the case that matters: it means no transition was ever
+// recorded for this broadcast, which covers a row that predates the coordinator
+// (an upgrade) and a broadcast created in somebody else's console. `created`
+// and `ready` are excluded for the reason lifecycleTarget.Phase documents --
+// YouTube has no documented path from either to `complete`.
+func endableFromPhase(phase string) bool {
+	switch {
+	case strings.EqualFold(phase, phaseTesting), strings.EqualFold(phase, phaseLive):
+		return true
+	default:
+		return false
+	}
+}
+
 func isTerminalPhase(phase string) bool {
 	return strings.EqualFold(phase, phaseComplete) || strings.EqualFold(phase, phaseRevoked)
 }
@@ -855,6 +872,34 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 	prov, ok := c.providers.LifecycleFor(t.Platform)
 	if !ok {
 		c.untrack(t.destinationID)
+		return
+	}
+
+	// A BROADCAST THIS PROCESS NEVER PUT ON AIR IS NOT ITS BUSINESS TO END.
+	//
+	// lifecycleTarget.Phase was added for exactly this and nothing ever read it.
+	// Its own doc says so: "A target whose broadcast never aired must not be
+	// ended when its row disappears -- there is nothing to end, and sending
+	// `complete` to a `created` broadcast is a transition YouTube documents no
+	// path for."
+	//
+	// considerRow already refuses on the same ground for a disabled row with no
+	// recorded phase, and calls that "the entire upgrade story and the entire
+	// somebody-else's-broadcast story at once". endOrphan reaches the same
+	// broadcasts by a different route -- the row vanished rather than being
+	// disabled -- and applied no such rule, so deleting a destination that had
+	// been created but never went live sent `complete` to it anyway.
+	//
+	// The asymmetry this file states everywhere decides the direction: declining
+	// to end a broadcast that should have ended costs a watch page that stays
+	// open; ending one that should not costs the show, because on YouTube
+	// complete is terminal.
+	if !endableFromPhase(t.Phase) {
+		c.untrack(t.destinationID)
+		c.log.Info("broadcast lifecycle: a deleted destination's broadcast was never "+
+			"confirmed on air by this process, so it was left alone rather than ended",
+			"destination", t.Name, "platform", t.Platform,
+			"broadcast", t.BroadcastID, "phase", firstNonBlank(t.Phase, "(none)"))
 		return
 	}
 

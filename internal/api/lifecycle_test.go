@@ -1293,3 +1293,75 @@ func TestEdgesCannotDriveASettledRowIntoUnboundedRereads(t *testing.T) {
 			"coordinator cannot end anything at all.", spent, max)
 	}
 }
+
+// A BROADCAST THIS PROCESS NEVER PUT ON AIR MUST NOT BE ENDED WHEN ITS ROW GOES.
+//
+// endOrphan already declines when the PLATFORM says the broadcast never aired:
+// it reads BroadcastState and planLifecycle returns no transition for `created`
+// or `ready`. That covers the ordinary case, and the first version of this test
+// asserted only that — so it passed with the guard removed, which means it was
+// asserting nothing about the guard at all.
+//
+// THE CASE THAT DIVERGES is the one considerRow calls "the somebody-else's-
+// broadcast story": the platform reports LIVE and this process never confirmed
+// it. A broadcast started in YouTube Studio, or one carried through an upgrade
+// that predates the coordinator, or one that autoStarted. The platform's answer
+// says end it; the recorded phase says we never put it on air. Without
+// lifecycleTarget.Phase being read, polyemesis sends `complete` to a stranger's
+// live show — and on YouTube complete is terminal.
+func TestALiveBroadcastThisProcessNeverConfirmedIsNotEnded(t *testing.T) {
+	// The row carries NO recorded phase — this process never transitioned it.
+	row := lifecycleTestRow(true, "")
+	// The platform, however, reports it live and delivering.
+	yt := &ytFake{status: phaseLive, streamStatus: "active"}
+	c, store, _ := lifecycleFixture(t, yt, row)
+
+	c.sweepOnce(context.Background(), sweepEverything)
+
+	store.mu.Lock()
+	delete(store.rows, row.ID)
+	store.mu.Unlock()
+
+	before, _ := yt.snapshot()
+	c.sweepOnce(context.Background(), sweepEverything)
+	after, _ := yt.snapshot()
+
+	for _, sent := range after[len(before):] {
+		if sent == string(oauth.PhaseComplete) {
+			t.Fatalf("polyemesis ended a LIVE broadcast it never put on air, because a "+
+				"destination row was deleted. The platform's state said live; the "+
+				"recorded phase said this process never confirmed it. That is "+
+				"somebody else's show, and on YouTube complete is terminal. sent=%v", after)
+		}
+	}
+}
+
+// AND ONE THIS PROCESS DID PUT ON AIR IS STILL ENDED, so the guard above is a
+// guard and not a removal of the feature.
+func TestADeletedDestinationThatWasLiveIsStillEnded(t *testing.T) {
+	row := lifecycleTestRow(true, phaseLive)
+	yt := &ytFake{status: phaseLive, streamStatus: "active"}
+	c, store, _ := lifecycleFixture(t, yt, row)
+
+	c.sweepOnce(context.Background(), sweepEverything)
+
+	store.mu.Lock()
+	delete(store.rows, row.ID)
+	store.mu.Unlock()
+
+	before, _ := yt.snapshot()
+	c.sweepOnce(context.Background(), sweepEverything)
+	after, _ := yt.snapshot()
+
+	ended := false
+	for _, sent := range after[len(before):] {
+		if sent == string(oauth.PhaseComplete) {
+			ended = true
+		}
+	}
+	if !ended {
+		t.Errorf("a LIVE broadcast this process confirmed was not ended when its "+
+			"destination was deleted; the phase guard is too tight and the watch page "+
+			"stays open forever. sent=%v", after)
+	}
+}

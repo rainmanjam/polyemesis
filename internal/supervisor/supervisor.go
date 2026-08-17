@@ -927,12 +927,27 @@ func (p *Process) runOnce(ctx context.Context) error {
 	_ = stdout.Close()
 	_ = stderr.Close()
 
+	// TORN DOWN PER SPAWN, NOT UNCONDITIONALLY. Publication at :805 sets p.cmd
+	// for THIS spawn; the teardown cleared whatever was there. A restart that
+	// begins while a predecessor is still unwinding -- a stop that hit the
+	// deadline arm, so nobody is waiting on it -- lets the old runOnce reach
+	// here AFTER the new one has published its own cmd, and blank it. The new
+	// child is then unreachable by terminate() and kill(): it keeps running and
+	// keeps publishing to a destination the operator believes is stopped.
+	//
+	// Comparing before clearing makes the two orders equivalent.
 	p.cmdMu.Lock()
-	p.cmd = nil
-	p.exited = nil
+	if p.cmd == cmd {
+		p.cmd = nil
+		p.exited = nil
+	}
 	p.cmdMu.Unlock()
 	p.mu.Lock()
-	p.pid = 0
+	// cmd.Process is nil when the spawn itself failed, and this path is reached
+	// on that route too.
+	if cmd.Process != nil && p.pid == cmd.Process.Pid {
+		p.pid = 0
+	}
 	p.mu.Unlock()
 
 	if waitErr != nil && len(lastLines) > 0 {

@@ -96,6 +96,15 @@ func LoadOrCreate(path string) (*Box, error) {
 	if err := os.WriteFile(path, []byte(hex.EncodeToString(box.key[:])), 0o600); err != nil {
 		return nil, fmt.Errorf("write secret key %s: %w", path, err)
 	}
+	// THE CREATE PATH NEEDED THIS TOO, AND THE COMMENT ABOVE SAYS WHY. The 0o600
+	// on WriteFile is a Unix concept; on Windows it restricts nothing, so the
+	// key file this function just generated was world-readable on the one
+	// platform the FileMode does not cover. The load path has called
+	// fsperm.SecureFile since it was written; the branch that MINTS the key did
+	// not.
+	if err := fsperm.SecureFile(path); err != nil {
+		return nil, fmt.Errorf("restrict secret key %s: %w", path, err)
+	}
 	return box, nil
 }
 

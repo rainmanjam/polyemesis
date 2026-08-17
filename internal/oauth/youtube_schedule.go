@@ -249,7 +249,17 @@ func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken stri
 		},
 		"status": map[string]any{"privacyStatus": ytScheduledPrivacy},
 	}
-	err := postJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?part=snippet,status",
+	// requestJSON, NOT postJSON, AND THE ADVICE BELOW DEPENDS ON IT. postJSON
+	// returns a plain fmt.Errorf carrying snippet(body) -- the 300-character
+	// DISPLAY cut. ytBroadcastCreateAdvice matches through adviceBody, which
+	// needs a *statusError to reach .payload() and the whole body; given a plain
+	// error it falls back to err.Error(). Its own comment says the reason code
+	// "sits past snippet()'s cut in a realistic refusal", so every branch of that
+	// advice was dead on the real path: an operator whose channel is not enabled
+	// for live streaming got the raw truncated body instead of the sentence
+	// telling them which button to press.
+	err := requestJSON(ctx, http.MethodPost,
+		y.apiEndpoint()+ytBroadcastsPath+"?part=snippet,status",
 		accessToken, payload, nil, &created)
 	if err != nil {
 		return nil, ytBroadcastCreateAdvice(err)
