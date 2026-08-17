@@ -1,0 +1,72 @@
+[
+  {
+    "name": "plain source is untouched",
+    "input": "const a = 1;\nconst b = 2;\n",
+    "want": "const a = 1;\nconst b = 2;\n"
+  },
+  {
+    "name": "a line comment is removed, its newline kept",
+    "input": "const a = 1; // set it\nconst b = 2;\n",
+    "want": "const a = 1; \nconst b = 2;\n"
+  },
+  {
+    "name": "a block comment is removed, its newlines kept",
+    "input": "const a = 1;\n/* two\n   lines */\nconst b = 2;\n",
+    "want": "const a = 1;\n\n\nconst b = 2;\n"
+  },
+  {
+    "name": "a JSX expression-container comment",
+    "input": "<div>\n  {/* hidden */}\n  <p/>\n</div>\n",
+    "want": "<div>\n  {}\n  <p/>\n</div>\n"
+  },
+  {
+    "name": "a URL inside a string literal survives",
+    "input": "const u = \"https://example.com/x\";\n",
+    "want": "const u = \"https://example.com/x\";\n"
+  },
+  {
+    "name": "a URL in single quotes survives",
+    "input": "const u = 'https://example.com/x';\n",
+    "want": "const u = 'https://example.com/x';\n"
+  },
+  {
+    "name": "a URL in a template literal survives",
+    "input": "const u = `https://example.com/x`;\n",
+    "want": "const u = `https://example.com/x`;\n"
+  },
+  {
+    "name": "a line comment AFTER a quoted string on the same line is kept, deliberately",
+    "input": "const u = \"a\"; // why\nconst b = 2;\n",
+    "want": "const u = \"a\"; // why\nconst b = 2;\n"
+  },
+  {
+    "name": "an unterminated block comment swallows the rest",
+    "input": "const a = 1;\n/* never closed\nconst b = 2;\n",
+    "want": "const a = 1;\n"
+  },
+  {
+    "name": "a line comment with no trailing newline swallows the rest",
+    "input": "const a = 1;\n// no newline after this",
+    "want": "const a = 1;\n"
+  },
+  {
+    "name": "a block comment on one line leaves no newline",
+    "input": "const a = /* mid */ 1;\n",
+    "want": "const a =  1;\n"
+  },
+  {
+    "name": "back-to-back block comments",
+    "input": "/*a*//*b*/const x = 1;\n",
+    "want": "const x = 1;\n"
+  },
+  {
+    "name": "a slash that is not a comment",
+    "input": "const r = a / b;\nconst s = a // b\n;\n",
+    "want": "const r = a / b;\nconst s = a \n;\n"
+  },
+  {
+    "name": "empty input",
+    "input": "",
+    "want": ""
+  }
+]
