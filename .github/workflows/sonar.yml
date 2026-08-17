@@ -1,0 +1,99 @@
+# SonarCloud, as a CI-BASED analysis rather than the automatic one.
+#
+# WHY THIS FILE EXISTS AT ALL. SonarCloud has two modes, and this project was on
+# the wrong one. Automatic Analysis needs no workflow -- it watches the repo and
+# scans on push, which is why there was no Sonar step here -- but it IGNORES the
+# project's own configuration. That is not a guess:
+#
+#   - sonar-project.properties records that sonar.issue.ignore.multicriteria was
+#     added for go:S5542, did not take effect, and the gate stayed red. The
+#     driver was changed instead.
+#   - sonar.cpd.exclusions was later set to scripts/** through the project
+#     settings UI, which is the other place the documentation says to put it.
+#     Verified project-scoped through the API, with a pattern the documentation
+#     confirms (`a/**` and `a/**/*` are equivalent; `**` matches ZERO or more
+#     directory segments, so scripts/** does cover scripts/x.go). A real commit
+#     was then analysed -- the density moved 11.4% -> 11.3% purely because that
+#     commit's comment lengthened the denominator -- and all ten files under
+#     scripts/ still reported their 744 duplicated lines.
+#
+# Two settings, two mechanisms, same outcome. Under CI-based analysis they bind,
+# which is the whole reason for this file.
+#
+# IT ALSO BUYS COVERAGE. SonarSource documents that Go coverage is not supported
+# under automatic analysis at all, so the Go coverage of this project has never
+# reached SonarCloud. Wiring it is a follow-up rather than part of this change:
+# the coverage profile has to come from a run with FFmpeg present, and repeating
+# ci.yml's FFmpeg install here to produce one would double a fifteen-minute job
+# for a number. The honest sequence is to make the analysis CI-based first, see
+# it work, then feed it a profile from the job that already earns one.
+#
+# THE TWO THINGS THIS FILE CANNOT DO FOR ITSELF, both one-time and both manual:
+#
+#   1. A SONAR_TOKEN repository secret, from SonarCloud > My Account > Security.
+#   2. Automatic Analysis turned OFF, at Administration > Analysis Method.
+#
+# They conflict: with Automatic Analysis still on, a CI scan is refused rather
+# than merged, so this is a swap and not an addition. The gate below means the
+# order does not matter and nothing goes red in between -- with no token this
+# job explains itself and succeeds, exactly as pages.yml does when the
+# Cloudflare secrets are absent.
+name: sonar
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# One analysis per branch. A superseded push has nothing to say about code that
+# has already been replaced.
+concurrency:
+  group: sonar-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  sonar:
+    name: SonarCloud analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Is a token configured?
+        id: gate
+        env:
+          # Through env, never interpolated into the script body -- the same
+          # reasoning as pages.yml: GitHub masks secrets in logs either way,
+          # and what env buys is that the value is never part of a command line
+          # that a `set -x` or a crash dump could print.
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -n "$SONAR_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "SONAR_TOKEN is set; running a CI-based analysis."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Sonar analysis skipped::SONAR_TOKEN is not set on this repository, so this job stops here rather than failing. Add the secret and turn Automatic Analysis off under Administration > Analysis Method to switch modes -- see the comment at the top of .github/workflows/sonar.yml."
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # REQUIRED, not tidiness. The scanner reads git history to decide what
+          # is new code, and the quality gate this project runs is new-code-only
+          # -- new_reliability_rating, new_security_rating,
+          # new_maintainability_rating, new_duplicated_lines_density and
+          # new_security_hotspots_reviewed. A shallow clone leaves it guessing
+          # which lines are new, and the gate is then measuring something else.
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        if: steps.gate.outputs.ready == 'true'
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Nothing to do
+        if: steps.gate.outputs.ready != 'true'
+        run: echo "No SONAR_TOKEN; this job is a no-op until the swap described in this file is done."
