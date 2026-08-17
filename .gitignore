@@ -83,3 +83,4 @@ docs/notes/
 # table's receipts, the Enhanced RTMP findings README depends on. Those have
 # to stay readable or the claims lose their evidence, which is worse than
 # either publishing or removing them cleanly.
+coverage.out
