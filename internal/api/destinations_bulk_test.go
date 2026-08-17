@@ -290,3 +290,74 @@ func TestAMixedBulkResultIsNeitherSuccessNorFailure(t *testing.T) {
 			started, failed)
 	}
 }
+
+// EVERY DESTINATION ON EVERY PLATFORM, AND A CUSTOM RTMP TARGET THAT HAS NO
+// PLATFORM AT ALL.
+//
+// The bulk routes read whatever ListDestinations returns and filter nothing --
+// there is no platform check anywhere in destinations_bulk.go, and Platform
+// appears there only as a field on the result row. That is the intended
+// behaviour and it is worth a test rather than a comment, because the
+// confirmation copy necessarily says a lot about YouTube: ending a YouTube
+// broadcast is permanent in a way that stopping a Twitch push is not, so the
+// warning leads with it. A reader of that copy could reasonably wonder whether
+// the control is YouTube-shaped. It is not, and this fails if it ever becomes so.
+func TestBulkActsOnEveryPlatformAndOnDestinationsWithNone(t *testing.T) {
+	h, _, sign := renditionServer(t, defaultTools())
+
+	// A spread of real platforms plus a plain RTMP target that belongs to no
+	// platform -- the case a platform-keyed implementation would silently skip.
+	want := map[string]string{
+		"yt main":     "youtube",
+		"twitch main": "twitch",
+		"kick main":   "kick",
+		"fb main":     "facebook",
+		"my own box":  "",
+	}
+	for name, platform := range want {
+		body := map[string]any{
+			"name": name, "kind": "rtmp",
+			"url": "rtmp://example.invalid/live", "streamKey": "k",
+		}
+		if platform != "" {
+			body["platform"] = platform
+		}
+		r := jsonRequest(t, http.MethodPost, "/api/v1/destinations", body)
+		sign(r)
+		if w := do(t, h, r); w.Code != http.StatusOK && w.Code != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", name, w.Code, w.Body.String())
+		}
+	}
+
+	for _, route := range []string{"stop-all", "start-all"} {
+		r := jsonRequest(t, http.MethodPost, "/api/v1/destinations/"+route, nil)
+		sign(r)
+		w := do(t, h, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", route, w.Code, w.Body.String())
+		}
+		var got bulkAnswer
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatalf("%s: decode: %v", route, err)
+		}
+		seen := map[string]bool{}
+		for _, row := range got.Results {
+			seen[row.Name] = true
+		}
+		for name, platform := range want {
+			if !seen[name] {
+				which := platform
+				if which == "" {
+					which = "no platform at all"
+				}
+				t.Errorf("%s skipped %q (%s). This control acts on EVERY destination; "+
+					"a platform-keyed implementation would quietly leave some of an "+
+					"operator's outputs running after they pressed Stop all.",
+					route, name, which)
+			}
+		}
+		if len(got.Results) != len(want) {
+			t.Errorf("%s returned %d rows, want %d", route, len(got.Results), len(want))
+		}
+	}
+}
