@@ -153,6 +153,16 @@ func TestNothingSendsADeleteToTheLiveStreamsEndpoint(t *testing.T) {
 						if v.Name == "ytStreamsPath" {
 							streams = true
 						}
+					case *ast.BasicLit:
+						// THE HOLE THIS GUARD SHIPPED WITH. Matching only the
+						// identifier meant a byte-identical delete that spelled
+						// the path inline -- "/liveStreams" -- walked straight
+						// past it, which a reviewer demonstrated rather than
+						// argued. A guard against one spelling of a dangerous
+						// call is a guard against typing it the obvious way.
+						if v.Kind == token.STRING && strings.Contains(v.Value, "liveStreams") {
+							streams = true
+						}
 					}
 					return true
 				})

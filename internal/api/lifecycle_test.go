@@ -731,16 +731,35 @@ func TestAnUpEdgeReChecksASettledLiveBroadcastWithoutWaitingOutTheCadence(t *tes
 		Destination: &hooks.DestinationRef{ID: 3, Name: "yt main", Platform: string(db.PlatformYouTube)},
 	})
 
-	// ONE sweep, not forty.
-	c.sweepOnce(context.Background(), sweepEverything)
+	// A FEW SWEEPS, NOT FORTY -- AND THIS ASSERTION USED TO DEMAND ONE.
+	//
+	// Immediacy was the wrong property and it cost the install's quota. An edge
+	// that re-read on the very next sweep meant a flapping destination re-read
+	// on EVERY edge, and the engine makes UP immediate while DOWN dwells ten
+	// seconds, so the flap floor is about twelve seconds: ~7,200 forced reads a
+	// day, ~14,400 API units, against an allocation of 10,000. The coordinator
+	// would then be out of quota and unable to end anything -- the exact
+	// failure the cadence exists to prevent.
+	//
+	// What actually matters is that the operator does not sit in front of a
+	// card reading "live" for ten minutes after the platform stopped. A minute
+	// serves that; instantly is not better in any way an operator can perceive,
+	// and it is much worse in a way their quota can.
+	// The budget counts sweeps SKIPPED, so a floor of n means the re-read lands
+	// on sweep n+1. Written as the loop bound rather than a literal so changing
+	// the floor does not silently change what this test proves.
+	for i := 0; i <= lifecycleLiveRecheckAfterEdge; i++ {
+		c.sweepOnce(context.Background(), sweepEverything)
+	}
 
 	if _, reads := yt.snapshot(); reads != 2 {
-		t.Fatalf("state reads after an UP edge = %d, want 2 -- the edge must spend the skip "+
-			"budget, or a broadcast the platform stopped stays labelled live for %d more sweeps",
-			reads, lifecycleLiveRecheckEvery)
+		t.Fatalf("state reads %d sweeps after an UP edge = %d, want 2 -- the edge must pull "+
+			"the re-read forward, or a broadcast the platform stopped stays labelled live "+
+			"for %d more sweeps",
+			lifecycleLiveRecheckAfterEdge, reads, lifecycleLiveRecheckEvery)
 	}
 	if got := store.get(3).Lifecycle.Phase; !strings.EqualFold(got, "complete") {
-		t.Fatalf("recorded phase = %q one sweep after the UP edge, want %q", got, "complete")
+		t.Fatalf("recorded phase = %q shortly after the UP edge, want %q", got, "complete")
 	}
 }
 
@@ -1227,5 +1246,50 @@ func TestABroadcastIsNotEndedBecauseAListingWasIncomplete(t *testing.T) {
 				"listing, though the row still exists. On YouTube that is permanent. "+
 				"sent=%v", after)
 		}
+	}
+}
+
+// A FLAPPING DESTINATION MUST NOT BE ABLE TO SPEND THE INSTALL'S QUOTA.
+//
+// An UP edge brings a settled-live row's re-read forward, which is right: a
+// broadcast ended in Studio should be noticed while the operator is still
+// looking at the card. The first version did it by DELETING the budget, so the
+// next sweep re-read unconditionally — right once, ruinous repeatedly.
+//
+// Edges are not rare. The engine makes UP immediate while DOWN dwells ten
+// seconds, on a two-second observe tick, so a flapping destination has a floor
+// of about twelve seconds between edges — roughly 7,200 forced re-reads a day
+// at two API calls each. That is ~14,400 units against a default allocation of
+// 10,000 SHARED with metadata push and chat: one destination exhausts the
+// install, and a coordinator out of quota cannot END anything, which is the
+// exact failure this cadence was introduced to prevent.
+//
+// Clamping keeps the useful half and drops the ruinous one.
+func TestEdgesCannotDriveASettledRowIntoUnboundedRereads(t *testing.T) {
+	row := lifecycleTestRow(true, phaseLive)
+	yt := &ytFake{status: phaseLive, streamStatus: "active"}
+	c, _, _ := lifecycleFixture(t, yt, row)
+
+	// Settle it: one sweep confirms live and arms the budget.
+	c.sweepOnce(context.Background(), sweepEverything)
+	_, settled := yt.snapshot()
+
+	// Now flap. Fifty edges, each followed by the sweep the wake would drive.
+	for i := 0; i < 50; i++ {
+		c.forgetLiveRecheck(row.ID)
+		c.sweepOnce(context.Background(), sweepEverything)
+	}
+	_, after := yt.snapshot()
+
+	spent := after - settled
+	// With the floor, fifty edges across fifty sweeps can afford at most one
+	// re-read per lifecycleLiveRecheckAfterEdge sweeps. Without it, every edge
+	// bought one: fifty.
+	max := 50/lifecycleLiveRecheckAfterEdge + 1
+	if spent > max {
+		t.Errorf("fifty edges spent %d state reads, want at most %d. Each read is two "+
+			"API calls, and a destination flapping every twelve seconds would spend "+
+			"~14,400 units a day against an allocation of 10,000 -- after which the "+
+			"coordinator cannot end anything at all.", spent, max)
 	}
 }

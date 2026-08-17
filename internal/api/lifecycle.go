@@ -152,6 +152,16 @@ const (
 	// platform-side end -- enableAutoStop firing when the ingest stopped --
 	// produces for free on its way back.
 	lifecycleLiveRecheckEvery = 40
+	// lifecycleLiveRecheckAfterEdge is the FLOOR an edge may pull the budget
+	// down to, and it exists because an edge is not rare.
+	//
+	// Four sweeps is about a minute at the ordinary tick -- soon enough that a
+	// broadcast ended in Studio is noticed while the operator is still looking
+	// at the card, and far enough out that a destination flapping every twelve
+	// seconds cannot spend more than one re-read per minute. Without a floor
+	// that same destination forced a re-read on every edge: roughly 7,200 a
+	// day, 14,400 API units, against an allocation of 10,000.
+	lifecycleLiveRecheckAfterEdge = 4
 	// lifecycleCallTimeout bounds one platform round trip. Matched to
 	// preannounce's, and for the same reason: it has to be shorter than the
 	// sweep interval times the give-up budget, or "consecutive sweeps" would
@@ -1269,9 +1279,29 @@ func (c *lifecycleCoordinator) noteLiveRead(id int64, live bool) {
 // The only cost is the two calls, and they are spent at the moment the answer is
 // most likely to have changed -- an UP edge means the ingest stopped and came
 // back, and a stopped ingest is exactly what fires enableAutoStop.
+// forgetLiveRecheck brings a settled-live row's next re-read FORWARD after an
+// edge says the world may have moved. It CLAMPS the budget; it does not delete
+// it, and the difference is the whole install's quota.
+//
+// Deleting made the next sweep re-read unconditionally, which is right once and
+// ruinous repeatedly, because an UP edge is not a rare event. The engine makes
+// UP immediate while DOWN dwells ten seconds, on a two-second observe tick, so
+// a destination that flaps has a floor of roughly twelve seconds between edges
+// -- about 7,200 forced re-reads a day. At two API calls each that is ~14,400
+// units against a default allocation of 10,000 SHARED with metadata push and
+// chat: one flapping destination exhausts the install and the coordinator can
+// then no longer END anything, which is precisely the failure the recheck
+// cadence was added to avoid. Measured at 33x the advertised rate before this.
+//
+// Clamping keeps the useful half. An edge still means "look sooner" -- within a
+// minute rather than up to ten -- and a destination flapping every twelve
+// seconds costs the same as one flapping once, because the budget cannot go
+// below the floor no matter how often it is nudged.
 func (c *lifecycleCoordinator) forgetLiveRecheck(id int64) {
 	c.mu.Lock()
-	delete(c.liveSkips, id)
+	if cur, ok := c.liveSkips[id]; !ok || cur > lifecycleLiveRecheckAfterEdge {
+		c.liveSkips[id] = lifecycleLiveRecheckAfterEdge
+	}
 	c.mu.Unlock()
 }
 
