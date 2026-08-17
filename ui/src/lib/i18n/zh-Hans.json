@@ -54,6 +54,8 @@
   "auto.evIngestRecovered": "输入已恢复",
   "auto.evSettingsChanged": "设置已更改",
   "auto.evSignedIn": "已登录",
+  "auto.evUpgradeRolledBack": "Update rolled back",
+  "auto.evUpgradeStaged": "Update staged",
   "auto.events": "事件",
   "auto.everyDay": "每天",
   "auto.failed": "失败",

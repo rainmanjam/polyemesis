@@ -54,6 +54,8 @@
   "auto.evIngestRecovered": "입력 복구됨",
   "auto.evSettingsChanged": "설정 변경됨",
   "auto.evSignedIn": "로그인됨",
+  "auto.evUpgradeRolledBack": "Update rolled back",
+  "auto.evUpgradeStaged": "Update staged",
   "auto.events": "이벤트",
   "auto.everyDay": "매일",
   "auto.failed": "실패",

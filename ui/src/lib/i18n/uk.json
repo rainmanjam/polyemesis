@@ -54,6 +54,8 @@
   "auto.evIngestRecovered": "Вхід відновлено",
   "auto.evSettingsChanged": "Налаштування змінено",
   "auto.evSignedIn": "Успішний вхід",
+  "auto.evUpgradeRolledBack": "Update rolled back",
+  "auto.evUpgradeStaged": "Update staged",
   "auto.events": "Події",
   "auto.everyDay": "Щодня",
   "auto.failed": "Помилка",

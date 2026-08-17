@@ -166,6 +166,8 @@ const EVENT_LABELS: Record<string, TranslationKey> = {
   "settings.changed": "auto.evSettingsChanged",
   "clip.captured": "auto.evClipCaptured",
   "broadcast.fault": "auto.broadcastFault",
+  "upgrade.staged": "auto.evUpgradeStaged",
+  "upgrade.rolled_back": "auto.evUpgradeRolledBack",
 };
 
 /** The stored event name is the fallback: an unknown type renders as itself

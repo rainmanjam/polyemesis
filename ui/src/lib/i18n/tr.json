@@ -54,6 +54,8 @@
   "auto.evIngestRecovered": "Giriş geri geldi",
   "auto.evSettingsChanged": "Ayarlar değiştirildi",
   "auto.evSignedIn": "Oturum açıldı",
+  "auto.evUpgradeRolledBack": "Update rolled back",
+  "auto.evUpgradeStaged": "Update staged",
   "auto.events": "Olaylar",
   "auto.everyDay": "Her gün",
   "auto.failed": "Başarısız",

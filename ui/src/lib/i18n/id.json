@@ -54,6 +54,8 @@
   "auto.evIngestRecovered": "Masukan pulih",
   "auto.evSettingsChanged": "Pengaturan diubah",
   "auto.evSignedIn": "Berhasil masuk",
+  "auto.evUpgradeRolledBack": "Update rolled back",
+  "auto.evUpgradeStaged": "Update staged",
   "auto.events": "Peristiwa",
   "auto.everyDay": "Setiap hari",
   "auto.failed": "Gagal",

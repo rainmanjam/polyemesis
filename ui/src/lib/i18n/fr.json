@@ -54,6 +54,8 @@
   "auto.evIngestRecovered": "Entrée rétablie",
   "auto.evSettingsChanged": "Paramètres modifiés",
   "auto.evSignedIn": "Connexion effectuée",
+  "auto.evUpgradeRolledBack": "Update rolled back",
+  "auto.evUpgradeStaged": "Update staged",
   "auto.events": "Événements",
   "auto.everyDay": "Tous les jours",
   "auto.failed": "Échouées",

@@ -54,6 +54,8 @@
   "auto.evIngestRecovered": "入力が復旧した",
   "auto.evSettingsChanged": "設定が変更された",
   "auto.evSignedIn": "サインインした",
+  "auto.evUpgradeRolledBack": "Update rolled back",
+  "auto.evUpgradeStaged": "Update staged",
   "auto.events": "イベント",
   "auto.everyDay": "毎日",
   "auto.failed": "失敗",
