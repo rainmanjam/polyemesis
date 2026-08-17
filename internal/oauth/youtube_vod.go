@@ -166,8 +166,15 @@ func (y *YouTube) AddVODToPlaylist(ctx context.Context, accessToken, playlistID,
 	body := map[string]any{
 		"snippet": map[string]any{
 			"playlistId": playlistID,
-			// kind is REQUIRED inside resourceId and identifies which sort of
-			// thing the id names; a playlist can hold more than videos.
+			// kind identifies which sort of thing the id names, because a
+			// playlist can hold more than videos.
+			//
+			// SENT, BUT NOT ON EVIDENCE THAT IT IS REQUIRED. An earlier version
+			// of this comment said "REQUIRED", which the evidence file does not
+			// support -- resourceIdRequired is among the refusals its refute
+			// pass explicitly WITHDREW as unsurfaceable. Sending it is right
+			// either way: it is in every documented example and costs nothing.
+			// Asserting that YouTube demands it is a claim nobody checked.
 			"resourceId": map[string]any{"kind": "youtube#video", "videoId": videoID},
 		},
 	}
