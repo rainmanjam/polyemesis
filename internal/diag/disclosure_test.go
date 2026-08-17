@@ -289,3 +289,38 @@ func TestTheBundleShapeIsAClosedSet(t *testing.T) {
 		t.Errorf("the bundle lost its %q field", k)
 	}
 }
+
+// A PULL SOURCE'S CREDENTIALS, WHICH THE FIRST VERSION OF THIS FEATURE LEAKED.
+//
+// The recorder's secret set was built from destinations alone — where a stream
+// GOES — and said nothing about where it comes FROM. A pull source is addressed
+// by a URL that routinely carries credentials, engine.go logs that URL, and it
+// therefore reached the exported bundle behind nothing but the residual pass.
+//
+// Found by an external review of this branch before it was pushed, not by any
+// test here, which is why this one exists.
+func TestAPullSourceCredentialDoesNotReachTheExport(t *testing.T) {
+	const camPass = "rtspCameraPassw0rd2026"
+	const cdnToken = "hdnts_exp1798761600_acl_hmac_9f2c1d4b8a6e3f07"
+	const publishToken = "Dxl1Gevc3Tas4XHlMxAGMXwmO0bJ96Hj"
+
+	// The set as the handler now builds it: destination AND source literals.
+	r := NewRecorder(64, alerts.NewSecretSet(nil, camPass, cdnToken, publishToken))
+	r.SetRecording(true)
+	log := slog.New(NewHandler(slog.NewTextHandler(io.Discard, nil), r))
+
+	// The shapes engine.go actually logs.
+	log.Info("ingest started", "mode", "pull", "url", "rtsp://operator:"+camPass+"@camera.local/stream1")
+	log.Info("pull failed", "url", "https://cdn.example/live/index.m3u8?"+cdnToken)
+	log.Info("srt publish accepted", "streamid", publishToken)
+
+	out := exported(t, r)
+	for _, secret := range []string{camPass, cdnToken, publishToken} {
+		if strings.Contains(out, secret) {
+			t.Errorf("a source credential reached the export: %q\n\n"+
+				"The bundle is sent to somebody who does not have the operator's box. "+
+				"A camera password, a CDN token or a publish token in it is a stranger "+
+				"who can watch or publish.\nexport: %s", secret, out)
+		}
+	}
+}

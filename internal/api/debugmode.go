@@ -69,9 +69,19 @@ func (s *Server) handleGetDebug(w http.ResponseWriter, r *http.Request) {
 
 // handleSetDebug turns recording on or off.
 //
-// The session is the authorisation. This changes what THIS box records and
-// nothing leaves it; the operator can already read every one of those lines by
-// running journalctl.
+// A session OR AN ADMIN API TOKEN authorises this, and the earlier comment here
+// said "the session is the authorisation", which was wrong. requireScope
+// (api.go:1648) passes an admin-scoped token straight through, so anything
+// holding one can toggle recording and export a bundle WITHOUT the UI
+// confirmation ever being drawn.
+//
+// That is the correct behaviour -- an admin token is admin -- but it means the
+// confirmation dialog is a courtesy to a human, not a control on the route. The
+// control on the route is the audit entry, which fires either way.
+//
+// The toggle itself is still cheap to authorise: it changes what THIS box
+// records, nothing leaves it, and the operator can already read every one of
+// those lines with journalctl.
 func (s *Server) handleSetDebug(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Recording *bool `json:"recording"`
@@ -102,14 +112,27 @@ func (s *Server) handleSetDebug(w http.ResponseWriter, r *http.Request) {
 		// stands behind it -- see diag.Recorder.SetSecrets, which exists so
 		// whatever reconciles destinations can close the gap.
 		if *body.Recording {
-			if rows, err := s.store.ListDestinations(); err == nil {
-				s.diag.SetSecrets(alerts.NewSecretSet(s.log, engine.DestinationSecrets(rows)...))
+			// SOURCES AS WELL AS DESTINATIONS, and the first version had only
+			// destinations -- which covers where a stream GOES and nothing about
+			// where it comes FROM. A pull source is addressed by a URL that
+			// routinely carries credentials (rtsp://user:pass@, a CDN token in
+			// the query), engine.go logs that URL, and everything in it therefore
+			// reached the exported bundle behind nothing but the residual
+			// alerts.Redact pass. The publish token goes in for the same reason:
+			// a token in a bundle sent to a stranger is a stranger who can
+			// publish.
+			dests, dErr := s.store.ListDestinations()
+			srcs, sErr := s.store.ListSources()
+			if dErr == nil && sErr == nil {
+				lits := append(engine.DestinationSecrets(dests), engine.SourceSecrets(srcs)...)
+				s.diag.SetSecrets(alerts.NewSecretSet(s.log, lits...))
 			} else {
 				// Refused rather than recorded: turning on a recorder whose
 				// scrub cannot be built is how a bundle full of stream keys
 				// gets made, and the operator would have no way to know.
 				writeError(w, http.StatusServiceUnavailable,
-					"could not read destinations to build the redaction set, so recording "+
+					"could not read the destinations and sources needed to build the "+
+						"redaction set, so recording "+
 						"was not started")
 				return
 			}
@@ -150,6 +173,13 @@ func (s *Server) handleExportDebug(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 
+	// BEFORE THE WRITE, ON PURPOSE, and this was queried in review. Publishing
+	// after a successful Encode would miss the case that matters most: a write
+	// that fails halfway has ALREADY put bytes on the wire, so the disclosure
+	// happened and an audit trail that omitted it would be wrong in the
+	// dangerous direction. The cost is that a connection dropped before the
+	// first byte is recorded as an export that did not deliver -- an audit trail
+	// that over-reports a disclosure is the right way round.
 	s.publishAudit(auditDebugExported(len(b.Records), b.Capture.Truncated, s.clientIP(r)))
 
 	if err := b.Encode(w); err != nil {

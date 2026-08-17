@@ -129,7 +129,13 @@ func NewRecorder(capacity int, secrets *alerts.SecretSet) *Recorder {
 
 // SetSecrets replaces the declared secrets.
 //
-// CALLED WHENEVER A DESTINATION CHANGES, and that is not optional. A stream key
+// CALLED WHEN RECORDING STARTS, and NOT on every destination change -- an
+// earlier version of this comment claimed the latter and no caller ever did it.
+// The window that leaves open is a key rotated WHILE recording is already on,
+// which is covered only by the residual alerts.Redact pass. Wiring this to the
+// destination write would close it, and nothing does yet.
+//
+// The reason it matters at all: a stream key
 // rotated mid-session is a secret this set has never seen: the ring would hold
 // the new one in the clear while the old one -- the one nobody is using any more
 // -- is the only value being masked. A set built once at startup is a set that

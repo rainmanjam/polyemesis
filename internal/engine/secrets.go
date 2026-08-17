@@ -434,3 +434,32 @@ func DestinationSecrets(rows []*db.Destination) []string {
 	}
 	return out
 }
+
+// SourceSecrets collects every credential literal a source carries.
+//
+// EXPORTED FOR THE DEBUG RECORDER, AND ITS ABSENCE WAS A REAL LEAK. The
+// recorder's set was first built from DestinationSecrets alone, which covers
+// where a stream goes and nothing about where it comes from. A pull source is
+// addressed by a URL that routinely carries credentials -- rtsp://user:pass@,
+// or a CDN token in the query -- and engine.go logs that URL. Everything in it
+// therefore reached the exported bundle with only the residual alerts.Redact
+// pass behind it, which matches shapes rather than literals.
+//
+// The publish TOKEN is collected for the same reason: it is what an encoder
+// authenticates with, it appears in the ingest URL an operator copies, and a
+// token in a bundle sent to a stranger is a stranger who can publish.
+//
+// PrevToken travels too. Rotation keeps the old one working for five minutes,
+// so during that window it is a live credential that log lines may still carry.
+func SourceSecrets(rows []*db.Source) []string {
+	var out []string
+	for _, s := range rows {
+		if s == nil {
+			continue
+		}
+		out = append(out, s.Token, s.PrevToken)
+		out = append(out, urlSecrets(s.Ingest.Pull.URL)...)
+		out = append(out, s.Ingest.SRT.Passphrase)
+	}
+	return wireSpellings(out)
+}
