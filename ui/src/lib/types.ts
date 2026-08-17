@@ -430,6 +430,49 @@ export type MetaField =
   | "contentDetails"
   | "tags";
 
+/** What happened to ONE destination in a bulk start or stop.
+ *
+ *  Mirrors api.bulkOutcome in internal/api/destinations_bulk.go.
+ *
+ *  - `started` / `stopped`  the intent was written, the pipeline reconciled and
+ *                           the process state read back.
+ *  - `warned`               it happened and something about it was NOT observed.
+ *                           Today only the unreaped stop (#209): SIGKILL issued,
+ *                           nobody waited, a child that may still be publishing.
+ *  - `failed`               refused, with `message` saying why.
+ *  - `skipped`              never attempted, so this destination is exactly as
+ *                           it was. Reached when the request is cancelled part
+ *                           way through a paced start.
+ *
+ *  Five words rather than four because "it happened but not cleanly" and "it did
+ *  not happen at all" are different things to an operator, and both differ from
+ *  a failure. */
+export type BulkDestOutcome = "started" | "stopped" | "warned" | "failed" | "skipped";
+
+/** One destination's row of a POST /destinations/start-all or /stop-all answer.
+ *
+ *  A BULK RESULT IS REPORTED PER DESTINATION, NEVER AS ONE BOOLEAN — the same
+ *  doctrine the metadata composer states for a push. Eight destinations of which
+ *  two refuse must not read as "failed", so this lives here beside MetaField
+ *  rather than inside the page: it is an API contract, not a component detail. */
+export interface BulkDestResult {
+  id: number;
+  name: string;
+  platform: string;
+  outcome: BulkDestOutcome;
+  /** The supervisor's word for the process afterwards. Absent when the engine
+   *  carries no process for this row. */
+  state?: string;
+  /** Why, on every outcome that is not a clean start or stop. */
+  message?: string;
+}
+
+/** The whole answer to a bulk start or stop. */
+export interface BulkDestReport {
+  action: "start" | "stop";
+  results: BulkDestResult[];
+}
+
 /** One font available to a text overlay, from GET /api/v1/fonts. */
 export interface FontInfo {
   name: string;

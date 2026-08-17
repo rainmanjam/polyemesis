@@ -325,6 +325,7 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 |---|---|
 | `GET` `POST` | `/destinations` |
 | `PUT` | `/destinations/order` |
+| `POST` | `/destinations/start-all`, `/stop-all` |
 | `GET` `PUT` `DELETE` | `/destinations/{id}` |
 | `POST` | `/destinations/{id}/start`, `/stop`, `/restart` |
 | `POST` | `/destinations/{id}/refresh-key` |
@@ -335,6 +336,44 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 
 List rows arrive wrapped as `{"destination": ..., "routing": ...}` so the UI
 gets the compiled routing without a second round trip.
+
+`start-all` and `stop-all` act on **every** destination — there is no id list
+and no selection. Each row is driven through the same code as
+`/destinations/{id}/start` and `/stop`, so the bulk control is exactly N presses
+of the per-destination button and can never be more destructive than it.
+
+The answer is a list, never a boolean:
+
+```json
+{"action": "start", "results": [
+  {"id": 3, "name": "YouTube main", "platform": "youtube",
+   "outcome": "started", "state": "running"},
+  {"id": 4, "name": "Backup RTMP", "platform": "custom",
+   "outcome": "failed", "message": "connection refused"}
+]}
+```
+
+`outcome` is one of `started`, `stopped`, `warned` (it happened and something
+about it was not observed — today only the unreaped stop), `failed` (with
+`message` saying why) or `skipped` (the caller went away before this row was
+reached, so it was not touched). The status is `200` whenever every row was
+reached, including when some of them failed: two refusals out of eight is not
+"the request failed".
+
+Starts are **paced** — a gap between one destination and the next, so a burst of
+FFmpeg children and a burst of near-simultaneous connections to the same platform
+do not arrive as one clap. It is a pacing choice about this box, not a limit
+derived from any platform's published ceiling. Stops are not paced: tearing down
+is local. A paced start of a long destination list is therefore a long request,
+and the response is the finished record of what happened.
+
+**`stop-all` ends every YouTube broadcast on the install, permanently.** Stop and
+disable are one thing here — `/stop` clears `destinations.enabled`, and the
+broadcast lifecycle coordinator ends the broadcast of any destination that is
+disabled. A completed YouTube broadcast cannot return to live. Starting again
+puts the video back on the wire but does not bring the broadcasts back; a new one
+has to be created or announced. This is true of the per-destination `/stop` too —
+the bulk route just does it to every row at once.
 
 The two `facebook/` routes act on the live video recorded against THAT
 destination rather than on the account, because one account can hold several

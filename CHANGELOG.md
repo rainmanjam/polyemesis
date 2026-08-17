@@ -74,6 +74,35 @@ its first tagged release.
   the moment the install stops having a programme. (#387)
 
 ### Added
+- **One control starts or stops every destination.** An operator with eight
+  destinations was pressing eight buttons; `POST /destinations/start-all` and
+  `POST /destinations/stop-all` now act on the whole install, with a matching
+  pair of buttons beside the destination list on the dashboard. There is no id
+  list and no per-card selection: the routes act on everything, deliberately,
+  because a bulk control with a selection is the per-destination control with
+  extra steps and one more thing that can be stale by the time it is pressed.
+
+  Each row is driven through the same code as the per-destination start and
+  stop, so the bulk control can never be more destructive than the button it
+  replaces — and **the answer is a list, never a boolean**. One row per
+  destination, naming which it was, what happened (`started`, `stopped`,
+  `warned`, `failed` or `skipped`) and why when something did not happen. Eight
+  destinations of which two refuse is not "failed", and the operator should not
+  have to open eight cards to find out which two.
+
+  **Starts are paced**, one destination at a time with a gap between them, so a
+  burst of encoder processes does not contend on the box and the same
+  connections do not arrive at a platform as one clap. That is a pacing choice
+  about this machine; it encodes no platform's published ceiling, counts
+  nothing and caps nothing. Stops are not paced — tearing down is local.
+
+  Stopping asks for confirmation, and the confirmation says what stopping
+  actually costs: **stop and disable are one thing on the server**, so stopping
+  ends every YouTube broadcast on the install and a completed YouTube broadcast
+  cannot return to live. Starting again puts the video back on the wire; it does
+  not bring the broadcasts back. That was already true of the per-destination
+  Stop button one row at a time — the wording is new, not the consequence.
+
 - **The viewer count is on screen, and a withheld one does not read as zero.**
   Three platforms implement `GET /platforms/accounts/{id}/stats`, the route
   answered, and nothing in the UI called it — so the capability matrix said

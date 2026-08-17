@@ -7,6 +7,7 @@ import type {
   AutomodModelStats,
   BitrateSample,
   BroadcastEnd,
+  BulkDestReport,
   ChatMessage,
   ChatModerationResult,
   ChatOverview,
@@ -439,6 +440,25 @@ export const api = {
     post<{ enabled: boolean }>(`/destinations/${id}/stop`),
   restartDestination: (id: number) =>
     post<{ status: string }>(`/destinations/${id}/restart`),
+
+  /* --- every destination at once ----------------------------------------
+   *
+   *  These are startDestination/stopDestination run over every row on the
+   *  server, not a new capability: same handler code, same reconcile, same
+   *  read-back. There is no id list because there is no selection — the
+   *  routes act on the whole install.
+   *
+   *  SLOW ON PURPOSE. Starts are paced server-side, so this resolves after
+   *  the last destination has been dealt with rather than on acknowledgement.
+   *  A caller that aborts leaves the untouched tail reported as `skipped`.
+   *
+   *  STOPPING ENDS EVERY YOUTUBE BROADCAST ON THE INSTALL, PERMANENTLY: stop
+   *  and disable are one thing on the server, and the broadcast lifecycle
+   *  coordinator ends the broadcast of a disabled destination. Starting again
+   *  puts video back on the wire; it does not bring the broadcasts back. See
+   *  internal/api/destinations_bulk.go. */
+  startAllDestinations: () => post<BulkDestReport>("/destinations/start-all"),
+  stopAllDestinations: () => post<BulkDestReport>("/destinations/stop-all"),
   refreshStreamKey: (id: number) =>
     post<{ destination: Destination }>(`/destinations/${id}/refresh-key`),
 

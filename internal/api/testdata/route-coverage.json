@@ -9,13 +9,13 @@
   "inertCeiling": 6,
   "varianceExemptCeiling": 2,
   "shapeFloor": 27,
-  "guardedFloor": 20,
+  "guardedFloor": 22,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 218,
+    "methodPatternPairs": 220,
     "swept": 65,
     "excused": 50,
-    "denied": 103,
+    "denied": 105,
     "nonTrieProbes": 12,
     "shapesEmitted": 27,
     "shapesNotInspected": 3
@@ -327,6 +327,18 @@
       "pattern": "/api/v1/destinations/order",
       "coverage": "denied-by-method",
       "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/start-all",
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/stop-all",
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
     },
     {
       "method": "DELETE",

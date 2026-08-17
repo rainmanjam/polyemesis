@@ -845,6 +845,17 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Order is display state and deliberately does NOT reconcile (see
 			// handleReorderDestinations), so it needs no programme either.
 			r.Put("/destinations/order", s.handleReorderDestinations)
+			// The bulk pair, beside the per-destination controls they drive.
+			// Static segments again, so they do not collide with {id} below.
+			//
+			// Same requireSource as /destinations/{id}/start and /stop: they
+			// are those routes, run once per row, and they reconcile after
+			// every one of them. See destinations_bulk.go -- and read its
+			// header before touching them, because "stop all" ends every
+			// YouTube broadcast on the install and that is not visible from
+			// here.
+			r.With(s.requireSource).Post("/destinations/start-all", s.handleStartAllDestinations)
+			r.With(s.requireSource).Post("/destinations/stop-all", s.handleStopAllDestinations)
 			r.Get("/destinations/{id}", s.handleGetDestination)
 			r.With(s.requireSource).Put("/destinations/{id}", s.handleUpdateDestination)
 			r.With(s.requireSource).Delete("/destinations/{id}", s.handleDeleteDestination)

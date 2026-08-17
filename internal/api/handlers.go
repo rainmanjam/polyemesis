@@ -1706,19 +1706,58 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
-	id, err := idParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
+// destEffect is what one press of start or stop actually did to one row: the
+// process state read back afterwards, and the two things that state cannot say
+// on its own.
+//
+// It exists so the bulk pair in destinations_bulk.go can report per destination
+// without a second implementation of the sentence below. See
+// applyDestinationEnabled.
+type destEffect struct {
+	// State is the supervisor's word for the process, and HasProcess says
+	// whether there was a process to ask.
+	//
+	// The two are separate because a zero supervisor.Status has an empty State,
+	// so "" cannot distinguish "no process" from "a process whose state has not
+	// been set" -- and the single-destination response has always emitted the
+	// key for the second case.
+	State      string
+	HasProcess bool
+	// Error is the destination's own fault text, empty when there is none.
+	Error string
+	// Warning is DestStatus.StopWarning: set only on a stop, and only when the
+	// stop ended on the deadline arm. Empty means the child was reaped.
+	Warning string
+	// Found reports that the row appeared in the engine's snapshot. False for a
+	// row the engine is not carrying, which is not a failure -- it is what a
+	// destination on another source's programme looks like from here.
+	Found bool
+}
+
+// destControl is the result of applyDestinationEnabled, carrying the two
+// failures apart because they answer with different status codes: a store
+// failure is about the row (404 for a missing one), a reconcile failure is
+// about the pipeline (500).
+type destControl struct {
+	Effect       destEffect
+	StoreErr     error
+	ReconcileErr error
+}
+
+// applyDestinationEnabled is the whole of what POST /destinations/{id}/start and
+// POST /destinations/{id}/stop do to one destination: write the run/stop intent,
+// reconcile the pipeline, and read the process state back.
+//
+// Factored out so the bulk routes are exactly N presses of the button an
+// operator already has, driven from the same code, rather than a parallel
+// implementation that can drift from it. Nothing here is bulk-specific; the
+// pacing and the per-row reporting live entirely in destinations_bulk.go.
+func (s *Server) applyDestinationEnabled(id int64, enabled bool) destControl {
 	if err := s.store.SetDestinationEnabled(id, enabled); err != nil {
-		writeStoreError(w, err)
-		return
+		return destControl{StoreErr: err}
 	}
 	if err := s.reconcile(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		return destControl{ReconcileErr: err}
 	}
 	// The EFFECT, not just the intent.
 	//
@@ -1736,24 +1775,53 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 	// asked: the second means a process that may still be running is still
 	// holding, and still publishing to, what this response has just declared
 	// free. So a stop reports `reaped`, and says why when it is false.
-	resp := map[string]any{"enabled": enabled}
+	var eff destEffect
 	for _, d := range s.eng().Status().Destinations {
 		if d.ID != id {
 			continue
 		}
+		eff.Found = true
 		if d.Process != nil {
-			resp["state"] = d.Process.State
+			eff.State, eff.HasProcess = string(d.Process.State), true
 		}
-		if d.Error != "" {
-			resp["error"] = d.Error
-		}
+		eff.Error = d.Error
 		if !enabled {
-			resp["reaped"] = d.StopWarning == ""
-			if d.StopWarning != "" {
-				resp["warning"] = d.StopWarning
-			}
+			eff.Warning = d.StopWarning
 		}
 		break
+	}
+	return destControl{Effect: eff}
+}
+
+func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
+	id, err := idParam(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	ctl := s.applyDestinationEnabled(id, enabled)
+	if ctl.StoreErr != nil {
+		writeStoreError(w, ctl.StoreErr)
+		return
+	}
+	if ctl.ReconcileErr != nil {
+		writeError(w, http.StatusInternalServerError, ctl.ReconcileErr.Error())
+		return
+	}
+	resp := map[string]any{"enabled": enabled}
+	if ctl.Effect.Found {
+		if ctl.Effect.HasProcess {
+			resp["state"] = ctl.Effect.State
+		}
+		if ctl.Effect.Error != "" {
+			resp["error"] = ctl.Effect.Error
+		}
+		if !enabled {
+			resp["reaped"] = ctl.Effect.Warning == ""
+			if ctl.Effect.Warning != "" {
+				resp["warning"] = ctl.Effect.Warning
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
