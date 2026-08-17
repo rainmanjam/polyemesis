@@ -202,6 +202,21 @@ const ()
 type lifecycleStore interface {
 	ListDestinations() ([]*db.Destination, error)
 	UpdateLifecycle(id int64, apply func(*db.Destination) bool) (*db.Destination, error)
+	// GetDestination CONFIRMS A DELETION RATHER THAN INFERRING ONE, and that
+	// distinction is the difference between ending a broadcast because a row is
+	// gone and ending it because a query did not mention it.
+	//
+	// endOrphan used to fire on absence from ListDestinations alone. That is
+	// correct only while the listing is unfiltered and whole-table, which it is
+	// -- and which nothing enforced. Scope that query later, to one source or
+	// to enabled rows or to a page, and every live broadcast outside the scope
+	// looks deleted and gets completed. The failure would be silent, permanent
+	// on YouTube, and would arrive as "why did half my broadcasts end".
+	//
+	// A second look costs one indexed read on a path that already spends two
+	// platform calls, and it turns a whole class of future refactor from
+	// dangerous into merely wrong.
+	GetDestination(id int64) (*db.Destination, error)
 }
 
 // lifecycleFault is one thing an operator has to be told about. It carries no
@@ -656,7 +671,27 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 		"broadcast", broadcastID, "to", plan.Send, "redundant", res.Redundant)
 }
 
-// end is the ONLY place in this process that sends oauth.PhaseComplete.
+// end is one of TWO places in this process that send oauth.PhaseComplete, and
+// the other one is endOrphan below.
+//
+// THIS COMMENT SAID "THE ONLY PLACE" AND IT WAS FALSE WHEN IT WAS WRITTEN. The
+// distinction that matters is not how many call sites there are, it is what
+// gates each one, so here is both:
+//
+//	end        gated by a COMPARE-AND-SET inside the writing transaction. The
+//	           row is re-read at the instant of the write, so an operator who
+//	           re-enables a destination while the state read is in flight gets
+//	           nothing sent.
+//	endOrphan  gated by the row being ABSENT from a successful, unfiltered,
+//	           whole-table ListDestinations. There is no row left to
+//	           compare-and-set against, which is exactly why it is a separate
+//	           function rather than a branch of this one.
+//
+// endOrphan's gate has a fragility this one does not: it depends on that
+// listing being unfiltered. Scope the query later -- to one source, to enabled
+// rows, to a page -- and every live broadcast outside the scope looks deleted
+// and gets completed. There is a test pinning it; see the subset case beside
+// endOrphan.
 //
 // THE GATE IS THE FIRST STATEMENT AND IT IS A COMPARE-AND-SET. db.UpdateLifecycle
 // re-reads the row inside the transaction that writes it, so the callback below
@@ -726,6 +761,31 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 	prov, ok := c.providers.LifecycleFor(t.Platform)
 	if !ok {
 		c.untrack(t.destinationID)
+		return
+	}
+
+	// CONFIRM THE DELETION BEFORE ACTING ON IT. The caller reached here because
+	// the row was absent from ListDestinations, which is an inference about a
+	// query rather than a fact about a row. Ask directly.
+	//
+	// Anything other than a clean "not found" means DO NOTHING: a store error
+	// is not evidence of a deletion, and the next sweep will ask again. The
+	// asymmetry is deliberate and matches every other decision in this file --
+	// declining to end a broadcast that should have ended costs a watch page
+	// that stays open, and ending one that should not costs the show, because
+	// on YouTube complete is terminal.
+	if _, err := c.store.GetDestination(t.destinationID); !errors.Is(err, db.ErrNotFound) {
+		if err != nil {
+			c.log.Warn("broadcast lifecycle: could not confirm a destination was deleted, "+
+				"so its broadcast is left alone",
+				"destination", t.Name, "broadcast", t.BroadcastID, "err", err)
+			return
+		}
+		// The row is there after all. The listing was incomplete, not the
+		// world -- which is exactly the case this check exists for.
+		c.log.Warn("broadcast lifecycle: a destination was missing from the listing but "+
+			"still exists, so its broadcast was NOT ended",
+			"destination", t.Name, "broadcast", t.BroadcastID)
 		return
 	}
 	if c.orphanAttemptCount(t.destinationID) >= lifecycleGiveUpAfter {

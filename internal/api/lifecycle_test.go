@@ -139,16 +139,37 @@ func (f *ytFake) handler(t *testing.T) http.HandlerFunc {
 type fakeLifecycleStore struct {
 	mu   sync.Mutex
 	rows map[int64]*db.Destination
+	// hideFromList omits rows from ListDestinations WITHOUT deleting them,
+	// which is what a scoped or paged query would do to a row that still
+	// exists. GetDestination still finds them, which is the whole point.
+	hideFromList map[int64]bool
 	// beforeUpdate runs inside the "transaction", before apply, so a test can
 	// move the world exactly where a real race would move it.
 	beforeUpdate func(id int64, cur *db.Destination)
+}
+
+// GetDestination answers what the real store answers: the row, or
+// db.ErrNotFound. endOrphan uses it to CONFIRM a deletion rather than infer one
+// from a listing, so a test can make the listing lie -- which is the whole
+// hazard -- and watch the confirmation refuse to act on it.
+func (f *fakeLifecycleStore) GetDestination(id int64) (*db.Destination, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if r, ok := f.rows[id]; ok {
+		cp := *r
+		return &cp, nil
+	}
+	return nil, db.ErrNotFound
 }
 
 func (f *fakeLifecycleStore) ListDestinations() ([]*db.Destination, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make([]*db.Destination, 0, len(f.rows))
-	for _, r := range f.rows {
+	for id, r := range f.rows {
+		if f.hideFromList[id] {
+			continue
+		}
 		cp := *r
 		out = append(out, &cp)
 	}
@@ -994,6 +1015,10 @@ func (brokenLifecycleStore) UpdateLifecycle(int64, func(*db.Destination) bool) (
 	return nil, errors.New("database is away")
 }
 
+func (brokenLifecycleStore) GetDestination(int64) (*db.Destination, error) {
+	return nil, errors.New("database is away")
+}
+
 // ------------------------------------------------- FINISHED BUSINESS IS FREE
 
 // A DISABLED ROW WHOSE BROADCAST IS ALREADY OVER MUST COST NOTHING, FOR EVER.
@@ -1059,5 +1084,48 @@ func TestTheDisabledPathGivesUpEventuallyRatherThanRetryingForEver(t *testing.T)
 	if reads != 0 || len(sent) != 0 {
 		t.Errorf("a disabled row past its give-up bound is still calling the platform "+
 			"(%d reads, %d transitions). The log says it gave up; it had not.", reads, len(sent))
+	}
+}
+
+// A LISTING THAT LIES MUST NOT END A BROADCAST.
+//
+// endOrphan fires for a destination absent from ListDestinations, which is an
+// inference about a QUERY rather than a fact about a row. It holds only while
+// that listing is unfiltered and whole-table — true today, enforced by nothing.
+// Scope the query later, to one source or to enabled rows or to a page, and
+// every live broadcast outside the scope looks deleted and gets completed:
+// silent, permanent on YouTube, and arriving as "why did half my broadcasts
+// end".
+//
+// So the deletion is confirmed rather than inferred. This test makes the
+// listing lie in exactly that way and asserts nothing is sent.
+func TestABroadcastIsNotEndedBecauseAListingWasIncomplete(t *testing.T) {
+	row := lifecycleTestRow(true, phaseLive)
+	yt := &ytFake{status: phaseLive, streamStatus: "active"}
+	c, store, _ := lifecycleFixture(t, yt, row)
+
+	// Track it the way a live destination is tracked.
+	c.sweepOnce(context.Background(), sweepEverything)
+
+	// Now make ListDestinations omit it WITHOUT deleting it — precisely what a
+	// scoped or paged query would do.
+	store.mu.Lock()
+	hidden := store.rows[row.ID]
+	store.hideFromList = map[int64]bool{row.ID: true}
+	store.mu.Unlock()
+	if hidden == nil {
+		t.Fatal("fixture row vanished")
+	}
+
+	before, _ := yt.snapshot()
+	c.sweepOnce(context.Background(), sweepEverything)
+	after, _ := yt.snapshot()
+
+	for _, sent := range after[len(before):] {
+		if sent == string(oauth.PhaseComplete) {
+			t.Fatalf("a broadcast was ENDED because the destination was missing from a "+
+				"listing, though the row still exists. On YouTube that is permanent. "+
+				"sent=%v", after)
+		}
 	}
 }
