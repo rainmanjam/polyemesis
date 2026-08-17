@@ -181,6 +181,28 @@ its first tagged release.
   draws them instead of printing forty lines of source at the reader.
 
 ### Fixed
+- **A credential in an unrecognised attribute reached the debug bundle
+  verbatim.** The recorder's scrub walk handled `string`, `[]string`,
+  `map[string]any`, `error` and `fmt.Stringer`, and passed everything else
+  through untouched — its comment asserted that what reached that branch
+  "cannot carry a credential without having been formatted first".
+  `slog.Any("detail", map[string]string{"token": key})` reaches it. Neither the
+  declared secret set nor the residual `alerts.Redact` pass ever saw the value,
+  and it travelled into a file intended for somebody who does not have the
+  operator's server. Reproduced in four shapes — a map of strings, a slice of
+  any, a struct, and a map of slices. Unrecognised values are now rendered and
+  scrubbed before capture.
+
+- **The debug ring counted its records and never weighed them.** The buffer
+  bounded the record COUNT at 5,000 and nothing bounded their size, so a single
+  enormous log line made the export unbounded — and the browser buffers that
+  file whole, twice, in the tab of the person trying to report a fault. Each
+  record now has an 8 KB budget, spent in a fixed order, applied AFTER the
+  scrub so a cut can never strand the front half of a stream key as text the
+  secret set no longer matches. The bundle states its own size and how many
+  lines were shortened, and the confirmation dialog shows both before anything
+  is sent.
+
 - **Four of six pages were shipping with no cache revalidation.**
   `web/public/_headers` scoped `no-cache` to `/` and `/*.html`, and its comment
   claimed that covered the built pages. It did not: with
