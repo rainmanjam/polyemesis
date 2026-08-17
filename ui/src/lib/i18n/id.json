@@ -339,7 +339,7 @@
   "debug.blurb": "Merekam aktivitas server ke dalam buffer yang dapat Anda ekspor dan kirim ke teknisi. Kunci siaran dan token dihapus saat setiap baris direkam, bukan saat diekspor.",
   "debug.clear": "Kosongkan buffer",
   "debug.confirmAction": "Ekspor",
-  "debug.confirmBody": "Membuat berkas untuk dikirim ke orang yang tidak memiliki server ini. Berisi baris log terbaru dengan kunci siaran dan token yang sudah dihapus, versi polyemesis, dan sistem operasi. Tidak berisi nama tujuan, nama sumber, nama host, atau konfigurasi Anda. Ekspor dicatat dalam jejak audit.",
+  "debug.confirmBody": "Membuat berkas untuk dikirim ke orang yang tidak memiliki server ini. Kunci siaran, token, dan kata sandi dihapus saat setiap baris direkam. Namun baris log itu sendiri BISA menyebut tujuan, sumber, dan host Anda — baca berkasnya sebelum mengirim. Berisi juga versi polyemesis dan sistem operasi, serta tanpa konfigurasi atau kredensial. Ekspor dicatat dalam jejak audit.",
   "debug.confirmTitle": "Ekspor paket awakutu?",
   "debug.consequenceRecords": "baris log",
   "debug.consequencesLabel": "Paket ini berisi",

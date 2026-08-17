@@ -339,7 +339,7 @@
   "debug.blurb": "Registreert serveractiviteit in een buffer die u kunt exporteren en naar een technicus sturen. Streamsleutels en tokens worden verwijderd bij het vastleggen van elke regel, niet pas bij het exporteren.",
   "debug.clear": "Buffer wissen",
   "debug.confirmAction": "Exporteren",
-  "debug.confirmBody": "Maakt een bestand om te sturen naar iemand die deze server niet heeft. Het bevat recente logregels waaruit streamsleutels en tokens al zijn verwijderd, de polyemesis-versie en het besturingssysteem. Het bevat geen bestemmings- of bronnamen, hostnaam of configuratie. De export wordt vastgelegd in het auditlogboek.",
+  "debug.confirmBody": "Maakt een bestand om te sturen naar iemand die deze server niet heeft. Streamsleutels, tokens en wachtwoorden worden verwijderd bij het vastleggen van elke regel. De logregels zelf KUNNEN wel uw bestemmingen, bronnen en hosts noemen — lees het bestand voordat u het verstuurt. Het bevat verder de polyemesis-versie en het besturingssysteem, en geen configuratie of inloggegevens. De export wordt vastgelegd in het auditlogboek.",
   "debug.confirmTitle": "Een foutopsporingspakket exporteren?",
   "debug.consequenceRecords": "logregels",
   "debug.consequencesLabel": "Dit pakket bevat",

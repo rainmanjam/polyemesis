@@ -339,7 +339,7 @@
   "debug.blurb": "Rejestruje działania serwera w buforze, który można wyeksportować i wysłać inżynierowi. Klucze transmisji i tokeny są usuwane podczas zapisu każdego wiersza, a nie przy eksporcie.",
   "debug.clear": "Wyczyść bufor",
   "debug.confirmAction": "Eksportuj",
-  "debug.confirmBody": "Tworzy plik do wysłania osobie, która nie ma tego serwera. Zawiera ostatnie wiersze dziennika z już usuniętymi kluczami transmisji i tokenami, wersję polyemesis oraz system operacyjny. Nie zawiera nazw celów ani źródeł, nazwy hosta ani konfiguracji. Eksport jest odnotowywany w dzienniku audytu.",
+  "debug.confirmBody": "Tworzy plik do wysłania osobie, która nie ma tego serwera. Klucze transmisji, tokeny i hasła są usuwane podczas zapisu każdego wiersza. Same wiersze dziennika MOGĄ jednak wymieniać Twoje cele, źródła i hosty — przejrzyj plik przed wysłaniem. Zawiera też wersję polyemesis i system operacyjny, a nie zawiera konfiguracji ani poświadczeń. Eksport jest odnotowywany w dzienniku audytu.",
   "debug.confirmTitle": "Wyeksportować pakiet diagnostyczny?",
   "debug.consequenceRecords": "wierszy dziennika",
   "debug.consequencesLabel": "Ten pakiet zawiera",

@@ -339,7 +339,7 @@
   "debug.blurb": "Zeichnet die Serveraktivität in einem Puffer auf, den Sie exportieren und an einen Techniker senden können. Stream-Schlüssel und Token werden beim Aufzeichnen jeder Zeile entfernt, nicht erst beim Export.",
   "debug.clear": "Puffer leeren",
   "debug.confirmAction": "Exportieren",
-  "debug.confirmBody": "Erstellt eine Datei für jemanden, der keinen Zugriff auf diesen Server hat. Sie enthält aktuelle Protokollzeilen mit bereits entfernten Stream-Schlüsseln und Token, die polyemesis-Version und das Betriebssystem. Sie enthält weder Ihre Ziel- und Quellnamen noch Hostnamen oder Konfiguration. Der Export wird im Audit-Protokoll vermerkt.",
+  "debug.confirmBody": "Erstellt eine Datei für jemanden, der keinen Zugriff auf diesen Server hat. Stream-Schlüssel, Token und Passwörter werden beim Aufzeichnen jeder Zeile entfernt. Die Protokollzeilen selbst KÖNNEN jedoch Ihre Ziele, Quellen und Hosts benennen — prüfen Sie die Datei vor dem Senden. Enthalten sind außerdem die polyemesis-Version und das Betriebssystem, jedoch keine Konfiguration und keine Zugangsdaten. Der Export wird im Audit-Protokoll vermerkt.",
   "debug.confirmTitle": "Diagnosepaket exportieren?",
   "debug.consequenceRecords": "Protokollzeilen",
   "debug.consequencesLabel": "Dieses Paket enthält",

@@ -339,7 +339,7 @@
   "debug.blurb": "Sunucu etkinliğini, dışa aktarıp bir mühendise gönderebileceğiniz bir arabelleğe kaydeder. Yayın anahtarları ve belirteçler, dışa aktarma sırasında değil, her satır kaydedilirken kaldırılır.",
   "debug.clear": "Arabelleği temizle",
   "debug.confirmAction": "Dışa aktar",
-  "debug.confirmBody": "Bu sunucuya sahip olmayan birine göndermek için bir dosya oluşturur. Yayın anahtarları ve belirteçleri çıkarılmış son günlük satırlarını, polyemesis sürümünü ve işletim sistemini içerir. Hedef adlarınızı, kaynak adlarınızı, ana bilgisayar adını veya yapılandırmayı içermez. Dışa aktarma denetim kaydına işlenir.",
+  "debug.confirmBody": "Bu sunucuya sahip olmayan birine göndermek için bir dosya oluşturur. Yayın anahtarları, belirteçler ve parolalar her satır kaydedilirken kaldırılır. Ancak günlük satırlarının kendisi hedeflerinizi, kaynaklarınızı ve sunucularınızı ADLANDIRABİLİR — göndermeden önce dosyayı okuyun. Ayrıca polyemesis sürümünü ve işletim sistemini içerir; yapılandırma veya kimlik bilgisi içermez. Dışa aktarma denetim kaydına işlenir.",
   "debug.confirmTitle": "Hata ayıklama paketi dışa aktarılsın mı?",
   "debug.consequenceRecords": "günlük satırı",
   "debug.consequencesLabel": "Bu paket şunları içerir",

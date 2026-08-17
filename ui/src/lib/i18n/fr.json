@@ -339,7 +339,7 @@
   "debug.blurb": "Enregistre l'activité du serveur dans un tampon que vous pouvez exporter et envoyer à un technicien. Les clés de diffusion et les jetons sont supprimés à l'enregistrement de chaque ligne, et non à l'export.",
   "debug.clear": "Vider le tampon",
   "debug.confirmAction": "Exporter",
-  "debug.confirmBody": "Crée un fichier destiné à une personne qui n'a pas accès à ce serveur. Il contient les lignes de journal récentes, clés de diffusion et jetons déjà supprimés, la version de polyemesis et le système d'exploitation. Il ne contient ni vos noms de destinations ou de sources, ni le nom d'hôte, ni la configuration. L'export est consigné dans le journal d'audit.",
+  "debug.confirmBody": "Crée un fichier destiné à une personne qui n'a pas accès à ce serveur. Les clés de diffusion, les jetons et les mots de passe sont supprimés à l'enregistrement de chaque ligne. Les lignes de journal elles-mêmes PEUVENT nommer vos destinations, sources et hôtes — relisez le fichier avant de l'envoyer. Il contient aussi la version de polyemesis et le système d'exploitation, mais aucune configuration ni identifiant. L'export est consigné dans le journal d'audit.",
   "debug.confirmTitle": "Exporter une archive de débogage ?",
   "debug.consequenceRecords": "lignes de journal",
   "debug.consequencesLabel": "Cette archive contient",

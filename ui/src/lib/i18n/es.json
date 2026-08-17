@@ -339,7 +339,7 @@
   "debug.blurb": "Registra la actividad del servidor en un búfer que puede exportar y enviar a un técnico. Las claves de transmisión y los tokens se eliminan al registrar cada línea, no al exportar.",
   "debug.clear": "Vaciar búfer",
   "debug.confirmAction": "Exportar",
-  "debug.confirmBody": "Genera un archivo para enviar a alguien que no tiene este servidor. Contiene líneas de registro recientes con las claves de transmisión y los tokens ya eliminados, la versión de polyemesis y el sistema operativo. No contiene los nombres de sus destinos ni fuentes, ni el nombre del host ni la configuración. La exportación queda registrada en la auditoría.",
+  "debug.confirmBody": "Genera un archivo para enviar a alguien que no tiene este servidor. Las claves de transmisión, los tokens y las contraseñas se eliminan al registrar cada línea. Las propias líneas de registro SÍ pueden nombrar sus destinos, fuentes y hosts: revise el archivo antes de enviarlo. También incluye la versión de polyemesis y el sistema operativo, y ninguna configuración ni credencial. La exportación queda registrada en la auditoría.",
   "debug.confirmTitle": "¿Exportar un paquete de depuración?",
   "debug.consequenceRecords": "líneas de registro",
   "debug.consequencesLabel": "Este paquete contiene",

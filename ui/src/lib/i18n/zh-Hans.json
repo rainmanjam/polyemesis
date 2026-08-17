@@ -339,7 +339,7 @@
   "debug.blurb": "将服务器行为记录到缓冲区，可导出并发送给工程师。推流密钥和令牌在记录每一行时即被移除，而非导出时才处理。",
   "debug.clear": "清空缓冲区",
   "debug.confirmAction": "导出",
-  "debug.confirmBody": "这会生成一个文件，用于发送给没有这台服务器的人。其中包含已移除推流密钥和令牌的近期日志行、polyemesis 版本和操作系统。不包含推流目标名称、源名称、主机名或配置。导出会记入审计日志。",
+  "debug.confirmBody": "这会生成一个文件，用于发送给没有这台服务器的人。推流密钥、令牌和密码在记录每一行时即被移除。但日志行本身可能会提到您的推流目标、源和主机名 — 发送前请先查看文件。其中还包含 polyemesis 版本和操作系统，不包含配置或凭据。导出会记入审计日志。",
   "debug.confirmTitle": "导出调试包？",
   "debug.consequenceRecords": "日志行",
   "debug.consequencesLabel": "此包包含",

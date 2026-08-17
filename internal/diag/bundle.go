@@ -15,12 +15,22 @@ import (
 // That matters more here than compactness, because the person deciding whether
 // to send it is the person whose credentials are in it if the scrubbing failed.
 //
-// EVERY FIELD HERE IS A DISCLOSURE DECISION. The rule applied throughout is:
-// include what an engineer cannot work without, and nothing that only MIGHT be
-// useful. Anything carrying an operator's own naming -- destination names, which
-// are frequently a client's name; source names; hostnames -- is deliberately
-// absent, because it identifies the business rather than the fault, and it is
-// the sort of thing whose absence nobody notices while debugging.
+// EVERY FIELD HERE IS A DISCLOSURE DECISION. The rule applied to the fields
+// BELOW is: include what an engineer cannot work without, and nothing that only
+// might be useful. So no configuration, no destination list, no hostname.
+//
+// THAT RULE DOES NOT AND CANNOT EXTEND TO Records, AND AN EARLIER VERSION OF
+// THIS COMMENT CLAIMED OTHERWISE. It said an operator's own naming was
+// "deliberately absent". That is true of the struct fields here and FALSE of
+// what they contain: polyemesis logs `"destination", d.Name` at more than
+// twenty call sites -- internal/api/lifecycle.go:764 and :844 among them -- so
+// destination, source and host names reach this bundle inside the log lines,
+// and no scrubber can remove them without destroying the diagnostic.
+//
+// The consent dialog says so now, in the operator's own words, because the
+// person deciding whether to send this is the only one who can judge whether a
+// client's name in a log line matters. A dialog that told them otherwise was
+// worse than no dialog: it bought consent with a false statement.
 type Bundle struct {
 	// GeneratedAt is when this was produced, so a stale bundle in a thread can
 	// be recognised as stale.

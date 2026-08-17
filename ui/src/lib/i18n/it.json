@@ -339,7 +339,7 @@
   "debug.blurb": "Registra l'attività del server in un buffer che puoi esportare e inviare a un tecnico. Le chiavi di streaming e i token vengono rimossi durante la registrazione di ogni riga, non all'esportazione.",
   "debug.clear": "Svuota buffer",
   "debug.confirmAction": "Esporta",
-  "debug.confirmBody": "Crea un file da inviare a chi non ha accesso a questo server. Contiene le righe di log recenti con chiavi di streaming e token già rimossi, la versione di polyemesis e il sistema operativo. Non contiene i nomi delle destinazioni o delle sorgenti, né il nome host o la configurazione. L'esportazione viene registrata nel log di audit.",
+  "debug.confirmBody": "Crea un file da inviare a chi non ha accesso a questo server. Chiavi di streaming, token e password vengono rimossi durante la registrazione di ogni riga. Le righe di log stesse POSSONO però citare destinazioni, sorgenti e host: controlla il file prima di inviarlo. Include anche la versione di polyemesis e il sistema operativo, e nessuna configurazione o credenziale. L'esportazione viene registrata nel log di audit.",
   "debug.confirmTitle": "Esportare un pacchetto di debug?",
   "debug.consequenceRecords": "righe di log",
   "debug.consequencesLabel": "Questo pacchetto contiene",

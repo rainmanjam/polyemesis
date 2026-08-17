@@ -339,7 +339,7 @@
   "debug.blurb": "Records what the server does into a buffer you can export and send to an engineer. Stream keys and tokens are removed as each line is recorded, not when you export.",
   "debug.clear": "Clear buffer",
   "debug.confirmAction": "Export",
-  "debug.confirmBody": "This produces a file to send to somebody who does not have this server. It contains recent log lines with stream keys and tokens already removed, the polyemesis version, and the operating system. It does not contain your destination names, source names, hostname or configuration. The export is recorded in the audit trail.",
+  "debug.confirmBody": "This produces a file to send to somebody who does not have this server. Stream keys, tokens and passwords are removed as each line is recorded. The log lines themselves CAN name your destinations, sources and hosts — read the file before you send it. It also carries the polyemesis version and operating system, and no configuration or credentials. The export is recorded in the audit trail.",
   "debug.confirmTitle": "Export a debug bundle?",
   "debug.consequenceRecords": "log lines",
   "debug.consequencesLabel": "This bundle contains",
