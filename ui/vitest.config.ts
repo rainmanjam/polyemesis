@@ -18,6 +18,30 @@ export default mergeConfig(
       include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
       exclude: ["e2e/**", "node_modules/**", "dist/**"],
       environment: "node",
+      /* Coverage exists for SonarCloud, which measured this half of the tree
+       * as zero before it did -- not because the tests are missing, but
+       * because nothing was reporting them. A gate reading a fabricated zero
+       * blocks every change or teaches everyone to ignore red.
+       *
+       * lcov because that is the format sonar.javascript.lcov.reportPaths
+       * consumes; text so a developer running `npm run coverage` sees it
+       * without opening a file.
+       *
+       * The exclusions are files with nothing to measure rather than files
+       * with something to hide: type declarations carry no statements, the
+       * generated route tree is not written here, and e2e belongs to
+       * Playwright, which reports its own way. */
+      coverage: {
+        provider: "v8",
+        reporter: ["text-summary", "lcov"],
+        reportsDirectory: "./coverage",
+        include: ["src/**/*.{ts,tsx}"],
+        exclude: [
+          "src/**/*.test.{ts,tsx}",
+          "src/**/*.d.ts",
+          "e2e/**",
+        ],
+      },
     },
   }),
 );

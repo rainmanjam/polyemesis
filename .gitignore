@@ -84,3 +84,4 @@ docs/notes/
 # to stay readable or the claims lose their evidence, which is worse than
 # either publishing or removing them cleanly.
 coverage.out
+ui/coverage/
