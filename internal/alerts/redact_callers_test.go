@@ -47,6 +47,18 @@ var redactAllowlist = map[string]string{
 		"application direction that is not strictly worse. Do not move it inside the " +
 		"per-element loop.",
 
+	// --- the debug-mode recorder ---
+	"internal/diag/diag.go": "residual only, and applied AFTER the recorder's own " +
+		"alerts.SecretSet -- Recorder.scrub is Redact(secrets.Scrub(s)), never Redact " +
+		"alone. The set is the mechanism and is rebuilt whenever a destination's key " +
+		"changes, because a rotated key is a literal the old set never held. It is a " +
+		"WHOLE-STRING pass over a log message and over attribute keys and values, " +
+		"never over argv elements -- the #150 shape -- and argv reaching a log line " +
+		"has already been through supervisor.Spec.Secrets before it gets here. It runs " +
+		"on the way IN so the ring never holds a plaintext credential: this buffer is " +
+		"exported to somebody who does not have the box, so anything in it has left " +
+		"the operator's control.",
+
 	// --- outbound alert / hook payloads ---
 	"internal/hooks/payload.go": "the outbound hook payload pass, the hooks-side twin of " +
 		"alerts.Event.Redacted. Whole strings, never argv elements.",
