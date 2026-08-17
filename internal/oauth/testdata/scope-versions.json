@@ -1,0 +1,47 @@
+[
+  {
+    "platform": "facebook",
+    "scopeVersion": 1,
+    "scopes": [
+      "pages_manage_posts",
+      "pages_read_engagement",
+      "pages_show_list",
+      "public_profile",
+      "publish_video"
+    ]
+  },
+  {
+    "platform": "kick",
+    "scopeVersion": 2,
+    "scopes": [
+      "channel:read",
+      "channel:write",
+      "chat:write",
+      "events:subscribe",
+      "moderation:ban",
+      "moderation:chat_message:manage",
+      "streamkey:read",
+      "user:read"
+    ]
+  },
+  {
+    "platform": "twitch",
+    "scopeVersion": 4,
+    "scopes": [
+      "channel:manage:broadcast",
+      "channel:read:stream_key",
+      "chat:edit",
+      "chat:read",
+      "moderator:manage:banned_users",
+      "moderator:manage:chat_messages",
+      "moderator:manage:chat_settings"
+    ]
+  },
+  {
+    "platform": "youtube",
+    "scopeVersion": 1,
+    "scopes": [
+      "https://www.googleapis.com/auth/youtube"
+    ]
+  }
+]
