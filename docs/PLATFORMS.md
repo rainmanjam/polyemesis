@@ -239,12 +239,28 @@ still hold many more scheduled. The refusal arrives at the moment a broadcast
 tries to start, which is the worst moment to learn about it — so plan for it
 rather than discovering it.
 
-**Scheduling is how you run more than three, because staggered broadcasts are
-not concurrent ones.** If your programmes do not need to overlap, schedule them
-instead of starting them together; only the ones actually live count against
-the three. polyemesis keeps a separate broadcast per schedule and per
-occurrence, so a weekly show gets a new broadcast each week rather than reusing
-one.
+There are two ways past it, and both work on today's build.
+
+**Schedule, if your programmes do not need to overlap.** Staggered broadcasts
+are not concurrent ones: only the streams actually live count against the
+three. polyemesis keeps a separate broadcast per schedule and per occurrence,
+so a weekly show gets a new broadcast each week rather than reusing one.
+
+**Or paste your own keys, if they genuinely have to run at once.** Create the
+broadcasts yourself in YouTube Studio — each one gets its own stream key — and
+add a destination per key. Nothing about a YouTube destination requires a
+connected account: the account is what lets polyemesis FETCH a key for you, and
+a pasted one works exactly as well. Ten broadcasts with ten keys are ten
+separate ingestion sources, so the 3-per-key limit never applies and the
+channel limit of ten is the only one left.
+
+What you give up is the automation, and it is worth knowing which parts. You
+create and name each broadcast by hand, you paste and rotate each key by hand,
+and **each broadcast still has to be started.** Whether pushing video to a
+scheduled broadcast takes it live depends on that broadcast's auto-start
+setting in Studio: with it off, YouTube marks the stream ready and waits for
+someone to press Go Live. polyemesis can be publishing to all ten while none of
+them is broadcasting.
 
 These two numbers came from YouTube support rather than from Google's published
 API documentation, which states that both limits exist and gives neither
