@@ -17,6 +17,13 @@ type YouTube struct {
 	// endpoints carries the base URLs; zero value is production. See
 	// endpoints.go.
 	endpoints
+	// vodRetry replaces the archive-availability wait in youtube_vod.go. Nil
+	// means ytArchiveRetryDelays, which is what production uses -- nothing at
+	// runtime assigns this, for the same reason nothing at runtime calls
+	// WithBaseURL. A test sets it to zero delays so the retry path can be
+	// driven without a real minute of waiting, which is the difference between
+	// that path being covered and being hoped about.
+	vodRetry []time.Duration
 }
 
 // Google splits what other platforms combine: consent is granted on
