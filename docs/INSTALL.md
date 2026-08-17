@@ -130,7 +130,7 @@ Everything past that floor is where they diverge:
 
 | Platform | Beyond the shared floor | Operationally |
 |---|---|---|
-| **Linux (server)** | The race detector, 11 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
+| **Linux (server)** | The race detector, 13 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
 | **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, bundling a pinned FFmpeg |
 | **macOS** | Nothing further | **Daily driver.** Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below |
 | **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and recording truncation on service stop is a known unresolved defect — see the note below |
@@ -220,8 +220,10 @@ which bundles one and asserts it at build time.
 A fourth exists if your encoder speaks **Enhanced RTMP**, which does carry
 multiple audio tracks: polyemesis ingests those and the routing works normally,
 with no libsrt anywhere. The caveat is what keeps it fourth rather than first —
-verified with FFmpeg 7.1+ publishing, broken on 6.1.1, and unconfirmed with OBS.
-If your encoder is OBS, fix the FFmpeg build instead.
+verified with FFmpeg 7.1+ publishing, broken on 6.1.1, and **OBS does not send
+it at all** — OBS 30.2.3 was measured sending only legacy single-track audio,
+and the multitrack path is gated on a capability no service in its
+`services.json` declares. If your encoder is OBS, use SRT.
 
 **Hardware encoders — nothing to install, nothing to configure.** Do *not* go
 looking for a build with NVENC or VA-API compiled in on the strength of
@@ -374,7 +376,7 @@ path, since the FFmpeg problem stops being a host problem.
 
 ### Install the binary
 
-Prerequisites for building from source: **Go 1.26.5+** (the floor in `go.mod`;
+Prerequisites for building from source: **Go 1.26.6+ (the `go` directive in go.mod)** (the floor in `go.mod`;
 the official Go images set `GOTOOLCHAIN=local`, so an older toolchain fails
 rather than silently upgrading itself) and **Node 20.19+ or 22.12+** (Vite 8's
 requirement). Neither is needed to *run* the result.
@@ -437,7 +439,7 @@ server. Open those ports on the firewall so encoders reach polyemesis directly.
 Developed on daily, so it works — but read the SRT paragraph, because the
 default Homebrew install cannot do multitrack ingest.
 
-**Prerequisites.** Homebrew. Go 1.26.5+ and Node 20.19+/22.12+ if building from
+**Prerequisites.** Homebrew. Go 1.26.6+ (the `go` directive in go.mod) and Node 20.19+/22.12+ if building from
 source. Apple Silicon and Intel both fine.
 
 ### FFmpeg on macOS: the version is fine, SRT is not
@@ -545,7 +547,7 @@ unresolved problem. The Service Control Manager wrapper, process-group teardown
 and installer scripts have never been exercised on a live host. If this needs to
 work today, use Linux or Docker.
 
-**Prerequisites.** Windows 10 / Server 2019 or newer, x86-64. Go 1.26.5+ and
+**Prerequisites.** Windows 10 / Server 2019 or newer, x86-64. Go 1.26.6+ (the `go` directive in go.mod) and
 Node 20.19+/22.12+ if you are building the binary yourself.
 
 ### FFmpeg on Windows: this part is straightforward
@@ -646,6 +648,12 @@ carries three badges: the FFmpeg version, `srt yes/no`, and `x264 yes/no`. If
 `srt` reads `no`, no amount of OBS configuration will fix it — go back to your
 platform's FFmpeg section.
 
+Those badges are there before you have created anything: a fresh install has no
+source, so that tab shows the badges and an invitation to make one rather than
+an ingest form. Creating the first source is [QUICKSTART step
+3](QUICKSTART.md#3-create-a-source) and it is what an encoder publishes to; the
+ingest settings then live on that source.
+
 The startup log carries the same facts:
 
 ```text
@@ -660,15 +668,16 @@ tls mode=… hostname=…
 | Port | Protocol | Needed when |
 |---|---|---|
 | 8080 | TCP | always — web UI and API. Configurable via `addr`. |
-| 6000 | **UDP** | SRT ingest. The default; changeable in *Settings → Ingest*. |
+| 6000 | **UDP** | SRT ingest. The default; changeable in *Settings → Ingest → Listeners*, which is install-wide and editable before any source exists. |
 | 1935 | TCP | RTMP ingest, only if you use the fallback. One port however many RTMP sources you run. |
 | 80 | TCP | only for `tls.mode: acme` (HTTP-01 validation), plus the HTTP→HTTPS redirect whenever polyemesis terminates TLS |
 | 443 | TCP | only if you set `addr` to `:443` rather than serving TLS on 8080 |
 
 The ingest listeners bind `0.0.0.0` regardless of `addr`, so restricting `addr`
 to loopback for a reverse-proxy deployment does not restrict ingest. Set an SRT
-passphrase in *Settings → Ingest*: without one your stream crosses the network
-in the clear. RTMP has no equivalent — its stream key authenticates the
+passphrase on the source's ingest (the **Sources** page, or *Settings → Ingest*
+for the default one):
+without one your stream crosses the network in the clear. RTMP has no equivalent — its stream key authenticates the
 publisher but encrypts nothing, so the RTMP port is the one to keep off the
 public internet if you have the choice.
 

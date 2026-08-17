@@ -8,8 +8,17 @@ single track over RTMP. OBS is what most people use, so it gets its own page.
 > late 2024, so a new enough build carries those tracks through polyemesis's
 > existing ingest command unchanged — verified up to six tracks on FFmpeg 8.1.
 > Ubuntu 24.04's stock FFmpeg 6.1.1 cannot: it refuses with *"at most one audio
-> stream is supported in flv"*. See `evidence/enhanced-rtmp-multitrack.md`; a
-> confirmation run against real OBS is still outstanding.
+> stream is supported in flv"*.
+>
+> **OBS cannot either, and that is now measured rather than open.** OBS 30.2.3
+> was run headless against a real polyemesis with three tracks configured,
+> each on its own mixer, `StreamMultiTrackAudioMixes=7` and a custom RTMP
+> service — and the captured wire bytes are `0xaf legacy ×3541` with no
+> multitrack tag anywhere. The path is gated on
+> `supports_additional_audio_track`, which **no service in OBS's
+> `services.json` declares (0 of 91)**, so it is unreachable even for custom
+> RTMP. A weekly job re-checks it. **If your encoder is OBS, use SRT.** See
+> `evidence/enhanced-rtmp-multitrack.md`.
 
 Only one of these configurations unlocks per-destination audio routing:
 **multitrack over SRT**. The others work, and are documented here so that
@@ -19,8 +28,8 @@ choosing one is deliberate rather than accidental.
   exists for
 - [Standard RTMP](#standard-rtmp-single-track) — one stereo pair, for encoders
   that cannot do SRT
-- [Enhanced RTMP multitrack](#enhanced-rtmp-multitrack-works-on-ffmpeg-71-unconfirmed-with-obs)
-  — works on FFmpeg 7.1+, unconfirmed against real OBS
+- [Enhanced RTMP multitrack](#enhanced-rtmp-multitrack-works-on-ffmpeg-71-not-from-obs)
+  — works on FFmpeg 7.1+, and OBS does not send it
 
 ---
 
@@ -28,6 +37,14 @@ choosing one is deliberate rather than accidental.
 
 OBS sends several audio tracks in one MPEG-TS stream over SRT, and polyemesis
 gives each destination its own mix of them.
+
+### 0. Create the source you are pushing to
+
+A fresh install has no source, and `YOUR_TOKEN` below is a *source's* publish
+token — so there is nothing to point OBS at until one exists. Add one on the
+**Sources** page; a name is all it asks for. That page then shows the whole
+publish URL, token included, which is the value to paste into the *File path or
+URL* field in step 3.
 
 ### 1. Enable the audio tracks
 
@@ -67,7 +84,9 @@ Track 1 = everything, track 2 = clean (no music), track 3 = mic only.
 | **Audio Track** | tick **1, 2, 3** (up to 6) |
 
 > **`latency` is in microseconds.** `200000` is 200 ms, and it must match the
-> latency set in polyemesis → *Settings → Ingest*. Writing `200` gives you a
+> latency set on that source's own ingest, on the **Sources** page. (*Settings →
+> Ingest* edits the same numbers for the default source, and on an install with
+> no source at all it has nothing to edit and says so.) Writing `200` gives you a
 > 0.2 ms buffer and a stream that falls apart on the first jitter.
 
 > **`streamid` is the address, not an extra.** One SRT port serves every source
@@ -137,7 +156,7 @@ SRT, use SRT.
 
 ---
 
-## Enhanced RTMP multitrack (works on FFmpeg 7.1+, unconfirmed with OBS)
+## Enhanced RTMP multitrack (works on FFmpeg 7.1+, not from OBS)
 
 OBS 30.2+ can send multiple audio tracks over Enhanced RTMP/FLV.
 

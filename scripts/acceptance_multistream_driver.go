@@ -91,6 +91,9 @@ func main() {
 			driverlib.Die("usage: setup <rtmp-port>")
 		}
 		driverlib.Setup(user, pass)
+		// Before ingest(), which configures THIS source's ingest block. Since
+		// #387 a fresh install has none; see driverlib.EnsureSource.
+		driverlib.EnsureSource("Main")
 		ingest(args[0])
 	case "publishkey":
 		driverlib.Login(user, pass)

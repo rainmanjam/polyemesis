@@ -46,6 +46,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -194,6 +195,135 @@ func Setup(user, pass string) {
 		Die(fmt.Sprintf("setup failed: %d %s", code, out))
 	}
 	fmt.Println("SETUP_OK")
+}
+
+// EnsureSource creates this install's first programme if it has none.
+//
+// EVERY SUITE THAT PUBLISHES NEEDS THIS NOW, and until #387 none of them had to
+// ask. A fresh database arrived with a source called Main because the migration
+// seeded one on first open -- so a driver could run first-run setup and go
+// straight to creating destinations, against a programme nobody had made. That
+// seed is gone for fresh installs, deliberately: it was a migration deciding
+// product behaviour.
+//
+// So the step the suites were silently inheriting becomes a step they perform,
+// which is also the more honest test. "Install it, create a source, point an
+// encoder at it" is what an operator actually does, and it is now what these
+// runs actually exercise -- including POST /sources itself, which no acceptance
+// suite drove before because nothing ever needed to.
+//
+// Idempotent, because several drivers run more than one phase against the same
+// server and a second source would change which one "the default" resolves to
+// halfway through a measurement.
+func EnsureSource(name string) int64 {
+	var existing []struct {
+		ID int64 `json:"id"`
+	}
+	code, out := Do(http.MethodGet, "/sources", nil)
+	if code != http.StatusOK {
+		Die(fmt.Sprintf("list sources: %d %s", code, out))
+	}
+	if err := json.Unmarshal(out, &existing); err != nil {
+		Die(fmt.Sprintf("decode sources: %v: %s", err, out))
+	}
+	if len(existing) > 0 {
+		return existing[0].ID
+	}
+
+	// SRT, EXPLICITLY, RATHER THAN WHATEVER THE SERVER DEFAULTS TO.
+	//
+	// The server's default is IngestUnset, and that is correct for a product --
+	// db.IngestUnset exists precisely "so nothing is chosen on an operator's
+	// behalf", and a fresh install is supposed to ask. It is unusable as a TEST
+	// default: an unset mode raises no listener, so a suite that publishes gets
+	// no ingest and fails somewhere far from the cause.
+	//
+	// That is what broke six suites when the seeded source went away. The seed
+	// carried the settings blob's ingest, so every driver inherited a working
+	// mode without asking for one; creating a bare source inherits Unset
+	// instead. Every suite that had configured a mode kept passing
+	// (acceptance-pull, -synth, -postprod, -playlist) and every suite that had
+	// never needed to failed (acceptance, -audio, -renditions, -ladder,
+	// -encoders, -recording-stop). The correlation is exact.
+	//
+	// SRT because it is the operated path and what most suites publish over.
+	// A suite needing rtmp or pull still overrides it through PUT /sources/{id}
+	// or the settings document, exactly as the four passing ones already do --
+	// this sets a usable floor, it does not overrule anybody.
+	// The SERVER'S OWN default ingest block with the mode set on top, not a
+	// hand-written one. Sending {"mode":"srt"} alone leaves every other SRT
+	// field at its zero value and the create is refused with
+	// `srt latency 0ms out of range (20-8000)` -- so a literal here would have
+	// to carry a latency, a passphrase policy and whatever the block gains
+	// next, and would rot the first time one of them changed.
+	body := map[string]any{"name": name, "enabled": true}
+	if ing, ok := LoadSettings()["ingest"].(map[string]any); ok {
+		copied := map[string]any{}
+		for k, v := range ing {
+			copied[k] = v
+		}
+		copied["mode"] = "srt"
+		body["ingest"] = copied
+	}
+	code, out = Do(http.MethodPost, "/sources", body)
+	if code != http.StatusOK && code != http.StatusCreated {
+		Die(fmt.Sprintf("create the first source: %d %s", code, out))
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(out, &created); err != nil {
+		Die(fmt.Sprintf("decode the created source: %v: %s", err, out))
+	}
+	fmt.Printf("SOURCE_OK %d\n", created.ID)
+	return created.ID
+}
+
+// ResolveRelayPort returns the relay hub's UDP port, preferring what the shell
+// found and asking the server when the shell found nothing.
+//
+// WHY THE SHELL CAN COME UP EMPTY, and why that is not its fault. Each suite
+// reads the port off the running process with lsof BEFORE starting its driver,
+// then hands it over as argv. That worked because a seeded source meant an
+// engine -- and therefore a bound relay socket -- existed before anything asked.
+//
+// #387 removes the seed and the ordering underneath is circular: the relay
+// socket exists only while an engine runs, an engine runs only for a source, and
+// the driver is what creates the source. The shell was requiring, moments before
+// invoking the driver, a port only that driver could bring into being.
+//
+// IT TAKES THE CALLER'S `get` RATHER THAN USING driverlib's OWN SESSION, which
+// is the whole reason this is one function instead of six. Five of these drivers
+// keep their own cookie jar and are not logged in through driverlib, so the
+// obvious shared helper would have made an unauthenticated request. Inlining a
+// copy per driver was the first answer and it duplicated thirty lines five times
+// -- SonarCloud measured the result at 13.2% duplicated new lines against a 3%
+// gate, which is a fair description of copying a loop five times.
+//
+// Polled rather than read once: an engine that has just been created is still
+// binding, and a single read loses that race about as often as it wins it.
+func ResolveRelayPort(fromShell string, get func(string) map[string]any) (int, error) {
+	if p, err := strconv.Atoi(strings.TrimSpace(fromShell)); err == nil && p > 0 {
+		return p, nil
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if st := get("/stats"); st != nil {
+			if relay, ok := st["relay"].(map[string]any); ok {
+				if pf, ok := relay["port"].(float64); ok && pf > 0 {
+					fmt.Printf("relay port discovered from the server: %d\n", int(pf))
+					return int(pf), nil
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			return 0, fmt.Errorf("no relay port: the shell found none and GET /stats reported " +
+				"none within 30s. A relay exists only while an engine runs, and an engine runs " +
+				"only for a source -- so this usually means the source was never created, not " +
+				"that the port is missing")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // LoadSettings reads the whole settings document.

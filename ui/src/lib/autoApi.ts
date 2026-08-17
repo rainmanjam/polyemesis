@@ -14,6 +14,8 @@
    the half-built alert rule in it.
    =========================================================================== */
 
+import { ApiError } from "./api";
+
 const BASE = "/api/v1";
 
 function csrfToken(): string {
@@ -21,8 +23,20 @@ function csrfToken(): string {
   return match ? decodeURIComponent(match[1]) : "";
 }
 
-/** Same contract as lib/api.ts's request: JSON in, JSON out, server message
- *  on failure. Kept byte-compatible so moving it later is a cut and paste. */
+/** Same contract as lib/api.ts's request: JSON in, JSON out, and the SAME
+ *  ApiError on failure. Kept byte-compatible so moving it later is a cut and
+ *  paste.
+ *
+ *  The failure path used to throw a bare Error carrying the sentence and
+ *  nothing else, which was byte-compatible with an older lib/api.ts and stopped
+ *  being so the moment ApiError grew `code`. Four of the routes the zero-source
+ *  guard refuses -- POST /clips, PUT /clips/buffer, DELETE /clips/{name} and
+ *  PUT /loudness -- are reachable from the UI ONLY through this client, so a
+ *  screen wanting to tell "this install has no programme yet" apart from "the
+ *  server is broken" had no field to read and would have had to match on the
+ *  English. That is the one thing the whole code contract exists to forbid, and
+ *  a second HTTP client that quietly opts out of it is worse than no contract,
+ *  because the contract's own test passes. */
 async function autoRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
@@ -46,7 +60,13 @@ async function autoRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
       body && typeof body === "object" && "error" in body
         ? String((body as { error: unknown }).error)
         : `request failed (${resp.status})`;
-    throw new Error(msg);
+    // Omitted by the server on every error that has nothing to branch on, so
+    // absent is the common case and "" is the honest reading of it.
+    const code =
+      body && typeof body === "object" && "code" in body
+        ? String((body as { code: unknown }).code)
+        : "";
+    throw new ApiError(resp.status, msg, code);
   }
   return body as T;
 }

@@ -187,10 +187,23 @@ func (s *Server) clipSegmentView(p clipPart) clipSegmentView {
 // falls back to the live ingest's layout rather than offering nothing: an empty
 // picker would make "clip just the mic" impossible on exactly the recordings
 // that most need it.
+//
+// SourceKnown, not Source, and the difference is the whole reason this route
+// still answers on an install with no programme. Recordings outlive the source
+// that made them -- recordings.source_id is ON DELETE SET NULL by design -- so
+// the clip editor is opened precisely when there may be no engine, and Source()
+// dereferences its receiver. Refusing the route would blank post-production
+// over files that are still on disk. What is dropped instead is the FALLBACK:
+// with no engine, or with an engine that has not probed anything yet, the
+// layout on offer is routing.DefaultSource()'s six placeholder tracks, and
+// listing six tracks a recording does not have is a worse answer than listing
+// none. The measured count from the index is unaffected either way.
 func (s *Server) clipTracks(tl clipTimeline) []clipTrackView {
 	n := tl.anchor.Tracks
 	if n <= 0 {
-		n = len(s.eng().Source().Tracks)
+		if src, known := s.engOrNil().SourceKnown(); known {
+			n = len(src.Tracks)
+		}
 	}
 	if n <= 0 {
 		return []clipTrackView{}

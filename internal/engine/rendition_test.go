@@ -416,6 +416,11 @@ func TestEveryFilterChangingFieldIsInTheRenditionSignature(t *testing.T) {
 		{"overlay margin y", func(r *db.Rendition) { r.Overlay.MarginYPct = 0.1 }},
 		{"overlay opacity", func(r *db.Rendition) { r.Overlay.Opacity = 0.5 }},
 		{"overlay removed", func(r *db.Rendition) { r.Overlay = db.RenditionOverlay{} }},
+		// Rate control. Both are written to the command line as -maxrate and
+		// -bufsize, and both were absent from the signature: the edit was
+		// stored and the running encoder kept its old ceiling.
+		{"maxrate", func(r *db.Rendition) { r.MaxrateKbps = 9000 }},
+		{"bufsize", func(r *db.Rendition) { r.BufsizeKbps = 12000 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := renditionSig(base(), 60, "", "")

@@ -117,7 +117,7 @@ A pull request should say:
 
 **On your pull request** CI runs: `gofmt` gating, build, vet and the unit tests
 with `-race`; the same build and tests plus a measured broadcast on macOS and
-Windows; the UI typecheck, lint and build; and eleven host acceptance suites.
+Windows; the UI typecheck, lint and build; and thirteen host acceptance suites.
 
 **Not on your pull request:** the three container suites and the browser E2E.
 Each builds the image and publishes real streams into it, so they run on `main`

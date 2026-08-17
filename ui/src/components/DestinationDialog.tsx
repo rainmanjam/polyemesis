@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { api, isNoSource } from "@/lib/api";
 import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
 import { useT } from "@/lib/i18n";
 import { computeLeaving, joinConsequence, leaveConsequence } from "@/lib/rendition-consequence";
@@ -917,6 +917,17 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       onSaved();
       onOpenChange(false);
     } catch (err) {
+      // A destination belongs to a programme, so on an install with none this
+      // save is refused with code no_source -- and nothing has failed. The
+      // dashboard stopped raising a scarlet toast for that state; this dialog
+      // is the one control that survives on the page long enough to still be
+      // clicked in it, so it must not go on doing so. It closes instead, which
+      // lets the empty state underneath be the answer.
+      if (isNoSource(err)) {
+        toast.info(t("dash.destinationNeedsASource"));
+        onOpenChange(false);
+        return;
+      }
       toast.error(err instanceof Error ? err.message : "Could not save the destination.");
     } finally {
       setBusy(false);

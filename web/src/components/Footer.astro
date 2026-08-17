@@ -26,13 +26,21 @@ const cols = [
     links: [
       { href: "/features", label: "Features" },
       { href: "/comparison", label: "How it compares" },
-      // NOT IN THE NAV, HERE ON PURPOSE. Both of these are entry points from
-      // search rather than places an existing visitor navigates to, and the
-      // header nav is four items that describe the product. Promoting a landing
-      // page into it would push "Features" and "Comparison" down the list to
-      // serve a reader who, by definition, has not arrived yet. The footer is
-      // where a page earns discovery without costing the nav its shape.
+      // NOT IN THE NAV, HERE ON PURPOSE. These are entry points from search
+      // rather than places an existing visitor navigates to, and the header nav
+      // is four items that describe the product. Promoting a landing page into
+      // it would push "Features" and "Comparison" down the list to serve a
+      // reader who, by definition, has not arrived yet. The footer is where a
+      // page earns discovery without costing the nav its shape.
+      //
+      // /multistream is the one that could argue for the nav and still does not.
+      // It is the site's answer to the generic head term, so nearly everyone who
+      // sees it arrives on it rather than navigating to it; a visitor already
+      // reading the site wants Features or Comparison, which is what the nav is
+      // for. What it DOES need is to be a link parent for /vs/*, and it is.
+      { href: "/multistream", label: "Multistream" },
       { href: "/free-restream-service", label: "Free restream service" },
+      { href: "/twitch-vod-track", label: "Twitch VOD track" },
       { href: "/download", label: "Install" },
     ],
   },

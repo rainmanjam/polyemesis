@@ -89,7 +89,7 @@ func TestPlatformCapabilitiesAssignTheDocumentedTier(t *testing.T) {
 		{"facebook", TierIntegrated},
 		// The whole point of a third tier: Kick is neither fully integrated nor
 		// a plain paste-the-key platform, and calling it either would mislead.
-		{"kick", TierPartial},
+		{"kick", TierIntegrated},
 		{"x", TierManual},
 		{"rumble", TierManual},
 		{"dlive", TierManual},

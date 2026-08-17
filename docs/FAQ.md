@@ -176,7 +176,7 @@ service stop is a known unresolved defect — the graceful stop is a
 `CTRL_BREAK_EVENT`, which Windows delivers only through a console, and a service
 has none.
 
-Linux also runs 11 acceptance suites and 3 container suites that never run
+Linux also runs 13 acceptance suites and 3 container suites that never run
 anywhere else, which is the other half of why it is the primary target.
 
 ## Why is HSTS off by default?

@@ -122,8 +122,9 @@ That belief was wrong: config loading ignores unrecognised keys, so the
 declaration was buying nothing while presenting a knob an operator could set and
 watch have no effect. **A config file that still names `enhancedRtmp` loads
 exactly as before.** For multitrack ingest that is actually operated, use SRT:
-Enhanced RTMP's version dependency is real, and it has not been confirmed with
-OBS itself as the publisher. See `evidence/enhanced-rtmp-multitrack.md`.
+Enhanced RTMP's version dependency is real, and OBS does not send multitrack
+audio over it — measured against OBS 30.2.3, which emitted only legacy
+single-track tags. See `evidence/enhanced-rtmp-multitrack.md`.
 
 ## The data directory
 
@@ -145,8 +146,17 @@ the container's single volume mount sufficient.
 
 ## Environment variables
 
-There are none. Everything is a file key or a flag. This is a deliberate choice
-— with three mechanisms it stops being obvious which one won.
+**Two, both for Rumble chat**, and everything else is a file key or a flag. The
+restraint is deliberate: with three mechanisms it stops being obvious which one
+won, so a variable has to earn its place.
+
+| Variable | What it does |
+|---|---|
+| `RUMBLE_CHAT_API_KEY` | The Rumble chat credential, read by `internal/chat/rumble.go`. It is **not** the stream key. It comes from rumble.com/account/livestream-api and lives in the environment because Rumble's chat API has no sign-in, so there is no account to store it against. Treat the URL as a secret — it is the whole credential |
+| `RUMBLE_CHAT_CHANNEL` | Which channel to read, when the key alone does not say |
+
+Both are read at startup by `internal/api/chat_wiring.go`. See
+[PLATFORMS.md](PLATFORMS.md) for the Rumble setup.
 
 For containers, pass flags in `command:`, or mount a `config.yaml`. The
 [`docker-compose.yml`](../docker-compose.yml) in the repo shows both.

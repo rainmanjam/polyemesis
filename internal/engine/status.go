@@ -212,7 +212,39 @@ func (e *Engine) Renditions() []RenditionStatus {
 }
 
 // Status assembles the current snapshot.
+//
+// THE CANONICAL NIL-RECEIVER GUARD. Every other read accessor that carries one
+// points here rather than repeating the reasoning.
+//
+// A nil *Engine is not a bug. The API reaches one through Manager.Default,
+// which has no engine to hand back until a source exists, so on an install that
+// has not created its first source this is EVERY request. The dashboard, the
+// WebSocket opening burst and the Prometheus scrape all read this method, and a
+// panic in any of them is a 500 on the first screen an operator ever sees.
+//
+// EVERY SLICE IS EMPTY, NOT NIL, and that is a rule about the whole struct
+// rather than a fact about two of its fields. ui/src/lib/types.ts declares
+// renditions and destinations non-nullable, so a JSON null there is a type lie
+// the UI walks straight into -- but loudness has no omitempty either, and
+// GET /api/v1/loudness and Engine.Loudness both normalise that same field to
+// []. A null here would be the one producer in the tree that disagreed, and
+// the disagreement would surface the day types.ts grows the field it is
+// already being sent. Anything added to Status that marshals as an array
+// belongs in this literal.
+//
+// The rest of the zero value is already the truth about an install with no
+// programme: nothing supervised, no relay traffic, nothing on air.
+//
+// READS ONLY. A mutation that answered a nil receiver would be a 200 OK for
+// something that did not happen; those refuse at the API boundary instead.
 func (e *Engine) Status() Status {
+	if e == nil {
+		return Status{
+			Renditions:   []RenditionStatus{},
+			Destinations: []DestStatus{},
+			Loudness:     []meters.Report{},
+		}
+	}
 	// ONE acquisition for everything e.mu owns. Status used to take it here and
 	// again inside SourceInfo, and a reconcile landing between the two paired
 	// the ingest's state with a layout from a different instant -- "running"
@@ -433,7 +465,14 @@ func (e *Engine) ScrubDestinationText(id int64, text string) string {
 }
 
 // Processes returns every supervised process, for the monitoring page.
+//
+// No engine supervises nothing, which is the truthful answer for an install
+// with no source rather than a refusal. See Engine.Status for why the nil
+// receiver is answered at all.
 func (e *Engine) Processes() []*supervisor.Process {
+	if e == nil {
+		return nil
+	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 

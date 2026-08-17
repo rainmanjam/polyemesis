@@ -87,12 +87,41 @@ export class ApiError extends Error {
   // Written out longhand rather than as a parameter property: the build sets
   // erasableSyntaxOnly, which forbids TS syntax that emits runtime code.
   readonly status: number;
+  /** The server's machine-readable reason, `""` when it sent none.
+   *
+   *  It exists so that a caller distinguishing one refusal from another does
+   *  not have to match on `message`. `"no_source"` is the first: a 503 saying
+   *  this install has no programme yet is an empty state, and every other 503
+   *  is a fault -- telling them apart by reading the English would break on a
+   *  reword and could never work once that sentence is translated. */
+  readonly code: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code = "") {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
+}
+
+/** The code the server sends when this install has no source yet.
+ *
+ *  Written once, here, next to the field it reads. Every screen that draws an
+ *  empty state compares against it, and a string literal repeated across four
+ *  pages is four chances to typo it into a comparison that is simply always
+ *  false -- which fails by drawing the red toast, i.e. by looking exactly like
+ *  the bug it was supposed to fix. lib/no-source-code.test.ts reads the Go
+ *  constant and asserts this equals it. */
+export const NO_SOURCE = "no_source";
+
+/** Whether a rejected request failed because the install has no programme yet.
+ *
+ *  This is an EMPTY STATE, not a fault: nothing is broken, and the only thing
+ *  missing is a source only the operator can create. A caller that treats it
+ *  like any other error tells a first-time operator that their brand-new
+ *  install is failing. */
+export function isNoSource(e: unknown): boolean {
+  return e instanceof ApiError && e.code === NO_SOURCE;
 }
 
 /** Read the double-submit CSRF token the server set as a readable cookie. */
@@ -137,7 +166,13 @@ async function request<T>(
         : typeof body === "string" && body
           ? body
           : `request failed (${resp.status})`;
-    throw new ApiError(resp.status, msg);
+    // Omitted by the server on every error that has nothing to branch on, so
+    // absent is the common case and "" is the honest reading of it.
+    const code =
+      body && typeof body === "object" && "code" in body
+        ? String((body as { code: unknown }).code)
+        : "";
+    throw new ApiError(resp.status, msg, code);
   }
   return body as T;
 }
@@ -276,8 +311,13 @@ export const api = {
   upgradeRollback: (force = false) => post<UpgradeResult>("/upgrade/rollback", { force }),
 
   // --- setup & auth ---
+  /** `sources` is how many programmes exist, and it is here rather than on a
+   *  signed-in route because this is the only status a browser can read before
+   *  it has an account. It is optional because the server omits it when the
+   *  count cannot be read — absent means "unknown", which is not the same
+   *  answer as 0 and must not be rendered as one. */
   setupStatus: () =>
-    get<{ needsSetup: boolean; minPasswordChars: number }>("/setup"),
+    get<{ needsSetup: boolean; minPasswordChars: number; sources?: number }>("/setup"),
   setup: (username: string, password: string) =>
     post<{ username: string }>("/setup", { username, password }),
   login: (username: string, password: string) =>

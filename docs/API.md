@@ -176,9 +176,20 @@ tokens are for.
   with `{"error": "..."}` saying what is wrong, in language meant for the person
   looking at the screen.
 - Lists return `[]`, never `null`.
-- **No response ever contains a secret.** Stream keys, client secrets, API
-  tokens and TLS private keys are never returned. Webhook URLs come back masked;
-  handing the masked form back on an update means "unchanged".
+- A route that acts on the running pipeline is `503` with
+  `{"error": "...", "code": "no_source"}` on an install that has no source yet.
+  The `code` is there so a client can tell "nothing has been created here"
+  from "something is broken" without matching on the sentence; every other
+  error omits it. Reads answer normally — an install with no source reports an
+  empty status, an empty process list and no levels, which is the truth.
+- **No response returns a secret it did not just create.** Stream keys, client
+  secrets, API tokens and TLS private keys are never returned on a read, and
+  webhook URLs come back masked — handing the masked form back on an update
+  means "unchanged". The exception is the moment of creation: minting an API
+  token or rotating a hook signing key returns the value once, because there is
+  no other moment you could receive it. A source's publish token is readable on
+  request by design — an operator has to paste it into an encoder and will come
+  back to read it again.
 
 ## Routes
 

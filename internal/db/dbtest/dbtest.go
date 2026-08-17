@@ -54,6 +54,26 @@ func template() ([]byte, error) {
 			templateErr = fmt.Errorf("template open: %w", err)
 			return
 		}
+		// The template creates its own source. db.Open no longer seeds one on a
+		// fresh database -- MigrateSources only builds "Main" for an install
+		// upgrading from single-ingest -- and the packages that take this
+		// template are testing a running install, where a source exists because
+		// the operator made one. Without it CreateDestination and
+		// CreateRendition refuse, having no default source to resolve.
+		//
+		// The source belongs in the fixture, NOT in a looser migration rule: a
+		// discriminator widened to keep these suites green would put the seed
+		// back on every fresh install. A test that means to exercise the
+		// zero-source state opens its own database rather than taking this.
+		if err := d.CreateSource(&db.Source{
+			Name:     db.DefaultSourceName,
+			Enabled:  true,
+			Ingest:   db.DefaultSettings().Ingest,
+			Position: 1,
+		}); err != nil {
+			templateErr = fmt.Errorf("template source: %w", err)
+			return
+		}
 		// Closed before the file is read, and the ordering is load-bearing
 		// rather than tidiness: Open runs in WAL mode, so until the last
 		// connection closes and checkpoints, the committed schema is still in

@@ -1074,8 +1074,19 @@ func (e *Engine) ingestToken() string {
 	return e.sourceToken
 }
 
-// SourceID reports which programme this engine owns.
-func (e *Engine) SourceID() int64 { return e.sourceID }
+// SourceID reports which programme this engine owns, and 0 when there is no
+// engine to ask. See Engine.Status for why the nil receiver is answered.
+//
+// 0 is not a programme and no row ever carries it, so a caller that feeds this
+// to the store gets "no such source" rather than a phantom one. That is the
+// only reading of it that is safe, and it is why nothing here treats a returned
+// id as a licence to write.
+func (e *Engine) SourceID() int64 {
+	if e == nil {
+		return 0
+	}
+	return e.sourceID
+}
 
 // SourceName is the operator's label for this programme, empty until the first
 // reconcile has read the row.
@@ -2181,6 +2192,13 @@ func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig, dataDir string
 		strconv.Itoa(r.Width), strconv.Itoa(r.Height), strconv.Itoa(r.FPS),
 		strconv.Itoa(r.VideoBitrate), string(r.Encoder), r.Preset,
 		strconv.FormatFloat(r.GOPSeconds, 'g', -1, 64),
+		// The rest of the rate-control triple. Both reach the command line --
+		// rendition.go writes `-maxrate` and `-bufsize` from them -- so a
+		// ceiling or buffer edit is a different encode. They were missing, which
+		// meant the UI accepted the change, the row stored it, and the running
+		// encoder kept the old ceiling until something else happened to restart
+		// it. Exactly the Deinterlace defect above, in a different field.
+		strconv.Itoa(r.MaxrateKbps), strconv.Itoa(r.BufsizeKbps),
 		// Aspect conversion changes the filter chain without changing any
 		// dimension, so it has to be named here or picking a mode would be
 		// saved and never encoded.
@@ -2883,7 +2901,18 @@ func (e *Engine) Source() routing.Source {
 // Deliberately NOT a refusal. Configuring destinations before any stream has
 // connected is the normal order (see the refuseIfSilent reasoning in the API),
 // so the preview stays; it just has to admit what it is compiled from.
+//
+// With no engine at all the answer is the placeholder and false — the same
+// shape an engine that has not probed yet gives, so the routing editor has a
+// layout to draw and is still told not to believe it. The guard is on the
+// exported method and NOT on effectiveSourceKnown, deliberately: Source()
+// discards the "known" bit, and every caller of that compiles a command line
+// from what it gets back. Those refuse at the API boundary instead of being
+// handed six tracks that do not exist. See Engine.Status.
 func (e *Engine) SourceKnown() (routing.Source, bool) {
+	if e == nil {
+		return routing.DefaultSource(), false
+	}
 	return e.effectiveSourceKnown()
 }
 
@@ -2911,7 +2940,15 @@ type SourceInfo struct {
 
 // SourceInfo returns the layout downstream graphs are compiled against, which
 // is the probe's unless the silence tier is standing in for it.
+//
+// With no engine the zero value says exactly what is true: id 0, unprobed, no
+// tracks. Unlike Status this needs no empty-slice fixing up — types.ts already
+// declares tracks nullable, because an unprobed engine has always answered that
+// way. See Engine.Status.
 func (e *Engine) SourceInfo() SourceInfo {
+	if e == nil {
+		return SourceInfo{}
+	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.sourceInfoLocked()
@@ -3146,7 +3183,15 @@ func (e *Engine) teardownLoudness(m *loudnessMon) {
 // The nil guard is for an Engine assembled field by field rather than through
 // New — which is how the tests build one, and how a status snapshot could
 // otherwise panic on a code path that has nothing to do with loudness.
+//
+// The RECEIVER guard below is a different question from that one and both are
+// needed: the store check reads a field, so it dereferences before it can
+// decide anything. An install with no source has no analyser to report and no
+// engine to hold one. See Engine.Status.
 func (e *Engine) Loudness() []meters.Report {
+	if e == nil {
+		return []meters.Report{}
+	}
 	if e.loudStore == nil {
 		return []meters.Report{}
 	}
@@ -3324,15 +3369,7 @@ func (e *Engine) ClipUsage() (clips.Usage, error) {
 	e.mu.RLock()
 	cfg := e.clipCfg
 	e.mu.RUnlock()
-	list, err := clips.List(cfg.Dir)
-	if err != nil {
-		return clips.Usage{}, err
-	}
-	u := clips.Usage{Count: len(list), MaxBytes: int64(cfg.MaxDiskMB) << 20, MaxClips: cfg.MaxClips}
-	for _, cl := range list {
-		u.UsedBytes += cl.Bytes
-	}
-	return u, nil
+	return clips.UsageOf(cfg)
 }
 
 // ClipPath resolves a clip name to a path a download handler can open,
@@ -3375,7 +3412,13 @@ type ClipStatus struct {
 }
 
 // ClipBuffer reports the capture buffer's state.
+//
+// No engine means no capturer and no configured directory, which renders as the
+// "off" card rather than a row of zeroes. See Engine.Status.
 func (e *Engine) ClipBuffer() ClipStatus {
+	if e == nil {
+		return ClipStatus{}
+	}
 	e.mu.RLock()
 	c, on, dir := e.clipCap, e.clipOn, e.clipCfg.Dir
 	e.mu.RUnlock()
@@ -3699,8 +3742,12 @@ func (e *Engine) teardownCaptions(c *transcribe.LiveCaptioner, port int, hub *re
 	e.log.Info("live captions stopped")
 }
 
-// Levels returns the most recent metering frame.
+// Levels returns the most recent metering frame, or an empty one and the zero
+// time when there is no engine to have measured anything. See Engine.Status.
 func (e *Engine) Levels() (ffmpeg.Levels, time.Time) {
+	if e == nil {
+		return ffmpeg.Levels{}, time.Time{}
+	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.levels, e.levelsAt
@@ -3727,8 +3774,22 @@ const (
 
 // Alerts exposes the notifier so the API can report its counters and send a
 // test message. Nil on an Engine assembled field by field, which is how the
-// tests build one.
-func (e *Engine) Alerts() *alerts.Notifier { return e.alerter }
+// tests build one, and nil when there is no engine at all.
+//
+// Those two nils were never the same statement — the doc line above describes
+// the FIELD, and reading it as a nil-receiver guarantee is how this method got
+// called on a nil engine in the first place. See Engine.Status.
+//
+// The callers already handle a nil notifier and must keep doing so: Stats and
+// Publish are nil-receiver safe, so the meta page reports empty counters, while
+// the test-send route refuses with a 503 rather than reporting "sent" for a
+// webhook nobody sent.
+func (e *Engine) Alerts() *alerts.Notifier {
+	if e == nil {
+		return nil
+	}
+	return e.alerter
+}
 
 // Hooks exposes the dispatcher so the API can report its counters, list recent
 // deliveries and send a test. Nil when no dispatcher was wired.
@@ -3745,8 +3806,15 @@ func (e *Engine) SetHooks(d *hooks.Dispatcher) {
 	e.mu.Unlock()
 }
 
-// Scheduler exposes the schedule runner for the same reason.
-func (e *Engine) Scheduler() *scheduler.Runner { return e.sched }
+// Scheduler exposes the schedule runner for the same reason, and answers nil
+// for the same two reasons Alerts does. scheduler.Runner.Last is nil-receiver
+// safe, so the runs page renders an empty report. See Engine.Status.
+func (e *Engine) Scheduler() *scheduler.Runner {
+	if e == nil {
+		return nil
+	}
+	return e.sched
+}
 
 // scheduleActuator is how the scheduler reaches the enable/disable path.
 //

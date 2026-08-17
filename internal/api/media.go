@@ -654,12 +654,12 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 
 	// Optional, like every other piece of the post-production tier: a test
 	// fixture that never touches the engine must still be able to delete a
-	// file (see testServer's comment). A running server always has one.
-	if s.mgr != nil {
-		if err := s.mgr.Reconcile(); err != nil {
-			writeError(w, http.StatusInternalServerError, "media deleted but reconcile failed: "+err.Error())
-			return
-		}
+	// file (see testServer's comment). A running server always has one, and the
+	// nil-manager check that used to stand here is inside Server.reconcile now,
+	// where every caller gets it.
+	if err := s.reconcile(); err != nil {
+		writeError(w, http.StatusInternalServerError, "media deleted but reconcile failed: "+err.Error())
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

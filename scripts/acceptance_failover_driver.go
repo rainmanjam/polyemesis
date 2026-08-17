@@ -68,6 +68,9 @@ func main() {
 	switch cmd {
 	case "":
 		driverlib.Setup(user, pass)
+		// The programme every step below acts on. Since #387 a fresh install
+		// has none; see driverlib.EnsureSource.
+		driverlib.EnsureSource("Main")
 		enableFailover()
 		dest()
 	case "status":

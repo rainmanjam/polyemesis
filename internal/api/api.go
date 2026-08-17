@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/chat"
+	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -34,6 +36,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/recording"
+	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
@@ -47,12 +50,75 @@ import (
 // Every endpoint that predates sources goes through here, which is what keeps
 // the whole existing API and UI working while multi-source runs underneath.
 //
-// It cannot be nil in a running server: the database refuses to delete the last
-// source, and Manager.Start fails when no engine came up, so the process never
-// finishes booting without one. A handler reached before Start would panic,
-// which is the correct outcome for a bug that means the server is serving
-// before its pipeline exists.
+// IT CAN BE NIL, and that is a normal state rather than a bug. What used to
+// stand here said the opposite -- "it cannot be nil in a running server",
+// leaning on the last-source delete guard and on Manager.Start refusing an
+// install with no engines -- and both halves were already false: Manager.Sync
+// logs and continues when engine.New fails, so an install where every source
+// failed to build serves every one of these handlers with nil. A fresh install
+// with no source yet is the same state, reached deliberately.
+//
+// Nil means "this install has no programme", and the answer to a request that
+// needs one is a refusal, not a panic and not a pretend engine. Where that
+// refusal is imposed is requireSource, at the router: see its comment for what
+// the guard does and does not promise. Readers that can answer honestly for an
+// absent programme go through engOrNil instead.
 func (s *Server) eng() *engine.Engine { return s.mgr.Default() }
+
+// engOrNil is eng() for the callers that have to answer for an absent engine,
+// and it exists to make that answer ATOMIC.
+//
+// Two properties, and the second is the one that was got wrong:
+//
+//	It tolerates a Server with no manager at all -- every server in this
+//	package's unit tests -- where eng() would panic inside Manager.Default
+//	before there is an engine to test.
+//
+//	It reads the engine set ONCE. eng() re-derives from Manager.Engines under
+//	m.mu on every call, and Manager.reconcile deletes from that map when a
+//	source is deleted, as does Manager.Stop when the process drains. A caller
+//	that wrote `if s.eng() == nil { ... }; s.eng().Hub()` therefore tested one
+//	engine and dereferenced another, and the guard bought nothing at exactly
+//	the moment it was needed: the last source going away under a scrape.
+//
+// Capture the return value and use THAT. See audit.go's eng := s.eng(), which
+// is the shape the rest of this package already uses.
+func (s *Server) engOrNil() *engine.Engine {
+	if s.mgr == nil {
+		return nil
+	}
+	return s.eng()
+}
+
+// reconcile makes what is running match what is stored, for EVERY programme.
+//
+// Through the manager, never through one engine, and that is the fix rather
+// than a tidy-up. Eleven handlers called s.eng().Reconcile(), which reconciles
+// the DEFAULT source and nothing else -- so on an install with two programmes,
+// editing the second one's destination saved the row and reconciled the first.
+// Nothing on screen said so: the response was a 200 and the change simply did
+// not take until a restart. sources.go's opening comment has described this
+// hazard for the source routes since they landed; it was never true only of
+// them.
+//
+// Manager.Reconcile is a superset of the old call in the direction that
+// matters: it re-derives the engine set from the sources table and then
+// reconciles each engine, so the default programme is still reconciled and the
+// others stop being skipped. It costs a Sync per mutation, which is a store
+// read and a map comparison.
+//
+// A nil manager is not an error. Every server in this package's unit tests has
+// one, and the caller's question -- "is what is running what is stored" -- is
+// answered by "nothing is running" rather than by a failure. The callers that
+// only warn keep warning and the callers that return 500 keep returning 500;
+// what changes is which engines were reconciled, not how a failure is
+// reported.
+func (s *Server) reconcile() error {
+	if s.mgr == nil {
+		return nil
+	}
+	return s.mgr.Reconcile()
+}
 
 // tools is the FFmpeg this install detected.
 //
@@ -84,6 +150,58 @@ func (s *Server) hostSystem() stats.System {
 		return stats.System{}
 	}
 	return s.mgr.Host().System()
+}
+
+// ingestBitrate is the arrival series the dashboard graphs, empty when no
+// programme is running.
+//
+// The check is HERE, in the handler layer, and not a nil-receiver guard on
+// stats.Monitor. That is the deliberate half of it. stats.Monitor and
+// relay.Hub describe a pipeline that is up; teaching them to answer for one
+// that is not spreads "there is nothing running" into two packages that have
+// no way to say so, and the next reader of Monitor.Bitrate would have to
+// wonder which of its zeroes meant idle and which meant absent. The API is
+// where the question "is there a programme at all" is already asked, so it is
+// where it is answered.
+//
+// Empty rather than a single zero sample: the graph draws no line for a series
+// it has never had a reading of, which is the truth, where a zero reading
+// claims a measured silence.
+//
+// ONE engOrNil, and the result is what gets dereferenced. See engOrNil.
+func (s *Server) ingestBitrate() []stats.Sample {
+	e := s.engOrNil()
+	if e == nil {
+		return []stats.Sample{}
+	}
+	return e.Monitor().Bitrate()
+}
+
+// relayStats is the fan-out hub's throughput, zero when no programme is
+// running. Same reasoning as ingestBitrate, and the zero value is honest: no
+// hub exists, so nothing has been received, replicated or dropped.
+func (s *Server) relayStats() relay.Stats {
+	e := s.engOrNil()
+	if e == nil {
+		return relay.Stats{}
+	}
+	return e.Hub().Stats()
+}
+
+// clipDir is where captured clips live: recordings/clips, one directory for
+// the whole install.
+//
+// Off the CONFIG, not off an engine, for the same reason Server.recordings is:
+// engine.New computes this exact path from the same cfg.RecordingsDir(), so
+// every engine names the same directory and a clip an operator captured
+// yesterday is still on disk after the programme that made it was deleted.
+//
+// It is a real base directory and must stay one. clips.Resolve confines a
+// downloaded name against it, and a nil-safe accessor answering "" would turn
+// that confinement into confinement against nothing. See jobs.go's ruling on
+// the same question for recordings.
+func (s *Server) clipDir() string {
+	return filepath.Join(s.cfg.RecordingsDir(), clips.Subdir)
 }
 
 // recordings is the shared, read-only view of the recordings directory:
@@ -660,10 +778,14 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/source", s.handleSource)
 			// What each incoming track is. Per-ingest, not per-destination:
 			// the feed is the same feed whoever is listening to it.
-			r.Put("/source/annotations", s.handlePutAnnotations)
+			//
+			// requireSource, like every mutation below that reaches a
+			// pipeline: there is no feed to describe the tracks of. See
+			// requireSource.
+			r.With(s.requireSource).Put("/source/annotations", s.handlePutAnnotations)
 			// Manual failover. The tier's return mode defaults to manual, so
 			// this is how a broadcast leaves a slate.
-			r.Post("/failover/source", s.handleSwitchSource)
+			r.With(s.requireSource).Post("/failover/source", s.handleSwitchSource)
 			// Per-item playlist readiness. Its own GET rather than a field on
 			// the settings blob -- see handlePlaylistStatus.
 			r.Get("/failover/playlist", s.handlePlaylistStatus)
@@ -690,26 +812,41 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// what this install can publish to.
 			r.Get("/services", s.handleListServices)
 
+			// The two READS stay open: destinations.source_id is nullable and
+			// a row can outlive the reconcile that would have started it, so
+			// there is a real listing to render on an install with no engine
+			// -- and a page that 503s is a page that cannot explain itself.
+			// Every WRITE below reconciles a pipeline that does not exist.
 			r.Get("/destinations", s.handleListDestinations)
-			r.Post("/destinations", s.handleCreateDestination)
+			r.With(s.requireSource).Post("/destinations", s.handleCreateDestination)
 			// chi matches the static segment ahead of {id}, so this does not
 			// collide with the destination routes below.
+			//
+			// Order is display state and deliberately does NOT reconcile (see
+			// handleReorderDestinations), so it needs no programme either.
 			r.Put("/destinations/order", s.handleReorderDestinations)
 			r.Get("/destinations/{id}", s.handleGetDestination)
-			r.Put("/destinations/{id}", s.handleUpdateDestination)
-			r.Delete("/destinations/{id}", s.handleDeleteDestination)
-			r.Post("/destinations/{id}/start", s.handleStartDestination)
-			r.Post("/destinations/{id}/stop", s.handleStopDestination)
-			r.Post("/destinations/{id}/restart", s.handleRestartDestination)
-			r.Post("/destinations/{id}/refresh-key", s.handleRefreshKey)
+			r.With(s.requireSource).Put("/destinations/{id}", s.handleUpdateDestination)
+			r.With(s.requireSource).Delete("/destinations/{id}", s.handleDeleteDestination)
+			r.With(s.requireSource).Post("/destinations/{id}/start", s.handleStartDestination)
+			r.With(s.requireSource).Post("/destinations/{id}/stop", s.handleStopDestination)
+			r.With(s.requireSource).Post("/destinations/{id}/restart", s.handleRestartDestination)
+			r.With(s.requireSource).Post("/destinations/{id}/refresh-key", s.handleRefreshKey)
 
 			// Expert mode: hand-edited FFmpeg arguments for one destination.
 			// Preview and dry-run are POSTs because they carry a candidate
 			// edit in the body, not because they change anything — neither
 			// writes. See expert.go.
+			//
+			// The three that write nothing carry no requireSource, and get
+			// their refusal from destinationBaseArgv instead: they resolve a
+			// command against the RUNNING process list, so the sentence is the
+			// same one and it arrives from the helper that actually needed the
+			// engine. The two that save carry the middleware as well, because
+			// they reconcile afterwards.
 			r.Get("/destinations/{id}/expert", s.handleGetExpert)
-			r.Put("/destinations/{id}/expert", s.handlePutExpert)
-			r.Delete("/destinations/{id}/expert", s.handleDeleteExpert)
+			r.With(s.requireSource).Put("/destinations/{id}/expert", s.handlePutExpert)
+			r.With(s.requireSource).Delete("/destinations/{id}/expert", s.handleDeleteExpert)
 			r.Post("/destinations/{id}/expert/preview", s.handlePreviewExpert)
 			r.Post("/destinations/{id}/expert/dry-run", s.handleDryRunExpert)
 
@@ -736,24 +873,29 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/media", s.handleListMedia)
 
 			r.Get("/renditions", s.handleListRenditions)
-			r.Post("/renditions", s.handleCreateRendition)
+			r.With(s.requireSource).Post("/renditions", s.handleCreateRendition)
 			// Static segment first, same as /destinations/order above.
 			r.Get("/renditions/presets", s.handleRenditionPresets)
 			// The font picker for text overlays. A listing rather than a
 			// compiled-in list, because operators add their own fonts.
 			r.Get("/fonts", s.handleListFonts)
 			r.Get("/renditions/{id}", s.handleGetRendition)
-			r.Put("/renditions/{id}", s.handleUpdateRendition)
-			r.Delete("/renditions/{id}", s.handleDeleteRendition)
-			r.Post("/renditions/{id}/restart", s.handleRestartRendition)
+			r.With(s.requireSource).Put("/renditions/{id}", s.handleUpdateRendition)
+			r.With(s.requireSource).Delete("/renditions/{id}", s.handleDeleteRendition)
+			r.With(s.requireSource).Post("/renditions/{id}/restart", s.handleRestartRendition)
 
 			// Which encoders this FFmpeg actually registers, so the rendition
 			// editor cannot offer one that would only fail once a stream is live.
 			r.Get("/encoders", s.handleListEncoders)
 
-			r.Post("/routing/compile", s.handleCompileRouting)
+			// Both compile against the tracks NOW ARRIVING, which is what
+			// makes them refuse rather than answer: with no ingest, Compile
+			// falls back to routing.DefaultSource()'s six placeholder tracks
+			// and the operator is shown a filter graph for a stream that does
+			// not exist. The catalogue in between is static and answers.
+			r.With(s.requireSource).Post("/routing/compile", s.handleCompileRouting)
 			r.Get("/routing/presets", s.handleListPresets)
-			r.Post("/routing/presets/{preset}", s.handleApplyPreset)
+			r.With(s.requireSource).Post("/routing/presets/{preset}", s.handleApplyPreset)
 
 			// Playout administration. The media itself is served outside this
 			// group; only the configuration and the operator's view of it are
@@ -860,15 +1002,42 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Put("/schedules/{id}", s.handleUpdateSchedule)
 			r.Delete("/schedules/{id}", s.handleDeleteSchedule)
 
-			// The rolling clip buffer.
+			// The rolling clip buffer, and the split down the middle of it.
+			//
+			// The LISTING is files on disk under recordings/clips, one
+			// directory per install, so it outlives the programme that
+			// captured them and stays open. The two that act on the ring
+			// buffer are guarded: capturing from a buffer that does not exist,
+			// or reporting a buffer switched on when nothing is running, is a
+			// 200 for something that did not happen.
+			//
+			// THE DELETE WAS THE ARGUABLE ONE and it is on the file side, with
+			// the argument recorded because it was first decided the other
+			// way. Guarding it left an install with no source able to list and
+			// download clips it could never remove -- and after the last-source
+			// delete becomes possible, a box with a full clips directory would
+			// have had no API that could clear it and no remedy but a shell.
+			// That is the opposite of the ruling three routes up on
+			// DELETE /recordings/{id}, for material that outlives its
+			// programme in exactly the same way.
+			//
+			// The capturer stays authoritative while there IS one, which is
+			// the reason the guard looked right: with a buffer running the
+			// capturer owns the index the listing comes from, and a delete
+			// going around it while the ring is evicting is the race
+			// Engine.DeleteClip exists to serialise. So the handler prefers
+			// the engine and falls back to the directory, exactly as the
+			// listing and the download already do.
 			r.Get("/clips", s.handleListClips)
-			r.Post("/clips", s.handleCaptureClip)
-			r.Put("/clips/buffer", s.handleSetClipBuffer)
+			r.With(s.requireSource).Post("/clips", s.handleCaptureClip)
+			r.With(s.requireSource).Put("/clips/buffer", s.handleSetClipBuffer)
 			r.Delete("/clips/{name}", s.handleDeleteClip)
 
-			// Loudness compliance, read by the meters page.
+			// Loudness compliance: the READ is the meters page, which answers
+			// with no measurements; the PUT switches a monitor on inside a
+			// running pipeline.
 			r.Get("/loudness", s.handleLoudness)
-			r.Put("/loudness", s.handleSetLoudnessMonitor)
+			r.With(s.requireSource).Put("/loudness", s.handleSetLoudnessMonitor)
 
 			r.Get("/processes", s.handleListProcesses)
 			r.Get("/processes/{name}/logs", s.handleProcessLogs)
@@ -1466,12 +1635,116 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // apiError is the single error shape the SPA handles.
+//
+// Code is the MACHINE-READABLE half, and it exists because the alternative was
+// the UI matching on the English sentence. A dashboard that has to tell "this
+// install has no programme yet" from "the reconcile failed" by reading
+// body.error breaks the day the sentence is reworded, and breaks silently in
+// every locale that translates it. Absent on every error that has nothing to
+// say beyond its status, which is why it is omitempty: adding a code is a
+// deliberate act, one per condition a client is expected to BRANCH on.
 type apiError struct {
 	Error string `json:"error"`
+	Code  string `json:"code,omitempty"`
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, apiError{Error: msg})
+}
+
+// writeErrorCode is writeError with the branch key set.
+func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, apiError{Error: msg, Code: code})
+}
+
+// codeNoSource is the one code this change introduces: there is no programme on
+// this install, so the thing being asked for does not exist to be acted on.
+//
+// ui/src/lib/api.ts carries it onto ApiError.code so a caller can branch
+// without reading the sentence.
+const codeNoSource = "no_source"
+
+// noSourceMsg is the sentence, written once so that twenty routes cannot drift
+// into twenty wordings of it.
+//
+// It names the SCREEN, not the concept. An operator meeting this has usually
+// just installed the product, and "create a source" is a phrase they have no
+// reason to recognise yet -- the Sources page is the thing they can go and
+// look at.
+const noSourceMsg = "this install has no source yet, so there is no programme to act on. " +
+	"Create one on the Sources page first."
+
+// errNoSource is the same refusal as an ERROR, for the helpers that are shared
+// by several routes and are in no position to write a response themselves.
+//
+// Its callers must map it back onto writeNoSource rather than rendering it with
+// whatever status they use for their own failures: destinationBaseArgv's other
+// errors are 409s about a destination that cannot be built, and answering 409
+// here would tell an operator their destination is broken when what is missing
+// is the whole programme.
+var errNoSource = errors.New(noSourceMsg)
+
+// writeNoSource is the refusal itself. 503, because the condition is temporary
+// and the operator is the one who ends it.
+func writeNoSource(w http.ResponseWriter) {
+	writeErrorCode(w, http.StatusServiceUnavailable, codeNoSource, noSourceMsg)
+}
+
+// requireSource refuses a request that needs a running programme when there is
+// none.
+//
+// AT THE ROUTER, not in each handler, and that is the whole design. The
+// alternative -- a nil check at the top of every handler that dereferences the
+// engine -- is a rule enforced by whoever remembers it, which is how
+// /destinations/{id}/expert came to read Engine.Tools through a nil-check on
+// the RESULT rather than on the receiver. Membership of the r.With() list at
+// the registration site is the statement, so a route added without one is a
+// route somebody has to have thought about.
+//
+// WHAT IT DOES NOT PROMISE, stated because the next reader will assume
+// otherwise. This is a check on the engine set at the moment the request
+// enters, and the handler behind it re-reads that set when it dereferences --
+// the two reads are not atomic, and Manager.reconcile deletes from the map when
+// a source goes away. Today the window cannot open: the store refuses to delete
+// the last source, so the set cannot empty under a request. When that guard is
+// removed the window becomes real for exactly the mutating handlers here, and
+// the fix is to carry the engine this middleware READ into the handler rather
+// than to re-derive it. See engOrNil, which is the same distinction one level
+// down.
+//
+// It is deliberately NOT applied to the routes an operator recovers through --
+// /setup, /auth/*, /sources*, /settings, /status, /system, /stats, /levels,
+// /ws, /metrics -- nor to the ones over files that outlive a programme:
+// /library*, /recordings*, /clipper* and the FILE side of /clips -- the
+// listing, the download and the delete. Those answer for an install with no
+// source, which is a different sentence from answering as if it had one. Only
+// the two routes that act on the rolling buffer itself are guarded; a delete
+// that an operator can see the target of and never perform is a disk that
+// only fills.
+func (s *Server) requireSource(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.engOrNil() == nil {
+			writeNoSource(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// writeCreateError renders a create failure, lifting "there is no source" out
+// of the 400 the rest of them share.
+//
+// db.CreateDestination and db.CreateRendition resolve an omitted source_id
+// through DefaultSourceID, which answers db.ErrSourceNotFound on an install
+// with none. That is not a malformed request -- the body was fine and the
+// operator can do nothing to it that would help -- so it is the one create
+// failure that is not the client's fault.
+func writeCreateError(w http.ResponseWriter, err error) {
+	if errors.Is(err, db.ErrSourceNotFound) {
+		writeNoSource(w)
+		return
+	}
+	writeError(w, http.StatusBadRequest, err.Error())
 }
 
 // writeNoSuchEndpoint answers exactly as an unrouted /api path does.
@@ -1500,6 +1773,27 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not found")
+	// A 404 ABOUT THE ROW, and it is deliberately NOT the install-wide refusal.
+	//
+	// db.ErrSourceNotFound serves two meanings -- "no row with this id", from
+	// every single-row getter, and "this install has no source at all", from
+	// DefaultSourceID -- and this mapping cannot tell them apart. It was the
+	// 503 briefly, which meant a lookup that failed for ONE id reported that
+	// the whole install had no source: PUT /source/annotations resolves the
+	// default engine's row through GetSource, so an install with four sources
+	// whose default row had gone would answer "this install has no source yet,
+	// create one on the Sources page" while the Sources page listed four. The
+	// UI branches on that code, correctly, and would have drawn the
+	// fresh-install empty state over a populated install.
+	//
+	// The install-wide meaning arrives at the HTTP surface from exactly two
+	// places, both creates, both through writeCreateError, which lifts it
+	// there and only there. Everything reaching this function resolved a row by
+	// id, so the row is what the answer is about. This also puts the mapping
+	// back in agreement with sources.go's own sourceStatus(), which has always
+	// answered 404 for this sentinel.
+	case errors.Is(err, db.ErrSourceNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, db.ErrNoUser):
 		writeError(w, http.StatusConflict, "setup has not been completed")
 	case errors.Is(err, db.ErrStateConflict):

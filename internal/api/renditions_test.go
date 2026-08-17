@@ -60,6 +60,25 @@ func srtPortOf(t *testing.T, store *db.DB) int {
 // binding a real port from a unit test.
 func renditionServer(t *testing.T, tools *ffmpeg.Tools) (http.Handler, *db.DB, func(*http.Request)) {
 	t.Helper()
+	_, h, store, sign := engineServer(t, tools, Options{})
+	return h, store, sign
+}
+
+// engineServer is renditionServer with the caller's Options merged in, and it
+// exists for the fixtures that need BOTH a real engine and a stub standing in
+// for a platform API.
+//
+// The two used to be alternatives: testServerWith could stub the providers and
+// left the manager nil, renditionServer built the manager and stubbed nothing.
+// requireSource is what made the combination necessary -- a route that reaches
+// a platform and then reconciles is refused outright on a server with no
+// programme, so a test about what Facebook received can no longer be written
+// against a manager-less server.
+//
+// Log, Config, DB, Secrets, Engine, Events and Version are this fixture's to
+// set; anything else the caller passes is kept.
+func engineServer(t *testing.T, tools *ffmpeg.Tools, o Options) (*Server, http.Handler, *db.DB, func(*http.Request)) {
+	t.Helper()
 
 	dir := t.TempDir()
 	store := dbtest.OpenAt(t, filepath.Join(dir, "polyemesis.db"))
@@ -105,18 +124,17 @@ func renditionServer(t *testing.T, tools *ffmpeg.Tools) (http.Handler, *db.DB, f
 	}
 	t.Cleanup(eng.Stop)
 
-	s := New(Options{
-		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Config:  cfg,
-		DB:      store,
-		Secrets: box,
-		Engine:  eng,
-		Events:  bus,
-		Version: "test",
-	})
+	o.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	o.Config = cfg
+	o.DB = store
+	o.Secrets = box
+	o.Engine = eng
+	o.Events = bus
+	o.Version = "test"
+	s := New(o)
 	h := s.Handler()
 	lastTestServer = s
-	return h, store, login(t, h)
+	return s, h, store, login(t, h)
 }
 
 // lastTestServer is the Server most recently built by renditionServer.

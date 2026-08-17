@@ -134,7 +134,11 @@ func compareCommittedLedger(want, live coverageLedger, note, regen string) (msgs
 		Part:            live.Partition,
 		Verdicts:        live.SweepVerdicts,
 		NonGetWitnesses: live.NonGetDifferentialFloor,
-		RegenCommand:    regen,
+		// Off the ROUTE ROWS, not off live.GuardedFloor: the guarded count is
+		// recomputable from the artifact, so the stand-in measurement is the
+		// real derivation rather than a copy of the number being asserted.
+		Guarded:      countGuardedRoutes(live.Routes),
+		RegenCommand: regen,
 	})
 	return c.msgs
 }

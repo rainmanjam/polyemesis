@@ -193,7 +193,19 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if len(m.engines) == 0 {
+	// TWO DIFFERENT STATES, and this used to refuse both.
+	//
+	// No sources at all is a fresh install, and it is now a normal way to
+	// boot: the operator has not created their first programme yet, and the
+	// screen that lets them do so is served by the API this refusal used to
+	// prevent from starting. Failing here left them with a process that exits
+	// and a log line, which is the one outcome from which they cannot recover.
+	//
+	// Sources that all failed to build is the other, and it stays an error.
+	// Sync logs and continues per source (see the loop it runs), so without
+	// this the process would come up looking healthy while publishing nothing,
+	// and the operator would find out from the platform.
+	if len(m.order) > 0 && len(m.engines) == 0 {
 		return fmt.Errorf("no sources to start")
 	}
 	return nil
