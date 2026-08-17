@@ -50,6 +50,33 @@ const (
 	flapEverySeconds = 12
 )
 
+// A FLOOR OF ZERO IS THE EDIT THIS WHOLE MECHANISM EXISTS TO PREVENT, AND IT
+// WAS GUARDED ONLY BY ACCIDENT.
+//
+// Setting lifecycleLiveRecheckAfterEdge to 0 does not currently reach a test
+// failure -- it fails to COMPILE, because lifecycle_test.go computes
+// `50/lifecycleLiveRecheckAfterEdge` and Go evaluates that constant expression
+// at build time. That is real protection and it is entirely incidental: it
+// disappears the moment somebody rewrites that line, and when it fires the
+// message is "invalid operation: division by zero", which says nothing about
+// quota.
+//
+// Stated deliberately here so the protection survives the arithmetic that
+// currently provides it. Zero means every edge buys a re-read, which is the
+// unfloored behaviour measured at 14,400 units a day against an allocation of
+// 10,000 -- and lifecycle.go is explicit that an install out of quota cannot
+// END a broadcast.
+func TestTheLiveRecheckFloorIsNotZero(t *testing.T) {
+	if lifecycleLiveRecheckAfterEdge < 1 {
+		t.Fatalf("lifecycleLiveRecheckAfterEdge = %d. A floor below 1 means every edge "+
+			"forces a state re-read, which is the unfloored behaviour the constant was "+
+			"introduced to stop: ~7,200 re-reads a day for one destination flapping "+
+			"every twelve seconds, 14,400 API units against an allocation of 10,000. "+
+			"An install that runs out cannot END a broadcast, so the show stays live.",
+			lifecycleLiveRecheckAfterEdge)
+	}
+}
+
 func TestTheLiveRecheckFloorStillNoticesWithinAboutAMinute(t *testing.T) {
 	// The budget counts sweeps SKIPPED, so a floor of n means the re-read lands
 	// on sweep n+1.
