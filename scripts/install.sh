@@ -342,6 +342,27 @@ require_systemd() {
 # distro copy in place. Nothing is deleted, so the way back is one rm.
 FFMPEG_UPGRADE=ask   # ask | skip | force
 
+# Installing a release binary whose checksum CANNOT BE CHECKED, as opposed to
+# one whose checksum is wrong. Both end with an unverified binary running as a
+# service; only this one used to happen without anybody choosing it. Off, so the
+# exception is a flag somebody typed.
+ALLOW_UNVERIFIED=false
+
+# Set when this run installs the static FFmpeg, and consumed by the config
+# writer.
+#
+# THIS IS THE POKA-YOKE, AND IT REPLACES AN INSTRUCTION. The warning below used
+# to read "Put /usr/local/bin ahead of it, or set the ffmpeg path in the config"
+# -- asking the operator to perform an edit, to a file THIS SCRIPT IS CREATING,
+# in the same run. internal/config.FFmpeg has Binary and Probe (config.go:107),
+# and the config.yaml emitted here carried no ffmpeg block at all.
+#
+# Writing the absolute path means PATH ORDER STOPS MATTERING, which is better
+# than getting PATH order right. The failure it removes is silent: the service
+# starts against the older FFmpeg and misbehaves later, somewhere else.
+FFMPEG_PINNED_BIN=""
+FFMPEG_PINNED_PROBE=""
+
 ffmpeg_static_asset() {
   # BtbN publishes per-architecture GPL tarballs. Only these two are built.
   case "$ARCH" in
@@ -483,6 +504,9 @@ offer_ffmpeg_upgrade() {
   # where /usr/local/bin is not first is the OLD build, so a successful upgrade
   # announces the version it just replaced.
   ok "installed $(/usr/local/bin/ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f1-3) to /usr/local/bin"
+  # Recorded so the generated config can PIN it. See FFMPEG_PINNED_BIN.
+  FFMPEG_PINNED_BIN=/usr/local/bin/ffmpeg
+  FFMPEG_PINNED_PROBE=/usr/local/bin/ffprobe
   echo "     The distro package is untouched at /usr/bin/ffmpeg. To go back:"
   echo "     rm /usr/local/bin/ffmpeg /usr/local/bin/ffprobe"
 
@@ -494,9 +518,16 @@ offer_ffmpeg_upgrade() {
   # because it is about to report a floor as cleared while polyemesis would
   # still shell out to the binary that does not clear it.
   if [ "$(command -v ffmpeg)" != "/usr/local/bin/ffmpeg" ]; then
-    warn "PATH still resolves ffmpeg to $(command -v ffmpeg) — polyemesis will use that one."
-    echo "     Put /usr/local/bin ahead of it, or set the ffmpeg path in the config."
-    [ "$need" = "required" ] && return 1
+    warn "PATH still resolves ffmpeg to $(command -v ffmpeg)."
+    # NOT "go and fix your PATH" any more. FFMPEG_PINNED_BIN is written into the
+    # generated config.yaml as ffmpeg.binary, so polyemesis uses the build this
+    # script just verified regardless of what PATH resolves. In binary mode the
+    # ambiguity is gone rather than reported.
+    echo "     polyemesis will still use ${FFMPEG_PINNED_BIN} — it is pinned in the"
+    echo "     generated config, so PATH order does not decide this."
+    # Still fatal for the DOCKER-mode preflight and for --check, where no config
+    # of ours is written and PATH is genuinely what decides.
+    [ "$need" = "required" ] && [ "${MODE:-}" != "binary" ] && return 1
   fi
   return 0
 }
@@ -583,7 +614,33 @@ check_ffmpeg() {
     echo "       polyemesis will start and warn, and you can use RTMP — but RTMP carries"
     echo "       ONE stereo pair, so per-destination audio routing has nothing to route"
     echo "       from. That is the whole reason to run polyemesis."
-    echo "       Fix it with a build configured --enable-libsrt, or use the docker mode."
+
+    # AND THEN OFFER TO FIX IT, which this branch spent its whole life telling
+    # people to do by hand.
+    #
+    # The previous line here was "Fix it with a build configured
+    # --enable-libsrt, or use the docker mode" -- while offer_ffmpeg_upgrade,
+    # fifty lines up, downloads a build and REFUSES IT unless -protocols lists
+    # srt. The artefact this message asked the operator to go and compile was
+    # already in the script's hand, tested.
+    #
+    # This is not a rare path and it is not the version gate: an FFmpeg can
+    # clear the 6.0 floor and carry no SRT. Homebrew's does, which
+    # docs/INSTALL.md states in three places, and several distro builds do too.
+    #
+    # `required`, because SRT is the reason to run polyemesis at all -- and
+    # because a successful return from that function already means the build
+    # carries srt AND that PATH resolves to it, which is exactly the condition
+    # this branch is testing for.
+    if offer_ffmpeg_upgrade "${major:-}" required; then
+      ok "installed an FFmpeg with libsrt — multitrack ingest available"
+      return 0
+    fi
+
+    # Declining is still allowed, because RTMP genuinely works and this is the
+    # operator's call to make. It is now a choice made against a fix that was
+    # offered, rather than one made against a reading list.
+    echo "       You can also use the docker mode, which bundles a build with SRT."
     local proceed
     ask_yn "Continue without SRT anyway?" "n" proceed
     [ "$proceed" = "yes" ] || return 1
@@ -623,10 +680,45 @@ port_in_use() {
   fi
 }
 
+# next_free_port walks upwards from $1 until nothing is listening. Bounded, so a
+# host with a genuinely saturated range says so instead of spinning.
+next_free_port() {
+  local port="$1" proto="$2" tries=0
+  while [ "$tries" -lt 200 ]; do
+    port=$((port + 1))
+    [ "$port" -le 65535 ] || return 1
+    port_in_use "$port" "$proto" || { echo "$port"; return 0; }
+    tries=$((tries + 1))
+  done
+  return 1
+}
+
+# warn_if_taken announced a bind failure and then went and caused it.
+#
+# It fires DURING THE INTERVIEW: the port was typed seconds ago, the operator is
+# still sitting there, and nothing has been written yet. Everything needed to
+# avoid the failure is in hand at the moment it is predicted, which is the
+# definition of a missed poka-yoke.
+#
+# The variable name is passed in so the corrected value goes back to the caller,
+# following the ask/ask_yn convention already used throughout the interview.
 warn_if_taken() {
-  local port="$1" proto="$2" what="$3"
-  if port_in_use "$port" "$proto"; then
-    warn "${proto}/${port} (${what}) is already in use — expect a bind failure unless you change it"
+  local port="$1" proto="$2" what="$3" var="${4:-}" free answer
+  port_in_use "$port" "$proto" || return 0
+
+  warn "${proto}/${port} (${what}) is already in use — polyemesis would fail to bind it"
+  # Nothing to offer, or nowhere to put the answer: fall back to the old
+  # behaviour rather than pretending.
+  if [ -z "$var" ] || ! free="$(next_free_port "$port" "$proto")"; then
+    echo "     Change it, or stop whatever is holding ${proto}/${port}."
+    return 0
+  fi
+  ask_yn "Use ${proto}/${free} for ${what} instead?" "y" answer
+  if [ "$answer" = "yes" ]; then
+    printf -v "$var" '%s' "$free"
+    ok "${what} moved to ${proto}/${free}"
+  else
+    echo "     Keeping ${proto}/${port}. Stop whatever is holding it before starting polyemesis."
   fi
 }
 
@@ -658,9 +750,10 @@ gather_configuration() {
   # two different ways to say the same thing.
   case "$RTMP_PORT" in 0|"") ENABLE_RTMP="no" ;; *) ENABLE_RTMP="yes" ;; esac
 
-  warn_if_taken "$HTTP_PORT" tcp "web UI"
-  warn_if_taken "$SRT_PORT"  udp "SRT ingest"
-  [ "$ENABLE_RTMP" = yes ] && warn_if_taken "$RTMP_PORT" tcp "RTMP ingest"
+  # The variable name goes in so an accepted alternative comes back out.
+  warn_if_taken "$HTTP_PORT" tcp "web UI"      HTTP_PORT
+  warn_if_taken "$SRT_PORT"  udp "SRT ingest"  SRT_PORT
+  [ "$ENABLE_RTMP" = yes ] && warn_if_taken "$RTMP_PORT" tcp "RTMP ingest" RTMP_PORT
 
   header "=== TLS ==="
   echo "  Plain HTTP sends the login form and session cookie in clear text."
@@ -731,6 +824,9 @@ gather_configuration() {
     ask_yn "Serve HTTPS on 443 instead of 8080?" "y" USE_443
     if [ "$USE_443" = yes ]; then
       HTTP_PORT=443
+      # Deliberately WITHOUT a variable here: 443 was just chosen on purpose,
+      # for a reason (an unprivileged bind), and silently moving it to 444 would
+      # undo the choice the operator just made. Warn only.
       warn_if_taken "$HTTP_PORT" tcp "web UI"
     fi
   fi
@@ -772,6 +868,23 @@ confirm_plan() {
 # Emitted into config.yaml for both modes. `auto` is not used here on purpose:
 # the operator has just answered the question auto exists to guess at, and a
 # resolved mode that disagrees with what they chose would be worse than either.
+
+# ffmpeg_yaml pins the FFmpeg this install actually verified, when it installed
+# one itself.
+#
+# Emitted ONLY when this run wrote /usr/local/bin/ffmpeg. If the host's own
+# FFmpeg was accepted, nothing is pinned: that binary is on PATH by the
+# operator's arrangement, and freezing an absolute path to it would break the
+# next `apt upgrade` in a way nobody would connect to this installer.
+#
+# Docker mode never calls this -- the image carries its own FFmpeg at its own
+# path, and a host path pinned into a container config would name a file that
+# does not exist there.
+ffmpeg_yaml() {
+  [ -n "$FFMPEG_PINNED_BIN" ] || return 0
+  printf 'ffmpeg:\n  binary: "%s"\n  probe: "%s"\n' \
+    "$FFMPEG_PINNED_BIN" "$FFMPEG_PINNED_PROBE"
+}
 
 tls_yaml() {
   case "$TLS_MODE" in
@@ -906,7 +1019,30 @@ install_binary_mode() {
       die "CHECKSUM MISMATCH for $asset — refusing to install it."
     fi
   else
-    warn "no SHA256SUMS published for $tag — installing an unverified download"
+    # A MISMATCH DIED; A MISSING SUMS FILE USED TO WARN AND INSTALL ANYWAY.
+    #
+    # Those are the same risk with different evidence. "The bytes are wrong" and
+    # "nobody can tell whether the bytes are wrong" both end with an unverified
+    # binary at $BIN_PATH, installed as root, and the second was the one that
+    # happened automatically. It is also the easier one to arrange: suppressing
+    # an asset is less work than forging a hash.
+    #
+    # docs/INSTALL.md tells readers this installer "verifies the download
+    # against the release's published SHA256SUMS and refuses to install on a
+    # mismatch" -- true as written, and it reads as a stronger promise than a
+    # warning kept.
+    #
+    # The escape hatch stays, because somebody installing a genuinely unsigned
+    # release needs it. It is now a flag they typed, which is auditable, rather
+    # than a default nobody chose.
+    if [ "$ALLOW_UNVERIFIED" != true ]; then
+      rm -rf "$tmp"
+      err "no SHA256SUMS published for $tag — refusing to install an unverified download."
+      echo "     The release may still be publishing; try again in a few minutes."
+      echo "     To install it anyway, re-run with --allow-unverified."
+      die "refusing to install an unverified binary"
+    fi
+    warn "no SHA256SUMS published for $tag — installing UNVERIFIED at your request (--allow-unverified)"
   fi
 
   install -m 0755 "$tmp/$asset" "$BIN_PATH"
@@ -936,6 +1072,7 @@ install_binary_mode() {
     printf 'dataDir: "%s"\n' "$DATA_DIR"
     printf 'addr: ":%s"\n' "$HTTP_PORT"
     tls_yaml
+    ffmpeg_yaml
   } > "$CONFIG_DIR/config.yaml"
 
   local caps=""
@@ -1321,6 +1458,8 @@ Options:
                          /usr/local/bin when the host's is older than the
                          container's, below the 6.0 floor, or missing entirely.
                          Never installs under --check.
+  --allow-unverified     install a release binary even when the release has no
+                         published SHA256SUMS to check it against
   --yes, -y              accept defaults; never prompt
   --check                run the preflight checks and exit, changing nothing
   --help, -h             this text
@@ -1371,6 +1510,7 @@ parse_args() {
       --ffmpeg)     [ $# -ge 2 ] || die "missing value for --ffmpeg"
                     case "$2" in ask|skip|force) FFMPEG_UPGRADE="$2" ;;
                       *) die "--ffmpeg takes ask, skip or force" ;; esac; shift 2 ;;
+      --allow-unverified) ALLOW_UNVERIFIED=true; shift ;;
       -y|--yes)     ASSUME_YES=true; shift ;;
       --check)      CHECK_ONLY=true; ASSUME_YES=true; shift ;;
       -h|--help)    usage; trap - EXIT INT TERM; exit 0 ;;

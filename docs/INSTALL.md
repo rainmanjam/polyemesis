@@ -135,9 +135,43 @@ with no terminal to ask, the installer refuses and names the flag instead.
 
 Nothing is deleted either way. The static build lands in `/usr/local/bin` ahead
 of `/usr/bin` on a default `PATH`, your distribution's package is left where it
-is, and the way back is `rm /usr/local/bin/ffmpeg /usr/local/bin/ffprobe`. If
-your `PATH` happens *not* to put `/usr/local/bin` first, the installer says so
-rather than reporting a floor it has not actually cleared.
+is, and the way back is `rm /usr/local/bin/ffmpeg /usr/local/bin/ffprobe`.
+
+**And `PATH` order does not decide the outcome.** When the installer installs
+FFmpeg itself, it writes the absolute path into the config it generates:
+
+```yaml
+ffmpeg:
+  binary: "/usr/local/bin/ffmpeg"
+  probe: "/usr/local/bin/ffprobe"
+```
+
+So polyemesis uses the build that was just verified even on a host whose `PATH`
+puts `/usr/bin` first. Nothing is pinned when your *own* FFmpeg was accepted —
+freezing a path to a distribution package would break your next `apt upgrade`
+in a way nobody would connect back to this installer.
+
+### The libsrt check, which is separate from the version
+
+Clearing 6.0 and having SRT are two different questions, and an FFmpeg can pass
+the first and fail the second — Homebrew's does, and so do several distribution
+builds. That matters more than it sounds: RTMP carries **one stereo pair**, so
+per-destination audio routing has nothing to route from, which is the main
+reason to run polyemesis at all.
+
+The installer offers the same static build here too, and that build is only
+accepted if `ffmpeg -protocols` actually lists `srt`. You can still decline and
+continue on RTMP — it works — but it is a choice made against an offer rather
+than against a compile-it-yourself instruction.
+
+### Verifying the download
+
+In binary mode the release archive is checked against the release's published
+`SHA256SUMS`. A **mismatch** is fatal. A **missing** sums file is also fatal —
+those are the same risk with different evidence, and installing a binary nobody
+can check, as root, is not a reasonable default. If you are deliberately
+installing a release that has no published sums, `--allow-unverified` says so
+explicitly.
 
 What it gets right that a hand-rolled `docker run` usually does not: `/udp` on
 the SRT port, `stop_grace_period: 30s` so a recording is finalised rather than
