@@ -78,7 +78,25 @@ export function hasMeasurements(stream: IngestStreamHealth): boolean {
 export function formatHealthValue(value: number): string {
   if (!Number.isFinite(value)) return "";
   if (Number.isInteger(value)) return String(value);
-  return value.toFixed(2).replace(/\.?0+$/, "");
+
+  // A NON-ZERO MEASUREMENT MUST NEVER RENDER AS "0", which is what this did.
+  // toFixed(2) turns 0.001 into "0.00" and the trailing-zero strip then turns
+  // that into "0" -- so a real, small, arriving-right-now value was displayed
+  // as the number that means nothing is arriving. On a stream-health pane that
+  // is not a rounding artefact, it is the difference between "your bitrate is
+  // tiny" and "your bitrate is zero", and the second one sends an operator to
+  // restart an encoder that is working.
+  //
+  // Same defect class as the viewer count one file over, arriving through
+  // arithmetic instead of through a nullish default: absent is not zero, and
+  // neither is small.
+  const rounded = value.toFixed(2).replace(/\.?0+$/, "");
+  if (Number(rounded) === 0) {
+    // Sign preserved: a negative that rounds to zero is still not zero, and
+    // dropping the sign would be a second small lie on top of the first.
+    return value < 0 ? "> -0.01" : "< 0.01";
+  }
+  return rounded;
 }
 
 /** How many ingest streams Facebook is currently describing.

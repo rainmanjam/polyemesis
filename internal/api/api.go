@@ -1059,6 +1059,19 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// a 200 saying so rather than a 404; see handleAccountStats.
 			r.Get("/platforms/accounts/{id}/stats", s.handleAccountStats)
 
+			// Facebook's broadcast surface, scoped to a DESTINATION rather
+			// than an account: one account can hold several broadcasts, and
+			// the live video these act on is the one recorded against this
+			// destination. See facebook_broadcast.go.
+			//
+			// The end is a POST because it is an irreversible outbound write,
+			// which puts it behind requireCSRF with the rest of the
+			// state-changing group. The health read answers 200 with
+			// supported:false when there is nothing to report, exactly as the
+			// stats route above does.
+			r.Post("/destinations/{id}/facebook/end-broadcast", s.handleEndFacebookBroadcast)
+			r.Get("/destinations/{id}/facebook/stream-health", s.handleFacebookStreamHealth)
+
 			// Go-live metadata. The push is a job rather than a request so a
 			// slow platform API cannot hold the dashboard open; the composer
 			// polls the job for per-platform results. See metadata.go.
@@ -1538,7 +1551,11 @@ var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/destinations/{id}/expert/preview":  true,
 	"/api/v1/clipper/recordings/{id}/keyframes": true,
 	"/api/v1/platforms/accounts/{id}/stats":     true,
-	"/api/v1/metadata/broadcast-window":         true,
+	// Both make an outbound call to Facebook on the caller's token, which is
+	// the property this list is about rather than anything in the path.
+	"/api/v1/destinations/{id}/facebook/stream-health": true,
+	"/api/v1/destinations/{id}/facebook/end-broadcast": true,
+	"/api/v1/metadata/broadcast-window":                true,
 
 	// #154: content, not metadata. Media bytes.
 	"/api/v1/recordings/{id}/download":             true,

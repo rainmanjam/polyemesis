@@ -117,6 +117,7 @@ are `403` because of what they *do*. The last eight are `403` because of what
 | `POST /destinations/{id}/expert/preview` | the same argv |
 | `GET /clipper/recordings/{id}/keyframes` | spawns `ffprobe`, once per timeline part |
 | `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
+| `GET /destinations/{id}/facebook/stream-health` | the same, for what Facebook sees arriving at its ingest |
 | `GET /metadata/broadcast-window` | the same, once per connected account |
 | `GET /recordings/{id}/download` | the recording itself |
 | `GET /recordings/stems/{name}/download` | a separated audio stem |
@@ -329,9 +330,24 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 | `POST` | `/destinations/{id}/refresh-key` |
 | `GET` `PUT` `DELETE` | `/destinations/{id}/expert` |
 | `POST` | `/destinations/{id}/expert/preview`, `/dry-run` |
+| `POST` | `/destinations/{id}/facebook/end-broadcast` |
+| `GET` | `/destinations/{id}/facebook/stream-health` |
 
 List rows arrive wrapped as `{"destination": ..., "routing": ...}` so the UI
 gets the compiled routing without a second round trip.
+
+The two `facebook/` routes act on the live video recorded against THAT
+destination rather than on the account, because one account can hold several
+broadcasts at once and "end the broadcast" would otherwise be ambiguous in the
+exact situation an operator reaches for it.
+
+`end-broadcast` turns the live video into a VOD; the artefact survives, the
+broadcast does not come back, and `ended: false` with no error is an ordinary
+outcome meaning Facebook accepted the end and has not yet reported it took.
+`stream-health` answers `200 {"supported": false, "reason": ...}` when the
+destination has never gone live — Facebook is the only platform here that
+publishes bitrate and frame rate at all, so its absence elsewhere is a fact
+about the platform rather than a gap.
 
 **A create, update or `refresh-key` may return `warnings`**, an array of
 sentences meant to be shown to the operator. It is present only when something
@@ -587,7 +603,7 @@ told so. The schedule still saves and still runs.
 | `GET` | `/platforms/credentials` |
 | `PUT` `DELETE` | `/platforms/credentials/{platform}` |
 | `POST` | `/platforms/credentials/{platform}/check` |
-| `GET` | `/platforms/accounts`, `/platforms/accounts/{id}/stats` |
+| `GET` | `/platforms/accounts`, `/platforms/accounts/{id}/stats`, `/destinations/{id}/facebook/stream-health` |
 | `DELETE` | `/platforms/accounts/{id}` |
 | `GET` | `/oauth/{platform}/start`, `/callback` |
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
