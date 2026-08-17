@@ -56,7 +56,17 @@
 
   --color-fg: #edf2f8;
   --color-muted: #9ba9ba;
-  --color-subtle: #6b7686;
+  /* WCAG AA, and it was not. Lighthouse (desktop, 2026-08-16) failed
+     color-contrast on twelve nodes: #6b7686 measured 4.22 against --color-bg
+     #0b0d11 and 4.13 against the raised #0e1015, where 4.5 is required for text
+     under 18pt. Every one of them is small type -- 10px and 11px mono labels,
+     14px body -- so none qualified for the 3:1 large-text allowance.
+
+     #7d8798 is not the minimum that passes. #727c8b clears it at 4.60/4.50,
+     and 4.50 is the threshold itself: any later darkening of a background, or a
+     browser rounding differently, puts it back in breach. This value measures
+     5.36 and 5.25, which leaves room to move without re-failing. */
+  --color-subtle: #7d8798;
 
   --color-primary: #5b7fc7;
   --color-primary-bright: #78a6e8;
