@@ -105,3 +105,14 @@ async function render(): Promise<void> {
 }
 
 void render();
+
+/* A MODULE, NOT A SCRIPT, AND `astro check` IS WHAT INSISTS.
+ *
+ * Everything above is side effects plus one dynamic `import()`, and a dynamic
+ * import does not make a file a module -- TypeScript needs a top-level `import`
+ * or `export` for that. Without this the build fails with "is not a module" the
+ * moment anything imports the file, which the unit tests beside it do.
+ *
+ * Empty on purpose: nothing here is meant to be called from elsewhere. The
+ * entry point is the import itself, from DocPage.astro. */
+export {};
