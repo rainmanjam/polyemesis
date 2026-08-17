@@ -29,7 +29,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 
 | Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers  Start / end |
 |---|---|---|---|---|---|---|---|---|
-| **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Unverified |
+| **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works |
 | **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible |
 | **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works |
 | **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible |

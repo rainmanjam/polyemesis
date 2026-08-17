@@ -96,8 +96,11 @@ func TestPlatformCapabilitiesReportVerifiedSupportPerCapability(t *testing.T) {
 		// implements is not a capability -- is why this is not SupportYes, and
 		// it is the same rule that held Rumble's viewer stats at unverified and
 		// that rolled X's five cells back after they were briefly set to yes.
-		{"youtube lifecycle is documented and unwired", "youtube", CapBroadcastLifecycle, SupportUnknown,
-			"the transition call exists as a provider method with no caller"},
+		// Was SupportUnknown for exactly as long as TransitionBroadcast had no
+		// caller. internal/api's coordinator is that caller now, wired from
+		// main.go and driven by the edges the engine already derives.
+		{"youtube can be told to go live and to end", "youtube", CapBroadcastLifecycle, SupportYes,
+			"the coordinator transitions it, and a failure never stops the stream"},
 		// Established by ENUMERATION, which is what this matrix requires before
 		// a cell may read Not possible: all 149 endpoints in the Helix
 		// reference were listed and swept, and all 27 operations in Kick's

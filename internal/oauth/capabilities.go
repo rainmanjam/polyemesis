@@ -212,9 +212,10 @@ var platformCapabilities = []PlatformCapability{
 			CapChatSend:           SupportYes,
 			CapModeration:         SupportYes,
 			CapViewerStats:        SupportYes,
-			CapBroadcastLifecycle: SupportUnknown,
+			CapBroadcastLifecycle: SupportYes,
 		},
 		Reasons: map[Capability]string{
+			CapBroadcastLifecycle: "Goes live on YouTube when video actually starts arriving, and ends when you disable or delete the destination \u2014 never when the encoder merely crashes, because a completed YouTube broadcast cannot return to live and a crash is recoverable. A refused transition raises a fault and never stops the stream.",
 			CapViewerStats: "Live state, title, start time and concurrent viewer count, over the same auth/youtube " +
 				"scope everything else here uses \u2014 so an account connected before this existed can already " +
 				"do it, with no reconnect. It costs two calls: polyemesis stores no video id, so it asks which " +
