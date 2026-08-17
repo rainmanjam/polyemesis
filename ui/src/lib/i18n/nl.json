@@ -1172,7 +1172,7 @@
   "set.tokenRevoked": "{name} ingetrokken.",
   "set.tokenScope": "Rechten",
   "set.tokenScopeAdmin": "Volledige toegang",
-  "set.tokenScopeAdminHint": "Kan alles wat de beheerder kan, behalve tokens beheren, het wachtwoord wijzigen en media uploaden. Maak er alleen een aan als iets echt onbeheerd wijzigingen moet doorvoeren.",
+  "set.tokenScopeAdminHint": "Kan alles wat de beheerder kan, behalve tokens beheren, het wachtwoord wijzigen, media uploaden, een upgrade voorbereiden en een debugbundel exporteren. Maak er alleen een aan als iets echt onbeheerd wijzigingen moet doorvoeren.",
   "set.tokenScopeRead": "Alleen lezen",
   "set.tokenScopeReadHint": "Kan alles lezen wat de console toont — status, statistieken, metrics, de medialijst — en kan niets wijzigen. Dit is wat een monitoringscript nodig heeft.",
   "set.topicPrefix": "Topic-voorvoegsel",

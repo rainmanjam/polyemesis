@@ -1172,7 +1172,7 @@
   "set.tokenRevoked": "{name} dicabut.",
   "set.tokenScope": "Izin",
   "set.tokenScopeAdmin": "Akses penuh",
-  "set.tokenScopeAdminHint": "Dapat melakukan semua yang bisa dilakukan admin, kecuali mengelola token, mengubah kata sandi, dan mengunggah media. Buat token seperti ini hanya jika sesuatu benar-benar harus melakukan perubahan tanpa pengawasan.",
+  "set.tokenScopeAdminHint": "Bisa melakukan semua yang bisa dilakukan admin, kecuali mengelola token, mengubah kata sandi, mengunggah media, menyiapkan pembaruan, dan mengekspor paket debug. Buat token ini hanya jika ada yang benar-benar harus membuat perubahan tanpa pengawasan.",
   "set.tokenScopeRead": "Hanya baca",
   "set.tokenScopeReadHint": "Dapat membaca semua yang ditampilkan konsol — status, statistik, metrik, daftar media — dan tidak dapat mengubah apa pun. Ini yang dibutuhkan skrip pemantauan.",
   "set.topicPrefix": "Awalan topik",

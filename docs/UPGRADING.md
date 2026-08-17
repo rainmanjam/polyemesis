@@ -131,9 +131,17 @@ still a leaked set of live streaming credentials.
 
 **Fixed forward for new upgrades**, which now open the database with
 `secure_delete` on and truncate the write-ahead log once the migration has
-finished. That pragma only governs writes made after it is set, so **it does
-nothing for an install that already ran the 0.7.0 migration.** Those need the
-scrub run once by hand:
+finished. Since the pre-tag review the checkpoint also runs on a boot that finds
+nothing left to seal, which covers the case that was previously permanent: an
+upgrade that sealed every row, committed, and then died — power loss, an OOM
+kill, a restart landing in the wrong second — used to come back, find no work to
+do, return before the checkpoint, and never truncate the log again.
+
+So an install that upgrades now gets its `-wal` cleared on the next start,
+whether or not the migration itself was interrupted. What upgrading cannot do is
+undo the freed pages: `secure_delete` only governs writes made after it is set,
+so **an install that already ran the 0.7.0 migration still needs `VACUUM` once by
+hand.** Run the pair, which remains the safe order:
 
 ```sh
 systemctl stop polyemesis                      # or: docker compose down
@@ -141,7 +149,9 @@ sqlite3 /var/lib/polyemesis/polyemesis.db "VACUUM; PRAGMA wal_checkpoint(TRUNCAT
 systemctl start polyemesis                     # or: docker compose up -d
 ```
 
-Both statements are required and neither is sufficient alone. `VACUUM` rebuilds
+Both statements are still the right thing to run by hand, and neither is
+sufficient alone — the newer automatic checkpoint clears the log, not the pages.
+`VACUUM` rebuilds
 the file without the freed pages but writes the result into the `-wal`, where
 the old content stays until it is checkpointed; `wal_checkpoint(TRUNCATE)` on
 its own copies the current pages back and empties the log but leaves whatever

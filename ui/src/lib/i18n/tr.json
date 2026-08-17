@@ -1172,7 +1172,7 @@
   "set.tokenRevoked": "{name} iptal edildi.",
   "set.tokenScope": "İzinler",
   "set.tokenScopeAdmin": "Tam erişim",
-  "set.tokenScopeAdminHint": "Belirteçleri yönetmek, parolayı değiştirmek ve medya yüklemek dışında yöneticinin yapabildiği her şeyi yapabilir. Yalnızca bir şeyin gerçekten gözetimsiz değişiklik yapması gerekiyorsa oluşturun.",
+  "set.tokenScopeAdminHint": "Belirteçleri yönetmek, parolayı değiştirmek, medya yüklemek, yükseltme hazırlamak ve hata ayıklama paketi dışa aktarmak dışında yöneticinin yapabildiği her şeyi yapar. Yalnızca bir şeyin gerçekten gözetimsiz değişiklik yapması gerekiyorsa oluşturun.",
   "set.tokenScopeRead": "Salt okunur",
   "set.tokenScopeReadHint": "Konsolun gösterdiği her şeyi okuyabilir — durum, istatistikler, metrikler, medya listesi — ve hiçbir şeyi değiştiremez. Bir izleme betiğinin ihtiyacı olan budur.",
   "set.topicPrefix": "Konu ön eki",

@@ -22,9 +22,15 @@ creation, and cannot be recovered. Revoke individually with
 `DELETE /auth/tokens/{id}`.
 
 **A token cannot manage other tokens**, change the account password, upload or
-delete media, or complete an OAuth connect flow. Those are session-only: a
-leaked token should not be able to mint replacements for itself, lock you out,
-write arbitrary bytes to the server's disk, or attach a platform account.
+delete media, complete an OAuth connect flow, or export a debug bundle. Those
+are session-only: a leaked token should not be able to mint replacements for
+itself, lock you out, write arbitrary bytes to the server's disk, attach a
+platform account, or take a copy of the server's own logs.
+
+The debug split is deliberate and worth stating: `GET /debug` and `PUT /debug`
+stay token-reachable, so a dashboard can read capture state and an automation
+can start or stop a recording. Only `POST /debug/export` — the step that mints
+a file intended to leave the machine — needs a signed-in operator.
 
 Bearer requests need no CSRF token — nothing attaches an `Authorization` header
 on its own, so there is no cross-site request to forge.
@@ -248,7 +254,7 @@ does not get to change what another operator's console shows them.
 | `GET` | `/system` | Host, FFmpeg, build |
 | `GET` | `/debug` | Debug-mode state: recording on/off, level, and how much is held |
 | `PUT` | `/debug` | Start or stop recording, and optionally clear the buffer |
-| `POST` | `/debug/export` | Download the debug bundle. **Audited** — see below |
+| `POST` | `/debug/export` | Session-only, and **audited**. Downloads the debug bundle; a token of either scope is refused |
 | `GET` | `/stats` | System, bitrate, relay counters |
 | `GET` | `/levels` | Current audio levels |
 | `GET` | `/source` | Probed track layout |

@@ -552,7 +552,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now polyemesis
 journalctl -u polyemesis -f
 ```
 
-Two details in that unit are load-bearing:
+Three details in that unit are load-bearing:
 
 - **`KillMode=mixed` with a 45 s stop timeout.** polyemesis signals its FFmpeg
   children and gives them time to finish. On SIGTERM, FFmpeg flushes and
@@ -566,6 +566,16 @@ Two details in that unit are load-bearing:
   HTTP→HTTPS redirect and HTTPS serves normally. With `mode: acme` it is not
   harmless: issuance will never complete. Uncomment the `AmbientCapabilities`
   block in the unit file.
+- **`ProtectProc=invisible`, and the host half you have to supply.** A
+  destination's RTMP target is `rtmp://host/app/<streamKey>`, and it reaches
+  FFmpeg as a command-line argument. polyemesis masks that command line
+  everywhere it renders it and cannot mask the kernel's copy: on a stock Linux
+  host, `/proc/<pid>/cmdline` and plain `ps` are readable by every local
+  account. `ProtectProc=invisible` hides other users' processes from this unit's
+  view; the complement is `hidepid=2` on `/proc` itself. On a single-operator
+  VPS this costs nothing and matters little. On a box with other people's shell
+  accounts on it, it is the difference between a stream key that is yours and
+  one that is everybody's.
 
 ### Behind a reverse proxy
 

@@ -1172,7 +1172,7 @@
   "set.tokenRevoked": "{name}을(를) 취소했습니다.",
   "set.tokenScope": "권한",
   "set.tokenScopeAdmin": "전체 액세스",
-  "set.tokenScopeAdminHint": "토큰 관리, 비밀번호 변경, 미디어 업로드를 제외하고 관리자가 할 수 있는 모든 작업을 수행할 수 있습니다. 무인으로 변경 작업이 반드시 필요한 경우에만 발급하세요.",
+  "set.tokenScopeAdminHint": "토큰 관리, 비밀번호 변경, 미디어 업로드, 업그레이드 준비, 디버그 번들 내보내기를 제외하면 관리자가 할 수 있는 모든 작업을 수행합니다. 무인으로 변경해야 하는 경우에만 발급하세요.",
   "set.tokenScopeRead": "읽기 전용",
   "set.tokenScopeReadHint": "콘솔에 표시되는 모든 것(상태, 통계, 메트릭, 미디어 목록)을 읽을 수 있지만 아무것도 변경할 수 없습니다. 모니터링 스크립트에 필요한 권한입니다.",
   "set.topicPrefix": "토픽 접두사",
