@@ -183,6 +183,16 @@ const (
 	phaseRevoked      = "revoked"
 )
 
+// isTerminalPhase reports whether the platform has said this broadcast is over
+// in a way that cannot be walked back. YouTube documents no transition out of
+// either, and a completed broadcast cannot return to live -- which is the whole
+// reason the coordinator refuses to send `complete` on a crash.
+func isTerminalPhase(phase string) bool {
+	return strings.EqualFold(phase, phaseComplete) || strings.EqualFold(phase, phaseRevoked)
+}
+
+const ()
+
 // lifecycleStore is the coordinator's entire reach into the database.
 //
 // TWO METHODS, AND NEITHER CAN START OR STOP ANYTHING. An interface rather than
@@ -508,6 +518,24 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		// phase has never been confirmed on air by this process, so there is
 		// nothing here that could justify sending `complete` to it.
 		return
+	case !d.Enabled && isTerminalPhase(d.Lifecycle.Phase):
+		// FINISHED BUSINESS, AND WITHOUT THIS IT COSTS QUOTA FOREVER. A
+		// disabled row whose broadcast has already completed has nothing left
+		// that can be done to it -- complete and revoked are both terminal, and
+		// a completed YouTube broadcast cannot return to live.
+		//
+		// Falling through instead meant tokenFor plus BroadcastState -- two API
+		// calls -- every fifteen seconds for the rest of the daemon's life. That
+		// is the same arithmetic the settled-live case below spells out, over
+		// eleven thousand units a day against a default of ten thousand, except
+		// that this one never stops on its own and never had a reason to run at
+		// all. One dead row is enough to exhaust the whole install's quota.
+		//
+		// Untracking also releases the Wanted() gate: c.tracked being non-empty
+		// is what keeps the engine building snapshots, so a row nobody will ever
+		// act on would otherwise pin the observe loop on forever too.
+		c.untrack(d.ID)
+		return
 	case d.Enabled && mode == sweepEndsOnly:
 		// Shutting down. Never go live on the way out.
 		return
@@ -532,6 +560,20 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		// The hold is deliberately NOT applied to the disabled branch below: an
 		// operator who gives up on going live and switches the destination off
 		// must still have their broadcast ended.
+		return
+	case !d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter*2:
+		// THE DISABLED PATH NEEDS A BOUND TOO, JUST A LATER ONE. Exempting it
+		// from the hold above is right -- a pending end must still land -- but
+		// "not held" was implemented as "retried at fifteen seconds for ever",
+		// and a state read that fails permanently (a revoked token, a deleted
+		// broadcast) then retries until the process dies while noteFailure logs
+		// "giving up for now", which was false.
+		//
+		// Twice the enabled budget, because ending matters more than starting:
+		// a broadcast left live is worse than one left un-started, so this tries
+		// considerably harder before it stops. endOrphan already works this way;
+		// this is the same rule for the row that still exists.
+		c.untrack(d.ID)
 		return
 	}
 

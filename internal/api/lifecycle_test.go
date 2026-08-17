@@ -993,3 +993,71 @@ func (brokenLifecycleStore) ListDestinations() ([]*db.Destination, error) {
 func (brokenLifecycleStore) UpdateLifecycle(int64, func(*db.Destination) bool) (*db.Destination, error) {
 	return nil, errors.New("database is away")
 }
+
+// ------------------------------------------------- FINISHED BUSINESS IS FREE
+
+// A DISABLED ROW WHOSE BROADCAST IS ALREADY OVER MUST COST NOTHING, FOR EVER.
+//
+// complete and revoked are terminal -- YouTube documents no transition out of
+// either, which is the same fact that stops this coordinator sending complete
+// on a crash. So there is nothing left to do to such a row, and asking anyway
+// costs two API calls (the broadcast and its bound stream) every fifteen
+// seconds until the daemon dies. That is over eleven thousand units a day
+// against a default allocation of ten thousand, from a row nobody will ever act
+// on -- one of them is enough to exhaust the whole install's quota and leave
+// the coordinator unable to end anything that matters.
+//
+// It also pins the observe loop on: Wanted() is true while anything is tracked,
+// so a dead row keeps the engine building snapshots it has no consumer for.
+func TestASettledTerminalRowIsForgottenRatherThanPolledForEver(t *testing.T) {
+	for _, phase := range []string{phaseComplete, phaseRevoked} {
+		t.Run(phase, func(t *testing.T) {
+			row := lifecycleTestRow(false, phase)
+			yt := &ytFake{status: phase, streamStatus: "inactive"}
+			c, _, _ := lifecycleFixture(t, yt, row)
+
+			for i := 0; i < 10; i++ {
+				c.sweepOnce(context.Background(), sweepEverything)
+			}
+
+			_, reads := yt.snapshot()
+			if reads != 0 {
+				t.Errorf("%d state reads across ten sweeps of a finished, disabled row. "+
+					"At two calls each on a fifteen-second tick this never stops, and one "+
+					"such row exhausts the install's daily quota on its own.", reads)
+			}
+			if c.Wanted() {
+				t.Error("a finished row still holds the observe loop on, so the engine keeps " +
+					"building snapshots for a consumer that will never act again")
+			}
+		})
+	}
+}
+
+// The disabled path is exempt from the enabled hold on purpose -- a pending end
+// must still land -- but "not held" was implemented as "retried every fifteen
+// seconds for ever". A permanently failing state read (a revoked token, a
+// broadcast deleted in Studio) then retries until the process dies, while the
+// failure log says "giving up for now", which was untrue.
+//
+// The bound is deliberately looser than the enabled one: a broadcast left live
+// is worse than one left un-started, so this tries considerably harder before
+// it stops.
+func TestTheDisabledPathGivesUpEventuallyRatherThanRetryingForEver(t *testing.T) {
+	row := lifecycleTestRow(false, phaseLive)
+	// Attempts already past the disabled bound: the row has been failing for a
+	// long time and nothing has changed.
+	row.Lifecycle.Attempts = lifecycleGiveUpAfter * 2
+	yt := &ytFake{status: phaseLive, streamStatus: "active"}
+	c, _, _ := lifecycleFixture(t, yt, row)
+
+	for i := 0; i < 5; i++ {
+		c.sweepOnce(context.Background(), sweepEverything)
+	}
+
+	sent, reads := yt.snapshot()
+	if reads != 0 || len(sent) != 0 {
+		t.Errorf("a disabled row past its give-up bound is still calling the platform "+
+			"(%d reads, %d transitions). The log says it gave up; it had not.", reads, len(sent))
+	}
+}
