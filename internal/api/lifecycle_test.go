@@ -624,23 +624,123 @@ func TestADisabledRowWithNoRecordedPhaseIsLeftAlone(t *testing.T) {
 	}
 }
 
-// A settled broadcast costs nothing.
+// A settled broadcast costs ONE read per cadence, not one per sweep.
 //
-// BroadcastState is TWO API calls. At a fifteen-second tick, re-reading a
-// confirmed-live broadcast is over eleven thousand quota units a day per
-// destination against YouTube's default ten thousand -- so a coordinator that
-// asked "just to be sure" would run every install out of quota by
-// mid-afternoon and then be unable to END anything either.
-func TestAConfirmedLiveBroadcastIsNotAskedAboutAgain(t *testing.T) {
+// This replaces TestAConfirmedLiveBroadcastIsNotAskedAboutAgain, which asserted
+// reads == 0 for ever. That was the defect, not the property: a broadcast can
+// end platform-side with the row untouched (enableAutoStop, an end in Studio, a
+// revoked token), and a coordinator that never asks again labels the row `live`
+// for the rest of the daemon's life. The QUOTA property it was protecting is
+// kept and made sharper here -- exactly one read per lifecycleLiveRecheckEvery
+// sweeps, where re-reading on every sweep would be forty.
+//
+// BroadcastState is TWO API calls, so the two cadences are 11,520 and 288 calls
+// a day per destination against Google's published default project allocation of
+// 10,000 a day, shared with everything else polyemesis sends. The first exhausts
+// the install by mid-afternoon and then cannot END anything either.
+func TestAConfirmedLiveBroadcastIsNotAskedAboutOnEverySweep(t *testing.T) {
 	yt := &ytFake{status: "live", streamStatus: "active"}
 	c, _, _ := lifecycleFixture(t, yt, lifecycleTestRow(true, "live"))
 
-	for i := 0; i < 10; i++ {
+	// The first sweep is due by construction -- an in-memory budget absent on a
+	// fresh process means "this daemon has confirmed nothing", which is what
+	// makes the boot pass a real reconciliation. The remaining sweeps of the
+	// period must cost nothing.
+	for i := 0; i < lifecycleLiveRecheckEvery; i++ {
 		c.sweepOnce(context.Background(), sweepEverything)
 	}
 	sent, reads := yt.snapshot()
-	if reads != 0 || len(sent) != 0 {
-		t.Fatalf("a settled broadcast cost %d state reads and %v transitions", reads, sent)
+	if reads != 1 {
+		t.Fatalf("a settled broadcast cost %d state reads over %d sweeps, want exactly 1 -- "+
+			"one per sweep is 11,520 calls a day per destination against an allocation of 10,000",
+			reads, lifecycleLiveRecheckEvery)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("a settled broadcast sent %v, want no transitions at all", sent)
+	}
+
+	// And the next sweep is the next read, so the cadence is a cadence rather
+	// than a one-off.
+	c.sweepOnce(context.Background(), sweepEverything)
+	if _, reads = yt.snapshot(); reads != 2 {
+		t.Fatalf("state reads after %d sweeps = %d, want 2 -- the settled row must be asked "+
+			"about once every %d sweeps, not once and then never again",
+			lifecycleLiveRecheckEvery+1, reads, lifecycleLiveRecheckEvery)
+	}
+}
+
+// A BROADCAST THAT ENDED PLATFORM-SIDE IS NOTICED, and the row stops saying it
+// is live.
+//
+// The row never changes in this scenario: nobody disables anything and nobody
+// deletes anything. YouTube's own enableAutoStop closed the broadcast when the
+// ingest went quiet -- which is the backstop the END policy above relies on BY
+// NAME -- or the operator ended it in Studio. If the coordinator never asks
+// again, the card an operator is told to read says `live` for ever, and so does
+// the phase the END policy consults.
+//
+// MUTATION OBSERVED RED. Restore the old branch -- make the settled-live case an
+// unconditional `return` again, dropping the !c.dueForLiveRecheck(d.ID) term --
+// and the phase below stays "live" for as many sweeps as the test cares to run.
+func TestAPlatformSideEndIsNoticedOnASettledLiveRow(t *testing.T) {
+	yt := &ytFake{status: "live", streamStatus: "active"}
+	c, store, _ := lifecycleFixture(t, yt, lifecycleTestRow(true, "live"))
+
+	// Sweep once to confirm it live and arm the skip budget.
+	c.sweepOnce(context.Background(), sweepEverything)
+
+	// The platform ends it underneath us. Nothing touches the row.
+	yt.set(func(f *ytFake) { f.status = "complete" })
+
+	for i := 0; i < lifecycleLiveRecheckEvery; i++ {
+		c.sweepOnce(context.Background(), sweepEverything)
+	}
+
+	if got := store.get(3).Lifecycle.Phase; !strings.EqualFold(got, "complete") {
+		t.Fatalf("recorded phase = %q after the platform completed the broadcast itself, "+
+			"want %q -- the row is what the card and the END policy both read",
+			got, "complete")
+	}
+	if sent, _ := yt.snapshot(); len(sent) != 0 {
+		t.Fatalf("transitions sent = %v, want none -- noticing an end is a READ, and the "+
+			"destination is still enabled", sent)
+	}
+}
+
+// AN UP EDGE IS A FREE RE-READ, and it is the one that catches enableAutoStop.
+//
+// The engine derives the edge whether or not anybody listens and Observe has
+// already woken the sweep, so spending the skip budget here adds nothing to the
+// steady state. It buys the read at the moment the answer is most likely to have
+// changed: an UP edge means the ingest stopped and came back, and a stopped
+// ingest is exactly what fires YouTube's automatic stop.
+func TestAnUpEdgeReChecksASettledLiveBroadcastWithoutWaitingOutTheCadence(t *testing.T) {
+	yt := &ytFake{status: "live", streamStatus: "active"}
+	c, store, _ := lifecycleFixture(t, yt, lifecycleTestRow(true, "live"))
+
+	c.sweepOnce(context.Background(), sweepEverything)
+	if _, reads := yt.snapshot(); reads != 1 {
+		t.Fatalf("first sweep cost %d reads, want 1", reads)
+	}
+
+	// The encoder dropped and came back; while it was away YouTube completed the
+	// broadcast on its own.
+	yt.set(func(f *ytFake) { f.status = "complete" })
+	c.Observe(hooks.Event{
+		Trigger:     hooks.TriggerDestinationUp,
+		Destination: &hooks.DestinationRef{ID: 3, Name: "yt main", Platform: string(db.PlatformYouTube)},
+	})
+
+	// ONE sweep, not forty.
+	c.sweepOnce(context.Background(), sweepEverything)
+
+	if _, reads := yt.snapshot(); reads != 2 {
+		t.Fatalf("state reads after an UP edge = %d, want 2 -- the edge must spend the skip "+
+			"budget, or a broadcast the platform stopped stays labelled live for %d more sweeps",
+			reads, lifecycleLiveRecheckEvery)
+	}
+	if got := store.get(3).Lifecycle.Phase; !strings.EqualFold(got, "complete") {
+		t.Fatalf("recorded phase = %q one sweep after the UP edge, want %q", got, "complete")
 	}
 }
 

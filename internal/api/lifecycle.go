@@ -118,6 +118,40 @@ const (
 	// on delivering and the operator is looking at a sentence that says what to
 	// do. The count clears on the next success or on a fresh UP edge.
 	lifecycleGiveUpAfter = 20
+	// lifecycleLiveRecheckEvery is how many sweeps a CONFIRMED-LIVE broadcast is
+	// allowed to pass unasked-about before the platform is asked again. Forty
+	// sweeps against a fifteen-second tick is ten minutes.
+	//
+	// COUNTED, NOT TIMED, for lifecycleGiveUpAfter's reason exactly: a wall clock
+	// would have to be persisted, and a timestamp absent on every row an upgrade
+	// finds reads as infinitely old, so the first sweep after an upgrade would
+	// re-read every live broadcast in the install at once.
+	//
+	// THE COUNT IS IN MEMORY AND ABSENT MEANS DUE. That makes a daemon restart
+	// re-confirm every live broadcast once, which is what lifecycleLoop's boot
+	// pass already claims to do and could not: the settled branch returned before
+	// it ever asked. One read per live destination per daemon start is the whole
+	// price of that promise being true.
+	//
+	// WHY FORTY AND NOT ONE, in calls per destination per day, against Google's
+	// published default project allocation of 10,000 units a day -- which is
+	// SHARED with metadata pushes, chat, stats and every other call polyemesis
+	// makes on that account:
+	//
+	//	every sweep   5,760 reads x 2 calls = 11,520/day. One destination
+	//	              exhausts the whole allocation before mid-afternoon, and an
+	//	              install out of quota cannot END anything -- which is
+	//	              strictly worse than a stale label.
+	//	every 40th      144 reads x 2 calls =    288/day. Under 3% of the
+	//	              allocation per destination, and a platform-side end is
+	//	              noticed within ten minutes.
+	//
+	// Ten minutes is the CEILING on how long a wrong label can stand, not the
+	// usual case: an UP edge spends the budget immediately (see
+	// forgetLiveRecheck), and that is the edge the common cause of a
+	// platform-side end -- enableAutoStop firing when the ingest stopped --
+	// produces for free on its way back.
+	lifecycleLiveRecheckEvery = 40
 	// lifecycleCallTimeout bounds one platform round trip. Matched to
 	// preannounce's, and for the same reason: it has to be shorter than the
 	// sweep interval times the give-up budget, or "consecutive sweeps" would
@@ -294,6 +328,11 @@ type lifecycleCoordinator struct {
 	// true, and holding a stale give-up against it would keep a working show off
 	// the air out of bookkeeping.
 	clearFaults map[int64]bool
+	// liveSkips is how many more sweeps each confirmed-live destination may be
+	// skipped before its state is read again. See lifecycleLiveRecheckEvery;
+	// absent means due now, which is the safe direction and the one a restart
+	// lands in.
+	liveSkips map[int64]int
 }
 
 // newLifecycleCoordinator builds one. Every dependency is explicit so that what
@@ -311,6 +350,7 @@ func newLifecycleCoordinator(log *slog.Logger, store lifecycleStore, providers o
 		tracked:        map[int64]lifecycleTarget{},
 		orphanAttempts: map[int64]int{},
 		clearFaults:    map[int64]bool{},
+		liveSkips:      map[int64]int{},
 	}
 }
 
@@ -514,6 +554,21 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 	})
 
 	cleared := c.takeClearFault(d.ID)
+	if cleared {
+		// AN UP EDGE IS A FREE RE-READ, AND IT IS THE ONE THAT MATTERS MOST.
+		//
+		// The edge itself costs nothing -- the engine derives it either way and
+		// Observe has already woken the sweep -- so spending the skip budget here
+		// buys a state read at the exact moment it is most likely to have changed,
+		// without adding a single call to the steady state.
+		//
+		// Why THIS moment: an UP edge means bytes stopped and started again, and a
+		// stopped ingest is precisely what fires YouTube's enableAutoStop. The
+		// broadcast this destination is publishing to may well have been completed
+		// while the encoder was away, so the row's `live` is exactly the label the
+		// ten-minute cadence exists to catch -- caught here in one sweep instead.
+		c.forgetLiveRecheck(d.ID)
+	}
 	if cleared && (d.Lifecycle.Fault != "" || d.Lifecycle.Attempts > 0) {
 		// It is delivering again, so the previous refusals -- overwhelmingly
 		// "no bytes are arriving yet" -- have stopped describing the world.
@@ -554,18 +609,42 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 	case d.Enabled && mode == sweepEndsOnly:
 		// Shutting down. Never go live on the way out.
 		return
-	case d.Enabled && strings.EqualFold(d.Lifecycle.Phase, phaseLive) && d.Lifecycle.Fault == "":
-		// SETTLED, AND ASKING AGAIN WOULD COST REAL QUOTA. A confirmed-live
-		// broadcast on an enabled destination has nothing left to be done to it,
-		// and BroadcastState is TWO API calls -- the broadcast and its bound
-		// stream. At a fifteen-second tick that is over eleven thousand units a
-		// day per destination against YouTube's default ten thousand, so a
-		// coordinator that re-read "just to be sure" would run every install out
-		// of quota by mid-afternoon and then be unable to end anything.
+	case d.Enabled && strings.EqualFold(d.Lifecycle.Phase, phaseLive) && d.Lifecycle.Fault == "" &&
+		!c.dueForLiveRecheck(d.ID):
+		// SETTLED, SO ASKED RARELY -- NOT NEVER. A confirmed-live broadcast on an
+		// enabled destination usually has nothing left to be done to it, and
+		// BroadcastState is TWO API calls: the broadcast, then its bound stream.
 		//
-		// Nothing is lost by not asking: the next thing that can matter is the
-		// operator disabling or deleting the row, and both change the row, which
-		// is read on every sweep for free.
+		// THIS BRANCH USED TO RETURN FOR EVER, on the claim that "nothing is lost
+		// by not asking: the next thing that can matter is the operator disabling
+		// or deleting the row, and both change the row". THAT SENTENCE WAS FALSE.
+		// A broadcast can END WITH THE ROW UNTOUCHED, and at least three routine
+		// things do it:
+		//
+		//   - YouTube's own enableAutoStop (oauth.BroadcastSettings.EnableAutoStop)
+		//     completes the broadcast when the ingest stops. THE END POLICY ABOVE
+		//     LEANS ON IT BY NAME as the backstop for a crash -- so the coordinator
+		//     was depending on a mechanism whose result it then refused to look at.
+		//   - The operator ends the broadcast in YouTube Studio, or an
+		//     administrator removes it (phase `revoked`).
+		//   - The token is revoked, so nothing here can confirm anything again.
+		//
+		// A permanent skip makes all three invisible and the skip is permanent:
+		// the row says `live` for the rest of the daemon's life, on the card the
+		// design tells operators to read and in the phase the END policy consults.
+		//
+		// RE-READING EVERY SWEEP IS NOT THE FIX EITHER. 5,760 sweeps a day times
+		// two calls is 11,520 per destination per day against Google's published
+		// default project allocation of 10,000 units a day, SHARED with metadata
+		// pushes, chat and stats -- one destination would exhaust the install by
+		// mid-afternoon, and an install out of quota cannot END anything, which is
+		// strictly worse than a stale label.
+		//
+		// So it is a cadence: one read every fortieth sweep, 144 reads x 2 calls =
+		// 288 a day per destination, under 3% of the allocation, with a wrong
+		// label standing for at most ten minutes. See lifecycleLiveRecheckEvery
+		// for the full arithmetic, and forgetLiveRecheck for why the case that
+		// actually happens is noticed in one sweep rather than forty.
 		return
 	case d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter:
 		// Held. See lifecycleGiveUpAfter -- the fault stands, the stream keeps
@@ -611,6 +690,11 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 	}
 
 	plan := planLifecycle(d.Enabled, st)
+	// The platform has just answered, so the skip budget restarts from what IT
+	// said rather than from what the row says. Armed only on `live`, and cleared
+	// on everything else, so the map can never hold a budget that some earlier
+	// read put there for a broadcast that has since moved.
+	c.noteLiveRead(d.ID, strings.EqualFold(strings.TrimSpace(plan.Phase), phaseLive))
 	switch {
 	case plan.Fault != "":
 		// Terminal: no number of retries changes it. Recorded at the give-up
@@ -1132,6 +1216,62 @@ func (c *lifecycleCoordinator) untrack(id int64) {
 	delete(c.tracked, id)
 	delete(c.orphanAttempts, id)
 	delete(c.clearFaults, id)
+	delete(c.liveSkips, id)
+	c.mu.Unlock()
+}
+
+// dueForLiveRecheck reports whether a settled-live destination's skip budget has
+// run out, and SPENDS ONE SWEEP OF IT when it has not.
+//
+// It is called from a switch condition, which is only sound because of where
+// that condition sits: every branch above it either returns for a disabled row
+// or returns for drain, so the budget is spent exactly once per sweep per
+// destination that is actually being skipped -- never on a pass that was going
+// to make the call anyway, and never during a shutdown.
+//
+// ABSENT MEANS DUE. A destination this process has not yet confirmed live with
+// its own eyes -- a fresh boot, a row promoted into this branch by a transition
+// -- is asked immediately rather than trusted for ten minutes on the strength of
+// a column written before the daemon restarted.
+func (c *lifecycleCoordinator) dueForLiveRecheck(id int64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.liveSkips[id] <= 0 {
+		delete(c.liveSkips, id)
+		return true
+	}
+	c.liveSkips[id]--
+	return false
+}
+
+// noteLiveRead records what the platform just said, arming the skip budget only
+// when it said `live`.
+//
+// MINUS ONE, because the read that arms the budget is itself one of the forty.
+// Arming with the whole number would make the real period forty-one sweeps and
+// the arithmetic in lifecycleLiveRecheckEvery -- which a reader will check
+// against a quota dashboard -- quietly wrong.
+func (c *lifecycleCoordinator) noteLiveRead(id int64, live bool) {
+	c.mu.Lock()
+	if live {
+		c.liveSkips[id] = lifecycleLiveRecheckEvery - 1
+	} else {
+		delete(c.liveSkips, id)
+	}
+	c.mu.Unlock()
+}
+
+// forgetLiveRecheck makes the next sweep ask, whatever the budget said.
+//
+// Called on an UP edge, and that is a re-read this file gets for nothing: the
+// engine derives the edge whether or not anybody listens, Observe has already
+// queued the wakeup, and the sweep it wakes was going to walk this row anyway.
+// The only cost is the two calls, and they are spent at the moment the answer is
+// most likely to have changed -- an UP edge means the ingest stopped and came
+// back, and a stopped ingest is exactly what fires enableAutoStop.
+func (c *lifecycleCoordinator) forgetLiveRecheck(id int64) {
+	c.mu.Lock()
+	delete(c.liveSkips, id)
 	c.mu.Unlock()
 }
 

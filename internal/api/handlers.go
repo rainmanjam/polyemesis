@@ -1696,6 +1696,16 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	// READ BEFORE THE DELETE, because the question is about the row and about its
+	// siblings, and after DeleteDestination neither the key nor the id ordering
+	// that answers it exists any more. A failed read is not worth a failed
+	// delete: the notice is a courtesy and the deletion is what was asked for.
+	//
+	// It does NOT remove the platform's ingest stream, and the long comment at
+	// noteOrphanedIngestStream says why that is the answer rather than a gap.
+	if dest, err := s.store.GetDestination(id); err == nil {
+		s.noteOrphanedIngestStream(dest)
+	}
 	if err := s.store.DeleteDestination(id); err != nil {
 		writeStoreError(w, err)
 		return

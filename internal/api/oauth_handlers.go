@@ -637,6 +637,142 @@ func (s *Server) needsOwnIngestStream(dest *db.Destination) bool {
 	return false
 }
 
+// ------------------------------------------------- the streams left behind
+//
+// WHY DELETING A DESTINATION DOES NOT DELETE ITS YouTube liveStream, AND WHY
+// THAT IS THE ANSWER RATHER THAN A TODO.
+//
+// The leak is real and is stated plainly so nobody has to rediscover it: every
+// destination beyond the first on an account gets a liveStream of its own
+// (needsOwnIngestStream above), and deleting the destination leaves that stream
+// on the channel, unused, one per deletion, for ever.
+//
+// A cleanup was designed against the YouTube documentation and NOT BUILT. Three
+// things have to be true before a delete is safe, and polyemesis can prove none
+// of them:
+//
+//  1. THAT THE STREAM IS POLYEMESIS'S TO DELETE. Nothing records that. The
+//     destination row stores the KEY, not the stream's id, and no column
+//     anywhere says "polyemesis created this". The only mark on the object is
+//     its title, and oauth.ytStreamTitle documents that title as display
+//     metadata for a human in Studio -- "never an identifier -- nothing matches
+//     on it, so a rename in either place breaks nothing". Matching on it would
+//     make a rename in Studio into a silent failure in one direction, and would
+//     delete a creator's own stream that happens to be named after us in the
+//     other. "A stream polyemesis did not create is not polyemesis's to delete"
+//     is not a preference here; it is a fact this process cannot establish.
+//
+//  2. THAT IT IS NOT THE CHANNEL'S SHARED STREAM. The shared one is chosen
+//     positionally -- the first reusable RTMP stream the channel lists -- so it
+//     is not identifiable after the fact either, and an operator's
+//     Studio-scheduled events are bound to it. Deleting it breaks things
+//     polyemesis did not create.
+//
+//  3. THAT NO BROADCAST IS BOUND TO IT. YouTube DOES refuse this, and the
+//     refusal is documented: liveStreams.delete answers 403
+//     liveStreamDeletionNotAllowed, "The specified live stream cannot be deleted
+//     because it is bound to a broadcast that has still not completed"
+//     (developers.google.com/youtube/v3/live/docs/liveStreams/delete, read
+//     2026-08-16). But whether a broadcast that is LIVE RIGHT NOW is inside that
+//     condition is NOT documented: it requires equating the refusal's English
+//     "completed" with the lifeCycleStatus enum value `complete`, which no page
+//     states, and no page states that `live` is therefore covered. That is an
+//     unresolved inference, and the cost of it being wrong is a show going off
+//     air, so it is not something to lean on. The alternative -- proving the
+//     stream unbound ourselves -- needs a whole-channel liveBroadcasts.list scan
+//     carrying broadcastType=all (the default is `event`, which silently omits
+//     every persistent broadcast) whose per-call quota cost YouTube does not
+//     publish. internal/api/lifecycle.go is already rationing a shared
+//     10,000-a-day allocation down to 288 calls per destination per day; adding
+//     an unbounded paginated scan to a delete path is the wrong direction.
+//
+// And the thing being cleaned up is CLUTTER. An unused liveStream costs the
+// operator nothing but a longer list in Studio, so every one of those
+// ambiguities resolves the same way: leave it alone.
+//
+// WHAT WOULD SETTLE IT, in the order it would have to be settled:
+//
+//   - Record the created stream's id and the fact that polyemesis created it, at
+//     the moment oauth.YouTube.createStream returns. That is a schema change and
+//     a migration, and it fixes (1) and (2) outright for every destination
+//     provisioned afterwards -- and for no destination provisioned before, which
+//     is why it is a change with a story rather than a patch.
+//   - One delete attempt against a stream bound to a `live` broadcast, recording
+//     the literal error.errors[].reason, to settle whether the server refuses.
+//   - The same against a `revoked` broadcast and against a pre-2020 channel's
+//     default stream, which the liveStreams resource page documents as
+//     undeletable in prose with no error code named anywhere.
+//
+// Until then this file does the one honest thing available: it NAMES what is
+// being left behind, so the operator can remove it in Studio if the clutter ever
+// bothers them.
+
+// noteOrphanedIngestStream tells the operator that deleting this destination
+// probably leaves a YouTube liveStream on their channel.
+//
+// IT COSTS NO API CALL AND MAKES NO CLAIM IT CANNOT SUPPORT. Both questions are
+// answered from the destination table alone, and the answer is "probably", which
+// is what the wording says:
+//
+//   - a sibling on the same account publishing with the same key means the
+//     stream is still in use, so nothing is orphaned;
+//   - a destination that was NOT given a stream of its own is holding the
+//     channel's shared one, which must never be touched by anybody.
+//
+// Only what survives both is worth mentioning, and even then only as something
+// the operator may want to look at -- polyemesis cannot prove it created the
+// stream, which is the whole reason nothing is deleted here. See the block
+// above.
+//
+// A LOG LINE RATHER THAN A RESPONSE FIELD, for the reason forgetPlatformSwitch
+// gives for the same choice: it is the only place a statement this hedged can go
+// without becoming an API somebody depends on.
+//
+// THE KEY NEVER APPEARS. The stream is named by its TITLE, which is what an
+// operator actually reads in Studio and is derived from the destination's own
+// name, and titles are the one string about a stream that is safe to log.
+func (s *Server) noteOrphanedIngestStream(dest *db.Destination) {
+	if !s.leavesAnOrphanedIngestStream(dest) {
+		return
+	}
+	s.log.Warn("deleting this destination leaves its YouTube ingest stream on the channel. "+
+		"polyemesis does not delete it, because it cannot prove the stream is one it created "+
+		"and not one of yours, and a stream that is still bound to a broadcast must not be "+
+		"removed. Delete it in YouTube Studio if you want it gone",
+		"destination", dest.Name, "streamTitle", oauth.YouTubeStreamTitle(dest.Name))
+}
+
+// leavesAnOrphanedIngestStream is the decision behind that notice, split out so
+// it can be asserted without reading log output.
+//
+// IT IS DELIBERATELY THE NARROWER OF THE TWO ERRORS. Saying nothing about a
+// stream that was in fact orphaned costs an operator one extra line in Studio;
+// saying "this is yours to delete" about the channel's shared stream, or about a
+// stream a sibling is publishing to, would point somebody at an object whose
+// removal breaks a working setup. So both of those answer false, and so does
+// every case where the row cannot support the claim at all.
+func (s *Server) leavesAnOrphanedIngestStream(dest *db.Destination) bool {
+	if dest == nil || dest.Platform != db.PlatformYouTube || dest.AccountID == nil {
+		// No account means the key was typed in by hand: polyemesis provisioned
+		// nothing and has nothing to say about it.
+		return false
+	}
+	if strings.TrimSpace(dest.StreamKey) == "" {
+		// Never fetched one, so nothing was ever created for it.
+		return false
+	}
+	// A sibling publishing with the same key means the stream stays in use --
+	// this is what an upgraded install looks like, where every YouTube
+	// destination was handed the account's one shared key.
+	if s.keyIsSharedWithASibling(dest) {
+		return false
+	}
+	// And a destination that was never given a stream of its own is holding the
+	// channel's shared one, which an operator's Studio-scheduled events are bound
+	// to. Never name that as removable.
+	return s.needsOwnIngestStream(dest)
+}
+
 // ingestFor fetches an ingest, preferring the connected target over the login's
 // default profile.
 //

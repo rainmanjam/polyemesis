@@ -337,6 +337,15 @@ const (
 // refused create: the alternative to trimming is a required field YouTube
 // rejects, and the operator would be told their destination's NAME broke a
 // stream key fetch.
+// YouTubeStreamTitle is ytStreamTitle for callers outside this package.
+//
+// EXPORTED FOR ONE READER, NOT FOR A WRITER: internal/api names the stream a
+// deleted destination leaves behind so an operator can find it in Studio, and
+// the name it prints has to be the name that was actually sent. Two spellings of
+// this rule would mean telling somebody to look for a title that does not exist.
+// It computes a display string and touches nothing.
+func YouTubeStreamTitle(label string) string { return ytStreamTitle(label) }
+
 func ytStreamTitle(label string) string {
 	label = strings.TrimSpace(label)
 	if label == "" {
