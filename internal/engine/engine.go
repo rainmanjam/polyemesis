@@ -1324,7 +1324,7 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	e.mu.Unlock()
 
 	proc.Start()
-	e.log.Info("ingest started", "mode", s.Ingest.Mode, "url", e.ingestPublicURL(s))
+	e.log.Info("ingest started", "mode", s.Ingest.Mode, "url", e.ingestURLForLog(s))
 }
 
 // stopIngestProcess tears down an FFmpeg ingest if one is running, leaving the
@@ -1369,7 +1369,15 @@ func (e *Engine) ingestSpec(s db.Settings) []string {
 	return ffmpeg.IngestArgs(spec)
 }
 
-func (e *Engine) ingestPublicURL(s db.Settings) string {
+// ingestURLForLog renders this install's ingest address for a LOG LINE.
+//
+// Named for what it is. It was ingestPublicURL, which read as "the URL to show
+// people" -- and its single caller has always been an Info log line, so the
+// name invited exactly the mistake that was in it: handing a rendering that
+// carries the SRT passphrase and the whole pull URL to something that writes to
+// journalctl. The API's own public rendering is ffmpeg.PublicIngestURL, reached
+// from internal/api, and that one is still whole on purpose.
+func (e *Engine) ingestURLForLog(s db.Settings) string {
 	spec := ffmpeg.IngestSpec{
 		Kind:          ffmpeg.IngestKind(s.Ingest.Mode),
 		SRTPort:       s.Listeners.SRTPort,
@@ -1377,13 +1385,20 @@ func (e *Engine) ingestPublicURL(s db.Settings) string {
 		SRTLatencyMS:  s.Ingest.SRT.LatencyMS,
 		RTMPPort:      s.Listeners.RTMPPort,
 		RTMPApp:       s.Ingest.RTMP.App,
-		// No RTMPAddress: PublicIngestURL deliberately renders the server half
-		// only, and the token goes in OBS's separate stream-key box. This is a
-		// log line and a dashboard string, so the token stays out of it.
-
+		// No RTMPAddress: the rendering deliberately shows the server half only,
+		// and the token goes in OBS's separate stream-key box.
 		PullURL: s.Ingest.Pull.URL,
 	}
-	return spec.PublicIngestURL("<server>")
+	// THE COMMENT ABOVE USED TO CLAIM MORE THAN THE CODE DID. It said "this is a
+	// log line and a dashboard string, so the token stays out of it" -- true of
+	// the RTMP token, which is simply not in the spec, and false of the other
+	// two credentials this function hands to PublicIngestURL: the SRT passphrase
+	// goes into the query, and the pull URL is returned whole. Both then reached
+	// `ingest started` at Info, on every boot, in the clear.
+	//
+	// IngestURLForLog keeps the host and port -- which is the question a failed
+	// ingest actually asks -- and drops the rest.
+	return spec.IngestURLForLog("<server>")
 }
 
 // stemPlanSig folds a stem plan into the recorder's restart signature. Names
