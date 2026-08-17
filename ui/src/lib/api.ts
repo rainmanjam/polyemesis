@@ -66,6 +66,7 @@ import type {
   SourceView,
   Status,
   StreamHealthView,
+  DebugState,
   SystemInfo,
   SystemStats,
   TlsStatus,
@@ -507,6 +508,47 @@ export const api = {
    *  route is not implemented server-side yet. */
   facebookStreamHealth: (id: number) =>
     get<StreamHealthView>(`/destinations/${id}/facebook/stream-health`),
+
+  // --- debug mode ---
+  debugState: () => get<DebugState>("/debug"),
+  setDebug: (body: { recording?: boolean; reset?: boolean }) =>
+    put<DebugState>("/debug", body),
+  /** Downloads the debug bundle.
+   *
+   *  NOT `<a href download>` like the clip and recording downloads, and the
+   *  difference is deliberate rather than incidental: the export is a POST so
+   *  that it is CSRF-covered and so that a browser prefetching a link cannot
+   *  put an entry in the audit trail. A POST cannot be an anchor, so the body
+   *  is fetched and handed to the browser as a blob.
+   *
+   *  Returns the text and the filename the server chose, so the caller does the
+   *  saving — this module does not touch the DOM. */
+  exportDebug: async (): Promise<{ text: string; filename: string }> => {
+    const resp = await fetch(`${BASE}/debug/export`, {
+      method: "POST",
+      // The same double-submit token every other non-GET carries. Built here
+      // rather than through request() because that helper parses the body as
+      // JSON, and this one needs the raw text and the Content-Disposition.
+      headers: { "X-CSRF-Token": csrfToken() },
+      credentials: "same-origin",
+    });
+    const text = await resp.text();
+    if (!resp.ok) {
+      let msg = `export failed (${resp.status})`;
+      try {
+        const parsed = JSON.parse(text) as { error?: string };
+        if (parsed.error) msg = parsed.error;
+      } catch {
+        /* a non-JSON body; the status is all there is to report */
+      }
+      throw new ApiError(resp.status, msg);
+    }
+    // The server names the file with a timestamp so two bundles in one support
+    // thread can be told apart. Fall back only if the header is missing.
+    const cd = resp.headers.get("Content-Disposition") ?? "";
+    const m = /filename="([^"]+)"/.exec(cd);
+    return { text, filename: m?.[1] ?? "polyemesis-debug.json" };
+  },
 
   // --- sources ---
   // A source is one ingested programme. Everything else -- destinations,

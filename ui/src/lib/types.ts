@@ -805,6 +805,19 @@ export interface IngestStreamHealth {
  *  Same arrangement internal/api already answers viewer stats with: 200 and
  *  supported:false, because "we cannot ask" and "the account is gone" are
  *  different problems with different fixes. */
+/** Debug-mode state. Mirrors debugState in internal/api/debugmode.go.
+ *
+ *  `held` and `seen` differ when the ring has dropped its oldest records, and
+ *  the UI says so: a capture that quietly shows 5,000 of 22,431 lines as though
+ *  they were all of them is how somebody concludes a fault left no trace. */
+export interface DebugState {
+  recording: boolean;
+  level: string;
+  held: number;
+  seen: number;
+  capacity: number;
+}
+
 export interface StreamHealthView {
   supported: boolean;
   streams?: IngestStreamHealth[] | null;
