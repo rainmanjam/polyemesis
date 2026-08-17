@@ -49,6 +49,19 @@ export interface ConfirmDestructiveProps {
    *  counts rather than prose: confirming a number is a decision, confirming a
    *  vibe is a click. */
   consequences?: { label: string; count: number }[];
+  /** The heading over that panel.
+   *
+   *  It was the hardcoded string "This also removes", which is exactly right
+   *  for the five deletions that were the only callers and becomes a lie the
+   *  moment a destructive action is not a deletion. Ending a Facebook
+   *  broadcast REMOVES NOTHING — Facebook saves the live video as a VOD — so
+   *  "This also removes: ingest streams 2" would describe a data loss that
+   *  does not happen, in the panel whose entire job is being precise about
+   *  what does.
+   *
+   *  A default rather than a required prop, so the deletions that meant the
+   *  original sentence keep saying it without being touched. */
+  consequencesLabel?: string;
   confirmLabel?: string;
   onConfirm: () => void | Promise<void>;
 }
@@ -61,6 +74,7 @@ export function ConfirmDestructive({
   description,
   requireTyping = false,
   consequences,
+  consequencesLabel = "This also removes",
   confirmLabel = "Delete",
   onConfirm,
 }: Readonly<ConfirmDestructiveProps>) {
@@ -103,7 +117,7 @@ export function ConfirmDestructive({
         {consequences && consequences.length > 0 && (
           <div className="flex flex-col gap-1 rounded-md border border-down/40 bg-down-dim/20 px-2.5 py-2">
             <span className="text-[10px] uppercase tracking-wider text-subtle-foreground">
-              This also removes
+              {consequencesLabel}
             </span>
             {consequences.map((c) => (
               <div key={c.label} className="flex items-baseline justify-between text-[12px]">

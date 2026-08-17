@@ -1012,6 +1012,41 @@ export function Dashboard() {
                     "refresh the stream key",
                   );
                 }}
+                /* Handed over only for Facebook, so the card's kebab is given
+                 * nothing to show on the platforms that have no broadcast to
+                 * end — the gate is the platform, not a disabled item. */
+                onEndBroadcast={
+                  d.platform === "facebook"
+                    ? async () => {
+                        await act(
+                          d.id,
+                          async () => {
+                            const r = await api.endFacebookBroadcast(d.id);
+                            /* THREE OUTCOMES, NOT TWO, and the middle one is
+                             * why this is not `r.ended ? success : error`.
+                             * EndBroadcast reports Ended only when Facebook
+                             * read the status back as VOD; a false with no
+                             * error means the POST SUCCEEDED and the node has
+                             * not settled yet. Facebook documents that it
+                             * saves the VOD, not how fast — so reporting that
+                             * as a failure would send an operator to end a
+                             * broadcast that is already ending, and reporting
+                             * it as a clean success would claim a confirmation
+                             * nobody gave. It gets its own sentence. */
+                            if (r.ended) toast.success(t("dash.broadcastEnded"));
+                            else toast.info(t("dash.broadcastEndAccepted"));
+                            /* Warnings name what was actually seen — a
+                             * read-back that failed, a status that is still
+                             * LIVE. Advisory beside the sentence above, not
+                             * errors: the end was accepted either way. */
+                            for (const w of r.warnings ?? []) toast.warning(w);
+                          },
+                          "end the Facebook broadcast",
+                        );
+                        setRefreshKey((k) => k + 1);
+                      }
+                    : undefined
+                }
               />
             ))}
           </div>
