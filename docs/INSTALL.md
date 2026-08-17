@@ -164,6 +164,19 @@ accepted if `ffmpeg -protocols` actually lists `srt`. You can still decline and
 continue on RTMP — it works — but it is a choice made against an offer rather
 than against a compile-it-yourself instruction.
 
+### It asks the binary, not the version string
+
+A version parsed out of `ffmpeg -version` is prose, and some builds do not
+produce a parseable one — a git or nightly build announces itself as
+`ffmpeg version N-119534-g...`, with no major number to compare.
+
+Rather than guess, the installer runs a ~50 ms probe that exercises what
+polyemesis actually depends on: the modern channel-layout API (the same `pan`
+shape the audio router compiles) and `-progress` emitting the fields the engine
+reads. A build whose version cannot be parsed but which passes the probe is
+accepted on the measurement; one that fails it is refused and offered a
+replacement, instead of being assumed fine.
+
 ### Verifying the download
 
 In binary mode the release archive is checked against the release's published

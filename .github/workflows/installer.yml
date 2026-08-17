@@ -193,6 +193,38 @@ jobs:
           echo "$out" | grep -q -- "--check makes no changes" \
             || { echo "the offer was skipped silently rather than declining out loud"; exit 1; }
 
+      # THE CAPABILITY PROBE, ON EVERY IMAGE IN THE MATRIX.
+      #
+      # check_ffmpeg now asks the binary to actually run polyemesis's own filter
+      # shape -- the modern channel-layout API via `pan`, and `-progress`
+      # emitting out_time_ms -- instead of deciding on a parsed version string.
+      # In the script that probe is currently only a WARNING on the
+      # already-passing path, because it had been run against exactly one build
+      # and an under-tested probe should not be able to block installs on four
+      # distributions nobody had tried it on.
+      #
+      # This is what earns it the right to become a refusal. It asserts the
+      # probe passes wherever FFmpeg clears the floor, and fails the build if a
+      # distribution ships an FFmpeg that cannot do this -- which is exactly the
+      # thing worth learning early, on CI rather than on somebody's server.
+      - name: FFmpeg can actually do what polyemesis needs
+        if: matrix.expect == 'pass'
+        run: |
+          set +e
+          ffmpeg -hide_banner -nostdin -loglevel error -progress pipe:1 \
+            -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=48000" \
+            -filter_complex "[0:a]pan=mono|c0=0.5*c0+0.5*c1[a]" \
+            -map "[a]" -t 0.1 -f null - 2>/dev/null | grep -q out_time_ms
+          rc=$?
+          set -e
+          [ "$rc" -eq 0 ] || {
+            echo "::error::FFmpeg on ${{ matrix.image }} cleared the version floor but could"
+            echo "::error::not run the channel-layout + -progress probe check_ffmpeg uses."
+            ffmpeg -version | head -1
+            exit 1
+          }
+          echo "probe passed on ${{ matrix.image }}"
+
       - name: The init gate fires, and names the real reason
         run: |
           set +e
