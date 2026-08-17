@@ -202,6 +202,19 @@ func (y *YouTube) TransitionBroadcast(ctx context.Context, accessToken, broadcas
 // three of them wrong.
 type TransitionRefusal string
 
+// THESE VALUES ARE POLYEMESIS'S LABELS, NOT YOUTUBE'S WIRE REASONS, and the
+// distinction is easy to miss because one of them coincides. RefusalInvalid-
+// Transition happens to spell "invalidTransition", which is exactly what
+// YouTube sends; RefusalStreamInactive spells "streamInactive" where the wire
+// says "errorStreamInactive", and RefusalRateLimited spells "rateLimited"
+// where the wire says "userRequestsExceedRateLimit".
+//
+// So a caller that compares one of these against a raw reason string from
+// YouTube will compile, run, and silently never match -- and it will look
+// correct, because the first example it copies might be the one that lines up.
+// The mapping from wire to label happens in exactly one place, the switch in
+// TransitionBroadcast, and it is the only place the wire spellings appear.
+
 const (
 	// RefusalStreamInactive means NO BYTES ARE ARRIVING YET. Verbatim: "The
 	// requested transition is not allowed when the stream that is bound to the
@@ -212,16 +225,29 @@ const (
 	// the requested status." The fix is to re-read the state and re-plan, never
 	// to send the same transition again.
 	RefusalInvalidTransition TransitionRefusal = "invalidTransition"
-	// RefusalConcurrencyLimit is the ceiling, and IT REFUSES AT TRANSITION
-	// RATHER THAN AT CREATE -- a channel can hold more created broadcasts than
-	// it can put on air. Verbatim: "The channel already has the maximum number
-	// of concurrent live broadcasts."
+	// TWO CEILINGS, TWO DIFFERENT FIXES, AND LUMPING THEM SENDS AN OPERATOR TO
+	// THE WRONG ONE. Both refuse at TRANSITION rather than at create -- a
+	// channel can hold far more created broadcasts than it can put on air --
+	// but what an operator does about each is not the same thing.
 	//
-	// YOUTUBE DOES NOT PUBLISH THE NUMBER, so there is no ceiling constant
-	// anywhere in this package and no pre-flight count that could avoid the
-	// refusal. Handling the refusal is the entire available strategy; a guessed
-	// limit would refuse broadcasts YouTube would have accepted.
-	RefusalConcurrencyLimit TransitionRefusal = "concurrencyLimit"
+	// RefusalChannelFull is concurrentBroadcastsExceedLimit. Verbatim: "The
+	// channel already has the maximum number of concurrent live broadcasts. One
+	// or more broadcasts that are already live must be stopped before another
+	// broadcast can start on the channel." The remedy is to stop a broadcast.
+	// Nothing polyemesis can do avoids it.
+	RefusalChannelFull TransitionRefusal = "channelFull"
+	// RefusalSharedIngestionFull is sharedIngestionBroadcastsExceedLimit, and
+	// it is the one polyemesis currently CAUSES. internal/oauth/youtube.go's
+	// Ingest hands every YouTube destination the same reusable stream, so they
+	// count as one ingestion source and hit this ceiling long before the
+	// channel one. The remedy is a stream per destination, which is a change to
+	// this codebase rather than an action for the operator -- so an operator
+	// told to "stop a broadcast" here has been sent to fix something that is
+	// not their fault and will not help.
+	//
+	// See docs/evidence/platform-lifecycle-apis-2026-08-16.md, and
+	// docs/PLATFORMS.md, which tells operators the practical number.
+	RefusalSharedIngestionFull TransitionRefusal = "sharedIngestionFull"
 	// RefusalRateLimited is userRequestsExceedRateLimit: the caller is asking
 	// too often. No documented number here either.
 	RefusalRateLimited TransitionRefusal = "rateLimited"
@@ -305,8 +331,10 @@ func classifyTransition(err error, broadcastID string, to BroadcastPhase) (*Tran
 			return nil, refused(se, broadcastID, to, RefusalStreamInactive, reason)
 		case "invalidTransition":
 			return nil, refused(se, broadcastID, to, RefusalInvalidTransition, reason)
-		case "concurrentBroadcastsExceedLimit", "sharedIngestionBroadcastsExceedLimit":
-			return nil, refused(se, broadcastID, to, RefusalConcurrencyLimit, reason)
+		case "concurrentBroadcastsExceedLimit":
+			return nil, refused(se, broadcastID, to, RefusalChannelFull, reason)
+		case "sharedIngestionBroadcastsExceedLimit":
+			return nil, refused(se, broadcastID, to, RefusalSharedIngestionFull, reason)
 		case "userRequestsExceedRateLimit":
 			return nil, refused(se, broadcastID, to, RefusalRateLimited, reason)
 		case "errorExecutingTransition":

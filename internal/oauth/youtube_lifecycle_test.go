@@ -149,19 +149,26 @@ func TestYouTubeClassifiesEachDocumentedTransitionRefusal(t *testing.T) {
 		{
 			// The ceiling refuses HERE rather than at create, and YouTube
 			// publishes no number for it.
-			name:        "the concurrent broadcast ceiling is its own classification",
+			name:        "a full channel is its own classification",
 			body:        ytTransitionRefusal("concurrentBroadcastsExceedLimit", "The channel already has the maximum number of concurrent live broadcasts"),
 			status:      http.StatusForbidden,
 			wantErr:     true,
-			wantRefusal: RefusalConcurrencyLimit,
+			wantRefusal: RefusalChannelFull,
 			wantFault:   true,
 		},
 		{
-			name:        "the shared ingestion ceiling classifies with the other ceiling",
+			// SEPARATE FROM THE ONE ABOVE, and this test used to assert they
+			// were the same. They refuse at the same moment and mean different
+			// things: a full channel is the operator's to resolve by stopping a
+			// broadcast, while a full ingestion source is polyemesis handing
+			// every YouTube destination the same reusable stream. Telling an
+			// operator to stop a broadcast for the second one sends them to fix
+			// something that is not theirs and will not help.
+			name:        "a full ingestion source is NOT the same refusal as a full channel",
 			body:        ytTransitionRefusal("sharedIngestionBroadcastsExceedLimit", "too many broadcasts share this ingestion point"),
 			status:      http.StatusForbidden,
 			wantErr:     true,
-			wantRefusal: RefusalConcurrencyLimit,
+			wantRefusal: RefusalSharedIngestionFull,
 			wantFault:   true,
 		},
 		{
