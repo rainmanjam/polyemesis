@@ -217,15 +217,26 @@ func TestYouTubeIngestAndIngestForAgreeOnTheStream(t *testing.T) {
 	}
 }
 
-// A bind that fails leaves a PUBLIC event page on the channel that nothing in
-// this database names, and the caller's next sweep will make another beside it.
-// The id is the only thing that lets an operator find the first one.
-func TestYouTubeNamesTheOrphanWhenTheBindFails(t *testing.T) {
+// A BIND THAT FAILS MUST NOT LEAVE A PUBLIC EVENT PAGE BEHIND, and the reason
+// is the caller rather than this function.
+//
+// YouTube's create is three calls; Facebook's is one. internal/api's
+// announceOne was written against the single-POST shape, so it reads any
+// IngestFor error as "nothing was created", records nothing, and tries again on
+// its next five-minute sweep. Here the broadcast already EXISTS when bind
+// fails, and liveBroadcastBindingNotAllowed is state-gated rather than
+// transient -- so without a delete, that sweep mints a fresh public event page
+// on the operator's channel every five minutes, all day, and logs only the
+// first one.
+func TestYouTubeDeletesTheBroadcastItCouldNotBind(t *testing.T) {
 	var log []capture
 	y := ytScheduleStub(t, &log, map[string]http.HandlerFunc{
 		"POST " + ytBindPath: func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
 			io.WriteString(w, `{"error":{"errors":[{"reason":"liveBroadcastBindingNotAllowed"}]}}`)
+		},
+		"DELETE " + ytBroadcastsPath: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
 		},
 	})
 
@@ -238,8 +249,70 @@ func TestYouTubeNamesTheOrphanWhenTheBindFails(t *testing.T) {
 	if b != nil {
 		t.Errorf("IngestFor returned a Broadcast alongside the error: %+v", b)
 	}
+	c := find(log, http.MethodDelete, ytBroadcastsPath)
+	if c == nil {
+		t.Fatal("the broadcast that could not be bound was NOT deleted. Every sweep " +
+			"of internal/api's pre-announce will now create another public event page.")
+	}
+	if q, perr := url.ParseQuery(c.Query); perr != nil {
+		t.Errorf("delete query %q did not parse: %v", c.Query, perr)
+	} else if got := q.Get("id"); got != "bcast-1" {
+		t.Errorf("deleted id = %q, want the broadcast just created", got)
+	}
+	// The operator is not asked to go and clean up something that is gone.
+	if strings.Contains(err.Error(), "YouTube Studio") {
+		t.Errorf("the error still tells the operator to delete it by hand: %v", err)
+	}
+}
+
+// When the delete ALSO fails there really is an orphan, and then -- and only
+// then -- the id belongs in the message, because it is the one remaining way
+// anybody learns the page exists.
+func TestYouTubeNamesTheOrphanOnlyWhenItCouldNotDeleteIt(t *testing.T) {
+	var log []capture
+	y := ytScheduleStub(t, &log, map[string]http.HandlerFunc{
+		"POST " + ytBindPath: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, `{"error":{"errors":[{"reason":"liveBroadcastBindingNotAllowed"}]}}`)
+		},
+		"DELETE " + ytBroadcastsPath: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		},
+	})
+
+	_, err := y.IngestFor(context.Background(), "cid", "tok", "",
+		IngestOptions{ScheduledFor: time.Unix(1893456000, 0)})
+	if err == nil {
+		t.Fatal("IngestFor succeeded despite an unbound, undeletable broadcast")
+	}
 	if !strings.Contains(err.Error(), "bcast-1") {
-		t.Errorf("the error does not name the broadcast that was left behind: %v", err)
+		t.Errorf("the error does not name the broadcast left behind: %v", err)
+	}
+}
+
+// A broadcast YouTube says is already gone is the state the delete was trying
+// to reach. Reporting 404 as a failure would produce the orphan warning for a
+// page that does not exist.
+func TestYouTubeTreatsAnAlreadyDeletedBroadcastAsDeleted(t *testing.T) {
+	var log []capture
+	y := ytScheduleStub(t, &log, map[string]http.HandlerFunc{
+		"POST " + ytBindPath: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, `{"error":{"errors":[{"reason":"liveBroadcastBindingNotAllowed"}]}}`)
+		},
+		"DELETE " + ytBroadcastsPath: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"error":{"errors":[{"reason":"liveBroadcastNotFound"}]}}`)
+		},
+	})
+
+	_, err := y.IngestFor(context.Background(), "cid", "tok", "",
+		IngestOptions{ScheduledFor: time.Unix(1893456000, 0)})
+	if err == nil {
+		t.Fatal("IngestFor succeeded despite the bind failing")
+	}
+	if strings.Contains(err.Error(), "YouTube Studio") {
+		t.Errorf("a 404 on delete was reported as an orphan needing manual cleanup: %v", err)
 	}
 }
 

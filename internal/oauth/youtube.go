@@ -187,6 +187,15 @@ func (y *YouTube) reusableStream(ctx context.Context, accessToken string) (*ytLi
 		Items []ytLiveStream `json:"items"`
 	}
 	err := getJSON(ctx,
+		// part=id was ADDED to a shipping path, and it is worth naming why the
+		// risk is asymmetric. The scheduled path needs the stream's id to bind
+		// a broadcast to it; without id in the part list there is no documented
+		// guarantee the field comes back. "id" is not in the evidence file for
+		// THIS resource, but it is evidenced for a sibling
+		// (part=id,snippet,status on liveBroadcasts.list), and an extra part is
+		// additive -- it cannot remove snippet or cdn, which is what this call
+		// already depended on. Resolve by: one live liveStreams.list without
+		// part=id, recording whether id is present.
 		y.apiEndpoint()+ytStreamsPath+"?part=id,snippet,cdn&mine=true&maxResults=50",
 		accessToken, nil, &list)
 	if err != nil {

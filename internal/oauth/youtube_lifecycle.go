@@ -32,8 +32,11 @@ const (
 	// {"status": ...} would be sent, accepted as empty, and change nothing while
 	// looking exactly like a successful call.
 	ytTransitionPath = "/liveBroadcasts/transition"
-	// The bound stream's liveness lives on a different resource.
-	ytStreamsPath = "/liveStreams"
+	// The bound stream's liveness lives on a different resource -- see
+	// ytStreamsPath in youtube.go, which declares it alongside the other
+	// YouTube paths. Two branches of this round each added their own copy; they
+	// landed in different files, so nothing conflicted and the build broke on
+	// the merge instead.
 	// The parts the transition response is asked for. `part` is required;
 	// status is what makes the response worth reading, since it carries the
 	// lifeCycleStatus the transition produced.

@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -178,18 +179,40 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 		return nil, err
 	}
 	if err := y.bindBroadcast(ctx, accessToken, created.ID, stream.ID); err != nil {
-		// THE ORPHAN IS NAMED. The broadcast is already on the channel at this
-		// point -- a public event page -- and returning a bare error would leave
-		// the caller to record nothing and create a second one on its next
-		// sweep, beside a first that nothing here can name. It cannot be undone
-		// safely from inside this function either: a delete is a second write
-		// whose own failure would leave the same orphan plus a misleading error.
-		// So the id goes in the message, which is the one place an operator can
-		// still act on it.
-		return nil, fmt.Errorf("YouTube created scheduled broadcast %s but would not bind it to "+
-			"the channel's stream, so nothing published to that stream key will reach it. "+
-			"Delete broadcast %s in YouTube Studio before the next attempt, or it will sit "+
-			"there as an event page for a show that goes out elsewhere: %w",
+		// THE BROADCAST IS DELETED, NOT NAMED IN A MESSAGE, AND THE DIFFERENCE
+		// IS ~288 PUBLIC EVENT PAGES A DAY.
+		//
+		// YouTube's create is three calls and Facebook's is one, which is the
+		// whole problem. internal/api/preannounce.go was written against the
+		// single-POST shape: any IngestFor error means nothing was created, so
+		// announceOne calls Forget and the next sweep tries again. Here the
+		// broadcast EXISTS by the time bind fails -- a real, public event page
+		// on the operator's channel -- so "try again in five minutes" mints
+		// another one. liveBroadcastBindingNotAllowed is state-gated and
+		// persistent, so it does not resolve on its own; the sweep runs all day.
+		//
+		// It is silent, too. announceOne logs only when its failure counter
+		// first reaches 1, and that counter is not cleared on this path, so
+		// orphans two onward produce no log line at all.
+		//
+		// An earlier version of this function named the id in the error and
+		// asked the operator to delete it, arguing a delete was "a second write
+		// whose own failure would leave the same orphan plus a misleading
+		// error". That is true of the failure case and misses the common one:
+		// the delete usually SUCCEEDS, and then there is no orphan and no
+		// instruction to follow. Best case beats worst case here because the
+		// worst case is exactly what we already had.
+		if delErr := y.deleteBroadcast(ctx, accessToken, created.ID); delErr == nil {
+			return nil, fmt.Errorf("YouTube would not bind scheduled broadcast %s to the "+
+				"channel's stream, so it was deleted rather than left as an event page for a "+
+				"show that publishes elsewhere: %w", created.ID, err)
+		}
+		// The delete failed too. NOW the id belongs in the message, because it
+		// is the only remaining way anyone learns the page is there.
+		return nil, fmt.Errorf("YouTube created scheduled broadcast %s, would not bind it to "+
+			"the channel's stream, and would not delete it either. Delete broadcast %s in "+
+			"YouTube Studio: it is a public event page for a show that goes out elsewhere, "+
+			"and the next attempt will create another: %w",
 			created.ID, created.ID, err)
 	}
 	b.ID = created.ID
@@ -250,7 +273,20 @@ func (y *YouTube) bindBroadcast(ctx context.Context, accessToken, broadcastID, s
 	q := url.Values{}
 	q.Set("id", broadcastID)
 	q.Set("streamId", streamID)
-	q.Set("part", "id,contentDetails")
+	// part=id AND NOTHING MORE, because this call's response is discarded --
+	// requestJSON is given a nil out. An earlier version sent
+	// "id,contentDetails", which asks YouTube to compose a part of a body
+	// nobody reads.
+	//
+	// NOT EVIDENCED, AND SAYING SO IS THE POINT. The evidence file documents
+	// this endpoint, streamId's optionality, the cardinality rule and
+	// liveBroadcastBindingNotAllowed -- it does NOT record that bind takes a
+	// part parameter at all, nor any accepted value. "id" is used because it is
+	// the one part value the file does evidence for a sibling resource
+	// (part=id,snippet,status on liveBroadcasts.list) and because it is the
+	// smallest thing that could satisfy a required parameter.
+	// Resolve by: one live bind, with and without part, recording both answers.
+	q.Set("part", "id")
 	// requestJSON with a nil payload sends no body and no Content-Type, which is
 	// what a method whose whole input is in the query string should send.
 	return requestJSON(ctx, http.MethodPost,
@@ -407,6 +443,36 @@ func ytBroadcastCreateAdvice(err error) error {
 		return fmt.Errorf("%w — this channel already has YouTube's maximum number of concurrent "+
 			"broadcasts. YouTube does not publish what that number is; end or delete a broadcast "+
 			"on the channel and schedule this show again", err)
+	}
+	return err
+}
+
+// deleteBroadcast removes a broadcast this package created and could not
+// finish setting up.
+//
+// ONLY EVER CALLED ON A BROADCAST CREATED SECONDS EARLIER IN THE SAME
+// FUNCTION, and that constraint is what makes it safe to have at all. A
+// general "delete a YouTube broadcast" helper on this provider would be a
+// loaded gun: nothing else in polyemesis should be able to remove an
+// operator's event page, and there is no caller that should want to.
+//
+// A 404 is success. The broadcast not being there is the state this is trying
+// to reach, and treating "already gone" as a failure would turn a clean
+// outcome into the orphan warning.
+func (y *YouTube) deleteBroadcast(ctx context.Context, accessToken, broadcastID string) error {
+	if strings.TrimSpace(broadcastID) == "" {
+		return fmt.Errorf("no broadcast id to delete")
+	}
+	q := url.Values{}
+	q.Set("id", broadcastID)
+	err := requestJSON(ctx, http.MethodDelete,
+		y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, nil, nil)
+	if err == nil {
+		return nil
+	}
+	var se *statusError
+	if errors.As(err, &se) && se.Status == http.StatusNotFound {
+		return nil
 	}
 	return err
 }
