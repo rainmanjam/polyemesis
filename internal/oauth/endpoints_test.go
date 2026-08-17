@@ -152,6 +152,8 @@ func TestAStubbedProviderReachesNoRealHost(t *testing.T) {
 				"PushBroadcastSettings": func() {
 					_, _ = y.PushBroadcastSettings(ctx, cid, tok, BroadcastSettings{EnableDvr: ptrBool(true)})
 				},
+				"SetVODPrivacy":    func() { _ = y.SetVODPrivacy(ctx, tok, "vid", db.PrivacyUnlisted) },
+				"AddVODToPlaylist": func() { _, _ = y.AddVODToPlaylist(ctx, tok, "PL123", "vid") },
 			}
 		},
 		"twitch": func(t *testing.T, base string) map[string]func() {
