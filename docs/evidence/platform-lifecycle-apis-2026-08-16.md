@@ -99,20 +99,59 @@ broadcast can't transition from its current status to the requested status"),
 numeric limit appears anywhere in the docs** — treat both as unknown values,
 never as "no limit".
 
-> **Practitioner report, 2026-08-16, NOT A PRIMARY SOURCE AND NOT ENCODABLE.**
-> The maintainer found a discussion
-> ([r/VIDEOENGINEERING, "YouTube max livestreams change"](https://www.reddit.com/r/VIDEOENGINEERING/comments/1r07x98/youtube_max_livestreams_change_practically_what/))
-> reporting the concurrent ceiling as **10**. Reddit served an empty body to
-> this pass's fetcher, so the figure is recorded as reported and has not been
-> read at source, let alone confirmed against a channel.
+> **A YOUTUBE SUPPORT TRANSCRIPT, RELAYED 2026-08-16. Not published
+> documentation — but it populates a structure the docs DO publish, which is
+> what makes it worth more than a forum number.**
 >
-> It is written down because it is genuinely useful — it tells an implementer
-> what ORDER OF MAGNITUDE to expect, which is enough to size a warning or a
-> UI hint sensibly. It must not become a constant, and the thread's own title
-> is the argument: the word is *change*. A number that has just moved is the
-> single worst candidate for hardcoding, and a cap that varies by channel
-> standing (as YouTube's creation limits are said to) cannot be one number at
-> all. Handle `concurrentBroadcastsExceedLimit`; do not predict it.
+> Posted to
+> [r/VIDEOENGINEERING](https://www.reddit.com/r/VIDEOENGINEERING/comments/1r07x98/youtube_max_livestreams_change_practically_what/)
+> and supplied by the maintainer (Reddit served this pass's fetcher an empty
+> body, so it is recorded as relayed, not read at source). A YouTube support
+> agent states two limits, applied simultaneously, effective **2026-02-24** —
+> already in force at the time of reading:
+>
+> * **3** active streams sharing the same stream key
+> * **10** active streams on a single channel
+>
+> **These map one-to-one onto the two error codes quoted above.** The docs
+> publish `sharedIngestionBroadcastsExceedLimit` and
+> `concurrentBroadcastsExceedLimit` and give no numbers; the transcript gives a
+> number for each, in that exact structure. It is not proposing a model — it is
+> filling in one Google already documents, which is a far stronger position
+> than a figure somebody remembered.
+>
+> **THE PART THAT IS NOT A NUMBER IS THE PART THAT SHAPES THE CODE, and it is
+> stated unambiguously:** *"Any scheduled streams (pre-live) do not count
+> towards the limit while in the 'upcoming' scheduled state. When the scheduled
+> start time is reached, the limits will be applied to any new streams."* And
+> concretely: *"a channel that has 10 streams currently live can still have 100
+> additional streams scheduled at an upcoming time."*
+>
+> So **scheduling is effectively unbounded and the ceiling binds at
+> transition** — which is exactly what the errors page implies and what the
+> caveat above deduced from where the refusal appears. Two independent lines of
+> evidence, one documentary and one from support, agreeing on the mechanism.
+> That mechanism may be relied on. Build the scheduler against it.
+>
+> **The numbers still do not go in the code**, and the reasons have not
+> weakened. Support agents are not a specification and are sometimes wrong; the
+> figures took effect six months ago and can move again the same way; the same
+> agent glossed the change as encouraging "original and authentic,
+> non-duplicative streams" and cited the *monetization policies* page for it,
+> which suggests enforcement tied to channel standing rather than a flat
+> constant. A hardcoded 10 would become a lie for whichever operator is treated
+> differently, and it would fail closed against a channel allowed more.
+>
+> Use them for COPY, not for control flow: a warning that names 3 and 10 as
+> what YouTube currently applies is honest and useful. A guard that refuses the
+> eleventh broadcast locally is polyemesis asserting a number it was told in a
+> chat window. Handle `concurrentBroadcastsExceedLimit` and
+> `sharedIngestionBroadcastsExceedLimit` as first-class outcomes and let
+> YouTube be the one that says no.
+>
+> *Resolve properly by:* a Google-published page stating either figure, or an
+> empirical run against a real channel recording the date and the account's
+> standing.
 
 **A CONTRADICTION WORTH KEEPING, because it shows how this fails.** Asked the
 same question on 2026-08-16, the `agy` assistant answered that
