@@ -67,10 +67,20 @@ func TestAllTypesKeepsTheOperationalPickerOrderItAlreadyHad(t *testing.T) {
 	// destination events by meaning, and putting it there would move twenty
 	// rows an operator has already learned.
 	lifecycle := []Type{TypeBroadcastFault}
+	// And the fourth append, for the fourth time against meaning. debug.exported
+	// belongs beside the AUDIT events -- it is somebody taking a copy of the
+	// server's own logs, which is the same kind of act as minting an API token --
+	// and filing it there would move every row below it. The pattern of appending
+	// is now itself the convention: this catalogue is ordered by WHEN A ROW WAS
+	// ADDED, not by what it means, and that is a deliberate trade of tidiness for
+	// not moving a control under somebody who has learned where it is.
+	diagnostics := []Type{TypeDebugExported}
 	all := AllTypes()
-	if len(all) != len(operational)+len(auditTypes)+len(health)+len(lifecycle) {
-		t.Fatalf("AllTypes has %d entries, want %d operational + %d audit + %d health + %d lifecycle",
-			len(all), len(operational), len(auditTypes), len(health), len(lifecycle))
+	if len(all) != len(operational)+len(auditTypes)+len(health)+len(lifecycle)+len(diagnostics) {
+		t.Fatalf("AllTypes has %d entries, want %d operational + %d audit + %d health + "+
+			"%d lifecycle + %d diagnostics",
+			len(all), len(operational), len(auditTypes), len(health), len(lifecycle),
+			len(diagnostics))
 	}
 	for i, want := range operational {
 		if all[i] != want {

@@ -88,13 +88,20 @@ func ReadUI(t *testing.T, parts ...string) string {
 // the next person reads green and believes it. The same trade is written down in
 // internal/oauth's parseUICapabilities for the same reason.
 //
-// A PORT OF THIS EXISTS IN TYPESCRIPT, in ui/src/lib/tour-drift.test.ts, and it
-// cannot be collapsed into this one: vitest cannot call Go. The two were
-// measured against each other when this was promoted -- both run over all 96
-// .ts and .tsx files under ui/src, output hashed per file, byte-identical on
-// every one -- so they have not drifted. Nothing enforces that, and the TS copy
-// names this one as its origin so the next edit to either can be carried across
-// by hand.
+// A PORT OF THIS EXISTS IN TYPESCRIPT, in ui/src/lib/strip-js-comments.ts, and
+// it cannot be collapsed into this one: vitest cannot call Go.
+//
+// THE TWO ARE NOW PINNED TO A SHARED CORPUS rather than to each other's word.
+// This used to say they had been compared by hand when this was promoted --
+// both run over all 96 .ts and .tsx files under ui/src, byte-identical -- and
+// that nothing enforced it. A hand comparison is evidence about one afternoon,
+// and it cannot survive somebody fixing a bug in one copy, which is the only way
+// this function ever changes.
+//
+// testdata/js-comment-corpus.json is the spec. js_comment_corpus_test.go drives
+// this implementation against it and ui/src/lib/strip-js-comments.test.ts drives
+// the port against the SAME FILE, so changing the behaviour means changing the
+// corpus and turning the other language's suite red in the same commit.
 func StripJSComments(src string) string {
 	var b strings.Builder
 	b.Grow(len(src))

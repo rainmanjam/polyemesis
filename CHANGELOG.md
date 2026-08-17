@@ -153,6 +153,33 @@ its first tagged release.
   reads as an abandoned one to the person deciding between reporting privately
   and going public.
 
+- **Broadcast lifecycle: polyemesis can tell YouTube to go live and to end.**
+  Connecting an account used to mean fetching a key and pushing a title;
+  "going live" was still bytes arriving at an ingest. A coordinator now drives
+  the platform's own broadcast state from the UP/DOWN edges the engine already
+  derives, and the `broadcastLifecycle` column says per platform what that
+  actually means. **YouTube is driven** — it goes live when video starts
+  arriving and ends when you disable or delete the destination, never when the
+  encoder merely crashes, because a completed YouTube broadcast cannot return
+  to live and a crash is recoverable. **Facebook is commanded by hand**:
+  connecting creates the live video and "End broadcast" is on the destination
+  menu, but nothing ends it for you. Twitch and Kick publish no such API at
+  all, which is established by enumeration rather than assumed.
+
+  A refused transition raises a fault and never stops the stream. Stopping the
+  encoder on a failed transition would destroy the only condition under which a
+  retry could succeed, since YouTube requires an active ingest to transition.
+
+- **Facebook's stream health and end-broadcast are wired to routes.** Both
+  existed in the provider and neither had a route, so the menu item would have
+  404ed while the stream stayed live. The health pane also states that Twitch,
+  YouTube and Kick publish no ingest numbers at all — that absence is a fact
+  about those platforms, not a gap in polyemesis.
+
+- **The documentation site renders diagrams.** `docs/INSTALL.md` gained
+  flowcharts of the installer and of the FFmpeg gate, and `/docs/install`
+  draws them instead of printing forty lines of source at the reader.
+
 ### Fixed
 - **Four of six pages were shipping with no cache revalidation.**
   `web/public/_headers` scoped `no-cache` to `/` and `/*.html`, and its comment
@@ -187,6 +214,40 @@ its first tagged release.
   that was already nobody's. It failed CI three times in one day on three
   different ranges, each time blaming the code under test for a port it never
   held. `testenv.FreeUDPWindow` reserves the window and holds it.
+
+- **The installer offered to fix FFmpeg only for the hosts that did not need
+  it.** `install.sh` has always known how to fetch a current static build and
+  verify it carries libsrt before displacing anything — and offered that only
+  when your FFmpeg was 6.x or 7.x, where it buys one feature. A host **below
+  the 6.0 floor, or with no FFmpeg at all**, got an error and a reading list,
+  one item of which was "a static build with libsrt" linking to the very
+  releases page the script downloads from. It now offers. Declining is what
+  ends the install, not the old version.
+
+  The same gap was one branch over: an FFmpeg can clear 6.0 and carry **no
+  libsrt** (Homebrew's does), which costs per-destination audio routing
+  entirely, and that branch also told you to compile one yourself.
+
+- **PATH order no longer decides which FFmpeg runs.** When the installer
+  installs FFmpeg itself it pins the absolute path into the config it
+  generates, so `/usr/bin` winning the PATH cannot silently give the service
+  the older binary.
+
+- **A release with no published `SHA256SUMS` is refused rather than installed.**
+  A checksum *mismatch* already died; an **unverifiable** download warned and
+  installed as root. `--allow-unverified` keeps the escape hatch as something
+  you type.
+
+- **YouTube's error advice never fired.** Both advice functions matched against
+  the response body *truncated at 300 characters for display*, and a realistic
+  YouTube 403 is 552 bytes with the machine-readable reason at index 448 —
+  Google puts a long human message before `errors[]`. So the sentences written
+  for "this channel is not enabled for live streaming" and for the concurrent
+  and shared-ingestion quota limits could not be reached. The quota ones are
+  what an operator hits at the moment they are trying to go live.
+
+- **A taken port is offered a free one** during the interview, instead of the
+  installer predicting a bind failure and then causing it.
 
 ### Changed
 - **Install-wide state comes off the engine** (first of six changes for #387).
@@ -339,7 +400,6 @@ its first tagged release.
   A fix and a test for one line of a pair, with the sibling left open, is the
   shape this file has now recorded twice.
 
-
 - **A destination's stream key could reach `data/logs/process.log` in the
   clear.** When a publish endpoint refused a connection, FFmpeg printed the
   output URL it could not open — key included — and the scrubber did not remove
@@ -412,7 +472,6 @@ its first tagged release.
   only when a new binary is cut, so the version the release was built with is
   part of what the release is.
   ([#329](https://github.com/rainmanjam/polyemesis/pull/329))
-
 
 - **The route that decides what your ingest pulls had no upload check at all.**
   Saving a pull source that names an upload this server was never able to
@@ -663,7 +722,6 @@ its first tagged release.
   which the previous survey had concluded it did not.
   ([#321](https://github.com/rainmanjam/polyemesis/pull/321))
 
-
 - **RTMP egress can carry a second audio track, and it has been measured doing
   it.** `ffmpeg.DestSpec.SecondAudioOutLabel` names a second finished mix from
   the destination's filter graph; it is mapped and encoded as a second audio
@@ -765,7 +823,6 @@ its first tagged release.
   refreshes OAuth tokens while nobody is logged in. Deriving it would be
   security theatre that also broke unattended restarts.
   ([#346](https://github.com/rainmanjam/polyemesis/pull/346))
-
 
 - **An upload the server never managed to inspect can be re-checked in place,
   instead of being re-uploaded.** `POST /media/{name}/verify` queues a *Media
@@ -951,7 +1008,6 @@ its first tagged release.
   [#337](https://github.com/rainmanjam/polyemesis/pull/337),
   [#338](https://github.com/rainmanjam/polyemesis/pull/338),
   [#345](https://github.com/rainmanjam/polyemesis/pull/345))
-
 
 - **BREAKING: a `read` API token gets metadata, not content.** Thirteen routes
   now answer `403` to a `read`-scoped token that previously served them: the
@@ -1162,7 +1218,6 @@ its first tagged release.
   bundle was being revalidated on each load despite carrying a correct
   `immutable` directive of its own.
   ([#334](https://github.com/rainmanjam/polyemesis/pull/334))
-
 
 - **A playlist item whose file was refused after the fact said "not yet queued
   for normalisation" for ever.** The *Media re-check* above is the first thing
@@ -1490,7 +1545,6 @@ its first tagged release.
   tell them apart — the same conflation that produced the mid-spawn stop above,
   on the respawn path instead of the teardown one.
   ([#290](https://github.com/rainmanjam/polyemesis/issues/290))
-
 
 - **Two guards that read `Dashboard.tsx` as text are now browser tests that
   drive it.** `internal/oauth/composer_tags_drift_test.go` proved that the
@@ -1856,7 +1910,6 @@ The ones with operator-visible consequences:
   port the installer had just written into its own `ExecStart` — `bind:
   permission denied`, on a fresh install, from following the prompts.
 
-
 ### Testing
 
 - The cross-platform smoke test now publishes over **E-RTMP and SRT** as well as
@@ -1890,7 +1943,6 @@ The fixes are worth reading in full. Three of them — a data race in the new RT
 listener, multitrack being unusable for any subscriber that joined late, and
 every SRT install reporting its ingest as offline — were found by tests written
 after the feature, which is the argument for writing them.
-
 
 ### Added
 
@@ -1950,7 +2002,6 @@ after the feature, which is the argument for writing them.
   headless in Docker and publishes into a real polyemesis, which is the only way
   to test OBS's own handshake and metadata rather than FFmpeg's.
 
-
 ### Changed
 
 - **The application is translated.** Every page under `src/pages` now reads from
@@ -2000,7 +2051,6 @@ after the feature, which is the argument for writing them.
 - **The E-RTMP multitrack harness is Go**, not Python. It was the repository's
   only `.py` file; everything else that stands up a real stream and measures what
   comes back is already a `//go:build ignore` main under `scripts/`.
-
 
 ### Fixed
 

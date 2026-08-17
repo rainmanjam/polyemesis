@@ -101,6 +101,13 @@ Copy the exact URL from the polyemesis dashboard rather than assembling it by
 hand — it renders your server's hostname and current settings, including the
 passphrase if you set one.
 
+> **Passphrases use letters, digits and `- _ . ~`.** Anything else is refused
+> when you set it, and the reason is worth knowing: the passphrase travels in
+> the URL above, and an encoder does **not** un-escape it. A `;` would be
+> written `%3B` in the URL, sent as the literal text `%3B`, and compared
+> against the `;` you stored — so a correct passphrase would be refused on
+> every connection, with nothing on screen to say why.
+
 ### 4. Start it
 
 Press **Start Recording**, not Start Streaming. With `Output to URL`, OBS's

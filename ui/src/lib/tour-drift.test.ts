@@ -1,5 +1,7 @@
 /// <reference types="node" />
 import { describe, expect, it } from "vitest";
+
+import { stripJSComments } from "./strip-js-comments";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -26,8 +28,8 @@ import { TOUR_STEPS } from "./tourSteps";
    A guard that greps a .tsx for a string passes forever if the string survives
    only in a comment. That is not hypothetical: it is the honest way to keep a
    substring guard green while deleting the thing it watches, and
-   facebook_ui_drift_test.go ships stripJSComments for exactly this reason.
-   `stripJSComments` below is that function ported, and
+   internal/testenv/uisource.go ships StripJSComments for exactly this reason.
+   `stripJSComments`, imported above, is that function ported, and
    `TestTheGuardCannotBeSatisfiedByAComment` -- "a comment satisfies nothing"
    here -- is its positive control: it plants an anchor in each comment form and
    requires the guard to still call it missing.
@@ -48,50 +50,12 @@ import { TOUR_STEPS } from "./tourSteps";
 
 const SRC = new URL("../", import.meta.url).pathname;
 
-/** Blanks out comments so a marker left behind in one cannot satisfy a guard
- *  that is asking whether a control is wired.
+/* stripJSComments MOVED TO ./strip-js-comments.ts, and this file now imports it.
  *
- *  Ported from stripJSComments in internal/db/facebook_ui_drift_test.go, with
- *  the same two rules and for the same reason:
- *
- *   - Block comments (`/* *\/`, and the `{/* *\/}` JSX form, which is a block
- *     comment inside an expression container) are removed outright.
- *   - Line comments are removed only when nothing before the `//` on that line
- *     is quoted, so a URL inside a string literal is left alone rather than
- *     truncated at the scheme separator.
- *
- *  Newlines are preserved so a line number quoted in a failure still means
- *  something to whoever goes to look. */
-function stripJSComments(src: string): string {
-  let out = "";
-  let i = 0;
-  while (i < src.length) {
-    if (src.startsWith("/*", i)) {
-      const end = src.indexOf("*/", i + 2);
-      if (end < 0) break; // unterminated; the rest is comment
-      for (const ch of src.slice(i, end + 2)) if (ch === "\n") out += "\n";
-      i = end + 2;
-      continue;
-    }
-    if (src.startsWith("//", i) && !quotedBefore(src, i)) {
-      const end = src.indexOf("\n", i);
-      if (end < 0) break;
-      i = end; // leave the newline for the next iteration
-      continue;
-    }
-    out += src[i];
-    i++;
-  }
-  return out;
-}
-
-/** Whether a quote appears between the start of the line containing `i` and `i`
- *  itself — the cheap test for "this `//` is inside a string literal or a JSX
- *  attribute rather than starting a comment". */
-function quotedBefore(src: string, i: number): boolean {
-  const start = src.lastIndexOf("\n", i - 1) + 1;
-  return /["'`]/.test(src.slice(start, i));
-}
+ * It lived here as a local function, which meant nothing could import it and the
+ * only evidence it still matched its Go original was a hand comparison recorded
+ * in that original's comment. It is now measured against a shared corpus that
+ * the Go test reads too — see strip-js-comments.test.ts. */
 
 /** The only selector shape a step may use.
  *

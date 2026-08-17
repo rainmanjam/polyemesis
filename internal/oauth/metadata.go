@@ -220,6 +220,26 @@ func (e *statusError) payload() string {
 	return e.Body
 }
 
+// adviceBody is the string an advice function must match against: the WHOLE
+// response body when the error carried one, and the error text otherwise.
+//
+// EVERY ADVICE FUNCTION NEEDS THIS AND TWO OF THEM DID NOT HAVE IT. fbAdvice
+// reaches payload() through its own type assertion; ytBroadcastCreateAdvice and
+// broadcastWriteAdvice read err.Error(), which is Body -- cut at 300 characters
+// by snippet() for display. A realistic YouTube 403 is 552 bytes with the
+// machine-readable `reason` at index 448, because Google puts a long human
+// message before errors[], so the token every branch keys on is reliably the
+// part that gets cut.
+//
+// Written here rather than in each caller so that the next advice function gets
+// it by using the obvious helper instead of by remembering the rule.
+func adviceBody(err error) string {
+	if se, ok := err.(*statusError); ok {
+		return se.payload()
+	}
+	return err.Error()
+}
+
 // requestJSON performs an authenticated request with an arbitrary method.
 // getJSON and postJSON cover the read and create paths; metadata writes are
 // PUT and PATCH, and they need the status back rather than a flattened string.

@@ -170,6 +170,12 @@ func (i IngestSettings) problems() []string {
 	if p := i.SRT.Passphrase; p != "" && (len(p) < 10 || len(p) > 79) {
 		add("srt passphrase must be 10-79 characters (got %d)", len(p))
 	}
+	if bad := srtPassphraseUnreserved(i.SRT.Passphrase); bad != "" {
+		add("srt passphrase cannot contain %q: it is carried in the ingest URL an "+
+			"encoder copies, and the encoder does not decode it, so anything needing "+
+			"escaping arrives as its escape text and never matches. Use letters, "+
+			"digits, and - _ . ~", bad)
+	}
 	if i.SRT.LatencyMS < 20 || i.SRT.LatencyMS > 8000 {
 		add("srt latency %dms out of range (20-8000)", i.SRT.LatencyMS)
 	}
@@ -781,6 +787,9 @@ func (f FailoverSettings) problems(primary IngestSettings) []string {
 	}
 	if p := b.SRT.Passphrase; p != "" && (len(p) < 10 || len(p) > 79) {
 		add("backup srt passphrase must be 10-79 characters (got %d)", len(p))
+	}
+	if bad := srtPassphraseUnreserved(b.SRT.Passphrase); bad != "" {
+		add("backup srt passphrase cannot contain %q; use letters, digits, and - _ . ~", bad)
 	}
 	if b.SRT.LatencyMS < 20 || b.SRT.LatencyMS > 8000 {
 		add("backup srt latency %dms out of range (20-8000)", b.SRT.LatencyMS)
@@ -2149,4 +2158,33 @@ func (d *DB) PutSettings(s Settings) error {
 		`INSERT INTO settings (id, json) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json`,
 		string(b))
 	return err
+}
+
+// srtPassphraseUnreserved is the alphabet an SRT passphrase may use.
+//
+// RFC 3986's unreserved set: nothing in it is escaped by url.Values.Encode(),
+// which is what makes ffmpeg.PublicIngestURL safe.
+//
+// THE RESTRICTION EXISTS BECAUSE THE CONSUMER DOES NOT DECODE. FFmpeg's libsrt
+// reads the passphrase out of that URL with av_find_info_tag, which copies the
+// raw bytes -- so a `;` rendered as `%3B` is SENT as `%3B` and compared,
+// literally, against the value stored here. It cannot match. A live install hit
+// exactly that: a correct passphrase, refused every time, and the URL the
+// dashboard told the operator to copy was the reason.
+//
+// Refusing at the form is the only place the message is useful. The alternative
+// -- escape it and hope -- produces a URL that PARSES and never connects, and
+// the operator sees a rejected handshake they cannot read. SRT itself permits
+// any bytes here, so this is polyemesis's restriction rather than SRT's, and it
+// is stated as such in the message.
+func srtPassphraseUnreserved(p string) string {
+	for _, r := range p {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.' || r == '~':
+		default:
+			return string(r)
+		}
+	}
+	return ""
 }

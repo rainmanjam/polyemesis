@@ -48,14 +48,14 @@
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --color-ink: #0b0d11;
-  --color-surface: #12151c;
-  --color-raised: #171d27;
-  --color-line: #232936;
-  --color-line-strong: #2a3444;
+  --color-ink: oklch(15.9% 0.0091 264.3);
+  --color-surface: oklch(19.6% 0.0149 266.8);
+  --color-raised: oklch(22.9% 0.0215 260.5);
+  --color-line: oklch(28.1% 0.0256 265.4);
+  --color-line-strong: oklch(32.3% 0.0317 259.7);
 
-  --color-fg: #edf2f8;
-  --color-muted: #9ba9ba;
+  --color-fg: oklch(95.9% 0.0097 252.8);
+  --color-muted: oklch(72.9% 0.0293 253.3);
   /* WCAG AA, and it was not. Lighthouse (desktop, 2026-08-16) failed
      color-contrast on twelve nodes: #6b7686 measured 4.22 against --color-bg
      #0b0d11 and 4.13 against the raised #0e1015, where 4.5 is required for text
@@ -66,17 +66,17 @@
      and 4.50 is the threshold itself: any later darkening of a background, or a
      browser rounding differently, puts it back in breach. This value measures
      5.36 and 5.25, which leaves room to move without re-failing. */
-  --color-subtle: #7d8798;
+  --color-subtle: oklch(62.1% 0.0282 261.1);
 
-  --color-primary: #5b7fc7;
-  --color-primary-bright: #78a6e8;
-  --color-primary-dim: #253148;
-  --color-live: #3ecf6d;
-  --color-live-dim: #143d25;
-  --color-cross: #e8a33d; /* active crosspoint ONLY */
-  --color-cross-dim: #3d2f12;
-  --color-meter: #45b5d0;
-  --color-down: #e25c5c;
+  --color-primary: oklch(60.2% 0.1177 263.2);
+  --color-primary-bright: oklch(71.9% 0.1090 257.4);
+  --color-primary-dim: oklch(31.3% 0.0447 262.9);
+  --color-live: oklch(75.6% 0.1840 149.9);
+  --color-live-dim: oklch(32.4% 0.0629 154.8);
+  --color-cross: oklch(76.5% 0.1399 72.9); /* active crosspoint ONLY */
+  --color-cross-dim: oklch(31.4% 0.0482 83.5);
+  --color-meter: oklch(72.1% 0.1065 216.8);
+  --color-down: oklch(64.7% 0.1678 23.0);
   /* Two more TRACK colours. The hero panel names four tracks at once — mic,
      music, co-host, game — and the palette had only two that read as signal, so
      three of the four chips would have had to share one.
@@ -86,8 +86,8 @@
      swatch and a matrix cell mean the same thing while meaning different
      things. Violet rather than a second blue for `game`, because --color-meter
      is already cyan and two blues at 20px wide are one colour. */
-  --color-cohost: #e2cf4a;
-  --color-game: #9b7fd4;
+  --color-cohost: oklch(84.7% 0.1501 101.1);
+  --color-game: oklch(65.7% 0.1262 298.0);
 
   --radius-token: 0.5rem;
 

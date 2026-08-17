@@ -27,6 +27,7 @@ import { AccountLiveStats } from "@/components/AccountLiveStats";
 import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
+import { DebugSettings } from "@/components/DebugSettings";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -260,6 +261,11 @@ export function SettingsPage() {
           <TabsTrigger value="pipeline">{t("set.tabPipeline")}</TabsTrigger>
           <TabsTrigger value="platforms">{t("set.tabPlatforms")}</TabsTrigger>
           <TabsTrigger value="security">{t("set.tabSecurity")}</TabsTrigger>
+          {/* Last, and beside Security rather than filed by subject: the export
+              is the only control here that hands a copy of this server's logs to
+              somebody else, and the tab an operator reaches for when thinking
+              about disclosure is the one next to it. */}
+          <TabsTrigger value="debug">{t("set.tabDebug")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="ingest">
@@ -315,6 +321,9 @@ export function SettingsPage() {
         </TabsContent>
         <TabsContent value="security">
           <SecuritySettings system={system} />
+        </TabsContent>
+        <TabsContent value="debug">
+          <DebugSettings />
         </TabsContent>
       </Tabs>
     </div>

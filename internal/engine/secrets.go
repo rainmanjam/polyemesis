@@ -412,3 +412,54 @@ func ingestSecrets(srt db.SRTSettings, rtmp db.RTMPSettings, pull db.PullSetting
 	out = append(out, pullURLSecrets(pull.URL)...)
 	return wireSpellings(out)
 }
+
+// DestinationSecrets collects every credential literal carried by these rows,
+// in every spelling each can wear on the wire.
+//
+// EXPORTED FOR THE DEBUG RECORDER, which needs the declared secrets and cannot
+// reach destSecrets. internal/diag's scrubbing is only as good as the set it is
+// given: alerts.Redact is a residual pass over shapes, and the exact-literal
+// masking that actually removes a stream key needs the literal.
+//
+// The rows are read, never mutated. Callers pass whatever ListDestinations
+// returned; a nil row is skipped rather than panicking, because the caller is a
+// diagnostic path and must not be able to take the process down.
+func DestinationSecrets(rows []*db.Destination) []string {
+	var out []string
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		out = append(out, destSecrets(row)...)
+	}
+	return out
+}
+
+// SourceSecrets collects every credential literal a source carries.
+//
+// EXPORTED FOR THE DEBUG RECORDER, AND ITS ABSENCE WAS A REAL LEAK. The
+// recorder's set was first built from DestinationSecrets alone, which covers
+// where a stream goes and nothing about where it comes from. A pull source is
+// addressed by a URL that routinely carries credentials -- rtsp://user:pass@,
+// or a CDN token in the query -- and engine.go logs that URL. Everything in it
+// therefore reached the exported bundle with only the residual alerts.Redact
+// pass behind it, which matches shapes rather than literals.
+//
+// The publish TOKEN is collected for the same reason: it is what an encoder
+// authenticates with, it appears in the ingest URL an operator copies, and a
+// token in a bundle sent to a stranger is a stranger who can publish.
+//
+// PrevToken travels too. Rotation keeps the old one working for five minutes,
+// so during that window it is a live credential that log lines may still carry.
+func SourceSecrets(rows []*db.Source) []string {
+	var out []string
+	for _, s := range rows {
+		if s == nil {
+			continue
+		}
+		out = append(out, s.Token, s.PrevToken)
+		out = append(out, urlSecrets(s.Ingest.Pull.URL)...)
+		out = append(out, s.Ingest.SRT.Passphrase)
+	}
+	return wireSpellings(out)
+}

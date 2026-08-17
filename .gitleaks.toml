@@ -114,3 +114,41 @@ keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "au
     '''internal/supervisor/redact_test\.go''',
     '''internal/api/handlers_test\.go''',
   ]
+
+    # A THIRD block, for the debug recorder's disclosure test.
+    #
+    # internal/diag exports a bundle of log records to somebody who does NOT
+    # have the operator's box, so its test plants a credential in every shape a
+    # slog record can carry one and asserts none survives to the export.
+    #
+    # Those plants have to LOOK like the real thing. A value shorter than
+    # alerts.MinSecretLen is refused by the secret set outright, and one that
+    # does not resemble a platform key would not exercise the residual
+    # alerts.Redact pass either -- so a fixture gitleaks ignores would be a
+    # fixture that proves less. It is correct for the scanner to flag these.
+    #
+    # Same AND condition and the same reasoning as the blocks above: the values
+    # are named one by one and scoped to the single file, so a REAL key
+    # committed to that test file is still a finding. If the scrubbing ever
+    # breaks, the disclosure test fails by name -- a better signal than gitleaks
+    # flagging a fixture for ever.
+    [[rules.allowlists]]
+    description = "planted credentials for internal/diag's export disclosure test"
+    condition = "AND"
+    regexTarget = "match"
+    regexes = [
+      # The stream key planted in the message, an attribute value, an attribute
+      # KEY, an argv slice, a wrapped error, a nested map and a URL.
+      '''live_884471209_kQxZ7fRvB2mNpL0sTdWyGhJcAe5U''',
+      # Its rotated successor, for the SetSecrets case.
+      '''live_884471209_ZZrotatedZZ9988776655443322110099''',
+      # A pull SOURCE's credentials -- a camera password, a CDN auth token and a
+      # publish token. Added after a pre-push review found the recorder's secret
+      # set was built from destinations only, so none of these was masked.
+      '''rtspCameraPassw0rd2026''',
+      '''hdnts_exp1798761600_acl_hmac_9f2c1d4b8a6e3f07''',
+      '''Dxl1Gevc3Tas4XHlMxAGMXwmO0bJ96Hj''',
+    ]
+    paths = [
+      '''internal/diag/disclosure_test\.go''',
+    ]
