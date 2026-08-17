@@ -1,8 +1,8 @@
 package api
 
 import (
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"sort"
