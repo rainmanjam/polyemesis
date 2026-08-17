@@ -219,6 +219,41 @@ Scope requested: `https://www.googleapis.com/auth/youtube`. Write access is
 needed because polyemesis creates a reusable ingest stream if your channel has
 none.
 
+**Three YouTube destinations can be live at once, and the reason is the stream
+key.** Since February 2026 YouTube applies two concurrency limits together:
+
+* **3** live streams sharing one stream key
+* **10** live streams on one channel
+
+polyemesis reuses your channel's ingest stream for every YouTube destination,
+so all of them count as one key — which means the first limit binds and the
+second one never does. A fourth destination going live is refused with
+`sharedIngestionBroadcastsExceedLimit`.
+
+Two things follow, and the second is the useful one.
+
+You will not see the refusal when you *create* the destination. YouTube applies
+these limits only to streams that are actually live: a broadcast sitting in the
+`upcoming` state does not count, and a channel already running its three can
+still hold many more scheduled. The refusal arrives at the moment a broadcast
+tries to start, which is the worst moment to learn about it — so plan for it
+rather than discovering it.
+
+**Scheduling is how you run more than three, because staggered broadcasts are
+not concurrent ones.** If your programmes do not need to overlap, schedule them
+instead of starting them together; only the ones actually live count against
+the three. polyemesis keeps a separate broadcast per schedule and per
+occurrence, so a weekly show gets a new broadcast each week rather than reusing
+one.
+
+These two numbers came from YouTube support rather than from Google's published
+API documentation, which states that both limits exist and gives neither
+figure. They are recorded here because knowing the order of magnitude is better
+than being surprised, and they are deliberately not enforced anywhere in
+polyemesis: a limit that is not published can change without notice, and may
+depend on your channel's standing. YouTube's refusal is what decides, and
+polyemesis reports it rather than predicting it.
+
 **Broadcast settings have an editing window.** Alongside title, description and
 category, polyemesis can push tags, the scheduled start, and YouTube's DVR,
 auto-start and auto-stop toggles. The last three **stop being editable once a
