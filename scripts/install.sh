@@ -532,6 +532,36 @@ offer_ffmpeg_upgrade() {
   return 0
 }
 
+# ffmpeg_capability_ok ASKS THE BINARY WHAT IT CAN DO, instead of reading its
+# name badge.
+#
+# Everything else in this file decides on a version STRING parsed out of a
+# banner, and internal/ffmpeg/detect.go:155 records where that ends up: an
+# unrecognised string becomes "assuming >= 6.0", which is a guess written down.
+# It is a REASONABLE guess -- an unparseable banner is nearly always a git build,
+# which is newer than 6.0 rather than older -- but it is still the installer
+# deciding a capability question by reading prose.
+#
+# So this measures instead. It exercises two of the three things
+# MinMajorVersion's comment names as the reason 6.0 is the floor:
+#
+#   * the modern channel-layout API used by pan/amerge -- the `pan` filter
+#     below is exactly the shape internal/routing compiles for a downmix
+#   * `-progress` output carrying the fields the engine parses; out_time_ms is
+#     one it actually reads
+#
+# The third, multi-track MPEG-TS mapping, has no probe this cheap and is left
+# to the version check.
+#
+# ~50ms measured, against lavfi rather than a file, so it costs nothing and
+# needs nothing on disk.
+ffmpeg_capability_ok() {
+  ffmpeg -hide_banner -nostdin -loglevel error -progress pipe:1 \
+    -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=48000" \
+    -filter_complex "[0:a]pan=mono|c0=0.5*c0+0.5*c1[a]" \
+    -map "[a]" -t 0.1 -f null - 2>/dev/null | grep -q "out_time_ms"
+}
+
 # check_ffmpeg enforces the two separate things that go wrong, because they
 # fail differently and only one of them is fatal.
 check_ffmpeg() {
@@ -569,10 +599,21 @@ check_ffmpeg() {
   # which is correct -- it has no major to compare.
   raw="$(ffmpeg -version 2>/dev/null | head -1 | sed -n 's/^ffmpeg version [^0-9]*\([0-9][0-9]*\)\..*/\1/p')"
   if [ -z "$raw" ]; then
-    # A git build, or a distro that rewrites the version banner. Unknown is not
-    # the same as too old, so this warns rather than refusing.
-    warn "could not parse the FFmpeg version from its banner — check it yourself:"
+    # A git build, or a distro that rewrites the version banner.
+    #
+    # THIS USED TO WARN AND WALK ON, handing the operator the banner and asking
+    # them to judge it. There is no need to guess: the binary is right here and
+    # can simply be asked whether it does what polyemesis needs.
+    warn "could not parse the FFmpeg version from its banner:"
     ffmpeg -version | head -1
+    if ffmpeg_capability_ok; then
+      ok "but it does what polyemesis needs — measured, not parsed"
+    else
+      err "and it cannot do what polyemesis needs."
+      echo "     The channel-layout filtering and -progress output that per-destination"
+      echo "     audio routing depends on did not work on this build."
+      offer_ffmpeg_upgrade "" required || return 1
+    fi
   else
     major="$raw"
     if [ "$major" -lt "$FFMPEG_MIN_MAJOR" ]; then
@@ -645,6 +686,25 @@ check_ffmpeg() {
     ask_yn "Continue without SRT anyway?" "n" proceed
     [ "$proceed" = "yes" ] || return 1
   fi
+
+  # And finally, ask a binary that passed every check above to actually DO the
+  # thing. A version can be high enough and a protocol list long enough on a
+  # build configured without the filters this depends on.
+  #
+  # A WARNING RATHER THAN A REFUSAL, DELIBERATELY, AND THE REASON IS EVIDENCE
+  # RATHER THAN CAUTION. This probe has been run against exactly one build. The
+  # version path above already refuses what it knows to be too old; making an
+  # under-tested probe able to block an install on four distributions nobody has
+  # run it on would be trusting it further than it has earned.
+  #
+  # installer.yml now asserts it passes on all four matrix images. Once that has
+  # a few runs behind it, this can become a refusal -- and the comment should be
+  # deleted when it does.
+  if ! ffmpeg_capability_ok; then
+    warn "this FFmpeg passed every check above but could not run polyemesis's own filter test."
+    echo "     Per-destination audio routing may not work. Report this with the output of:"
+    echo "     ffmpeg -version | head -1"
+  fi
   return 0
 }
 
@@ -663,7 +723,36 @@ install_docker() {
   elif command -v docker-compose >/dev/null 2>&1; then
     COMPOSE_CMD="docker-compose"
   else
-    die "Docker Compose not found. Install the compose plugin and re-run."
+    # THE OPERATOR JUST ACCEPTED A FULL DOCKER INSTALL AND IS NOW BEING SENT
+    # AWAY TO INSTALL PART OF IT BY HAND.
+    #
+    # get.docker.com -- which install_docker pipes to a shell a few lines up --
+    # ships the compose plugin. So the script either already had it, or knows
+    # precisely how to get it, at the moment it gave up.
+    warn "Docker Compose not found."
+    echo "     polyemesis's docker mode is a compose file; without the plugin there is"
+    echo "     nothing to run it with."
+    local getcompose=""
+    case "${DISTRO}" in
+      ubuntu|debian) getcompose="apt-get install -y docker-compose-plugin" ;;
+      fedora|rocky|almalinux|rhel|centos) getcompose="dnf install -y docker-compose-plugin" ;;
+    esac
+    if [ -n "$getcompose" ]; then
+      local wantcompose
+      ask_yn "Install the compose plugin now?" "y" wantcompose
+      if [ "$wantcompose" = "yes" ]; then
+        # Not `die` on failure: the re-check below is the verdict, and it gives
+        # a better message than the package manager's exit code.
+        DEBIAN_FRONTEND=noninteractive $getcompose >/dev/null 2>&1 || true
+        if docker compose version >/dev/null 2>&1; then
+          COMPOSE_CMD="docker compose"
+          ok "compose plugin installed"
+        fi
+      fi
+    fi
+    if [ -z "${COMPOSE_CMD:-}" ]; then
+      die "Docker Compose not found. Install the compose plugin and re-run."
+    fi
   fi
   ok "using: $COMPOSE_CMD"
 }
@@ -803,6 +892,34 @@ gather_configuration() {
       esac
     done
     echo
+    # TWO THINGS THAT ARE KNOWABLE FROM HERE, CHECKED RATHER THAN ASSERTED.
+    #
+    # Whether tcp/80 reaches this box from the internet cannot be settled from
+    # inside it, so the warning below stays. But two of the ways HTTP-01 fails
+    # ARE local facts, and both were being left to the operator to discover
+    # after issuance had already failed:
+    #
+    #   * the name does not resolve at all -- a typo, or a record never created.
+    #     Issuance cannot succeed and nothing about the install will say so.
+    #   * something else is already holding tcp/80, so the challenge listener
+    #     cannot bind. warn_if_taken covers the ports the operator chose; :80 is
+    #     not one of them, it is implied by choosing acme.
+    #
+    # DELIBERATELY NOT DONE: comparing the resolved address against this host's
+    # public IP. That needs an external echo service -- a network dependency and
+    # a third party told about this install -- to check something the warning
+    # below already covers.
+    if command -v getent >/dev/null 2>&1 && ! getent hosts "$DOMAIN_NAME" >/dev/null 2>&1; then
+      warn "$DOMAIN_NAME does not resolve from this host."
+      echo "     Let's Encrypt resolves it from the outside, so this is not proof it will"
+      echo "     fail — but a name with no record anywhere cannot be validated. Check the"
+      echo "     DNS before relying on the certificate."
+    fi
+    if port_in_use 80 tcp; then
+      warn "something is already listening on tcp/80."
+      echo "     HTTP-01 validation needs to bind it. Stop that service, or use"
+      echo "     --tls selfsigned and put your own proxy in front."
+    fi
     warn "acme needs inbound tcp/80 from the public internet for HTTP-01 validation."
     warn "A CNAME to a CDN, a captive portal, or an ISP blocking 80 all break issuance."
   elif [ "$TLS_MODE" = "selfsigned" ]; then
