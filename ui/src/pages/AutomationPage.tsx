@@ -165,6 +165,7 @@ const EVENT_LABELS: Record<string, TranslationKey> = {
   "auth.token.revoked": "auth.tokenRevoked",
   "settings.changed": "auto.evSettingsChanged",
   "clip.captured": "auto.evClipCaptured",
+  "broadcast.fault": "auto.broadcastFault",
 };
 
 /** The stored event name is the fallback: an unknown type renders as itself

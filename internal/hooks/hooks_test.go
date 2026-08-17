@@ -35,8 +35,12 @@ func TestAllTriggersExcludesTest(t *testing.T) {
 				"the subscription filter, not appear in it")
 		}
 	}
-	if len(AllTriggers()) != 4 {
-		t.Fatalf("AllTriggers has %d entries, want 4 -- add the new one to this "+
+	// Five since broadcast.fault joined it. The number is asserted rather than
+	// derived for this test's original reason -- a test that asks AllTriggers
+	// what is in AllTriggers cannot fail -- and raising it is the step that
+	// makes somebody go and write the docs row.
+	if len(AllTriggers()) != 5 {
+		t.Fatalf("AllTriggers has %d entries, want 5 -- add the new one to this "+
 			"test and to the docs before shipping it", len(AllTriggers()))
 	}
 }

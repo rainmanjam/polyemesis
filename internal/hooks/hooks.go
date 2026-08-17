@@ -55,6 +55,22 @@ const (
 	// FACT, not an incident, which is why a deliberate disable reports it: a
 	// script mirroring "what are we live to" needs both edges.
 	TriggerDestinationDown Trigger = "destination.down"
+	// TriggerBroadcastFault fires when a platform refused to move a broadcast's
+	// state and the refusal is one somebody has to act on -- the channel is at
+	// its concurrent-broadcast ceiling, the broadcast has already been
+	// completed, the token expired.
+	//
+	// A SEPARATE TRIGGER RATHER THAN A destination.down WITH A REASON, because
+	// it is the opposite fact. The stream is FINE: bytes are flowing, FFmpeg is
+	// healthy, the destination is delivering. What has failed is the platform's
+	// idea of the broadcast, so a script that mirrors "what are we live to"
+	// must not tear anything down when it hears this, and a script subscribed
+	// to destination.down must not start hearing about it.
+	//
+	// It never means the stream was stopped. Nothing in polyemesis stops a
+	// stream because a transition failed -- see internal/api/lifecycle.go, where
+	// that rule is the one invariant with a test of its own.
+	TriggerBroadcastFault Trigger = "broadcast.fault"
 	// TriggerTest is what the test button sends. Never subscribable: a test
 	// that a subscription filter swallows teaches the operator that their
 	// endpoint is broken when it is not.
@@ -67,6 +83,12 @@ func AllTriggers() []Trigger {
 	return []Trigger{
 		TriggerIngestPublished, TriggerIngestDisconnected,
 		TriggerDestinationUp, TriggerDestinationDown,
+		// APPENDED, so no row of the settings picker moves under an operator
+		// who has learned where the existing four are. Same reasoning as
+		// alerts.AllTypes, and the same cost stated the same way: a hook with an
+		// empty Triggers list means "everything", so an install that never
+		// narrowed its subscription starts receiving this one on upgrade.
+		TriggerBroadcastFault,
 	}
 }
 

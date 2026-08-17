@@ -19,10 +19,14 @@ import (
 // the same reasoning at oauth.go:298 -- the value of the interface is that
 // ABSENT is a supported answer, handled once by the caller.
 //
-// NOTHING IN THIS BUILD CALLS IT YET, DELIBERATELY. A transition is the one
-// platform write that can stop a broadcast that is already going out, so
-// deciding WHEN to send one is its own piece of work with its own review. This
-// round delivers the capability and the classification of its refusals.
+// WHO CALLS IT. internal/api/lifecycle.go, and nothing else. A transition is the
+// one platform write that can stop a broadcast that is already going out, so
+// deciding WHEN to send one was kept out of this package deliberately and given
+// its own review: this file delivers the capability and the classification of
+// its refusals, and the coordinator decides. If you are adding a second caller,
+// read that file's header first -- in particular the part about why a failed
+// transition must never stop the stream, and why the transition to
+// PhaseComplete has exactly one call site.
 
 // BroadcastPhase is a transition TARGET. YouTube's transition call takes exactly
 // three, and they are spelled the way the API spells them because the operator

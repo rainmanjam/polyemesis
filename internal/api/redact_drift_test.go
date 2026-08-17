@@ -83,6 +83,26 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.facebook.donateCharityId":           sPublic,
 	"destination.facebook.scheduledFor":              sPublic,
 	"destination.id":                                 sPublic,
+	// The broadcast-lifecycle coordinator's bookkeeping. All four are public,
+	// and each for its own reason rather than by association:
+	//
+	// broadcastId is the id in the public watch URL -- the same value
+	// destination.facebook.broadcastId already carries, and the one string an
+	// operator needs to find the broadcast in the platform's own console.
+	// phase is the platform's own word, visible in that console to anyone who
+	// can see the channel. attempts is a counter.
+	//
+	// fault is the only one worth arguing about, because it is free text built
+	// from platform errors -- and it is public because it EXISTS to be read: it
+	// is what the destination card shows when a broadcast will not start, so
+	// masking it would leave an operator with a blank space instead of a
+	// sentence telling them their channel is at its concurrent-broadcast limit.
+	// Nothing on the path that builds it touches a key: see
+	// TestALifecycleFaultCarriesNoCredential.
+	"destination.lifecycle.attempts":    sPublic,
+	"destination.lifecycle.broadcastId": sPublic,
+	"destination.lifecycle.fault":       sPublic,
+	"destination.lifecycle.phase":       sPublic,
 	// The reason a stream key could not be decrypted on this machine. sPublic
 	// despite sitting next to two sSecret leaves and despite the word "key"
 	// being in it: it is a fixed instruction to the operator -- re-enter the

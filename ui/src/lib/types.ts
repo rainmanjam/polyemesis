@@ -211,6 +211,14 @@ export interface Destination {
    *  charity's donate button to attach. Always present in a server response
    *  and empty for a destination that has not set any. */
   facebook?: FacebookSettings;
+  /** What the server knows about this destination's current platform broadcast.
+   *  Always present in a server response and empty for every destination on a
+   *  platform whose broadcast is a side effect of bytes arriving rather than an
+   *  object with a state machine — which today is everything except YouTube.
+   *
+   *  READ-ONLY. The server writes it through one narrow path of its own and
+   *  ignores it on a destination save, so sending it back changes nothing. */
+  lifecycle?: BroadcastControl;
   kind: DestKind;
   platform: Platform;
   accountId?: number | null;
@@ -2217,6 +2225,30 @@ export interface FacebookSettings {
   broadcastId?: string;
 }
 
+/** What the server knows about one destination's current platform broadcast.
+ *  Mirrors db.BroadcastControl field for field.
+ *
+ *  Everything here is a RECORD OF WHAT THE PLATFORM SAID, never a belief about
+ *  what polyemesis asked for — which is what makes it worth showing an operator
+ *  whose broadcast will not start. */
+export interface BroadcastControl {
+  /** Which broadcast the rest of this describes. */
+  broadcastId?: string;
+  /** The platform's own word for where the broadcast is — for YouTube:
+   *  created, ready, testing, testStarting, live, liveStarting, complete,
+   *  revoked. Passed through unmapped so it can be compared against what the
+   *  platform's own console shows. */
+  phase?: string;
+  /** How many consecutive sweeps have failed. */
+  attempts?: number;
+  /** What went wrong, in the operator's words, or absent when nothing has.
+   *
+   *  A fault here NEVER means the stream stopped: the server does not stop a
+   *  stream because a broadcast transition failed. It means the bytes are going
+   *  out and the platform has not put them in front of an audience. */
+  fault?: string;
+}
+
 // ------------------------------------------------------------------- expert
 //
 // Hand-edited FFmpeg arguments, per destination. Two strings appended to the
@@ -2851,7 +2883,12 @@ export type HookTrigger =
   | "ingest.published"
   | "ingest.disconnected"
   | "destination.up"
-  | "destination.down";
+  | "destination.down"
+  /** A platform refused to move a broadcast's state and somebody has to act.
+   *  NOT a destination.down: the stream is fine and is still being delivered —
+   *  what failed is the platform's idea of the broadcast. A script that mirrors
+   *  "what are we live to" must not tear anything down when it hears this. */
+  | "broadcast.fault";
 
 /** A stored lifecycle webhook. `url` is always masked and `secret` is never
  *  present: the plaintext key is returned once, by the create call, and cannot

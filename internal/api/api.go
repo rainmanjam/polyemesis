@@ -352,6 +352,17 @@ type Server struct {
 	// -- which is the difference an operator needs to see.
 	hooks *hooks.Dispatcher
 
+	// lifecycle drives platform broadcast state -- when a broadcast goes live,
+	// and when it ends. Nil when the server was built without a store, which is
+	// how several tests in this package build one.
+	//
+	// It is reached from outside this package only as an engine.LifecycleObserver
+	// (see Lifecycle) and as two loop entry points. Everything it is allowed to
+	// do is fixed at construction in New: a store handle whose only lifecycle
+	// method writes one column, a provider set, a token refresher and an
+	// escalation callback. See the header of lifecycle.go.
+	lifecycle *lifecycleCoordinator
+
 	// kickKeys caches Kick's webhook signing key. One per server rather than
 	// one per adapter: the key belongs to Kick, not to an account, so two
 	// connected Kick channels share the fetch.
@@ -585,6 +596,15 @@ func New(o Options) *Server {
 	// UPGRADE, which is exactly what an empty path makes upgrade.PlanFor do.
 	if p, err := os.Executable(); err == nil {
 		s.execPath = p
+	}
+	// The broadcast-lifecycle coordinator. Built here rather than in main so
+	// that everything it can reach is chosen in one place and is visible in one
+	// expression -- a store, a provider set, a token refresher, an escalation
+	// callback. Nothing about an engine, a process or a reconcile is available
+	// to be passed in, which is the point.
+	if o.DB != nil {
+		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
+			s.tokenFor, s.escalateBroadcastFault)
 	}
 	return s
 }

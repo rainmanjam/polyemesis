@@ -85,6 +85,21 @@ func TestEveryAuditEventIsCoveredByTheRedactionTest(t *testing.T) {
 			alerts.TypeDiskLow, alerts.TypeDiskRecovered,
 			alerts.TypeLoudnessOut, alerts.TypeLoudnessRecovered:
 			continue
+		// broadcast.fault is OPERATIONAL and is raised by this package, which is
+		// a combination none of the above covers -- so it is exempted here for
+		// its own reason rather than folded into theirs. It cannot join
+		// everyAuditEvent because the two invariants that list enforces are
+		// properties of AUDIT events specifically: an audit event must set no
+		// coalescing Key (see the flood argument below), while an operational
+		// one must, or a destination refusing every fifteen seconds becomes two
+		// hundred and forty messages an hour.
+		//
+		// It is not left unchecked. TestABroadcastFaultAlertNeverCarriesASecret
+		// in lifecycle_test.go plants the same secret in the one field of it
+		// that is not written by this process -- the platform's own error text
+		// -- and asserts the same three encodings.
+		case alerts.TypeBroadcastFault:
+			continue
 		}
 		if !seen[ty] {
 			t.Errorf("%s is subscribable but has no entry in everyAuditEvent, so nothing checks it for leaks", ty)

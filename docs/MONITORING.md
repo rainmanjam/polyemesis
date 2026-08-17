@@ -120,6 +120,35 @@ destination is starting up or after it has stopped.
 
 The same numbers are on each destination's card, live.
 
+### A broadcast that will not start or end
+
+`broadcast.fault` (`warning`) fires when a platform refuses to move a
+broadcast's state and somebody has to act — the channel is at its
+concurrent-broadcast limit, the broadcast has already been completed and cannot
+return to live, the connected account's token expired.
+
+**It is not `destination.down`, and reading it as one sends you to look at the
+thing that is working.** The stream is fine: bytes are flowing, FFmpeg is
+healthy, the destination is delivering. What has failed is the platform's idea
+of the broadcast, so the symptom an operator sees is a watch page that says
+"starting soon" beside a stream that is going out perfectly.
+
+**polyemesis never stops a stream because a transition failed.** The platform
+requires an active ingest to accept a transition at all, so stopping the stream
+would destroy the only condition under which a retry could ever succeed. The
+whole response to a failure is therefore to tell you: the fault appears on the
+destination card, raises this alert, and sends a `broadcast.fault` webhook. The
+stream carries on.
+
+A crashed encoder is deliberately **not** one of these, and does not end the
+broadcast either. A completed broadcast cannot return to live, so ending on a
+crash would permanently destroy a show that the supervisor is about to
+reconnect to the same key and the same bound stream. If nothing ever
+reconnects, the platform's own automatic stop closes the broadcast.
+
+The current phase, the retry count and the fault text are on the destination in
+the API, under `lifecycle`.
+
 ### Security and configuration events
 
 Seven of the subscribable types are not about the stream. They are about the

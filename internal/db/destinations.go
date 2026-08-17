@@ -231,7 +231,21 @@ type Destination struct {
 	// Facebook is create-time configuration for a Facebook destination. Empty
 	// for every other platform, and for a Facebook destination that has not set
 	// any of it.
-	Facebook  FacebookSettings `json:"facebook"`
+	Facebook FacebookSettings `json:"facebook"`
+	// Lifecycle is what the broadcast-lifecycle coordinator knows about this
+	// destination's current broadcast. Zero for every destination on a platform
+	// whose broadcast is a side effect of bytes arriving rather than an object
+	// with a state machine -- see internal/oauth/lifecycle.go.
+	//
+	// READ-ONLY THROUGH THE API, and structurally so rather than by a guard in a
+	// handler: neither CreateDestination nor UpdateDestination mentions the
+	// `lifecycle` column, so a request body carrying one is decoded, ignored and
+	// never written. UpdateLifecycle is the only writer in the process. That is
+	// what stops an operator's rename -- which decodes the body OVER the stored
+	// row and writes the whole thing back -- from reverting a phase the
+	// coordinator recorded a moment earlier, and it is why there is no
+	// dropUnsendableSettings clause for this field.
+	Lifecycle BroadcastControl `json:"lifecycle"`
 	Position  int              `json:"position"`
 	CreatedAt time.Time        `json:"createdAt"`
 	UpdatedAt time.Time        `json:"updatedAt"`
@@ -880,6 +894,11 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		// Same reasoning as complianceJSON: a row written before this column
 		// existed must decode to a zero FacebookSettings, not fail the scan.
 		facebookJSON = "{}"
+		// Same reasoning again, and it is the one that matters most here: every
+		// row in every existing install predates this column, so a scan that
+		// failed on the default would take the whole destinations list down on
+		// the first start after an upgrade.
+		lifecycleJSON = "{}"
 		// The second (VOD) mix. Empty is "no second track" -- see the vod_profile
 		// migration for why empty and not "{}" -- so a row written before the
 		// column existed decodes to a nil VODProfile rather than to a profile
@@ -898,6 +917,7 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		&dst.Resilience.MinBackoffSeconds, &dst.Resilience.MaxBackoffSeconds,
 		&dst.Resilience.GiveUpAfter,
 		&dst.Audio.Codec, &dst.Audio.Mono, &dst.Audio.Copy, &complianceJSON, &facebookJSON,
+		&lifecycleJSON,
 		&dst.Multitrack, &vodProfileRaw,
 		&dst.Position, &created, &updated)
 	if err != nil {
@@ -961,6 +981,11 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 			return nil, fmt.Errorf("destination %d has unreadable Facebook settings: %w", dst.ID, err)
 		}
 	}
+	if lifecycleJSON != "" {
+		if err := json.Unmarshal([]byte(lifecycleJSON), &dst.Lifecycle); err != nil {
+			return nil, fmt.Errorf("destination %d has unreadable broadcast lifecycle state: %w", dst.ID, err)
+		}
+	}
 	if err := json.Unmarshal([]byte(profileRaw), &dst.Profile); err != nil {
 		return nil, fmt.Errorf("destination %d: decode routing profile: %w", dst.ID, err)
 	}
@@ -987,6 +1012,7 @@ const destColumns = `id, name, kind, platform, account_id, url,
 	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after,
 	au_codec, au_mono, au_copy, compliance, facebook,
+	lifecycle,
 	multitrack, vod_profile,
 	position, created_at, updated_at`
 
@@ -1391,6 +1417,77 @@ func (d *DB) UpdateAnnouncement(id int64, apply func(*Destination) bool) (*Desti
 	return d.GetDestination(id)
 }
 
+// ErrLifecycleSkipped is what UpdateLifecycle returns when the callback declined
+// the row it was shown. The sibling of ErrAnnouncementSkipped and a sentinel for
+// the same reason: it is not an operational failure, it is the answer "the
+// destination is no longer one this write may claim".
+var ErrLifecycleSkipped = errors.New("lifecycle update skipped")
+
+// UpdateLifecycle writes ONE column: the broadcast-lifecycle block.
+//
+// THE NARROWEST WRITER IN THIS FILE, AND THAT IS THE POINT. It is the only way
+// the lifecycle coordinator can touch the database at all, so whatever it can
+// persist is exactly what this statement lists -- and this statement lists
+// nothing that changes what a destination DOES. Set Enabled inside apply and it
+// is discarded. Set StreamKey and it is discarded. Set URL and it is discarded.
+// The coordinator therefore cannot start, stop, or reconfigure an output by any
+// route, however wrong its logic becomes, and that is a property of this
+// function rather than a promise made in a comment somewhere else.
+//
+// Contrast UpdateAnnouncement, which writes three columns including the stream
+// key and is therefore forbidden on an enabled destination. This one writes a
+// column that reaches no FFmpeg argument, so it is safe on a LIVE destination --
+// which is the whole reason a lifecycle coordinator can exist while the
+// pre-announce sweep has to stand back. See internal/engine/lifecycle_spec_test.go
+// for the pin.
+//
+// The row is READ AGAIN INSIDE THE TRANSACTION, for UpdateAnnouncement's reason:
+// the caller has been away making an HTTP call to a platform, an operator may
+// have disabled or re-enabled the destination in that window, and apply must
+// decide against the row as it stands rather than against a snapshot taken
+// before the call. apply returning false rolls back with ErrLifecycleSkipped,
+// which is what makes "this broadcast is being ended" a compare-and-set: two
+// daemons on one database serialise here, and the loser sends nothing.
+func (d *DB) UpdateLifecycle(id int64, apply func(*Destination) bool) (*Destination, error) {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	cur, err := d.scanDestination(tx.QueryRow(destByIDQuery, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !apply(cur) {
+		return nil, ErrLifecycleSkipped
+	}
+	lifecycle, err := json.Marshal(cur.Lifecycle)
+	if err != nil {
+		return nil, err
+	}
+	// updated_at is deliberately NOT touched. This sweep runs every fifteen
+	// seconds over every lifecycle destination, and bumping the timestamp would
+	// make "when did somebody last change this destination" mean "when did the
+	// coordinator last confirm the platform agreed with us" -- which is the
+	// answer to a different question, on the field an operator uses to work out
+	// what changed before a show went wrong.
+	res, err := tx.Exec(`UPDATE destinations SET lifecycle=? WHERE id=?`, string(lifecycle), id)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return d.GetDestination(id)
+}
+
 // SetDestinationEnabled flips the run/stop intent without touching anything
 // else, so start/stop never risks rewriting a routing profile.
 func (d *DB) SetDestinationEnabled(id int64, enabled bool) error {
@@ -1561,6 +1658,19 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		// compliance is one: a slice plus a scalar, edited as a unit, and '{}'
 		// is "send nothing".
 		{"facebook", `ALTER TABLE destinations ADD COLUMN facebook TEXT NOT NULL DEFAULT '{}'`},
+		// The broadcast-lifecycle coordinator's bookkeeping, one JSON blob for
+		// the same reason compliance and facebook are, and '{}' for the same
+		// reason: it decodes to a zero BroadcastControl, which means "this
+		// destination has never been through the coordinator".
+		//
+		// THAT DEFAULT IS THE UPGRADE STORY IN FULL, and it is deliberately the
+		// quiet one. A row that predates this column has no recorded phase, so
+		// the disabled-row branch of the sweep declines to end anything for it
+		// -- see the table in internal/api/lifecycle.go. An install upgrading
+		// mid-show therefore does nothing to the broadcast already on air; the
+		// coordinator adopts it the moment the platform is next asked and says
+		// it is live.
+		{"lifecycle", `ALTER TABLE destinations ADD COLUMN lifecycle TEXT NOT NULL DEFAULT '{}'`},
 		{"backup_url", `ALTER TABLE destinations ADD COLUMN backup_url TEXT NOT NULL DEFAULT ''`},
 		{"backup_stream_key", `ALTER TABLE destinations ADD COLUMN backup_stream_key TEXT NOT NULL DEFAULT ''`},
 		// The operator's intent, promoted out of the facebook JSON blob to sit

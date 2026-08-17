@@ -31,6 +31,16 @@ script needed.
 | `ingest.disconnected` | nothing has arrived for 5s | 5s |
 | `destination.up` | a destination starts delivering | none |
 | `destination.down` | a destination stops — failed, disabled or deleted | 10s |
+| `broadcast.fault` | a platform refused to start or end a broadcast | none |
+
+`broadcast.fault` is **not** a `destination.down` and must not be treated as
+one. The stream is fine: bytes are flowing and the destination is delivering.
+What failed is the platform's own idea of the broadcast — the channel is at its
+concurrent-broadcast limit, the broadcast has already been completed and cannot
+return to live, the connected account's token expired. polyemesis never stops a
+stream because a transition failed, so a script that mirrors "what are we live
+to" must not tear anything down when it hears this. The `reason` field carries
+the operator-facing sentence and the broadcast id.
 
 `ingest.published` has **no dwell on purpose**. An operator scripting "we are
 live" wants it now, and the cost is stated below under limitations.

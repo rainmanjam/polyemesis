@@ -127,6 +127,23 @@ const (
 	// "somebody quietly returned this box to the version before the security
 	// fix" is exactly the sentence this trail exists to make findable.
 	TypeUpgradeRolledBack Type = "upgrade.rolled_back"
+	// TypeBroadcastFault fires when a platform refused to move a broadcast's
+	// lifecycle and somebody has to act: the channel is at its concurrent
+	// broadcast ceiling, the broadcast has already been completed and cannot
+	// return, the token expired.
+	//
+	// NOT TypeDestinationDown, and not a severity of it. The destination is up:
+	// bytes are flowing and the encoder is healthy. What is wrong is that the
+	// audience cannot see them, and an operator paged with "destination down"
+	// would go and look at the one thing that is working. See
+	// docs/DESIGN-DESTINATION-HEALTH.md for the same argument about reusing an
+	// existing event: one message closing out two different situations closes
+	// out neither.
+	//
+	// Warning rather than critical: the show is going out and is recoverable by
+	// hand in the platform's own console, which is a different night from
+	// "nothing is being delivered".
+	TypeBroadcastFault Type = "broadcast.fault"
 	// TypeTest is what the "send a test message" button raises. It is never
 	// coalesced and never filtered, because a test that a rule quietly swallows
 	// teaches the operator nothing.
@@ -169,6 +186,10 @@ func AllTypes() []Type {
 		// Appended for the same stability reason, not because a binary
 		// replacement is less important than a clip.
 		TypeUpgradeStaged, TypeUpgradeRolledBack,
+		// Appended for the third time, for the third time against meaning: this
+		// belongs beside the destination events and putting it there would move
+		// twenty established picker rows.
+		TypeBroadcastFault,
 	}
 }
 
