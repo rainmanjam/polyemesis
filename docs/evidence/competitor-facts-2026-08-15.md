@@ -245,3 +245,79 @@ ships, and it is a **local OBS Studio plugin**.
 
   *Uncertain and therefore unpublishable:* whether sub-second trial
   configurations carry a watermark.
+
+---
+
+# 8. Streamlabs Multistream — added 2026-08-16, same sourcing standard
+
+Primary source, read **16 August 2026**: <https://streamlabs.com/multistream>,
+including its own FAQ block on that page. Every quote below is theirs, verbatim,
+including two grammatical slips reproduced rather than tidied so the quote can be
+checked against the page.
+
+## What it is
+
+> Streamlabs Multistream is a feature that allows you to broadcast your live
+> stream to multiple platforms at once. With Multistream you can go live to
+> Twitch, YouTube, TikTok, Kick, Facebook, Patreon, X(Twitter), and RTMP
+> destinations simultaneously. **We process your stream on our servers** so you
+> can expand your reach without straining your PC.
+
+That last clause is the architecture, stated by them: it is a CLOUD relay. The
+stream leaves the operator's machine and is fanned out by Streamlabs. This is the
+same shape as restream.io and Castr, and the opposite of a plugin.
+
+> Streamlabs utilizes a cloud-based multistreaming system mean that you only send
+> one stream (or two with Dual Output enabled — one vertical and one horizontal)
+> to Streamlabs and our servers handle the rest.
+
+[sic — "system mean that"]
+
+## Price gate
+
+> Streamlabs Multistream is an Ultra feature. If you want to multistream for
+> free, you can go live to one vertical and one horizontal destination at the
+> same time with Dual Ouput, no subscription required.
+
+[sic — "Dual Ouput"]
+
+So: **multistreaming proper requires the paid Ultra tier.** The free path is Dual
+Output, and its scope is exactly two destinations of prescribed shapes — one
+vertical, one horizontal. From the same page:
+
+> Stream to one platform per canvas, completely free.
+
+**NO PRICE FIGURE IS RECORDED HERE ON PURPOSE.** The Ultra page was not read on
+16 August 2026, and a subscription price is the single most movable fact in this
+file. Any page citing a Streamlabs price needs its own dated read.
+
+## Ingest paths
+
+> Yes, you have two options if you want to use Streamlabs to Multistream from
+> OBS. **Streamlabs Plugin for OBS** — Multistreaming is built into the
+> Streamlabs Plugin for OBS. **RTMP** — If you want to use OBS without the
+> Plugin, you can set up your platforms in your Multistream setting in Dashboard
+> and use the RTMP URL and Stream Key from this page as your stream destination
+> in OBS.
+
+RTMP in, therefore. Nothing on the page offers an SRT ingest, and nothing offers
+a multitrack one.
+
+## Chat
+
+> You can read chat and post comments from Multichat for: YouTube, Twitch,
+> Facebook Pages. You can read chat from Multichat for: Kick, X (Twitter),
+> Facebook Profiles.
+
+## WHAT THIS SOURCE DOES NOT SAY, AND WHICH THEREFORE MUST NOT BE CLAIMED
+
+The page says **nothing** about per-destination audio. Not that it is absent —
+nothing either way. Under the rule at the head of this file that means a
+comparison row states what polyemesis does and **leaves the Streamlabs cell
+blank**. It does not assert a "No".
+
+This matters more here than it did for the plugins. obs-multi-rtmp, Aitum and
+SE.Live were all read at the source level, so their track-SELECTION behaviour is
+known and the narrow true claim could be written. For Streamlabs the relay is
+somebody else's server and there is no source to read. Absence of a claim on
+their marketing page is not evidence of absence in their product.

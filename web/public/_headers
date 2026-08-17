@@ -122,6 +122,10 @@
   Cache-Control: no-cache
 /how-to-multistream-from-obs
   Cache-Control: no-cache
+/multistream
+  Cache-Control: no-cache
+/twitch-vod-track
+  Cache-Control: no-cache
 /404
   Cache-Control: no-cache
 # The comparison pages are nested, so they are SERVED at /vs/<name> and built as
@@ -136,6 +140,8 @@
 /vs/restreamer
   Cache-Control: no-cache
 /vs/streamelements
+  Cache-Control: no-cache
+/vs/streamlabs
   Cache-Control: no-cache
 /*.html
   Cache-Control: no-cache

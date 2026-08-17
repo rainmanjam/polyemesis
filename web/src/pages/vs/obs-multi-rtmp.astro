@@ -34,7 +34,7 @@ const outbound = [
   [
     "Video encodes running on the stream PC",
     "One, shared, with Get from OBS — or one per destination when you want different bitrates",
-    "None. The picture is stream-copied through untouched",
+    "One, to produce the SRT ingest — and still one at ten destinations. The server stream-copies the picture through untouched",
   ],
   [
     "Outbound streams from your connection",
@@ -44,7 +44,7 @@ const outbound = [
   [
     "Audio encodes on the stream PC",
     "One per destination",
-    "None. The mixing and the audio encode both happen on the server",
+    "One AAC encode per track you send, and that count is fixed by your track layout, not by the destination list. The summing and the per-destination encode happen on the server",
   ],
   [
     "Where a mix gets summed",
@@ -246,6 +246,8 @@ const merits = [
       <a href="/vs/aitum-multistream" class="text-primary underline-offset-4 hover:underline">Aitum Multistream</a>
       ·
       <a href="/vs/streamelements" class="text-primary underline-offset-4 hover:underline">StreamElements</a>
+      ·
+      <a href="/vs/streamlabs" class="text-primary underline-offset-4 hover:underline">Streamlabs</a>
       ·
       <a href="/vs/restreamer" class="text-primary underline-offset-4 hover:underline">Restreamer and restream.io</a>
     </p>
