@@ -342,6 +342,27 @@ require_systemd() {
 # distro copy in place. Nothing is deleted, so the way back is one rm.
 FFMPEG_UPGRADE=ask   # ask | skip | force
 
+# Installing a release binary whose checksum CANNOT BE CHECKED, as opposed to
+# one whose checksum is wrong. Both end with an unverified binary running as a
+# service; only this one used to happen without anybody choosing it. Off, so the
+# exception is a flag somebody typed.
+ALLOW_UNVERIFIED=false
+
+# Set when this run installs the static FFmpeg, and consumed by the config
+# writer.
+#
+# THIS IS THE POKA-YOKE, AND IT REPLACES AN INSTRUCTION. The warning below used
+# to read "Put /usr/local/bin ahead of it, or set the ffmpeg path in the config"
+# -- asking the operator to perform an edit, to a file THIS SCRIPT IS CREATING,
+# in the same run. internal/config.FFmpeg has Binary and Probe (config.go:107),
+# and the config.yaml emitted here carried no ffmpeg block at all.
+#
+# Writing the absolute path means PATH ORDER STOPS MATTERING, which is better
+# than getting PATH order right. The failure it removes is silent: the service
+# starts against the older FFmpeg and misbehaves later, somewhere else.
+FFMPEG_PINNED_BIN=""
+FFMPEG_PINNED_PROBE=""
+
 ffmpeg_static_asset() {
   # BtbN publishes per-architecture GPL tarballs. Only these two are built.
   case "$ARCH" in
@@ -351,49 +372,103 @@ ffmpeg_static_asset() {
   esac
 }
 
+# offer_ffmpeg_upgrade takes the major you have (empty when there is no FFmpeg
+# at all) and NEED, which is "optional" or "required".
+#
+# THE TWO CALLERS WANT OPPOSITE THINGS AND THE DIFFERENCE IS NOT COSMETIC.
+#
+#   optional -- you have 6.x or 7.x. Everything works; what 8.x adds is
+#               multitrack FLV. Declining costs you one feature, so the default
+#               is "no" and the return value is ignored.
+#
+#   required -- you have nothing, or something below the floor. polyemesis
+#               REFUSES TO START against it, so declining ends the install. The
+#               default is "yes", the wording says what is actually at stake,
+#               and the return value decides whether check_ffmpeg fails.
+#
+# Returns 0 only when a usable FFmpeg is on PATH afterwards. That is stricter
+# than "the files were written": /usr/local/bin is ahead of /usr/bin on a
+# DEFAULT path and not on every host, and an install that put a good binary
+# somewhere PATH does not reach is a failure that used to report success.
 offer_ffmpeg_upgrade() {
-  local have="$1" asset answer tmp
+  local have="$1" need="${2:-optional}" asset answer tmp label default_answer
   asset="$(ffmpeg_static_asset)"
+  # "6.x" reads wrong when there is no FFmpeg at all.
+  if [ -n "$have" ]; then label="$have.x"; else label="no FFmpeg"; fi
 
-  echo "     What you have keeps working: SRT carries every audio track on any"
-  echo "     version above the floor, and nothing about routing, recording or"
-  echo "     destinations depends on this."
-  echo "     What ${FFMPEG_RECOMMENDED_MAJOR}.x adds is multitrack FLV. Below 7.1 an Enhanced RTMP"
-  echo "     publisher sending several audio tracks arrives as ONE track, with no"
-  echo "     error on either end -- which is the part worth knowing, because it"
-  echo "     looks like the tracks were never sent."
+  if [ "$need" = "required" ]; then
+    echo "     polyemesis shells out to FFmpeg for everything and will not start"
+    echo "     against ${label}. A current static build fixes that without touching"
+    echo "     your distribution's package."
+  else
+    echo "     What you have keeps working: SRT carries every audio track on any"
+    echo "     version above the floor, and nothing about routing, recording or"
+    echo "     destinations depends on this."
+    echo "     What ${FFMPEG_RECOMMENDED_MAJOR}.x adds is multitrack FLV. Below 7.1 an Enhanced RTMP"
+    echo "     publisher sending several audio tracks arrives as ONE track, with no"
+    echo "     error on either end -- which is the part worth knowing, because it"
+    echo "     looks like the tracks were never sent."
+  fi
+
+  # --check INSTALLS NOTHING, AND THAT PROMISE OUTRANKS THIS OFFER.
+  #
+  # Its whole contract is that it proves what a host can be asked without
+  # changing it -- it is what CI runs across the distro matrix, including the
+  # two images that are deliberately below the floor. Without this guard,
+  # `--check --ffmpeg force` would download and replace a system binary during
+  # a preflight, which is the one thing --check says it will not do. Reported
+  # rather than silently skipped, so the operator learns the fix exists.
+  if [ "${CHECK_ONLY:-false}" = true ]; then
+    echo "     --check makes no changes. Re-run without it (or with --ffmpeg force)"
+    echo "     to install FFmpeg ${FFMPEG_RECOMMENDED_MAJOR}.x to /usr/local/bin."
+    return 1
+  fi
 
   if [ -z "$asset" ]; then
-    warn "no static build is published for $ARCH — staying on $have.x"
+    warn "no static build is published for $ARCH — staying on ${label}"
     echo "     Use the docker mode, which bundles ${FFMPEG_RECOMMENDED_MAJOR}.x for every architecture."
-    return 0
+    return 1
   fi
 
   case "$FFMPEG_UPGRADE" in
     skip)
-      echo "     Skipping the upgrade (--ffmpeg skip). Staying on $have.x."
-      return 0 ;;
+      echo "     Skipping the install (--ffmpeg skip). Staying on ${label}."
+      return 1 ;;
     force) answer=yes ;;
     *)
       if ! interactive; then
         # Unattended. Installing a system binary nobody asked for is not a
-        # default worth taking silently.
-        warn "unattended: leaving FFmpeg at $have.x. Re-run with --ffmpeg force to upgrade."
-        return 0
+        # default worth taking silently -- and that holds even when it is
+        # required, because the honest outcome there is a refusal that names
+        # the flag, not a system binary replaced by a script nobody watched.
+        warn "unattended: leaving ${label}. Re-run with --ffmpeg force to install ${FFMPEG_RECOMMENDED_MAJOR}.x."
+        return 1
       fi
-      # Default "n", not "y". ask() returns the default whenever nothing can
-      # answer -- and interactive() can still be true on a host where /dev/tty
-      # is readable but no one is reading it, so a "y" default would replace a
-      # system binary on the strength of a question nobody saw. Someone who
-      # wants this either types y or passes --ffmpeg force.
-      ask_yn "Install FFmpeg ${FFMPEG_RECOMMENDED_MAJOR}.x to /usr/local/bin now?" "n" answer ;;
+      # Default "n" when the upgrade is OPTIONAL. ask() returns the default
+      # whenever nothing can answer -- and interactive() can still be true on a
+      # host where /dev/tty is readable but no one is reading it, so a "y"
+      # default would replace a system binary on the strength of a question
+      # nobody saw. Someone who wants this either types y or passes
+      # --ffmpeg force.
+      #
+      # Default "y" when it is REQUIRED, and the same reasoning is what permits
+      # it: the alternative to installing is not "keep what you have", it is
+      # "this install stops here". A question nobody saw then defaults to the
+      # outcome the operator was asking for by running the installer at all.
+      if [ "$need" = "required" ]; then default_answer=y; else default_answer=n; fi
+      ask_yn "Install FFmpeg ${FFMPEG_RECOMMENDED_MAJOR}.x to /usr/local/bin now?" "$default_answer" answer ;;
   esac
 
   if [ "$answer" != "yes" ]; then
-    echo "     Left at $have.x. Enhanced RTMP multitrack will arrive as a single"
+    if [ "$need" = "required" ]; then
+      echo "     Declined. Nothing was changed, and this install cannot continue"
+      echo "     against ${label} — see the options above."
+      return 1
+    fi
+    echo "     Left at ${label}. Enhanced RTMP multitrack will arrive as a single"
     echo "     track; everything else behaves the same. Re-run with --ffmpeg force"
     echo "     to change this later."
-    return 0
+    return 1
   fi
 
   tmp="$(mktemp -d)"
@@ -403,22 +478,22 @@ offer_ffmpeg_upgrade() {
   echo "     Fetching $asset ..."
   if ! fetch_https "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$asset" \
         "$tmp/ff.tar.xz"; then
-    warn "download failed — staying on $have.x. Nothing was changed."
+    warn "download failed — staying on ${label}. Nothing was changed."
     warn "(needs one of curl, wget or python3; this host appears to have none)"
-    return 0
+    return 1
   fi
 
   mkdir -p "$tmp/x"
   if ! tar xf "$tmp/ff.tar.xz" --strip-components=1 -C "$tmp/x" 2>/dev/null; then
-    warn "the archive did not extract — staying on $have.x. Nothing was changed."
-    return 0
+    warn "the archive did not extract — staying on ${label}. Nothing was changed."
+    return 1
   fi
 
   # Verify BEFORE displacing anything: a build without libsrt would be a
   # downgrade in capability dressed as an upgrade in version.
   if ! "$tmp/x/bin/ffmpeg" -hide_banner -protocols 2>/dev/null | tr ' ' '\n' | grep -qx srt; then
-    warn "the downloaded build has no libsrt — refusing it, staying on $have.x."
-    return 0
+    warn "the downloaded build has no libsrt — refusing it, staying on ${label}."
+    return 1
   fi
 
   install -m 0755 "$tmp/x/bin/ffmpeg"  /usr/local/bin/ffmpeg
@@ -429,12 +504,32 @@ offer_ffmpeg_upgrade() {
   # where /usr/local/bin is not first is the OLD build, so a successful upgrade
   # announces the version it just replaced.
   ok "installed $(/usr/local/bin/ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f1-3) to /usr/local/bin"
-  if [ "$(command -v ffmpeg)" != "/usr/local/bin/ffmpeg" ]; then
-    warn "PATH still resolves ffmpeg to $(command -v ffmpeg) — polyemesis will use that one."
-    echo "     Put /usr/local/bin ahead of it, or set the ffmpeg path in the config."
-  fi
+  # Recorded so the generated config can PIN it. See FFMPEG_PINNED_BIN.
+  FFMPEG_PINNED_BIN=/usr/local/bin/ffmpeg
+  FFMPEG_PINNED_PROBE=/usr/local/bin/ffprobe
   echo "     The distro package is untouched at /usr/bin/ffmpeg. To go back:"
   echo "     rm /usr/local/bin/ffmpeg /usr/local/bin/ffprobe"
+
+  # WROTE THE FILES IS NOT THE SAME AS FIXED THE PROBLEM, and this is where the
+  # difference bites. /usr/local/bin is ahead of /usr/bin on a DEFAULT PATH and
+  # not on every host -- a trimmed root PATH, or a distro that orders them the
+  # other way, leaves the old binary winning. That was already warned about;
+  # what is new is that the REQUIRED caller cannot treat a warning as success,
+  # because it is about to report a floor as cleared while polyemesis would
+  # still shell out to the binary that does not clear it.
+  if [ "$(command -v ffmpeg)" != "/usr/local/bin/ffmpeg" ]; then
+    warn "PATH still resolves ffmpeg to $(command -v ffmpeg)."
+    # NOT "go and fix your PATH" any more. FFMPEG_PINNED_BIN is written into the
+    # generated config.yaml as ffmpeg.binary, so polyemesis uses the build this
+    # script just verified regardless of what PATH resolves. In binary mode the
+    # ambiguity is gone rather than reported.
+    echo "     polyemesis will still use ${FFMPEG_PINNED_BIN} — it is pinned in the"
+    echo "     generated config, so PATH order does not decide this."
+    # Still fatal for the DOCKER-mode preflight and for --check, where no config
+    # of ours is written and PATH is genuinely what decides.
+    [ "$need" = "required" ] && [ "${MODE:-}" != "binary" ] && return 1
+  fi
+  return 0
 }
 
 # check_ffmpeg enforces the two separate things that go wrong, because they
@@ -453,7 +548,16 @@ check_ffmpeg() {
                echo "     On this family the default repos have neither. EPEL's ffmpeg-free is"
                echo "     5.1.x, below the floor. Use RPM Fusion, a static build, or docker." ;;
     esac
-    return 1
+    # AND THEN OFFER TO DO IT, rather than only saying how.
+    #
+    # This script already knows how to install a current FFmpeg -- it does it
+    # fifty lines up for hosts that are merely OLD. Withholding the same
+    # machinery from the hosts that cannot run polyemesis AT ALL was the wrong
+    # way round: it handed a working answer to the operator whose install was
+    # going to succeed anyway, and a list of homework to the one whose install
+    # was about to stop.
+    offer_ffmpeg_upgrade "" required || return 1
+    return 0
   }
 
   local raw major
@@ -484,12 +588,17 @@ check_ffmpeg() {
       esac
       echo "     Options: a newer distribution, a static build with libsrt"
       echo "     (https://github.com/BtbN/FFmpeg-Builds/releases), or the docker mode."
-      return 1
+      # The second of those three is something this script can just do, and the
+      # static build it fetches is the same one the sentence above recommends.
+      offer_ffmpeg_upgrade "$major" required || return 1
+      return 0
     fi
     if [ "$major" -lt "$FFMPEG_RECOMMENDED_MAJOR" ]; then
       ok "ffmpeg $major.x clears the ${FFMPEG_MIN_MAJOR}.0 floor"
       warn "ffmpeg $major.x is older than the ${FFMPEG_RECOMMENDED_MAJOR}.x the container ships."
-      offer_ffmpeg_upgrade "$major"
+      # Optional: the return value is deliberately ignored. Declining here costs
+      # one feature, not the install.
+      offer_ffmpeg_upgrade "$major" optional || true
     else
       ok "ffmpeg $major.x matches the ${FFMPEG_RECOMMENDED_MAJOR}.x the container ships"
     fi
@@ -505,7 +614,33 @@ check_ffmpeg() {
     echo "       polyemesis will start and warn, and you can use RTMP — but RTMP carries"
     echo "       ONE stereo pair, so per-destination audio routing has nothing to route"
     echo "       from. That is the whole reason to run polyemesis."
-    echo "       Fix it with a build configured --enable-libsrt, or use the docker mode."
+
+    # AND THEN OFFER TO FIX IT, which this branch spent its whole life telling
+    # people to do by hand.
+    #
+    # The previous line here was "Fix it with a build configured
+    # --enable-libsrt, or use the docker mode" -- while offer_ffmpeg_upgrade,
+    # fifty lines up, downloads a build and REFUSES IT unless -protocols lists
+    # srt. The artefact this message asked the operator to go and compile was
+    # already in the script's hand, tested.
+    #
+    # This is not a rare path and it is not the version gate: an FFmpeg can
+    # clear the 6.0 floor and carry no SRT. Homebrew's does, which
+    # docs/INSTALL.md states in three places, and several distro builds do too.
+    #
+    # `required`, because SRT is the reason to run polyemesis at all -- and
+    # because a successful return from that function already means the build
+    # carries srt AND that PATH resolves to it, which is exactly the condition
+    # this branch is testing for.
+    if offer_ffmpeg_upgrade "${major:-}" required; then
+      ok "installed an FFmpeg with libsrt — multitrack ingest available"
+      return 0
+    fi
+
+    # Declining is still allowed, because RTMP genuinely works and this is the
+    # operator's call to make. It is now a choice made against a fix that was
+    # offered, rather than one made against a reading list.
+    echo "       You can also use the docker mode, which bundles a build with SRT."
     local proceed
     ask_yn "Continue without SRT anyway?" "n" proceed
     [ "$proceed" = "yes" ] || return 1
@@ -545,10 +680,45 @@ port_in_use() {
   fi
 }
 
+# next_free_port walks upwards from $1 until nothing is listening. Bounded, so a
+# host with a genuinely saturated range says so instead of spinning.
+next_free_port() {
+  local port="$1" proto="$2" tries=0
+  while [ "$tries" -lt 200 ]; do
+    port=$((port + 1))
+    [ "$port" -le 65535 ] || return 1
+    port_in_use "$port" "$proto" || { echo "$port"; return 0; }
+    tries=$((tries + 1))
+  done
+  return 1
+}
+
+# warn_if_taken announced a bind failure and then went and caused it.
+#
+# It fires DURING THE INTERVIEW: the port was typed seconds ago, the operator is
+# still sitting there, and nothing has been written yet. Everything needed to
+# avoid the failure is in hand at the moment it is predicted, which is the
+# definition of a missed poka-yoke.
+#
+# The variable name is passed in so the corrected value goes back to the caller,
+# following the ask/ask_yn convention already used throughout the interview.
 warn_if_taken() {
-  local port="$1" proto="$2" what="$3"
-  if port_in_use "$port" "$proto"; then
-    warn "${proto}/${port} (${what}) is already in use — expect a bind failure unless you change it"
+  local port="$1" proto="$2" what="$3" var="${4:-}" free answer
+  port_in_use "$port" "$proto" || return 0
+
+  warn "${proto}/${port} (${what}) is already in use — polyemesis would fail to bind it"
+  # Nothing to offer, or nowhere to put the answer: fall back to the old
+  # behaviour rather than pretending.
+  if [ -z "$var" ] || ! free="$(next_free_port "$port" "$proto")"; then
+    echo "     Change it, or stop whatever is holding ${proto}/${port}."
+    return 0
+  fi
+  ask_yn "Use ${proto}/${free} for ${what} instead?" "y" answer
+  if [ "$answer" = "yes" ]; then
+    printf -v "$var" '%s' "$free"
+    ok "${what} moved to ${proto}/${free}"
+  else
+    echo "     Keeping ${proto}/${port}. Stop whatever is holding it before starting polyemesis."
   fi
 }
 
@@ -580,9 +750,10 @@ gather_configuration() {
   # two different ways to say the same thing.
   case "$RTMP_PORT" in 0|"") ENABLE_RTMP="no" ;; *) ENABLE_RTMP="yes" ;; esac
 
-  warn_if_taken "$HTTP_PORT" tcp "web UI"
-  warn_if_taken "$SRT_PORT"  udp "SRT ingest"
-  [ "$ENABLE_RTMP" = yes ] && warn_if_taken "$RTMP_PORT" tcp "RTMP ingest"
+  # The variable name goes in so an accepted alternative comes back out.
+  warn_if_taken "$HTTP_PORT" tcp "web UI"      HTTP_PORT
+  warn_if_taken "$SRT_PORT"  udp "SRT ingest"  SRT_PORT
+  [ "$ENABLE_RTMP" = yes ] && warn_if_taken "$RTMP_PORT" tcp "RTMP ingest" RTMP_PORT
 
   header "=== TLS ==="
   echo "  Plain HTTP sends the login form and session cookie in clear text."
@@ -653,6 +824,9 @@ gather_configuration() {
     ask_yn "Serve HTTPS on 443 instead of 8080?" "y" USE_443
     if [ "$USE_443" = yes ]; then
       HTTP_PORT=443
+      # Deliberately WITHOUT a variable here: 443 was just chosen on purpose,
+      # for a reason (an unprivileged bind), and silently moving it to 444 would
+      # undo the choice the operator just made. Warn only.
       warn_if_taken "$HTTP_PORT" tcp "web UI"
     fi
   fi
@@ -694,6 +868,23 @@ confirm_plan() {
 # Emitted into config.yaml for both modes. `auto` is not used here on purpose:
 # the operator has just answered the question auto exists to guess at, and a
 # resolved mode that disagrees with what they chose would be worse than either.
+
+# ffmpeg_yaml pins the FFmpeg this install actually verified, when it installed
+# one itself.
+#
+# Emitted ONLY when this run wrote /usr/local/bin/ffmpeg. If the host's own
+# FFmpeg was accepted, nothing is pinned: that binary is on PATH by the
+# operator's arrangement, and freezing an absolute path to it would break the
+# next `apt upgrade` in a way nobody would connect to this installer.
+#
+# Docker mode never calls this -- the image carries its own FFmpeg at its own
+# path, and a host path pinned into a container config would name a file that
+# does not exist there.
+ffmpeg_yaml() {
+  [ -n "$FFMPEG_PINNED_BIN" ] || return 0
+  printf 'ffmpeg:\n  binary: "%s"\n  probe: "%s"\n' \
+    "$FFMPEG_PINNED_BIN" "$FFMPEG_PINNED_PROBE"
+}
 
 tls_yaml() {
   case "$TLS_MODE" in
@@ -828,7 +1019,30 @@ install_binary_mode() {
       die "CHECKSUM MISMATCH for $asset — refusing to install it."
     fi
   else
-    warn "no SHA256SUMS published for $tag — installing an unverified download"
+    # A MISMATCH DIED; A MISSING SUMS FILE USED TO WARN AND INSTALL ANYWAY.
+    #
+    # Those are the same risk with different evidence. "The bytes are wrong" and
+    # "nobody can tell whether the bytes are wrong" both end with an unverified
+    # binary at $BIN_PATH, installed as root, and the second was the one that
+    # happened automatically. It is also the easier one to arrange: suppressing
+    # an asset is less work than forging a hash.
+    #
+    # docs/INSTALL.md tells readers this installer "verifies the download
+    # against the release's published SHA256SUMS and refuses to install on a
+    # mismatch" -- true as written, and it reads as a stronger promise than a
+    # warning kept.
+    #
+    # The escape hatch stays, because somebody installing a genuinely unsigned
+    # release needs it. It is now a flag they typed, which is auditable, rather
+    # than a default nobody chose.
+    if [ "$ALLOW_UNVERIFIED" != true ]; then
+      rm -rf "$tmp"
+      err "no SHA256SUMS published for $tag — refusing to install an unverified download."
+      echo "     The release may still be publishing; try again in a few minutes."
+      echo "     To install it anyway, re-run with --allow-unverified."
+      die "refusing to install an unverified binary"
+    fi
+    warn "no SHA256SUMS published for $tag — installing UNVERIFIED at your request (--allow-unverified)"
   fi
 
   install -m 0755 "$tmp/$asset" "$BIN_PATH"
@@ -858,6 +1072,7 @@ install_binary_mode() {
     printf 'dataDir: "%s"\n' "$DATA_DIR"
     printf 'addr: ":%s"\n' "$HTTP_PORT"
     tls_yaml
+    ffmpeg_yaml
   } > "$CONFIG_DIR/config.yaml"
 
   local caps=""
@@ -1185,10 +1400,8 @@ print_summary() {
 
   echo "  ${BOLD}Point your encoder at${NC}"
   echo "    srt://${hostpart}:${SRT_PORT}?streamid=<token>"
-  echo "  Create a source on the Sources page first: a fresh install has none,"
-  echo "  and that source's publish token is the <token> above. The token is the"
-  echo "  address, so every source shares this one port — adding another needs"
-  echo "  no new port and no restart."
+  echo "  The Sources page shows the token. It is the address, so every source"
+  echo "  shares this one port — adding another needs no new port and no restart."
   echo
   echo "  In OBS, multitrack SRT does NOT go through the Stream tab. Use"
   echo "  Settings -> Output -> Advanced -> Recording, Type: Custom Output (FFmpeg),"
@@ -1241,8 +1454,12 @@ Options:
                          Pass --tls off explicitly if that is what you want.
   --hostname NAME        hostname for acme (sets DOMAIN_NAME)
   --email ADDR           contact address for acme
-  --ffmpeg MODE          ask (default), skip, or force an FFmpeg upgrade when
-                         the installed one is older than the container's
+  --ffmpeg MODE          ask (default), skip, or force installing FFmpeg 8.x to
+                         /usr/local/bin when the host's is older than the
+                         container's, below the 6.0 floor, or missing entirely.
+                         Never installs under --check.
+  --allow-unverified     install a release binary even when the release has no
+                         published SHA256SUMS to check it against
   --yes, -y              accept defaults; never prompt
   --check                run the preflight checks and exit, changing nothing
   --help, -h             this text
@@ -1293,6 +1510,7 @@ parse_args() {
       --ffmpeg)     [ $# -ge 2 ] || die "missing value for --ffmpeg"
                     case "$2" in ask|skip|force) FFMPEG_UPGRADE="$2" ;;
                       *) die "--ffmpeg takes ask, skip or force" ;; esac; shift 2 ;;
+      --allow-unverified) ALLOW_UNVERIFIED=true; shift ;;
       -y|--yes)     ASSUME_YES=true; shift ;;
       --check)      CHECK_ONLY=true; ASSUME_YES=true; shift ;;
       -h|--help)    usage; trap - EXIT INT TERM; exit 0 ;;

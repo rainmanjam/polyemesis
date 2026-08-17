@@ -169,6 +169,24 @@ jobs:
         # less coverage -- which is the failure mode worth guarding.
         run: npm ci --ignore-scripts --no-audit --no-fund && npm run coverage || true
 
+      # web/ is the marketing and documentation site. Only its two
+      # markdown-pipeline modules are unit-tested, deliberately -- the harness
+      # for the rest is scripts/check-build.mjs against a real build, which
+      # Sonar cannot see and which is not being replaced. Without this step
+      # those two modules read as 0% new coverage, which is how a green site
+      # with a well-tested plugin fails a quality gate.
+      #
+      # --ignore-scripts and continue-on-error for the same two reasons as the
+      # step above: a token-bearing runner must not execute postinstall scripts,
+      # and a report that could not be produced must leave the analysis running
+      # rather than turn a reporting gap into a red build.
+      - name: Web coverage for the scanner
+        if: steps.gate.outputs.ready == 'true'
+        continue-on-error: true
+        timeout-minutes: 10
+        working-directory: web
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run coverage || true
+
       - name: SonarQube Scan
         if: steps.gate.outputs.ready == 'true'
         uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1

@@ -85,3 +85,4 @@ docs/notes/
 # either publishing or removing them cleanly.
 coverage.out
 ui/coverage/
+web/coverage/

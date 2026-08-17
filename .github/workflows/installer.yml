@@ -168,6 +168,31 @@ jobs:
               || { echo "expected this FFmpeg to be rejected"; exit 1; }
           fi
 
+      # --check INSTALLS NOTHING, EVEN WHEN TOLD TO FORCE AN FFMPEG UPGRADE.
+      #
+      # check_ffmpeg now OFFERS to install a current static FFmpeg when the host
+      # is below the floor, instead of only printing advice. That offer must not
+      # reach a preflight: --check's entire contract is that it proves what a
+      # host can be asked WITHOUT CHANGING IT, and this is the one combination
+      # that could quietly break it -- `--check --ffmpeg force` reads as two
+      # reasonable flags and would otherwise download and install a system
+      # binary during what the operator was told is a dry run.
+      #
+      # Asserted on the below-floor images because they are the ones that reach
+      # the offer at all. The file check is the assertion that matters; the
+      # message is checked too so a silent skip cannot pass for a guard.
+      - name: A forced upgrade during --check still changes nothing
+        if: matrix.expect == 'fail'
+        run: |
+          before="$(ls -l /usr/local/bin/ffmpeg 2>/dev/null || echo absent)"
+          out="$(bash scripts/install.sh --check --mode binary --ffmpeg force 2>&1 || true)"
+          after="$(ls -l /usr/local/bin/ffmpeg 2>/dev/null || echo absent)"
+          echo "$out" | grep -E '^\[|--check makes no changes' || true
+          [ "$before" = "$after" ] \
+            || { echo "--check --ffmpeg force MODIFIED /usr/local/bin/ffmpeg"; exit 1; }
+          echo "$out" | grep -q -- "--check makes no changes" \
+            || { echo "the offer was skipped silently rather than declining out loud"; exit 1; }
+
       - name: The init gate fires, and names the real reason
         run: |
           set +e

@@ -102,6 +102,15 @@ jobs:
       - name: Install
         run: npm ci --ignore-scripts
 
+      # The markdown pipeline's own plugins, which decide per fence whether a
+      # reader sees a diagram or forty lines of `flowchart TD`. check-build.mjs
+      # below catches the same class of mistake -- it is what caught this
+      # plugin's first version, by counting 21 <pre> against 19 Copy buttons --
+      # but only after a full 38-page build, and only as a count. These localise
+      # it to the predicate.
+      - name: Unit tests
+        run: npm test
+
       # NOT gated. `npm run build` is `astro check && astro build &&
       # scripts/check-build.mjs`, and the third of those is the only thing in the
       # repository that asserts about the shipped CSS and the resolvability of

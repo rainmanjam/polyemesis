@@ -36,12 +36,22 @@
  * `.code` in styles/global.css and scripts/code-copy.ts.
  */
 
+import { isMermaidPre } from "./hast-mermaid.mjs";
+
 /** @type {import("satteri").HastPluginDefinition} */
 export const hastCodeBlock = {
   name: "polyemesis:code-block",
   element: {
     filter: ["pre"],
     visit(node, ctx) {
+      /* A ```mermaid fence is a DIAGRAM, not a code block, and hast-mermaid.mjs
+         turns it into a <div>. Declining it here rather than relying on plugin
+         order: if this ran first it would wrap a diagram in a `.code` box and
+         offer a Copy button for its source, and the <pre>-count guard in
+         check-build.mjs -- which is what would otherwise catch the mistake --
+         would be satisfied by exactly that wrapping. */
+      if (isMermaidPre(node)) return;
+
       // Idempotent, so that a second pass -- or a <pre> already inside a
       // CodeBlock, which is how MDX content would arrive -- cannot nest boxes.
       const parent = ctx.parent(node);
