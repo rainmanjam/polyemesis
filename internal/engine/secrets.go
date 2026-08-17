@@ -451,15 +451,47 @@ func DestinationSecrets(rows []*db.Destination) []string {
 //
 // PrevToken travels too. Rotation keeps the old one working for five minutes,
 // so during that window it is a live credential that log lines may still carry.
+// AccountSecrets collects every credential a connected platform account holds.
+//
+// THE THIRD INVENTORY, AND THE ONE THAT WAS MISSING. The debug recorder's
+// SecretSet was built from destinations, then destinations plus sources after a
+// review found pull-source credentials reaching the export. Platform accounts
+// were never added, and they hold the OAuth access and refresh tokens.
+//
+// That gap is reachable rather than theoretical: a failed token refresh is
+// preserved as a 300-character snippet of the provider's own response body
+// (oauth.tokenStatusError) and logged at internal/api/oauth_handlers.go. A
+// provider -- or a proxy in front of one -- that echoes the token in an error
+// body puts that literal in the ring, where the declared set has never heard of
+// it and alerts.Redact does not recognise arbitrary token shapes.
+func AccountSecrets(rows []db.PlatformAccount) []string {
+	var out []string
+	for _, a := range rows {
+		out = append(out, a.AccessToken, a.RefreshToken)
+	}
+	return wireSpellings(out)
+}
+
 func SourceSecrets(rows []*db.Source) []string {
 	var out []string
 	for _, s := range rows {
 		if s == nil {
 			continue
 		}
+		// DELEGATED TO ingestSecrets RATHER THAN REBUILT, and rebuilding it was
+		// the bug. This called urlSecrets on the pull URL, and urlSecrets says in
+		// its own comment that it "is NOT correct for a pull URL, where the
+		// credential is in the URL and nowhere else -- see pullURLSecrets and
+		// #229." It takes the LAST path segment, which for a publish URL is the
+		// stream key and for a pull URL is the filename: a CDN URL ending
+		// /SUPERSECRETPATHSEG/stream1/index.m3u8 was declared to the debug
+		// recorder as "index.m3u8", so the credential left the box in the clear.
+		//
+		// The second copy also silently dropped rtmp.StreamKey, which
+		// ingestSecrets has always carried. Two extractors for one concept is how
+		// they drift; there is now one.
 		out = append(out, s.Token, s.PrevToken)
-		out = append(out, urlSecrets(s.Ingest.Pull.URL)...)
-		out = append(out, s.Ingest.SRT.Passphrase)
+		out = append(out, ingestSecrets(s.Ingest.SRT, s.Ingest.RTMP, s.Ingest.Pull, s.Token)...)
 	}
 	return wireSpellings(out)
 }

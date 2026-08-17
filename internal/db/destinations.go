@@ -1838,7 +1838,18 @@ func (d *DB) backfillDestinationStreamKeys() error {
 		return fmt.Errorf("scan destinations for plaintext stream keys: %w", err)
 	}
 	if len(todo) == 0 {
-		return nil
+		// NOTHING TO SEAL IS NOT THE SAME AS NOTHING TO CLEAN UP, and reading it
+		// that way left plaintext in the log permanently. The previous version
+		// returned here, and the TRUNCATE below is the only thing that clears the
+		// write-ahead log. An upgrade that sealed every row, COMMITTED, and then
+		// died before the checkpoint -- power loss, an OOM kill, a restart landing
+		// in the wrong second -- comes back to exactly this state: every row
+		// already sealed, so no work to do, so an early return, so the log is
+		// never truncated. Not on that boot and not on any later one.
+		//
+		// So the checkpoint runs anyway. It is cheap on an already-clean log, and
+		// it is the difference between a transient exposure and a permanent one.
+		return checkpointTruncate(d)
 	}
 
 	for i := range todo {
@@ -1911,8 +1922,39 @@ func (d *DB) backfillDestinationStreamKeys() error {
 	// is still on disk -- exactly the silent half-fix this change is about. An
 	// operator who sees the startup error can run the remediation in
 	// docs/UPGRADING.md; one who sees nothing cannot.
-	if _, err := d.sql.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+	return checkpointTruncate(d)
+}
+
+// checkpointTruncate empties the write-ahead log, and CHECKS THAT IT DID.
+//
+// PRAGMA wal_checkpoint(TRUNCATE) DOES NOT RETURN AN ERROR WHEN IT FAILS. It
+// returns a row -- (busy, log, checkpointed) -- and signals refusal by setting
+// busy=1 with the log left exactly where it was. The previous code used Exec,
+// which discards result rows, so the "a failure here is fatal, and deliberately
+// so" guarantee stated below was never armed for the one failure mode that
+// actually happens. It caught a SQL error that cannot occur and missed the
+// refusal that can.
+//
+// A FAILURE HERE IS FATAL, and deliberately so. Open holds one connection
+// (SetMaxOpenConns(1)), so nothing inside this process can hold the lock -- but
+// another process can: a second polyemesis pointed at the same file, a backup
+// tool, an operator with the sqlite3 CLI open. If that happens the rows still
+// read back correctly and every automated check passes while the plaintext is
+// still on disk, which is exactly the silent half-fix this whole change is
+// about. An operator who sees the startup error can run the remediation in
+// docs/UPGRADING.md; one who sees nothing cannot.
+func checkpointTruncate(d *DB) error {
+	var busy, logFrames, checkpointed int
+	if err := d.sql.QueryRow(`PRAGMA wal_checkpoint(TRUNCATE)`).
+		Scan(&busy, &logFrames, &checkpointed); err != nil {
 		return fmt.Errorf("checkpoint after stream key backfill: %w", err)
+	}
+	if busy != 0 {
+		return fmt.Errorf("the write-ahead log could not be truncated: SQLite reported "+
+			"the checkpoint busy (%d frames left in the log). Another process is holding "+
+			"a read transaction on this database. Plaintext stream keys from before the "+
+			"seal-at-rest upgrade may remain readable in polyemesis.db-wal until it is "+
+			"truncated -- see docs/UPGRADING.md", logFrames)
 	}
 	return nil
 }

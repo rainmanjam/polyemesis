@@ -133,18 +133,30 @@ func (s *Server) handleSetDebug(w http.ResponseWriter, r *http.Request) {
 			// alerts.Redact pass. The publish token goes in for the same reason:
 			// a token in a bundle sent to a stranger is a stranger who can
 			// publish.
+			// AND ACCOUNTS, WHICH WERE THE THIRD OMISSION IN A ROW. This started
+			// as destinations only; a review added sources; a review of THAT found
+			// platform accounts had never been here at all -- and they hold the
+			// OAuth access and refresh tokens. The path is concrete: a failed
+			// refresh keeps a 300-character snippet of the provider's response
+			// body, oauth_handlers.go logs it, and a body echoing the token puts a
+			// literal in the ring that the declared set has never heard of.
+			//
+			// The pattern worth naming is that each omission was an inventory
+			// nobody enumerated, not a mistake in the code that was written.
 			dests, dErr := s.store.ListDestinations()
 			srcs, sErr := s.store.ListSources()
-			if dErr == nil && sErr == nil {
+			accts, aErr := s.store.ListPlatformAccounts()
+			if dErr == nil && sErr == nil && aErr == nil {
 				lits := append(engine.DestinationSecrets(dests), engine.SourceSecrets(srcs)...)
+				lits = append(lits, engine.AccountSecrets(accts)...)
 				s.diag.SetSecrets(alerts.NewSecretSet(s.log, lits...))
 			} else {
 				// Refused rather than recorded: turning on a recorder whose
 				// scrub cannot be built is how a bundle full of stream keys
 				// gets made, and the operator would have no way to know.
 				writeError(w, http.StatusServiceUnavailable,
-					"could not read the destinations and sources needed to build the "+
-						"redaction set, so recording "+
+					"could not read the destinations, sources and connected accounts "+
+						"needed to build the redaction set, so recording "+
 						"was not started")
 				return
 			}

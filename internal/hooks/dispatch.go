@@ -450,7 +450,7 @@ func (d *Dispatcher) deliver(ctx context.Context, w *worker, ev Event) {
 		}
 		rec.Attempts = attempt
 		status, snippet, retry, err := d.attempt(ctx, hook, body, env)
-		rec.Status, rec.Response = status, secrets.Scrub(snippet)
+		rec.Status, rec.Response = status, alerts.Redact(secrets.Scrub(snippet))
 		if err == nil {
 			rec.DurationMS = d.now().Sub(started).Milliseconds()
 			sent := d.now()
@@ -516,12 +516,20 @@ func (d *Dispatcher) attempt(ctx context.Context, h Hook, body []byte, env Envel
 		_ = resp.Body.Close()
 	}()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, bodySnippet))
-	// RESIDUAL ONLY. This is a THIRD PARTY'S response body, so the shapes it
-	// arrives in are the ones Redact is worst at -- `{"error":"bad token
-	// XXXX"}` is JSON, which Redact does not see at all (limit 3). The exact
-	// pass over this hook's own literals is applied by the caller, which is
-	// where the hook row is in scope; see deliver.
-	snippet = alerts.Redact(string(raw))
+	// RETURNED RAW, AND THE ORDER IS THE WHOLE POINT. This used to apply
+	// alerts.Redact here and leave the exact pass to the caller, which inverted
+	// the rule internal/alerts states about itself: the declared SecretSet is
+	// the MECHANISM and Redact is the BACKSTOP over what is left. Redact
+	// TRANSFORMS text -- RedactURL re-encodes a query string -- so a declared
+	// literal that arrived inside a URL was no longer byte-identical by the time
+	// secrets.Scrub ran, and the exact pass matched nothing.
+	//
+	// Both callers now spell it alerts.Redact(secrets.Scrub(...)), which is how
+	// deliverTest already wrote it one line below its own snippet handling.
+	// This is a THIRD PARTY'S response body: Redact is worst at exactly these
+	// shapes -- `{"error":"bad token XXXX"}` is JSON, which it does not see at
+	// all -- which is why it must not be the only pass, and must not be first.
+	snippet = string(raw)
 
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
@@ -581,7 +589,7 @@ func (d *Dispatcher) Test(ctx context.Context, h Hook, tr Trigger) (TestResult, 
 	res := TestResult{
 		Status:     status,
 		DurationMS: d.now().Sub(started).Milliseconds(),
-		Response:   secrets.Scrub(snippet),
+		Response:   alerts.Redact(secrets.Scrub(snippet)),
 		Body:       string(body),
 	}
 	if hook.Secret != "" {

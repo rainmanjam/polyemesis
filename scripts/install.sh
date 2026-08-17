@@ -1235,6 +1235,15 @@ RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+# THE STREAM KEY IS IN FFmpeg'S ARGV, AND ARGV IS WORLD-READABLE BY DEFAULT.
+# A destination's RTMP target is built as rtmp://host/app/<streamKey> and handed
+# to the child as an argument, so on a stock Linux host any local account can
+# read a live stream key out of /proc/<pid>/cmdline or plain `ps`. polyemesis
+# masks its own renderings of that command line and cannot mask the kernel's.
+# ProtectProc=invisible hides other users' processes from this unit's view and,
+# with hidepid on /proc, is what keeps the key off a shared box. It is one line
+# and it costs nothing on a single-operator VPS.
+ProtectProc=invisible
 ProtectHome=true
 ReadWritePaths=${DATA_DIR}
 

@@ -188,7 +188,28 @@ type expertGuard struct {
 // said so explicitly. The split matters: a second -i renumbers every input
 // stream, so `[0:a:3]` in the routing graph starts pointing at a different
 // track, and there is no version of that the operator meant.
+// reportFlagRefusal is the message for -report, which is refused on both sides.
+//
+// EVERY OTHER REFUSAL HERE IS ABOUT WHAT THE PIPELINE DOES. -report changes
+// nothing about the stream and changes where the CREDENTIAL ends up: FFmpeg
+// writes its own log file whose first line is the argv it was invoked with,
+// including rtmp://host/app/<streamKey>, into the working directory — outside
+// supervisor's LogSink, which is the only place this product scrubs what FFmpeg
+// says. Found by codex during the v0.7.0 pre-tag review.
+//
+// It is the operator's own key on their own box, so this is a broken promise
+// rather than a privilege boundary. The promise is still worth keeping.
+const reportFlagRefusal = "-report makes FFmpeg write its own log file, and the first line of " +
+	"that file is the full command line — which contains this destination's stream key. " +
+	"It would be written to disk unmasked, outside the log polyemesis scrubs. Remove it; " +
+	"the resolved command is available on this page without it"
+
 func checkExpertArgs(in, out []string, row *db.Destination) (guards []expertGuard, err error) {
+	for _, a := range append(append([]string{}, in...), out...) {
+		if a == "-report" {
+			return nil, errors.New(reportFlagRefusal)
+		}
+	}
 	for _, a := range in {
 		if a == "-i" {
 			return nil, errors.New("input args: -i adds a second input, which renumbers every " +
@@ -695,6 +716,22 @@ func parseExpertRequest(req expertRequest, row *db.Destination) (in, out []strin
 
 // handleGetExpert reports the current arguments and the command they produce.
 func (s *Server) handleGetExpert(w http.ResponseWriter, r *http.Request) {
+	// THIS RESPONSE CONTAINS THE STREAM KEY, AND IT DIVERGES BY PRINCIPAL.
+	//
+	// readScopeDeniedPatterns lists this route precisely because, in redact.go's
+	// words, "its response is the resolved FFmpeg argv, and the argv contains the
+	// destination's stream key". So the same URL answers 200-with-the-key for a
+	// session or admin token and 403 for a read-scoped one — the exact shape
+	// principalVaryingResponse exists for, and it was never called here.
+	//
+	// The failure needs no bug in polyemesis. An operator fronts the box with
+	// nginx and `proxy_cache_valid 200 10m` — the deployment redact.go names when
+	// it calls these headers "required rather than defensive". The console loads
+	// this URL, nginx stores the 200 keyed on the path alone because nothing says
+	// Vary, and a read-scoped monitoring token then gets the stream key served
+	// from cache without the request ever reaching requireScope.
+	principalVaryingResponse(w)
+
 	id, row, ok := s.expertDestination(w, r)
 	if !ok {
 		return
