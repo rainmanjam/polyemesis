@@ -149,6 +149,10 @@ func TestAStubbedProviderReachesNoRealHost(t *testing.T) {
 					_, _ = y.PushCompliance(ctx, cid, tok, ComplianceTarget{}, db.Compliance{Privacy: db.PrivacyUnlisted})
 				},
 				"BroadcastWindow": func() { _, _ = y.BroadcastWindow(ctx, tok) },
+				"BroadcastState":  func() { _, _ = y.BroadcastState(ctx, tok, "bcast-1") },
+				"TransitionBroadcast": func() {
+					_, _ = y.TransitionBroadcast(ctx, tok, "bcast-1", PhaseComplete)
+				},
 				"PushBroadcastSettings": func() {
 					_, _ = y.PushBroadcastSettings(ctx, cid, tok, BroadcastSettings{EnableDvr: ptrBool(true)})
 				},
