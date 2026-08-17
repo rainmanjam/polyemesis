@@ -253,7 +253,7 @@ var platformCapabilities = []PlatformCapability{
 		// Up front, not in step six. Meta's review is measured in days and it
 		// is the operator's to do — a setup guide that mentions it late has
 		// already wasted their evening.
-		ReadFirst: "Meta requires App Review before anyone other than you can connect an account. Your own account works immediately as a developer or tester of your app, which is all a single-operator setup needs — but publishing on someone else's behalf needs Advanced Access to publish_video (profiles) or pages_manage_posts plus pages_read_engagement (Pages). Budget days, not minutes, and start it before you need it.",
+		ReadFirst: "Meta requires App Review before anyone other than you can connect an account. Your own account works immediately as a developer or tester of your app, which is all a single-operator setup needs — but publishing on someone else's behalf needs Advanced Access to publish_video (profiles) or pages_manage_posts plus pages_read_engagement (Pages). Budget days, not minutes, and start it before you need it. Separately, and NOT a permission: Meta refuses go-live on account properties no scope can satisfy. Since 2024-06-10 the account must be at least 60 days old and the Page or professional-mode profile must have at least 100 followers. A connection with every scope granted still fails both, and the Graph error names neither \u2014 so if everything looks correct and it still will not start, check those two first.",
 		HelpURL:   "https://developers.facebook.com/apps",
 		Caps: map[Capability]Support{
 			CapSSO:       SupportYes,
