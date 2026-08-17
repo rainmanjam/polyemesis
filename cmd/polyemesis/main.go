@@ -20,6 +20,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/diag"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
@@ -119,7 +120,18 @@ func run(h *hooks) error {
 		return nil
 	}
 
-	log := h.logger(*logLevel)
+	// DEBUG MODE, WIRED HERE BECAUSE THE LOGGER IS BUILT HERE. The switch shares
+	// its level with the handler, so changing it at runtime reaches every
+	// component that was handed this logger at startup -- the engine, the
+	// notifier, the supervisor -- rather than only whoever asks for a new one.
+	//
+	// The recorder wraps the handler rather than replacing it: the process keeps
+	// logging exactly where it did, and the ring is a second consumer that stays
+	// empty until an operator turns recording on. That is what makes it safe to
+	// leave wired in permanently.
+	diagSwitch := diag.NewSwitch(parseLevel(*logLevel))
+	diagRecorder := diag.NewRecorder(diag.DefaultCapacity, nil)
+	log := h.debugLogger(*logLevel, diagSwitch, diagRecorder)
 
 	h.progress("loading the configuration")
 	cfg, err := config.Load(*configPath)
@@ -304,7 +316,9 @@ func run(h *hooks) error {
 	eng.SetHooks(hookd)
 
 	srv := api.New(api.Options{
-		Log: log, Config: cfg,
+		Diag:      diagRecorder,
+		DiagLevel: diagSwitch,
+		Log:       log, Config: cfg,
 		DB: store, Secrets: box, Engine: eng, Events: bus, Version: version,
 		Chat:  hub,
 		Hooks: hookd,
@@ -848,6 +862,21 @@ func describeIngest(mode db.IngestMode, s db.Settings) string {
 	default:
 		return fmt.Sprintf("%s (port %d)", mode, s.Listeners.SRTPort)
 	}
+}
+
+// debugLogger builds the process logger with a runtime-switchable level and the
+// debug recorder attached.
+//
+// It falls back to the plain logger when the harness has supplied its own
+// handler, for the reason hooks.logger already has that branch: a test driving
+// main must be able to capture output, and wrapping somebody else's handler in
+// a recorder they did not ask for would change what they see.
+func (h *hooks) debugLogger(level string, sw *diag.Switch, rec *diag.Recorder) *slog.Logger {
+	if h != nil && h.NewHandler != nil {
+		return h.logger(level)
+	}
+	base := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: sw.Leveler()})
+	return slog.New(diag.NewHandler(base, rec))
 }
 
 func newLogger(level string) *slog.Logger {

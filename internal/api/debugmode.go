@@ -6,7 +6,9 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/diag"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 )
 
 // Debug mode: the toggle, and the export.
@@ -89,6 +91,29 @@ func (s *Server) handleSetDebug(w http.ResponseWriter, r *http.Request) {
 		s.diag.Reset()
 	}
 	if body.Recording != nil {
+		// REBUILD THE SECRET SET AS RECORDING STARTS, because the scrubbing is
+		// only as good as the literals it was given and a set built at boot is
+		// stale by the first key refresh. This is the moment it matters most:
+		// nothing has been captured yet, so everything the ring is about to hold
+		// is covered by a set assembled from the destinations as they are now.
+		//
+		// THE RESIDUAL IS A KEY ROTATED WHILE RECORDING IS ALREADY ON. That
+		// literal is one this set has never held, and alerts.Redact is what
+		// stands behind it -- see diag.Recorder.SetSecrets, which exists so
+		// whatever reconciles destinations can close the gap.
+		if *body.Recording {
+			if rows, err := s.store.ListDestinations(); err == nil {
+				s.diag.SetSecrets(alerts.NewSecretSet(s.log, engine.DestinationSecrets(rows)...))
+			} else {
+				// Refused rather than recorded: turning on a recorder whose
+				// scrub cannot be built is how a bundle full of stream keys
+				// gets made, and the operator would have no way to know.
+				writeError(w, http.StatusServiceUnavailable,
+					"could not read destinations to build the redaction set, so recording "+
+						"was not started")
+				return
+			}
+		}
 		s.diag.SetRecording(*body.Recording)
 		// The LEVEL moves with the switch. Recording at the configured level
 		// captures exactly what the operator already had, which is not what

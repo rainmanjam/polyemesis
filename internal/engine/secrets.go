@@ -412,3 +412,25 @@ func ingestSecrets(srt db.SRTSettings, rtmp db.RTMPSettings, pull db.PullSetting
 	out = append(out, pullURLSecrets(pull.URL)...)
 	return wireSpellings(out)
 }
+
+// DestinationSecrets collects every credential literal carried by these rows,
+// in every spelling each can wear on the wire.
+//
+// EXPORTED FOR THE DEBUG RECORDER, which needs the declared secrets and cannot
+// reach destSecrets. internal/diag's scrubbing is only as good as the set it is
+// given: alerts.Redact is a residual pass over shapes, and the exact-literal
+// masking that actually removes a stream key needs the literal.
+//
+// The rows are read, never mutated. Callers pass whatever ListDestinations
+// returned; a nil row is skipped rather than panicking, because the caller is a
+// diagnostic path and must not be able to take the process down.
+func DestinationSecrets(rows []*db.Destination) []string {
+	var out []string
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		out = append(out, destSecrets(row)...)
+	}
+	return out
+}
