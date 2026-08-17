@@ -95,7 +95,23 @@ import (
 // is a round number chosen for those two reasons and for no other; tune it if
 // the box says otherwise, and do not derive it from anything a platform
 // publishes.
-const bulkStartPacing = 2 * time.Second
+var bulkStartPacing = 2 * time.Second
+
+// A var rather than a const SO TESTS CAN STOP BURNING WALL CLOCK ON IT, and
+// that is not a cosmetic concern: it timed the whole internal/api package out
+// in CI.
+//
+// The suite runs under -race, which is several times slower than a plain run,
+// against a 15-minute budget for the package. Two tests drive bulk starts
+// across three and five destinations, and at two real seconds a gap that is
+// twelve seconds of deliberate sleeping before the race detector's multiplier.
+// The package was already the longest in the tree; that pushed it over.
+//
+// Only the test that asserts the pacing ITSELF should pay for it. Everything
+// else that merely needs several destinations started can set this low, which
+// is what withBulkPacing does.
+//
+// Never written outside a test. The one production value is above.
 
 // bulkOutcome is what happened to one destination. See bulkDestResult.
 type bulkOutcome string

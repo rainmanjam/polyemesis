@@ -398,7 +398,31 @@ jobs:
       # counterpart undischarged while still printing ok. The full suite runs
       # here with no filter, so strict mode costs nothing and closes that door.
       - if: needs.changes.outputs.code == 'true'
-        run: POLYEMESIS_LEDGER=strict go test -race -timeout 15m ./...
+        # 20m, RAISED FROM 15m ON EVIDENCE THAT THIS IS ACCUMULATION AND NOT
+        # A HANG -- which is the only reason raising a timeout is ever the right
+        # move rather than the lazy one.
+        #
+        # internal/api hit the 15m wall on 2026-08-16 and reported 900.034s. The
+        # panic named the test that was running, which is exactly why Go's
+        # timeout is kept below this job's timeout-minutes: 25, and it read
+        #
+        #     running tests:
+        #       TestAMutationReconcilesEveryProgrammeRatherThanTheDefault (0s)
+        #
+        # ZERO SECONDS. Nothing was stuck; the package had simply spent fifteen
+        # minutes getting there. A hang would have named a test with a large
+        # number beside it, and the fix for that is never a bigger budget.
+        #
+        # internal/api is the largest suite in the tree -- the route ledger
+        # alone drives every method-pattern pair against a live fixture -- and
+        # the race detector multiplies all of it. Tests that were spending real
+        # wall clock on a pacing constant were trimmed in the same change, which
+        # is the part that should have been unnecessary; this is the part that
+        # was overdue.
+        #
+        # Still five minutes below the job's own timeout, so Go keeps its
+        # goroutine dump. If this needs raising again, split the package first.
+        run: POLYEMESIS_LEDGER=strict go test -race -timeout 20m ./...
 
       # The acceptance suites' shared diagnostic helpers, tested here rather
       # than in their own job: it is pure shell, needs nothing installed and

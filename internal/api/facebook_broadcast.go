@@ -189,6 +189,32 @@ func (s *Server) handleFacebookStreamHealth(w http.ResponseWriter, r *http.Reque
 
 	_, acct, broadcastID, status, err := s.facebookBroadcastFor(ctx, id)
 	if err != nil {
+		// A READ THAT CANNOT ASK IS supported:false, NOT AN ERROR STATUS, AND A
+		// BROWSER CONSOLE IS WHY THIS IS NOT PEDANTRY.
+		//
+		// This pane polls. Answering 412 for a Facebook destination with no
+		// connected account -- an ordinary, permanent, entirely valid
+		// configuration -- put "Failed to load resource: 412" in the console on
+		// a loop, and the browser acceptance suite asserts a destination card
+		// logs nothing. It was right to: an operator opening devtools on a
+		// working install should not find errors from a panel that has simply
+		// nothing to report.
+		//
+		// It is also the doctrine this handler's own comment cites and then
+		// failed to follow. handleAccountStats answers 200 with supported:false
+		// precisely because "we cannot ask" and "something went wrong" are
+		// different, and only one of them is worth an operator's attention.
+		//
+		// 4xx and 5xx are kept for the WRITE, next door: an end-broadcast the
+		// operator explicitly asked for and did not get is a real failure and
+		// must not be reported as a shrug.
+		if status == http.StatusPreconditionFailed {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"supported": false,
+				"reason":    err.Error(),
+			})
+			return
+		}
 		if status != 0 {
 			writeError(w, status, err.Error())
 			return

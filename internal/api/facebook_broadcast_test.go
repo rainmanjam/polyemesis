@@ -147,3 +147,57 @@ func TestFacebookBroadcastRoutesNeedASession(t *testing.T) {
 		})
 	}
 }
+
+// A POLLED READ MUST NOT PUT ERRORS IN A BROWSER CONSOLE FOR AN ORDINARY
+// CONFIGURATION.
+//
+// The stream-health pane polls. A Facebook destination with no connected
+// account is not a fault — it is a valid, permanent setup, and the honest
+// answer is "there is nothing to report", not a 412. Answering 412 filled the
+// console with "Failed to load resource" on a loop and failed
+// live-status-rendering.spec.ts, which asserts a destination card logs nothing.
+// That assertion is right: an operator opening devtools on a working install
+// should not find errors from a panel with nothing to say.
+//
+// The WRITE next door keeps its error statuses. An end-broadcast the operator
+// asked for and did not get is a real failure and must not be reported as a
+// shrug.
+func TestStreamHealthAnswersSupportedFalseRatherThanAnErrorItCannotAct(t *testing.T) {
+	s, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+
+	// A Facebook destination with a broadcast recorded but NO connected
+	// account: nothing to ask with.
+	dest, err := store.CreateDestination(&db.Destination{
+		Name: "FB no account", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+		URL: "rtmps://live-api-s.facebook.com:443/rtmp/", StreamKey: "k",
+	})
+	if err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+	_ = s
+	id := strconv.FormatInt(dest.ID, 10)
+
+	r := jsonRequest(t, http.MethodGet, "/api/v1/destinations/"+id+"/facebook/stream-health", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200. A polled read that cannot ask must not report "+
+			"an error status: the browser logs every 4xx, once per poll, on a "+
+			"destination that is configured perfectly well. (body %s)",
+			w.Code, w.Body.String())
+	}
+	var got struct {
+		Supported bool   `json:"supported"`
+		Reason    string `json:"reason"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Supported {
+		t.Error("claimed stream health is available for a destination with no account")
+	}
+	if got.Reason == "" {
+		t.Error("said no without saying why, so the pane has nothing to show")
+	}
+}

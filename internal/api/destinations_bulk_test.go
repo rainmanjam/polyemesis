@@ -33,6 +33,8 @@ type bulkAnswer struct {
 }
 
 func TestBulkStartAndStopReportOneRowPerDestination(t *testing.T) {
+	// Asserts the SHAPE of the response, not the pacing.
+	withBulkPacing(t, time.Millisecond)
 	h, _, sign := renditionServer(t, defaultTools())
 
 	names := []string{"youtube", "twitch", "backup"}
@@ -303,6 +305,10 @@ func TestAMixedBulkResultIsNeitherSuccessNorFailure(t *testing.T) {
 // warning leads with it. A reader of that copy could reasonably wonder whether
 // the control is YouTube-shaped. It is not, and this fails if it ever becomes so.
 func TestBulkActsOnEveryPlatformAndOnDestinationsWithNone(t *testing.T) {
+	// This test is about WHICH destinations are reached, not about the gap
+	// between them, so it does not pay for the gap. Five destinations at the
+	// production pace is eight seconds of sleeping, twice.
+	withBulkPacing(t, time.Millisecond)
 	h, _, sign := renditionServer(t, defaultTools())
 
 	// A spread of real platforms plus a plain RTMP target that belongs to no
@@ -360,4 +366,18 @@ func TestBulkActsOnEveryPlatformAndOnDestinationsWithNone(t *testing.T) {
 			t.Errorf("%s returned %d rows, want %d", route, len(got.Results), len(want))
 		}
 	}
+}
+
+// withBulkPacing lowers the start gap for a test that needs several
+// destinations started but is not measuring the gap, and restores it after.
+//
+// Safe because nothing in this package calls t.Parallel -- verified, zero call
+// sites -- so no two tests are reading this at once. If that ever changes, this
+// becomes a race and the detector will say so, which is the right way for it to
+// be found.
+func withBulkPacing(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := bulkStartPacing
+	bulkStartPacing = d
+	t.Cleanup(func() { bulkStartPacing = prev })
 }
