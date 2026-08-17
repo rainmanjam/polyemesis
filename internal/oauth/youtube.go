@@ -234,7 +234,11 @@ func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts Ingest
 	// destination's stored key being compared against the platform's spelling
 	// of the same key, and #306 is what a "helpful" normalisation between
 	// those two costs.
-	if opts.HeldKey != "" {
+	// The held key wins UNLESS the operator asked for a new one and this
+	// destination is meant to have a stream of its own. That combination is
+	// the only way an established key ever moves -- see IngestOptions.RotateKey
+	// for why it has to exist at all.
+	if opts.HeldKey != "" && !(opts.RotateKey && opts.DedicatedIngest) {
 		for i := range streams {
 			if streams[i].CDN.IngestionInfo.StreamName == opts.HeldKey {
 				return &streams[i], nil
@@ -242,7 +246,26 @@ func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts Ingest
 		}
 	}
 
-	if !opts.DedicatedIngest {
+	// TAKING "THE FIRST RTMP STREAM ON THE CHANNEL" USED TO BE SAFE AND IS NOT
+	// ANY MORE, AND THIS GUARD IS THE DIFFERENCE.
+	//
+	// Before destinations had streams of their own, a channel held at most one
+	// polyemesis stream, so "the first one" and "ours" were the same object.
+	// Now the channel fills up with streams belonging to OTHER destinations,
+	// and the first listed is very likely one of them.
+	//
+	// The case that bites is an error path, which is why it was missed: a
+	// destination holding a key whose stream has since been deleted in Studio.
+	// Its HeldKey matches nothing, it falls through here, and it adopts a
+	// sibling's stream -- rotating its key onto a stream another destination is
+	// already publishing to. Two destinations, one ingestion source: the exact
+	// defect this whole change exists to remove, recreated by the recovery
+	// path. It was measured, not theorised.
+	//
+	// So the shared stream is only for a destination that has never held a key.
+	// One that held a key and cannot find it gets a new stream, which is the
+	// honest reading of its situation: whatever it was bound to is gone.
+	if !opts.DedicatedIngest && opts.HeldKey == "" {
 		// Prefer an existing reusable RTMP stream; that is the one the creator's
 		// scheduled broadcasts are already bound to.
 		for i := range streams {

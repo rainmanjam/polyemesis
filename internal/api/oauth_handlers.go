@@ -391,7 +391,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b, err := s.ingestFor(ctx, provider, creds.ClientID, acct, s.ingestOptions(dest, time.Time{}))
+	b, err := s.ingestFor(ctx, provider, creds.ClientID, acct, s.ingestOptionsForRefresh(dest))
 	if err != nil {
 		// A platform that publishes no key endpoint is not a transport
 		// failure, and 502 invites a retry that can never succeed. The
@@ -506,6 +506,59 @@ func (s *Server) ingestOptions(dest *db.Destination, scheduledFor time.Time) oau
 	opts := ingestOptionsFor(dest, scheduledFor)
 	opts.DedicatedIngest = s.needsOwnIngestStream(dest)
 	return opts
+}
+
+// ingestOptionsForRefresh is ingestOptions for the one caller that may change a
+// destination's key: handleRefreshKey, driven by an operator pressing a button
+// named Refresh stream key.
+//
+// Separate from ingestOptions rather than a bool parameter, because the
+// distinction is about AUTHORITY and a bool at a call site does not read as
+// one. preannounce.go sweeps every five minutes and must never move a key an
+// encoder is publishing with; this path exists because somebody asked. Anything
+// new that rotates keys should have to come here and say so.
+func (s *Server) ingestOptionsForRefresh(dest *db.Destination) oauth.IngestOptions {
+	opts := s.ingestOptions(dest, time.Time{})
+	// ROTATE ONLY WHAT IS ACTUALLY SHARED. Being asked is necessary and not
+	// sufficient: a destination that already has a stream of its own gains
+	// nothing from a new one, and every needless rotation leaves an orphaned
+	// liveStream on the operator's channel that nothing cleans up.
+	//
+	// Setting this unconditionally was measured doing exactly that -- the
+	// end-to-end refresh test caught a second destination being moved off its
+	// own perfectly good stream onto a freshly created one.
+	opts.RotateKey = s.keyIsSharedWithASibling(dest)
+	return opts
+}
+
+// keyIsSharedWithASibling reports whether another destination on the same
+// account publishes with this destination's key.
+//
+// That is the whole condition under which a key may be moved: it is what
+// distinguishes an upgraded install, where every YouTube destination holds the
+// same key, from one already provisioned correctly. A destination with a key
+// nobody else uses is already its own ingestion source and must be left alone.
+func (s *Server) keyIsSharedWithASibling(dest *db.Destination) bool {
+	if dest == nil || dest.AccountID == nil || strings.TrimSpace(dest.StreamKey) == "" {
+		return false
+	}
+	rows, err := s.store.ListDestinations()
+	if err != nil {
+		// Unknown is treated as NOT shared, so a store failure never rotates a
+		// key. The cost of guessing wrong that way is a ceiling that stays
+		// where it is; the cost of guessing the other way is a live encoder
+		// publishing to a stream nothing is watching.
+		return false
+	}
+	for _, other := range rows {
+		if other.ID == dest.ID || other.AccountID == nil {
+			continue
+		}
+		if *other.AccountID == *dest.AccountID && other.StreamKey == dest.StreamKey {
+			return true
+		}
+	}
+	return false
 }
 
 // needsOwnIngestStream answers whether this destination should be given an

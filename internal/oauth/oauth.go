@@ -304,6 +304,27 @@ type IngestOptions struct {
 	// stream whatever this says, so flipping the flag on an established
 	// destination does not mint a second stream for it.
 	DedicatedIngest bool
+	// RotateKey says the OPERATOR ASKED FOR A NEW KEY, which is the one
+	// circumstance in which the key on a destination may change.
+	//
+	// WITHOUT IT THE DEDICATED-STREAM FEATURE IS INERT ON EVERY INSTALL THAT
+	// NEEDS IT, and that was measured rather than argued. HeldKey is matched
+	// first so an automatic sweep can never move a key out from under somebody
+	// mid-broadcast. But in production EVERY YouTube destination already holds
+	// the same shared key -- that is precisely the defect -- so the match
+	// always succeeds, the dedicated branch is never reached, and nothing is
+	// created. Three destinations were driven through the real refresh handler
+	// and produced zero new streams.
+	//
+	// The two requirements are the same line of code: "never move a key" and
+	// "move this destination to its own stream" cannot both hold for a
+	// destination that already holds the shared one. What separates them is not
+	// a rule, it is WHO ASKED. A five-minute sweep has no right to rotate a key
+	// an encoder is publishing with; an operator pressing Refresh stream key
+	// has asked for exactly that and would be puzzled to get the old one back.
+	//
+	// So this is set on the explicit path and nowhere else.
+	RotateKey bool
 	// HeldKey is the stream key this destination is ALREADY publishing with,
 	// empty for one that has never fetched an ingest.
 	//

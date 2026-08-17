@@ -2,8 +2,10 @@ package oauth
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -335,5 +337,163 @@ func TestYouTubeStreamTitleNamesTheDestinationAndFitsTheDocumentedLimit(t *testi
 	}
 	if !strings.ContainsRune(got, '夜') || strings.ContainsRune(got, '�') {
 		t.Errorf("title = %q, want whole characters -- the cut is by rune", got)
+	}
+}
+
+// A FAITHFUL STUB: what you insert is what you later list.
+//
+// The stubs above return a fixed list and append nothing on create, which makes
+// two outcomes indistinguishable — "found the stream I made last time" and
+// "made another one". A refresh button is pressed more than once, so that is
+// exactly the distinction that matters, and no assertion in this file could
+// draw it. Measured against the fixed stub: two refreshes of one destination
+// produced two creates and the test still passed.
+func ytStatefulStreamStub(t *testing.T, existing []string) (*YouTube, *int) {
+	t.Helper()
+	keys := append([]string(nil), existing...)
+	creates := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/channels":
+			// IngestFor resolves the channel before anything else, for the
+			// ownership guard on the broadcast listing.
+			_, _ = io.WriteString(w, `{"items":[{"id":"UCchan","snippet":{"title":"Chan"}}]}`)
+		case r.Method == http.MethodGet && r.URL.Path == ytStreamsPath:
+			items := make([]string, 0, len(keys))
+			for i, k := range keys {
+				items = append(items, fmt.Sprintf(
+					`{"id":"stream-%d","cdn":{"ingestionType":"rtmp","ingestionInfo":{"streamName":%q,"ingestionAddress":"rtmp://x/live2"}}}`,
+					i, k))
+			}
+			_, _ = io.WriteString(w, `{"items":[`+strings.Join(items, ",")+`]}`)
+		case r.Method == http.MethodPost && r.URL.Path == ytStreamsPath:
+			creates++
+			k := fmt.Sprintf("key-made-%d", creates)
+			keys = append(keys, k)
+			_, _ = io.WriteString(w, fmt.Sprintf(
+				`{"id":"stream-new-%d","cdn":{"ingestionType":"rtmp","ingestionInfo":{"streamName":%q,"ingestionAddress":"rtmp://x/live2"}}}`,
+				creates, k))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return NewYouTube(WithBaseURL(srv.URL)), &creates
+}
+
+// Pressing Refresh twice must not mint a second stream the first time, and must
+// not keep minting them forever after.
+func TestYouTubeReusesTheStreamItMadeInsteadOfMakingAnother(t *testing.T) {
+	y, creates := ytStatefulStreamStub(t, []string{"shared-key"})
+	ctx := context.Background()
+
+	// First refresh of a second destination: it has no key of its own yet and
+	// is nominated for a dedicated stream, so one is created.
+	first, err := y.IngestFor(ctx, "cid", "tok", "", IngestOptions{
+		DedicatedIngest: true, RotateKey: true, IngestLabel: "Second show"})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	if *creates != 1 {
+		t.Fatalf("creates = %d after the first refresh, want 1", *creates)
+	}
+
+	// Second refresh, now holding the key it was just given, and NOT asking to
+	// rotate — the automatic path. It must find its own stream again.
+	again, err := y.IngestFor(ctx, "cid", "tok", "", IngestOptions{
+		DedicatedIngest: true, HeldKey: first.Ingest.Key, IngestLabel: "Second show"})
+	if err != nil {
+		t.Fatalf("IngestFor (second): %v", err)
+	}
+	if again.Ingest.Key != first.Ingest.Key {
+		t.Errorf("key moved on a non-rotating call: %q then %q", first.Ingest.Key, again.Ingest.Key)
+	}
+	if *creates != 1 {
+		t.Errorf("creates = %d; the stream made a moment ago was not found again, so every "+
+			"sweep would leave another one on the channel", *creates)
+	}
+}
+
+// The recovery path that recreated the defect: a destination whose stream was
+// deleted in Studio must get its OWN new one, never a sibling's.
+func TestYouTubeDoesNotAdoptASiblingsStreamWhenItsOwnIsGone(t *testing.T) {
+	// The channel holds the shared stream and a sibling's dedicated stream.
+	// This destination's key matches neither -- its stream was deleted.
+	y, creates := ytStatefulStreamStub(t, []string{"shared-key", "siblings-key"})
+
+	got, err := y.IngestFor(context.Background(), "cid", "tok", "", IngestOptions{
+		HeldKey: "key-that-no-longer-exists", IngestLabel: "First show"})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	if got.Ingest.Key == "shared-key" || got.Ingest.Key == "siblings-key" {
+		t.Fatalf("adopted an existing stream (%q) instead of creating one. Two destinations "+
+			"now publish to one ingestion source, which is the exact defect this change "+
+			"removes -- recreated by its own recovery path.", got.Ingest.Key)
+	}
+	if *creates != 1 {
+		t.Errorf("creates = %d, want 1", *creates)
+	}
+}
+
+// THE UPGRADE CASE, AND THE ONE THE FIRST VERSION OF THIS FEATURE FAILED.
+//
+// Every YouTube destination on an existing install holds the SAME shared key —
+// that is the defect. So the destination that most needs its own stream is
+// always one whose HeldKey matches something. If the held key wins
+// unconditionally, the dedicated branch is never reached and the whole change
+// is inert on precisely the installs it was written for. That was measured on
+// the first implementation: three destinations through the real refresh
+// handler, zero streams created.
+//
+// The operator pressing Refresh stream key is what separates this from a
+// five-minute sweep. A sweep has no right to move a key an encoder is
+// publishing with; a person who pressed that button has asked for a new one.
+func TestYouTubeMovesAnUpgradedDestinationOffTheSharedStreamWhenAsked(t *testing.T) {
+	y, creates := ytStatefulStreamStub(t, []string{"shared-key"})
+
+	got, err := y.IngestFor(context.Background(), "cid", "tok", "", IngestOptions{
+		// Holds the shared key, like every destination on an upgraded install.
+		HeldKey:         "shared-key",
+		DedicatedIngest: true,
+		RotateKey:       true,
+		IngestLabel:     "Second show",
+	})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	if got.Ingest.Key == "shared-key" {
+		t.Fatalf("the destination kept the shared key on an explicit refresh, so it still " +
+			"counts as the same ingestion source and the ceiling has not moved. This is the " +
+			"whole feature being inert on an upgrade.")
+	}
+	if *creates != 1 {
+		t.Errorf("creates = %d, want 1", *creates)
+	}
+}
+
+// The other half, and it is what stops the fix above from becoming a key
+// rotation nobody asked for: the SAME destination on the automatic path keeps
+// what it has.
+func TestYouTubeLeavesAnUpgradedDestinationAloneWhenNobodyAsked(t *testing.T) {
+	y, creates := ytStatefulStreamStub(t, []string{"shared-key"})
+
+	got, err := y.IngestFor(context.Background(), "cid", "tok", "", IngestOptions{
+		HeldKey:         "shared-key",
+		DedicatedIngest: true,
+		// RotateKey deliberately absent: this is preannounce's sweep.
+		IngestLabel: "Second show",
+	})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	if got.Ingest.Key != "shared-key" {
+		t.Fatalf("a background sweep moved the key from %q to %q. An encoder publishing with "+
+			"the old one goes to a stream nothing is watching, mid-broadcast.",
+			"shared-key", got.Ingest.Key)
+	}
+	if *creates != 0 {
+		t.Errorf("creates = %d; a sweep created a stream nobody asked for", *creates)
 	}
 }
