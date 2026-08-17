@@ -9,6 +9,7 @@ import { PUBLISHED } from "./src/data/docs.mjs";
 import { mdastDocLinks } from "./src/lib/mdast-doc-links.mjs";
 import { hastCodeBlock } from "./src/lib/hast-code-block.mjs";
 import { hastDocTables } from "./src/lib/hast-doc-tables.mjs";
+import { hastMermaid } from "./src/lib/hast-mermaid.mjs";
 
 /* lastmod, taken from git rather than from the clock.
  *
@@ -140,7 +141,10 @@ export default defineConfig({
        cold and never sees it. */
     processor: satteri({
       mdastPlugins: [mdastDocLinks],
-      hastPlugins: [hastCodeBlock, hastDocTables],
+      // hastMermaid first: it turns a ```mermaid fence into a <div> before
+      // hastCodeBlock could wrap it. hastCodeBlock also declines the node on its
+      // own, so this order is a convenience rather than a dependency.
+      hastPlugins: [hastMermaid, hastCodeBlock, hastDocTables],
     }),
   },
   integrations: [

@@ -62,6 +62,12 @@ const breadcrumbLd = {
       them. */}
   <script>
     import "../scripts/code-copy.ts";
+    /* Same reason as the copy buttons above: the diagram containers are built
+       by lib/hast-mermaid.mjs from the markdown, so no component pulls this in
+       and the page has to ask for it. The module itself checks whether the page
+       actually has a diagram before importing mermaid, so the 22 documents
+       without one pay for a querySelectorAll and nothing else. */
+    import "../scripts/mermaid-render.ts";
   </script>
 
   <script type="application/ld+json" is:inline set:html={JSON.stringify(breadcrumbLd)} slot="head" />

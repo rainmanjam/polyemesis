@@ -79,7 +79,7 @@ flowchart TD
     stopRoot:::halt
     stopOS:::halt
     stopSysd:::halt
-    classDef halt fill:#fee,stroke:#c00,color:#900
+    classDef halt fill:#4a1d22,stroke:#c0524f,color:#ffdfe0
 ```
 
 The `--check` branch is what CI runs on every distro in the matrix: it
@@ -115,7 +115,7 @@ flowchart TD
     verdict -- no --> okpath
 
     stop:::halt
-    classDef halt fill:#fee,stroke:#c00,color:#900
+    classDef halt fill:#4a1d22,stroke:#c0524f,color:#ffdfe0
 ```
 
 Two things about that gate are worth stating plainly, because they are the
