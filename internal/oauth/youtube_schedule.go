@@ -122,8 +122,17 @@ func (y *YouTube) AccountFor(ctx context.Context, clientID, accessToken, targetR
 
 // ------------------------------------------------------- create and bind
 
-// IngestFor returns the channel's ingest, and -- when opts.ScheduledFor is set
-// -- creates the broadcast that will carry it and binds the two together.
+// IngestFor returns the ingest THIS DESTINATION publishes to, and -- when
+// opts.ScheduledFor is set -- creates the broadcast that will carry it and
+// binds the two together.
+//
+// "THIS DESTINATION'S" RATHER THAN "THE CHANNEL'S", and that distinction is the
+// difference between three simultaneous YouTube destinations and as many as the
+// channel allows. streamFor honours opts.DedicatedIngest and opts.HeldKey; read
+// its comment for which stream comes back and why. The scheduled path below
+// then binds to whatever it returned, so a destination with its own stream gets
+// a broadcast bound to its own stream -- which is what makes it a separate
+// ingestion source rather than a co-tenant of one.
 //
 // THE ZERO ScheduledFor PATH CREATES NOTHING, and that is deliberate to the
 // point of being the reason this method can exist at all. internal/api routes
@@ -139,7 +148,7 @@ func (y *YouTube) AccountFor(ctx context.Context, clientID, accessToken, targetR
 // THREE CALLS FOR THE SCHEDULED PATH, in this order, because each needs the one
 // before it:
 //
-//  1. liveStreams.list/insert, for the ingest AND the stream id (reusableStream).
+//  1. liveStreams.list/insert, for the ingest AND the stream id (streamFor).
 //  2. liveBroadcasts.insert, which yields the broadcast id.
 //  3. liveBroadcasts.bind, which joins them. Without it the broadcast exists,
 //     the encoder publishes, and the two never meet.
@@ -159,7 +168,7 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 	if err != nil {
 		return nil, err
 	}
-	stream, err := y.reusableStream(ctx, accessToken)
+	stream, err := y.streamFor(ctx, accessToken, opts)
 	if err != nil {
 		return nil, err
 	}

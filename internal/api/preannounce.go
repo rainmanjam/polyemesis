@@ -344,8 +344,13 @@ func (s *Server) announceOne(ctx context.Context, sb oauth.ScheduledBroadcaster,
 		return
 	}
 
+	// s.ingestOptions rather than ingestOptionsFor: a pre-announce is a create
+	// like any other, and a YouTube destination pre-announced onto the account's
+	// SHARED stream would be bound to it for the whole run-up to the show --
+	// which is the concurrency ceiling this repository causes for itself, laid
+	// days in advance instead of at go-live.
 	b, err := s.ingestFor(cctx, sb, creds.ClientID, acct,
-		ingestOptionsFor(d, at))
+		s.ingestOptions(d, at))
 	if err != nil {
 		// The intent goes back: Graph refused, so the next sweep is free to try
 		// again -- which is the behaviour this whole file is built on.

@@ -275,6 +275,66 @@ type IngestOptions struct {
 	// not ours to widen. It is enforced by the caller, which is the only layer
 	// that knows the occurrence; this struct carries whatever it is given.
 	ScheduledFor time.Time
+	// DedicatedIngest asks the platform for an ingest stream that belongs to
+	// THIS destination rather than the one the account already shares.
+	//
+	// It exists because YouTube counts concurrency two ways at once -- per
+	// stream key and per channel -- and the per-key ceiling is the smaller of
+	// the two, so every destination handed the same key counts as one
+	// ingestion source and the channel ceiling is unreachable. A refused
+	// broadcast comes back as sharedIngestionBroadcastsExceedLimit, which
+	// youtube_lifecycle.go classifies as RefusalSharedIngestionFull precisely
+	// because it is polyemesis's doing and not the operator's. Neither number
+	// is published by YouTube and neither is written down here: this is the
+	// shape of the fix, not a count.
+	//
+	// IT IS AN OPTION RATHER THAN A PROVIDER DECISION BECAUSE A PROVIDER
+	// CANNOT MAKE IT. Answering "does this destination need its own stream"
+	// means knowing whether some OTHER destination already holds the account's
+	// shared one, and a provider is handed a token and a target ref -- it has
+	// never heard of a destination. The caller owns the destination table, so
+	// the caller decides; see internal/api's ingestOptions.
+	//
+	// False keeps today's behaviour EXACTLY: the account's existing reusable
+	// stream, created only if there is none. That is what protects the common
+	// case -- one destination, whose key an operator's Studio-scheduled events
+	// are already bound to and which must not change under them.
+	//
+	// HeldKey outranks it. A destination that already holds a key keeps that
+	// stream whatever this says, so flipping the flag on an established
+	// destination does not mint a second stream for it.
+	DedicatedIngest bool
+	// HeldKey is the stream key this destination is ALREADY publishing with,
+	// empty for one that has never fetched an ingest.
+	//
+	// It is an input to a create so that a re-fetch is not a rotation. Refresh
+	// key is a button an operator presses when they think something is stale,
+	// and a platform whose streams are addressable by key can answer it by
+	// handing back the same stream instead of provisioning another one --
+	// which would leave the key in their encoder pointing at a stream nothing
+	// publishes to. It is the mechanism behind DedicatedIngest's last
+	// paragraph, and it is the only thing that keeps the destination holding
+	// the shared stream on the shared stream once its neighbours have moved
+	// off it.
+	//
+	// A KEY IN, NEVER A KEY OUT. This is matched byte for byte against what
+	// the platform lists and is never logged, echoed in an error or sent as a
+	// request parameter; #306 is what happens when a stored key and the key on
+	// the wire are allowed to differ, so nothing here trims or normalises it.
+	HeldKey string
+	// IngestLabel is the destination's name, for platforms that let a
+	// provisioned stream be titled.
+	//
+	// A channel with five polyemesis streams on it, all called "polyemesis",
+	// is a channel whose operator cannot tell which one their second show
+	// publishes to -- and these are visible in YouTube Studio, which is where
+	// they will go looking. The destination's own name is the only material
+	// polyemesis has that means anything to them.
+	//
+	// NOT A SECRET AND NOT A KEY. It is a display string that reaches the
+	// platform's public-ish metadata, so a caller must never put a key, a
+	// token or an ingest URL in it.
+	IngestLabel string
 }
 
 // ScheduledBroadcaster is the optional capability for a platform that can
