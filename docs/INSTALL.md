@@ -34,9 +34,110 @@ sudo bash install.sh
 
 It offers two modes. **Docker** bundles a known-good FFmpeg with libsrt, so
 nothing on the host matters. **Binary** installs the static binary plus a
-systemd unit, and refuses to proceed if your FFmpeg is below 6.0 — naming your
+systemd unit, and will not proceed against an FFmpeg below 6.0 — naming your
 distribution's actual version when it recognises it — rather than installing a
-service that cannot start.
+service that cannot start. It offers to install a current FFmpeg for you at
+that point; declining is what stops the install, not the old version itself.
+
+### What it does, in order
+
+Everything before `confirm_plan` only *reads* the host. Nothing is written
+until you have seen the plan and agreed to it, and a failure after that point
+runs the rollback trap rather than leaving a half-install behind.
+
+```mermaid
+flowchart TD
+    start(["sudo bash install.sh"]) --> root{"running as root?"}
+    root -- no --> stopRoot["refuses"]
+    root -- yes --> os["detect_os"]
+    os --> linux{"/etc/os-release?"}
+    linux -- no --> stopOS["exits — this installer targets Linux"]
+    linux -- yes --> checkonly{"--check given?"}
+
+    checkonly -- yes --> pre["preflight only:<br/>FFmpeg floor + systemd<br/><b>installs nothing</b>"]
+    pre --> exitCheck(["exit 0 / exit 1"])
+
+    checkonly -- no --> gather["gather_configuration<br/>mode · ports · TLS"]
+    gather --> plan["confirm_plan<br/><i>last point before anything is written</i>"]
+    plan --> sysd{"systemd present?"}
+    sysd -- no --> stopSysd["dies"]
+    sysd -- yes --> mode{"which mode?"}
+
+    mode -- docker --> d1["install_docker"]
+    d1 --> d2["install_docker_mode<br/>image carries FFmpeg + libsrt"]
+    d2 --> d3["write_helper_scripts"]
+    d3 --> fw
+
+    mode -- binary --> b1["install_binary_mode"]
+    b1 --> b2["check_ffmpeg<br/><i>see the gate below</i>"]
+    b2 --> b3["verify SHA256SUMS<br/>then install unit"]
+    b3 --> fw
+
+    fw["configure_firewall<br/><b>udp</b>/6000 for SRT"] --> ver["verify"]
+    ver --> done(["print_summary"])
+
+    stopRoot:::halt
+    stopOS:::halt
+    stopSysd:::halt
+    classDef halt fill:#fee,stroke:#c00,color:#900
+```
+
+The `--check` branch is what CI runs on every distro in the matrix: it
+exercises detection, the architecture gate, the init gate and the FFmpeg floor,
+and installs nothing.
+
+### The FFmpeg gate
+
+Only binary mode reaches this; in docker mode the image carries its own FFmpeg
+and the host's version is irrelevant.
+
+```mermaid
+flowchart TD
+    a["check_ffmpeg"] --> onpath{"ffmpeg on PATH?"}
+    onpath -- no --> none["states the problem,<br/><b>then offers to install 8.1</b><br/><i>required</i>"]
+    onpath -- yes --> parse{"version banner parses?"}
+    parse -- no --> unknown["warns and continues —<br/>unknown is not the same as too old"]
+    parse -- yes --> major{"major version"}
+
+    major -- "below 6" --> tooold["names your distro's actual version,<br/><b>then offers to install 8.1</b><br/><i>required</i>"]
+    major -- "6 or 7" --> old["<b>offers to install 8.1</b><br/><i>optional — you only lose<br/>multitrack FLV by declining</i>"]
+    major -- "8 or newer" --> fine["matches what the container ships"]
+
+    none --> offer
+    tooold --> offer
+    old --> offer
+
+    offer["offer_ffmpeg_upgrade<br/>static 8.1 build →  /usr/local/bin<br/><b>libsrt verified before anything<br/>is displaced</b>; distro copy untouched"]
+    offer --> took{"installed?"}
+    took -- yes --> okpath["floor cleared"]
+    took -- "no (declined,<br/>skipped, or unattended)" --> verdict{"was it required?"}
+    verdict -- yes --> stop["<b>install stops here</b>"]
+    verdict -- no --> okpath
+
+    stop:::halt
+    classDef halt fill:#fee,stroke:#c00,color:#900
+```
+
+Two things about that gate are worth stating plainly, because they are the
+parts people get caught by:
+
+**Declining is only fatal when it was required.** At 6.x or 7.x you are simply
+choosing to stay put, and everything except multitrack FLV behaves identically.
+Below the floor — or with no FFmpeg at all — declining ends the install, because
+polyemesis will not start against what you have.
+
+**`--check` never installs anything, including with `--ffmpeg force`.** That
+combination reads as two reasonable flags, and a preflight that replaced a
+system binary would be a broken promise; it prints what *would* be installed
+and exits. `--ffmpeg force` takes the upgrade without asking on a real run,
+`--ffmpeg skip` declines it. Unattended runs never install FFmpeg on their own:
+with no terminal to ask, the installer refuses and names the flag instead.
+
+Nothing is deleted either way. The static build lands in `/usr/local/bin` ahead
+of `/usr/bin` on a default `PATH`, your distribution's package is left where it
+is, and the way back is `rm /usr/local/bin/ffmpeg /usr/local/bin/ffprobe`. If
+your `PATH` happens *not* to put `/usr/local/bin` first, the installer says so
+rather than reporting a floor it has not actually cleared.
 
 What it gets right that a hand-rolled `docker run` usually does not: `/udp` on
 the SRT port, `stop_grace_period: 30s` so a recording is finalised rather than
@@ -130,7 +231,7 @@ Everything past that floor is where they diverge:
 
 | Platform | Beyond the shared floor | Operationally |
 |---|---|---|
-| **Linux (server)** | The race detector, 13 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
+| **Linux (server)** | The race detector, 11 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
 | **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, bundling a pinned FFmpeg |
 | **macOS** | Nothing further | **Daily driver.** Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below |
 | **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and recording truncation on service stop is a known unresolved defect — see the note below |
@@ -220,10 +321,8 @@ which bundles one and asserts it at build time.
 A fourth exists if your encoder speaks **Enhanced RTMP**, which does carry
 multiple audio tracks: polyemesis ingests those and the routing works normally,
 with no libsrt anywhere. The caveat is what keeps it fourth rather than first —
-verified with FFmpeg 7.1+ publishing, broken on 6.1.1, and **OBS does not send
-it at all** — OBS 30.2.3 was measured sending only legacy single-track audio,
-and the multitrack path is gated on a capability no service in its
-`services.json` declares. If your encoder is OBS, use SRT.
+verified with FFmpeg 7.1+ publishing, broken on 6.1.1, and unconfirmed with OBS.
+If your encoder is OBS, fix the FFmpeg build instead.
 
 **Hardware encoders — nothing to install, nothing to configure.** Do *not* go
 looking for a build with NVENC or VA-API compiled in on the strength of
@@ -376,7 +475,7 @@ path, since the FFmpeg problem stops being a host problem.
 
 ### Install the binary
 
-Prerequisites for building from source: **Go 1.26.6+ (the `go` directive in go.mod)** (the floor in `go.mod`;
+Prerequisites for building from source: **Go 1.26.5+** (the floor in `go.mod`;
 the official Go images set `GOTOOLCHAIN=local`, so an older toolchain fails
 rather than silently upgrading itself) and **Node 20.19+ or 22.12+** (Vite 8's
 requirement). Neither is needed to *run* the result.
@@ -439,7 +538,7 @@ server. Open those ports on the firewall so encoders reach polyemesis directly.
 Developed on daily, so it works — but read the SRT paragraph, because the
 default Homebrew install cannot do multitrack ingest.
 
-**Prerequisites.** Homebrew. Go 1.26.6+ (the `go` directive in go.mod) and Node 20.19+/22.12+ if building from
+**Prerequisites.** Homebrew. Go 1.26.5+ and Node 20.19+/22.12+ if building from
 source. Apple Silicon and Intel both fine.
 
 ### FFmpeg on macOS: the version is fine, SRT is not
@@ -547,7 +646,7 @@ unresolved problem. The Service Control Manager wrapper, process-group teardown
 and installer scripts have never been exercised on a live host. If this needs to
 work today, use Linux or Docker.
 
-**Prerequisites.** Windows 10 / Server 2019 or newer, x86-64. Go 1.26.6+ (the `go` directive in go.mod) and
+**Prerequisites.** Windows 10 / Server 2019 or newer, x86-64. Go 1.26.5+ and
 Node 20.19+/22.12+ if you are building the binary yourself.
 
 ### FFmpeg on Windows: this part is straightforward
@@ -648,12 +747,6 @@ carries three badges: the FFmpeg version, `srt yes/no`, and `x264 yes/no`. If
 `srt` reads `no`, no amount of OBS configuration will fix it — go back to your
 platform's FFmpeg section.
 
-Those badges are there before you have created anything: a fresh install has no
-source, so that tab shows the badges and an invitation to make one rather than
-an ingest form. Creating the first source is [QUICKSTART step
-3](QUICKSTART.md#3-create-a-source) and it is what an encoder publishes to; the
-ingest settings then live on that source.
-
 The startup log carries the same facts:
 
 ```text
@@ -668,16 +761,15 @@ tls mode=… hostname=…
 | Port | Protocol | Needed when |
 |---|---|---|
 | 8080 | TCP | always — web UI and API. Configurable via `addr`. |
-| 6000 | **UDP** | SRT ingest. The default; changeable in *Settings → Ingest → Listeners*, which is install-wide and editable before any source exists. |
+| 6000 | **UDP** | SRT ingest. The default; changeable in *Settings → Ingest*. |
 | 1935 | TCP | RTMP ingest, only if you use the fallback. One port however many RTMP sources you run. |
 | 80 | TCP | only for `tls.mode: acme` (HTTP-01 validation), plus the HTTP→HTTPS redirect whenever polyemesis terminates TLS |
 | 443 | TCP | only if you set `addr` to `:443` rather than serving TLS on 8080 |
 
 The ingest listeners bind `0.0.0.0` regardless of `addr`, so restricting `addr`
 to loopback for a reverse-proxy deployment does not restrict ingest. Set an SRT
-passphrase on the source's ingest (the **Sources** page, or *Settings → Ingest*
-for the default one):
-without one your stream crosses the network in the clear. RTMP has no equivalent — its stream key authenticates the
+passphrase in *Settings → Ingest*: without one your stream crosses the network
+in the clear. RTMP has no equivalent — its stream key authenticates the
 publisher but encrypts nothing, so the RTMP port is the one to keep off the
 public internet if you have the choice.
 
