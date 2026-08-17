@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useT } from "@/lib/i18n";
 import { toast } from "sonner";
 import {
   CornerUpLeft,
@@ -644,6 +645,7 @@ export function ChatSearchResults({
   onOpenUser?: (m: ChatMessage) => void;
   onMenu?: (m: ChatMessage, at: { x: number; y: number }) => void;
 }) {
+  const t = useT();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 bg-card-raised px-2 py-1 text-[10px] text-subtle-foreground">
@@ -665,7 +667,7 @@ export function ChatSearchResults({
           // its own invites "then they never said it" — which is a conclusion
           // about a purged table, not about a person.
           <div className="px-2 py-4 text-[12px] text-muted-foreground">
-            <p>No matches in the retained scrollback.</p>
+            <p>{t("chatpage.noMatchesInScrollback")}</p>
             {search.note && (
               <p className="mt-1 text-[11px] text-subtle-foreground">{search.note}</p>
             )}
