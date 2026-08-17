@@ -97,7 +97,36 @@ broadcast can't transition from its current status to the requested status"),
 
 **Concurrency ceilings refuse at TRANSITION, not at create**, and **neither
 numeric limit appears anywhere in the docs** — treat both as unknown values,
-never as "no limit". Verbatim: `rateLimitExceeded(403)/concurrentBroadcastsExceedLimit`
+never as "no limit".
+
+> **Practitioner report, 2026-08-16, NOT A PRIMARY SOURCE AND NOT ENCODABLE.**
+> The maintainer found a discussion
+> ([r/VIDEOENGINEERING, "YouTube max livestreams change"](https://www.reddit.com/r/VIDEOENGINEERING/comments/1r07x98/youtube_max_livestreams_change_practically_what/))
+> reporting the concurrent ceiling as **10**. Reddit served an empty body to
+> this pass's fetcher, so the figure is recorded as reported and has not been
+> read at source, let alone confirmed against a channel.
+>
+> It is written down because it is genuinely useful — it tells an implementer
+> what ORDER OF MAGNITUDE to expect, which is enough to size a warning or a
+> UI hint sensibly. It must not become a constant, and the thread's own title
+> is the argument: the word is *change*. A number that has just moved is the
+> single worst candidate for hardcoding, and a cap that varies by channel
+> standing (as YouTube's creation limits are said to) cannot be one number at
+> all. Handle `concurrentBroadcastsExceedLimit`; do not predict it.
+
+**A CONTRADICTION WORTH KEEPING, because it shows how this fails.** Asked the
+same question on 2026-08-16, the `agy` assistant answered that
+`liveBroadcasts.insert` costs **50 units**, stating "Is a number published?
+**Yes: 50 units**" and citing the quota calculator by URL. That page was
+re-fetched during this pass: 92,748 bytes, real body, and the string
+`liveBroadcasts` occurs **zero times** on it. The claim is confident,
+well-formatted, correctly-cited and false — and it is the *same* 50-unit figure
+this file's first research pass asserted and its refute pass withdrew. The cost
+of `liveBroadcasts.insert` remains unknown.
+
+The lesson is not that one assistant is unreliable. It is that a citation is
+not a check: the URL was right, the page was real, and the sentence was not
+there. Only fetching the page settles it. Verbatim: `rateLimitExceeded(403)/concurrentBroadcastsExceedLimit`
 ("The channel already has the maximum number of concurrent live broadcasts. One
 or more broadcasts that are already live must be stopped before another
 broadcast can start on the channel.") and
