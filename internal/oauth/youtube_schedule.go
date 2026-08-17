@@ -437,7 +437,9 @@ func (y *YouTube) broadcastByID(ctx context.Context, accessToken, broadcastID st
 // here would be a surprise; it is handled anyway because a surprise that reads
 // as a generic 403 is how an operator ends up debugging their own credentials.
 func ytBroadcastCreateAdvice(err error) error {
-	msg := err.Error()
+	// The WHOLE body, not the display snippet: the reason code YouTube
+	// returns sits past snippet()'s cut in a realistic refusal. See adviceBody.
+	msg := adviceBody(err)
 	switch {
 	case strings.Contains(msg, "liveStreamingNotEnabled"):
 		return fmt.Errorf("%w — this YouTube channel is not enabled for live streaming, so no "+

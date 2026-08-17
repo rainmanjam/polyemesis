@@ -301,7 +301,9 @@ func (y *YouTube) setTags(ctx context.Context, accessToken, videoID string, tags
 // "enableDvrModificationNotAllowed" tells somebody nothing about WHEN they
 // could have changed it. The lifecycle status is what makes it make sense.
 func broadcastWriteAdvice(err error, lifeCycleStatus string, s BroadcastSettings) error {
-	msg := err.Error()
+	// The WHOLE body, not the display snippet: the reason code YouTube
+	// returns sits past snippet()'s cut in a realistic refusal. See adviceBody.
+	msg := adviceBody(err)
 	if !strings.Contains(msg, "ModificationNotAllowed") && !strings.Contains(msg, "403") {
 		return err
 	}
