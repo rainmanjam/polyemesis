@@ -153,6 +153,33 @@ never as "no limit".
 > empirical run against a real channel recording the date and the account's
 > standing.
 
+> **CONSEQUENCE FOR POLYEMESIS, AND IT IS NOT A YOUTUBE PROBLEM.**
+> `internal/oauth/youtube.go`'s `Ingest` lists `/liveStreams?mine=true` and
+> returns the FIRST reusable RTMP stream it finds; it creates one only when the
+> channel has none. Its signature takes no destination identity —
+> `(ctx, clientID, accessToken)` — so **every YouTube destination in an install
+> is handed the same stream key.**
+>
+> Under the limits above that caps a channel at **3 simultaneous YouTube
+> destinations**, not 10: they are one ingestion source, so
+> `sharedIngestionBroadcastsExceedLimit` fires long before the channel limit is
+> approached. The 10-per-channel headroom is unreachable through polyemesis as
+> written.
+>
+> The reuse was correct when it was written and its comment says why — "that is
+> the one the creator's scheduled broadcasts are already bound to", which is
+> exactly right for the single-destination case that was the only case. It
+> became a ceiling on 2026-02-24, when the shared-ingestion limit appeared. No
+> code changed; the world did.
+>
+> Raising it means creating a separate `liveStream` per destination rather than
+> sharing one, which `liveStreams.insert` supports and which the code already
+> does on the empty-channel path. That is a real design change, not a constant:
+> a per-destination stream has to be found again on restart, cleaned up when a
+> destination is deleted, and reconciled with broadcasts already bound to the
+> shared one. Filed here rather than done, because it is a feature and this is
+> an evidence file.
+
 **A CONTRADICTION WORTH KEEPING, because it shows how this fails.** Asked the
 same question on 2026-08-16, the `agy` assistant answered that
 `liveBroadcasts.insert` costs **50 units**, stating "Is a number published?
