@@ -52,7 +52,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **Unverified** | Not built, and the platform's API not confirmed either way. Never a refusal — nothing stops you trying |
 | **Not possible** | Somebody read the platform's published API and the thing is not in it. No amount of setup will produce it |
 
-*Everything else* is the other twenty-five entries in the destination preset
+*Everything else* is the other nineteen entries in the destination preset
 catalogue — PeerTube, Owncast, Cloudflare Stream, Mux, AWS IVS, LinkedIn, Trovo,
 Odysee, Vimeo, Dailymotion and the rest. They stream perfectly over RTMP, RTMPS
 or SRT with a pasted URL and key; we simply have not researched their APIs, and
@@ -248,9 +248,13 @@ current broadcast and carries every untouched field through on every write.
 3. Category: *Broadcasting Suite*. Client Type: **Confidential**.
 4. **Manage → New Secret**, then paste both values into polyemesis.
 
-Scopes requested: `channel:read:stream_key` (the key), `channel:manage:broadcast`
-(title and category at go-live), `chat:read` and `chat:edit` (the unified chat
-pane).
+Scopes requested, all seven: `channel:read:stream_key` (the key),
+`channel:manage:broadcast` (title and category at go-live), `chat:read` and
+`chat:edit` (the unified chat pane), and the three that make the Moderation row
+above read *Works* — `moderator:manage:chat_messages` (delete a message),
+`moderator:manage:banned_users` (ban, timeout, and lift either) and
+`moderator:manage:chat_settings`. The moderation three only work in a channel
+the connected account already moderates; Twitch answers 403 otherwise.
 
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, disconnect and reconnect once.
