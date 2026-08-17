@@ -48,6 +48,7 @@
   "auto.endpoint": "Punkt końcowy",
   "auto.evAudioClipping": "Przesterowanie dźwięku",
   "auto.evClipCaptured": "Przechwycono klip",
+  "auto.evDebugExported": "Debug bundle exported",
   "auto.evDiskLow": "Kończy się miejsce na dysku",
   "auto.evDiskRecovered": "Dysk przywrócony",
   "auto.evIngestLost": "Utracono wejście",

@@ -48,6 +48,7 @@
   "auto.endpoint": "端点",
   "auto.evAudioClipping": "音频削波",
   "auto.evClipCaptured": "片段已截取",
+  "auto.evDebugExported": "Debug bundle exported",
   "auto.evDiskLow": "磁盘空间不足",
   "auto.evDiskRecovered": "磁盘已恢复",
   "auto.evIngestLost": "输入已丢失",

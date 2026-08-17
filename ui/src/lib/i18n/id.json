@@ -48,6 +48,7 @@
   "auto.endpoint": "Endpoint",
   "auto.evAudioClipping": "Clipping audio",
   "auto.evClipCaptured": "Klip ditangkap",
+  "auto.evDebugExported": "Debug bundle exported",
   "auto.evDiskLow": "Disk menipis",
   "auto.evDiskRecovered": "Disk pulih",
   "auto.evIngestLost": "Masukan hilang",

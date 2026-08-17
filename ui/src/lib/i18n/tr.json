@@ -48,6 +48,7 @@
   "auto.endpoint": "Uç nokta",
   "auto.evAudioClipping": "Ses kırpılması",
   "auto.evClipCaptured": "Klip yakalandı",
+  "auto.evDebugExported": "Debug bundle exported",
   "auto.evDiskLow": "Disk azalıyor",
   "auto.evDiskRecovered": "Disk toparlandı",
   "auto.evIngestLost": "Giriş kaybedildi",

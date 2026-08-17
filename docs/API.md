@@ -246,6 +246,9 @@ does not get to change what another operator's console shows them.
 |---|---|---|
 | `GET` | `/status` | Everything the dashboard renders, in one object |
 | `GET` | `/system` | Host, FFmpeg, build |
+| `GET` | `/debug` | Debug-mode state: recording on/off, level, and how much is held |
+| `PUT` | `/debug` | Start or stop recording, and optionally clear the buffer |
+| `POST` | `/debug/export` | Download the debug bundle. **Audited** — see below |
 | `GET` | `/stats` | System, bitrate, relay counters |
 | `GET` | `/levels` | Current audio levels |
 | `GET` | `/source` | Probed track layout |

@@ -48,6 +48,7 @@
   "auto.endpoint": "エンドポイント",
   "auto.evAudioClipping": "音声のクリッピング",
   "auto.evClipCaptured": "クリップを取得",
+  "auto.evDebugExported": "Debug bundle exported",
   "auto.evDiskLow": "ディスク残量が少ない",
   "auto.evDiskRecovered": "ディスクが回復した",
   "auto.evIngestLost": "入力が失われた",

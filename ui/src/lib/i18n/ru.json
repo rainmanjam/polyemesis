@@ -48,6 +48,7 @@
   "auto.endpoint": "Конечная точка",
   "auto.evAudioClipping": "Клиппинг звука",
   "auto.evClipCaptured": "Клип записан",
+  "auto.evDebugExported": "Debug bundle exported",
   "auto.evDiskLow": "Мало места на диске",
   "auto.evDiskRecovered": "Место на диске восстановлено",
   "auto.evIngestLost": "Вход потерян",

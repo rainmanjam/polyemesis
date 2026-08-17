@@ -29,6 +29,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/diag"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
@@ -254,14 +255,19 @@ func (s *Server) storageVerdict() recording.StorageState {
 
 // Server wires the HTTP layer to everything else.
 type Server struct {
-	log      *slog.Logger
-	cfg      config.Config
-	store    *db.DB
-	box      *secrets.Box
-	mgr      *engine.Manager
-	bus      *events.Broker
-	sessions *auth.Manager
-	logins   *auth.Throttle
+	log *slog.Logger
+	// diag is the debug-mode recorder and diagLevel the runtime log level it
+	// moves with. Both nil on a build without debug mode, which the handlers
+	// report as recording:false rather than as a missing route.
+	diag      *diag.Recorder
+	diagLevel *diag.Switch
+	cfg       config.Config
+	store     *db.DB
+	box       *secrets.Box
+	mgr       *engine.Manager
+	bus       *events.Broker
+	sessions  *auth.Manager
+	logins    *auth.Throttle
 	// providers is the OAuth provider set every handler resolves through, and
 	// it replaced five function-pointer fields on this struct.
 	//
@@ -517,6 +523,12 @@ type Options struct {
 	Engine  *engine.Manager
 	Events  *events.Broker
 	Version string
+	// Diag is the debug-mode recorder, and DiagLevel the runtime log level it
+	// moves with. Both optional: a build without them answers the debug routes
+	// with recording:false rather than 404ing, because "we cannot offer this"
+	// and "the route is gone" are different problems.
+	Diag      *diag.Recorder
+	DiagLevel *diag.Switch
 	// TLS is the provider the HTTP listener was built from. Optional; without
 	// it the TLS status endpoint can only report what config.yaml asked for.
 	TLS *tlsx.Provider
@@ -568,6 +580,8 @@ func New(o Options) *Server {
 		chat:      o.Chat,
 		hooks:     o.Hooks,
 		version:   o.Version,
+		diag:      o.Diag,
+		diagLevel: o.DiagLevel,
 		startedAt: time.Now(),
 		logins:    auth.NewThrottle(),
 		kickKeys:  &chat.KickKeyFetcher{},
@@ -777,6 +791,18 @@ func (s *Server) registerRoutes(r chi.Router) {
 			})
 
 			r.Get("/system", s.handleSystem)
+
+			// DEBUG MODE. The toggle and the export sit at deliberately
+			// different weights: recording changes only what THIS box writes
+			// down and discloses nothing, so the session is enough. The export
+			// mints an artefact meant to LEAVE the machine for somebody who does
+			// not have it, so it is a POST -- audited, CSRF-covered, and not
+			// reachable by a prefetching browser, which would otherwise put an
+			// entry in the audit trail every time something speculatively
+			// fetched a link and make the trail useless for its one question.
+			r.Get("/debug", s.handleGetDebug)
+			r.Put("/debug", s.handleSetDebug)
+			r.Post("/debug/export", s.handleExportDebug)
 			// Authenticated on purpose: the build number is a fingerprint, and
 			// an unauthenticated scanner should not get to read it. The check
 			// is a POST so requireCSRF covers it and no prefetching browser

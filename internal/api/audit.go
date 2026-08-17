@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -392,4 +393,30 @@ func changedSections(before, after []byte) []string {
 	// against the last one.
 	sort.Strings(out)
 	return out
+}
+
+// auditDebugExported records that a debug bundle was downloaded.
+//
+// CRITICAL rather than Info, and the severity is the point. Nothing has broken
+// -- but a copy of this server's own logs has just left the operator's control
+// for somebody who does not have the box, and polyemesis deliberately keeps no
+// copy of what was sent. This entry is the only durable record that it happened
+// at all, which is exactly the question an audit trail exists to answer.
+//
+// The COUNTS travel, not the contents. "How many lines, and was it truncated"
+// is what somebody reviewing the trail later needs in order to know what was
+// disclosed; the lines themselves are in the bundle, and putting any of them
+// here would put log contents into the alert pipeline -- which reaches webhooks.
+func auditDebugExported(records int, truncated bool, address string) alerts.Event {
+	text := fmt.Sprintf("A debug bundle of %d log records was downloaded.", records)
+	if truncated {
+		text += " The capture was truncated: older records had already been dropped."
+	}
+	return alerts.Event{
+		Type:     alerts.TypeDebugExported,
+		Severity: alerts.SeverityCritical,
+		Title:    "Debug bundle exported",
+		Text:     text,
+	}.
+		WithField(fieldAddress, address)
 }

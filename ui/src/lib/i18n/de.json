@@ -48,6 +48,7 @@
   "auto.endpoint": "Endpunkt",
   "auto.evAudioClipping": "Audioübersteuerung",
   "auto.evClipCaptured": "Clip aufgenommen",
+  "auto.evDebugExported": "Debug bundle exported",
   "auto.evDiskLow": "Speicherplatz wird knapp",
   "auto.evDiskRecovered": "Speicherplatz wieder verfügbar",
   "auto.evIngestLost": "Eingang verloren",

@@ -48,6 +48,14 @@ func everyAuditEvent() []alerts.Event {
 		// ever makes this name caller-supplied must sanitise it at the source;
 		// the redactor will not.
 		auditClipCaptured("clip-20260806-143000.ts", dirty),
+		// The address is planted; the COUNTS are not, and cannot be. Both are
+		// integers this server computed from its own ring -- no caller-supplied
+		// string reaches this event at all, which is the same structural
+		// guarantee auditClipCaptured relies on and states above. What makes it
+		// worth the entry anyway is what this event is ABOUT: a copy of the
+		// server's own logs leaving for somebody who does not have the box. An
+		// audit entry announcing that must not itself carry a credential.
+		auditDebugExported(4200, true, dirty),
 		// A realistic release tag rather than a planted one, for exactly the
 		// reason auditClipCaptured spells out above: the version is read from
 		// this server's own update feed and never from operator text, which is
@@ -256,6 +264,14 @@ func TestAuditSeveritiesMatchWhatTheFloorsPromise(t *testing.T) {
 		// other direction.
 		alerts.TypeUpgradeStaged:     alerts.SeverityCritical,
 		alerts.TypeUpgradeRolledBack: alerts.SeverityCritical,
+		// Critical, and NOT because anything has broken. This is the only entry
+		// here that records a DISCLOSURE rather than a change: a copy of this
+		// server's own logs has left the operator's control for somebody who
+		// does not have the box, and polyemesis deliberately keeps no copy of
+		// what was sent. So this line is the only durable evidence it happened,
+		// which is precisely the reasoning auditAPITokenCreated is critical on --
+		// what it records survives the response to a compromise.
+		alerts.TypeDebugExported: alerts.SeverityCritical,
 	}
 	seen := map[alerts.Type]bool{}
 	for _, ev := range everyAuditEvent() {

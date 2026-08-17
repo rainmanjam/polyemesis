@@ -48,6 +48,7 @@
   "auto.endpoint": "엔드포인트",
   "auto.evAudioClipping": "오디오 클리핑",
   "auto.evClipCaptured": "클립 캡처됨",
+  "auto.evDebugExported": "Debug bundle exported",
   "auto.evDiskLow": "디스크 공간 부족",
   "auto.evDiskRecovered": "디스크 복구됨",
   "auto.evIngestLost": "입력 끊김",

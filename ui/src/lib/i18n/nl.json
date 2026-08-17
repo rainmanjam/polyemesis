@@ -48,6 +48,7 @@
   "auto.endpoint": "Endpoint",
   "auto.evAudioClipping": "Audio clipt",
   "auto.evClipCaptured": "Clip vastgelegd",
+  "auto.evDebugExported": "Debug bundle exported",
   "auto.evDiskLow": "Schijf raakt vol",
   "auto.evDiskRecovered": "Schijf hersteld",
   "auto.evIngestLost": "Ingang verloren",

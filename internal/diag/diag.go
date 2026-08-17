@@ -307,3 +307,14 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 	}
 	return h.inner.Handle(ctx, r)
 }
+
+// Capacity is the ring's size, so a caller can tell an operator "5,000 of
+// 22,431 kept" rather than showing a number that looks complete and is not.
+func (r *Recorder) Capacity() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.buf)
+}

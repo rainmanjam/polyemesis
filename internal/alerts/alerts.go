@@ -144,6 +144,13 @@ const (
 	// hand in the platform's own console, which is a different night from
 	// "nothing is being delivered".
 	TypeBroadcastFault Type = "broadcast.fault"
+	// TypeDebugExported fires when a debug bundle is downloaded. CRITICAL, and
+	// not because anything broke: it is the moment a copy of this server's own
+	// logs leaves the operator's control for somebody who does not have the box.
+	// polyemesis keeps no copy of the bundle -- storing one would create a second
+	// place credentials could be read from -- so this entry is the ONLY durable
+	// record that it happened.
+	TypeDebugExported Type = "debug.exported"
 	// TypeTest is what the "send a test message" button raises. It is never
 	// coalesced and never filtered, because a test that a rule quietly swallows
 	// teaches the operator nothing.
@@ -190,6 +197,11 @@ func AllTypes() []Type {
 		// belongs beside the destination events and putting it there would move
 		// twenty established picker rows.
 		TypeBroadcastFault,
+		// Appended for the fourth time, and for the fourth time against meaning.
+		// This one belongs beside the auth events -- it is somebody taking a copy
+		// of the server's own logs -- and filing it there would move every picker
+		// row below it.
+		TypeDebugExported,
 	}
 }
 

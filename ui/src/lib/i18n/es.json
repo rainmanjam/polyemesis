@@ -48,6 +48,7 @@
   "auto.endpoint": "Endpoint",
   "auto.evAudioClipping": "Saturación de audio",
   "auto.evClipCaptured": "Clip capturado",
+  "auto.evDebugExported": "Debug bundle exported",
   "auto.evDiskLow": "Queda poco espacio en disco",
   "auto.evDiskRecovered": "Disco recuperado",
   "auto.evIngestLost": "Entrada perdida",

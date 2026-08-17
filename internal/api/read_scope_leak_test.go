@@ -370,6 +370,11 @@ func leakRoutes() []string {
 		"/api/v1/sources/1",
 		"/api/v1/settings",
 		"/api/v1/system",
+		// Debug-mode state: recording on/off and how much is held. Swept rather
+		// than excused because it is a READ a read-scoped token can make, and the
+		// counts it returns describe a buffer of the server's own logs -- exactly
+		// the shape this sweep exists to check for leaks.
+		"/api/v1/debug",
 		"/api/v1/status",
 		"/api/v1/source",
 		"/api/v1/destinations",
