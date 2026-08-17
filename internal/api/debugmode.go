@@ -39,6 +39,16 @@ type debugState struct {
 	Held     int    `json:"held"`
 	Seen     uint64 `json:"seen"`
 	Capacity int    `json:"capacity"`
+	// Bytes is the measured payload size of what is held, so the confirmation
+	// dialog can state how large the bundle is BEFORE it is sent. Approximate --
+	// it excludes the JSON envelope -- which is the right precision for a
+	// sentence an operator reads, and the wrong one to compute a Content-Length
+	// from.
+	Bytes int `json:"bytes"`
+	// RecordsTruncated is how many captured lines were cut at the per-record
+	// cap. A different claim from Held < Seen, which is about whole lines the
+	// ring dropped.
+	RecordsTruncated uint64 `json:"recordsTruncated"`
 }
 
 func (s *Server) debugStateNow() debugState {
@@ -51,6 +61,8 @@ func (s *Server) debugStateNow() debugState {
 	st.Held = len(recs)
 	st.Seen = s.diag.Seen()
 	st.Capacity = s.diag.Capacity()
+	st.Bytes = s.diag.Bytes()
+	st.RecordsTruncated = s.diag.TruncatedCount()
 	if s.diagLevel != nil {
 		st.Level = s.diagLevel.Level().String()
 	}

@@ -65,6 +65,19 @@ type CaptureInfo struct {
 	Capacity int `json:"capacity"`
 	// Truncated is Seen > Held, stated rather than left to arithmetic.
 	Truncated bool `json:"truncated"`
+	// Bytes is the measured payload size of the records, so the operator sending
+	// this can be told how large it is BEFORE they send it. Approximate: it
+	// excludes the JSON syntax and indentation wrapped around it at export.
+	Bytes int `json:"bytes"`
+	// RecordsTruncated is how many captured records exceeded MaxRecordBytes and
+	// were cut. A DIFFERENT CLAIM FROM Truncated above, which is about whole
+	// records the ring dropped; this is about surviving records that are short.
+	// An engineer needs both: one explains a missing line, the other explains a
+	// line that stops mid-sentence.
+	RecordsTruncated uint64 `json:"recordsTruncated"`
+	// RecordCap is MaxRecordBytes, so "a line was cut at 8 KB" is a fact the
+	// bundle carries rather than one the reader has to know.
+	RecordCap int `json:"recordCap"`
 	// Recording is whether capture was still running when this was taken.
 	Recording bool `json:"recording"`
 	// Level is the log level in force, because "debug mode was on" and "the
@@ -80,15 +93,13 @@ type CaptureInfo struct {
 // of the build. Adding an operator's configuration means adding a disclosure
 // decision per field, and each one needs its own test -- see the note in
 // docs/notes on why step 4 is security work rather than plumbing.
+// ONE SNAPSHOT, NOT SIX READS. An earlier version called Records, Seen, Bytes,
+// TruncatedCount and Recording in turn, each taking the recorder's lock
+// separately, so a concurrent Observe or Reset produced a bundle whose stated
+// size described a ring state its records had not come from. The size an
+// operator is shown before sending a file has to be that file's size.
 func Build(version string, platform string, rec *Recorder, sw *Switch, now time.Time) Bundle {
-	records := rec.Records()
-	seen := rec.Seen()
-	capacity := 0
-	if rec != nil {
-		rec.mu.Lock()
-		capacity = len(rec.buf)
-		rec.mu.Unlock()
-	}
+	snap := rec.Snapshot()
 	level := ""
 	if sw != nil {
 		level = sw.Level().String()
@@ -98,14 +109,17 @@ func Build(version string, platform string, rec *Recorder, sw *Switch, now time.
 		Version:     version,
 		Platform:    platform,
 		Capture: CaptureInfo{
-			Held:      len(records),
-			Seen:      seen,
-			Capacity:  capacity,
-			Truncated: seen > uint64(len(records)),
-			Recording: rec.Recording(),
-			Level:     level,
+			Held:             len(snap.Records),
+			Seen:             snap.Seen,
+			Capacity:         snap.Capacity,
+			Truncated:        snap.Seen > uint64(len(snap.Records)),
+			Bytes:            snap.Bytes,
+			RecordsTruncated: snap.Truncated,
+			RecordCap:        MaxRecordBytes,
+			Recording:        snap.Recording,
+			Level:            level,
 		},
-		Records: records,
+		Records: snap.Records,
 	}
 }
 

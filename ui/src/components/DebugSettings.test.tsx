@@ -45,6 +45,8 @@ const state = (over: Partial<Record<string, unknown>> = {}) => ({
   held: 0,
   seen: 0,
   capacity: 5000,
+  bytes: 0,
+  recordsTruncated: 0,
   ...over,
 });
 
@@ -198,6 +200,52 @@ describe("DebugSettings", () => {
     // The blob is what the operator ends up with; a POST fetched into memory
     // that never reaches the disk is an export that silently did nothing.
     expect(globalThis.URL.createObjectURL).toHaveBeenCalled();
+  });
+
+  // THE SIZE IS PART OF THE DECISION, not decoration. The count says how much
+  // diagnostic is in the bundle; the size decides whether it can be attached to
+  // the thread the operator was about to attach it to.
+  it("states the SIZE in the confirmation, not only the line count", async () => {
+    debugState.mockResolvedValue(
+      state({ recording: true, held: 12, seen: 12, bytes: 3_500_000 }),
+    );
+    render(<DebugSettings />);
+    await waitFor(() => expect(exportButton().disabled).toBe(false));
+
+    await act(async () => {
+      exportButton().click();
+    });
+    const dialog = await screen.findByRole("dialog");
+
+    // 3,500,000 bytes reads as MB, not as a raw byte count nobody can judge.
+    expect(dialog.textContent).toMatch(/3\.3 MB/);
+    expect(dialog.textContent).toMatch(/12/);
+  });
+
+  // A LINE CUT AT THE PER-RECORD CAP IS A DIFFERENT CLAIM from a line the ring
+  // dropped, and an engineer told "the log just stops" needs to know which.
+  it("says when long lines were shortened, distinctly from dropped ones", async () => {
+    debugState.mockResolvedValue(
+      state({ recording: true, held: 40, seen: 40, bytes: 9000, recordsTruncated: 3 }),
+    );
+    render(<DebugSettings />);
+
+    await waitFor(() => expect(screen.getByText(/long lines shortened/i)).toBeDefined());
+    expect(screen.getByText(/3 long lines shortened/i)).toBeDefined();
+    // Nothing was DROPPED here — seen equals held — so the other claim must not
+    // appear. Conflating them would send an engineer looking for missing lines
+    // that are not missing.
+    expect(screen.queryByText(/oldest dropped/i)).toBeNull();
+  });
+
+  it("makes no truncation claim when nothing was cut", async () => {
+    debugState.mockResolvedValue(
+      state({ recording: true, held: 12, seen: 12, bytes: 4096, recordsTruncated: 0 }),
+    );
+    render(<DebugSettings />);
+
+    await waitFor(() => expect(exportButton().disabled).toBe(false));
+    expect(screen.queryByText(/shortened/i)).toBeNull();
   });
 
   it("shows a failure instead of swallowing it", async () => {
