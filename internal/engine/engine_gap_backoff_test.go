@@ -7,6 +7,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/relay"
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // ----------------------------------------------------- the failed-start backoff
@@ -173,7 +174,16 @@ func TestAFailedStartArmsTheBackoffFromItsOwnAttempt(t *testing.T) {
 	e := failoverEngine(t)
 	// Two ports: the first feed has to SUCCEED, so that the stamp this test
 	// then clears is a real one and the clearing is doing visible work.
-	e.alloc = relay.NewPortAllocator(freeUDPPort(t), 2)
+	// Named window rather than held: this test already uses held for the ports
+	// it drains from the allocator further down.
+	base, window := testenv.FreeUDPWindow(t, 2)
+	// Released together, immediately before the allocator is built: the window
+	// has to be free for Allocate to hand it out, and holding it until this line
+	// is what stopped anything else from taking it.
+	for _, r := range window {
+		r.Release()
+	}
+	e.alloc = relay.NewPortAllocator(base, 2)
 	s := failoverOnSettings()
 	setSettings(e, s)
 	e.reconcileSelector(s, wantSelector(s), "")

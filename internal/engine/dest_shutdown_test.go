@@ -9,6 +9,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // stoppedEngine is an engine that has already shut down, with a one-port
@@ -158,7 +159,14 @@ func TestAReconcileThatPublishesIntoAShutdownStartsNothing(t *testing.T) {
 // `if p.retired || p.running`. Observed to fail -- the backup left "stopped".
 func TestAReconciledBackupPublishedIntoAShutdownStartsNothing(t *testing.T) {
 	e, _ := storeEngine(t)
-	e.alloc = relay.NewPortAllocator(freeUDPPort(t), 2)
+	base, held := testenv.FreeUDPWindow(t, 2)
+	// Released together, immediately before the allocator is built: the window
+	// has to be free for Allocate to hand it out, and holding it until this line
+	// is what stopped anything else from taking it.
+	for _, r := range held {
+		r.Release()
+	}
+	e.alloc = relay.NewPortAllocator(base, 2)
 	d := &destination{row: backupRow(), hub: e.hub}
 	e.mu.Lock()
 	e.dests[d.row.ID] = d
