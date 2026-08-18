@@ -357,8 +357,45 @@ else
 	ok "all 14 suites carry the shared trap and call poly_cleanup_exit"
 fi
 
+step "11. A leaked ffmpeg fails the suite, and someone else's does not"
+
+# ATTRIBUTION IS THE POINT, and it is what is asserted here. A bare count of
+# ffmpeg on the host cannot tell this suite's leak from a developer's own
+# transcode or from a sibling suite running in parallel, and a teardown check
+# that goes red for someone else's process is one people learn to ignore.
+#
+# The process list is substituted rather than faked. A copy of a system binary
+# renamed to ffmpeg is the obvious fake and does not work: macOS refuses to
+# execute it at all once the copy has lost its code signature, so the first
+# version of this test asserted nothing on a Mac while appearing to pass.
+if (poly_ffmpeg_pids() { echo 4242; }
+    POLY_FFMPEG_BASELINE=" "
+    poly_report_orphans >/dev/null 2>&1); then
+	bad "an ffmpeg that appeared after the baseline did not fail poly_report_orphans"
+else
+	ok "an ffmpeg that appeared after the baseline fails the check"
+fi
+
+if (poly_ffmpeg_pids() { echo 4242; }
+    POLY_FFMPEG_BASELINE=" 4242 "
+    poly_report_orphans >/dev/null 2>&1); then
+	ok "an ffmpeg that predates the suite is not attributed to it"
+else
+	bad "an ffmpeg present before the suite started was wrongly blamed on it"
+fi
+
+# And the verdict has to REACH the exit status, which is the half a RETURN trap
+# could never do.
+if (poly_ffmpeg_pids() { echo 4242; }
+    POLY_FFMPEG_BASELINE=" "
+    poly_cleanup_exit 0 "" >/dev/null 2>&1); then
+	bad "a suite that leaked an ffmpeg still exited 0"
+else
+	ok "a leaked ffmpeg promotes a green run to red"
+fi
+
 total=$((pass + fail))
-EXPECTED_CHECKS=17
+EXPECTED_CHECKS=20
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
 	printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

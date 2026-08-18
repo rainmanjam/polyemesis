@@ -287,9 +287,28 @@ poly_wait_jobs() {
 # enough to catch every orphan is also wide enough to kill a suite running in
 # another terminal. Reporting makes the leak visible, which is the one thing it
 # was not before.
-# poly_report_orphans names the media children that outlived the run.
+# POLY_FFMPEG_BASELINE is the set of ffmpeg pids that were ALREADY running when
+# this library was sourced, which is before the suite has started anything.
 #
-# WHY THIS IS REPORTED RATHER THAN FAILED. setProcessGroup puts every child in
+# IT EXISTS SO THE CHECK BELOW CAN FAIL RATHER THAN MERELY PRINT. A bare count of
+# ffmpeg on the host cannot tell a process this suite leaked from a developer's
+# own transcode, or from a sibling suite running in parallel -- and a teardown
+# check that goes red for someone else's process is one people learn to ignore,
+# which is the state this was already in. Diffing against the baseline attributes
+# the leak, so the failure names only processes this run is responsible for.
+# poly_ffmpeg_pids is the ONE place the process list is obtained, so a test can
+# substitute it. Faking a real process is not portable enough to rely on -- a copy
+# of a system binary renamed to ffmpeg is refused outright on macOS, where the
+# copy loses its code signature -- and the logic worth testing here is the
+# attribution, not whether pgrep can match a name.
+poly_ffmpeg_pids() { pgrep -x ffmpeg 2>/dev/null; }
+
+POLY_FFMPEG_BASELINE="$(poly_ffmpeg_pids | tr '\n' ' ')"
+
+# poly_report_orphans names the media children that outlived the run, and FAILS
+# when any of them are this run's doing.
+#
+# WHY THE LEAK EXISTS AT ALL. setProcessGroup puts every child in
 # its OWN process group, deliberately, so a Ctrl-C reaches polyemesis and lets
 # it shut its children down in order. The cost is that an ABRUPT death of
 # polyemesis -- SIGKILL, an OOM, a cancelled CI job -- signals nothing, and every
@@ -302,23 +321,39 @@ poly_wait_jobs() {
 # thread retirement could kill live destinations. That trade needs its own
 # testing, not a line in a teardown helper. See #448.
 #
-# So this makes the leak VISIBLE instead of fixing it. Thirteen of these had been
-# running for up to 5.5 days on a dev box before anyone looked, and a cancelled
-# CI job left a polyemesis and five ffmpeg behind. Neither said anything at the
-# time, which is the part worth changing first.
+# So this does not fix the leak -- under systemd nothing needs to, KillMode=mixed
+# SIGKILLs the whole cgroup when the unit stops for any reason. What leaks is
+# every OTHER way polyemesis runs: these suites (as the login user, not the root
+# service), a foreground developer run, a container with a shell entrypoint. That
+# is exactly where the thirteen came from.
+#
+# IT FAILS THE SUITE NOW, where it used to print. Thirteen of these had been
+# running for up to 5.5 days on a dev box before anyone looked, and a cancelled CI
+# job left a polyemesis and five ffmpeg behind. Neither said anything at the time.
+# A finding nobody is forced to read is a finding nobody reads.
 poly_report_orphans() {
 	command -v pgrep >/dev/null 2>&1 || return 0
-	# `pgrep -x | wc -l`, not `pgrep -c`: BSD pgrep has no -c, so on macOS the
-	# count came back empty and this reported nothing while an ffmpeg was plainly
-	# running. Caught by running it against a live one rather than against none.
-	local n
-	n="$(pgrep -x ffmpeg 2>/dev/null | wc -l | tr -d ' ')"
-	case "$n" in ''|*[!0-9]*) return 0 ;; esac
-	[ "$n" -gt 0 ] || return 0
-	printf "  \033[33mFINDING\033[0m  %s ffmpeg process(es) outlived this suite\n" "$n" >&2
-	pgrep -a -x ffmpeg 2>/dev/null | sed -E 's#(rtmps?://|srt://)[^ ]*#\1<redacted>#g' | cut -c1-120 | sed 's/^/            /' >&2
-	printf "            They are reparented to init and will run until the host is\n" >&2
-	printf "            rebooted. See #448; teardown is asked to be tidy, not relied on.\n" >&2
+	local pid new=""
+	# Listed per-pid rather than counted. `pgrep -c` is not portable -- BSD pgrep
+	# has no -c, so on macOS the count came back empty and this reported nothing
+	# while an ffmpeg was plainly running. Caught by running it against a live one
+	# rather than against none.
+	for pid in $(poly_ffmpeg_pids); do
+		case " $POLY_FFMPEG_BASELINE " in
+			*" $pid "*) continue ;;  # was already here before the suite began
+		esac
+		new="$new $pid"
+	done
+	[ -n "$new" ] || return 0
+	printf "  \033[31mFAIL\033[0m  ffmpeg outlived this suite:%s\n" "$new" >&2
+	for pid in $new; do
+		ps -o pid=,ppid=,command= -p "$pid" 2>/dev/null \
+			| sed -E 's#(rtmps?://|srt://)[^ ]*#\1<redacted>#g' | cut -c1-120 | sed 's/^/            /' >&2
+	done
+	printf "            A ppid of 1 means it was reparented to init and will run until\n" >&2
+	printf "            the host is rebooted, holding whatever relay port it was reading.\n" >&2
+	printf "            See #448.\n" >&2
+	return 1
 }
 
 poly_cleanup() {
@@ -404,10 +439,6 @@ poly_cleanup() {
 poly_cleanup_exit() {
   local rc="$1"
   shift
-  # AFTER poly_cleanup below has had its turn, so what this names is what
-  # teardown failed to reach rather than what it had not got to yet. It never
-  # changes rc -- see #448 and the note on poly_report_orphans.
-  trap 'poly_report_orphans' RETURN
   if ! poly_cleanup "$@"; then
     # ONLY a 0 is promoted. An unconditional `rc=1`, or an `else rc=0` on the
     # success side, both RENUMBER a red run -- which is the one outcome the table
@@ -419,6 +450,21 @@ poly_cleanup_exit() {
     # arithmetic expression, where a non-numeric value reads as 0 and would be
     # PROMOTED to 1 -- renumbering a run on exactly the axis the table above
     # forbids renumbering.
+    if [ "$rc" -eq 0 ]; then
+      rc=1
+    fi
+  fi
+  # AFTER poly_cleanup has had its turn, so what this names is what teardown
+  # failed to reach rather than what it had not got to yet.
+  #
+  # IT USED TO BE `trap 'poly_report_orphans' RETURN`, which could not have failed
+  # the run even if it had wanted to: a RETURN trap fires after the return value
+  # is already fixed. Moving it inline is the whole of what turns a printed
+  # finding into a result.
+  #
+  # Same promotion rule as above, for the same reason -- only a 0 is promoted,
+  # because renumbering a red run is the one outcome the table above forbids.
+  if ! poly_report_orphans; then
     if [ "$rc" -eq 0 ]; then
       rc=1
     fi
