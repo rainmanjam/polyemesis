@@ -44,6 +44,9 @@ const pageSource = {
   "/vs/obs-multi-rtmp": "src/pages/vs/obs-multi-rtmp.astro",
   "/vs/restreamer": "src/pages/vs/restreamer.astro",
   "/vs/streamelements": "src/pages/vs/streamelements.astro",
+  "/vs/streamlabs": "src/pages/vs/streamlabs.astro",
+  "/multistream": "src/pages/multistream.astro",
+  "/twitch-vod-track": "src/pages/twitch-vod-track.astro",
   ...Object.fromEntries(PUBLISHED.map((d) => [`/docs/${d.slug}`, `../docs/${d.file}`])),
 };
 

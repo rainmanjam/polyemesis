@@ -1884,7 +1884,11 @@ func (e *Engine) reconcileBackupIngest(s db.Settings) {
 	e.mu.Unlock()
 
 	proc.Start()
-	e.log.Info("backup ingest started", "mode", b.Mode, "url", spec.PublicIngestURL("<server>"))
+	// IngestURLForLog, not PublicIngestURL: this line lands in journalctl and
+	// server.log, and the full rendering carries the SRT passphrase or the whole
+	// pull URL. internal/diag's scrubbing does not cover it -- the recorder is a
+	// second consumer and the inner handler still writes the original record.
+	e.log.Info("backup ingest started", "mode", b.Mode, "url", spec.IngestURLForLog("<server>"))
 }
 
 func (e *Engine) teardownBackup(b *backupIngest) {

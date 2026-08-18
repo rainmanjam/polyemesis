@@ -8,6 +8,91 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Security
+
+- **The ingest URL in `ingest started` carried the credential, on every boot.**
+  `PublicIngestURL` renders the server half only for RTMP — deliberately, and the
+  comment above the caller said so — but it renders `…&passphrase=<cleartext>`
+  for SRT and the operator's pull URL WHOLE for pull, and a pull URL is where a
+  camera password or a CDN path token lives. Both reached `ingest started` and
+  `backup ingest started` at Info, so they landed in journalctl and
+  `server.log`. Debug mode's scrubbing does not cover this: the recorder is a
+  second consumer and the inner handler still writes the original record. The log
+  rendering now keeps the host and port — the question a failed ingest actually
+  asks — and drops the rest, and an allowlist test fails the build if a third log
+  line acquires the full one.
+
+- **Facebook's credential check printed the app secret on any network hiccup.**
+  The pair travels in the query string, which is load-bearing — a POST form makes
+  Facebook reject correct credentials — but a transport failure arrives as a
+  `*url.Error` carrying the full URL, and that was interpolated raw into the
+  message an operator sees and the logs keep. A DNS outage, a timeout or a TLS
+  error was enough.
+
+- **A credential in an unrecognised attribute shape reached the debug bundle.**
+  Rendering a value before scrubbing it is only safe if the rendering keeps the
+  bytes. It did not, twice: a `[]byte` was base64-encoded, so the credential
+  arrived present, unrecognisable to the exact-match set, and decodable by the
+  recipient in one step; and `&`, `<` and `>` were escaped, so a camera or CDN
+  password containing an ampersand — ordinary, and a declared literal — was
+  transformed out of matching range.
+
+- **The debug bundle's scrub set had never heard of three inventories.** It was
+  built from destinations; sources were added after an earlier review; platform
+  accounts (which hold the OAuth access and refresh tokens), the install-wide
+  ingest, and the failover BACKUP ingest were in none of them. The backup pull
+  URL is logged in full at the moment the selector switches to it — which is when
+  an operator is recording, because that switch is the fault they are capturing.
+
+- **The source credential extractor read a pull URL with the publish-URL rule.**
+  `urlSecrets` says in its own comment that it "is NOT correct for a pull URL,
+  where the credential is in the URL and nowhere else". It takes the last path
+  segment, which for a publish URL is the stream key and for a pull URL is the
+  filename, so a CDN URL was declared to the recorder as `index.m3u8` and the
+  credential left in the clear.
+
+- **The hook response pass ran backwards.** The residual `Redact` was applied
+  before the declared secret set rather than after it, inverting the rule
+  `internal/alerts` states about itself. `Redact` transforms text, so a declared
+  literal arriving inside a URL was no longer byte-identical when the exact pass
+  ran.
+
+- **An interrupted upgrade left plaintext stream keys in the write-ahead log,
+  permanently.** The 0.7.0 migration seals every row, commits, then truncates the
+  log — but the function returned early when it found nothing left to seal, and
+  the truncate sits after that return. An upgrade that committed and then died
+  came back, found no work, and never truncated the log again. Not on that boot
+  and not on any later one. Measured at 162 plaintext keys still greppable after
+  the restart.
+
+- **The checkpoint never checked itself.** `PRAGMA wal_checkpoint(TRUNCATE)` does
+  not fail with an error when it cannot get the lock; it returns a row with
+  `busy=1` and the log where it was. The code used `Exec`, which discards result
+  rows, so the fatal-on-failure guarantee written above it was armed for a SQL
+  error that cannot happen and blind to the refusal that can.
+
+- **Exporting a debug bundle now requires a signed-in operator.** `GET /debug`
+  and `PUT /debug` stay reachable by an admin API token, so a dashboard can read
+  capture state and an automation can start one. Taking the file — a copy of the
+  server's own logs, meant for somebody who does not have the box — joins
+  `/upgrade/stage` and `/auth/tokens` behind a session.
+
+- **Expert mode accepted `-report`.** It makes FFmpeg write its own log file
+  whose first line is the argv it was invoked with, stream key included, into a
+  directory nothing here scrubs.
+
+- **`ProtectProc=invisible` on both unit definitions.** A destination's stream key
+  reaches FFmpeg as a command-line argument, and on a stock Linux host
+  `/proc/<pid>/cmdline` is readable by every local account. The host half is
+  `hidepid=2`; see INSTALL.md.
+
+- **The installer ran an unverified third-party FFmpeg as root.** It refuses its
+  own binary without a matching `SHA256SUMS`, and fetched FFmpeg with no
+  integrity check at all — then extracted it and executed it to probe for libsrt.
+  It now verifies against the published `checksums.sha256` and refuses the
+  upgrade if that is missing or does not match, running nothing from the
+  download.
+
 ### Changed
 - **An install with no source is one somebody can actually use.** A fresh
   database no longer manufactures a "Main" source nobody configured, so zero
@@ -127,8 +212,8 @@ its first tagged release.
   panel down — it takes metadata push down with it.
 
 - **polyemesis.com publishes the documentation.** The site went from 6 pages to
-  35: the 23 user-facing documents in `docs/` are rendered at `/docs/<slug>`
-  rather than linked to GitHub, four comparison pages sit under `/vs/`, and
+  37: the 23 user-facing documents in `docs/` are rendered at `/docs/<slug>`
+  rather than linked to GitHub, five comparison pages sit under `/vs/`, and
   `/free-restream-service` and `/how-to-multistream-from-obs` answer the two
   queries with the most measured search demand this project can address.
 
@@ -181,6 +266,48 @@ its first tagged release.
   draws them instead of printing forty lines of source at the reader.
 
 ### Fixed
+- **Deleting a destination could end a broadcast this process never put on
+  air.** The coordinator decided from the platform's answer alone; the phase it
+  had actually confirmed was recorded and never read. They diverge in the case
+  the code calls "the somebody-else's-broadcast story" — a broadcast started in
+  YouTube Studio, or carried through an upgrade — where the platform says live
+  and polyemesis never transitioned it. On YouTube `complete` is terminal.
+
+- **Start and stop reported the wrong thing on a multi-source install.** The
+  effect was read back from the DEFAULT engine only, so a destination belonging
+  to another programme was simply not found: a failed enable reported as
+  started, and a stop that left a process holding the port reported as clean.
+  Invisible on a single-source install, which is every development box.
+
+- **The debug bundle's size cap counted the wrong bytes.** It measured raw
+  string length while JSON writes six bytes for a control character, so the
+  ceiling the package states about itself was wrong by a factor of six —
+  785,437 bytes against an asserted 393,216. Measurement, cutting and every
+  budget deduction now run in encoded units.
+
+- **Attributes logged inside a group reached the bundle as `{}`.** The key names
+  survived and every value vanished, which reads as "the field was blank" rather
+  than "the recorder cannot represent this".
+
+- **YouTube's broadcast-create advice was dead on the real path.** It matched
+  against a truncated body, and its own comment says the reason code sits past
+  that cut — so an operator whose channel is not enabled for live streaming got
+  the raw snippet instead of the sentence naming the button.
+
+- **The secret key file was created with a Unix file mode alone.** The load path
+  has always restricted it properly; the branch that MINTS the key did not, so
+  on Windows the file it had just generated was readable by everyone.
+
+- **A supervisor restart could leave a live child unreachable.** The teardown
+  cleared the process handle unconditionally, so a predecessor still unwinding
+  could blank a successor's — after which `terminate()` and `kill()` could not
+  find the new child, and it kept running and kept publishing to a destination
+  the operator believed was stopped.
+
+- **Three published pages were missing from the sitemap.**
+  `/multistream`, `/twitch-vod-track` and `/vs/streamlabs` were built and served
+  but absent from the `lastmod` map.
+
 - **A credential in an unrecognised attribute reached the debug bundle
   verbatim.** The recorder's scrub walk handled `string`, `[]string`,
   `map[string]any`, `error` and `fmt.Stringer`, and passed everything else

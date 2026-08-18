@@ -1172,7 +1172,7 @@
   "set.tokenRevoked": "已吊销 {name}。",
   "set.tokenScope": "权限",
   "set.tokenScopeAdmin": "完全访问",
-  "set.tokenScopeAdminHint": "可以执行管理员的所有操作，但不能管理令牌、更改密码或上传媒体。只有在确实需要无人值守地进行更改时才创建此类令牌。",
+  "set.tokenScopeAdminHint": "除了管理令牌、修改密码、上传媒体、准备升级和导出调试包之外，可以执行管理员的所有操作。只有在确实需要无人值守地进行更改时才创建。",
   "set.tokenScopeRead": "只读",
   "set.tokenScopeReadHint": "可以读取控制台显示的一切——状态、统计、指标、媒体列表——但不能更改任何内容。这正是监控脚本所需要的。",
   "set.topicPrefix": "主题前缀",

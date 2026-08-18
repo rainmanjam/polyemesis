@@ -802,7 +802,25 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// fetched a link and make the trail useless for its one question.
 			r.Get("/debug", s.handleGetDebug)
 			r.Put("/debug", s.handleSetDebug)
-			r.Post("/debug/export", s.handleExportDebug)
+
+			// THE EXPORT IS SESSION-ONLY; THE READ AND THE TOGGLE ARE NOT.
+			//
+			// The earlier comment here argued an admin token should pass because
+			// "an admin token is admin", and the audit entry was the control. That
+			// is a defensible rule and it is not the one the rest of this file
+			// follows: /upgrade/stage, /auth/tokens and /media are all inside
+			// requireSession precisely so a machine credential cannot perform the
+			// irreversible or the disclosing without a human present. This route
+			// mints a copy of the server's own logs to send to somebody else,
+			// which is the largest disclosure in the product, and it sat outside.
+			//
+			// The split is deliberate: GET /debug and PUT /debug stay
+			// token-reachable so a dashboard can read state and an automation can
+			// start a capture. Taking the FILE needs a session.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireSession)
+				r.Post("/debug/export", s.handleExportDebug)
+			})
 			// Authenticated on purpose: the build number is a fingerprint, and
 			// an unauthenticated scanner should not get to read it. The check
 			// is a POST so requireCSRF covers it and no prefetching browser

@@ -1172,7 +1172,7 @@
   "set.tokenRevoked": "Unieważniono {name}.",
   "set.tokenScope": "Uprawnienia",
   "set.tokenScopeAdmin": "Pełny dostęp",
-  "set.tokenScopeAdminHint": "Może robić wszystko to, co administrator, poza zarządzaniem tokenami, zmianą hasła i przesyłaniem mediów. Twórz taki token tylko wtedy, gdy coś naprawdę musi wprowadzać zmiany bez nadzoru.",
+  "set.tokenScopeAdminHint": "Może robić wszystko to, co administrator, poza zarządzaniem tokenami, zmianą hasła, przesyłaniem multimediów, przygotowaniem aktualizacji i eksportem pakietu diagnostycznego. Twórz taki token tylko wtedy, gdy coś naprawdę musi wprowadzać zmiany bez nadzoru.",
   "set.tokenScopeRead": "Tylko odczyt",
   "set.tokenScopeReadHint": "Może odczytać wszystko, co pokazuje konsola — stan, statystyki, metryki, listę mediów — i nie może niczego zmienić. Tego potrzebuje skrypt monitorujący.",
   "set.topicPrefix": "Prefiks tematu",

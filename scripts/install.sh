@@ -483,6 +483,33 @@ offer_ffmpeg_upgrade() {
     return 1
   fi
 
+  # VERIFY BEFORE EXTRACTING, AND BEFORE RUNNING IT AS ROOT.
+  #
+  # This installer refuses its OWN binary without a matching SHA256SUMS, and
+  # fetched a third-party FFmpeg with no integrity check at all -- then
+  # extracted it and EXECUTED it as root to probe for libsrt. Whatever was
+  # published at that moment ran on the operator's box. The asymmetry was the
+  # finding: strict about us, silent about them.
+  #
+  # BtbN publishes one checksums.sha256 per release covering every asset, in
+  # the `<hash>  <name>` form sha256sum -c reads directly -- the same idiom
+  # install_binary_mode uses for our own download.
+  if ! fetch_https "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/checksums.sha256" \
+        "$tmp/checksums.sha256"; then
+    warn "could not fetch BtbN's checksums.sha256 — refusing to install an"
+    warn "unverified FFmpeg. Staying on ${label}. Nothing was changed."
+    warn "Install FFmpeg 6.0+ with libsrt by hand if you need it sooner."
+    return 1
+  fi
+  mv "$tmp/ff.tar.xz" "$tmp/$asset"
+  if ! (cd "$tmp" && grep " ${asset}\$" checksums.sha256 | sha256sum -c --status -); then
+    warn "CHECKSUM MISMATCH for $asset — refusing it. Staying on ${label}."
+    warn "Nothing was changed, and nothing from that download was run."
+    return 1
+  fi
+  mv "$tmp/$asset" "$tmp/ff.tar.xz"
+  echo "     checksum verified"
+
   mkdir -p "$tmp/x"
   if ! tar xf "$tmp/ff.tar.xz" --strip-components=1 -C "$tmp/x" 2>/dev/null; then
     warn "the archive did not extract — staying on ${label}. Nothing was changed."
@@ -1235,6 +1262,15 @@ RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+# THE STREAM KEY IS IN FFmpeg'S ARGV, AND ARGV IS WORLD-READABLE BY DEFAULT.
+# A destination's RTMP target is built as rtmp://host/app/<streamKey> and handed
+# to the child as an argument, so on a stock Linux host any local account can
+# read a live stream key out of /proc/<pid>/cmdline or plain `ps`. polyemesis
+# masks its own renderings of that command line and cannot mask the kernel's.
+# ProtectProc=invisible hides other users' processes from this unit's view and,
+# with hidepid on /proc, is what keeps the key off a shared box. It is one line
+# and it costs nothing on a single-operator VPS.
+ProtectProc=invisible
 ProtectHome=true
 ReadWritePaths=${DATA_DIR}
 

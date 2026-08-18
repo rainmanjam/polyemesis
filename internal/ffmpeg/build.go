@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 )
 
 // commonArgs are the flags every polyemesis child gets.
@@ -392,11 +394,77 @@ func (s IngestSpec) IngestURL() string {
 	}
 }
 
+// IngestURLForLog renders the same address for a LOG LINE, without the
+// credential.
+//
+// PublicIngestURL is for the authenticated API: it shows an operator their own
+// passphrase, which is the whole point of the settings page. The same string was
+// also going into `ingest started` and `backup ingest started` — ordinary Info
+// lines that land in journalctl and server.log and anywhere those are shipped.
+//
+// engine.ingestURLForLog's comment already says what the rule is meant to be:
+// "This is a log line and a dashboard string, so the token stays out of it." It
+// held for RTMP, where the key is deliberately not in the rendering at all. It
+// did not hold for SRT, whose query carries `passphrase=<cleartext>`, or for
+// pull, which returns the operator's URL whole — and a pull URL is exactly where
+// a camera password or a CDN path token lives.
+//
+// ASSEMBLED, NOT PATTERN-MATCHED, and that is the difference from
+// alerts.RedactURL. Redaction is the residual pass, written for strings nobody
+// constructed; its keyCarrying table is rtmp/rtsp/srt/udp/rtp, so an https CDN
+// URL of the shape https://cdn.example/live/<TOKEN>/index.m3u8 goes through it
+// untouched. Here the URL was BUILT from known fields, so the safe rendering
+// omits the secret ones instead of guessing which they were.
+//
+// WHAT IS KEPT IS WHAT A FAULT NEEDS. The host and port answer "which endpoint
+// did it try", which is the question behind every failed ingest. The path and
+// query of a pull URL are dropped wholesale rather than filtered: a credential
+// can sit in any segment or any parameter, and a rule that keeps "the harmless
+// ones" is a rule that will be wrong about a shape nobody has met yet.
+func (s IngestSpec) IngestURLForLog(host string) string {
+	switch s.Kind {
+	case IngestPull:
+		raw := strings.TrimSpace(s.PullURL)
+		if raw == "" {
+			return ""
+		}
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" {
+			// Unparseable: say the shape and nothing else, rather than falling
+			// back to printing it.
+			return alerts.Mask
+		}
+		out := u.Scheme + "://" + u.Hostname()
+		if p := u.Port(); p != "" {
+			out += ":" + p
+		}
+		if u.Path != "" && u.Path != "/" || u.RawQuery != "" {
+			out += "/" + alerts.Mask
+		}
+		return out
+	case IngestRTMP:
+		// Already carries no key — PublicIngestURL renders the server half only.
+		return s.PublicIngestURL(host)
+	default:
+		// SRT: everything PublicIngestURL renders except the passphrase, which is
+		// masked rather than dropped so the line still says one is configured.
+		full := s.PublicIngestURL(host)
+		if s.SRTPassphrase == "" {
+			return full
+		}
+		return strings.ReplaceAll(full, s.SRTPassphrase, alerts.Mask)
+	}
+}
+
 // PublicIngestURL renders the URL a streamer points their encoder at.
 //
 // In pull mode nobody points anything anywhere, so it reports the source
 // polyemesis dials instead — that is the address the operator needs to see, and
 // returning nothing would leave the dashboard blank.
+//
+// FOR THE AUTHENTICATED API, NOT FOR LOGS. It renders the SRT passphrase and the
+// whole pull URL in the clear, deliberately: the settings page shows an operator
+// their own credential. Anything writing to a log wants IngestURLForLog.
 func (s IngestSpec) PublicIngestURL(host string) string {
 	switch s.Kind {
 	case IngestPull:

@@ -1172,7 +1172,7 @@
   "set.tokenRevoked": "{name} widerrufen.",
   "set.tokenScope": "Berechtigung",
   "set.tokenScopeAdmin": "Voller Zugriff",
-  "set.tokenScopeAdminHint": "Kann alles, was der Administrator kann – außer Tokens verwalten, das Passwort ändern und Medien hochladen. Erstellen Sie ein solches Token nur, wenn wirklich etwas unbeaufsichtigt Änderungen vornehmen muss.",
+  "set.tokenScopeAdminHint": "Kann alles, was die Administratorin kann, außer Tokens verwalten, das Passwort ändern, Medien hochladen, ein Upgrade vorbereiten und ein Debug-Paket exportieren. Erstellen Sie so einen Token nur, wenn wirklich etwas unbeaufsichtigt Änderungen vornehmen muss.",
   "set.tokenScopeRead": "Nur lesen",
   "set.tokenScopeReadHint": "Kann alles lesen, was die Konsole anzeigt – Status, Statistiken, Metriken, die Medienliste – und nichts verändern. Genau das braucht ein Überwachungsskript.",
   "set.topicPrefix": "Topic-Präfix",

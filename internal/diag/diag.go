@@ -31,10 +31,12 @@
 package diag
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -291,6 +293,19 @@ func scrubValue(r *Recorder, v any) any {
 			out[r.scrub(k)] = scrubValue(r, vv)
 		}
 		return out
+	case []slog.Attr:
+		// A GROUP'S VALUES WERE REACHING THE BUNDLE AS {}. slog.Value has only
+		// unexported fields, so a group attribute -- which arrives here as
+		// []slog.Attr -- fell to the default branch and marshalled to an empty
+		// object: the KEY names survived and every value vanished. An engineer
+		// reads that as "the field was blank" rather than "the recorder cannot
+		// represent this", which is the same silent-truncation failure the rest
+		// of this package is built to avoid.
+		out := make(map[string]any, len(t))
+		for _, a := range t {
+			out[r.scrub(a.Key)] = scrubValue(r, a.Value.Any())
+		}
+		return out
 	case fmt.Stringer:
 		return r.scrub(t.String())
 	default:
@@ -309,11 +324,36 @@ func scrubValue(r *Recorder, v any) any {
 		if isScalar(v) {
 			return v
 		}
-		if b, err := json.Marshal(v); err == nil {
-			return r.scrub(string(b))
-		}
-		return r.scrub(fmt.Sprint(v))
+		return r.scrub(renderForScrub(v))
 	}
+}
+
+// renderForScrub turns an unrecognised value into text the exact-match set can
+// still recognise its literals inside.
+//
+// RENDERING BEFORE SCRUBBING IS ONLY SAFE IF THE RENDERING PRESERVES THE BYTES.
+// json.Marshal does not, in two ways that both hid a declared credential:
+//
+//	IT ESCAPES & < AND > BY DEFAULT. A camera or CDN password containing an
+//	ampersand -- ordinary, and collected by urlSecrets as a declared literal --
+//	became p&ssw0rd… in the text handed to Scrub, which is a strings.Replace
+//	over exact literals and therefore matched nothing. SetEscapeHTML(false) is
+//	the fix; the bundle is a diagnostic file, never an HTML document.
+//
+//	IT BASE64-ENCODES A []byte. The credential is then present, unrecognisable
+//	to the scrub, and decodable in one step by whoever receives the bundle.
+//	Handled ahead of the marshal, as text.
+func renderForScrub(v any) string {
+	if b, ok := v.([]byte); ok {
+		return string(b)
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return fmt.Sprint(v)
+	}
+	return strings.TrimRight(buf.String(), "\n")
 }
 
 // isScalar reports whether a value is small, unshortenable, and incapable of
@@ -438,7 +478,17 @@ func (h *Handler) WithAttrs(as []slog.Attr) slog.Handler {
 }
 
 func (h *Handler) WithGroup(name string) slog.Handler {
-	return &Handler{inner: h.inner.WithGroup(name), rec: h.rec, attrs: h.attrs, group: name}
+	// APPENDED, NOT REPLACED. Overwriting meant nested groups collapsed onto the
+	// innermost name, so a grouped attribute was recorded under its bare key and
+	// collided with a same-named top-level one -- last write into the map wins,
+	// silently.
+	g := name
+	if h.group != "" && name != "" {
+		g = h.group + "." + name
+	} else if name == "" {
+		g = h.group
+	}
+	return &Handler{inner: h.inner.WithGroup(name), rec: h.rec, attrs: h.attrs, group: g}
 }
 
 func (h *Handler) Handle(ctx context.Context, r slog.Record) error {

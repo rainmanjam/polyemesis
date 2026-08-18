@@ -52,6 +52,36 @@ func marker(dropped int) string {
 	return fmt.Sprintf("%s, %d bytes dropped]", truncationMarker, dropped)
 }
 
+// encodedLen is how many bytes s costs once JSON has escaped it.
+//
+// THE CAP HAS TO BOUND THE FILE, NOT THE ARITHMETIC. It counted raw bytes, and
+// JSON writes SIX for a control character (\u0000). A record of 8 KB of NULs
+// measured 8,192 against the cap and serialised to 49,152 — so the ceiling this
+// package states about itself was wrong by a factor of six, measured at 785,437
+// bytes against an asserted 393,216.
+//
+// Counted in one pass with no allocation, which is what keeps it affordable on
+// the logging path: Observe's contract is that it must not block, and
+// marshalling every record to measure it would put a json.Marshal between the
+// process and every line it logs. & < and > are one byte each because
+// renderForScrub disables HTML escaping.
+func encodedLen(s string) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' || c == '\\':
+			n += 2
+		case c == '\n' || c == '\r' || c == '\t' || c == '\b' || c == '\f':
+			n += 2
+		case c < 0x20:
+			n += 6 // \u00XX
+		default:
+			n++
+		}
+	}
+	return n
+}
+
 // cutString shortens s to fit budget, on a rune boundary, leaving room for the
 // marker.
 //
@@ -60,7 +90,7 @@ func marker(dropped int) string {
 // receiving it gets a file that will not parse, which is worse than a file that
 // is merely short.
 func cutString(s string, budget int) (string, bool) {
-	if len(s) <= budget {
+	if encodedLen(s) <= budget {
 		return s, false
 	}
 	if budget <= 0 {
@@ -77,14 +107,30 @@ func cutString(s string, budget int) (string, bool) {
 		// capture's RecordsTruncated still carry that, so this is not silent.
 		return "", true
 	}
-	keep := budget - len(m)
-	if keep > len(s) {
-		keep = len(s)
+	// WALKED IN ENCODED UNITS, NOT SLICED BY RAW INDEX. The budget is a JSON
+	// cost, so a byte index into s does not measure it: 8 KB of NULs costs six
+	// times its length. Accumulate until the allowance runs out.
+	allow := budget - len(m)
+	keep, spent := 0, 0
+	for keep < len(s) {
+		c := s[keep]
+		cost := 1
+		switch {
+		case c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t' || c == '\b' || c == '\f':
+			cost = 2
+		case c < 0x20:
+			cost = 6
+		}
+		if spent+cost > allow {
+			break
+		}
+		spent += cost
+		keep++
 	}
 	// Back off to the last complete rune: a string cut through a multi-byte rune
 	// does not survive JSON encoding, and an engineer receiving a file that will
 	// not parse is worse off than one receiving a short one.
-	for keep > 0 && !utf8.RuneStart(s[keep]) {
+	for keep > 0 && keep < len(s) && !utf8.RuneStart(s[keep]) {
 		keep--
 	}
 	// marker(len(s)-keep) is never longer than marker(len(s)), which was the
@@ -96,11 +142,11 @@ func cutString(s string, budget int) (string, bool) {
 func valueBytes(v any) int {
 	switch t := v.(type) {
 	case string:
-		return len(t)
+		return encodedLen(t)
 	case []string:
 		n := 0
 		for _, s := range t {
-			n += len(s)
+			n += encodedLen(s)
 		}
 		return n
 	case map[string]any:
@@ -114,6 +160,9 @@ func valueBytes(v any) int {
 			return 0
 		}
 		return len(t.Error())
+	case []byte:
+		// Stored as text now, not base64 — see diag.renderForScrub.
+		return len(t)
 	case fmt.Stringer:
 		return len(t.String())
 	default:
@@ -137,9 +186,9 @@ func valueBytes(v any) int {
 
 // recordBytes is the measured size of a record, in the same units as the cap.
 func recordBytes(rec Record) int {
-	n := len(rec.Message) + len(rec.Level)
+	n := encodedLen(rec.Message) + encodedLen(rec.Level)
 	for k, v := range rec.Attrs {
-		n += len(k) + valueBytes(v)
+		n += encodedLen(k) + valueBytes(v)
 	}
 	return n
 }
@@ -149,7 +198,7 @@ func capValue(v any, budget int) (any, int, bool) {
 	switch t := v.(type) {
 	case string:
 		out, cut := cutString(t, budget)
-		return out, budget - len(out), cut
+		return out, budget - encodedLen(out), cut
 	case []string:
 		out := make([]string, 0, len(t))
 		cut := false
@@ -183,7 +232,7 @@ func capValue(v any, budget int) (any, int, bool) {
 				break
 			}
 			out = append(out, c)
-			budget -= len(c)
+			budget -= encodedLen(c)
 			cut = cut || did
 		}
 		budget += reserve
@@ -298,11 +347,11 @@ func capRecord(rec Record) (Record, bool) {
 	if len(rec.Level) > maxLevelBytes {
 		rec.Level, _ = cutString(rec.Level, maxLevelBytes)
 	}
-	budget := MaxRecordBytes - len(rec.Level)
+	budget := MaxRecordBytes - encodedLen(rec.Level)
 
 	msg, _ := cutString(rec.Message, budget)
 	rec.Message = msg
-	budget -= len(msg)
+	budget -= encodedLen(msg)
 
 	if len(rec.Attrs) > 0 {
 		out := make(map[string]any, len(rec.Attrs))
@@ -313,7 +362,7 @@ func capRecord(rec Record) (Record, bool) {
 				cut = true
 				break
 			}
-			budget -= len(k)
+			budget -= encodedLen(k)
 			v, rest, did := capValue(rec.Attrs[k], budget)
 			out[k] = v
 			budget = rest

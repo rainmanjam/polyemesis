@@ -252,7 +252,7 @@ curl -H "Authorization: Bearer pmk_..." \
      -X POST https://stream.example.com/api/v1/destinations/3/stop
 ```
 
-An `admin` token acts as the admin with two exceptions, both of which are the
+An `admin` token acts as the admin with three exceptions, all of which are the
 router's rules rather than a handler's good manners:
 
 - **It cannot create or revoke tokens.** If a leaked token could mint more,
@@ -263,6 +263,11 @@ router's rules rather than a handler's good manners:
   media.** Those are the browser's, for the same reason: a credential built for
   unattended automation should not be able to write arbitrary bytes to the disk
   the database lives on.
+- **It cannot export the debug bundle.** `GET /debug` and `PUT /debug` stay
+  token-reachable, so a dashboard can read capture state and an automation can
+  start one. `POST /debug/export` mints a copy of the server's own logs to send
+  to somebody who does not have the box, which is the largest disclosure in the
+  product; that step wants a human present.
 
 Full route reference: [API.md](API.md).
 

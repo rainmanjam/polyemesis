@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"io"
 	"net"
 	"net/http"
@@ -190,13 +191,23 @@ func classifyCheckError(err error) error {
 		// correct. Every other status (400, 401, 403, 404...) is the
 		// platform's considered answer about the pair itself, and stands.
 		if se.code >= 500 || se.code == http.StatusTooManyRequests {
-			return fmt.Errorf("%w: %s", ErrCheckUnreachable, err.Error())
+			// SANITISED, NOT RAW. An http.Client.Do failure arrives as a
+			// *url.Error whose Error() carries the FULL request URL. Facebook's
+			// CheckCredentials puts client_id and CLIENT_SECRET in the query
+			// string -- deliberately, because a POST form makes Facebook reject
+			// correct credentials -- so interpolating err.Error() here printed
+			// the app secret into the operator's error and the logs on any DNS
+			// outage, timeout or TLS failure. alerts.ClientErrorText unwraps the
+			// *url.Error and keeps the cause without the URL.
+			return fmt.Errorf("%w: %s", ErrCheckUnreachable, alerts.ClientErrorText(err))
 		}
 		return err
 	}
 
 	if isTransportFailure(err) {
-		return fmt.Errorf("%w: %s", ErrCheckUnreachable, err.Error())
+		// Same reasoning as above: the URL is in the error and the secret is in
+		// the URL.
+		return fmt.Errorf("%w: %s", ErrCheckUnreachable, alerts.ClientErrorText(err))
 	}
 	return err
 }

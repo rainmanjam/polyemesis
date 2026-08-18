@@ -1172,7 +1172,7 @@
   "set.tokenRevoked": "Revoked {name}.",
   "set.tokenScope": "Scope",
   "set.tokenScopeAdmin": "Full access",
-  "set.tokenScopeAdminHint": "Can do everything the admin can, apart from managing tokens, changing the password and uploading media. Only mint one of these if something genuinely has to make changes unattended.",
+  "set.tokenScopeAdminHint": "Can do everything the admin can, apart from managing tokens, changing the password, uploading media, staging an upgrade and exporting a debug bundle. Only mint one of these if something genuinely has to make changes unattended.",
   "set.tokenScopeRead": "Read only",
   "set.tokenScopeReadHint": "Can read anything the console shows — status, stats, metrics, the media list — and cannot change a single thing. This is what a monitoring script wants.",
   "set.topicPrefix": "Topic prefix",

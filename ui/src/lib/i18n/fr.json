@@ -1172,7 +1172,7 @@
   "set.tokenRevoked": "{name} révoqué.",
   "set.tokenScope": "Permissions",
   "set.tokenScopeAdmin": "Accès complet",
-  "set.tokenScopeAdminHint": "Peut faire tout ce que l'administrateur peut faire, sauf gérer les jetons, changer le mot de passe et téléverser des médias. N'en créez un que si quelque chose doit vraiment apporter des modifications sans surveillance.",
+  "set.tokenScopeAdminHint": "Peut tout faire comme l'administrateur, sauf gérer les jetons, changer le mot de passe, téléverser des médias, préparer une mise à niveau et exporter un paquet de débogage. N'en créez un que si quelque chose doit vraiment apporter des modifications sans surveillance.",
   "set.tokenScopeRead": "Lecture seule",
   "set.tokenScopeReadHint": "Peut lire tout ce qu'affiche la console — état, statistiques, métriques, liste des médias — et ne peut rien modifier. C'est ce qu'il faut à un script de supervision.",
   "set.topicPrefix": "Préfixe de sujet",

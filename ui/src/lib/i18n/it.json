@@ -1172,7 +1172,7 @@
   "set.tokenRevoked": "{name} revocato.",
   "set.tokenScope": "Permessi",
   "set.tokenScopeAdmin": "Accesso completo",
-  "set.tokenScopeAdminHint": "Può fare tutto ciò che può fare l'amministratore, tranne gestire i token, cambiare la password e caricare media. Creane uno solo se qualcosa deve davvero apportare modifiche senza supervisione.",
+  "set.tokenScopeAdminHint": "Può fare tutto ciò che fa l'amministratore, tranne gestire i token, cambiare la password, caricare contenuti, preparare un aggiornamento ed esportare un pacchetto di debug. Creane uno solo se qualcosa deve davvero apportare modifiche senza supervisione.",
   "set.tokenScopeRead": "Sola lettura",
   "set.tokenScopeReadHint": "Può leggere tutto ciò che mostra la console — stato, statistiche, metriche, l'elenco dei media — e non può modificare nulla. È quello che serve a uno script di monitoraggio.",
   "set.topicPrefix": "Prefisso del topic",
