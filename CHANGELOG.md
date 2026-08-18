@@ -437,6 +437,39 @@ its first tagged release.
   upgrade if that is missing or does not match, running nothing from the
   download.
 
+- **Renaming a webhook destroyed a signing secret that was only unreadable.**
+  Two deliberate designs composed into permanent loss. The read path swallows a
+  decrypt failure and leaves the secret empty on purpose — "a secret that will
+  not open leaves the hook UNSIGNED rather than unreadable", so one bad row
+  cannot fail the whole listing — while the write path read an empty secret as
+  "keep the stored one", fetched it back, and re-sealed it. When the ciphertext
+  would not open, after a restore against the wrong key or a half-finished
+  rotation, the re-seal wrote a valid encryption of the empty string over bytes
+  that would have opened again once the right key came back.
+
+  Editing any other field was enough to trigger it, and the API had been
+  correctly reporting `hasSecret:false` the whole time — so the operator's own
+  diagnostic step was what destroyed the value. The keep path no longer
+  re-seals; the stored bytes are preserved in SQL.
+
+- **A slate colour could rewrite the filtergraph.** `SlateSettings.Color` is
+  documented as "any spelling FFmpeg's colour parser accepts" and nothing
+  validated it, yet it was escaped one level deep under a comment asserting its
+  inputs were "validated elsewhere to be a name or 0xRRGGBB". The strict
+  whitelist that comment refers to is only ever applied to rendition *text*
+  colours — so the validated field got the strong escaping and the unvalidated
+  one got the weak escaping. A filtergraph is unescaped twice; both slate call
+  sites now use the two-level escaper and the single-level one is gone.
+
+- **The transcription confinement check did not confine.** A recording name is
+  refused if it contains a separator or `..`, and the joined path is then tested
+  for being inside the recordings directory — using an absolute-path conversion,
+  which does not follow symlinks. A symlink placed in that directory passed
+  every check, and both the existence test and the reader after it traversed to
+  the target. Links are now resolved before the test, on the directory as well
+  as the file, so an install whose recordings path is itself a symlink still
+  works.
+
 ### Added
 - **The second (VOD) audio mix has a UI.** `vodProfile` shipped complete — the
   column, the migration, the API, `routing.CompilePair`, the engine's gate on
@@ -1077,6 +1110,14 @@ its first tagged release.
   selector against the component that owns it, reading past comments so an
   anchor cannot be kept green by leaving the words behind in one.
 
+- **A keyframe lookup that finds nothing now widens to a bounded window rather
+  than reading the whole file.** The fallback asked for one packet record per
+  frame across the entire recording and buffered all of it, on a path an
+  authenticated request can reach — so asking about a few seconds of a long
+  archive allocated in proportion to the archive. Both cases the fallback exists
+  for, a long GOP and a file shorter than the lookback, are covered by a
+  ten-minute window centred on the point in question.
+
 ### Fixed
 - **The upgrade guard refused upgrades it was written to protect.** The
   generated `update.sh` checked its backup with `tar tzf … | grep -q secret.key`
@@ -1565,6 +1606,69 @@ its first tagged release.
 
 - **A taken port is offered a free one** during the interview, instead of the
   installer predicting a bind failure and then causing it.
+
+- **An automod rule that asked for a timeout with no duration banned the viewer
+  permanently.** Every adapter reads a zero duration as "forever" — that is the
+  documented contract — and the executor passed the configured seconds straight
+  through. A rule saved without `timeoutSeconds` therefore removed a viewer for
+  good and logged it as a successful timeout. Saving such a rule is now refused,
+  and the executor clamps at the point of use, which is what protects the rules
+  already stored.
+
+- **Retention deleted the subtitles of recordings that still existed.** The
+  sweep identifies an orphaned transcript by walking the filename backwards and
+  testing prefixes that end at a dot. Transcripts are written one file per track
+  named after the speaker, joined with a *hyphen*, plus a merged `-all` file — so
+  a transcript of a surviving recording never matched and was removed. The
+  `.json` transcript does end at a dot, so it survived: the sweep kept the
+  machine-readable file and deleted every human-readable subtitle track for a
+  recording sitting in the library. Hyphens are now prefix boundaries too, which
+  only ever keeps more files.
+
+- **Cancelling a transcode could hang for ever.** The child is killed when the
+  context ends, but a grandchild — x265 and SVT-AV1 both spawn their own workers
+  — can hold the output pipes open after its parent is gone. The wait delay that
+  exists for exactly this only takes effect inside the process wait, and the
+  reader goroutines were waited on first, so the readers never saw end-of-file,
+  the wait was never reached, and the delay never applied. Measured: the previous
+  ordering was still blocked 25 seconds after cancellation; it now returns in
+  about 300ms.
+
+- **Every reconnect published a spurious destination-down webhook.** The
+  ten-second dwell that absorbs a supervisor reconnect was declared, documented,
+  and never applied: a zero dwell — which the configuration documents as "takes
+  every default", and which is what the engine constructs — fell through the
+  clamp for negatives without picking the default up. Any subscriber therefore
+  received a down-and-up pair for every restart.
+
+- **A library with more than 32,766 recordings rendered as if it were empty.**
+  Four queries bind one parameter per recording from an unbounded list; past
+  SQLite's limit the statement fails, and the handler substitutes an empty map.
+  Every session then showed no members and no poster, every recording fell into
+  the ungrouped list, and every title, description and tag disappeared — while
+  the page still returned 200. Nothing had been lost and there was no way to
+  tell that by looking. The queries are chunked, and the metadata failure is now
+  logged like its two siblings.
+
+- **Refiling several recordings at once left the session they came from
+  reporting recordings it no longer had.** The bulk edit steals each recording
+  from its previous session but only recalculated the destination. The
+  one-at-a-time path already recalculated both, and said why.
+
+- **The automod API key, model timeout and spend counters were stored but never
+  read.** Setting the key returned "configured" without rebuilding the model
+  checker, so it took effect only at the next restart and a rotated key kept
+  sending the old one; the configured model timeout was dropped when the engine
+  was built, so every model-decided timeout ran at the built-in default; and the
+  statistics endpoint returned a hardcoded zero after the wiring it was waiting
+  for had landed, which an operator watching their model bill reads as "nothing
+  has been spent".
+
+- **An internationalised hostname could never obtain a certificate.** The
+  configured name was compared against the incoming SNI after lowercasing only,
+  but a client sends the punycode form while the operator configures the
+  readable one — two spellings of a single name, never equal. The policy refused
+  to request a certificate for the only hostname it was configured with.
 
 ### Testing
 - **Ten UI-drift guards, recovered from a branch that was never merged.** They
