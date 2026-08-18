@@ -171,9 +171,26 @@ func (m *Manager) sweepTranscripts(known map[string]bool) int {
 // Erring towards KEEPING an ambiguous file is deliberate: a stray transcript
 // costs kilobytes, and deleting one that is still referenced loses the only
 // searchable record of what was said.
+//
+// A PREFIX MAY ALSO END AT A HYPHEN, and leaving that out deleted the subtitles
+// of recordings that still existed. The transcriber writes one subtitle file per
+// track named after the speaker -- worker.go's
+// fmt.Sprintf("%s-%s%s", base, fileSafe(...), f.Ext()) -- plus a merged
+// "<base>-all". Those join the base with a HYPHEN, so testing only dot
+// boundaries compared "rec-…-143000-host.srt" as "…-host.srt" and "…-host" and
+// never as "rec-…-143000". Every one of them read as an orphan.
+//
+// The asymmetry is what hid it: "<base>.json" does end at a dot, so the sweep
+// kept the machine-readable transcript and removed every human-readable
+// subtitle track for a recording sitting in the library.
+//
+// Widening the boundary set only ever keeps MORE files, which is the direction
+// this function already says it wants to err in. It can now keep a transcript
+// whose own recording is gone when some shorter-named recording survives -- a
+// few kilobytes, against the subtitles of a session the operator still has.
 func transcriptBelongsToSurvivor(name string, survives map[string]bool) bool {
 	for i := len(name); i > 0; i-- {
-		if i < len(name) && name[i] != '.' {
+		if i < len(name) && name[i] != '.' && name[i] != '-' {
 			continue
 		}
 		if survives[name[:i]] {
