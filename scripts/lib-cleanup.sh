@@ -99,6 +99,89 @@ poly_port_holders() {
 	lsof -ti ":$port" 2>/dev/null
 }
 
+# poly_port_bound reports whether anything is listening on port/proto.
+#
+# NOT poly_port_holders, which is lsof and TCP-only. An SRT ingest is UDP, and
+# lsof is absent on a stock server install -- poly_port_holders returns nothing
+# there, which reads as "free" and is the wrong answer to fail open on. `ss` is
+# present on anything with systemd, which is every host these suites run on.
+poly_port_bound() {
+	local port="$1" proto="${2:-tcp}"
+	command -v ss >/dev/null 2>&1 || return 1
+	if [ "$proto" = udp ]; then
+		ss -lnu 2>/dev/null | grep -qE "[:.]${port}\b"
+	else
+		ss -lnt 2>/dev/null | grep -qE "[:.]${port}\b"
+	fi
+}
+
+# poly_socket_owner names the process listening on port/proto, or prints nothing.
+#
+# TRIES sudo -n SECOND, and that is the whole reason this is a function. ss only
+# attributes a socket it has the privilege to see, so an unprivileged run
+# against a service started by root reports the port as taken by nobody in
+# particular -- which is exactly the case these suites hit, because the thing
+# holding the port is nearly always the installed polyemesis. Non-interactive,
+# so a host without passwordless sudo degrades to the anonymous message rather
+# than stopping to ask for a password nobody is there to type.
+poly_socket_owner() {
+	local port="$1" proto="$2" flag out
+	[ "$proto" = udp ] && flag=lnpu || flag=lnpt
+	out="$(ss -"$flag" 2>/dev/null | grep -E "[:.]${port}\\b" | head -1)"
+	case "$out" in
+		*users:*) ;;
+		*) out="$(sudo -n ss -"$flag" 2>/dev/null | grep -E "[:.]${port}\\b" | head -1)" ;;
+	esac
+	printf '%s' "$out" | grep -oE 'users:\(\("[^"]+"' | head -1 | grep -oE '"[^"]+"' | tr -d '"'
+}
+
+# poly_require_ports refuses to start when something already holds a port this
+# suite is about to bind or map into a container.
+#
+# WHY THIS IS WORTH A HELPER. acceptance-multisource maps 6000/udp, which is the
+# DEFAULT SRT ingest port -- so on any host already running polyemesis, the
+# container cannot bind it and the suite failed with:
+#
+#	FAIL  container never became healthy
+#
+# That sentence is true and useless. It cost four steps of digging to reach "the
+# service you are running holds the port", which the machine knew all along.
+# install.sh has done this check since it shipped (port_in_use / warn_if_taken);
+# the suites never borrowed it.
+#
+# Names the holder where the kernel will say, because "6000/udp is taken" and
+# "the polyemesis you are running is on 6000/udp" lead to different next moves.
+#
+# Usage: poly_require_ports 8097/tcp 6000/udp 6001/udp
+poly_require_ports() {
+	local spec port proto taken=0 who
+	for spec in "$@"; do
+		port="${spec%%/*}"
+		proto="${spec#*/}"
+		[ "$proto" = "$spec" ] && proto=tcp
+		poly_port_bound "$port" "$proto" || continue
+		if [ "$taken" -eq 0 ]; then
+			printf "\n\033[31mCannot start: a port this suite needs is already in use.\033[0m\n" >&2
+		fi
+		taken=1
+		who="$(poly_socket_owner "$port" "$proto")"
+		if [ -n "$who" ]; then
+			printf "  %s/%s is held by \033[1m%s\033[0m\n" "$proto" "$port" "$who" >&2
+		else
+			printf "  %s/%s is held by another process\n" "$proto" "$port" >&2
+		fi
+	done
+	[ "$taken" -eq 0 ] && return 0
+
+	printf "\n  These are the real defaults, so the usual cause is a polyemesis\n" >&2
+	printf "  already running on this host. Two instances cannot share an ingest\n" >&2
+	printf "  port. Stop the service for the duration of the run:\n\n" >&2
+	printf "      sudo systemctl stop polyemesis\n" >&2
+	printf "      %s\n" "${0##*/}" >&2
+	printf "      sudo systemctl start polyemesis\n\n" >&2
+	exit 1
+}
+
 # poly_wait_port_ready waits for something to START listening on a port.
 #
 # The mirror image of poly_free_port, and it lives here because it needs the

@@ -26,6 +26,16 @@ VOL=poly-ms-data
 PORT=8097
 BASE="http://127.0.0.1:$PORT"
 
+# Sourced for poly_require_ports below. This suite maps the REAL default ingest
+# ports, so it is the one that collides with a polyemesis already running on the
+# host -- see the preflight's own comment.
+. "$SCRIPTS/lib-cleanup.sh"
+
+# Before the image builds, not after: a four-minute build followed by "container
+# never became healthy" is the failure this replaces, and the port was knowable
+# before any of it started.
+poly_require_ports "$PORT/tcp" 6000/udp 6001/udp 6100/udp
+
 pass=0; fail=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
 bad()  { printf "  \033[31mFAIL\033[0m  %s\n" "$1"; fail=$((fail+1)); }
