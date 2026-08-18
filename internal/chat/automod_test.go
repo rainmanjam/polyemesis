@@ -316,3 +316,26 @@ func TestReconfiguringDoesNotLeakWorkers(t *testing.T) {
 		t.Fatalf("goroutines grew from %d to %d over 25 reconfigurations", before, after)
 	}
 }
+
+/* Moderator exposes the live engine so the API can read its counters.
+ *
+ * It returns the INTERFACE rather than the concrete engine, which keeps the Hub
+ * unaware of what a moderator is made of -- the property SetModerator's
+ * signature already chose. The nil case is the one that matters: an install
+ * with automod off has no moderator, and the caller must be able to tell that
+ * apart from a moderator reporting zeros.
+ */
+func TestTheHubHandsBackTheModeratorItWasGiven(t *testing.T) {
+	h := New()
+	if got := h.Moderator(); got != nil {
+		t.Errorf("a hub with no moderator returned %#v, want nil — the API "+
+			"cannot otherwise tell \"nothing is moderating\" from \"nothing has "+
+			"been spent\"", got)
+	}
+
+	m := &stubModerator{}
+	h.SetModerator(m)
+	if got := h.Moderator(); got != m {
+		t.Errorf("Moderator() = %#v, want the moderator that was set", got)
+	}
+}
