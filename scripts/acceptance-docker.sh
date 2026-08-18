@@ -27,6 +27,10 @@ VOL=poly-acc-data
 PORT=8099
 SRTPORT=6099
 RTMPPORT=1999
+
+# Deliberately off the defaults (6000/1935) so this suite can run beside a live
+# install -- but "deliberately" is not "guaranteed", and a second copy of this
+# suite or anything else on 6099 fails the same opaque way.
 BASE="http://127.0.0.1:$PORT"
 
 pass=0; fail=0; skip=0
