@@ -4,6 +4,7 @@ package supervisor
 
 import (
 	"log/slog"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -64,10 +65,31 @@ func ensureJob() {
 			uintptr(unsafe.Pointer(&info)),
 			uint32(unsafe.Sizeof(info)),
 		); err != nil {
+			runtime.KeepAlive(&info)
 			_ = windows.CloseHandle(h)
 			slog.Default().Warn("could not set job object limits; FFmpeg children will survive a polyemesis crash", "err", err)
 			return
 		}
+		// KEPT ALIVE ACROSS THE CALL, and this is not decoration.
+		//
+		// unsafe's rules allow Pointer -> uintptr only inside the argument list of
+		// the syscall itself, because that is the one place the compiler and the
+		// runtime treat the value as keeping the object alive.
+		// windows.SetInformationJobObject is an ordinary Go function that happens
+		// to take a uintptr, so at that boundary the only reference to info is an
+		// integer: the compiler may treat info as dead from the conversion onward,
+		// and the collector may reclaim it before the wrapper reaches the real
+		// syscall. The kernel would then write job limits into memory the runtime
+		// has already recycled, and the corruption surfaces later, somewhere with
+		// nothing to do with job objects.
+		//
+		// No tool here catches it. `go vet ./...` runs on Linux, where this file
+		// is not built; and GOOS=windows go vet is clean too, because vet's
+		// unsafeptr check looks for uintptr -> Pointer, the opposite direction.
+		// See #440, which records a "found pointer to free object" on a Windows
+		// runner that this may or may not explain -- the violation is real either
+		// way.
+		runtime.KeepAlive(&info)
 
 		if err := windows.AssignProcessToJobObject(h, windows.CurrentProcess()); err != nil {
 			// Nesting one job inside another needs Windows 8. On anything

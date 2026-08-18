@@ -323,6 +323,18 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         run: go vet ./...
 
+      # WINDOWS TOO, because `go vet ./...` above never sees a _windows.go file.
+      # internal/supervisor and internal/fsperm both have Windows-only sources
+      # that use unsafe, and they were type-checked by nothing in this repo until
+      # now -- a build tag is enough to hide a package from every gate.
+      #
+      # It will not catch every unsafe misuse: vet's unsafeptr check looks for
+      # uintptr -> Pointer, and the violation found in #440 is the other
+      # direction. It does catch what vet catches, on files that had no gate at
+      # all, which is the gap being closed rather than the whole class.
+      - name: go vet, for the Windows build
+        run: GOOS=windows go vet ./...
+
       # THE PREFLIGHT'S OWN LIVENESS, and it runs HERE because it was not
       # running anywhere.
       #

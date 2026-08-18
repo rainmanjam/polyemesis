@@ -3,6 +3,7 @@
 package supervisor
 
 import (
+	"runtime"
 	"testing"
 	"unsafe"
 
@@ -81,6 +82,9 @@ func TestJobLimitsSurviveARoundTripThroughTheKernel(t *testing.T) {
 	); err != nil {
 		t.Fatalf("SetInformationJobObject: %v", err)
 	}
+	// Same rule as job_windows.go: the wrapper takes a uintptr, so nothing keeps
+	// `want` alive across the call unless this does.
+	runtime.KeepAlive(&want)
 
 	var got windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
 	var retlen uint32
@@ -93,6 +97,7 @@ func TestJobLimitsSurviveARoundTripThroughTheKernel(t *testing.T) {
 	); err != nil {
 		t.Fatalf("QueryInformationJobObject: %v", err)
 	}
+	runtime.KeepAlive(&got)
 
 	if got.BasicLimitInformation.LimitFlags != want.BasicLimitInformation.LimitFlags {
 		t.Fatalf("LimitFlags round-tripped as %#x, want %#x",

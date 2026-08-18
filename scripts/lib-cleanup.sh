@@ -287,6 +287,40 @@ poly_wait_jobs() {
 # enough to catch every orphan is also wide enough to kill a suite running in
 # another terminal. Reporting makes the leak visible, which is the one thing it
 # was not before.
+# poly_report_orphans names the media children that outlived the run.
+#
+# WHY THIS IS REPORTED RATHER THAN FAILED. setProcessGroup puts every child in
+# its OWN process group, deliberately, so a Ctrl-C reaches polyemesis and lets
+# it shut its children down in order. The cost is that an ABRUPT death of
+# polyemesis -- SIGKILL, an OOM, a cancelled CI job -- signals nothing, and every
+# ffmpeg it started keeps running. Windows has a backstop for exactly this
+# (job_windows.go, KILL_ON_JOB_CLOSE, whose own warning says "FFmpeg children
+# will survive a polyemesis crash"); Linux has none.
+#
+# The Linux equivalent is Pdeathsig, and it is NOT applied here on purpose: in Go
+# it fires when the parent THREAD exits rather than the process, so a runtime
+# thread retirement could kill live destinations. That trade needs its own
+# testing, not a line in a teardown helper. See #448.
+#
+# So this makes the leak VISIBLE instead of fixing it. Thirteen of these had been
+# running for up to 5.5 days on a dev box before anyone looked, and a cancelled
+# CI job left a polyemesis and five ffmpeg behind. Neither said anything at the
+# time, which is the part worth changing first.
+poly_report_orphans() {
+	command -v pgrep >/dev/null 2>&1 || return 0
+	# `pgrep -x | wc -l`, not `pgrep -c`: BSD pgrep has no -c, so on macOS the
+	# count came back empty and this reported nothing while an ffmpeg was plainly
+	# running. Caught by running it against a live one rather than against none.
+	local n
+	n="$(pgrep -x ffmpeg 2>/dev/null | wc -l | tr -d ' ')"
+	case "$n" in ''|*[!0-9]*) return 0 ;; esac
+	[ "$n" -gt 0 ] || return 0
+	printf "  \033[33mFINDING\033[0m  %s ffmpeg process(es) outlived this suite\n" "$n" >&2
+	pgrep -a -x ffmpeg 2>/dev/null | sed -E 's#(rtmps?://|srt://)[^ ]*#\1<redacted>#g' | cut -c1-120 | sed 's/^/            /' >&2
+	printf "            They are reparented to init and will run until the host is\n" >&2
+	printf "            rebooted. See #448; teardown is asked to be tidy, not relied on.\n" >&2
+}
+
 poly_cleanup() {
   local ports="$1" work="${2:-}" bindports="${3:-}"
   local p stopfail=0
@@ -370,6 +404,10 @@ poly_cleanup() {
 poly_cleanup_exit() {
   local rc="$1"
   shift
+  # AFTER poly_cleanup below has had its turn, so what this names is what
+  # teardown failed to reach rather than what it had not got to yet. It never
+  # changes rc -- see #448 and the note on poly_report_orphans.
+  trap 'poly_report_orphans' RETURN
   if ! poly_cleanup "$@"; then
     # ONLY a 0 is promoted. An unconditional `rc=1`, or an `else rc=0` on the
     # success side, both RENUMBER a red run -- which is the one outcome the table
