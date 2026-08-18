@@ -246,6 +246,45 @@ squares were *read* and which were reasoned. Legend:
 | **D** — loopback redirect | **Works** — register-app page places no host restriction | **Works** — "recommended mechanism" for desktop; *Desktop app* client type | **Unchecked** | **Works** — vendor recommends `http://localhost/auth/callback`; see the `127.0.0.1` rewrite bug |
 | **E** — real hostname + ACME | **Works** | **Works** | **Works** | **Works** |
 
+### What OBS Studio does, per platform
+
+Read from the OBS sources on 2026-08-18, because "OBS uses a relay" is the
+argument most often made for option B and it turns out to be **only two thirds
+true**. OBS picks a *different* strategy for Google than for the others.
+
+| Platform | OBS's strategy | Evidence |
+|---|---|---|
+| **Twitch** | **B1** — shared credentials, obsproject.com relays *and exchanges* | `#define TWITCH_AUTH_URL "https://obsproject.com/app-auth/twitch?action=redirect"` / `#define TWITCH_TOKEN_URL "https://obsproject.com/app-auth/twitch-token"`, with `client_id = TWITCH_CLIENTID; deobfuscate_str(&client_id[0], TWITCH_HASH);` |
+| **Restream** | **B1** — identical shape | `RESTREAM_AUTH_URL ".../app-auth/restream?action=redirect"`, `RESTREAM_TOKEN_URL ".../app-auth/restream-token"`, `deobfuscate_str(&client_id[0], RESTREAM_HASH)` |
+| **YouTube** | **D-shaped** — a *local listener*, and OBS exchanges the code itself | `auth-youtube.cpp` includes `auth-listener.hpp`, and calls `auth->GetToken(YOUTUBE_TOKEN_URL, clientid, secret, redirect_uri, ...)` — note it passes a **secret** and its **own** `redirect_uri` |
+| **Facebook** | Not integrated in the sources read | — |
+| **Kick** | Not integrated in the sources read | — |
+
+Three things follow, and they matter for the polyemesis decision.
+
+**The client ID is obfuscated in the binary, not secret.** `deobfuscate_str` is
+obfuscation, not encryption — the value ships to every user and is recoverable
+by anyone who cares. OBS is not pretending otherwise; it is accepting that a
+desktop app cannot hold a secret, and putting the *exchange* somewhere that can.
+
+**That is the whole point of the relay.** For Twitch and Restream the token
+exchange happens at `obsproject.com/…-token`, not in OBS. The relay exists so
+the client secret never ships. Any polyemesis relay that only forwards the
+redirect and lets each box exchange (**B2**) is solving a different problem —
+and only works because each polyemesis operator has their *own* secret to
+exchange with, which OBS's users do not.
+
+**Google got a different answer.** For YouTube, OBS runs a local listener and
+exchanges directly, passing a `secret` from the binary. It did not route Google
+through obsproject.com the way it routes Twitch. Whatever the reason — Google's
+rules on redirect URIs, or its verification model attaching to the client — the
+lesson for us is that **a relay design cannot be assumed to be acceptable to
+every provider**, and Google is the one that most often differs.
+
+**UNVERIFIED:** the host `YOUTUBE_TOKEN_URL` points at, and the loopback port
+the listener binds. Both were inferred from the call shape and the include, not
+read.
+
 ### What each option costs polyemesis
 
 | | New code | Custody risk | Headless + remote admin | Extra registration |

@@ -176,6 +176,19 @@ either of the two challenges it may choose:
 - **TLS-ALPN-01, on port 443.** Answered on the listener already serving the UI,
   with no extra port.
 
+**Open both 80 and 443 inbound.** Outbound-only firewalls and un-forwarded NAT
+fail here, and the symptom is a browser certificate warning that never clears
+rather than an obvious error. If port 80 is genuinely unavailable — a proxy owns
+it, or the process cannot bind low ports — polyemesis says so rather than
+leaving you to guess; see the certificate status in the UI.
+
+**The first request after a cold start is slow**, because that is when issuance
+runs. On a machine you are about to broadcast from, load the page once before
+you need it.
+
+Renewal is automatic and also happens on a handshake. The cache survives
+restarts, so this is a first-boot cost, not a recurring one.
+
 ### If your DNS is on Cloudflare
 
 Point the record at the box with the proxy **off** — the grey cloud, "DNS only":
@@ -198,19 +211,6 @@ Issue a Cloudflare **Origin Certificate**, point `tls.mode: manual` at it with
 `certFile` and `keyFile`, and set `trustProxyHeaders: true` so the callback URI
 is built from the address the browser actually used. You will still need a
 second, unproxied name for ingest.
-
-**Open both 80 and 443 inbound.** Outbound-only firewalls and un-forwarded NAT
-fail here, and the symptom is a browser certificate warning that never clears
-rather than an obvious error. If port 80 is genuinely unavailable — a proxy owns
-it, or the process cannot bind low ports — polyemesis says so rather than
-leaving you to guess; see the certificate status in the UI.
-
-**The first request after a cold start is slow**, because that is when issuance
-runs. On a machine you are about to broadcast from, load the page once before
-you need it.
-
-Renewal is automatic and also happens on a handshake. The cache survives
-restarts, so this is a first-boot cost, not a recurring one.
 
 ### The part that pays for itself: platform sign-in
 
@@ -274,6 +274,83 @@ instead. If you expected ACME and did not get it, that is almost always why.
 you have registered at every platform. Changing it means re-registering all of
 them, and existing connected accounts keep working only until their tokens need
 a refresh through the old callback. Pick the name you intend to keep.
+
+## Connecting accounts without a public address
+
+[Giving the box a real name](#giving-the-box-a-real-name) is the durable answer.
+This is the one for a box that does not have a name yet — a machine on your LAN,
+a rented server you are still evaluating, or anything you reach over SSH.
+
+It needs no certificate, no DNS record and no changes to polyemesis. It works
+because every platform makes an exception for **loopback** addresses, and
+because polyemesis builds its callback from the address *you* reached it at.
+
+### Set it up
+
+Bind to loopback only, and let SSH carry the encryption:
+
+```yaml
+addr: "127.0.0.1:8080"
+tls:
+  mode: "off"
+```
+
+Then, from the machine you browse on:
+
+```
+ssh -L 8080:127.0.0.1:8080 you@your-server
+```
+
+and open <http://localhost:8080>.
+
+Turning TLS off is safe **only** in this shape. The listener is not reachable
+from the network at all — SSH is the encrypted channel, and it is doing the same
+job the "put a reverse proxy in front" advice describes. Do not combine
+`tls.mode: off` with a public bind address; polyemesis warns loudly at startup
+if you do, because that puts passwords and session cookies on the wire in the
+clear.
+
+### Register the callback
+
+Settings shows the exact URI for each platform, with a copy button. Browsing at
+`localhost:8080`, it will read:
+
+```
+http://localhost:8080/api/v1/oauth/twitch/callback
+```
+
+**Twitch** — paste it as an OAuth Redirect URL. Twitch permits plain HTTP for
+loopback and nothing else, so this is the one case where `http://` is correct.
+
+**YouTube** — create the OAuth client with application type **Desktop app**, not
+Web application, and register the same URL with `/youtube/`. Google requires the
+redirect to match exactly *including the port*, which is easy here: polyemesis
+serves a fixed port from `addr`, so unlike a desktop application there is no
+ephemeral port to reconcile.
+
+Google will show an "unverified app" screen until the app is verified. For a
+personal install, keeping the app in testing mode and adding yourself as a test
+user is enough.
+
+### Why not the device-code flow
+
+For YouTube it is worth being explicit: Google's device flow is restricted to
+`youtube` and `youtube.readonly`. The loopback flow described here has **no such
+ceiling**, so features that need a broader scope — thumbnail upload, for one —
+remain available. Loopback is the more capable choice, not the fallback.
+
+### What this does not do
+
+The browser has to be able to reach `localhost`, which means the tunnel has to
+be up and you have to be the one at the keyboard. This is a way to connect
+*your* accounts to *your* box. It is not a way to let other people sign in to an
+installation they do not have shell access to — for that the server needs a real
+name, which is the previous section.
+
+One cosmetic wrinkle: if `tls.hostname` is set while you are browsing through
+the tunnel, the setup card warns that you are browsing `localhost` while the
+server is configured as something else. In this flow that warning is expected
+and can be ignored.
 
 ## The data directory
 
