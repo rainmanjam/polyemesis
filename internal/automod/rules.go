@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -45,6 +46,25 @@ func (r *Rule) Compile() error {
 	}
 	if !KnownActions(r.Action) {
 		return fmt.Errorf("rule %q asks for unknown action %q", r.Name, r.Action)
+	}
+	// A TIMEOUT WITH NO DURATION IS A PERMANENT BAN, and nothing said so.
+	//
+	// internal/chat/automod.go dispatches ActionTimeout as
+	// Ban(..., TimeoutSeconds*time.Second, ...) and the case directly below it
+	// records what zero means there: "Zero duration is a permanent ban, same as
+	// the moderator UI sends." TimeoutSeconds is `omitempty` and was validated
+	// nowhere, so a rule that said `timeout` and omitted the number banned a
+	// viewer for ever -- and the log recorded it as a success.
+	//
+	// Refused here so it cannot be created. Rules ALREADY STORED with a zero are
+	// the other half of the problem and are covered at execution by
+	// TimeoutDuration, because no validation change can reach a row that is
+	// already in the database.
+	if r.Action == ActionTimeout && r.TimeoutSeconds <= 0 {
+		return fmt.Errorf("rule %q asks for a timeout but carries no duration; "+
+			"a timeout of zero seconds is a permanent ban on every platform, so "+
+			"set timeoutSeconds, or use the ban action if that is what you meant",
+			r.Name)
 	}
 	// (?i) rather than lowercasing the subject: an operator writing a pattern
 	// with a character class should not have to think about case folding, and
@@ -207,4 +227,32 @@ func foldHomoglyph(r rune) rune {
 		return 'a'
 	}
 	return r
+}
+
+// DefaultTimeoutSeconds is what a stored rule with no duration is clamped to.
+//
+// Ten minutes: long enough to interrupt someone, short enough that being wrong
+// about it costs a viewer very little. The value matters far less than the
+// property that it is NOT ZERO -- see TimeoutDuration.
+const DefaultTimeoutSeconds = 600
+
+// TimeoutDuration converts a rule's timeout into a duration that cannot be
+// mistaken for a permanent ban.
+//
+// THE ADAPTERS READ ZERO AS FOREVER. Every Ban implementation treats a zero
+// duration as permanent -- that is deliberate and correct for ActionBan, and
+// catastrophic for ActionTimeout. Compile now refuses to create such a rule,
+// but a rule stored before that check existed is still in the database and
+// still fires; this is what stops it banning somebody.
+//
+// Clamped rather than refused at this point on purpose: refusing would mean an
+// automod action silently not happening, which is the failure the capability
+// table exists to prevent. Doing something slightly stronger than nothing and
+// far weaker than forever is the right answer when the operator's intent was
+// unambiguously "a timeout".
+func TimeoutDuration(seconds int) time.Duration {
+	if seconds <= 0 {
+		return DefaultTimeoutSeconds * time.Second
+	}
+	return time.Duration(seconds) * time.Second
 }

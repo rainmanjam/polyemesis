@@ -279,8 +279,15 @@ func (h *Hub) performAutomod(ctx context.Context, s *automodState, job automodJo
 		// Seconds throughout, converted to the platform's unit inside the
 		// adapter. Kick counts minutes; doing that arithmetic here would put a
 		// second copy of it outside the one place that is tested.
+		//
+		// THROUGH TimeoutDuration, NOT A RAW MULTIPLY, and the case below says
+		// why: zero is a PERMANENT ban. This used to pass TimeoutSeconds
+		// straight through, so a rule that asked for a timeout and carried no
+		// duration banned a viewer for ever and logged it as a success.
+		// Compile now refuses to create such a rule; this is what protects the
+		// ones already stored, which no validation change can reach.
 		err = h.Ban(ctx, job.platform, job.account, job.authorID,
-			time.Duration(job.finding.TimeoutSeconds)*time.Second, job.finding.Reason)
+			automod.TimeoutDuration(job.finding.TimeoutSeconds), job.finding.Reason)
 	case automod.ActionBan:
 		// Zero duration is a permanent ban, same as the moderator UI sends.
 		err = h.Ban(ctx, job.platform, job.account, job.authorID, 0, job.finding.Reason)
