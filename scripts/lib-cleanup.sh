@@ -303,7 +303,11 @@ poly_wait_jobs() {
 # attribution, not whether pgrep can match a name.
 poly_ffmpeg_pids() { pgrep -x ffmpeg 2>/dev/null; }
 
-POLY_FFMPEG_BASELINE="$(poly_ffmpeg_pids | tr '\n' ' ')"
+# `|| true` because pgrep exits non-zero when it matches NOTHING, which is the
+# ordinary case on a clean host. Without it, sourcing this library from a shell
+# with `set -e` inherited would exit at this line -- and would do so precisely
+# when there was nothing wrong. Found by review, not by a failing run.
+POLY_FFMPEG_BASELINE="$(poly_ffmpeg_pids | tr '\n' ' ' || true)"
 
 # poly_report_orphans names the media children that outlived the run, and FAILS
 # when any of them are this run's doing.
@@ -333,25 +337,58 @@ POLY_FFMPEG_BASELINE="$(poly_ffmpeg_pids | tr '\n' ' ')"
 # A finding nobody is forced to read is a finding nobody reads.
 poly_report_orphans() {
 	command -v pgrep >/dev/null 2>&1 || return 0
-	local pid new=""
-	# Listed per-pid rather than counted. `pgrep -c` is not portable -- BSD pgrep
-	# has no -c, so on macOS the count came back empty and this reported nothing
-	# while an ffmpeg was plainly running. Caught by running it against a live one
-	# rather than against none.
+	local pid new="" left="" waited=0
+	# In ticks of 0.1s. A seam so the library's own tests do not have to spend the
+	# full settle window twice to assert on what happens after it.
+	local ticks="${POLY_ORPHAN_SETTLE_TICKS:-150}"
+
 	for pid in $(poly_ffmpeg_pids); do
 		case " $POLY_FFMPEG_BASELINE " in
-			*" $pid "*) continue ;;  # was already here before the suite began
+			*" $pid "*) continue ;;
 		esac
 		new="$new $pid"
 	done
 	[ -n "$new" ] || return 0
-	printf "  \033[31mFAIL\033[0m  ffmpeg outlived this suite:%s\n" "$new" >&2
-	for pid in $new; do
+
+	# SETTLE BEFORE JUDGING, and this is not politeness -- without it the check
+	# reports its own race. poly_stop_server waits for POLYEMESIS to exit, and the
+	# instant it does its children reparent to init. A ppid of 1 therefore means
+	# "the parent is already gone", NOT "this one is abandoned": an encoder still
+	# flushing and finalising its output looks identical from outside.
+	# acceptance-postprod runs transcodes and was failed by exactly that race on
+	# the first run of this check, having passed all twelve of its own assertions.
+	#
+	# 15s is above the supervisor's own shutdownGrace (8s) plus its drain (2s), so
+	# anything still here afterwards has outlived every budget the product gives
+	# itself and is genuinely abandoned.
+	while [ "$waited" -lt "$ticks" ]; do
+		left=""
+		for pid in $new; do
+			if kill -0 "$pid" 2>/dev/null; then left="$left $pid"; fi
+		done
+		if [ -z "$left" ]; then return 0; fi
+		sleep 0.1
+		waited=$((waited + 1))
+	done
+
+	printf "  \033[31mFAIL\033[0m  ffmpeg outlived this suite by more than 15s:%s\n" "$left" >&2
+	for pid in $left; do
 		ps -o pid=,ppid=,command= -p "$pid" 2>/dev/null \
 			| sed -E 's#(rtmps?://|srt://)[^ ]*#\1<redacted>#g' | cut -c1-120 | sed 's/^/            /' >&2
 	done
-	printf "            A ppid of 1 means it was reparented to init and will run until\n" >&2
-	printf "            the host is rebooted, holding whatever relay port it was reading.\n" >&2
+
+	# REAPED, NOT MERELY NAMED. Reporting alone is what let thirteen of these reach
+	# five and a half days on a shared host. The suite that created them is the last
+	# thing that knows their pids, so it is the last chance anything has to clean up
+	# without a reboot. SIGTERM first, so a process mid-write to a file this suite
+	# may still assert on gets to finalise it.
+	kill $left 2>/dev/null
+	sleep 1
+	for pid in $left; do
+		if kill -0 "$pid" 2>/dev/null; then kill -9 "$pid" 2>/dev/null; fi
+	done
+	printf "            Reaped by this teardown, so the host is left clean -- but nothing\n" >&2
+	printf "            in polyemesis did it, and outside systemd nothing would have.\n" >&2
 	printf "            See #448.\n" >&2
 	return 1
 }

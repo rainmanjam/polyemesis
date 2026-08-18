@@ -368,34 +368,56 @@ step "11. A leaked ffmpeg fails the suite, and someone else's does not"
 # renamed to ffmpeg is the obvious fake and does not work: macOS refuses to
 # execute it at all once the copy has lost its code signature, so the first
 # version of this test asserted nothing on a Mac while appearing to pass.
-if (poly_ffmpeg_pids() { echo 4242; }
+# A LIVE process, because the check now waits for the pid to exit before judging
+# it -- a made-up pid settles immediately and correctly reports nothing.
+sleep 60 &
+orphan=$!
+if (poly_ffmpeg_pids() { echo "$orphan"; }
     POLY_FFMPEG_BASELINE=" "
+    POLY_ORPHAN_SETTLE_TICKS=2
     poly_report_orphans >/dev/null 2>&1); then
 	bad "an ffmpeg that appeared after the baseline did not fail poly_report_orphans"
 else
 	ok "an ffmpeg that appeared after the baseline fails the check"
 fi
 
-if (poly_ffmpeg_pids() { echo 4242; }
-    POLY_FFMPEG_BASELINE=" 4242 "
+# And the reap is not optional: the process above must be gone now.
+if kill -0 "$orphan" 2>/dev/null; then
+	bad "the orphan survived the teardown that reported it; naming a leak is not clearing it"
+	kill -9 "$orphan" 2>/dev/null
+else
+	ok "the reported orphan was reaped, so the host is left clean"
+fi
+wait "$orphan" 2>/dev/null
+
+sleep 60 &
+mine=$!
+if (poly_ffmpeg_pids() { echo "$mine"; }
+    POLY_FFMPEG_BASELINE=" $mine "
+    POLY_ORPHAN_SETTLE_TICKS=2
     poly_report_orphans >/dev/null 2>&1); then
 	ok "an ffmpeg that predates the suite is not attributed to it"
 else
 	bad "an ffmpeg present before the suite started was wrongly blamed on it"
 fi
+kill "$mine" 2>/dev/null; wait "$mine" 2>/dev/null
 
 # And the verdict has to REACH the exit status, which is the half a RETURN trap
 # could never do.
-if (poly_ffmpeg_pids() { echo 4242; }
+sleep 60 &
+third=$!
+if (poly_ffmpeg_pids() { echo "$third"; }
     POLY_FFMPEG_BASELINE=" "
+    POLY_ORPHAN_SETTLE_TICKS=2
     poly_cleanup_exit 0 "" >/dev/null 2>&1); then
 	bad "a suite that leaked an ffmpeg still exited 0"
 else
 	ok "a leaked ffmpeg promotes a green run to red"
 fi
+kill -9 "$third" 2>/dev/null; wait "$third" 2>/dev/null
 
 total=$((pass + fail))
-EXPECTED_CHECKS=20
+EXPECTED_CHECKS=21
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
 	printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"
