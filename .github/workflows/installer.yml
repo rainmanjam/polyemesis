@@ -352,6 +352,51 @@ jobs:
           pid1="$(cat /proc/1/comm)"
           [ "$pid1" = systemd ] || { echo "PID 1 is $pid1, not systemd — this job assumes a VM runner"; exit 1; }
 
+      # BINARY MODE REQUIRES FFmpeg ON THE HOST, and a GitHub runner has none.
+      # The first draft of this job passed --ffmpeg skip and the installer
+      # correctly refused: "no ffmpeg on PATH". That refusal is the installer
+      # working, so the job has to bring one.
+      #
+      # The same pinned build and cache key ci.yml uses, deliberately rather than
+      # `apt install ffmpeg`: #430 is open about apt being the largest source of
+      # red CI, and a cache stops asking a mirror that is refusing. Reusing the
+      # key means this job shares ci.yml's warm cache instead of populating a
+      # second one.
+      - name: Cache FFmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ffmpeg-${{ runner.os }}-n8.1-latest-linux64-gpl-8.1-v1
+
+      - name: Install FFmpeg
+        run: |
+          FFCACHE=/tmp/ffcache
+          if [ -x "$FFCACHE/ffmpeg" ] && [ -x "$FFCACHE/ffprobe" ]; then
+            echo "ffmpeg restored from cache"
+          else
+            for attempt in 1 2 3; do
+              if curl -fsSL --proto '=https' --proto-redir '=https' \
+                   --retry 3 --retry-all-errors --retry-delay 5 \
+                   --connect-timeout 20 --max-time 90 \
+                   -o /tmp/ff.tar.xz \
+                   "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; then
+                break
+              fi
+              echo "ffmpeg download attempt $attempt failed"
+              if [ "$attempt" = 3 ]; then exit 1; fi
+              sleep 5
+            done
+            mkdir -p /tmp/ffbuild && tar xf /tmp/ff.tar.xz --strip-components=1 -C /tmp/ffbuild
+            mkdir -p "$FFCACHE"
+            cp /tmp/ffbuild/bin/ffmpeg /tmp/ffbuild/bin/ffprobe "$FFCACHE/"
+          fi
+          sudo install -m 0755 "$FFCACHE/ffmpeg"  /usr/local/bin/ffmpeg
+          sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
+          # The installer gates on libsrt separately from the version, so a build
+          # without it would fail the preflight for a reason unrelated to this job.
+          ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
+          ffmpeg -hide_banner -version | head -1
+
       - name: Install, binary mode
         run: sudo bash scripts/install.sh --mode binary --yes --tls selfsigned --http-port 8080 --ffmpeg skip
 
