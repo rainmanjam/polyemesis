@@ -416,8 +416,33 @@ else
 fi
 kill -9 "$third" 2>/dev/null; wait "$third" 2>/dev/null
 
+step "12. The teardown gives polyemesis at least as long as production does"
+
+# THIS PAIR DRIFTED APART AND MANUFACTURED A BUG. poly_stop_server used to allow
+# 15s before escalating to SIGKILL, while the shipped unit allows 45. main.go can
+# spend 20s in httpServer.Shutdown alone and only reaches eng.Stop -- the call
+# that tears destinations down -- after that, so a 15s teardown was killing
+# polyemesis mid-shutdown and orphaning its encoders. acceptance-postprod leaked
+# two on every run because of it.
+#
+# Read from both files rather than asserted as a literal, so raising one and not
+# the other is what fails rather than what ships.
+unit_stop="$(sed -n 's/^TimeoutStopSec=\([0-9]*\).*/\1/p' deploy/polyemesis.service | head -1)"
+loop_ticks="$(sed -n 's/.*for i in $(seq 1 \([0-9]*\)); do.*/\1/p' scripts/lib-cleanup.sh | head -1)"
+if [ -z "$unit_stop" ] || [ -z "$loop_ticks" ]; then
+	bad "could not read TimeoutStopSec ($unit_stop) or the stop loop bound ($loop_ticks); this check is examining nothing"
+else
+	# The loop sleeps 0.5s per tick.
+	grace=$((loop_ticks / 2))
+	if [ "$grace" -lt "$unit_stop" ]; then
+		bad "poly_stop_server escalates to SIGKILL after ${grace}s but the unit allows ${unit_stop}s: teardown kills polyemesis before its own shutdown can finish, orphaning whatever eng.Stop had not reached"
+	else
+		ok "teardown allows ${grace}s, at least the unit's ${unit_stop}s"
+	fi
+fi
+
 total=$((pass + fail))
-EXPECTED_CHECKS=21
+EXPECTED_CHECKS=22
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
 	printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

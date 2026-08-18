@@ -58,11 +58,32 @@
 poly_stop_server() {
   local port="$1"
   pkill -f "polyemesis -addr :$port" 2>/dev/null
+
+  # 90 half-seconds, NOT 30, and the number is taken from the shipped unit rather
+  # than chosen. deploy/polyemesis.service sets TimeoutStopSec=45; this is what
+  # polyemesis is given in production, so it is what a teardown that claims to
+  # stop it the ordinary way has to give it too.
+  #
+  # THE OLD 15s WAS BELOW THE PRODUCT'S OWN WORST CASE, which is how
+  # acceptance-postprod came to leak two encoders on every run. main.go spends up
+  # to 20s in httpServer.Shutdown ALONE, then DrainLifecycle, then eng.Stop --
+  # and eng.Stop is the call that tears the destinations down, so a SIGKILL that
+  # lands before it reaches them leaves exactly the orphans #448 is about. The
+  # teardown was manufacturing the leak it was later asked to detect.
   local i
-  for i in $(seq 1 30); do
+  for i in $(seq 1 90); do
     pgrep -f "polyemesis -addr :$port" >/dev/null 2>&1 || return 0
     sleep 0.5
   done
+
+  # SAID OUT LOUD, because this is the moment orphans are created. This function
+  # used to -9 and return 0, so "it stopped" and "it was killed while still
+  # shutting down" reached every caller as the same answer -- and the callers are
+  # teardowns, which is the last place a silent difference of that kind is
+  # useful.
+  printf "  \033[33mFINDING\033[0m  the server on port %s did not stop within 45s of SIGTERM;\n" "$port" >&2
+  printf "            escalating to SIGKILL. Anything it had not yet torn down is about\n" >&2
+  printf "            to be orphaned -- see #448.\n" >&2
 
   # THE LAST STEP WAS MISSING: this used to send -9 and return, which asserted
   # nothing. A signal is a request, and on every platform there is an interval
