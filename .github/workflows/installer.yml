@@ -314,3 +314,146 @@ jobs:
               echo "add an arm to this case, or drop the row from the matrix"
               exit 1 ;;
           esac
+
+  # THE JOBS ABOVE ONLY EVER RUN --check, AND THAT IS THE GAP THIS CLOSES.
+  #
+  # --check exits before install_binary_mode, write_helper_scripts, the unit
+  # heredoc and the rollback trap have run, so the installer's DECISIONS were
+  # well covered and its ACTIONS had never executed in CI at all.
+  # acceptance-install.sh says the same of itself: "This does not run the
+  # installer." Four defects were found in one afternoon by running it by hand on
+  # a real host, and every one of them is invisible to --check.
+  #
+  # NOT IN A CONTAINER, which is the whole trick. Both modes end at
+  # `systemctl enable --now`, and a container has no init -- which is why every
+  # job above has to stop at the preflight. A GitHub-hosted ubuntu runner is a
+  # VM with systemd as PID 1, so it can take a real root install. The runner is
+  # destroyed afterwards, which is what makes trashing it acceptable.
+  #
+  # Ubuntu only, deliberately. A real install on Fedora or Rocky needs systemd
+  # inside a privileged container and is fragile; the matrices above already
+  # cover per-distro DETECTION, and the actions asserted here are the same on
+  # every distro. Ubuntu end-to-end plus per-distro preflight is the honest
+  # split, not a shortcut.
+  install-uninstall:
+    name: install, uninstall and interrupt, for real
+    runs-on: ubuntu-latest
+    # Measured at ~2 minutes: two installs, an uninstall, an interrupted install
+    # and a reinstall, with no image builds. Eight leaves room for a slow release
+    # download and none for a hung one.
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: systemd is really PID 1 here
+        run: |
+          # If this ever stops being true the job below fails in a confusing way
+          # instead of an obvious one.
+          pid1="$(cat /proc/1/comm)"
+          [ "$pid1" = systemd ] || { echo "PID 1 is $pid1, not systemd — this job assumes a VM runner"; exit 1; }
+
+      - name: Install, binary mode
+        run: sudo bash scripts/install.sh --mode binary --yes --tls selfsigned --http-port 8080 --ffmpeg skip
+
+      - name: The unit file contains only the unit
+        run: |
+          unit=/etc/systemd/system/polyemesis.service
+          lines="$(sudo wc -l < "$unit")"
+          echo "unit is $lines lines"
+          # The template is ~40 lines. It once emitted 215, because a comment
+          # quoting `ps` in an unquoted heredoc ran ps and wrote its output in.
+          [ "$lines" -lt 80 ] || { echo "unit is $lines lines — something expanded into it"; sudo sed -n '1,40p' "$unit"; exit 1; }
+          if sudo grep -qE '^ *[0-9]+ +\? +[0-9]{2}:[0-9]{2}:[0-9]{2}' "$unit"; then
+            echo "the unit contains ps output — a command substitution ran in the heredoc"
+            exit 1
+          fi
+          # systemd-analyze verify, NOT journalctl. Grepping the journal makes the
+          # check depend on how much history the runner happens to hold, and it
+          # only works after the service has started. This reads the file.
+          #
+          # Its EXIT CODE IS USELESS: verified against a unit with ps output
+          # spliced into it, and it printed four "Missing '='" lines and still
+          # exited 0. The output is the signal.
+          verdict="$(systemd-analyze verify "$unit" 2>&1 || true)"
+          if printf '%s\n' "$verdict" | grep -q "Missing '='"; then
+            echo "systemd cannot parse lines of the unit:"
+            printf '%s\n' "$verdict" | head -5
+            exit 1
+          fi
+
+      - name: The hardening directives actually applied
+        run: |
+          # A malformed unit still starts, with the lines systemd could not read
+          # silently dropped. These are the ones worth losing loudly.
+          for pair in "ProtectProc=invisible" "ProtectSystem=strict" "NoNewPrivileges=yes" "PrivateTmp=yes"; do
+            k="${pair%%=*}"; want="${pair#*=}"
+            got="$(systemctl show polyemesis -p "$k" --value)"
+            [ "$got" = "$want" ] || { echo "$k is '$got', want '$want'"; exit 1; }
+            echo "$k=$got"
+          done
+
+      - name: Binary mode gets its helper scripts
+        run: |
+          # write_helper_scripts was called only in the docker branch, so its own
+          # "if MODE != docker" arm was unreachable and #347 never shipped.
+          for f in /opt/polyemesis/update.sh /opt/polyemesis/uninstall.sh; do
+            [ -x "$f" ] || { echo "missing or not executable: $f"; ls -la /opt/polyemesis || true; exit 1; }
+            echo "ok $f"
+          done
+
+      - name: The service is up and answering
+        run: |
+          for _ in $(seq 1 20); do
+            code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 https://127.0.0.1:8080/ || true)"
+            if [ "$code" = "200" ]; then echo "answered 200"; exit 0; fi
+            sleep 1
+          done
+          echo "never answered 200 (last: ${code:-none})"
+          sudo journalctl -u polyemesis --no-pager | tail -30
+          exit 1
+
+      - name: Uninstall removes what it added and keeps what is yours
+        run: |
+          before="$(sudo md5sum /var/lib/polyemesis/secret.key | cut -d' ' -f1)"
+          sudo /opt/polyemesis/uninstall.sh
+          for gone in /usr/local/bin/polyemesis /etc/polyemesis /etc/systemd/system/polyemesis.service; do
+            if [ -e "$gone" ]; then echo "uninstall left $gone behind"; exit 1; fi
+          done
+          # A unit systemd still lists, whose binary is gone, fails a later start
+          # against nothing.
+          n="$(systemctl list-unit-files | grep -c '^polyemesis' || true)"
+          [ "$n" -eq 0 ] || { echo "systemd still lists the unit"; exit 1; }
+          # Kept, deliberately: it holds the database and secret.key.
+          [ -d /var/lib/polyemesis ] || { echo "uninstall DELETED the data directory"; exit 1; }
+          after="$(sudo md5sum /var/lib/polyemesis/secret.key | cut -d' ' -f1)"
+          [ "$before" = "$after" ] || { echo "secret.key changed during uninstall"; exit 1; }
+          echo "data kept, secret.key unchanged"
+
+      - name: An interrupted install rolls back, once, and leaves nothing
+        run: |
+          sudo rm -rf /var/lib/polyemesis
+          set +e
+          out="$(sudo timeout -s INT 3 bash scripts/install.sh --mode docker --yes --tls selfsigned --http-port 8080 2>&1)"
+          set -e
+          echo "$out" | tail -8
+          # The trap is armed for EXIT INT TERM, so SIGINT once ran the whole
+          # rollback twice and reported the same failure twice.
+          n="$(printf '%s\n' "$out" | grep -c 'undoing what it had already done' || true)"
+          [ "$n" -eq 1 ] || { echo "rollback announced $n times, want exactly 1"; exit 1; }
+          for gone in /opt/polyemesis /etc/polyemesis /etc/systemd/system/polyemesis.service; do
+            if [ -e "$gone" ]; then echo "rollback left $gone behind"; exit 1; fi
+          done
+          echo "rolled back once, cleanly"
+
+      - name: Installing again after an interruption works
+        run: |
+          sudo bash scripts/install.sh --mode docker --yes --tls selfsigned --http-port 8080
+          docker ps --format '{{.Names}} {{.Status}}' | head -2
+          for _ in $(seq 1 30); do
+            code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 https://127.0.0.1:8080/ || true)"
+            if [ "$code" = "200" ]; then echo "answered 200 after reinstall"; exit 0; fi
+            sleep 2
+          done
+          echo "never answered 200 after reinstall"
+          sudo docker compose -f /opt/polyemesis/docker-compose.yml logs --tail 40 || true
+          exit 1
