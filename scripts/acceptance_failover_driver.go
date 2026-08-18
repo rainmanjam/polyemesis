@@ -28,9 +28,11 @@
 //	                     restart cannot damage the first one's recording
 //	restarts <name>      print one named destination's restart count, or -1
 //	outtime <name>       print its produced media in ms, or -1 when it has no process
+//	deldest <name>       remove one destination, to measure what that does to the rest
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -100,6 +102,12 @@ func main() {
 		}
 		driverlib.Login(user, pass)
 		addDest(os.Args[3], os.Args[4])
+	case "deldest":
+		if len(os.Args) < 4 {
+			driverlib.Die("usage: deldest <destination-name>")
+		}
+		driverlib.Login(user, pass)
+		delDest(os.Args[3])
 	case "restarts":
 		if len(os.Args) < 4 {
 			driverlib.Die("usage: restarts <destination-name>")
@@ -160,6 +168,35 @@ func dest() { addDest("onair", "onair.ts") }
 // needs a destination of its OWN. That case expects restarts, and a restart
 // truncates the file the destination is writing -- pointed at onair.mkv it
 // would erase the very recording the timeline checks measured.
+// delDest removes one destination by name, so a step can measure what removing
+// it does to the destinations left behind.
+//
+// The list is objects WRAPPING a destination rather than bare destinations, and
+// parsing {id,name} at the top level silently yields zero-valued rows and "no
+// destination named ..." -- the same trap acceptance_docker_driver.go records
+// having fallen into.
+func delDest(name string) {
+	_, out := driverlib.Do(http.MethodGet, "/destinations", nil)
+	var rows []struct {
+		Destination struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"destination"`
+	}
+	_ = json.Unmarshal(out, &rows)
+	for _, r := range rows {
+		if r.Destination.Name == name {
+			code, body := driverlib.Do(http.MethodDelete, fmt.Sprintf("/destinations/%d", r.Destination.ID), nil)
+			if code != http.StatusOK && code != http.StatusNoContent {
+				driverlib.Die(fmt.Sprintf("delete %s failed: %d %s", name, code, body))
+			}
+			fmt.Println("DELDEST_OK")
+			return
+		}
+	}
+	driverlib.Die("no destination named " + name)
+}
+
 func addDest(name, url string) {
 	driverlib.CreateDest(name, map[string]any{
 		"name": name, "kind": "file", "url": url,
