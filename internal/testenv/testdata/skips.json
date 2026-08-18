@@ -89,8 +89,7 @@
     "internal/scheduler": 1,
     "internal/secrets": 1,
     "internal/srtserver": 3,
-    "internal/supervisor": 1,
-    "internal/transcribe": 1,
+    "internal/transcribe": 2,
     "internal/upgrade": 8
   },
   "raisedBy3": [
@@ -131,6 +130,19 @@
       "why": "ONE site, for TestAVFRSourceKeepsItsTimingThroughARendition, which closes #342. The test measures real frame timing through a real encode, so it needs ffmpeg AND ffprobe on the machine and can do nothing useful with either alone. Written as a single skip rather than the two LookPath skips the neighbouring tests use, because the condition really is one condition -- the census should count what is true, not how many if-statements express it.",
       "whyNotAvoidable": "The alternative is asserting on the argv instead of on an encode, and that is exactly what #342 said was missing: RenditionArgs was already readable and nobody could say what the frames did. A test that reads the same flags a second time would have added no information. Verified by mutation -- adding `-fps_mode cfr` takes the fixture from 72 frames to 120, and only a real encode can see that.",
       "handEditedRatherThanRegenerated": "Same reason as every entry above: -update-skips only records a count that has FALLEN, so a deliberate raise has to be written down with its reason rather than absorbed."
+    }
+  ],
+  "raisedBy5": [
+    {
+      "pr": 437,
+      "from": 95,
+      "to": 95,
+      "packages": {
+        "internal/transcribe": "1 -> 2",
+        "internal/supervisor": "1 -> 0"
+      },
+      "why": "ONE new site, and one stale one removed, so the total does not move -- which is exactly the coincidence that would have hidden the new one if this file only tracked a total. internal/transcribe gains symlinkOrSkip, a single helper shared by both confinement tests rather than a skip per test, following the sampleMedia/needFFmpeg shape the entries above settled on. A Windows account without the create-symlink privilege cannot run either test, and that is a property of the machine; anything other than a permission refusal is reported as a failure, not a skip. internal/supervisor is committed at 1 and has had 0 for some time -- there is no t.Skip left in the package -- so the count is corrected here rather than left to absorb somebody else's future addition.",
+      "notAdded": "The cancellation test for the surviving-grandchild hang wanted a #!/bin/sh fixture, which is the same trade PR 118 made and PR 270 paid back. It uses internal/media's existing TestHelperProcess re-exec instead, with a new grandchild mode, so it runs on Windows and adds no site at all."
     }
   ]
 }

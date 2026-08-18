@@ -633,12 +633,24 @@ func (p *Processor) resolveRecording(name string) (string, error) {
 	if name != filepath.Base(name) || strings.Contains(name, "..") {
 		return "", fmt.Errorf("%q is not a recording filename", name)
 	}
+	// SYMLINKS RESOLVED BEFORE THE PREFIX TEST, because filepath.Abs does not
+	// follow them and the test below is the confinement. A symlink sitting in
+	// the recordings directory has a name with no separators and no "..", and
+	// its absolute path is inside the directory, so every check here passed —
+	// and then os.Stat and the reader that follows both traverse the link to
+	// whatever it points at. The one check whose stated job is confinement did
+	// not confine.
+	//
+	// EvalSymlinks is applied to the directory too: an install whose recordings
+	// path is itself a symlink (/var/lib/polyemesis/recordings -> /mnt/media is
+	// the ordinary way to put recordings on a big disk) would otherwise compare
+	// a resolved file against an unresolved root and reject everything.
 	path := filepath.Join(p.recordingsDir, name)
-	resolved, err := filepath.Abs(path)
+	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("recording %q does not exist", name)
 	}
-	dir, err := filepath.Abs(p.recordingsDir)
+	dir, err := filepath.EvalSymlinks(p.recordingsDir)
 	if err != nil {
 		return "", err
 	}

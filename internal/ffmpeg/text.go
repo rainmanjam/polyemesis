@@ -122,7 +122,7 @@ func drawtextFilter(t *TextSpec, outW, outH int) string {
 }
 
 // escapeLavfiArg protects a value inside a FILTER ARGUMENT within a filtergraph
-// description. That is one level deeper than escapeLavfiValue, and the extra
+// description. That is one level deeper than a single-level escaper, and the extra
 // level is not cosmetic.
 //
 // A filtergraph is unescaped TWICE: once when the description is split into
@@ -132,7 +132,7 @@ func drawtextFilter(t *TextSpec, outW, outH int) string {
 // "my:fonts":
 //
 //	/tmp/my:fonts/f.ttf      fails
-//	/tmp/my\:fonts/f.ttf     fails   <- what escapeLavfiValue produces
+//	/tmp/my\:fonts/f.ttf     fails   <- what a single-level escaper produces
 //	/tmp/my\\:fonts/f.ttf    works
 //
 // This is what broke the Windows runner: C:\... escaped once became
@@ -157,7 +157,7 @@ func escapeLavfiArg(v string) string { return lavfiArgEscaper.Replace(v) }
 // Escaping alone is not enough on Windows, and the failure is not subtle: even
 // filtergraph is unescaped TWICE -- once when the description is split into
 // chains and filters, and again when a filter's arguments are split on ':' --
-// so escapeLavfiValue's `\` -> `\\` collapses back to a single backslash at the
+// so a single-level escaper's `\` -> `\\` collapses back to a single backslash at the
 // separator is converted rather than escaped. The real error, from
 // the Windows CI runner:
 //
