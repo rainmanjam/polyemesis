@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/acme/autocert"
+	"golang.org/x/net/idna"
 
 	"github.com/rainmanjam/polyemesis/internal/fsperm"
 )
@@ -62,6 +63,27 @@ func hostPolicy(hostname string) autocert.HostPolicy {
 	}
 }
 
+// normalizeHost puts a name into the one form both sides of the policy can be
+// compared in.
+//
+// PUNYCODE, NOT JUST LOWERCASE. Lowercasing alone compares two spellings of the
+// same name and calls them different: an operator configures muenchen with an
+// umlaut, and the browser connecting to it sends SNI already converted to
+// xn--... . The policy then refuses to request a certificate for the very
+// hostname it was configured with, and reports the punycode back at an operator
+// who never typed it.
+//
+// This is what autocert's own HostWhitelist does, and the reason hostPolicy has
+// to repeat it is that hostPolicy exists to be stricter than a whitelist, not
+// differently spelled.
+//
+// A name that will not convert falls back to lowercase rather than failing: the
+// Lookup profile is deliberately strict, and a name it rejects should be turned
+// away by the comparison below with a clear message, not by an error here.
 func normalizeHost(h string) string {
-	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(h), "."))
+	h = strings.TrimSuffix(strings.TrimSpace(h), ".")
+	if ascii, err := idna.Lookup.ToASCII(h); err == nil {
+		return ascii
+	}
+	return strings.ToLower(h)
 }

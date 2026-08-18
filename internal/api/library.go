@@ -182,6 +182,10 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 
 	meta, err := s.store.ListRecordingMeta(ids)
 	if err != nil {
+		// Logged, like its two siblings above. Swallowing this silently meant a
+		// library that had lost every title and tag looked exactly like a
+		// library where nobody had set any.
+		s.log.Warn("library: recording metadata unavailable", "err", err)
 		meta = map[int64]db.RecordingMeta{}
 	}
 	for _, rec := range ungrouped {

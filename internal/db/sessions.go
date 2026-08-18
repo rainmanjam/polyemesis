@@ -325,20 +325,26 @@ func (d *DB) SessionIDsForRecordings(ids []int64) (map[int64]int64, error) {
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := d.sql.Query(`SELECT recording_id, session_id FROM session_recordings
-		WHERE recording_id IN (`+placeholders(len(ids))+`)`, int64Args(ids)...)
+	err := eachIDChunk(ids, func(chunk []int64) error {
+		rows, err := d.sql.Query(`SELECT recording_id, session_id FROM session_recordings
+			WHERE recording_id IN (`+placeholders(len(chunk))+`)`, int64Args(chunk)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var rid, sid int64
+			if err := rows.Scan(&rid, &sid); err != nil {
+				return err
+			}
+			out[rid] = sid
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var rid, sid int64
-		if err := rows.Scan(&rid, &sid); err != nil {
-			return nil, err
-		}
-		out[rid] = sid
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // SetSessionRecordings replaces the membership wholesale and recomputes the
@@ -364,7 +370,20 @@ func (d *DB) SetSessionRecordings(sessionID int64, recordingIDs []int64) error {
 	if err != nil {
 		return err
 	}
+	// Noted BEFORE the upsert, because the upsert is what overwrites session_id.
+	// AddRecordingToSession already does this for the one-recording case -- "the
+	// session it came from is now shorter and its span is stale" -- and the bulk
+	// path simply never did. Same steal, same stale span, one path fixed.
+	donors := map[int64]bool{}
 	for i, id := range ordered {
+		var prev int64
+		err := tx.QueryRow(`SELECT session_id FROM session_recordings WHERE recording_id = ?`, id).Scan(&prev)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if prev != 0 && prev != sessionID {
+			donors[prev] = true
+		}
 		if _, err := tx.Exec(`INSERT INTO session_recordings (recording_id, session_id, position)
 			VALUES (?,?,?) ON CONFLICT(recording_id) DO UPDATE SET session_id=excluded.session_id, position=excluded.position`,
 			id, sessionID, i); err != nil {
@@ -373,6 +392,11 @@ func (d *DB) SetSessionRecordings(sessionID int64, recordingIDs []int64) error {
 	}
 	if err := recalcSessionTx(tx, sessionID); err != nil {
 		return err
+	}
+	for prev := range donors {
+		if err := recalcSessionTx(tx, prev); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -504,21 +528,42 @@ func orderByStart(tx execQuerier, ids []int64) ([]int64, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := tx.Query(`SELECT id FROM recordings WHERE id IN (`+placeholders(len(ids))+`)
-		ORDER BY started_at, id`, int64Args(ids)...)
+	// Sorted HERE rather than in SQL, because the query is chunked and an ORDER
+	// BY only orders within its own statement. The keys are the same pair the
+	// SQL used, in the same order, so a caller under the chunk threshold gets a
+	// byte-identical answer.
+	type startedID struct{ started, id int64 }
+	var found []startedID
+	err := eachIDChunk(ids, func(chunk []int64) error {
+		rows, err := tx.Query(`SELECT id, started_at FROM recordings WHERE id IN (`+
+			placeholders(len(chunk))+`)`, int64Args(chunk)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r startedID
+			if err := rows.Scan(&r.id, &r.started); err != nil {
+				return err
+			}
+			found = append(found, r)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
+	sort.Slice(found, func(i, j int) bool {
+		if found[i].started != found[j].started {
+			return found[i].started < found[j].started
 		}
-		out = append(out, id)
+		return found[i].id < found[j].id
+	})
+	out := make([]int64, 0, len(found))
+	for _, r := range found {
+		out = append(out, r.id)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func renumberSession(tx execQuerier, sessionID int64) error {
@@ -979,26 +1024,32 @@ func (d *DB) ListRecordingMeta(ids []int64) (map[int64]RecordingMeta, error) {
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := d.sql.Query(`SELECT recording_id, title, description, tags, updated_at
-		FROM recording_meta WHERE recording_id IN (`+placeholders(len(ids))+`)`, int64Args(ids)...)
+	err := eachIDChunk(ids, func(chunk []int64) error {
+		rows, err := d.sql.Query(`SELECT recording_id, title, description, tags, updated_at
+			FROM recording_meta WHERE recording_id IN (`+placeholders(len(chunk))+`)`, int64Args(chunk)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				m        RecordingMeta
+				tagsJSON string
+				updated  int64
+			)
+			if err := rows.Scan(&m.RecordingID, &m.Title, &m.Description, &tagsJSON, &updated); err != nil {
+				return err
+			}
+			m.Tags = unmarshalTags(tagsJSON)
+			m.UpdatedAt = time.Unix(updated, 0)
+			out[m.RecordingID] = m
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			m        RecordingMeta
-			tagsJSON string
-			updated  int64
-		)
-		if err := rows.Scan(&m.RecordingID, &m.Title, &m.Description, &tagsJSON, &updated); err != nil {
-			return nil, err
-		}
-		m.Tags = unmarshalTags(tagsJSON)
-		m.UpdatedAt = time.Unix(updated, 0)
-		out[m.RecordingID] = m
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // NormalizeTags trims, drops empties and removes case-insensitive duplicates

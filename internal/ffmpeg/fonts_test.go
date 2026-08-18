@@ -217,7 +217,7 @@ func TestDrawtextRendersWithTheEmbeddedFont(t *testing.T) {
 	// carries both, so an unescaped path is not merely wrong there -- it is a
 	// parse error.
 	//
-	// filterPath, NOT escapeLavfiValue. This test used the latter and the
+	// filterPath, NOT a single-level escaper. This test used the latter and the
 	// Windows runner rejected the graph it built -- `C\:\\Users\\...`, with
 	// "No option name near '\Users...'" -- while text.go had already been
 	// fixed. A test that hand-rolls what the production code does is a test

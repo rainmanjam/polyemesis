@@ -109,9 +109,25 @@ func Exec(ctx context.Context, cmd Command, sink Sink) error {
 			}
 		})
 	}()
+	// c.Wait FIRST, then the readers. Waiting on the readers first is what
+	// killGrace was written to prevent, and it disabled it.
+	//
+	// WaitDelay only has effect INSIDE Cmd.Wait: it is the bound on how long
+	// Wait spends on the I/O pipes after the process has exited, after which it
+	// closes them itself. Blocking on the reader goroutines beforehand meant
+	// that when a grandchild held the pipes open -- the exact case killGrace's
+	// comment names, "x265 and SVT-AV1 both do" -- the readers never saw EOF,
+	// wg.Wait never returned, and c.Wait was never reached to apply the delay.
+	// The worker sat there for ever and, in that comment's own words, "the
+	// queue's cancellation would be a lie".
+	//
+	// Draining after Wait is safe in the other direction: Wait closes the pipes,
+	// so the scanners end. wg.Wait still precedes the read of tail, so the
+	// quoted reason is complete and the mutex is uncontended by then.
+	err = c.Wait()
 	wg.Wait()
 
-	if err := c.Wait(); err != nil {
+	if err != nil {
 		mu.Lock()
 		reason := strings.Join(tail, "; ")
 		mu.Unlock()

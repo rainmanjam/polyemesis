@@ -6,6 +6,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // A1. Stop cleared e.dests and then stopped only d.proc. stopBackup was
@@ -20,7 +21,14 @@ func TestStopTakesTheBackupDownWithTheDestination(t *testing.T) {
 	e, _ := storeEngine(t)
 	// Span of two, so "was the port given back" is answerable by asking for it
 	// again rather than by reaching inside the allocator.
-	e.alloc = relay.NewPortAllocator(freeUDPPort(t), 2)
+	base, held := testenv.FreeUDPWindow(t, 2)
+	// Released together, immediately before the allocator is built: the window
+	// has to be free for Allocate to hand it out, and holding it until this line
+	// is what stopped anything else from taking it.
+	for _, r := range held {
+		r.Release()
+	}
+	e.alloc = relay.NewPortAllocator(base, 2)
 
 	row := backupRow()
 	primaryPort, err := e.alloc.Allocate()
