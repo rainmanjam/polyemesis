@@ -301,21 +301,27 @@ func (d *DB) TranscribedRecordings(ids []int64) (map[int64]bool, error) {
 	if len(ids) == 0 {
 		return out, nil
 	}
-	q := `SELECT DISTINCT recording_id FROM transcript_tracks WHERE recording_id IN (` +
-		placeholders(len(ids)) + `)`
-	rows, err := d.sql.Query(q, int64Args(ids)...)
+	err := eachIDChunk(ids, func(chunk []int64) error {
+		q := `SELECT DISTINCT recording_id FROM transcript_tracks WHERE recording_id IN (` +
+			placeholders(len(chunk)) + `)`
+		rows, err := d.sql.Query(q, int64Args(chunk)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			out[id] = true
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out[id] = true
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // DeleteTranscript drops every track of a recording. Deleting the recording
@@ -839,6 +845,38 @@ func wrapFTSError(err error) error {
 // ErrBadQuery is a malformed raw FTS5 query. Only Raw queries can produce it —
 // MatchQuery cannot emit invalid syntax.
 var ErrBadQuery = errors.New("invalid search query")
+
+// maxSQLiteVariables is the most bound parameters one statement may carry.
+//
+// MEASURED, NOT ASSUMED: 32766 succeeds and 32767 fails with "too many SQL
+// variables". Every query below builds one placeholder per recording id from
+// a list the library handler takes straight from ListRecordings, which is
+// unbounded -- so this is a cliff an install reaches by recording for long
+// enough, not by doing anything unusual.
+//
+// It failed SILENTLY, which is why it is worth the chunking. The handler treats
+// an error from any of these as "index unavailable" and substitutes an empty
+// map, so past the threshold every session renders with no members and no
+// poster, every recording falls into Ungrouped, and every title and tag
+// disappears. The page still returns 200. An operator sees a library that looks
+// erased.
+const maxSQLiteVariables = 32766
+
+// eachIDChunk calls fn with slices of ids no longer than one statement can bind.
+// A single chunk is the overwhelmingly common case and costs one extra slice
+// header.
+func eachIDChunk(ids []int64, fn func(chunk []int64) error) error {
+	for len(ids) > maxSQLiteVariables {
+		if err := fn(ids[:maxSQLiteVariables]); err != nil {
+			return err
+		}
+		ids = ids[maxSQLiteVariables:]
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return fn(ids)
+}
 
 // placeholders builds "?,?,?" for an IN clause.
 func placeholders(n int) string {
