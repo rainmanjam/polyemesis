@@ -72,6 +72,8 @@ CONTAINER_STARTED=false
 BINARY_INSTALLED=false
 CONFIG_DIR_CREATED=false
 INSTALL_COMPLETE=false
+# Set by cleanup_on_failure so the EXIT trap cannot re-run it after INT/TERM.
+ROLLBACK_DONE=false
 
 # Every network fetch below goes through these flags.
 #
@@ -161,6 +163,18 @@ die() { err "$*"; exit 1; }
 
 cleanup_on_failure() {
   local code=$?
+  # ONCE. The trap is armed for EXIT INT TERM, so a Ctrl-C ran this twice: SIGINT
+  # fired the INT handler, which cleaned up and exited, and that exit fired the
+  # EXIT handler, which cleaned up again. The operator saw the same failure
+  # reported twice and had no way to tell that from "the first rollback failed
+  # and it retried".
+  #
+  # Harmless today only because every action below is idempotent -- rm -f,
+  # compose down, systemctl disable. That is a property of the current contents,
+  # not of the design, and the next step added here would inherit the bug
+  # silently.
+  [ "$ROLLBACK_DONE" = true ] && exit "$code"
+  ROLLBACK_DONE=true
   [ "$INSTALL_COMPLETE" = true ] && exit 0
   [ "$code" -eq 0 ] && exit 0
 
@@ -1399,6 +1413,55 @@ EOF
   chmod +x "$INSTALL_DIR/update.sh"
 }
 
+# write_binary_uninstall_script gives systemd installs the same thing docker
+# installs have had: one script that removes what the installer added, keeps the
+# data, and SAYS which of the two it did to each thing.
+#
+# The summary used to print this instead:
+#
+#	sudo systemctl disable --now polyemesis && sudo rm /usr/local/bin/polyemesis
+#
+# which leaves the unit file, the config directory and the data directory --
+# measured at 8K, 12K and 820K on a real install. Two of those matter. systemd
+# still lists a service whose binary is gone, so a later `systemctl start`
+# fails against nothing. And the data directory holds secret.key, which the
+# summary three lines above calls secret material and which an operator
+# decommissioning a host has just been told they have finished removing.
+#
+# Data is KEPT, like docker's. An installer that deletes a database on the way
+# out is a worse problem than the one it is solving. It is named, with the
+# command to remove it, so the choice is the operator's and is visible.
+write_binary_uninstall_script() {
+	mkdir -p "$INSTALL_DIR"
+	cat > "$INSTALL_DIR/uninstall.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+SERVICE_NAME="$SERVICE_NAME"
+BIN_PATH="$BIN_PATH"
+CONFIG_DIR="$CONFIG_DIR"
+DATA_DIR="$DATA_DIR"
+
+systemctl disable --now "\$SERVICE_NAME" >/dev/null 2>&1 || true
+rm -f "/etc/systemd/system/\$SERVICE_NAME.service"
+systemctl daemon-reload >/dev/null 2>&1 || true
+rm -f "\$BIN_PATH"
+rm -rf "\$CONFIG_DIR"
+
+echo
+echo "Removed the service, the unit file, \$BIN_PATH and \$CONFIG_DIR."
+echo
+echo "\$DATA_DIR was KEPT - it holds your database, secret.key and recordings."
+echo "secret.key is what decrypts your stored platform tokens. To destroy it"
+echo "permanently:"
+echo
+echo "    sudo rm -rf \$DATA_DIR"
+echo
+EOF
+	chmod +x "$INSTALL_DIR/uninstall.sh"
+	ok "wrote update.sh and uninstall.sh"
+}
+
 write_helper_scripts() {
   # BINARY MODE GETS ONE TOO. It used to return here unless the mode was docker,
   # which left the install that most needs a guard rail with the least: docker
@@ -1408,6 +1471,7 @@ write_helper_scripts() {
   # forward-only in both modes. See #347.
   if [ "$MODE" != "docker" ]; then
     write_binary_update_script
+    write_binary_uninstall_script
     return 0
   fi
 
@@ -1574,7 +1638,8 @@ print_summary() {
     echo "  Restart     sudo systemctl restart $SERVICE_NAME"
     echo "  Config      $CONFIG_DIR/config.yaml"
     echo "  Data        $DATA_DIR  ${YELLOW}(back this up)${NC}"
-    echo "  Uninstall   sudo systemctl disable --now $SERVICE_NAME && sudo rm $BIN_PATH"
+    echo "  Update      sudo $INSTALL_DIR/update.sh"
+    echo "  Uninstall   sudo $INSTALL_DIR/uninstall.sh"
   fi
   echo
   echo "  The data directory holds secret.key, which decrypts your stored platform"
@@ -1728,10 +1793,16 @@ main() {
   if [ "$MODE" = "docker" ]; then
     install_docker
     install_docker_mode
-    write_helper_scripts
   else
     install_binary_mode
   fi
+
+  # BOTH modes, because write_helper_scripts splits on MODE itself. Calling it
+  # only in the docker branch made its own `if [ "$MODE" != "docker" ]` arm
+  # unreachable, so #347 -- which exists to give systemd operators the same
+  # backup-before-upgrade guard rail docker operators got -- never shipped. The
+  # fix was written and never wired.
+  write_helper_scripts
 
   configure_firewall
   verify
