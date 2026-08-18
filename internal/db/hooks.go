@@ -160,25 +160,37 @@ func (d *DB) UpdateHook(box *secrets.Box, h *hooks.Hook) (*hooks.Hook, error) {
 	if err := norm.Validate(); err != nil {
 		return nil, err
 	}
-	if norm.Secret == "" {
-		existing, err := d.GetHook(box, norm.ID)
-		if err != nil {
+	// KEPT IN SQL, NOT READ BACK AND RE-SEALED. An empty Secret means "leave the
+	// stored one alone", and the previous implementation honoured that by asking
+	// GetHook for the current value -- but scanHook DELIBERATELY SWALLOWS a
+	// decrypt failure and leaves Secret empty, so that one bad row cannot take
+	// every other hook down with it.
+	//
+	// Those two designs compose into data destruction. When the ciphertext will
+	// not open -- a restore against the wrong key, a half-finished rotation --
+	// GetHook returns "", the update reads that as the current secret, and seals
+	// it. A row that was unreadable but RECOVERABLE, and that the API was
+	// honestly reporting as hasSecret:false, becomes a valid seal of the empty
+	// string. Renaming a hook was enough to trigger it.
+	//
+	// Not re-sealing at all removes the failure: the column keeps whatever bytes
+	// it already held, so restoring the right box still opens it.
+	keepSecret := norm.Secret == ""
+	var sealed []byte
+	if !keepSecret {
+		var err error
+		if sealed, err = box.Seal(norm.Secret); err != nil {
 			return nil, err
 		}
-		norm.Secret = existing.Secret
-	}
-	sealed, err := box.Seal(norm.Secret)
-	if err != nil {
-		return nil, err
 	}
 	triggers, err := marshalTriggers(norm.Triggers)
 	if err != nil {
 		return nil, err
 	}
 	res, err := d.sql.Exec(`UPDATE hooks SET
-		name=?, enabled=?, url=?, secret=?, triggers=?,
+		name=?, enabled=?, url=?, secret=CASE WHEN ? THEN secret ELSE ? END, triggers=?,
 		timeout_seconds=?, max_attempts=?, updated_at=? WHERE id=?`,
-		norm.Name, boolToInt(norm.Enabled), norm.URL, sealed, triggers,
+		norm.Name, boolToInt(norm.Enabled), norm.URL, boolToInt(keepSecret), sealed, triggers,
 		norm.TimeoutSeconds, norm.MaxAttempts, time.Now().Unix(), norm.ID)
 	if err != nil {
 		return nil, err
