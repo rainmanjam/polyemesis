@@ -548,7 +548,16 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         timeout-minutes: 10
         run: |
-          sudo apt-get install -y --no-install-recommends lsof
+          # RETRIED. A mirror that is slow rather than down turns one unlucky
+          # fetch into a red run and a rerun, which is #430's complaint in
+          # miniature. Three attempts with a widening pause; the job ceiling
+          # above still bounds the whole thing.
+          for attempt in 1 2 3; do
+            sudo apt-get install -y --no-install-recommends lsof && break
+            echo "apt attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep $(( attempt * 5 ))
+          done
           ./scripts/test-lib-cleanup.sh
 
   # The same build and test, on the operating systems polyemesis actually ships

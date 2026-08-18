@@ -169,9 +169,18 @@ jobs:
           # --proto '=https' matters because -L follows redirects: without it a
           # redirect to http:// would silently downgrade the transport for a
           # binary that is about to be run as a security gate.
+          #
+          # RETRIED VIA A FILE, NOT A PIPE. --retry restarts the transfer from the
+          # beginning, so retrying a `curl | tar` re-feeds bytes into a tar that has
+          # already consumed some of the stream -- a corrupt extract, reported as a
+          # download failure. Landing the archive first makes the retry safe, and
+          # the extract then runs once, on a file known to be complete.
           curl -sSfL --proto '=https' --tlsv1.2 \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin gitleaks
+            --retry 3 --retry-all-errors --retry-delay 5 --max-time 120 \
+            -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          sudo tar -xz -C /usr/local/bin -f gitleaks.tar.gz gitleaks
+          rm -f gitleaks.tar.gz
           installed="$(gitleaks version)"
           echo "gitleaks $installed"
           if [ "$installed" != "$GITLEAKS_VERSION" ]; then
