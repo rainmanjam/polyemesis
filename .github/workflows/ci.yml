@@ -1419,7 +1419,7 @@ jobs:
 
       - name: Install FFmpeg
         if: needs.changes.outputs.code == 'true'
-        timeout-minutes: 6
+        timeout-minutes: 15
         run: |
           # STILL apt's 6.1.1, and that is now a KNOWN GAP rather than an
           # oversight -- see the issue linked below.
@@ -1460,11 +1460,40 @@ jobs:
           # solve this outright. It was tried, and it broke acceptance-failover
           # -- see the note above and issue #398. Reliability and the version
           # change are separable, and this is the half that carries no risk.
+          # THE BUDGET HAS TO FIT THE CEILING, AND IT DID NOT. Three attempts at
+          # a 100s timeout is 300s inside a 360s step ceiling, leaving 60s for
+          # the install itself. When the mirror is SLOW rather than down, every
+          # attempt burns its whole budget and the step dies with no room left to
+          # succeed even if the next one would have worked. That is the shape in
+          # every failure log: three stalls, then the ceiling. Measured at 8 of
+          # the last 9 failed jobs in this repository -- see #430.
+          #
+          # Five attempts at 90s is 450s, so the ceiling moves to 15 minutes to
+          # hold that plus the install. A step that CAN take fifteen minutes is
+          # not a step that usually does: a healthy acquisition finishes in
+          # seconds, and the ceiling is only ever reached by a stall.
+          #
+          # AND A DIFFERENT MIRROR ON THE LATER ATTEMPTS, because a retry re-asks
+          # the host that is refusing. This is the part the existing retries
+          # could not do for themselves.
+          apt_switch_mirror() {
+            echo "switching to the Ubuntu mirror pool for the remaining attempts"
+            sudo sed -i -E \
+              -e 's|https?://[a-z0-9.-]*archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+              /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+              /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          }
+
           apt_try() {
-            for attempt in 1 2 3; do
-              if sudo timeout 100 apt-get $APT_OPTS "$@"; then return 0; fi
+            for attempt in 1 2 3 4 5; do
+              if sudo timeout 90 apt-get $APT_OPTS "$@"; then return 0; fi
               echo "apt attempt $attempt failed or stalled; retrying"
-              sleep 5
+              # Switched once, before the fourth: three attempts is enough to
+              # establish that this mirror is not merely unlucky.
+              [ "$attempt" = 3 ] && apt_switch_mirror
+              # Backoff, because an overloaded mirror is likelier to answer in
+              # twenty seconds than in five.
+              sleep $(( attempt * 5 ))
             done
             return 1
           }
