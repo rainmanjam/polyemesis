@@ -830,6 +830,57 @@ in the clear. RTMP has no equivalent — its stream key authenticates the
 publisher but encrypts nothing, so the RTMP port is the one to keep off the
 public internet if you have the choice.
 
+## Removing it
+
+The scripted install writes an `uninstall.sh` beside the install, in both modes:
+
+```
+sudo /opt/polyemesis/uninstall.sh
+```
+
+It removes what the installer added — the service, the unit file, the binary or
+container, and the config directory — and **keeps your data**, because that
+directory holds the database, your recordings, and `secret.key`. It prints the
+one command that removes it, so destroying it is a decision you make rather than
+one made for you.
+
+`secret.key` is what decrypts your stored platform tokens. A backup of the data
+directory without it is not a backup you can restore from, and a copy of it is
+as sensitive as the tokens themselves. If you are decommissioning a host rather
+than reinstalling, remove the data directory too — the uninstall script names
+the path.
+
+### Installs that predate the script
+
+An install done by hand, or one from a version that did not write an
+`uninstall.sh` for your mode, leaves the same things behind. Remove them in this
+order:
+
+```sh
+sudo systemctl disable --now polyemesis
+sudo rm -f /etc/systemd/system/polyemesis.service
+sudo systemctl daemon-reload          # or systemd still lists a service whose
+                                      # binary is gone, and a later `start` fails
+sudo rm -f /usr/local/bin/polyemesis
+sudo rm -rf /etc/polyemesis
+```
+
+and then, only if you mean it:
+
+```sh
+sudo rm -rf /var/lib/polyemesis        # database, recordings, secret.key
+```
+
+Docker installs additionally keep a named volume, which survives `compose down`
+by design:
+
+```sh
+docker volume rm polyemesis-data       # same warning applies
+```
+
+The firewall rules the installer added are not removed with it. `sudo ufw status`
+lists them; delete the ones you no longer want.
+
 ---
 
 Configuration reference: [`CONFIGURATION.md`](CONFIGURATION.md), and
