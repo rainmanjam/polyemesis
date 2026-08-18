@@ -73,10 +73,9 @@ func (s *Server) automodStats() automod.ModelStats {
 	if m == nil {
 		return automod.ModelStats{}
 	}
-	if e, ok := m.(interface{ ModelStats() automod.ModelStats }); ok {
-		return e.ModelStats()
-	}
-	return automod.ModelStats{}
+	// Called directly: chat.Moderator declares ModelStats, so a type assertion
+	// here would be a branch that cannot fail and cannot be tested.
+	return m.ModelStats()
 }
 
 // handlePutAutomodKey sets or clears the model API key.
