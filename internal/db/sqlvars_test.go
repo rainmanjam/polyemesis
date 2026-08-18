@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -103,5 +104,88 @@ func TestTheChunkedOrderingStillSortsByStartThenID(t *testing.T) {
 				"sort that replaced ORDER BY is not ordering by start time",
 				i, cur, i-1, prev)
 		}
+	}
+}
+
+/* eachIDChunk is where an off-by-one would live, so it is tested directly
+ * rather than only through the four queries that use it. The boundary cases are
+ * the point: exactly at the limit must stay ONE statement, and one past it must
+ * become two -- because 32766 succeeds and 32767 is the id that fails.
+ */
+func TestEachIDChunkSplitsAtTheLimitAndNotBefore(t *testing.T) {
+	ids := func(n int) []int64 {
+		out := make([]int64, n)
+		for i := range out {
+			out[i] = int64(i + 1)
+		}
+		return out
+	}
+
+	for _, tc := range []struct {
+		name  string
+		in    []int64
+		sizes []int
+	}{
+		{"none at all calls nothing", nil, nil},
+		{"empty slice calls nothing", []int64{}, nil},
+		{"one", ids(1), []int{1}},
+		{"exactly the limit is one statement", ids(maxSQLiteVariables), []int{maxSQLiteVariables}},
+		{"one past the limit splits", ids(maxSQLiteVariables + 1), []int{maxSQLiteVariables, 1}},
+		{"twice the limit", ids(2 * maxSQLiteVariables), []int{maxSQLiteVariables, maxSQLiteVariables}},
+		{"two and a bit", ids(2*maxSQLiteVariables + 5), []int{maxSQLiteVariables, maxSQLiteVariables, 5}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []int
+			var seen []int64
+			if err := eachIDChunk(tc.in, func(chunk []int64) error {
+				got = append(got, len(chunk))
+				seen = append(seen, chunk...)
+				return nil
+			}); err != nil {
+				t.Fatalf("eachIDChunk: %v", err)
+			}
+			if len(got) != len(tc.sizes) {
+				t.Fatalf("chunk sizes = %v, want %v", got, tc.sizes)
+			}
+			for i := range got {
+				if got[i] != tc.sizes[i] {
+					t.Fatalf("chunk sizes = %v, want %v", got, tc.sizes)
+				}
+			}
+			// Every id must be visited exactly once, in order: a chunker that
+			// drops or repeats one would silently lose recordings from a listing.
+			if len(seen) != len(tc.in) {
+				t.Fatalf("visited %d ids, want %d", len(seen), len(tc.in))
+			}
+			for i, v := range seen {
+				if v != tc.in[i] {
+					t.Fatalf("id at %d is %d, want %d — the chunks are not the "+
+						"input in order", i, v, tc.in[i])
+				}
+			}
+		})
+	}
+}
+
+// A failing chunk stops immediately: the caller returns the error, and a
+// listing must not half-populate from the chunks that happened to run first.
+func TestEachIDChunkStopsAtTheFirstFailure(t *testing.T) {
+	ids := make([]int64, 2*maxSQLiteVariables+1)
+	for i := range ids {
+		ids[i] = int64(i + 1)
+	}
+	want := errors.New("statement failed")
+
+	calls := 0
+	err := eachIDChunk(ids, func([]int64) error {
+		calls++
+		return want
+	})
+	if !errors.Is(err, want) {
+		t.Errorf("error = %v, want the chunk's own error", err)
+	}
+	if calls != 1 {
+		t.Errorf("ran %d chunks after the first failed, want 1 — continuing "+
+			"would spend three statements to return an error either way", calls)
 	}
 }
