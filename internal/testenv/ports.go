@@ -160,7 +160,7 @@ func FreeUDPWindow(t *testing.T, n int) (base int, held []*Reservation) {
 	from := probe.Port() + 1
 	probe.Release()
 
-	for start := from; start < from+4096 && start+n < 65535; start++ {
+	for _, start := range windowStarts(from, n, 4096) {
 		run := make([]*Reservation, 0, n)
 		for k := 0; k < n; k++ {
 			c, err := net.ListenPacket("udp", fmt.Sprintf("127.0.0.1:%d", start+k))
@@ -180,8 +180,41 @@ func FreeUDPWindow(t *testing.T, n int) (base int, held []*Reservation) {
 			r.Release()
 		}
 	}
-	t.Fatalf("FreeUDPWindow: no run of %d free UDP ports in 4096 numbers above %d", n, from)
+	t.Fatalf("FreeUDPWindow: no run of %d free UDP ports in 4096 start positions from %d", n, from)
 	return 0, nil
+}
+
+// windowStarts is the sequence of start positions FreeUDPWindow tries, wrapping
+// rather than marching into the ceiling.
+//
+// SEPARATED OUT BECAUSE THE BUG WAS HERE AND WAS OTHERWISE UNTESTABLE. The scan
+// used to be a bare `start < from+4096 && start+n < 65535`, which is a march
+// upward with no way back. When the probe lands near the top of the range the
+// guard is false on the FIRST iteration, so the function tried not one bind and
+// failed outright -- reporting "no run of 3 free UDP ports" about a machine on
+// which almost every port was free. It cannot happen on a stock Linux, whose
+// ephemeral range stops at 60999, and it happens on macOS, whose range runs to
+// 65535. That is why it read as a macOS-only failure rather than as a bug.
+//
+// Reaching it needs the kernel to hand out a port within n of the ceiling, so a
+// test cannot provoke it by asking for ports. Taking the arithmetic out as a
+// pure function is what makes the wrap assertable at all.
+func windowStarts(from, n, attempts int) []int {
+	// Below 1024 needs privilege and the very top is where the wrap is needed,
+	// so the ring is the unprivileged range with room for a whole window.
+	const lowest, highest = 1024, 65535
+	span := highest - n + 1 - lowest // number of valid start positions
+	if span < 1 {
+		return nil // n is wider than the range; the caller's bind loop cannot help
+	}
+	if from < lowest {
+		from = lowest
+	}
+	out := make([]int, 0, attempts)
+	for i := 0; i < attempts; i++ {
+		out = append(out, lowest+((from-lowest+i)%span))
+	}
+	return out
 }
 
 // FreeTCPPort is the same trick for a TCP listener.
