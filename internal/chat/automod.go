@@ -312,3 +312,18 @@ func (h *Hub) ModelStats() automod.ModelStats {
 	}
 	return s.mod.ModelStats()
 }
+
+// Moderator returns the moderator currently attached, or nil.
+//
+// Exposed so the API can read the live engine's counters. Returning the
+// interface rather than the concrete engine keeps the Hub unaware of what a
+// moderator is made of, which is the property SetModerator's signature already
+// chose.
+func (h *Hub) Moderator() Moderator {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.automod == nil {
+		return nil
+	}
+	return h.automod.mod
+}
