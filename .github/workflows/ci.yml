@@ -1419,7 +1419,7 @@ jobs:
 
       - name: Install FFmpeg
         if: needs.changes.outputs.code == 'true'
-        timeout-minutes: 6
+        timeout-minutes: 40
         run: |
           # STILL apt's 6.1.1, and that is now a KNOWN GAP rather than an
           # oversight -- see the issue linked below.
@@ -1460,18 +1460,75 @@ jobs:
           # solve this outright. It was tried, and it broke acceptance-failover
           # -- see the note above and issue #398. Reliability and the version
           # change are separable, and this is the half that carries no risk.
+          # THE BUDGET HAS TO FIT THE WORK, AND IT NEVER DID. This step failed
+          # 8 of the last 9 times anything failed in this repository, and the
+          # reading that it was "a flaky mirror" was wrong -- see #430. The
+          # install fetches 62.8 MB of archives, and every attempt was bounded at
+          # 100 seconds. That needs ~700 KB/s sustained; a mirror merely under
+          # load cannot manage it, so the timeout was killing a working download
+          # rather than rescuing a stalled one. A first pass at this cut the
+          # bound to 90s, which made it strictly worse.
+          #
+          # So the bound is now per-operation. `update` moves a few megabytes of
+          # indexes and 90s is generous for it; `install` moves 62.8 MB and gets
+          # five minutes. Retrying still helps because apt keeps part-downloaded
+          # archives in /var/cache/apt/archives, so each attempt RESUMES -- the
+          # logs show successive attempts reaching Get:9 rather than restarting.
+          #
+          # Worst case is 5x90 + 5x300 = 1950s plus backoff, which is why the
+          # ceiling is 40 minutes. A step that CAN take forty minutes is not one
+          # that usually does: a healthy install finishes in under a minute, and
+          # the ceiling is only ever reached by a mirror that is failing.
+          #
+          # AND THE MIRROR SWITCH HAS TO EDIT THE FILE THE RUNNER ACTUALLY READS.
+          # GitHub's images configure apt through a Mirrorlist -- the logs show
+          # `Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist` -- so rewriting
+          # sources.list, which is what the first attempt did, changed nothing.
+          #
+          # https, NOT http, and this is not pedantry: the fallback exists to be
+          # used when the primary is failing, so it runs at exactly the moment
+          # nobody is watching. Fetching packages CI is about to execute over
+          # plaintext is the hole githubactions:S6506 exists for, and the curl
+          # block above already carries a comment about the same rule catching
+          # the same mistake in its own copy. archive.ubuntu.com serves https,
+          # and apt on noble speaks it without apt-transport-https.
+          apt_switch_mirror() {
+            echo "switching to the Ubuntu mirror pool for the remaining attempts"
+            # The mirrorlist is what the runner reads; sources.list is a fallback
+            # for images that do not use one.
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\n' \
+                | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            fi
+            for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+                     /etc/apt/sources.list.d/*.sources; do
+              [ -f "$f" ] || continue
+              sudo sed -i -E \
+                -e 's|https?://[a-z0-9.-]*archive\.ubuntu\.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+                "$f"
+            done
+            sudo timeout 90 apt-get $APT_OPTS update -qq || true
+          }
+
+          # apt_try <seconds> <apt-get args...>
           apt_try() {
-            for attempt in 1 2 3; do
-              if sudo timeout 100 apt-get $APT_OPTS "$@"; then return 0; fi
+            local budget="$1"; shift
+            for attempt in 1 2 3 4 5; do
+              if sudo timeout "$budget" apt-get $APT_OPTS "$@"; then return 0; fi
               echo "apt attempt $attempt failed or stalled; retrying"
-              sleep 5
+              # Switched once, before the fourth: three attempts is enough to
+              # establish that this mirror is not merely unlucky.
+              [ "$attempt" = 3 ] && apt_switch_mirror
+              # Backoff, because an overloaded mirror is likelier to answer in
+              # twenty seconds than in five.
+              sleep $(( attempt * 5 ))
             done
             return 1
           }
-          apt_try update -qq
+          apt_try 90 update -qq
           # lsof as well: three suites read the engine's relay port out of it
           # to measure the right socket, and they fail obscurely without it.
-          apt_try install -y --no-install-recommends ffmpeg lsof
+          apt_try 300 install -y --no-install-recommends ffmpeg lsof
           ffmpeg -hide_banner -version | head -1
           # Not fatal: none of these suites needs SRT (the container ones do,
           # and they run elsewhere). Logged because a suite behaving oddly is
