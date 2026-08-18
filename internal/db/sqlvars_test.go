@@ -189,3 +189,56 @@ func TestEachIDChunkStopsAtTheFirstFailure(t *testing.T) {
 			"would spend three statements to return an error either way", calls)
 	}
 }
+
+/* A FAILED STATEMENT MUST NOT LOOK LIKE AN EMPTY ANSWER.
+ *
+ * Each of these builds a map across one or more statements. If one fails, the
+ * error has to reach the caller -- because the library's whole problem in this
+ * area is that a MISSING entry renders as "this recording has no session" or
+ * "no title", never as an error. A partial map is worse than none: it reads as
+ * complete. The handler substitutes an empty map deliberately and logs, which
+ * it can only do if it is told.
+ *
+ * A closed handle is the cheapest way to make every statement fail, and it
+ * exercises the error arm of each chunk closure.
+ */
+func TestAFailedStatementReturnsAnErrorRatherThanAPartialMap(t *testing.T) {
+	ids := []int64{1, 2, 3}
+
+	t.Run("session ids", func(t *testing.T) {
+		d := testDB(t)
+		closeForTest(t, d)
+		got, err := d.SessionIDsForRecordings(ids)
+		if err == nil {
+			t.Fatalf("returned %v and no error against a closed database — the "+
+				"caller cannot tell that from \"none of them are in a session\"", got)
+		}
+		if got != nil {
+			t.Errorf("returned a map (%v) alongside the error; a partial answer "+
+				"reads as complete", got)
+		}
+	})
+	t.Run("recording meta", func(t *testing.T) {
+		d := testDB(t)
+		closeForTest(t, d)
+		if _, err := d.ListRecordingMeta(ids); err == nil {
+			t.Error("no error against a closed database — every title would " +
+				"silently read as unset")
+		}
+	})
+	t.Run("transcribed", func(t *testing.T) {
+		d := testDB(t)
+		closeForTest(t, d)
+		if _, err := d.TranscribedRecordings(ids); err == nil {
+			t.Error("no error against a closed database — every recording would " +
+				"silently read as untranscribed")
+		}
+	})
+}
+
+func closeForTest(t *testing.T, d *DB) {
+	t.Helper()
+	if err := d.sql.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
