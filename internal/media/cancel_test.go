@@ -2,7 +2,6 @@ package media
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -25,20 +24,13 @@ import (
  * Wait first it returns in about 300ms.
  */
 func TestCancellingACommandDoesNotHangOnASurvivingGrandchild(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skipf("no sh on this platform: %v", err)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		// sh spawns a grandchild that inherits stdout and outlives it. Cancelling
-		// kills sh; the grandchild holds the pipe open, which is the shape of an
-		// encoder that forks its own workers.
-		done <- Exec(ctx, Command{
-			Name: "sh",
-			Args: []string{"-c", "sleep 30 & echo started; sleep 30"},
-		}, Sink{})
+		// The helper spawns a grandchild that inherits stdout and outlives it.
+		// Cancelling kills the helper; the grandchild holds the pipe open, which
+		// is the shape of an encoder that forks its own workers.
+		done <- Exec(ctx, helper("grandchild"), Sink{})
 	}()
 
 	// Long enough for the grandchild to exist and the reader to be blocked.

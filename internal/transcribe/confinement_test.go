@@ -1,8 +1,10 @@
 package transcribe
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -28,9 +30,7 @@ func TestARecordingSymlinkCannotEscapeTheRecordingsDirectory(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("not really an mkv"), 0o600); err != nil {
 		t.Fatalf("seed the file to escape to: %v", err)
 	}
-	if err := os.Symlink(outside, filepath.Join(h.recordingsDir, "smuggled.mkv")); err != nil {
-		t.Skipf("this filesystem will not make symlinks: %v", err)
-	}
+	symlinkOrSkip(t, outside, filepath.Join(h.recordingsDir, "smuggled.mkv"))
 
 	got, err := h.proc.resolveRecording("smuggled.mkv")
 	if err == nil {
@@ -61,14 +61,29 @@ func TestAnOrdinaryRecordingStillResolvesThroughASymlinkedDirectory(t *testing.T
 
 	// Now reach the same directory through a symlinked root.
 	link := filepath.Join(t.TempDir(), "recordings")
-	if err := os.Symlink(h.recordingsDir, link); err != nil {
-		t.Skipf("this filesystem will not make symlinks: %v", err)
-	}
+	symlinkOrSkip(t, h.recordingsDir, link)
 	p := *h.proc
 	p.recordingsDir = link
 	if _, err := p.resolveRecording("rec-20260101-120000.mkv"); err != nil {
 		t.Errorf("a recording under a symlinked recordings directory was refused: "+
 			"%v — resolving the file but not the root compares a real path "+
 			"against a link and rejects everything", err)
+	}
+}
+
+// symlinkOrSkip makes a link, or skips because this machine will not.
+//
+// ONE site for the whole file rather than one per test, which is the shape
+// skips.json asks for: a Windows account without the create-symlink privilege
+// cannot run either of these, and that is a property of the machine, not of the
+// code under test. Anything other than a permission refusal is a real failure
+// and is reported as one.
+func symlinkOrSkip(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		if errors.Is(err, os.ErrPermission) || runtime.GOOS == "windows" {
+			t.Skipf("this machine will not create symlinks: %v", err)
+		}
+		t.Fatalf("symlink %s -> %s: %v", link, target, err)
 	}
 }
