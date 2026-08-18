@@ -126,6 +126,232 @@ Enhanced RTMP's version dependency is real, and OBS does not send multitrack
 audio over it — measured against OBS 30.2.3, which emitted only legacy
 single-track tags. See `evidence/enhanced-rtmp-multitrack.md`.
 
+## Giving the box a real name
+
+Most of what makes polyemesis awkward to set up — browser warnings, and every
+platform refusing to accept a callback URL — is one problem wearing two hats:
+the server has no name anyone else recognises. Three config keys fix both at
+once, and the machinery is already here.
+
+### What to do
+
+1. **Point a DNS record at the box.**
+
+   ```
+   stream.example.com.   A   203.0.113.10
+   ```
+
+2. **Name it in `config.yaml`.**
+
+   ```yaml
+   tls:
+     mode: auto                    # or acme, to be explicit
+     hostname: stream.example.com
+     acmeEmail: you@example.com
+   ```
+
+3. **Make port 443 reachable from the internet**, including *inbound* from
+   Let's Encrypt. See the validation note below — this is the step people skip.
+
+4. **Restart.** Nothing happens yet, on purpose.
+
+### What actually happens
+
+Startup does **no network I/O**. It resolves the mode (see
+[`tls.mode: auto` does not mean "always encrypt"](#tlsmode-auto-does-not-mean-always-encrypt)),
+then creates a certificate cache under the data directory, locked to this
+account — it holds the ACME account key and every private key that is ever
+issued.
+
+Issuance happens on the **first HTTPS handshake for the configured name**. A
+browser arrives, there is no certificate yet, and polyemesis orders one then.
+
+Let's Encrypt validates by connecting **back to you**, and polyemesis answers
+either of the two challenges it may choose:
+
+- **HTTP-01, on port 80.** A small helper listener is started for this whenever
+  TLS is enabled and the main listener does not already own the port. If it
+  cannot bind, issuance keeps failing — the startup log calls this "the single
+  most common reason Let's Encrypt issuance never completes".
+- **TLS-ALPN-01, on port 443.** Answered on the listener already serving the UI,
+  with no extra port.
+
+**Open both 80 and 443 inbound.** Outbound-only firewalls and un-forwarded NAT
+fail here, and the symptom is a browser certificate warning that never clears
+rather than an obvious error. If port 80 is genuinely unavailable — a proxy owns
+it, or the process cannot bind low ports — polyemesis says so rather than
+leaving you to guess; see the certificate status in the UI.
+
+**The first request after a cold start is slow**, because that is when issuance
+runs. On a machine you are about to broadcast from, load the page once before
+you need it.
+
+Renewal is automatic and also happens on a handshake. The cache survives
+restarts, so this is a first-boot cost, not a recurring one.
+
+### If your DNS is on Cloudflare
+
+Point the record at the box with the proxy **off** — the grey cloud, "DNS only":
+
+```
+stream.example.com    A    203.0.113.10    DNS only
+```
+
+Proxying it (the orange cloud) breaks certificate issuance in both directions at
+once: Cloudflare terminates TLS, so the TLS-ALPN-01 challenge never reaches you,
+and it proxies and caches HTTP, so the HTTP-01 challenge is unreliable at best.
+
+There is a second reason, and for a streaming box it is the decisive one:
+**Cloudflare's proxy carries HTTP and HTTPS only.** RTMP on 1935 and SRT over
+UDP cannot pass through it at all, so a proxied name cannot serve your ingest
+even when the certificate works.
+
+If you specifically want the web UI behind the proxy, do not use ACME for it.
+Issue a Cloudflare **Origin Certificate**, point `tls.mode: manual` at it with
+`certFile` and `keyFile`, and set `trustProxyHeaders: true` so the callback URI
+is built from the address the browser actually used. You will still need a
+second, unproxied name for ingest.
+
+### The part that pays for itself: platform sign-in
+
+polyemesis builds every OAuth callback from the address **you reached it at**.
+Browse to the real name and the callback becomes:
+
+```
+https://stream.example.com/api/v1/oauth/twitch/callback
+```
+
+That is a string a platform will accept. Paste it into each developer console —
+Twitch, YouTube, Facebook, Kick all take it, with no relay, no device-code flow
+and no second application to register.
+
+This is the whole reason to bother. Connecting an account from a box reachable
+only as `192.168.1.50`, or on a self-signed certificate, does not work at any
+platform, because there is no address their console will let you register.
+
+You do not have to assemble that string yourself. **Settings → the card for each
+platform shows the exact URI to register**, built from the address you are
+browsing right now, with a copy button beside it. It is computed rather than
+described because getting it wrong — a stray slash, `http` where the platform
+demands `https` — is the most common reason a setup fails, and the error the
+platform returns names none of that.
+
+The same card checks the URI before you paste it, and will tell you when:
+
+- the address is plain HTTP on a routable host, which Google refuses outright
+  and Twitch allows only for loopback;
+- the address is a bare IP, which Google will not accept for a web application
+  client;
+- you are browsing one name while `tls.hostname` says another, which produces
+  `redirect_uri_mismatch` at the platform;
+- a reverse proxy is in front but `trustProxyHeaders` is off, so the URI on
+  screen is not the one your browser actually used.
+
+Loopback is deliberately exempt from the bare-IP warning: `http://127.0.0.1` is
+what the platforms' own documentation recommends for local development, and
+warning about the configuration they recommend is how operators learn to click
+past warnings.
+
+### Four things that catch people
+
+**Issuance is rate limited, so a wrong DNS record is expensive.** polyemesis
+pins issuance to the single configured name for exactly this reason: anyone who
+can reach the port could otherwise make it request certificates for names you
+do not own and exhaust the budget. Check the record resolves *before* the first
+request, not after five failures.
+
+**`trustProxyHeaders: true` turns this off.** It resolves to `off`, because it
+means a reverse proxy is terminating TLS and issuing certificates is the
+proxy's job. That is a supported setup; the callback URL then comes from the
+`X-Forwarded-Host` and `X-Forwarded-Proto` headers your proxy sets, so it still
+needs to be the public name.
+
+**A hostname without a dot, an IP literal, or a `.local`/`.internal`/`.lan`
+suffix is not a public name** and silently gives you a self-signed certificate
+instead. If you expected ACME and did not get it, that is almost always why.
+
+**Renaming later is not free.** The hostname ends up inside every redirect URI
+you have registered at every platform. Changing it means re-registering all of
+them, and existing connected accounts keep working only until their tokens need
+a refresh through the old callback. Pick the name you intend to keep.
+
+## Connecting accounts without a public address
+
+[Giving the box a real name](#giving-the-box-a-real-name) is the durable answer.
+This is the one for a box that does not have a name yet — a machine on your LAN,
+a rented server you are still evaluating, or anything you reach over SSH.
+
+It needs no certificate, no DNS record and no changes to polyemesis. It works
+because every platform makes an exception for **loopback** addresses, and
+because polyemesis builds its callback from the address *you* reached it at.
+
+### Set it up
+
+Bind to loopback only, and let SSH carry the encryption:
+
+```yaml
+addr: "127.0.0.1:8080"
+tls:
+  mode: "off"
+```
+
+Then, from the machine you browse on:
+
+```
+ssh -L 8080:127.0.0.1:8080 you@your-server
+```
+
+and open <http://localhost:8080>.
+
+Turning TLS off is safe **only** in this shape. The listener is not reachable
+from the network at all — SSH is the encrypted channel, and it is doing the same
+job the "put a reverse proxy in front" advice describes. Do not combine
+`tls.mode: off` with a public bind address; polyemesis warns loudly at startup
+if you do, because that puts passwords and session cookies on the wire in the
+clear.
+
+### Register the callback
+
+Settings shows the exact URI for each platform, with a copy button. Browsing at
+`localhost:8080`, it will read:
+
+```
+http://localhost:8080/api/v1/oauth/twitch/callback
+```
+
+**Twitch** — paste it as an OAuth Redirect URL. Twitch permits plain HTTP for
+loopback and nothing else, so this is the one case where `http://` is correct.
+
+**YouTube** — create the OAuth client with application type **Desktop app**, not
+Web application, and register the same URL with `/youtube/`. Google requires the
+redirect to match exactly *including the port*, which is easy here: polyemesis
+serves a fixed port from `addr`, so unlike a desktop application there is no
+ephemeral port to reconcile.
+
+Google will show an "unverified app" screen until the app is verified. For a
+personal install, keeping the app in testing mode and adding yourself as a test
+user is enough.
+
+### Why not the device-code flow
+
+For YouTube it is worth being explicit: Google's device flow is restricted to
+`youtube` and `youtube.readonly`. The loopback flow described here has **no such
+ceiling**, so features that need a broader scope — thumbnail upload, for one —
+remain available. Loopback is the more capable choice, not the fallback.
+
+### What this does not do
+
+The browser has to be able to reach `localhost`, which means the tunnel has to
+be up and you have to be the one at the keyboard. This is a way to connect
+*your* accounts to *your* box. It is not a way to let other people sign in to an
+installation they do not have shell access to — for that the server needs a real
+name, which is the previous section.
+
+One cosmetic wrinkle: if `tls.hostname` is set while you are browsing through
+the tunnel, the setup card warns that you are browsing `localhost` while the
+server is configured as something else. In this flow that warning is expected
+and can be ignored.
+
 ## The data directory
 
 ```
