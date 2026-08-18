@@ -108,3 +108,24 @@ func TestTheWindowScanIsStillConsecutiveAwayFromTheCeiling(t *testing.T) {
 		}
 	}
 }
+
+// The two guards, which are the difference between a useful nil and a loop that
+// hands the caller start positions no window can fit inside.
+func TestTheWindowScanRefusesAnImpossibleWidthAndClampsALowProbe(t *testing.T) {
+	// A window wider than the unprivileged range cannot be placed anywhere, and
+	// saying so with nil is better than returning starts the bind loop will
+	// silently fail on 4096 times before reporting the wrong reason.
+	if got := windowStarts(40000, 70000, 8); got != nil {
+		t.Errorf("windowStarts with n wider than the port range returned %d starts, want nil",
+			len(got))
+	}
+
+	// A probe below 1024 must be lifted, or the scan would hand back privileged
+	// ports that bind only as root -- passing for the wrong reason in a container
+	// and failing everywhere else.
+	for i, s := range windowStarts(80, 3, 16) {
+		if s < 1024 {
+			t.Fatalf("start[%d] = %d is privileged; a low probe must be clamped to 1024", i, s)
+		}
+	}
+}
