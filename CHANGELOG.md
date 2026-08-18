@@ -8,429 +8,7 @@ its first tagged release.
 
 ## [Unreleased]
 
-### Security
-
-- **The ingest URL in `ingest started` carried the credential, on every boot.**
-  `PublicIngestURL` renders the server half only for RTMP — deliberately, and the
-  comment above the caller said so — but it renders `…&passphrase=<cleartext>`
-  for SRT and the operator's pull URL WHOLE for pull, and a pull URL is where a
-  camera password or a CDN path token lives. Both reached `ingest started` and
-  `backup ingest started` at Info, so they landed in journalctl and
-  `server.log`. Debug mode's scrubbing does not cover this: the recorder is a
-  second consumer and the inner handler still writes the original record. The log
-  rendering now keeps the host and port — the question a failed ingest actually
-  asks — and drops the rest, and an allowlist test fails the build if a third log
-  line acquires the full one.
-
-- **Facebook's credential check printed the app secret on any network hiccup.**
-  The pair travels in the query string, which is load-bearing — a POST form makes
-  Facebook reject correct credentials — but a transport failure arrives as a
-  `*url.Error` carrying the full URL, and that was interpolated raw into the
-  message an operator sees and the logs keep. A DNS outage, a timeout or a TLS
-  error was enough.
-
-- **A credential in an unrecognised attribute shape reached the debug bundle.**
-  Rendering a value before scrubbing it is only safe if the rendering keeps the
-  bytes. It did not, twice: a `[]byte` was base64-encoded, so the credential
-  arrived present, unrecognisable to the exact-match set, and decodable by the
-  recipient in one step; and `&`, `<` and `>` were escaped, so a camera or CDN
-  password containing an ampersand — ordinary, and a declared literal — was
-  transformed out of matching range.
-
-- **The debug bundle's scrub set had never heard of three inventories.** It was
-  built from destinations; sources were added after an earlier review; platform
-  accounts (which hold the OAuth access and refresh tokens), the install-wide
-  ingest, and the failover BACKUP ingest were in none of them. The backup pull
-  URL is logged in full at the moment the selector switches to it — which is when
-  an operator is recording, because that switch is the fault they are capturing.
-
-- **The source credential extractor read a pull URL with the publish-URL rule.**
-  `urlSecrets` says in its own comment that it "is NOT correct for a pull URL,
-  where the credential is in the URL and nowhere else". It takes the last path
-  segment, which for a publish URL is the stream key and for a pull URL is the
-  filename, so a CDN URL was declared to the recorder as `index.m3u8` and the
-  credential left in the clear.
-
-- **The hook response pass ran backwards.** The residual `Redact` was applied
-  before the declared secret set rather than after it, inverting the rule
-  `internal/alerts` states about itself. `Redact` transforms text, so a declared
-  literal arriving inside a URL was no longer byte-identical when the exact pass
-  ran.
-
-- **An interrupted upgrade left plaintext stream keys in the write-ahead log,
-  permanently.** The 0.7.0 migration seals every row, commits, then truncates the
-  log — but the function returned early when it found nothing left to seal, and
-  the truncate sits after that return. An upgrade that committed and then died
-  came back, found no work, and never truncated the log again. Not on that boot
-  and not on any later one. Measured at 162 plaintext keys still greppable after
-  the restart.
-
-- **The checkpoint never checked itself.** `PRAGMA wal_checkpoint(TRUNCATE)` does
-  not fail with an error when it cannot get the lock; it returns a row with
-  `busy=1` and the log where it was. The code used `Exec`, which discards result
-  rows, so the fatal-on-failure guarantee written above it was armed for a SQL
-  error that cannot happen and blind to the refusal that can.
-
-- **Exporting a debug bundle now requires a signed-in operator.** `GET /debug`
-  and `PUT /debug` stay reachable by an admin API token, so a dashboard can read
-  capture state and an automation can start one. Taking the file — a copy of the
-  server's own logs, meant for somebody who does not have the box — joins
-  `/upgrade/stage` and `/auth/tokens` behind a session.
-
-- **Expert mode accepted `-report`.** It makes FFmpeg write its own log file
-  whose first line is the argv it was invoked with, stream key included, into a
-  directory nothing here scrubs.
-
-- **`ProtectProc=invisible` on both unit definitions.** A destination's stream key
-  reaches FFmpeg as a command-line argument, and on a stock Linux host
-  `/proc/<pid>/cmdline` is readable by every local account. The host half is
-  `hidepid=2`; see INSTALL.md.
-
-- **The installer ran an unverified third-party FFmpeg as root.** It refuses its
-  own binary without a matching `SHA256SUMS`, and fetched FFmpeg with no
-  integrity check at all — then extracted it and executed it to probe for libsrt.
-  It now verifies against the published `checksums.sha256` and refuses the
-  upgrade if that is missing or does not match, running nothing from the
-  download.
-
-### Changed
-- **An install with no source is one somebody can actually use.** A fresh
-  database no longer manufactures a "Main" source nobody configured, so zero
-  sources is a normal state rather than a state the product had never been run
-  in — and every screen now behaves as though it were. Reads answer (the
-  dashboard, the telemetry socket and the Prometheus scrape used to nil-deref
-  together on the very first page load); the routes that act on a pipeline
-  refuse with `503` and `code: "no_source"` rather than falling over; and the
-  Dashboard, Sources and Settings pages draw an empty state naming the one next
-  action instead of a red toast.
-
-  Two things that were previously silent are now loud. The settings **ingest**
-  editor refuses a change on an install with nowhere to write it through to,
-  where it used to store the block, answer `200` and have no effect whatever;
-  every other setting in the same request is still saved, because `PUT
-  /settings` also holds the listeners, recording, chat, automod and alerts, all
-  of which an operator legitimately configures before creating a source. And
-  the startup banner says `ingest no programme yet` instead of naming a port
-  that is bound and will refuse the encoder aimed at it.
-
-  Upgrading installs are unaffected: the migration still carries an existing
-  single-ingest configuration onto a source called "Main", and now tells that
-  case apart from a first run rather than seeding both. (#387)
-
-- **The listener ports stay editable on an install with no source.** They belong
-  to the whole install rather than to a programme — one SRT listener serves
-  every source and tells them apart by publish token — so they lived on the
-  ingest tab, which the empty state had replaced wholesale. A first install
-  whose 1935 or 6000 was already taken therefore had no port control anywhere in
-  the UI, and was invited to create a source that would arrive on the port that
-  could not bind. (#387)
-
-- **`POST /alerts/rules/{id}/test` says which absence it is refusing for.** It
-  answered `503 the alert notifier is not running` on an install with no
-  programme, which sent the operator looking for a subsystem to restart:
-  `Engine.Alerts()` is nil for exactly one reason, and it is this one. It now
-  carries `code: "no_source"` like every other refusal of the same condition.
-  (#387)
-
-- **The startup SRT warning names a screen that exists on the boot that prints
-  it.** "switch Settings → Ingest to RTMP" was executable only because a seeded
-  source put an ingest form on that tab. `docs/QUICKSTART.md`, `docs/INSTALL.md`,
-  the meters page and the media uploader carried the same kind of pointer and
-  now say where the setting really is. (#387)
-
-- **The last source can be deleted.** The store refused it, on the grounds that
-  an install with none had no ingest and no way through the UI to get one back.
-  Neither half holds any more: zero sources is the state a fresh install boots
-  into, and the Sources page carries the form that ends it. The refusal was
-  standing between an operator and a place they can already be — most obviously
-  the one replacing their single source, who had to create the replacement
-  first and then work out which of two rows was which. The delete button on the
-  only source is no longer greyed out, and its confirmation says what the
-  install is left with: destinations and renditions go with the source,
-  recordings stay on disk, and nothing is publishing until another source
-  exists. A boot after that delete does not put "Main" back. (#387)
-
-- **The confirmation of a deleted source stopped disagreeing with the warning
-  that preceded it.** The dialog said renditions go with the source, which they
-  do; the message afterwards named destinations alone, so the operator who
-  wanted to keep a 720p encode for a replacement was told nothing had been lost
-  that they would have to build again. Both now name the same three things, and
-  deleting the LAST source says so — that message is the only thing on screen at
-  the moment the install stops having a programme. (#387)
-
-### Added
-- **One control starts or stops every destination.** An operator with eight
-  destinations was pressing eight buttons; `POST /destinations/start-all` and
-  `POST /destinations/stop-all` now act on the whole install, with a matching
-  pair of buttons beside the destination list on the dashboard. There is no id
-  list and no per-card selection: the routes act on everything, deliberately,
-  because a bulk control with a selection is the per-destination control with
-  extra steps and one more thing that can be stale by the time it is pressed.
-
-  Each row is driven through the same code as the per-destination start and
-  stop, so the bulk control can never be more destructive than the button it
-  replaces — and **the answer is a list, never a boolean**. One row per
-  destination, naming which it was, what happened (`started`, `stopped`,
-  `warned`, `failed` or `skipped`) and why when something did not happen. Eight
-  destinations of which two refuse is not "failed", and the operator should not
-  have to open eight cards to find out which two.
-
-  **Starts are paced**, one destination at a time with a gap between them, so a
-  burst of encoder processes does not contend on the box and the same
-  connections do not arrive at a platform as one clap. That is a pacing choice
-  about this machine; it encodes no platform's published ceiling, counts
-  nothing and caps nothing. Stops are not paced — tearing down is local.
-
-  Stopping asks for confirmation, and the confirmation says what stopping
-  actually costs: **stop and disable are one thing on the server**, so stopping
-  ends every YouTube broadcast on the install and a completed YouTube broadcast
-  cannot return to live. Starting again puts the video back on the wire; it does
-  not bring the broadcasts back. That was already true of the per-destination
-  Stop button one row at a time — the wording is new, not the consequence.
-
-- **The viewer count is on screen, and a withheld one does not read as zero.**
-  Three platforms implement `GET /platforms/accounts/{id}/stats`, the route
-  answered, and nothing in the UI called it — so the capability matrix said
-  "Viewers: Works" while no operator could see a number anywhere. Every
-  connected account in Settings → Platforms now carries its live state, polled
-  once a minute while the tab is visible and stopped entirely for a platform
-  that has said it cannot answer.
-
-  The distinction the round is actually about: a live stream whose count the
-  platform DECLINED to give reads "Viewer count not reported", never `0` and
-  never a dash. YouTube omits the number when nobody is watching, when the owner
-  has hidden it, and once the broadcast ends — three states, one absent key —
-  and the one that matters is the streamer with an audience who would otherwise
-  be told nobody is there. A reported `0` still renders as `0`, because on a
-  live stream that is a fact. A platform polyemesis cannot ask shows the
-  server's own sentence naming it rather than an empty space, and an offline
-  channel says offline rather than reporting an audience of none.
-
-  The interval is a quota decision. One YouTube stats read is three requests
-  against a project-wide ceiling of 10,000 units a day that title push,
-  compliance and chat all draw from, so polling harder does not merely slow this
-  panel down — it takes metadata push down with it.
-
-- **polyemesis.com publishes the documentation.** The site went from 6 pages to
-  37: the 23 user-facing documents in `docs/` are rendered at `/docs/<slug>`
-  rather than linked to GitHub, five comparison pages sit under `/vs/`, and
-  `/free-restream-service` and `/how-to-multistream-from-obs` answer the two
-  queries with the most measured search demand this project can address.
-
-  The documents were invisible to search before this — 63,000 words reachable
-  only on github.com, so the authority accrued to Microsoft's domain and the
-  pages had no title, description or internal linking under our control.
-
-  Publishing is an **allowlist**, not a glob with exclusions. `docs/` also holds
-  `RESEARCH-COMPETITIVE.md` and `COPY-CONSTRAINTS.md`, and a glob would make the
-  next internal note public by default. A build check fails when a file in that
-  directory appears in neither list, so adding a document is a decision somebody
-  writes down.
-
-- **`llms.txt`, `/.well-known/security.txt`, an apple-touch-icon, `HowTo`
-  structured data on the install steps, and `lastmod` in the sitemap.** The
-  `lastmod` dates come from `git log -1` per page rather than the clock: a
-  build-time stamp marks every page as modified on every deploy, which is a lie
-  a crawler discounts, costing the signal it was meant to give.
-
-  `security.txt` carries the mandatory RFC 9116 `Expires` field, and the build
-  now fails when it is past and warns 30 days out. An expired security contact
-  reads as an abandoned one to the person deciding between reporting privately
-  and going public.
-
-- **Broadcast lifecycle: polyemesis can tell YouTube to go live and to end.**
-  Connecting an account used to mean fetching a key and pushing a title;
-  "going live" was still bytes arriving at an ingest. A coordinator now drives
-  the platform's own broadcast state from the UP/DOWN edges the engine already
-  derives, and the `broadcastLifecycle` column says per platform what that
-  actually means. **YouTube is driven** — it goes live when video starts
-  arriving and ends when you disable or delete the destination, never when the
-  encoder merely crashes, because a completed YouTube broadcast cannot return
-  to live and a crash is recoverable. **Facebook is commanded by hand**:
-  connecting creates the live video and "End broadcast" is on the destination
-  menu, but nothing ends it for you. Twitch and Kick publish no such API at
-  all, which is established by enumeration rather than assumed.
-
-  A refused transition raises a fault and never stops the stream. Stopping the
-  encoder on a failed transition would destroy the only condition under which a
-  retry could succeed, since YouTube requires an active ingest to transition.
-
-- **Facebook's stream health and end-broadcast are wired to routes.** Both
-  existed in the provider and neither had a route, so the menu item would have
-  404ed while the stream stayed live. The health pane also states that Twitch,
-  YouTube and Kick publish no ingest numbers at all — that absence is a fact
-  about those platforms, not a gap in polyemesis.
-
-- **The documentation site renders diagrams.** `docs/INSTALL.md` gained
-  flowcharts of the installer and of the FFmpeg gate, and `/docs/install`
-  draws them instead of printing forty lines of source at the reader.
-
-### Fixed
-- **Deleting a destination could end a broadcast this process never put on
-  air.** The coordinator decided from the platform's answer alone; the phase it
-  had actually confirmed was recorded and never read. They diverge in the case
-  the code calls "the somebody-else's-broadcast story" — a broadcast started in
-  YouTube Studio, or carried through an upgrade — where the platform says live
-  and polyemesis never transitioned it. On YouTube `complete` is terminal.
-
-- **Start and stop reported the wrong thing on a multi-source install.** The
-  effect was read back from the DEFAULT engine only, so a destination belonging
-  to another programme was simply not found: a failed enable reported as
-  started, and a stop that left a process holding the port reported as clean.
-  Invisible on a single-source install, which is every development box.
-
-- **The debug bundle's size cap counted the wrong bytes.** It measured raw
-  string length while JSON writes six bytes for a control character, so the
-  ceiling the package states about itself was wrong by a factor of six —
-  785,437 bytes against an asserted 393,216. Measurement, cutting and every
-  budget deduction now run in encoded units.
-
-- **Attributes logged inside a group reached the bundle as `{}`.** The key names
-  survived and every value vanished, which reads as "the field was blank" rather
-  than "the recorder cannot represent this".
-
-- **YouTube's broadcast-create advice was dead on the real path.** It matched
-  against a truncated body, and its own comment says the reason code sits past
-  that cut — so an operator whose channel is not enabled for live streaming got
-  the raw snippet instead of the sentence naming the button.
-
-- **The secret key file was created with a Unix file mode alone.** The load path
-  has always restricted it properly; the branch that MINTS the key did not, so
-  on Windows the file it had just generated was readable by everyone.
-
-- **A supervisor restart could leave a live child unreachable.** The teardown
-  cleared the process handle unconditionally, so a predecessor still unwinding
-  could blank a successor's — after which `terminate()` and `kill()` could not
-  find the new child, and it kept running and kept publishing to a destination
-  the operator believed was stopped.
-
-- **Three published pages were missing from the sitemap.**
-  `/multistream`, `/twitch-vod-track` and `/vs/streamlabs` were built and served
-  but absent from the `lastmod` map.
-
-- **A credential in an unrecognised attribute reached the debug bundle
-  verbatim.** The recorder's scrub walk handled `string`, `[]string`,
-  `map[string]any`, `error` and `fmt.Stringer`, and passed everything else
-  through untouched — its comment asserted that what reached that branch
-  "cannot carry a credential without having been formatted first".
-  `slog.Any("detail", map[string]string{"token": key})` reaches it. Neither the
-  declared secret set nor the residual `alerts.Redact` pass ever saw the value,
-  and it travelled into a file intended for somebody who does not have the
-  operator's server. Reproduced in four shapes — a map of strings, a slice of
-  any, a struct, and a map of slices. Unrecognised values are now rendered and
-  scrubbed before capture.
-
-- **The debug ring counted its records and never weighed them.** The buffer
-  bounded the record COUNT at 5,000 and nothing bounded their size, so a single
-  enormous log line made the export unbounded — and the browser buffers that
-  file whole, twice, in the tab of the person trying to report a fault. Each
-  record now has an 8 KB budget, spent in a fixed order, applied AFTER the
-  scrub so a cut can never strand the front half of a stream key as text the
-  secret set no longer matches. The bundle states its own size and how many
-  lines were shortened, and the confirmation dialog shows both before anything
-  is sent.
-
-- **Four of six pages were shipping with no cache revalidation.**
-  `web/public/_headers` scoped `no-cache` to `/` and `/*.html`, and its comment
-  claimed that covered the built pages. It did not: with
-  `build.format: "file"` and `trailingSlash: "never"` a page is BUILT as
-  `features.html` and SERVED as `/features`, and Cloudflare matches the request
-  path. The failure that block exists to prevent — "a deploy is invisible until
-  caches expire" — was live on `/features`, `/comparison`, `/docs` and
-  `/download`. A build check now derives the expectation from the built output.
-
-- **114 Copy buttons did nothing.** The click handler shipped inside
-  `CodeBlock.astro`, which the rendered documentation pages never mount. Styled,
-  focusable, labelled and inert.
-
-- **Eleven copy defects**, found by three independent reviewers with different
-  lenses. The ones that mattered were claims about other people's products:
-  a sentence whose "either" retroactively negated the clause before it, turning
-  a correct statement into the overclaim it was written to avoid; a wrong
-  restream.io plan limit that contradicted a sibling page; four capability cells
-  asserted "No" for competitors with nothing behind them; and a card presenting a
-  DESCRIPTION of a function in the quoted-source treatment that gives its
-  neighbours their authority.
-
-  Also removed: a per-destination CPU figure that appears nowhere but in prose,
-  and a claim that the second Twitch audio track works, which
-  `docs/AUDIO-ROUTING.md` marks EXPERIMENTAL because no broadcast has ever been
-  published through a key Enhanced Broadcasting minted.
-
-- **An engine test asked for three contiguous UDP ports and checked one.**
-  `testenv.FreeUDPPort` probes a port, releases it, and returns the number, so a
-  three-port allocator built on it had two numbers nobody had checked and one
-  that was already nobody's. It failed CI three times in one day on three
-  different ranges, each time blaming the code under test for a port it never
-  held. `testenv.FreeUDPWindow` reserves the window and holds it.
-
-- **The installer offered to fix FFmpeg only for the hosts that did not need
-  it.** `install.sh` has always known how to fetch a current static build and
-  verify it carries libsrt before displacing anything — and offered that only
-  when your FFmpeg was 6.x or 7.x, where it buys one feature. A host **below
-  the 6.0 floor, or with no FFmpeg at all**, got an error and a reading list,
-  one item of which was "a static build with libsrt" linking to the very
-  releases page the script downloads from. It now offers. Declining is what
-  ends the install, not the old version.
-
-  The same gap was one branch over: an FFmpeg can clear 6.0 and carry **no
-  libsrt** (Homebrew's does), which costs per-destination audio routing
-  entirely, and that branch also told you to compile one yourself.
-
-- **PATH order no longer decides which FFmpeg runs.** When the installer
-  installs FFmpeg itself it pins the absolute path into the config it
-  generates, so `/usr/bin` winning the PATH cannot silently give the service
-  the older binary.
-
-- **A release with no published `SHA256SUMS` is refused rather than installed.**
-  A checksum *mismatch* already died; an **unverifiable** download warned and
-  installed as root. `--allow-unverified` keeps the escape hatch as something
-  you type.
-
-- **YouTube's error advice never fired.** Both advice functions matched against
-  the response body *truncated at 300 characters for display*, and a realistic
-  YouTube 403 is 552 bytes with the machine-readable reason at index 448 —
-  Google puts a long human message before `errors[]`. So the sentences written
-  for "this channel is not enabled for live streaming" and for the concurrent
-  and shared-ingestion quota limits could not be reached. The quota ones are
-  what an operator hits at the moment they are trying to go live.
-
-- **A taken port is offered a free one** during the interview, instead of the
-  installer predicting a bind failure and then causing it.
-
-### Changed
-- **Install-wide state comes off the engine** (first of six changes for #387).
-  Tools, recording paths, the host sampler and the settings read no longer route
-  through whichever engine happens to be default. No behaviour change intended,
-  with one exception worth stating: `GET /system` now reads settings from the
-  store rather than the engine's snapshot, so it stops lagging a settings save.
-
-- **An onboarding tour, offered once per install rather than once per browser.**
-  A new operator finishes the signup screen and lands on an empty dashboard, and
-  everything they need next is either in a terminal they have closed or in
-  `docs/`. The tour covers the things the console does not say out loud: where a
-  source's publish address and token live now that `install.sh` has printed them
-  and exited, that Routing is the part which is not restreaming, what the
-  `experimental` badge is actually claiming, and that `secret.key` is a separate
-  file whose absence brings every destination back *disabled* after a restore
-  with nothing on screen to explain why.
-
-  It is **offered, not launched**: a dismissible strip under the header, plus a
-  replay control in Settings. Completion is stored server-side —
-  `users.tour_completed_at`, added by an idempotent migration — so an operator
-  opening the same install from a second machine is not offered it again. New
-  routes: `GET /api/v1/tour` and `POST /api/v1/tour/complete`, the write
-  admin-scoped because a read-only token must not mutate user state.
-
-  Built on [driver.js](https://github.com/kamranahmedse/driver.js) (MIT, **zero
-  dependencies**), themed from `ui/src/index.css`'s own tokens rather than the
-  library's stock white popover. A tour's failure mode is silent — a selector
-  that stops matching simply highlights nothing — so the steps are DATA in
-  `ui/src/lib/tourSteps.ts` and `ui/src/lib/tour-drift.test.ts` asserts every
-  selector against the component that owns it, reading past comments so an
-  anchor cannot be kept green by leaving the words behind in one.
-
-## [0.7.0] — 2026-08-14
+## [0.7.0] — 2026-08-17
 
 ### Security
 - **0.7.0's seal-at-rest migration left the plaintext stream keys it replaced
@@ -776,6 +354,89 @@ its first tagged release.
   characters, treat it as exposed to anyone who held a `read` token and rotate
   it.**
 
+- **The ingest URL in `ingest started` carried the credential, on every boot.**
+  `PublicIngestURL` renders the server half only for RTMP — deliberately, and the
+  comment above the caller said so — but it renders `…&passphrase=<cleartext>`
+  for SRT and the operator's pull URL WHOLE for pull, and a pull URL is where a
+  camera password or a CDN path token lives. Both reached `ingest started` and
+  `backup ingest started` at Info, so they landed in journalctl and
+  `server.log`. Debug mode's scrubbing does not cover this: the recorder is a
+  second consumer and the inner handler still writes the original record. The log
+  rendering now keeps the host and port — the question a failed ingest actually
+  asks — and drops the rest, and an allowlist test fails the build if a third log
+  line acquires the full one.
+
+- **Facebook's credential check printed the app secret on any network hiccup.**
+  The pair travels in the query string, which is load-bearing — a POST form makes
+  Facebook reject correct credentials — but a transport failure arrives as a
+  `*url.Error` carrying the full URL, and that was interpolated raw into the
+  message an operator sees and the logs keep. A DNS outage, a timeout or a TLS
+  error was enough.
+
+- **A credential in an unrecognised attribute shape reached the debug bundle.**
+  Rendering a value before scrubbing it is only safe if the rendering keeps the
+  bytes. It did not, twice: a `[]byte` was base64-encoded, so the credential
+  arrived present, unrecognisable to the exact-match set, and decodable by the
+  recipient in one step; and `&`, `<` and `>` were escaped, so a camera or CDN
+  password containing an ampersand — ordinary, and a declared literal — was
+  transformed out of matching range.
+
+- **The debug bundle's scrub set had never heard of three inventories.** It was
+  built from destinations; sources were added after an earlier review; platform
+  accounts (which hold the OAuth access and refresh tokens), the install-wide
+  ingest, and the failover BACKUP ingest were in none of them. The backup pull
+  URL is logged in full at the moment the selector switches to it — which is when
+  an operator is recording, because that switch is the fault they are capturing.
+
+- **The source credential extractor read a pull URL with the publish-URL rule.**
+  `urlSecrets` says in its own comment that it "is NOT correct for a pull URL,
+  where the credential is in the URL and nowhere else". It takes the last path
+  segment, which for a publish URL is the stream key and for a pull URL is the
+  filename, so a CDN URL was declared to the recorder as `index.m3u8` and the
+  credential left in the clear.
+
+- **The hook response pass ran backwards.** The residual `Redact` was applied
+  before the declared secret set rather than after it, inverting the rule
+  `internal/alerts` states about itself. `Redact` transforms text, so a declared
+  literal arriving inside a URL was no longer byte-identical when the exact pass
+  ran.
+
+- **An interrupted upgrade left plaintext stream keys in the write-ahead log,
+  permanently.** The 0.7.0 migration seals every row, commits, then truncates the
+  log — but the function returned early when it found nothing left to seal, and
+  the truncate sits after that return. An upgrade that committed and then died
+  came back, found no work, and never truncated the log again. Not on that boot
+  and not on any later one. Measured at 162 plaintext keys still greppable after
+  the restart.
+
+- **The checkpoint never checked itself.** `PRAGMA wal_checkpoint(TRUNCATE)` does
+  not fail with an error when it cannot get the lock; it returns a row with
+  `busy=1` and the log where it was. The code used `Exec`, which discards result
+  rows, so the fatal-on-failure guarantee written above it was armed for a SQL
+  error that cannot happen and blind to the refusal that can.
+
+- **Exporting a debug bundle now requires a signed-in operator.** `GET /debug`
+  and `PUT /debug` stay reachable by an admin API token, so a dashboard can read
+  capture state and an automation can start one. Taking the file — a copy of the
+  server's own logs, meant for somebody who does not have the box — joins
+  `/upgrade/stage` and `/auth/tokens` behind a session.
+
+- **Expert mode accepted `-report`.** It makes FFmpeg write its own log file
+  whose first line is the argv it was invoked with, stream key included, into a
+  directory nothing here scrubs.
+
+- **`ProtectProc=invisible` on both unit definitions.** A destination's stream key
+  reaches FFmpeg as a command-line argument, and on a stock Linux host
+  `/proc/<pid>/cmdline` is readable by every local account. The host half is
+  `hidepid=2`; see INSTALL.md.
+
+- **The installer ran an unverified third-party FFmpeg as root.** It refuses its
+  own binary without a matching `SHA256SUMS`, and fetched FFmpeg with no
+  integrity check at all — then extracted it and executed it to probe for libsrt.
+  It now verifies against the published `checksums.sha256` and refuses the
+  upgrade if that is missing or does not match, running nothing from the
+  download.
+
 ### Added
 - **The second (VOD) audio mix has a UI.** `vodProfile` shipped complete — the
   column, the migration, the API, `routing.CompilePair`, the engine's gate on
@@ -1069,6 +730,112 @@ its first tagged release.
   scope, because a leaked token that can replace the server's own binary is a
   different category of problem from one that can read a stream key.
 
+- **One control starts or stops every destination.** An operator with eight
+  destinations was pressing eight buttons; `POST /destinations/start-all` and
+  `POST /destinations/stop-all` now act on the whole install, with a matching
+  pair of buttons beside the destination list on the dashboard. There is no id
+  list and no per-card selection: the routes act on everything, deliberately,
+  because a bulk control with a selection is the per-destination control with
+  extra steps and one more thing that can be stale by the time it is pressed.
+
+  Each row is driven through the same code as the per-destination start and
+  stop, so the bulk control can never be more destructive than the button it
+  replaces — and **the answer is a list, never a boolean**. One row per
+  destination, naming which it was, what happened (`started`, `stopped`,
+  `warned`, `failed` or `skipped`) and why when something did not happen. Eight
+  destinations of which two refuse is not "failed", and the operator should not
+  have to open eight cards to find out which two.
+
+  **Starts are paced**, one destination at a time with a gap between them, so a
+  burst of encoder processes does not contend on the box and the same
+  connections do not arrive at a platform as one clap. That is a pacing choice
+  about this machine; it encodes no platform's published ceiling, counts
+  nothing and caps nothing. Stops are not paced — tearing down is local.
+
+  Stopping asks for confirmation, and the confirmation says what stopping
+  actually costs: **stop and disable are one thing on the server**, so stopping
+  ends every YouTube broadcast on the install and a completed YouTube broadcast
+  cannot return to live. Starting again puts the video back on the wire; it does
+  not bring the broadcasts back. That was already true of the per-destination
+  Stop button one row at a time — the wording is new, not the consequence.
+
+- **The viewer count is on screen, and a withheld one does not read as zero.**
+  Three platforms implement `GET /platforms/accounts/{id}/stats`, the route
+  answered, and nothing in the UI called it — so the capability matrix said
+  "Viewers: Works" while no operator could see a number anywhere. Every
+  connected account in Settings → Platforms now carries its live state, polled
+  once a minute while the tab is visible and stopped entirely for a platform
+  that has said it cannot answer.
+
+  The distinction the round is actually about: a live stream whose count the
+  platform DECLINED to give reads "Viewer count not reported", never `0` and
+  never a dash. YouTube omits the number when nobody is watching, when the owner
+  has hidden it, and once the broadcast ends — three states, one absent key —
+  and the one that matters is the streamer with an audience who would otherwise
+  be told nobody is there. A reported `0` still renders as `0`, because on a
+  live stream that is a fact. A platform polyemesis cannot ask shows the
+  server's own sentence naming it rather than an empty space, and an offline
+  channel says offline rather than reporting an audience of none.
+
+  The interval is a quota decision. One YouTube stats read is three requests
+  against a project-wide ceiling of 10,000 units a day that title push,
+  compliance and chat all draw from, so polling harder does not merely slow this
+  panel down — it takes metadata push down with it.
+
+- **polyemesis.com publishes the documentation.** The site went from 6 pages to
+  37: the 23 user-facing documents in `docs/` are rendered at `/docs/<slug>`
+  rather than linked to GitHub, five comparison pages sit under `/vs/`, and
+  `/free-restream-service` and `/how-to-multistream-from-obs` answer the two
+  queries with the most measured search demand this project can address.
+
+  The documents were invisible to search before this — 63,000 words reachable
+  only on github.com, so the authority accrued to Microsoft's domain and the
+  pages had no title, description or internal linking under our control.
+
+  Publishing is an **allowlist**, not a glob with exclusions. `docs/` also holds
+  `RESEARCH-COMPETITIVE.md` and `COPY-CONSTRAINTS.md`, and a glob would make the
+  next internal note public by default. A build check fails when a file in that
+  directory appears in neither list, so adding a document is a decision somebody
+  writes down.
+
+- **`llms.txt`, `/.well-known/security.txt`, an apple-touch-icon, `HowTo`
+  structured data on the install steps, and `lastmod` in the sitemap.** The
+  `lastmod` dates come from `git log -1` per page rather than the clock: a
+  build-time stamp marks every page as modified on every deploy, which is a lie
+  a crawler discounts, costing the signal it was meant to give.
+
+  `security.txt` carries the mandatory RFC 9116 `Expires` field, and the build
+  now fails when it is past and warns 30 days out. An expired security contact
+  reads as an abandoned one to the person deciding between reporting privately
+  and going public.
+
+- **Broadcast lifecycle: polyemesis can tell YouTube to go live and to end.**
+  Connecting an account used to mean fetching a key and pushing a title;
+  "going live" was still bytes arriving at an ingest. A coordinator now drives
+  the platform's own broadcast state from the UP/DOWN edges the engine already
+  derives, and the `broadcastLifecycle` column says per platform what that
+  actually means. **YouTube is driven** — it goes live when video starts
+  arriving and ends when you disable or delete the destination, never when the
+  encoder merely crashes, because a completed YouTube broadcast cannot return
+  to live and a crash is recoverable. **Facebook is commanded by hand**:
+  connecting creates the live video and "End broadcast" is on the destination
+  menu, but nothing ends it for you. Twitch and Kick publish no such API at
+  all, which is established by enumeration rather than assumed.
+
+  A refused transition raises a fault and never stops the stream. Stopping the
+  encoder on a failed transition would destroy the only condition under which a
+  retry could succeed, since YouTube requires an active ingest to transition.
+
+- **Facebook's stream health and end-broadcast are wired to routes.** Both
+  existed in the provider and neither had a route, so the menu item would have
+  404ed while the stream stayed live. The health pane also states that Twitch,
+  YouTube and Kick publish no ingest numbers at all — that absence is a fact
+  about those platforms, not a gap in polyemesis.
+
+- **The documentation site renders diagrams.** `docs/INSTALL.md` gained
+  flowcharts of the installer and of the FFmpeg gate, and `/docs/install`
+  draws them instead of printing forty lines of source at the reader.
+
 ### Changed
 - **Two features are now labelled EXPERIMENTAL throughout — labelled, not
   gated.** Twitch Enhanced Broadcasting and hardware encoding both shipped in
@@ -1214,6 +981,101 @@ its first tagged release.
   account password closes the operator's.** A socket used to keep the principal
   it was opened with for ever, so revocation — the only lever you have after a
   leak — did not reach a live connection.
+
+- **An install with no source is one somebody can actually use.** A fresh
+  database no longer manufactures a "Main" source nobody configured, so zero
+  sources is a normal state rather than a state the product had never been run
+  in — and every screen now behaves as though it were. Reads answer (the
+  dashboard, the telemetry socket and the Prometheus scrape used to nil-deref
+  together on the very first page load); the routes that act on a pipeline
+  refuse with `503` and `code: "no_source"` rather than falling over; and the
+  Dashboard, Sources and Settings pages draw an empty state naming the one next
+  action instead of a red toast.
+
+  Two things that were previously silent are now loud. The settings **ingest**
+  editor refuses a change on an install with nowhere to write it through to,
+  where it used to store the block, answer `200` and have no effect whatever;
+  every other setting in the same request is still saved, because `PUT
+  /settings` also holds the listeners, recording, chat, automod and alerts, all
+  of which an operator legitimately configures before creating a source. And
+  the startup banner says `ingest no programme yet` instead of naming a port
+  that is bound and will refuse the encoder aimed at it.
+
+  Upgrading installs are unaffected: the migration still carries an existing
+  single-ingest configuration onto a source called "Main", and now tells that
+  case apart from a first run rather than seeding both. (#387)
+
+- **The listener ports stay editable on an install with no source.** They belong
+  to the whole install rather than to a programme — one SRT listener serves
+  every source and tells them apart by publish token — so they lived on the
+  ingest tab, which the empty state had replaced wholesale. A first install
+  whose 1935 or 6000 was already taken therefore had no port control anywhere in
+  the UI, and was invited to create a source that would arrive on the port that
+  could not bind. (#387)
+
+- **`POST /alerts/rules/{id}/test` says which absence it is refusing for.** It
+  answered `503 the alert notifier is not running` on an install with no
+  programme, which sent the operator looking for a subsystem to restart:
+  `Engine.Alerts()` is nil for exactly one reason, and it is this one. It now
+  carries `code: "no_source"` like every other refusal of the same condition.
+  (#387)
+
+- **The startup SRT warning names a screen that exists on the boot that prints
+  it.** "switch Settings → Ingest to RTMP" was executable only because a seeded
+  source put an ingest form on that tab. `docs/QUICKSTART.md`, `docs/INSTALL.md`,
+  the meters page and the media uploader carried the same kind of pointer and
+  now say where the setting really is. (#387)
+
+- **The last source can be deleted.** The store refused it, on the grounds that
+  an install with none had no ingest and no way through the UI to get one back.
+  Neither half holds any more: zero sources is the state a fresh install boots
+  into, and the Sources page carries the form that ends it. The refusal was
+  standing between an operator and a place they can already be — most obviously
+  the one replacing their single source, who had to create the replacement
+  first and then work out which of two rows was which. The delete button on the
+  only source is no longer greyed out, and its confirmation says what the
+  install is left with: destinations and renditions go with the source,
+  recordings stay on disk, and nothing is publishing until another source
+  exists. A boot after that delete does not put "Main" back. (#387)
+
+- **The confirmation of a deleted source stopped disagreeing with the warning
+  that preceded it.** The dialog said renditions go with the source, which they
+  do; the message afterwards named destinations alone, so the operator who
+  wanted to keep a 720p encode for a replacement was told nothing had been lost
+  that they would have to build again. Both now name the same three things, and
+  deleting the LAST source says so — that message is the only thing on screen at
+  the moment the install stops having a programme. (#387)
+
+- **Install-wide state comes off the engine** (first of six changes for #387).
+  Tools, recording paths, the host sampler and the settings read no longer route
+  through whichever engine happens to be default. No behaviour change intended,
+  with one exception worth stating: `GET /system` now reads settings from the
+  store rather than the engine's snapshot, so it stops lagging a settings save.
+
+- **An onboarding tour, offered once per install rather than once per browser.**
+  A new operator finishes the signup screen and lands on an empty dashboard, and
+  everything they need next is either in a terminal they have closed or in
+  `docs/`. The tour covers the things the console does not say out loud: where a
+  source's publish address and token live now that `install.sh` has printed them
+  and exited, that Routing is the part which is not restreaming, what the
+  `experimental` badge is actually claiming, and that `secret.key` is a separate
+  file whose absence brings every destination back *disabled* after a restore
+  with nothing on screen to explain why.
+
+  It is **offered, not launched**: a dismissible strip under the header, plus a
+  replay control in Settings. Completion is stored server-side —
+  `users.tour_completed_at`, added by an idempotent migration — so an operator
+  opening the same install from a second machine is not offered it again. New
+  routes: `GET /api/v1/tour` and `POST /api/v1/tour/complete`, the write
+  admin-scoped because a read-only token must not mutate user state.
+
+  Built on [driver.js](https://github.com/kamranahmedse/driver.js) (MIT, **zero
+  dependencies**), themed from `ui/src/index.css`'s own tokens rather than the
+  library's stock white popover. A tour's failure mode is silent — a selector
+  that stops matching simply highlights nothing — so the steps are DATA in
+  `ui/src/lib/tourSteps.ts` and `ui/src/lib/tour-drift.test.ts` asserts every
+  selector against the component that owns it, reading past comments so an
+  anchor cannot be kept green by leaving the words behind in one.
 
 ### Fixed
 - **The upgrade guard refused upgrades it was written to protect.** The
@@ -1572,6 +1434,138 @@ its first tagged release.
   that sends you to your firewall to debug a port that was never in the path.
   It now reads `pull (dials out; no inbound port)`.
 
+- **Deleting a destination could end a broadcast this process never put on
+  air.** The coordinator decided from the platform's answer alone; the phase it
+  had actually confirmed was recorded and never read. They diverge in the case
+  the code calls "the somebody-else's-broadcast story" — a broadcast started in
+  YouTube Studio, or carried through an upgrade — where the platform says live
+  and polyemesis never transitioned it. On YouTube `complete` is terminal.
+
+- **Start and stop reported the wrong thing on a multi-source install.** The
+  effect was read back from the DEFAULT engine only, so a destination belonging
+  to another programme was simply not found: a failed enable reported as
+  started, and a stop that left a process holding the port reported as clean.
+  Invisible on a single-source install, which is every development box.
+
+- **The debug bundle's size cap counted the wrong bytes.** It measured raw
+  string length while JSON writes six bytes for a control character, so the
+  ceiling the package states about itself was wrong by a factor of six —
+  785,437 bytes against an asserted 393,216. Measurement, cutting and every
+  budget deduction now run in encoded units.
+
+- **Attributes logged inside a group reached the bundle as `{}`.** The key names
+  survived and every value vanished, which reads as "the field was blank" rather
+  than "the recorder cannot represent this".
+
+- **YouTube's broadcast-create advice was dead on the real path.** It matched
+  against a truncated body, and its own comment says the reason code sits past
+  that cut — so an operator whose channel is not enabled for live streaming got
+  the raw snippet instead of the sentence naming the button.
+
+- **The secret key file was created with a Unix file mode alone.** The load path
+  has always restricted it properly; the branch that MINTS the key did not, so
+  on Windows the file it had just generated was readable by everyone.
+
+- **A supervisor restart could leave a live child unreachable.** The teardown
+  cleared the process handle unconditionally, so a predecessor still unwinding
+  could blank a successor's — after which `terminate()` and `kill()` could not
+  find the new child, and it kept running and kept publishing to a destination
+  the operator believed was stopped.
+
+- **Three published pages were missing from the sitemap.**
+  `/multistream`, `/twitch-vod-track` and `/vs/streamlabs` were built and served
+  but absent from the `lastmod` map.
+
+- **A credential in an unrecognised attribute reached the debug bundle
+  verbatim.** The recorder's scrub walk handled `string`, `[]string`,
+  `map[string]any`, `error` and `fmt.Stringer`, and passed everything else
+  through untouched — its comment asserted that what reached that branch
+  "cannot carry a credential without having been formatted first".
+  `slog.Any("detail", map[string]string{"token": key})` reaches it. Neither the
+  declared secret set nor the residual `alerts.Redact` pass ever saw the value,
+  and it travelled into a file intended for somebody who does not have the
+  operator's server. Reproduced in four shapes — a map of strings, a slice of
+  any, a struct, and a map of slices. Unrecognised values are now rendered and
+  scrubbed before capture.
+
+- **The debug ring counted its records and never weighed them.** The buffer
+  bounded the record COUNT at 5,000 and nothing bounded their size, so a single
+  enormous log line made the export unbounded — and the browser buffers that
+  file whole, twice, in the tab of the person trying to report a fault. Each
+  record now has an 8 KB budget, spent in a fixed order, applied AFTER the
+  scrub so a cut can never strand the front half of a stream key as text the
+  secret set no longer matches. The bundle states its own size and how many
+  lines were shortened, and the confirmation dialog shows both before anything
+  is sent.
+
+- **Four of six pages were shipping with no cache revalidation.**
+  `web/public/_headers` scoped `no-cache` to `/` and `/*.html`, and its comment
+  claimed that covered the built pages. It did not: with
+  `build.format: "file"` and `trailingSlash: "never"` a page is BUILT as
+  `features.html` and SERVED as `/features`, and Cloudflare matches the request
+  path. The failure that block exists to prevent — "a deploy is invisible until
+  caches expire" — was live on `/features`, `/comparison`, `/docs` and
+  `/download`. A build check now derives the expectation from the built output.
+
+- **114 Copy buttons did nothing.** The click handler shipped inside
+  `CodeBlock.astro`, which the rendered documentation pages never mount. Styled,
+  focusable, labelled and inert.
+
+- **Eleven copy defects**, found by three independent reviewers with different
+  lenses. The ones that mattered were claims about other people's products:
+  a sentence whose "either" retroactively negated the clause before it, turning
+  a correct statement into the overclaim it was written to avoid; a wrong
+  restream.io plan limit that contradicted a sibling page; four capability cells
+  asserted "No" for competitors with nothing behind them; and a card presenting a
+  DESCRIPTION of a function in the quoted-source treatment that gives its
+  neighbours their authority.
+
+  Also removed: a per-destination CPU figure that appears nowhere but in prose,
+  and a claim that the second Twitch audio track works, which
+  `docs/AUDIO-ROUTING.md` marks EXPERIMENTAL because no broadcast has ever been
+  published through a key Enhanced Broadcasting minted.
+
+- **An engine test asked for three contiguous UDP ports and checked one.**
+  `testenv.FreeUDPPort` probes a port, releases it, and returns the number, so a
+  three-port allocator built on it had two numbers nobody had checked and one
+  that was already nobody's. It failed CI three times in one day on three
+  different ranges, each time blaming the code under test for a port it never
+  held. `testenv.FreeUDPWindow` reserves the window and holds it.
+
+- **The installer offered to fix FFmpeg only for the hosts that did not need
+  it.** `install.sh` has always known how to fetch a current static build and
+  verify it carries libsrt before displacing anything — and offered that only
+  when your FFmpeg was 6.x or 7.x, where it buys one feature. A host **below
+  the 6.0 floor, or with no FFmpeg at all**, got an error and a reading list,
+  one item of which was "a static build with libsrt" linking to the very
+  releases page the script downloads from. It now offers. Declining is what
+  ends the install, not the old version.
+
+  The same gap was one branch over: an FFmpeg can clear 6.0 and carry **no
+  libsrt** (Homebrew's does), which costs per-destination audio routing
+  entirely, and that branch also told you to compile one yourself.
+
+- **PATH order no longer decides which FFmpeg runs.** When the installer
+  installs FFmpeg itself it pins the absolute path into the config it
+  generates, so `/usr/bin` winning the PATH cannot silently give the service
+  the older binary.
+
+- **A release with no published `SHA256SUMS` is refused rather than installed.**
+  A checksum *mismatch* already died; an **unverifiable** download warned and
+  installed as root. `--allow-unverified` keeps the escape hatch as something
+  you type.
+
+- **YouTube's error advice never fired.** Both advice functions matched against
+  the response body *truncated at 300 characters for display*, and a realistic
+  YouTube 403 is 552 bytes with the machine-readable reason at index 448 —
+  Google puts a long human message before `errors[]`. So the sentences written
+  for "this channel is not enabled for live streaming" and for the concurrent
+  and shared-ingestion quota limits could not be reached. The quota ones are
+  what an operator hits at the moment they are trying to go live.
+
+- **A taken port is offered a free one** during the interview, instead of the
+  installer predicting a bind failure and then causing it.
+
 ### Testing
 - **Ten UI-drift guards, recovered from a branch that was never merged.** They
   check that the React frontend still offers what the Go side expects — the
@@ -1711,6 +1705,7 @@ its first tagged release.
 
 ## [0.6.0] — 2026-08-09
 
+
 An operator-facing release: the server now tells you an update exists and what a
 restart would cost, a rendition stopped doing work it threw away, and a failover
 respawn stopped ignoring its own backoff.
@@ -1801,6 +1796,7 @@ respawn stopped ignoring its own backoff.
   mode is a server with no runnable binary.
 
 ## [0.5.0] — 2026-08-08
+
 
 The first release with the core review in it, and the version number is
 deliberately 0.5.0 rather than 0.6.0.
@@ -2076,6 +2072,7 @@ The ones with operator-visible consequences:
 
 ## [0.4.0] — 2026-08-07
 
+
 A minor bump. Nothing here breaks a stored config, but two behaviours change in
 ways an existing install will notice: **ingest mode no longer has a default**, so
 a fresh install asks rather than choosing; and **RTMP ingest is now addressed by
@@ -2243,6 +2240,7 @@ after the feature, which is the argument for writing them.
 
 ## [0.3.0] — 2026-08-05
 
+
 A minor bump rather than a patch, and deliberately: `facebook.backupIngest`
 became `backupIngestWanted` with no compatibility alias, which breaks any client
 that *writes* that field. Everything else here is a fix.
@@ -2336,6 +2334,7 @@ found. Every change below traces to a numbered finding in that audit.
   switched off.
 
 ## [0.2.0] — 2026-08-04
+
 
 ### Added
 
@@ -2585,6 +2584,7 @@ found. Every change below traces to a numbered finding in that audit.
   machinery every stream depends on is the worse trade.
 
 ## [0.1.0] — 2026-07-31
+
 
 The first tagged release. Entries are grouped by what they do for an operator
 rather than by which package changed.
