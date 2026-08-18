@@ -396,8 +396,18 @@ func TestACrashedDestinationIsNeverEndedOnTheStrengthOfItsCrash(t *testing.T) {
 // Without this, renaming "disabled" to "disabled by operator" in
 // internal/hooks/watch.go would compile, pass every test in that package, and
 // silently stop every broadcast from ever being ended -- with no error anywhere.
+// immediateDown asks the watcher for a DOWN edge with no dwell.
+//
+// NOT ZERO. A zero DestinationDownAfter means "unset, take the default" -- the
+// WatchConfig doc says "A zero value takes every default" -- so these cases used
+// to get their immediate edge from a default that was never applied. Now that it
+// is, a zero dwells ten seconds and these snapshots, one second apart, produce
+// no edge at all. The negative clamp exists so a caller can say "no dwell" and
+// be believed; this is a reason test, not a timing test, so it says so.
+const immediateDown = -1
+
 func TestTheDownReasonsAreTheOnesTheWatcherActuallyEmits(t *testing.T) {
-	w := hooks.NewWatcher(hooks.SourceRef{ID: 1}, hooks.WatchConfig{DestinationDownAfter: 0})
+	w := hooks.NewWatcher(hooks.SourceRef{ID: 1}, hooks.WatchConfig{DestinationDownAfter: immediateDown})
 	base := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 
 	up := func(at time.Time) alerts.Snapshot {
@@ -428,7 +438,7 @@ func TestTheDownReasonsAreTheOnesTheWatcherActuallyEmits(t *testing.T) {
 	}
 
 	// The operator switching it off.
-	w2 := hooks.NewWatcher(hooks.SourceRef{ID: 1}, hooks.WatchConfig{DestinationDownAfter: 0})
+	w2 := hooks.NewWatcher(hooks.SourceRef{ID: 1}, hooks.WatchConfig{DestinationDownAfter: immediateDown})
 	w2.Observe(up(base))
 	got = reasonOf(w2.Observe(alerts.Snapshot{At: base.Add(time.Second), Destinations: []alerts.DestState{
 		{ID: 3, Name: "yt", Platform: "youtube", Enabled: false, Running: false},
@@ -439,7 +449,7 @@ func TestTheDownReasonsAreTheOnesTheWatcherActuallyEmits(t *testing.T) {
 	}
 
 	// The row being deleted.
-	w3 := hooks.NewWatcher(hooks.SourceRef{ID: 1}, hooks.WatchConfig{DestinationDownAfter: 0})
+	w3 := hooks.NewWatcher(hooks.SourceRef{ID: 1}, hooks.WatchConfig{DestinationDownAfter: immediateDown})
 	w3.Observe(up(base))
 	got = reasonOf(w3.Observe(alerts.Snapshot{At: base.Add(time.Second)}))
 	if got != lifecycleReasonRemoved {

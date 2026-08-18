@@ -131,11 +131,20 @@ func TestAFlappingDestinationDoesNotStorm(t *testing.T) {
 	}
 }
 
+// noDwell asks for an immediate DOWN edge.
+//
+// NOT ZERO. A zero DestinationDownAfter means "unset, take the default" -- the
+// struct says "A zero value takes every default" and DisconnectAfter has always
+// read it that way -- so these tests used to get their immediate edge from a
+// default that was simply never applied. The negative clamp in normalized()
+// exists precisely so a caller can say "no dwell" and mean it.
+const noDwell = -1
+
 func TestDisablingADestinationIsADownWithAReason(t *testing.T) {
 	// Deliberately different from alerts, which treats a disabled destination
 	// as "not down". A hook is a fact, not an incident: a script mirroring
 	// "what are we live to" needs the edge whoever caused it.
-	w := NewWatcher(SourceRef{ID: 1}, WatchConfig{DestinationDownAfter: 0})
+	w := NewWatcher(SourceRef{ID: 1}, WatchConfig{DestinationDownAfter: noDwell})
 	up := alerts.Snapshot{
 		At: at(0), IngestConfigured: true, IngestLive: true,
 		Destinations: []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: true}},
@@ -156,7 +165,7 @@ func TestDisablingADestinationIsADownWithAReason(t *testing.T) {
 }
 
 func TestARemovedDestinationGoesDownRatherThanVanishing(t *testing.T) {
-	w := NewWatcher(SourceRef{ID: 1}, WatchConfig{DestinationDownAfter: 0})
+	w := NewWatcher(SourceRef{ID: 1}, WatchConfig{DestinationDownAfter: noDwell})
 	up := alerts.Snapshot{
 		At: at(0), IngestConfigured: true, IngestLive: true,
 		Destinations: []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: true}},
@@ -180,7 +189,7 @@ func TestARemovedDestinationGoesDownRatherThanVanishing(t *testing.T) {
 func TestDestinationEventsAreOrderedByID(t *testing.T) {
 	// Map iteration order must never reach the wire: a receiver correlating
 	// deliveries by sequence sees a different order on every run otherwise.
-	w := NewWatcher(SourceRef{ID: 1}, WatchConfig{DestinationDownAfter: 0})
+	w := NewWatcher(SourceRef{ID: 1}, WatchConfig{DestinationDownAfter: noDwell})
 	s := alerts.Snapshot{
 		At: at(0), IngestConfigured: true, IngestLive: true,
 		Destinations: []alerts.DestState{
@@ -215,5 +224,53 @@ func TestUnconfiguredIngestResetsRatherThanFiring(t *testing.T) {
 	if !same(triggers(got), []Trigger{TriggerIngestPublished}) {
 		t.Fatalf("triggers = %v, want a fresh publish after reconfiguration",
 			triggers(got))
+	}
+}
+
+/* THE DOWN DWELL WAS DECLARED AND NEVER APPLIED.
+ *
+ * normalized() clamped a negative DestinationDownAfter and stopped, so a zero
+ * -- which the struct documents as "takes every default", and which is exactly
+ * what engine.go:623 constructs with hooks.WatchConfig{} -- meant NO DWELL.
+ * DefaultDestinationDownAfter appeared nowhere but its own declaration and a
+ * comment reasoning about a delay that never happened.
+ *
+ * So every supervisor reconnect crossed a DOWN edge and published a
+ * destination.down hook with a destination.up behind it: the storm the constant
+ * was written to absorb. It also falsified the LifecycleObserver design at
+ * engine.go:3853, which reasons that a restarted destination "crosses no edge
+ * at all, because the DOWN direction has a 10s dwell".
+ */
+func TestTheZeroConfigTakesTheDestinationDownDefault(t *testing.T) {
+	if got := (WatchConfig{}).normalized().DestinationDownAfter; got != DefaultDestinationDownAfter {
+		t.Errorf("a zero WatchConfig dwells %v before a destination DOWN, want %v — "+
+			"the struct documents a zero value as taking every default, and this "+
+			"is the config the engine actually constructs", got, DefaultDestinationDownAfter)
+	}
+}
+
+// A restart shorter than the dwell must cross no edge at all — the property the
+// lifecycle design rests on.
+func TestASupervisorReconnectInsideTheDwellPublishesNothing(t *testing.T) {
+	w := NewWatcher(SourceRef{ID: 1}, WatchConfig{})
+	live := alerts.Snapshot{
+		At: at(0), IngestConfigured: true, IngestLive: true,
+		Destinations: []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: true}},
+	}
+	w.Observe(live)
+
+	// Down for two seconds: one reconcile, well inside the 10s dwell.
+	blip := live
+	blip.At = at(2)
+	blip.Destinations = []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: false}}
+	if got := w.Observe(blip); len(got) != 0 {
+		t.Errorf("a 2s reconnect published %v — with no dwell every restart "+
+			"becomes a down/up pair on every subscriber's endpoint", triggers(got))
+	}
+
+	back := live
+	back.At = at(4)
+	if got := w.Observe(back); len(got) != 0 {
+		t.Errorf("coming back published %v, want nothing: it never went down", triggers(got))
 	}
 }

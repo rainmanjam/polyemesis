@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +43,22 @@ func TestHelperProcess(t *testing.T) {
 		fmt.Println("out_time_ms=2000000")
 		fmt.Println("progress=end")
 		fmt.Fprintln(os.Stderr, "a warning nobody minds")
+	case "grandchild":
+		// Spawns a copy of this binary that INHERITS the pipes and outlives it,
+		// then blocks. That is the shape killGrace was written for: x265 and
+		// SVT-AV1 fork their own workers, and killing the parent leaves those
+		// workers holding the output pipes open.
+		//
+		// A #!/bin/sh one-liner would say the same thing in one line and cost a
+		// Windows skip; skips.json records that trade being made and then paid
+		// back twice, so it is not made again here.
+		g := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$", "media-helper", "sleep")
+		g.Stdout, g.Stderr = os.Stdout, os.Stderr
+		if err := g.Start(); err != nil {
+			os.Exit(2)
+		}
+		fmt.Println("grandchild started")
+		time.Sleep(60 * time.Second)
 	case "chatty":
 		for i := 0; i < 100; i++ {
 			fmt.Fprintf(os.Stderr, "line %d\n", i)

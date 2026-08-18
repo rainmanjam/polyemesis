@@ -584,7 +584,14 @@ func TestABurstOfPreviewRequestsAgainstADownEncoderSpawnsOne(t *testing.T) {
 	// TWO ports, deliberately. A one-port allocator would make the second spawn
 	// fail for lack of a port and the test would pass with the debounce deleted
 	// -- measured: that version of this test survived the mutation.
-	e.alloc = relay.NewPortAllocator(freeUDPPort(t), 2)
+	base, held := testenv.FreeUDPWindow(t, 2)
+	// Released together, immediately before the allocator is built: the window
+	// has to be free for Allocate to hand it out, and holding it until this line
+	// is what stopped anything else from taking it.
+	for _, r := range held {
+		r.Release()
+	}
+	e.alloc = relay.NewPortAllocator(base, 2)
 	setSettings(e, previewOnSettings())
 
 	e.PreviewRequested()

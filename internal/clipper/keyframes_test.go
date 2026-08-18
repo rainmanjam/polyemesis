@@ -296,7 +296,13 @@ func TestKeyframeArgsClampANegativeStart(t *testing.T) {
 // A bounded read that finds nothing means the window missed — a very long GOP,
 // or a segment shorter than the lookback. Giving up there would leave the cut
 // unsnapped for a file that is perfectly readable.
-func TestFFprobeWidensToTheWholeFileWhenABoundedReadFindsNothing(t *testing.T) {
+// The widen is BOUNDED. It used to drop -read_intervals entirely and pay for
+// the whole file, which on a multi-hour archive means millions of packet
+// objects buffered in CombinedOutput -- on a path an authenticated request can
+// reach through handleClipKeyframes. Both cases the fallback exists for survive
+// a bounded widen: a long GOP is seconds, and a file shorter than the lookback
+// fits inside FallbackWindow entirely.
+func TestFFprobeWidensAroundTheCallersPointWhenABoundedReadFindsNothing(t *testing.T) {
 	var calls [][]string
 	p := FFprobe{
 		Bin: "ffprobe",
@@ -309,17 +315,46 @@ func TestFFprobeWidensToTheWholeFileWhenABoundedReadFindsNothing(t *testing.T) {
 		},
 	}
 
-	kf, err := p.Keyframes(context.Background(), "/rec/seg0.mkv", 90*time.Second, time.Minute)
+	kf, err := p.Keyframes(context.Background(), "/rec/seg0.mkv", time.Hour, time.Minute)
 	if err != nil {
 		t.Fatalf("Keyframes: %v", err)
 	}
 	if len(calls) != 2 {
 		t.Fatalf("ffprobe ran %d times, want 2", len(calls))
 	}
-	if strings.Contains(strings.Join(calls[1], " "), "-read_intervals") {
-		t.Error("the widened read is still bounded")
+	second := strings.Join(calls[1], " ")
+	if !strings.Contains(second, "-read_intervals") {
+		t.Error("the widened read dropped -read_intervals, so ffprobe emits one " +
+			"JSON object per packet for the WHOLE file and CombinedOutput buffers " +
+			"all of it. A long archive is hundreds of megabytes, and this path is " +
+			"reachable from handleClipKeyframes — the allocation would be " +
+			"proportional to the recording rather than to the question.")
+	}
+	// Centred on the caller's point, not restarted at zero: a long GOP sits just
+	// outside their window, which is where the keyframe actually is.
+	if !strings.Contains(second, "3300.000000%+600.000000") {
+		t.Errorf("widened read asked for %q, want a %v window centred on the "+
+			"caller's one-hour point", second, FallbackWindow)
 	}
 	assertTimes(t, kf, []time.Duration{0})
+}
+
+// The widen must not run past the start of the file.
+func TestTheWidenedReadDoesNotAskForANegativeStart(t *testing.T) {
+	var calls [][]string
+	p := FFprobe{Run: func(_ context.Context, _ string, args []string) ([]byte, error) {
+		calls = append(calls, args)
+		return []byte(`{"packets":[]}`), nil
+	}}
+	if _, err := p.Keyframes(context.Background(), "/rec/seg0.mkv", time.Second, time.Minute); err != nil {
+		t.Fatalf("Keyframes: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("ffprobe ran %d times, want 2", len(calls))
+	}
+	if got := strings.Join(calls[1], " "); !strings.Contains(got, "0.000000%+600.000000") {
+		t.Errorf("widened read asked for %q, want it clamped to the start of the file", got)
+	}
 }
 
 func TestFFprobeDoesNotWidenWhenTheBoundedReadSucceeded(t *testing.T) {

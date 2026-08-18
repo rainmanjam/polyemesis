@@ -355,7 +355,7 @@ func slateVideoInput(s SlateSpec) []string {
 		"-re",
 		"-f", "lavfi",
 		"-i", fmt.Sprintf("color=c=%s:s=%dx%d:r=%s",
-			escapeLavfiValue(s.Color), s.Width, s.Height, formatFPS(s.FPS)),
+			escapeLavfiArg(s.Color), s.Width, s.Height, formatFPS(s.FPS)),
 	}
 }
 
@@ -371,7 +371,7 @@ func slateVideoFilter(s SlateSpec, prof encoderProfile) string {
 		chain = append(chain,
 			fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease", s.Width, s.Height),
 			fmt.Sprintf("pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=%s",
-				s.Width, s.Height, escapeLavfiValue(s.Color)),
+				s.Width, s.Height, escapeLavfiArg(s.Color)),
 			"setsar=1",
 		)
 	}
@@ -383,32 +383,6 @@ func slateVideoFilter(s SlateSpec, prof encoderProfile) string {
 	}
 	return strings.Join(chain, ",")
 }
-
-// escapeLavfiValue protects an option value inside a filtergraph description.
-//
-// ONE level of escaping, which is enough for the colours this is used for and
-// is NOT enough in general. A filtergraph is unescaped twice -- see
-// escapeLavfiArg in text.go, and the measurements there. The values reaching
-// this function are colours validated elsewhere to be a name or 0xRRGGBB, so
-// none of them can contain a character that needs the second level; a colour
-// that could would break exactly as the Windows font path did. Anything else
-// passed through here should use escapeLavfiArg instead.
-// A colour like "0x101014" is harmless, but any user-supplied string with a
-// colon in it would otherwise be read as the start of the next option and
-// produce a parse error the operator cannot connect to what they typed.
-func escapeLavfiValue(v string) string {
-	return lavfiEscaper.Replace(v)
-}
-
-var lavfiEscaper = strings.NewReplacer(
-	`\`, `\\`,
-	`:`, `\:`,
-	`,`, `\,`,
-	`'`, `\'`,
-	`[`, `\[`,
-	`]`, `\]`,
-	`;`, `\;`,
-)
 
 // formatSeconds renders a time without an exponent or trailing zeros, because
 // FFmpeg's duration parser rejects Go's default "1e+06" formatting.

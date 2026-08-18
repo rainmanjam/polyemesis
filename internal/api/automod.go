@@ -49,10 +49,33 @@ func (s *Server) handleAutomodMatrix(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAutomodStats reports model spend and health.
+//
+// FROM THE LIVE ENGINE. This returned a hardcoded automod.ModelStats{} behind a
+// comment saying "until that wiring lands this reports an honest zero rather
+// than inventing numbers" -- and the wiring had since landed:
+// automod.Engine.ModelStats() exists and the hub holds the engine. A zero is
+// only honest while it is unknowable; once it is knowable a zero is a claim
+// that nothing has been spent, which is what the operator reads it as.
+//
+// Still a zero when no moderator is attached, which is the genuinely unknowable
+// case and is what an install with automod off should report.
 func (s *Server) handleAutomodStats(w http.ResponseWriter, r *http.Request) {
-	// Stats live on the engine, which the chat hub owns. Until that wiring
-	// lands this reports an honest zero rather than inventing numbers.
-	writeJSON(w, http.StatusOK, automod.ModelStats{})
+	writeJSON(w, http.StatusOK, s.automodStats())
+}
+
+// automodStats reads the current generation's model counters, or the zero value
+// when nothing is moderating.
+func (s *Server) automodStats() automod.ModelStats {
+	if s.chat == nil {
+		return automod.ModelStats{}
+	}
+	m := s.chat.Moderator()
+	if m == nil {
+		return automod.ModelStats{}
+	}
+	// Called directly: chat.Moderator declares ModelStats, so a type assertion
+	// here would be a branch that cannot fail and cannot be tested.
+	return m.ModelStats()
 }
 
 // handlePutAutomodKey sets or clears the model API key.
@@ -78,6 +101,19 @@ func (s *Server) handlePutAutomodKey(w http.ResponseWriter, r *http.Request) {
 	// Same reasoning as the MQTT password: sealed straight into the store, so
 	// PUT /settings never sees it and changedSections cannot report it. The
 	// section name travels and the key never does.
+	// RE-APPLIED, OR THE KEY DOES NOTHING UNTIL THE NEXT RESTART. ApplyAutomod
+	// reads the sealed key when it builds the model checker, and nothing here
+	// called it -- so an operator who pasted a key saw "configured", and the
+	// model checker went on running without one (or kept using the old one after
+	// a rotation). The engine is rebuilt on every settings save for exactly this
+	// reason; setting the key is a settings save that forgot to say so.
+	if set, err := s.store.GetSettings(); err != nil {
+		s.log.Warn("automod key stored, but settings could not be re-read to "+
+			"rebuild the model checker; it will pick the key up on restart", "err", err)
+	} else {
+		ApplyAutomod(s.chat, s.store, s.box, s.log, set.Automod)
+	}
+
 	s.publishAudit(auditSettingsChanged([]string{"automod"}, s.clientIP(r)))
 	writeJSON(w, http.StatusOK, map[string]any{"hasApiKey": key != ""})
 }
@@ -186,6 +222,44 @@ func historyFromSettings(a db.AutomodSettings) automod.HistoryLimits {
 // one rule pattern must still serve chat, still flag, and still run the history
 // detectors — refusing to moderate at all because one regex is malformed is the
 // wrong trade in both directions.
+// modelConfigFrom turns the stored model settings into the engine's config.
+//
+// EXTRACTED SO IT CAN BE TESTED WITHOUT A STORE, because two fields here were
+// silently not wired and nothing could see it. The stored shape and the
+// engine's are deliberately different -- see matrixFromSettings for the same
+// reasoning -- and that gap is exactly where a field gets forgotten.
+//
+// THE TWO TIMEOUTS ARE NOT THE SAME TIMEOUT, and conflating them is what went
+// wrong. Model.TimeoutSeconds is how long to wait for the model to ANSWER;
+// Model.TimeoutForBan is how long a viewer the model flags stays timed out.
+// Only the first was applied, so every model-decided timeout ran at the
+// built-in default and the operator's configured duration did nothing --
+// while internal/engine/reload.go:301 classified timeoutForBan as ClassLive
+// through this function, which is a written promise that saving it takes
+// effect.
+func modelConfigFrom(a db.AutomodSettings) automod.ModelConfig {
+	cfg := automod.DefaultModelConfig()
+	cfg.Enabled = true
+	cfg.Endpoint = a.Model.Endpoint
+	cfg.Model = a.Model.Model
+	cfg.MaxCallsPerHour = a.Model.MaxCallsPerHour
+	cfg.MinConfidence = a.Model.MinConfidence
+	cfg.Instruction = a.Model.Instruction
+	if a.Model.TimeoutSeconds > 0 {
+		cfg.Timeout = time.Duration(a.Model.TimeoutSeconds) * time.Second
+	}
+	// Left at DefaultModelConfig's value when unset rather than zeroed: zero is
+	// a PERMANENT ban at every adapter, which is the same trap the rule path
+	// carried until it was fixed alongside this.
+	if a.Model.TimeoutForBan > 0 {
+		cfg.TimeoutSeconds = a.Model.TimeoutForBan
+	}
+	if automod.KnownActions(automod.Action(a.Model.Action)) {
+		cfg.Action = automod.Action(a.Model.Action)
+	}
+	return cfg
+}
+
 func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logger, a db.AutomodSettings) {
 	if hub == nil {
 		return
@@ -207,19 +281,7 @@ func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logge
 
 	var model *automod.Model
 	if a.Model.Enabled {
-		cfg := automod.DefaultModelConfig()
-		cfg.Enabled = true
-		cfg.Endpoint = a.Model.Endpoint
-		cfg.Model = a.Model.Model
-		cfg.MaxCallsPerHour = a.Model.MaxCallsPerHour
-		cfg.MinConfidence = a.Model.MinConfidence
-		cfg.Instruction = a.Model.Instruction
-		if a.Model.TimeoutSeconds > 0 {
-			cfg.Timeout = time.Duration(a.Model.TimeoutSeconds) * time.Second
-		}
-		if automod.KnownActions(automod.Action(a.Model.Action)) {
-			cfg.Action = automod.Action(a.Model.Action)
-		}
+		cfg := modelConfigFrom(a)
 		if key, err := store.GetAutomodKey(box); err == nil {
 			cfg.APIKey = key
 		} else {
