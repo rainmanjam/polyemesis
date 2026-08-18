@@ -56,6 +56,26 @@ commits = [
   "a357fafffad25b8912a5c08aa16312adbedce09d",
 ]
 
+# AND THE GENERATED CODE INDEX, WHICH IS NOT SOURCE.
+#
+# `gitnexus analyze` writes a ~128 MB index under .gitnexus/ containing copies
+# of the code it indexed -- including the fixtures allowlisted below. `gitleaks
+# detect --no-git` reads the WORKING TREE and does not consult .gitignore, so
+# once anyone indexes locally the scan reports seven findings inside
+# .gitnexus/lbug and this repository's own security check starts crying wolf. A
+# check people learn to skip is worse than no check.
+#
+# SAFE HERE FOR A REASON THAT DOES NOT GENERALISE. The header above rightly
+# refuses a blanket path allowlist for test files, because a real key committed
+# to a test file is exactly the kind that gets committed. This is different in
+# kind: .gitnexus/ is generated, never committed (see .gitignore), and derived
+# ENTIRELY from tracked source. A credential cannot appear here without also
+# appearing in the source it was built from, where the scanner still sees it.
+# This removes a duplicate report, not a detection.
+paths = [
+  '''^\.gitnexus/''',
+]
+
 [[rules]]
 id = "generic-api-key"
 description = "Generic API key"
