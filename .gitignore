@@ -86,3 +86,4 @@ docs/notes/
 coverage.out
 ui/coverage/
 web/coverage/
+.gitnexus
