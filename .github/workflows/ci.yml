@@ -1484,19 +1484,27 @@ jobs:
           # GitHub's images configure apt through a Mirrorlist -- the logs show
           # `Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist` -- so rewriting
           # sources.list, which is what the first attempt did, changed nothing.
+          #
+          # https, NOT http, and this is not pedantry: the fallback exists to be
+          # used when the primary is failing, so it runs at exactly the moment
+          # nobody is watching. Fetching packages CI is about to execute over
+          # plaintext is the hole githubactions:S6506 exists for, and the curl
+          # block above already carries a comment about the same rule catching
+          # the same mistake in its own copy. archive.ubuntu.com serves https,
+          # and apt on noble speaks it without apt-transport-https.
           apt_switch_mirror() {
             echo "switching to the Ubuntu mirror pool for the remaining attempts"
             # The mirrorlist is what the runner reads; sources.list is a fallback
             # for images that do not use one.
             if [ -f /etc/apt/apt-mirrors.txt ]; then
-              printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\n' \
+              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\n' \
                 | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
             fi
             for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
                      /etc/apt/sources.list.d/*.sources; do
               [ -f "$f" ] || continue
               sudo sed -i -E \
-                -e 's|https?://[a-z0-9.-]*archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+                -e 's|https?://[a-z0-9.-]*archive\.ubuntu\.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
                 "$f"
             done
             sudo timeout 90 apt-get $APT_OPTS update -qq || true
