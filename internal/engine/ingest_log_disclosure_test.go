@@ -23,6 +23,20 @@ import (
  * export does not cover journalctl, server.log, or wherever those are shipped.
  * That is the failure diag's own header lists twice from 0.7.0 alone: "a key
  * reaching server.log on the give-up path".
+ *
+ * WHY THE FIXTURES READ notAreal... RATHER THAN LOOKING LIKE REAL KEYS.
+ * internal/diag's plants are deliberately realistic and deliberately
+ * allowlisted in .gitleaks.toml, because that test exercises the RESIDUAL
+ * alerts.Redact pass, which only fires on values shaped like real platform
+ * credentials -- "a fixture gitleaks ignores would be a fixture that proves
+ * less", in its own words.
+ *
+ * These prove something else. They assert that a DECLARED literal is masked,
+ * and the declared set matches whatever exact bytes it was handed, so realism
+ * buys nothing here and costs a gitleaks finding plus an allowlist entry. The
+ * constraints that DO matter are kept: each is longer than alerts.MinSecretLen,
+ * and the SRT passphrase stays inside the RFC 3986 unreserved alphabet the
+ * database enforces.
  */
 
 func settingsWithSRTPassphrase(pass string) db.Settings {
