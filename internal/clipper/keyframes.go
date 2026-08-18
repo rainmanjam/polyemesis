@@ -292,6 +292,12 @@ type FFprobe struct {
 	Run func(ctx context.Context, name string, args []string) ([]byte, error)
 }
 
+// FallbackWindow bounds the widened re-probe taken when the caller's own window
+// found no keyframe. Ten minutes is far past any real GOP while keeping the
+// probe's output proportional to the question rather than to the file: at 60fps
+// it is tens of thousands of packets, where a long archive is millions.
+const FallbackWindow = 10 * time.Minute
+
 // Keyframes implements Prober.
 func (f FFprobe) Keyframes(ctx context.Context, path string, from, window time.Duration) (Keyframes, error) {
 	bin := f.Bin
@@ -318,9 +324,27 @@ func (f FFprobe) Keyframes(ctx context.Context, path string, from, window time.D
 		return kf, nil
 	}
 	// A bounded read that found nothing means the window missed — a very long
-	// GOP, or a segment shorter than the lookback. Pay for the whole file once
+	// GOP, or a segment shorter than the lookback. Widen and pay for that once,
 	// rather than returning "unknown" and giving up on snapping.
-	out, err = run(ctx, bin, KeyframeArgs(path, 0, 0))
+	//
+	// WIDENED, NOT UNBOUNDED. This used to re-probe with no -read_intervals at
+	// all, which asks ffprobe for one JSON object per video packet across the
+	// WHOLE file while runCommand buffers the lot in CombinedOutput. A twelve
+	// hour archive is millions of packets and hundreds of megabytes of JSON —
+	// and this is reachable from handleClipKeyframes, so asking about a few
+	// seconds of a long recording allocated in proportion to the RECORDING
+	// rather than to the question, on demand, repeatably.
+	//
+	// Both cases the fallback exists for survive a bounded widen: a long GOP is
+	// seconds and sits just outside the caller's window, and a file shorter than
+	// the lookback fits inside FallbackWindow entirely. What is given up is
+	// snapping when the nearest keyframe is more than half of FallbackWindow
+	// away, which is not a GOP any encoder this talks to produces.
+	start := from - FallbackWindow/2
+	if start < 0 {
+		start = 0
+	}
+	out, err = run(ctx, bin, KeyframeArgs(path, start, FallbackWindow))
 	if err != nil {
 		return Keyframes{}, fmt.Errorf("clipper: ffprobe %s: %w", path, err)
 	}

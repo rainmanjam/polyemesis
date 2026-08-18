@@ -763,6 +763,22 @@ func TestSlateArgsTimestampOffset(t *testing.T) {
 	}
 }
 
+// TWO LEVELS, NOT ONE. A filtergraph is unescaped twice -- once when the
+// description is split into chains and filters, and again when a filter's
+// arguments are split on ':' -- so a literal colon in an option VALUE has to
+// survive both passes. That is FFmpeg's documented rule and text.go carries the
+// CI failure that proves it: one level of escaping produced
+//
+//	drawtext=fontfile=C\:\\Users\\RUNNER~1\\...
+//	[AVFilterGraph] No option name near '\Users\RUNNER~1\...'
+//
+// These cases used to expect the one-level form, on the strength of a comment
+// claiming the colours reaching here were "validated elsewhere to be a name or
+// 0xRRGGBB". They are not: SlateSettings.Color is documented as "any spelling
+// FFmpeg's colour parser accepts" and nothing checks it. colorProblem, the
+// strict whitelist, is only ever applied to rendition TEXT colours -- so the
+// validated field got the strong escaping and the unvalidated one got the weak
+// escaping, which is the wrong way round.
 func TestSlateArgsColourEscaping(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -774,9 +790,9 @@ func TestSlateArgsColourEscaping(t *testing.T) {
 		{"an alpha suffix needs no escaping", "gray@0.5", "color=c=gray@0.5:"},
 		// A raw colon would be read as the start of the next option and turn
 		// into a parse error the operator cannot connect to what they typed.
-		{"a colon is escaped, not passed through", "a:b", `color=c=a\:b:`},
-		{"a backslash is escaped first so it cannot double-escape", `a\b`, `color=c=a\\b:`},
-		{"a comma cannot end the filter", "a,b", `color=c=a\,b:`},
+		{"a colon survives both unescape passes", "a:b", `color=c=a\\:b:`},
+		{"a backslash is escaped first so it cannot double-escape", `a\b`, `color=c=a\\\\b:`},
+		{"a comma cannot end the filter", "a,b", `color=c=a\\,b:`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -797,7 +813,7 @@ func TestSlateArgsPadColourIsEscaped(t *testing.T) {
 	s.ImagePath = "/srv/slate.png"
 	s.Color = "a:b"
 	vf, _ := argsAfter(SlateArgs(s), "-vf")
-	if !strings.Contains(vf, `color=a\:b`) {
+	if !strings.Contains(vf, `color=a\\:b`) {
 		t.Errorf("-vf = %q, want the pad colour escaped", vf)
 	}
 }
