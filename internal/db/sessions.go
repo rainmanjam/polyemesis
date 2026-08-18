@@ -364,7 +364,20 @@ func (d *DB) SetSessionRecordings(sessionID int64, recordingIDs []int64) error {
 	if err != nil {
 		return err
 	}
+	// Noted BEFORE the upsert, because the upsert is what overwrites session_id.
+	// AddRecordingToSession already does this for the one-recording case -- "the
+	// session it came from is now shorter and its span is stale" -- and the bulk
+	// path simply never did. Same steal, same stale span, one path fixed.
+	donors := map[int64]bool{}
 	for i, id := range ordered {
+		var prev int64
+		err := tx.QueryRow(`SELECT session_id FROM session_recordings WHERE recording_id = ?`, id).Scan(&prev)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if prev != 0 && prev != sessionID {
+			donors[prev] = true
+		}
 		if _, err := tx.Exec(`INSERT INTO session_recordings (recording_id, session_id, position)
 			VALUES (?,?,?) ON CONFLICT(recording_id) DO UPDATE SET session_id=excluded.session_id, position=excluded.position`,
 			id, sessionID, i); err != nil {
@@ -373,6 +386,11 @@ func (d *DB) SetSessionRecordings(sessionID int64, recordingIDs []int64) error {
 	}
 	if err := recalcSessionTx(tx, sessionID); err != nil {
 		return err
+	}
+	for prev := range donors {
+		if err := recalcSessionTx(tx, prev); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
