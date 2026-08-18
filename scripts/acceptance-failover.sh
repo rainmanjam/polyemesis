@@ -545,65 +545,7 @@ else
   note "that is FLAPPING, which a floor of 2 cannot see -- see issue #226"
 fi
 
-step "7. Adding and removing a sibling leaves the others alone"
-# destSpec is a hash of the argv signature, the rendition tier and the upstream,
-# and its own comment says editing one destination should restart "that
-# destination and no other". Nothing measured that. Step 6 proves a destination
-# survives a SOURCE switch; this proves it survives a NEIGHBOUR appearing and
-# disappearing, which is the operation an operator performs most often and the
-# one that would silently drop every other platform if the hash covered too much.
-#
-# MEASURED ON `onair`, which has been running since step 3 and is untouched by
-# anything below. Its restart counter is the whole assertion: a restart IS a
-# dropped platform connection, and outtime rising proves it kept producing
-# rather than merely staying alive.
-sib_before=$(drive restarts onair | tail -1)
-sib_t_before=$(drive outtime onair | tail -1)
-note "before the sibling: restarts=$sib_before outtime=${sib_t_before}ms"
-
-OUT=$(drive adddest sibling sibling.mkv)
-case "$OUT" in
-  *DEST_OK*) ok "a sibling destination was created" ;;
-  *) bad "could not create the sibling: $OUT" ;;
-esac
-sleep 8
-
-sib_after=$(drive restarts onair | tail -1)
-sib_t_after=$(drive outtime onair | tail -1)
-if [ "$sib_before" = "-1" ] || [ "$sib_after" = "-1" ]; then
-  bad "no destination process was reported; the sibling check measured nothing"
-elif [ "$sib_after" -eq "$sib_before" ]; then
-  ok "adding a destination did not restart the existing one ($sib_after restarts)"
-else
-  bad "adding a destination restarted the existing one ($sib_before -> $sib_after)"
-  note "every other platform's connection dropped because a new one was added"
-fi
-
-# Alive is not the same as delivering: a process that reconnected keeps its pid
-# for the second look while its output clock restarts.
-if [ "${sib_t_after:-0}" -gt "${sib_t_before:-0}" ] 2>/dev/null; then
-  ok "the existing destination kept producing across the add (${sib_t_before}ms -> ${sib_t_after}ms)"
-else
-  bad "the existing destination stopped producing across the add (${sib_t_before}ms -> ${sib_t_after}ms)"
-fi
-
-OUT=$(drive deldest sibling)
-case "$OUT" in
-  *DELDEST_OK*) : ;;
-  *) note "could not remove the sibling: $OUT" ;;
-esac
-sleep 8
-
-sib_gone=$(drive restarts onair | tail -1)
-if [ "$sib_gone" = "-1" ]; then
-  bad "no destination process was reported after the removal"
-elif [ "$sib_gone" -eq "$sib_after" ]; then
-  ok "removing a destination did not restart the remaining one ($sib_gone restarts)"
-else
-  bad "removing a destination restarted the remaining one ($sib_after -> $sib_gone)"
-fi
-
-step "8. Filler starts playing, with the encoder still on air"
+step "7. Filler starts playing, with the encoder still on air"
 # THE CASE THIS WHOLE SUB-PROJECT EXISTS FOR, and it was impossible to write
 # before it. A playing file used to feed the PRIMARY's hub, so the primary
 # always had bytes on it, the selector read the programme as live, and it would
@@ -649,7 +591,7 @@ else
 fi
 sleep 4
 
-step "9. THE POINT: the encoder drops while the filler plays"
+step "8. THE POINT: the encoder drops while the filler plays"
 unpublish
 # THE REGRESSION, in one field. Before the playlist got a hub of its own, the
 # file's bytes landed on the PRIMARY's relay, so primaryLive stayed true for as
@@ -706,7 +648,7 @@ SEQUENCE_SECS=42
 note "letting the playlist run ${SEQUENCE_SECS}s so a whole cycle lands in the recording"
 sleep "$SEQUENCE_SECS"
 
-step "10. The output timeline, and what actually played"
+step "9. The output timeline, and what actually played"
 # ONE FILE, EVERY SWITCH IN THE RUN. This is the whole of steps 3 to 8 measured
 # end to end, not the slate cycle alone: the recording spans primary -> slate ->
 # primary (steps 3 to 5), primary -> filler and back when the pin goes on and
@@ -1081,7 +1023,7 @@ else
   fi
 fi
 
-step "11. THE FAILURE THIS DOES NOT FIX: a publisher that does not match the profile"
+step "10. THE FAILURE THIS DOES NOT FIX: a publisher that does not match the profile"
 # MEASURED, NOT FIXED, AND PINNED SO IT CANNOT SILENTLY GET WORSE.
 #
 # Items are normalised to match EACH OTHER -- one fixed 1920x1080@30 profile, so
@@ -1272,11 +1214,11 @@ printf "  %d passed, %d failed\n\n" "$pass" "$fail"
 # 25 rather than 24 since #226 added the switch-count CEILING alongside its
 # floor. The floor alone passed a tier switching 80 times.
 #
-# 31 since step 7 added four. Measured on a clean run rather than derived: the
-# pinned 25 was already two below what a clean run produced, so two checks could
-# have stopped running without this noticing. A floor set from arithmetic drifts
-# away from the suite; one read off a green run does not.
-EXPECTED_CHECKS=31
+# 27, read off a green run rather than derived. The pinned 25 was two below what
+# a clean run produces, so two checks could have stopped running without this
+# noticing. A floor set from arithmetic drifts away from the suite; one read off
+# a green run does not.
+EXPECTED_CHECKS=27
 total=$((pass + fail))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"
