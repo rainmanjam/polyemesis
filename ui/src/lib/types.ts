@@ -703,6 +703,13 @@ export interface DestStatus {
   renditionName?: string;
   /** The pre-announced scheduled Facebook broadcast, when one exists. */
   facebookBroadcastId?: string;
+  /** The file a recording is actually being written to, when that is not the
+   *  name the operator configured. A file destination never overwrites footage,
+   *  so a respawn whose configured name already holds bytes is given a
+   *  timestamped sibling instead. Nothing is wrong when this is set — the
+   *  recording is continuing — but without it the configured filename holds a
+   *  header and no video and nothing anywhere says where the footage went. */
+  rolledOverTo?: string;
   /** The redundant backup feed's live state, absent when there is no backup.
    *  Reported separately from `process` because a dead backup beside a healthy
    *  primary is the one state this must never hide. */

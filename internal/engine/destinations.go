@@ -20,6 +20,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -833,6 +834,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 					"dest", row.Name, "err", err)
 				return buildArgs(target)
 			}
+			e.noteRollover(row, out)
 			return buildArgs(out)
 		}
 	}
@@ -1006,6 +1008,65 @@ func (e *Engine) noteStopOutcome(id int64, err error) {
 
 // StopUnreaped reports whether the last stop of this destination left a child
 // that was killed but never observed dead, and the warning that says so.
+// noteRollover reports that a file destination's respawn is writing somewhere
+// other than the name the operator configured.
+//
+// THE ROLLOVER ITSELF IS CORRECT AND IS NOT WHAT THIS IS ABOUT. ResolveForWrite
+// refuses to destroy footage, so a respawn whose configured name already holds
+// bytes is given a timestamped sibling instead. That is the right call and it is
+// load-bearing: the alternative, -y, would truncate an earlier take every time a
+// destination flapped.
+//
+// What was wrong is that nobody was told. The child that stopped can exit
+// CLEANLY -- in FFmpeg 8.1 a demuxer-side failure exits 0 -- and a clean exit is
+// logged at Info with no entry in the process log ring, while LastError stays
+// empty because -loglevel warning suppresses the lines classify would have kept.
+// So the operator's configured filename held a Matroska header and nothing else,
+// the footage was in a file nobody had mentioned, and the only trace anywhere was
+// a restart counter going from 0 to 1. It reads exactly like an empty recording.
+//
+// Warn rather than Info: this is the one moment at which the name an operator
+// asked for stops being the name their footage is in.
+func (e *Engine) noteRollover(row *db.Destination, actual string) {
+	want, err := e.recman.Resolve(row.URL)
+	if err != nil || actual == "" || actual == want {
+		return
+	}
+	e.stopMu.Lock()
+	if e.rolledOver == nil {
+		e.rolledOver = map[int64]string{}
+	}
+	e.rolledOver[row.ID] = actual
+	e.stopMu.Unlock()
+
+	e.log.Warn("destination: recording continued in a different file",
+		"dest", row.Name, "configured", want, "writing", actual,
+		"why", "the configured file already holds footage and is never overwritten")
+
+	// Nil-safe by the same discipline as e.hooks elsewhere: an install with no
+	// hooks configured still gets the log line and the status field.
+	if e.hooks != nil {
+		e.hooks.Publish(hooks.Event{
+			Trigger: hooks.TriggerDestinationRolledOver,
+			At:      time.Now(),
+			Source:  hooks.SourceRef{ID: e.sourceID, Name: e.SourceName()},
+			Destination: &hooks.DestinationRef{
+				ID: row.ID, Name: row.Name, Platform: string(row.Platform),
+			},
+			Reason: actual,
+		})
+	}
+}
+
+// RolledOver is the path a file destination is actually writing to, when that
+// differs from the configured one, and whether it differs at all.
+func (e *Engine) RolledOver(id int64) (path string, rolled bool) {
+	e.stopMu.Lock()
+	defer e.stopMu.Unlock()
+	p, ok := e.rolledOver[id]
+	return p, ok
+}
+
 func (e *Engine) StopUnreaped(id int64) (warning string, unreaped bool) {
 	e.stopMu.Lock()
 	defer e.stopMu.Unlock()
