@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 )
 
@@ -89,5 +90,55 @@ func TestANonFileDestinationNeverReportsARollover(t *testing.T) {
 	if got, rolled := e.RolledOver(9); rolled {
 		t.Errorf("an RTMP destination reported a rollover to %q; only a file "+
 			"destination has an output path that can move", got)
+	}
+}
+
+// The hook is published on the same path that records the status, so a
+// dispatcher that is present must not change what is recorded — and a
+// dispatcher with no hooks configured must not be a special case.
+//
+// PUBLISHING IS ASSERTED THROUGH ITS EFFECT ON THE CALLER, not by intercepting
+// the event. Dispatcher.Publish fans out to configured endpoints over HTTP; a
+// test that stood one up would be testing internal/hooks, which has its own
+// tests for exactly that. What is this package's business is that wiring a
+// dispatcher in cannot break the rollover record, and that the nil-hooks case
+// and the no-hooks-configured case behave the same.
+func TestARolloverIsRecordedWhetherOrNotHooksAreWired(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		hooks func() *hooks.Dispatcher
+	}{
+		{"no dispatcher at all", func() *hooks.Dispatcher { return nil }},
+		{"a dispatcher with no hooks configured", func() *hooks.Dispatcher {
+			return hooks.NewDispatcher(slog.New(slog.NewTextHandler(io.Discard, nil)),
+				hooks.SourceFunc(func() ([]hooks.Hook, error) { return nil, nil }))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, _ := rolloverEngine(t)
+			e.hooks = tc.hooks()
+			row := &db.Destination{ID: 3, Name: "archive", Kind: db.DestFile, URL: "show.mkv"}
+
+			want, err := e.recman.Resolve(row.URL)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if err := os.WriteFile(want, []byte("existing footage"), 0o600); err != nil {
+				t.Fatalf("seed footage: %v", err)
+			}
+			actual, err := e.recman.ResolveForWrite(row.URL)
+			if err != nil {
+				t.Fatalf("ResolveForWrite: %v", err)
+			}
+
+			e.noteRollover(row, actual)
+
+			got, rolled := e.RolledOver(3)
+			if !rolled || got != actual {
+				t.Errorf("RolledOver = (%q, %v), want (%q, true) — whether a hook "+
+					"endpoint exists is not this destination's business, and the "+
+					"operator-facing record must not depend on it", got, rolled, actual)
+			}
+		})
 	}
 }
