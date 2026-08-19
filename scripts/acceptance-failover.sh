@@ -63,8 +63,26 @@ bad()  { printf "  \033[31mFAIL\033[0m  %s\n" "$1"; fail=$((fail+1)); }
 step() { printf "\n\033[1m%s\033[0m\n" "$1"; poly_step_record "$1"; }
 note() { printf "        %s\n" "$1"; }
 
+# THE RTMP SINK, and it is a LOOP for the reason this measurement exists.
+#
+# `ffmpeg -listen 1` accepts exactly one connection and then stops listening --
+# acceptance-docker.sh:447 records what that costs when something touches the
+# socket early. Here it would be worse than that: the entire question is whether
+# an RTMP destination SURVIVES the source seams, and a destination that dies and
+# reconnects needs a second accept. A one-shot sink would make every restart look
+# like a dead sink, which is the measurement answering itself.
+rtmp_sink_loop() {
+  while true; do
+    ffmpeg -hide_banner -loglevel error -listen 1 \
+      -i "rtmp://127.0.0.1:$RTMP_SINK_PORT/live/out" -c copy -f null - >/dev/null 2>&1
+    sleep 0.3
+  done
+}
+
 cleanup() {
   pkill -f "failover-publisher" 2>/dev/null
+  [ -n "${RTMP_SINK_PID:-}" ] && kill "$RTMP_SINK_PID" 2>/dev/null
+  pkill -f "rtmp://127.0.0.1:${RTMP_SINK_PORT:-0}/live/out" 2>/dev/null
   # INGEST is passed because the ingest ffmpeg's argv carries no work-dir path,
   # so the sweep above cannot see it. It is the port that leaked.
   poly_cleanup_exit "${1:-0}" "$PORT" "$WORK" "$INGEST"
@@ -438,6 +456,25 @@ else
   note "not ready means the production enqueue path did not deliver one"
   exit 1
 fi
+
+# --- #398 RTMP ARM -------------------------------------------------------------
+# Every destination this suite has ever created is kind:file. The 48 runs that
+# measured a consumer dying at a seam therefore measured only files, and a file
+# that dies rolls over to a new file. An RTMP destination that dies drops and
+# reconnects to the platform. That is a different severity and it has never been
+# measured. This arm asks only that one question and asserts nothing, so it
+# cannot change what any existing step measures.
+RTMP_SINK_PORT=1936
+rtmp_sink_loop &
+RTMP_SINK_PID=$!
+sleep 1
+OUT=$(drive addrtmp rtmpdest "rtmp://127.0.0.1:$RTMP_SINK_PORT/live" out 2>&1)
+case "$OUT" in
+  *DEST_OK*) note ">>>RTMP the rtmp destination was created" ;;
+  *) note ">>>RTMP could not create the rtmp destination: $OUT" ;;
+esac
+sleep 6
+note ">>>RTMP baseline restarts=$(drive restarts rtmpdest | tail -1) outtime=$(drive outtime rtmpdest | tail -1)ms"
 
 step "3. The primary goes on air"
 # Before publishing, not after. The server reporting ready means its HTTP
@@ -1218,6 +1255,11 @@ printf "  %d passed, %d failed\n\n" "$pass" "$fail"
 # a clean run produces, so two checks could have stopped running without this
 # noticing. A floor set from arithmetic drifts away from the suite; one read off
 # a green run does not.
+# --- #398 RTMP ARM: the verdict -----------------------------------------------
+# A NOTE, not a check: this arm is a measurement and must not move the pass/fail
+# of a suite that is used as a gate elsewhere.
+note ">>>RTMP final restarts=$(drive restarts rtmpdest | tail -1) outtime=$(drive outtime rtmpdest | tail -1)ms"
+
 EXPECTED_CHECKS=27
 total=$((pass + fail))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then

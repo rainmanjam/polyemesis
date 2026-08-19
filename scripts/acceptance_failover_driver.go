@@ -94,6 +94,17 @@ func main() {
 	case "plready":
 		driverlib.Login(user, pass)
 		playlistReady()
+	// addrtmp exists for ONE question (#398): every destination this suite has
+	// ever created is kind:file, so the 48 runs that measured a consumer dying at
+	// a source seam measured only files. A file that dies rolls over to a new
+	// file; an RTMP destination that dies DROPS AND RECONNECTS to the platform,
+	// which is the failure the whole failover tier exists to prevent.
+	case "addrtmp":
+		if len(os.Args) < 6 {
+			driverlib.Die("usage: addrtmp <name> <url> <key>")
+		}
+		driverlib.Login(user, pass)
+		addRTMP(os.Args[3], os.Args[4], os.Args[5])
 	case "adddest":
 		if len(os.Args) < 5 {
 			driverlib.Die("usage: adddest <name> <file-url>")
@@ -160,6 +171,19 @@ func dest() { addDest("onair", "onair.ts") }
 // needs a destination of its OWN. That case expects restarts, and a restart
 // truncates the file the destination is writing -- pointed at onair.mkv it
 // would erase the very recording the timeline checks measured.
+// addRTMP is addDest with an RTMP target instead of a file. Same profile, so the
+// only difference between the two measurements is the transport.
+func addRTMP(name, url, key string) {
+	driverlib.CreateDest(name, map[string]any{
+		"name": name, "kind": "rtmp", "url": url, "streamKey": key,
+		"enabled": true, "audioBitrate": 160,
+		"profile": map[string]any{
+			"mode": "simple", "tracks": driverlib.Sel(0), "matrix": []any{},
+			"normalize": "off", "sampleRate": 48000,
+		},
+	})
+}
+
 func addDest(name, url string) {
 	driverlib.CreateDest(name, map[string]any{
 		"name": name, "kind": "file", "url": url,
