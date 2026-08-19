@@ -241,8 +241,21 @@ waitfor() {
 # which accepts a negative on purpose, so a genuine -1 from the API flows
 # through the validator untouched and is indistinguishable here from the
 # fallback line. Both mean the same thing to this suite and both are waited out.
+# THE DEFAULT IS 90s, AND 30 WAS INDEFENSIBLE AGAINST THIS SUITE'S OWN NUMBERS.
+#
+# A destination cannot have a process until the ingest layout has been measured:
+# while it is unmeasured, reconcileOutputs deliberately plans NOTHING, so nothing
+# starts. And settle() below records, as a measurement rather than a guess, that
+# "a newly connected encoder is not stable for about forty seconds". So the old
+# 30s ceiling asked for the answer before it could exist, and a run where the
+# probe landed slowly reported -1 -- which step 6 then compared against and failed
+# on its own precondition rather than on anything the product did.
+#
+# Measured, from the run that finally carried a payload (#462): the destination
+# was unreported at step 3, present with ZERO restarts by step 5, and wrote a
+# continuous file across all ten seams. It had not died. It had not started yet.
 wait_for_dest_process() {
-  local secs="${1:-30}" deadline=$(( SECONDS + secs )) line
+  local secs="${1:-90}" deadline=$(( SECONDS + secs )) line
   while [ "$SECONDS" -lt "$deadline" ]; do
     line=$(readstatus)
     if [ "$(printf '%s' "$line" | awk '{print $4}')" != "-1" ]; then
@@ -460,8 +473,10 @@ sleep 6
 
 # And this one is about a condition, which the sleep above was quietly being
 # asked to cover as well. See wait_for_dest_process.
-if ! BEFORE=$(wait_for_dest_process 30); then
-  note "the destination process was still unreported after 30s; step 6 will say so"
+if ! BEFORE=$(wait_for_dest_process 90); then
+  note "the destination never started within 90s -- not a fault of the switch, which"
+  note "has not happened yet. Step 6 measures restarts ACROSS the cut and cannot do"
+  note "that from a baseline of -1, so it will report unmeasured rather than failed."
 fi
 set -- $BEFORE; restarts_before="${4:-0}"
 note "before the cut: $BEFORE"
@@ -504,7 +519,17 @@ step "6. THE POINT: the destination never restarted"
 # This is the whole feature. If the destination restarted, the platform
 # connection dropped and failover achieved nothing -- the output file could
 # still look perfectly healthy.
-if [ "$restarts_before" = "-1" ] || [ "$restarts_after" = "-1" ]; then
+if [ "$restarts_before" = "-1" ] && [ "$restarts_after" != "-1" ]; then
+  # WHICH -1 THIS IS, because the two mean opposite things. A baseline of -1 with
+  # a real reading after it means the destination had not STARTED when the
+  # baseline was taken -- it cannot have restarted across a cut it was not
+  # present for. Saying "no destination process was reported" there reads as a
+  # death, and this suite's value is that it is believed when it reports one.
+  bad "the destination had not started when the baseline was taken (before=-1, after=$restarts_after)"
+  note "so this is a precondition that did not hold, not a restart: the destination"
+  note "cannot have dropped across a cut it was not yet present for. See the"
+  note "wait_for_dest_process ceiling above."
+elif [ "$restarts_before" = "-1" ] || [ "$restarts_after" = "-1" ]; then
   bad "no destination process was reported; nothing was measured"
   # CAPTURE THE PAYLOAD, not another theory. -1 means the driver found no
   # destination carrying a process. Which state the destination was actually in
@@ -635,7 +660,11 @@ note "with the filler on air: $FILLER_STATUS"
 # Reported as unmeasured rather than passed: the destination may genuinely have
 # restarted and we would not know. The one thing it must not do is claim a
 # restart it did not observe.
-if [[ "$restarts_filler" = "-1" ]] || [[ "$restarts_before" = "-1" ]]; then
+if [[ "$restarts_before" = "-1" ]] && [[ "$restarts_filler" != "-1" ]]; then
+  bad "the destination had not started when the baseline was taken (before=-1, filler=$restarts_filler)"
+  note "same precondition as step 6: nothing can have dropped across a switch it was"
+  note "not present for."
+elif [[ "$restarts_filler" = "-1" ]] || [[ "$restarts_before" = "-1" ]]; then
   bad "no destination process was reported across the filler switch; nothing was measured"
   drive rawstatus > "$WORK/status-at-failure-2.json" 2>/dev/null || true
   note ">>>462 source: $(grep -oE '"source":\{[^}]*"id":[0-9]+' "$WORK/status-at-failure-2.json" 2>/dev/null | head -1)"
