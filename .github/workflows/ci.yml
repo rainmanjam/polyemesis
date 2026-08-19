@@ -834,6 +834,36 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         run: go test -timeout 15m ./...
 
+      # THE RACE DETECTOR, ON WINDOWS ONLY, ON THE ONE PACKAGE THAT CRASHES.
+      #
+      # #440 is an intermittent `fatal error: found pointer to free object` in
+      # internal/engine on windows-latest. The runtime's own message names the two
+      # diagnostics that would explain it -- "try -d=checkptr or -race" -- and
+      # neither has ever been run on Windows, because the only race job in this
+      # file is the ubuntu one. That is precisely the blind spot: the crash is
+      # Windows-only, and so is the code most likely to be responsible.
+      #
+      # -race ALONE, because -race implies -d=checkptr (cmd/compile's flag setup
+      # does this on every platform), so one flag delivers both. It is also the
+      # stronger of the two: the detector reports a racing pair whenever the two
+      # accesses execute, where checkptr only fires on an executed bad conversion
+      # and is blind to a torn interface or slice write.
+      #
+      # ONE PACKAGE, not ./..., because this is a diagnostic for a named crash
+      # rather than a new gate. internal/engine is where the crash happens and it
+      # is the package whose tests stand up hubs, supervisors and a database at
+      # once. Widening it is a decision to take on evidence, not by reflex.
+      #
+      # continue-on-error, deliberately: a data race that has been latent for
+      # months must not turn every Windows run red before anyone has seen what it
+      # says. The point is to make it SPEAK. When it names something, that finding
+      # gets its own change and this becomes a gate.
+      - name: race detector on the package that crashes (#440)
+        if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        continue-on-error: true
+        timeout-minutes: 20
+        run: go test -race -timeout 15m ./internal/engine/
+
       # Build and RUN it. Compiling proves the code is valid for the platform;
       # it does not prove the process comes up.
       #
