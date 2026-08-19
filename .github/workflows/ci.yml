@@ -1715,5 +1715,10 @@ jobs:
             /tmp/polyemesis-acceptance*/dts.csv
             /tmp/polyemesis-acceptance*/seams.txt
             /tmp/polyemesis-acceptance*/data/recordings/onair.mkv
+            # The status payload captured at the instant a destination reported
+            # no process (#462). Without this the suite dumps it and the runner
+            # discards it -- which is how the one artifact that answers the
+            # question has been thrown away on every failing run so far.
+            /tmp/polyemesis-acceptance*/status-at-failure-*.json
           if-no-files-found: ignore
           retention-days: 7
