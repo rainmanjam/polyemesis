@@ -488,12 +488,14 @@ if ! BEFORE=$(wait_for_dest_process 90); then
   # asking for it meant perturbing the run. `destinationHold` is published from
   # the reconcile's own hold decision and is empty whenever destinations are
   # being planned normally.
-  hold=$(drive rawstatus 2>/dev/null | tr ',' '\n' | grep -o '"destinationHold":"[^"]*"' | head -1)
-  if [ -n "$hold" ]; then
-    note "the engine is HOLDING every destination: ${hold#*:}"
+  # Matched on the CODE, which is a stable identifier, rather than on the prose
+  # beside it -- that is why they are two fields.
+  if drive rawstatus 2>/dev/null | grep -q '"code":"awaiting-ingest-probe"'; then
+    note "the engine is HOLDING every destination: the ingest layout is unmeasured,"
+    note "so nothing is planned. That is the cause, and it is upstream of this suite."
   else
-    note "the engine reports no hold, so the destinations were being planned"
-    note "normally and something else left this one without a process."
+    note "the engine reports no hold, so destinations were being planned normally."
+    note "That does not name a fault -- it only rules this one reason out."
   fi
 
   # The server log is kept as corroboration, NOT as a verdict. The one warning

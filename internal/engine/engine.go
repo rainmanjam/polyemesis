@@ -385,7 +385,7 @@ type Engine struct {
 	// e.mu around the pieces it needs, and reaching for the write lock there to
 	// publish one string would put this on the inside of a lock ordering it has
 	// no business being part of. Nothing reads it together with another field.
-	destHold atomic.Value // string
+	destHold atomic.Value // *HoldStatus, nil when nothing is held
 
 	levels   ffmpeg.Levels
 	levelsAt time.Time
@@ -2052,11 +2052,19 @@ func (e *Engine) reconcileOutputs() error {
 	// /status cannot disagree with the reconcile about why nothing is running.
 	// Cleared on every pass that does not hold, so a stale reason cannot outlive
 	// the condition that produced it.
-	hold := ""
+	// Worded for an operator watching a dashboard, not for the person who wrote
+	// the hold. "A routing graph compiled against the placeholder would map tracks
+	// that may not exist" is the true reason and belongs in reconcileOutputs'
+	// comment, where it already is; on a card it reads as a fault report about
+	// track mapping, which is not what is happening. What the operator needs is
+	// that this is a normal, transient, pre-stream state and nothing is wrong.
+	var hold *HoldStatus
 	if holdDests {
-		hold = "the ingest layout has not been probed yet, so no destination is " +
-			"planned: a routing graph compiled against the placeholder would map " +
-			"tracks that may not exist"
+		hold = &HoldStatus{
+			Code: "awaiting-ingest-probe",
+			Reason: "Waiting for the first look at the incoming stream. " +
+				"Destinations start once its audio and video tracks are known.",
+		}
 	}
 	e.destHold.Store(hold)
 	switch {

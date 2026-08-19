@@ -201,7 +201,30 @@ type Status struct {
 	// predicate has three inputs (measured, the silence tier, and the
 	// unmeasurable fallback) and a second copy of it in the API layer would be
 	// free to drift away from the one that actually decides.
-	DestinationHold string `json:"destinationHold,omitempty"`
+	//
+	// TOP-LEVEL RATHER THAN PER-DESTINATION because the hold is all-or-nothing by
+	// construction: a held pass plans no destination at all. If destinations ever
+	// start independently of one another this field is the wrong shape and should
+	// move onto DestStatus rather than growing a second meaning here.
+	//
+	// AND IT IS A DISCRIMINATOR, NOT A DIAGNOSIS. Its presence says the engine
+	// chose not to plan; its ABSENCE says only that this particular reason does
+	// not apply, never that a missing process is therefore a fault.
+	DestinationHold *HoldStatus `json:"destinationHold,omitempty"`
+}
+
+// HoldStatus is why the engine is deliberately running no destinations.
+//
+// Two fields rather than one sentence, because they have different readers and
+// different stability. Code is matched by machinery -- the acceptance suite and
+// anything that alerts on this -- so it is a stable identifier that may not
+// change without a deliberate decision. Reason is read by a person and may be
+// reworded freely. Collapsing them means every rewording is a breaking change,
+// and the first draft of this field made exactly that mistake: the suite grepped
+// its prose and a test asserted on one of its words.
+type HoldStatus struct {
+	Code   string `json:"code"`
+	Reason string `json:"reason"`
 }
 
 // procStatus is nil for a process that is not running, which the JSON omits.
@@ -316,7 +339,7 @@ func (e *Engine) Status() Status {
 
 	// Read outside the lock: it is published atomically by reconcileOutputs and
 	// is not part of the coherent snapshot the lock above exists to give.
-	hold, _ := e.destHold.Load().(string)
+	hold, _ := e.destHold.Load().(*HoldStatus)
 
 	st := Status{
 		DestinationHold: hold,

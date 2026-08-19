@@ -54,9 +54,9 @@ func TestStatusSaysWhyEveryDestinationIsUnplanned(t *testing.T) {
 	if err := e.reconcileOutputs(); err != nil {
 		t.Fatalf("reconcileOutputs (measured): %v", err)
 	}
-	if hold := e.Status().DestinationHold; hold != "" {
-		t.Errorf("a normally-planned pass reported a hold reason %q. A reason that "+
-			"is present when nothing is held trains every reader to ignore it.", hold)
+	if hold := e.Status().DestinationHold; hold != nil {
+		t.Errorf("a normally-planned pass reported a hold %+v. A reason that is "+
+			"present when nothing is held trains every reader to ignore it.", *hold)
 	}
 
 	// The ingest restarts: placeholder back, nothing measured. Every destination
@@ -78,14 +78,20 @@ func TestStatusSaysWhyEveryDestinationIsUnplanned(t *testing.T) {
 	}
 
 	hold := e.Status().DestinationHold
-	if hold == "" {
+	if hold == nil {
 		t.Fatal("every destination was held and /status said nothing about it. " +
 			"A reader -- the dashboard, or the acceptance suite -- sees a destination " +
 			"with no process and cannot tell a deliberate hold from a crash.")
 	}
-	if !strings.Contains(hold, "probed") {
-		t.Errorf("the hold reason %q does not name the unmeasured layout, which is "+
-			"the one thing the reader has to know to act on it", hold)
+	// The CODE, not the prose. Asserting on a word in the sentence is what makes
+	// a reworded message a failing build, which is the whole reason the two are
+	// separate fields.
+	if hold.Code != "awaiting-ingest-probe" {
+		t.Errorf("hold code %q, want awaiting-ingest-probe -- this is the identifier "+
+			"the suite and any alerting match on, so it is not free to drift", hold.Code)
+	}
+	if strings.TrimSpace(hold.Reason) == "" {
+		t.Error("the hold carries a code but nothing a person can read")
 	}
 
 	// AND IT CLEARS. A reason that outlives its condition is worse than none:
@@ -97,7 +103,7 @@ func TestStatusSaysWhyEveryDestinationIsUnplanned(t *testing.T) {
 	if err := e.reconcileOutputs(); err != nil {
 		t.Fatalf("reconcileOutputs (re-measured): %v", err)
 	}
-	if hold := e.Status().DestinationHold; hold != "" {
-		t.Errorf("the hold reason survived the layout being measured again: %q", hold)
+	if hold := e.Status().DestinationHold; hold != nil {
+		t.Errorf("the hold survived the layout being measured again: %+v", *hold)
 	}
 }
