@@ -1544,6 +1544,29 @@ jobs:
             for attempt in 1 2 3 4 5; do
               if sudo timeout "$budget" apt-get $APT_OPTS "$@"; then return 0; fi
               echo "apt attempt $attempt failed or stalled; retrying"
+
+              # REPAIR DPKG BEFORE RETRYING, or the retries cannot succeed.
+              #
+              # `timeout` sends SIGTERM to apt-get, and apt-get may be in the
+              # middle of dpkg when it arrives. dpkg then refuses every later
+              # invocation with
+              #
+              #   E: dpkg was interrupted, you must manually run
+              #      'sudo dpkg --configure -a' to correct the problem.
+              #
+              # Measured on acceptance-encoders: attempt 1 was killed during
+              # "Unpacking libdc1394-25", and attempts 2 through 5 each failed
+              # INSTANTLY on that message -- not on a slow mirror. The retry loop
+              # was structurally incapable of succeeding, and the mirror switch
+              # before attempt 4 was equally wasted. Five attempts, none of which
+              # could ever have worked, and the step still reported "failed or
+              # stalled" as though the network were at fault.
+              #
+              # Unconditional and non-fatal: on a clean dpkg state it is a no-op
+              # that costs a fraction of a second, and its own failure must not
+              # mask the apt failure being retried.
+              sudo dpkg --configure -a >/dev/null 2>&1 || true
+
               # Switched once, before the fourth: three attempts is enough to
               # establish that this mirror is not merely unlucky.
               [ "$attempt" = 3 ] && apt_switch_mirror
