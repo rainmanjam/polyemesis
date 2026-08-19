@@ -457,22 +457,12 @@ else
   exit 1
 fi
 
-# --- #398 RTMP ARM -------------------------------------------------------------
-# Every destination this suite has ever created is kind:file. The 48 runs that
-# measured a consumer dying at a seam therefore measured only files, and a file
-# that dies rolls over to a new file. An RTMP destination that dies drops and
-# reconnects to the platform. That is a different severity and it has never been
-# measured. This arm asks only that one question and asserts nothing, so it
-# cannot change what any existing step measures.
+# The RTMP sink starts early; the DESTINATION does not -- see the arm below.
 RTMP_SINK_PORT=1936
 rtmp_sink_loop &
 RTMP_SINK_PID=$!
 sleep 1
-OUT=$(drive addrtmp rtmpdest "rtmp://127.0.0.1:$RTMP_SINK_PORT/live" out 2>&1)
-case "$OUT" in
-  *DEST_OK*) note ">>>RTMP the rtmp destination was created" ;;
-  *) note ">>>RTMP could not create the rtmp destination: $OUT" ;;
-esac
+
 
 step "3. The primary goes on air"
 # Before publishing, not after. The server reporting ready means its HTTP
@@ -489,19 +479,6 @@ else
   exit 1
 fi
 
-# BASELINE HERE, not at creation. A destination gets no process until there is a
-# source to read, so a baseline taken before the primary is on air reads -1 --
-# "no process at all" -- and the arm then refuses to score itself. Measured: the
-# first attempt polled for 40s before step 3 and never saw one.
-# different answer from "0 restarts" -- a fixed sleep that lands early records
-# the absence as if it were the measurement.
-RTMP_BEFORE=-1
-for _ in $(seq 1 40); do
-  RTMP_BEFORE=$(drive restarts rtmpdest | tail -1)
-  [ "$RTMP_BEFORE" != "-1" ] && break
-  sleep 1
-done
-note ">>>RTMP baseline restarts=$RTMP_BEFORE outtime=$(drive outtime rtmpdest | tail -1)ms"
 # Let a few seconds of real primary land in the file before anything is cut.
 # This one IS about elapsed time -- there has to be primary in the recording for
 # the timeline check at step 9 to have anything to find.
@@ -712,21 +689,6 @@ step "9. The output timeline, and what actually played"
 # No destination was ever stopped, so this file was always an unfinalised
 # Matroska, and the duration check below was written around that damage instead
 # of against it.
-# --- #398 RTMP ARM: read BEFORE stopall ----------------------------------------
-# The first version read at the very END of the suite, which is after stopall has
-# stopped every destination -- so it reported -1 ("no process") for one that had
-# run fine all along, and recorded the teardown as the result. Everything this
-# arm asks about has happened by now: all five seams are behind us.
-RTMP_AFTER=$(drive restarts rtmpdest | tail -1)
-note ">>>RTMP after-seams restarts=$RTMP_AFTER outtime=$(drive outtime rtmpdest | tail -1)ms"
-if [ "$RTMP_BEFORE" = "-1" ] || [ "$RTMP_AFTER" = "-1" ]; then
-  note ">>>RTMP VERDICT unmeasured (no process at one of the two reads)"
-elif [ "$RTMP_AFTER" -eq "$RTMP_BEFORE" ]; then
-  note ">>>RTMP VERDICT survived all seams (restarts $RTMP_BEFORE -> $RTMP_AFTER)"
-else
-  note ">>>RTMP VERDICT DROPPED (restarts $RTMP_BEFORE -> $RTMP_AFTER)"
-fi
-
 OUT=$(drive stopall)
 case "$OUT" in *STOPPED*) : ;; *) bad "stop the destinations: $OUT" ;; esac
 sleep 8
@@ -1127,6 +1089,31 @@ EXPECTED_MISMATCH_RESTARTS=0
 # a restarting file destination truncates and reopens its output -- pointed at
 # onair.mkv it would erase the recording step 9 just measured. It is added after
 # those measurements for the same reason.
+# --- #398 RTMP ARM: created HERE, beside mismatch, and that placement is the
+# whole experiment.
+#
+# The first version created this destination back at step 3, alongside onair.
+# Measured, in one run: onair (file, early) saw 0 missing parameter sets and
+# never died; rtmpdest (rtmp, early) likewise 0; mismatch (file, LATE) saw 77
+# and died twice. So the variable that predicts the failure is WHEN A CONSUMER
+# JOINS, not what it writes -- a destination created with the stream sees
+# SPS/PPS immediately, one that joins a programme already running must wait for
+# the next keyframe. The early arm compared file-late against rtmp-early and
+# changed two things at once; it could only ever have returned "survived".
+#
+# Created immediately before mismatch so both join the same programme at the
+# same moment, leaving the transport as the only difference between them.
+OUT=$(drive addrtmp rtmpdest "rtmp://127.0.0.1:$RTMP_SINK_PORT/live" out 2>&1)
+case "$OUT" in
+  *DEST_OK*) note ">>>RTMP created beside mismatch" ;;
+  *) note ">>>RTMP could not create the rtmp destination: $OUT" ;;
+esac
+# NO POLL HERE, deliberately. An earlier version waited up to 40s for this
+# destination's process before creating mismatch -- which handed the RTMP arm up
+# to 40 seconds of extra consumer age and keyframes that mismatch would never
+# see. That is the same confound as creating it at step 3, just smaller. Both
+# baselines are taken together below, beside mis_before.
+
 OUT=$(drive adddest mismatch mismatch.mkv)
 case "$OUT" in *DEST_OK*) : ;; *) bad "add the mismatch destination: $OUT"; exit 1 ;; esac
 publish_geom "$MISMATCH_W" "$MISMATCH_H" "$MISMATCH_FPS"
@@ -1166,6 +1153,12 @@ settle primary 25 120 || note "the mismatched ingest never settled; the count be
 # supervisor.Status. Only the driver's decode struct was missing it.
 mis_t_settled=$(drive outtime mismatch | tail -1)
 mis_before=$(drive restarts mismatch | tail -1)
+# The RTMP arm baselines HERE, in the same breath as mismatch and after the same
+# settle, so the two are measured over the same interval rather than over
+# intervals that differ by however long a poll happened to take.
+RTMP_BEFORE=$(drive restarts rtmpdest | tail -1)
+RTMP_T_BEFORE=$(drive outtime rtmpdest | tail -1)
+note ">>>RTMP baseline restarts=$RTMP_BEFORE outtime=${RTMP_T_BEFORE}ms"
 OUT=$(drive pin playlist)
 case "$OUT" in *PIN_OK*) : ;; *) bad "pin playlist (mismatch): $OUT" ;; esac
 waitfor 1 playlist 40 || note "the mismatched run never reached the playlist; the count below covers less than two cuts"
@@ -1222,6 +1215,28 @@ fi
 # does before measuring onair.mkv, and for the same reason its comment gives:
 # this file was "always an unfinalised Matroska, and the duration check below was
 # written around that damage instead of against it".
+# --- #398 RTMP ARM: the verdict, after the mismatch step ------------------------
+# Read BEFORE the stopall directly below, which stops every destination so the
+# mismatch file can be finalised -- including this one. Both destinations have
+# crossed the same mismatched cuts by now, which is the comparison this arm
+# exists to make. A note, never a check: it must not move a suite used as a gate.
+RTMP_AFTER=$(drive restarts rtmpdest | tail -1)
+RTMP_T_AFTER=$(drive outtime rtmpdest | tail -1)
+note ">>>RTMP after-seams restarts=$RTMP_AFTER outtime=${RTMP_T_AFTER}ms"
+# DELIVERY IS REQUIRED, not just a stable restart counter. A destination whose
+# process is up but sending nothing would otherwise read as "survived" -- the
+# same trap out_time exists to close for the file arm two steps above.
+RTMP_T_DELTA=$(( ${RTMP_T_AFTER:-0} - ${RTMP_T_BEFORE:-0} ))
+if [ "$RTMP_BEFORE" = "-1" ] || [ "$RTMP_AFTER" = "-1" ]; then
+  note ">>>RTMP VERDICT unmeasured (no process at one of the two reads)"
+elif [ "$RTMP_T_DELTA" -lt 5000 ]; then
+  note ">>>RTMP VERDICT unmeasured (only ${RTMP_T_DELTA}ms of media across the cuts; it was not delivering)"
+elif [ "$RTMP_AFTER" -eq "$RTMP_BEFORE" ]; then
+  note ">>>RTMP VERDICT survived all seams (restarts $RTMP_BEFORE -> $RTMP_AFTER)"
+else
+  note ">>>RTMP VERDICT DROPPED (restarts $RTMP_BEFORE -> $RTMP_AFTER)"
+fi
+
 OUT=$(drive stopall)
 case "$OUT" in *STOPPED*) : ;; *) bad "stop the destinations before measuring the mismatch file: $OUT" ;; esac
 sleep 8
