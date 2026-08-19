@@ -241,19 +241,18 @@ waitfor() {
 # which accepts a negative on purpose, so a genuine -1 from the API flows
 # through the validator untouched and is indistinguishable here from the
 # fallback line. Both mean the same thing to this suite and both are waited out.
-# THE DEFAULT IS 90s, AND 30 WAS INDEFENSIBLE AGAINST THIS SUITE'S OWN NUMBERS.
+# 90s IS HEADROOM, NOT A BOUND, and saying so matters more than the number.
 #
 # A destination cannot have a process until the ingest layout has been measured:
-# while it is unmeasured, reconcileOutputs deliberately plans NOTHING, so nothing
-# starts. And settle() below records, as a measurement rather than a guess, that
-# "a newly connected encoder is not stable for about forty seconds". So the old
-# 30s ceiling asked for the answer before it could exist, and a run where the
-# probe landed slowly reported -1 -- which step 6 then compared against and failed
-# on its own precondition rather than on anything the product did.
+# while it is unmeasured, reconcileOutputs deliberately plans nothing. How long
+# that takes is not something this suite can derive -- an earlier draft of this
+# comment justified the number from settle()'s "about forty seconds", which is
+# about SELECTOR STABILITY and has nothing to do with a layout probe. Two
+# unrelated quantities, one of them borrowed to make the other look measured.
 #
-# Measured, from the run that finally carried a payload (#462): the destination
-# was unreported at step 3, present with ZERO restarts by step 5, and wrote a
-# continuous file across all ten seams. It had not died. It had not started yet.
+# So: 90s because it is comfortably more than any observed start, and if a
+# destination has not appeared by then the run says what it saw rather than what
+# it assumes.
 wait_for_dest_process() {
   local secs="${1:-90}" deadline=$(( SECONDS + secs )) line
   while [ "$SECONDS" -lt "$deadline" ]; do
@@ -266,7 +265,9 @@ wait_for_dest_process() {
   done
   # Hand back whatever the last read was. The caller reports it as unmeasured,
   # which is the same verdict as before this helper existed -- the point is that
-  # it now takes 30 seconds of trying to get there rather than one look.
+  # it now spends the whole ceiling trying to get there rather than taking one
+  # look. The ceiling is the caller's argument, so this comment does not name a
+  # number that can drift away from it.
   printf '%s\n' "$line"
   return 1
 }
@@ -474,9 +475,12 @@ sleep 6
 # And this one is about a condition, which the sleep above was quietly being
 # asked to cover as well. See wait_for_dest_process.
 if ! BEFORE=$(wait_for_dest_process 90); then
-  note "the destination never started within 90s -- not a fault of the switch, which"
-  note "has not happened yet. Step 6 measures restarts ACROSS the cut and cannot do"
-  note "that from a baseline of -1, so it will report unmeasured rather than failed."
+  note "no destination process was available at the baseline, after 90s of trying."
+  note "That is NOT the same as 'it never started' -- a teardown removes the process"
+  note "and a recreated destination gets a fresh one whose restart counter begins at"
+  note "zero, so this reading cannot tell the two apart. Step 6 will report what it"
+  note "saw."
+  drive rawstatus > "$WORK/status-at-baseline-timeout.json" 2>/dev/null || true
 fi
 set -- $BEFORE; restarts_before="${4:-0}"
 note "before the cut: $BEFORE"
@@ -525,10 +529,11 @@ if [ "$restarts_before" = "-1" ] && [ "$restarts_after" != "-1" ]; then
   # baseline was taken -- it cannot have restarted across a cut it was not
   # present for. Saying "no destination process was reported" there reads as a
   # death, and this suite's value is that it is believed when it reports one.
-  bad "the destination had not started when the baseline was taken (before=-1, after=$restarts_after)"
-  note "so this is a precondition that did not hold, not a restart: the destination"
-  note "cannot have dropped across a cut it was not yet present for. See the"
-  note "wait_for_dest_process ceiling above."
+  bad "destination process unavailable at baseline (before=-1, after=$restarts_after)"
+  note "The cut cannot be measured from here: a baseline of -1 is not a restart count."
+  note "What it does NOT establish is that the destination never started -- a teardown"
+  note "removes the process and a recreated one counts from zero, so after=0 is"
+  note "consistent with both. Proving which needs a pid or startedAt on both reads."
 elif [ "$restarts_before" = "-1" ] || [ "$restarts_after" = "-1" ]; then
   bad "no destination process was reported; nothing was measured"
   # CAPTURE THE PAYLOAD, not another theory. -1 means the driver found no
@@ -661,9 +666,8 @@ note "with the filler on air: $FILLER_STATUS"
 # restarted and we would not know. The one thing it must not do is claim a
 # restart it did not observe.
 if [[ "$restarts_before" = "-1" ]] && [[ "$restarts_filler" != "-1" ]]; then
-  bad "the destination had not started when the baseline was taken (before=-1, filler=$restarts_filler)"
-  note "same precondition as step 6: nothing can have dropped across a switch it was"
-  note "not present for."
+  bad "destination process unavailable at baseline (before=-1, filler=$restarts_filler)"
+  note "Same limit as step 6: this says the baseline had no process, not why."
 elif [[ "$restarts_filler" = "-1" ]] || [[ "$restarts_before" = "-1" ]]; then
   bad "no destination process was reported across the filler switch; nothing was measured"
   drive rawstatus > "$WORK/status-at-failure-2.json" 2>/dev/null || true

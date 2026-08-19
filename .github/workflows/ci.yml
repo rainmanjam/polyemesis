@@ -1720,5 +1720,6 @@ jobs:
             # discards it -- which is how the one artifact that answers the
             # question has been thrown away on every failing run so far.
             /tmp/polyemesis-acceptance*/status-at-failure-*.json
+            /tmp/polyemesis-acceptance*/status-at-baseline-timeout.json
           if-no-files-found: ignore
           retention-days: 7
