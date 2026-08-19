@@ -65,3 +65,67 @@ func TestFreeUDPWindowSkipsAnOccupiedPort(t *testing.T) {
 		t.Fatalf("base = %d, want a real port", base)
 	}
 }
+
+// TestTheWindowScanWrapsInsteadOfMarchingIntoTheCeiling pins the bug that made
+// internal/engine fail on macOS while passing on Linux.
+//
+// The old scan was `start < from+4096 && start+n < 65535` -- upward only. A probe
+// port near the top of the range made that guard false on the FIRST iteration,
+// so FreeUDPWindow tried not a single bind and reported "no run of 3 free UDP
+// ports" about a machine where all but two were free. Linux's ephemeral range
+// stops at 60999 and never reaches it; macOS runs to 65535 and does.
+//
+// Asserted through windowStarts rather than through FreeUDPWindow because the
+// trigger is the kernel handing out a port within n of the ceiling, which a test
+// cannot ask for.
+func TestTheWindowScanWrapsInsteadOfMarchingIntoTheCeiling(t *testing.T) {
+	// The exact shape that failed: probe at 65533, so from is 65534, asking for
+	// the three contiguous ports internal/engine's allocator needs.
+	starts := windowStarts(65534, 3, 4096)
+	if len(starts) != 4096 {
+		t.Fatalf("got %d start positions from a probe near the ceiling, want 4096: "+
+			"the scan gave up without trying a single bind, which is the bug", len(starts))
+	}
+	for i, s := range starts {
+		if s < 1024 || s+3-1 > 65535 {
+			t.Fatalf("start[%d] = %d puts a 3-port window outside 1024..65535", i, s)
+		}
+	}
+	// It must actually go somewhere usable, not sit on one number.
+	if starts[0] == starts[1] {
+		t.Errorf("the scan repeats %d rather than advancing", starts[0])
+	}
+}
+
+// And the ordinary case must not have been disturbed by the wrap: a probe in the
+// middle of the range still scans consecutively upward from it.
+func TestTheWindowScanIsStillConsecutiveAwayFromTheCeiling(t *testing.T) {
+	starts := windowStarts(40000, 3, 8)
+	for i, want := 0, 40000; i < len(starts); i, want = i+1, want+1 {
+		if starts[i] != want {
+			t.Fatalf("start[%d] = %d, want %d: away from the ceiling the scan is "+
+				"consecutive, and the wrap must not change that", i, starts[i], want)
+		}
+	}
+}
+
+// The two guards, which are the difference between a useful nil and a loop that
+// hands the caller start positions no window can fit inside.
+func TestTheWindowScanRefusesAnImpossibleWidthAndClampsALowProbe(t *testing.T) {
+	// A window wider than the unprivileged range cannot be placed anywhere, and
+	// saying so with nil is better than returning starts the bind loop will
+	// silently fail on 4096 times before reporting the wrong reason.
+	if got := windowStarts(40000, 70000, 8); got != nil {
+		t.Errorf("windowStarts with n wider than the port range returned %d starts, want nil",
+			len(got))
+	}
+
+	// A probe below 1024 must be lifted, or the scan would hand back privileged
+	// ports that bind only as root -- passing for the wrong reason in a container
+	// and failing everywhere else.
+	for i, s := range windowStarts(80, 3, 16) {
+		if s < 1024 {
+			t.Fatalf("start[%d] = %d is privileged; a low probe must be clamped to 1024", i, s)
+		}
+	}
+}

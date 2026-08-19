@@ -100,6 +100,15 @@ func main() {
 		}
 		driverlib.Login(user, pass)
 		addDest(os.Args[3], os.Args[4])
+	// rawstatus prints the status document verbatim, through the SAME
+	// authenticated session every other subcommand uses.
+	//
+	// It exists because the first attempt at capturing this used curl from the
+	// suite, which has no session, and every captured payload read
+	// {"error":"not signed in"} -- a broken instrument reporting confidently.
+	case "rawstatus":
+		driverlib.Login(user, pass)
+		rawStatus()
 	case "restarts":
 		if len(os.Args) < 4 {
 			driverlib.Die("usage: restarts <destination-name>")
@@ -210,8 +219,12 @@ type statusDoc struct {
 		PrimaryLive bool   `json:"primaryLive"`
 	} `json:"failover"`
 	Destinations []struct {
-		Name    string `json:"name"`
-		Process *struct {
+		Name string `json:"name"`
+		// Set while a destination has left the running set but its child has not
+		// been confirmed dead. Decoded so a run can tell a teardown in flight from
+		// a destination that died -- see #462.
+		Transitioning bool `json:"transitioning"`
+		Process       *struct {
 			Restarts int    `json:"restarts"`
 			State    string `json:"state"`
 			// Progress is what the child has actually PRODUCED, and it was on
@@ -236,6 +249,18 @@ type statusDoc struct {
 // suite decodes the failover block and a destination's restart count, and the
 // multistream driver decodes the source's tracks and each destination's
 // compiled routing. The fetch-and-decode underneath both is driverlib.GetJSON.
+// rawStatus prints /status as the server sent it, so a failure can be read
+// rather than inferred. Everything this investigation needs is in there:
+// source.id against the source owning the logged dest:<id>, and each
+// destination's process, enabled, error and transitioning.
+func rawStatus() {
+	code, out := driverlib.Do(http.MethodGet, "/status", nil)
+	if code != http.StatusOK {
+		driverlib.Die(fmt.Sprintf("cannot read status: %d %s", code, out))
+	}
+	fmt.Println(string(out))
+}
+
 func readStatus() statusDoc {
 	var st statusDoc
 	driverlib.GetJSON("/status", "status", &st)

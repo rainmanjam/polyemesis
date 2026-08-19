@@ -587,7 +587,7 @@ func TestNoTwoHeaderRulesSetTheSameHeader(t *testing.T) {
 
 	for name, paths := range setters {
 		// A header set by several DISJOINT path rules is fine -- /fonts/* and
-		// /shots/* both setting Cache-Control never match one request. What is
+		// /_astro/* both setting Cache-Control never match one request. What is
 		// not fine is a rule that also matches everything.
 		hasCatchAll := false
 		for _, p := range paths {

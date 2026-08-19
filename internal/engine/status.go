@@ -48,6 +48,31 @@ type DestStatus struct {
 	// observed, and the reason it has to be said out loud is that Process.State
 	// reads "stopped" on both of Stop's arms and so cannot say it (#209).
 	StopWarning string `json:"stopWarning,omitempty"`
+	// RolledOverTo is the file a file destination is actually writing to, when
+	// that is not the name the operator configured.
+	//
+	// A SEPARATE FIELD FROM Warnings for the same reason StopWarning is separate
+	// from Error: nothing is wrong. The destination is delivering and the
+	// recording is continuing; the configured name simply already held footage,
+	// so the respawn was given a timestamped sibling rather than overwriting it.
+	//
+	// It is said out loud because nothing else says it. The child that stopped
+	// can exit CLEANLY -- FFmpeg 8.1 exits 0 on a demuxer-side failure -- and a
+	// clean exit is logged at Info with no entry in the process log ring, while
+	// LastError stays empty. Before this field the configured filename held a
+	// header and no video, the footage was in a file nobody had been told about,
+	// and the only trace was Process.Restarts moving from 0 to 1.
+	RolledOverTo string `json:"rolledOverTo,omitempty"`
+	// Transitioning is set while a destination has left the running set but its
+	// child has not been confirmed dead. Process is still populated when it is.
+	//
+	// It exists so that "no process" means what it says. Without it, a status
+	// read landing inside a reconcile published a nil Process for a destination
+	// that was still delivering, and every consumer -- the dashboard, the
+	// acceptance suites -- read that as the destination having died (#462).
+	// Reporting the process without this flag would be the opposite lie: a
+	// destination on its way out would look ordinarily live.
+	Transitioning bool `json:"transitioning,omitempty"`
 	// RenditionID is the shared encode this destination reads, nil for
 	// passthrough. RenditionName is its label, empty for passthrough, so the
 	// dashboard can group destinations under the encode they share.
@@ -154,6 +179,52 @@ type Status struct {
 	Loudness []meters.Report `json:"loudness"`
 	// Clips is the rolling capture buffer's state.
 	Clips ClipStatus `json:"clips"`
+	// DestinationHold is why NO destination has a process, when that is a
+	// deliberate decision rather than a fault. Empty whenever destinations are
+	// being planned normally, which is nearly always.
+	//
+	// It exists because this payload could not previously tell three very
+	// different states apart. reconcileOutputs holds every destination while the
+	// ingest layout is unmeasured -- a routing graph compiled against the
+	// placeholder would map tracks that may not exist -- and a held destination
+	// simply has no Process, which is byte-for-byte what a destination that
+	// CRASHED looks like, and what one that was never planned looks like. An
+	// operator reading the dashboard, and the acceptance suite reading /status,
+	// both saw an absence and had to guess at its cause.
+	//
+	// The reason did exist, but only in a settings-save response, via
+	// Engine.LastReload -- so the only way to ask "why is nothing running" was to
+	// save something, which perturbs the thing being asked about. This is the
+	// same answer, readable without changing anything.
+	//
+	// Set from the holdDests decision itself rather than recomputed here: the
+	// predicate has three inputs (measured, the silence tier, and the
+	// unmeasurable fallback) and a second copy of it in the API layer would be
+	// free to drift away from the one that actually decides.
+	//
+	// TOP-LEVEL RATHER THAN PER-DESTINATION because the hold is all-or-nothing by
+	// construction: a held pass plans no destination at all. If destinations ever
+	// start independently of one another this field is the wrong shape and should
+	// move onto DestStatus rather than growing a second meaning here.
+	//
+	// AND IT IS A DISCRIMINATOR, NOT A DIAGNOSIS. Its presence says the engine
+	// chose not to plan; its ABSENCE says only that this particular reason does
+	// not apply, never that a missing process is therefore a fault.
+	DestinationHold *HoldStatus `json:"destinationHold,omitempty"`
+}
+
+// HoldStatus is why the engine is deliberately running no destinations.
+//
+// Two fields rather than one sentence, because they have different readers and
+// different stability. Code is matched by machinery -- the acceptance suite and
+// anything that alerts on this -- so it is a stable identifier that may not
+// change without a deliberate decision. Reason is read by a person and may be
+// reworded freely. Collapsing them means every rewording is a breaking change,
+// and the first draft of this field made exactly that mistake: the suite grepped
+// its prose and a test asserted on one of its words.
+type HoldStatus struct {
+	Code   string `json:"code"`
+	Reason string `json:"reason"`
 }
 
 // procStatus is nil for a process that is not running, which the JSON omits.
@@ -256,16 +327,28 @@ func (e *Engine) Status() Status {
 	for _, d := range e.dests {
 		dests = append(dests, d)
 	}
+	// Snapshotted under the SAME lock as e.dests, so a destination cannot appear
+	// in neither map: stopDestinations moves it from one to the other while
+	// holding e.mu, and this reads both sides of that move at once.
+	retiring := make(map[int64]*destination, len(e.retiring))
+	for id, d := range e.retiring {
+		retiring[id] = d
+	}
 	source := e.sourceInfoLocked()
 	e.mu.RUnlock()
 
+	// Read outside the lock: it is published atomically by reconcileOutputs and
+	// is not part of the coherent snapshot the lock above exists to give.
+	hold, _ := e.destHold.Load().(*HoldStatus)
+
 	st := Status{
-		Source:       source,
-		Relay:        e.hub.Stats(),
-		Renditions:   e.Renditions(),
-		Destinations: []DestStatus{},
-		Loudness:     e.Loudness(),
-		Clips:        e.ClipBuffer(),
+		DestinationHold: hold,
+		Source:          source,
+		Relay:           e.hub.Stats(),
+		Renditions:      e.Renditions(),
+		Destinations:    []DestStatus{},
+		Loudness:        e.Loudness(),
+		Clips:           e.ClipBuffer(),
 	}
 	st.Ingest = procStatus(ingest)
 	st.Recorder = procStatus(recorder)
@@ -308,6 +391,7 @@ func (e *Engine) Status() Status {
 			// stopped is gone from e.dests, so anything hung off `live` below
 			// would be silently absent exactly when the warning is true.
 			ds.StopWarning, _ = e.StopUnreaped(row.ID)
+			ds.RolledOverTo, _ = e.RolledOver(row.ID)
 			// Looked up ONCE. This was two identical linear scans of the same
 			// list with the same argument, per row, on a function that runs per
 			// WebSocket push and per telemetry tick.
@@ -338,6 +422,17 @@ func (e *Engine) Status() Status {
 				ds.Warnings = live.compiled.Warnings
 				ds.Error = live.err
 				ds.Process = procStatus(live.proc)
+			} else if going := retiring[row.ID]; going != nil {
+				// Left the running set, child not yet confirmed dead. Report the
+				// process it still has, and say plainly that it is on its way
+				// out -- the alternative was reporting nothing at all, which
+				// reads as a destination that died.
+				ds.Summary = going.compiled.Summary
+				ds.Tracks = going.compiled.Tracks
+				ds.FilterComplex = going.compiled.FilterComplex
+				ds.Normalization = going.compiled.Normalization
+				ds.Process = procStatus(going.proc)
+				ds.Transitioning = true
 			} else if c, cerr := routing.Compile(row.Profile, e.Source()); cerr == nil {
 				// Not running: still show what it *would* send, so the card is
 				// informative before the stream is ever started.

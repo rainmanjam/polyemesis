@@ -829,7 +829,26 @@ func TestStopReportsNoErrorWhenTheChildExitsOnItsOwn(t *testing.T) {
 	p.Start()
 	waitFor(t, "child to start", func() bool { return p.Status().State == StateRunning })
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// THE BUDGET IS NOT THE ASSERTION HERE, which is the opposite of the 2s in
+	// TestStopKillsAChildThatIgnoresSIGTERM above -- read that comment before
+	// touching this one, because the two look alike and are not.
+	//
+	// What is asserted is that the error is nil. The context exists only so that
+	// a hang fails the test instead of blocking it, and the number therefore has
+	// to sit ABOVE everything stop() is allowed to spend, not near it.
+	//
+	// 5s did not. `done` closes after the child is reaped AND the drain finishes,
+	// and this package's own constants put the permitted worst case at
+	// shutdownGrace + drainGrace = 8s + 2s = 10s. So a loaded runner that merely
+	// delayed the child could produce ErrStopDeadline with nothing wrong at all,
+	// which is what CI reported on macOS and Linux: the test failed at exactly
+	// 5.01s, its whole budget, having asserted nothing about the code.
+	//
+	// waitTimeout (15s) is the package's existing convention for "long enough
+	// that only a real hang reaches it", and it is above the 10s worst case with
+	// room. A genuine hang is still caught -- by this, and by go test's own
+	// timeout behind it.
+	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
 	if err := p.Stop(ctx); err != nil {
 		t.Errorf("Stop on a child that honours SIGTERM returned %v, want nil", err)

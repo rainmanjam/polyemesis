@@ -560,6 +560,21 @@ Three details in that unit are load-bearing:
   a truncated one, and between a clean disconnect and a platform that thinks you
   dropped. Letting systemd kill the whole cgroup immediately cuts a recording off
   mid-write.
+
+  It also does something you only notice when it is missing. polyemesis puts each
+  FFmpeg child in its **own process group**, so that stopping one destination
+  stops its helpers and a Ctrl-C reaches polyemesis rather than killing its
+  children out from under it mid-write. The cost of that isolation is that a
+  polyemesis which is *killed* rather than asked to stop — the OOM killer, a
+  `kill -9`, a cancelled job — signals nothing on the way out, and its encoders
+  keep running, reparented to `init`, still holding the relay ports they were
+  reading. `KillMode=mixed` is what closes that: systemd SIGKILLs the whole cgroup
+  when the unit stops for any reason.
+
+  **So if you run polyemesis outside systemd** — in the foreground while
+  developing, or in a container whose entrypoint is a shell rather than
+  polyemesis itself — nothing reaps those encoders for you. Check with `pgrep -a
+  ffmpeg` after an abrupt exit. Under the shipped unit there is nothing to do.
 - **No `CAP_NET_BIND_SERVICE` by default.** The service runs unprivileged, so it
   cannot bind ports below 1024. With `tls.mode: auto` resolving to `selfsigned`
   that is harmless — you get a warning that `:80` could not be bound for the

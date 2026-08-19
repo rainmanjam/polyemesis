@@ -136,8 +136,15 @@ jobs:
         timeout-minutes: 6
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          # RETRIED, because a mirror that is slow rather than down turns one
+          # unlucky fetch into a red run and a rerun. Three attempts with a
+          # widening pause; the ceiling above still bounds the whole job.
+          for attempt in 1 2 3; do
+            sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg && break
+            echo "apt attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep $(( attempt * 5 ))
+          done
           # THE THREE THINGS THIS SUITE ACTUALLY NEEDS, asserted rather than
           # assumed. A `ffmpeg -version` that prints is not a build that can
           # write the fixture: without libx264 there is no video stream, and

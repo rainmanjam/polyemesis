@@ -1,6 +1,7 @@
 package meters
 
 import (
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"math"
 	"strings"
 	"testing"
@@ -24,7 +25,13 @@ func TestArgsSplicesTheAnalyserOntoTheDestinationGraph(t *testing.T) {
 		{"maps only the metadata stream", "-map [" + analyserOut + "]"},
 		{"discards the samples", "-f null -"},
 		{"keeps stderr a human log", "-loglevel warning"},
-		{"reads the relay with the same overrun policy as every other consumer", "fifo_size=5000"},
+		// DERIVED, NOT A LITERAL. This assertion's point is that the analyser
+		// reads the relay through the SAME builder every other consumer uses,
+		// so pinning the number here made it a second place the number lives --
+		// and raising the shared one broke this test rather than agreeing with
+		// it. ffmpeg.RelayInputURL is the single definition; ask it.
+		{"reads the relay with the same overrun policy as every other consumer",
+			strings.TrimPrefix(ffmpeg.RelayInputURL("x"), "x?")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

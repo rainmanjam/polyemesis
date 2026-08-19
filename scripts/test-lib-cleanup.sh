@@ -357,8 +357,123 @@ else
 	ok "all 14 suites carry the shared trap and call poly_cleanup_exit"
 fi
 
+step "11. A leaked ffmpeg fails the suite, and someone else's does not"
+
+# ATTRIBUTION IS THE POINT, and it is what is asserted here. A bare count of
+# ffmpeg on the host cannot tell this suite's leak from a developer's own
+# transcode or from a sibling suite running in parallel, and a teardown check
+# that goes red for someone else's process is one people learn to ignore.
+#
+# The process list is substituted rather than faked. A copy of a system binary
+# renamed to ffmpeg is the obvious fake and does not work: macOS refuses to
+# execute it at all once the copy has lost its code signature, so the first
+# version of this test asserted nothing on a Mac while appearing to pass.
+# A LIVE process, because the check now waits for the pid to exit before judging
+# it -- a made-up pid settles immediately and correctly reports nothing.
+sleep 60 &
+orphan=$!
+if (poly_ffmpeg_pids() { echo "$orphan"; }
+    POLY_FFMPEG_BASELINE=" "
+    POLY_ORPHAN_SETTLE_TICKS=2
+    poly_report_orphans >/dev/null 2>&1); then
+	bad "an ffmpeg that appeared after the baseline did not fail poly_report_orphans"
+else
+	ok "an ffmpeg that appeared after the baseline fails the check"
+fi
+
+# And the reap is not optional: the process above must be gone now.
+if kill -0 "$orphan" 2>/dev/null; then
+	bad "the orphan survived the teardown that reported it; naming a leak is not clearing it"
+	kill -9 "$orphan" 2>/dev/null
+else
+	ok "the reported orphan was reaped, so the host is left clean"
+fi
+wait "$orphan" 2>/dev/null
+
+sleep 60 &
+mine=$!
+if (poly_ffmpeg_pids() { echo "$mine"; }
+    POLY_FFMPEG_BASELINE=" $mine "
+    POLY_ORPHAN_SETTLE_TICKS=2
+    poly_report_orphans >/dev/null 2>&1); then
+	ok "an ffmpeg that predates the suite is not attributed to it"
+else
+	bad "an ffmpeg present before the suite started was wrongly blamed on it"
+fi
+kill "$mine" 2>/dev/null; wait "$mine" 2>/dev/null
+
+# And the verdict has to REACH the exit status, which is the half a RETURN trap
+# could never do.
+sleep 60 &
+third=$!
+if (poly_ffmpeg_pids() { echo "$third"; }
+    POLY_FFMPEG_BASELINE=" "
+    POLY_ORPHAN_SETTLE_TICKS=2
+    poly_cleanup_exit 0 "" >/dev/null 2>&1); then
+	bad "a suite that leaked an ffmpeg still exited 0"
+else
+	ok "a leaked ffmpeg promotes a green run to red"
+fi
+kill -9 "$third" 2>/dev/null; wait "$third" 2>/dev/null
+
+step "12. The teardown gives polyemesis at least as long as production does"
+
+# THIS PAIR DRIFTED APART AND MANUFACTURED A BUG. poly_stop_server used to allow
+# 15s before escalating to SIGKILL, while the shipped unit allows 45. main.go can
+# spend 20s in httpServer.Shutdown alone and only reaches eng.Stop -- the call
+# that tears destinations down -- after that, so a 15s teardown was killing
+# polyemesis mid-shutdown and orphaning its encoders. acceptance-postprod leaked
+# two on every run because of it.
+#
+# Read from both files rather than asserted as a literal, so raising one and not
+# the other is what fails rather than what ships.
+unit_stop="$(sed -n 's/^TimeoutStopSec=\([0-9]*\).*/\1/p' deploy/polyemesis.service | head -1)"
+loop_ticks="$(sed -n 's/.*for i in $(seq 1 \([0-9]*\)); do.*/\1/p' scripts/lib-cleanup.sh | head -1)"
+if [ -z "$unit_stop" ] || [ -z "$loop_ticks" ]; then
+	bad "could not read TimeoutStopSec ($unit_stop) or the stop loop bound ($loop_ticks); this check is examining nothing"
+else
+	# The loop sleeps 0.5s per tick.
+	grace=$((loop_ticks / 2))
+	if [ "$grace" -lt "$unit_stop" ]; then
+		bad "poly_stop_server escalates to SIGKILL after ${grace}s but the unit allows ${unit_stop}s: teardown kills polyemesis before its own shutdown can finish, orphaning whatever eng.Stop had not reached"
+	else
+		ok "teardown allows ${grace}s, at least the unit's ${unit_stop}s"
+	fi
+fi
+
+step "13. A suite that kills polyemesis on purpose also reaps its children"
+
+# THE REGRESSION THIS EXISTS FOR. acceptance-postprod and acceptance-mqtt both
+# SIGKILL polyemesis deliberately -- one to prove a crashed job is recovered, the
+# other to prove the broker publishes the will message. A SIGKILL gives polyemesis
+# no chance to signal its children, and each child sits in its own process group,
+# so every encoder survives and reparents to init. On a real box systemd's cgroup
+# reaps them; these suites do not run under systemd, so they have to do it
+# themselves or they leave two encoders per run behind.
+#
+# Checked structurally rather than by running a suite: what must not happen is a
+# THIRD suite adding a deliberate kill and not knowing about any of this.
+offenders=""
+for f in scripts/acceptance-*.sh; do
+	if grep -qE '^[[:space:]]*(pkill|kill)[[:space:]]+-9[^|]*polyemesis' "$f" 2>/dev/null; then
+		offenders="$offenders $(basename "$f")"
+	fi
+done
+if [ -n "$offenders" ]; then
+	bad "these suites SIGKILL polyemesis directly instead of via poly_kill_server_uncleanly, so they orphan its encoders:$offenders"
+else
+	ok "no suite SIGKILLs polyemesis without reaping its children"
+fi
+
+users="$(grep -lE 'poly_kill_server_uncleanly' scripts/acceptance-*.sh 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$users" -lt 2 ]; then
+	bad "only $users suite(s) use poly_kill_server_uncleanly; postprod and mqtt both should, so this check is examining nothing"
+else
+	ok "$users suites route their deliberate kill through the reaping helper"
+fi
+
 total=$((pass + fail))
-EXPECTED_CHECKS=17
+EXPECTED_CHECKS=24
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
 	printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

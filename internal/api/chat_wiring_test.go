@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -246,7 +247,26 @@ func TestRefreshKeyTellsKickOperatorsToReconnectRatherThanRetry(t *testing.T) {
 	// route reconciles after it rotates, so an install with no programme is
 	// refused before the platform is ever called and this test would read that
 	// refusal instead of Kick's.
-	s, h, store, sign := engineServer(t, defaultTools(), Options{})
+	// THE 401 IS STUBBED, NOT SOLICITED FROM KICK. Options{} is the zero
+	// oauth.Set, which resolves to the platforms' real hosts -- so this test used
+	// to reach id.kick.com and depend on it answering 401 today. It failed twice
+	// in one afternoon when an S3-fronted edge answered with an AccessDenied
+	// document instead: the status mapping still worked, but the operator-facing
+	// text carried somebody else's XML rather than the word this asserts on.
+	//
+	// What is under test is entirely local -- given an upstream rejection, does
+	// the handler say reconnect rather than retry -- and none of it needs Kick to
+	// be reachable. See ProvidersWith: "A test that replaces the provider set
+	// replaces the thing that makes the HTTP call."
+	kick := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"Unauthenticated."}`))
+	}))
+	t.Cleanup(kick.Close)
+
+	s, h, store, sign := engineServer(t, defaultTools(), Options{
+		Providers: oauth.NewSet(oauth.WithBaseURL(kick.URL)),
+	})
 
 	acctID := connectAccount(t, store, s.box, db.PlatformKick, "kicker")
 	if err := store.PutPlatformCreds(s.box, db.PlatformKick, "cid", "topsecret"); err != nil {

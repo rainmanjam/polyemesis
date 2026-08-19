@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1586,5 +1587,55 @@ func TestDestinationArgsVideoDelaySurvivesTheExpertSplice(t *testing.T) {
 	}
 	if args[off+1] != "setts=pts=PTS+0.200/TB:dts=DTS+0.200/TB" {
 		t.Errorf("-bsf:v = %q, want the 0.200 setts expression", args[off+1])
+	}
+}
+
+// TestTheRelayFIFOIsNotBelowFFmpegsOwnDefault is the guard for how this went
+// wrong the first time.
+//
+// The value was 5000, and the comment beside it called that "~940 KB of slack".
+// The arithmetic was right and the conclusion was backwards: FFmpeg's default is
+// 28672 packets, so the number written to ADD slack was a 5.7x reduction. Nobody
+// re-derived it because it read as deliberate and generous.
+//
+// The default is asserted against the running binary rather than hardcoded here,
+// because a second hardcoded copy of somebody else's default is the same mistake
+// in a new place. A build that does not report a default is skipped rather than
+// guessed at.
+func TestTheRelayFIFOIsNotBelowFFmpegsOwnDefault(t *testing.T) {
+	// needFFmpeg, not a bare LookPath+Skip. testenv.FFmpegBinary turns "this
+	// machine has no ffmpeg" into a FAILURE when POLYEMESIS_REQUIRE_FFMPEG is
+	// armed, which is what stops this check quietly declining to run on the one
+	// machine that matters. A hand-rolled t.Skip here would have been three new
+	// entries in the skip census buying nothing the helper does not already give.
+	bin := needFFmpeg(t, "ffmpeg")[0]
+
+	out, err := exec.Command(bin, "-hide_banner", "-h", "protocol=udp").CombinedOutput()
+	if err != nil {
+		t.Fatalf("ffmpeg -h protocol=udp: %v\n%s", err, out)
+	}
+	// FATAL, not skipped. Every ffmpeg this project supports reports this
+	// default -- verified on 6.1.1 and 8.1.2 -- so not finding it means the
+	// pattern is wrong, which is a defect in this test rather than a property of
+	// the host, and a skip would hide it.
+	m := regexp.MustCompile(`-fifo_size\b[^\n]*\(default (\d+)\)`).FindSubmatch(out)
+	if m == nil {
+		t.Fatalf("no fifo_size default in `ffmpeg -h protocol=udp`; the pattern no longer "+
+			"matches this build's help output:\n%s", out)
+	}
+	def, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		t.Fatalf("parsing the reported default %q: %v", m[1], err)
+	}
+	if relayFIFOPackets < def {
+		t.Errorf("relayFIFOPackets = %d, below ffmpeg's own default of %d. A receive "+
+			"buffer smaller than the default is a restriction, however generous the "+
+			"comment beside it sounds — see the note on relayFIFOPackets.",
+			relayFIFOPackets, def)
+	}
+	// And the value has to actually reach the URL every consumer builds.
+	if got := RelayInputURL("udp://127.0.0.1:21000"); !strings.Contains(got,
+		"fifo_size="+strconv.Itoa(relayFIFOPackets)) {
+		t.Errorf("RelayInputURL = %q, which does not carry fifo_size=%d", got, relayFIFOPackets)
 	}
 }
