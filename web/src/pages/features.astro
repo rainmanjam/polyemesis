@@ -1,6 +1,68 @@
 ---
 import Base from "../layouts/Base.astro";
 import Lightbox from "../components/Lightbox.astro";
+import { Picture, getImage } from "astro:assets";
+import type { ImageMetadata } from "astro";
+
+/* THE SCREENSHOTS MOVED OUT OF public/ TO GET RESPONSIVE VARIANTS AT ALL.
+ *
+ * Astro copies public/ verbatim and processes nothing in it, so an <img src>
+ * pointing there can only ever be the one file every visitor downloads. These
+ * captures are 2880x1800; the figure renders at about 690 CSS px on a wide
+ * screen and 335 on a phone, so the smallest viewport was paying for the
+ * largest image. Nothing about the markup could fix that -- the file had to be
+ * somewhere the build can see it.
+ *
+ * Globbed rather than imported one by one because the section list below is the
+ * source of truth for which captures exist, and a second hand-written list of
+ * imports beside it is a list that drifts.
+ *
+ * MISSING FILES ARE NOW A BUILD FAILURE, and that is the point of shotOf's
+ * throw rather than a fallback. Three of these -- 05-sources, 13-automation and
+ * 10-playout -- were referenced here while living only in docs/media, so the
+ * page had been serving three 404s: a broken image renders as empty space and
+ * says nothing, which is why it survived. Under public/ that was undetectable
+ * at build time. It is not any more. */
+const shotFiles = import.meta.glob<{ default: ImageMetadata }>(
+  "../assets/shots/*.png",
+  { eager: true },
+);
+const shotOf = (name: string): ImageMetadata => {
+  const mod = shotFiles[`../assets/shots/${name}`];
+  if (!mod) {
+    throw new Error(
+      `features.astro references ../assets/shots/${name}, which does not exist. ` +
+        `A screenshot named in the section list must be in src/assets/shots.`,
+    );
+  }
+  return mod.default;
+};
+
+/* WHAT THE BROWSER IS TOLD THE IMAGE WILL BE, which is the half of srcset that
+ * is easy to get wrong. The grid is .wrap (80rem, 1.25rem padding either side)
+ * split 0.85fr/1.15fr with a 2.5rem gap, so the figure column is about 690px
+ * once past the lg breakpoint and full width below it. Quoting a number larger
+ * than the real box would hand every visitor a file bigger than they can show,
+ * which is the bug this whole change exists to remove. */
+const SHOT_SIZES = "(min-width: 1024px) 690px, calc(100vw - 2.5rem)";
+
+/* THE FALLBACK IS WEBP, NOT THE ORIGINAL PNG, and that is a deliberate
+ * narrowing. <picture> falls back only for a browser that understands neither
+ * avif nor webp, and every browser that understands <picture> at all
+ * understands webp -- but the bigger reason is that the PNG fallback measured
+ * WORSE than the file it replaced: re-encoding a 189kB palette-optimised
+ * capture produced 397kB, because the optimisation that made the original small
+ * does not survive a resize. Shipping it would hand the narrowest, oldest
+ * audience a file twice the size of what they got before this change, which is
+ * the opposite of the point. It also keeps ~6MB of unused variants out of the
+ * deployed artefact.
+ *
+ * The candidate widths stop at 1440: 690 CSS px on a 2x display is 1380 device
+ * px, and a variant nothing can select is bytes spent at build time to serve
+ * nobody. The full 2880 is generated separately, for the lightbox, which is the
+ * one place the whole capture is genuinely wanted. */
+const SHOT_WIDTHS = [420, 690, 960, 1440];
+
 
 /* Each section pairs a claim with the screenshot that evidences it. The
  * dashboard capture is deliberately absent: it currently photographs an ingest
@@ -148,6 +210,18 @@ const sections = [
     alt: "polyemesis chat page: merged timeline across platforms with a single send box",
   },
 ];
+
+/* The expanded view is plain <img src> assigned from a data attribute, so it
+ * needs a URL rather than a component. Resolved here, once per distinct
+ * capture, because a section list may name the same screenshot twice -- and it
+ * does: #routing and #matrix share 02-routing.png. */
+const fullShot = new Map<string, string>();
+for (const name of new Set(sections.map((s) => s.shot))) {
+  fullShot.set(
+    name,
+    (await getImage({ src: shotOf(name), format: "webp", width: 2880 })).src,
+  );
+}
 ---
 
 <Base
@@ -233,19 +307,25 @@ const sections = [
             <button
               type="button"
               class="shot-open"
-              data-shot={`/shots/${s.shot}`}
+              data-shot={fullShot.get(s.shot)}
               data-shot-alt={s.alt}
               aria-label={`Expand screenshot: ${s.alt}`}
             >
-              <img
-                src={`/shots/${s.shot}`}
+              {/* <picture> is inline by default, and an inline box in a
+                  block button picks up a line-height gap under it -- which
+                  would show as a hairline between the screenshot and its
+                  border. Blocked explicitly rather than left to inherit. */}
+              <Picture
+                src={shotOf(s.shot)}
+                formats={["avif", "webp"]}
+                fallbackFormat="webp"
+                widths={SHOT_WIDTHS}
+                sizes={SHOT_SIZES}
                 alt={s.alt}
-                width="2880"
-                height="1800"
                 loading="lazy"
                 decoding="async"
                 class="w-full rounded-token border border-line"
-                data-shot-img
+                pictureAttributes={{ class: "block" }}
               />
             </button>
             {/* A CAPTION SAYS WHAT TO NOTICE. None of the six had one, while
