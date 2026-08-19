@@ -473,8 +473,16 @@ case "$OUT" in
   *DEST_OK*) note ">>>RTMP the rtmp destination was created" ;;
   *) note ">>>RTMP could not create the rtmp destination: $OUT" ;;
 esac
-sleep 6
-note ">>>RTMP baseline restarts=$(drive restarts rtmpdest | tail -1) outtime=$(drive outtime rtmpdest | tail -1)ms"
+# POLLED, not slept. -1 means "no destination process at all", which is a
+# different answer from "0 restarts" -- a fixed sleep that lands early records
+# the absence as if it were the measurement.
+RTMP_BEFORE=-1
+for _ in $(seq 1 40); do
+  RTMP_BEFORE=$(drive restarts rtmpdest | tail -1)
+  [ "$RTMP_BEFORE" != "-1" ] && break
+  sleep 1
+done
+note ">>>RTMP baseline restarts=$RTMP_BEFORE outtime=$(drive outtime rtmpdest | tail -1)ms"
 
 step "3. The primary goes on air"
 # Before publishing, not after. The server reporting ready means its HTTP
@@ -700,6 +708,21 @@ step "9. The output timeline, and what actually played"
 # No destination was ever stopped, so this file was always an unfinalised
 # Matroska, and the duration check below was written around that damage instead
 # of against it.
+# --- #398 RTMP ARM: read BEFORE stopall ----------------------------------------
+# The first version read at the very END of the suite, which is after stopall has
+# stopped every destination -- so it reported -1 ("no process") for one that had
+# run fine all along, and recorded the teardown as the result. Everything this
+# arm asks about has happened by now: all five seams are behind us.
+RTMP_AFTER=$(drive restarts rtmpdest | tail -1)
+note ">>>RTMP after-seams restarts=$RTMP_AFTER outtime=$(drive outtime rtmpdest | tail -1)ms"
+if [ "$RTMP_BEFORE" = "-1" ] || [ "$RTMP_AFTER" = "-1" ]; then
+  note ">>>RTMP VERDICT unmeasured (no process at one of the two reads)"
+elif [ "$RTMP_AFTER" -eq "$RTMP_BEFORE" ]; then
+  note ">>>RTMP VERDICT survived all seams (restarts $RTMP_BEFORE -> $RTMP_AFTER)"
+else
+  note ">>>RTMP VERDICT DROPPED (restarts $RTMP_BEFORE -> $RTMP_AFTER)"
+fi
+
 OUT=$(drive stopall)
 case "$OUT" in *STOPPED*) : ;; *) bad "stop the destinations: $OUT" ;; esac
 sleep 8
@@ -1233,33 +1256,6 @@ note "the mismatch recording declares: $(ffprobe -v error -select_streams v \
 
 step "Summary"
 printf "  %d passed, %d failed\n\n" "$pass" "$fail"
-# Fixed-value guard. Several checks live behind an "if the file exists" branch,
-# so a suite that fell over early could otherwise report "all passed" having
-# measured almost nothing.
-#
-# The filler case in steps 7 and 8 added five of these, the sequencing readback
-# in step 9 three more, and the mismatch ratchet in step 10 two; every one of
-# them lives after a `bad ... exit 1` precondition, so a run that could not build
-# the clips or enable the tier has to be told apart from one that measured the
-# case and liked what it saw.
-#
-# COUNTED, not estimated. A floor set below the real count is a floor a
-# silently-skipped check walks straight over, which is the one thing it is here
-# to stop. It is a FLOOR, not an equality: a failure that fires an extra `bad`
-# on a path a clean run never takes only raises the total. If you add or remove
-# a check, change this line in the same commit.
-# 25 rather than 24 since #226 added the switch-count CEILING alongside its
-# floor. The floor alone passed a tier switching 80 times.
-#
-# 27, read off a green run rather than derived. The pinned 25 was two below what
-# a clean run produces, so two checks could have stopped running without this
-# noticing. A floor set from arithmetic drifts away from the suite; one read off
-# a green run does not.
-# --- #398 RTMP ARM: the verdict -----------------------------------------------
-# A NOTE, not a check: this arm is a measurement and must not move the pass/fail
-# of a suite that is used as a gate elsewhere.
-note ">>>RTMP final restarts=$(drive restarts rtmpdest | tail -1) outtime=$(drive outtime rtmpdest | tail -1)ms"
-
 EXPECTED_CHECKS=27
 total=$((pass + fail))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
