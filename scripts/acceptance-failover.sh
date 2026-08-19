@@ -1230,7 +1230,37 @@ fi
 OUT=$(drive stopall)
 case "$OUT" in *STOPPED*) : ;; *) bad "stop the destinations before measuring the mismatch file: $OUT" ;; esac
 sleep 8
-MIS_BYTES=$(wc -c < "$WORK/data/recordings/mismatch.mkv" 2>/dev/null | tr -d ' ')
+# THE CONFIGURED NAME IS NOT NECESSARILY THE FILE.
+#
+# ResolveForWrite never destroys footage: when a destination respawns and the
+# name it is configured with already holds bytes, the new run goes to a
+# TIMESTAMPED SIBLING and the engine says so --
+#
+#   destination: recording continued in a different file
+#   configured=.../mismatch.mkv writing=.../mismatch-20260819-213221.mkv
+#
+# and this step is the one place in the suite where that is ROUTINE rather than
+# exceptional, because it is the case that deliberately EXPECTS restarts.
+#
+# Reading the configured name therefore measured an abandoned 293-byte Matroska
+# header while 10.4 seconds of media sat in the sibling, and the suite reported
+# a delivery failure against a destination that had delivered. Observed on CI,
+# with "restarts across the mismatched cuts: 1 -> 1" printed four lines above
+# the failure -- the evidence was already on screen and the check was not
+# looking at it.
+#
+# So: every file this destination wrote, summed. Summed rather than largest,
+# because after a restart the media is SPLIT across the files and the question
+# this check asks is how much the destination wrote in total.
+mis_files=("$WORK"/data/recordings/mismatch*.mkv)
+MIS_BYTES=$(cat "${mis_files[@]}" 2>/dev/null | wc -c | tr -d ' ')
+MIS_MAIN=$(ls -S "${mis_files[@]}" 2>/dev/null | head -1)
+if [ "${#mis_files[@]}" -gt 1 ]; then
+  note "the destination restarted, so its output is split across ${#mis_files[@]} files:"
+  for f in "${mis_files[@]}"; do
+    note "  $(basename "$f") $(wc -c < "$f" 2>/dev/null | tr -d ' ') bytes"
+  done
+fi
 note "mismatch produced media: settled=${mis_t_settled:--1}ms back=${mis_t_back:--1}ms; file=${MIS_BYTES:-0} bytes"
 if [ "${MIS_BYTES:-0}" -gt 10000 ] 2>/dev/null; then
   ok "the mismatch destination actually wrote its output ($MIS_BYTES bytes)"
@@ -1279,7 +1309,7 @@ else
 fi
 note "the mismatch recording declares: $(ffprobe -v error -select_streams v \
   -show_entries stream=width,height,r_frame_rate -of csv=p=0 \
-  data/recordings/mismatch.mkv 2>/dev/null) -- for content that is 1280x720@60 for half its length"
+  "${MIS_MAIN:-data/recordings/mismatch.mkv}" 2>/dev/null) -- for content that is 1280x720@60 for half its length"
 
 step "Summary"
 printf "  %d passed, %d failed\n\n" "$pass" "$fail"
