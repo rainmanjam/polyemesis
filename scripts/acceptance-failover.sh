@@ -254,8 +254,31 @@ waitfor() {
 # destination has not appeared by then the run says what it saw rather than what
 # it assumes.
 wait_for_dest_process() {
-  local secs="${1:-90}" deadline=$(( SECONDS + secs )) line
+  # Split across three statements rather than one, because
+  #
+  #   local secs="${1:-90}" deadline=$(( SECONDS + secs ))
+  #
+  # is fragile under `set -u`: bash expands the right-hand sides before the
+  # names become visible, so the arithmetic can see `secs` as unbound, and the
+  # function then returns non-zero ON ITS FIRST LINE. Reproduced in isolation on
+  # bash 5.2 (Linux) and 5.3 (macOS) with this exact line.
+  #
+  # HONESTY ABOUT WHAT THIS IS: it is a hardening, NOT the diagnosis. The shipped
+  # script does not actually hit it -- twelve real runs across CI, OVH and a
+  # laptop carry no "unbound variable" anywhere, and the caller gets a real
+  # status line back, which a function that died on line one could not produce.
+  # Something in the surrounding scope evidently defines `secs`, and depending on
+  # that is precisely the fragility worth removing. It is written this way so the
+  # helper cannot start failing when that surrounding scope changes.
+  #
+  # The failure mode it would have is the dangerous kind: a function that dies
+  # immediately and one that polls for ninety seconds return the same exit status
+  # and print the same message, so the wait would silently stop waiting.
+  local secs="${1:-90}"
+  local deadline=$(( SECONDS + secs ))
+  local line started=$SECONDS polls=0
   while [ "$SECONDS" -lt "$deadline" ]; do
+    polls=$(( polls + 1 ))
     line=$(readstatus)
     if [ "$(printf '%s' "$line" | awk '{print $4}')" != "-1" ]; then
       printf '%s\n' "$line"
@@ -263,6 +286,13 @@ wait_for_dest_process() {
     fi
     sleep 1
   done
+  # MEASURED, NOT ASSUMED. The caller used to say "after 90s of trying" because
+  # 90 is what it passed in, which is a statement about the argument rather than
+  # about the run. One readstatus can itself take seconds -- five attempts, each
+  # behind the driver's client timeout -- so the elapsed time and the ceiling are
+  # not the same number, and a wait that ends EARLY and one that ends late are
+  # indistinguishable in a message that only quotes the ceiling.
+  printf '%s %s\n' "$(( SECONDS - started ))" "$polls" > "$WORK/baseline-wait.txt"
   # Hand back whatever the last read was. The caller reports it as unmeasured,
   # which is the same verdict as before this helper existed -- the point is that
   # it now spends the whole ceiling trying to get there rather than taking one
@@ -475,7 +505,16 @@ sleep 6
 # And this one is about a condition, which the sleep above was quietly being
 # asked to cover as well. See wait_for_dest_process.
 if ! BEFORE=$(wait_for_dest_process 90); then
-  note "no destination process was available at the baseline, after 90s of trying."
+  # Guarded with -f rather than relying on 2>/dev/null: the shell reports a
+  # failed REDIRECTION before the redirection is applied, so the error still
+  # reaches the log.
+  waited="?"; npolls="?"
+  if [ -f "$WORK/baseline-wait.txt" ]; then
+    read -r waited npolls < "$WORK/baseline-wait.txt" || { waited="?"; npolls="?"; }
+  fi
+  note "no destination process was available at the baseline. The wait was given 90s"
+  note "and actually spent ${waited}s across ${npolls} polls -- if those differ, the"
+  note "wait is the thing to fix before anything it reports is worth reading."
   note "That is NOT the same as 'it never started' -- a teardown removes the process"
   note "and a recreated destination gets a fresh one whose restart counter begins at"
   note "zero, so this reading cannot tell the two apart. Step 6 will report what it"
