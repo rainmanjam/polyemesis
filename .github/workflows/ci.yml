@@ -1595,6 +1595,7 @@ jobs:
       # missing binary by every one of thirteen suites at once. `make build` and
       # not `go build ./cmd/...`: the suites run the real build.
       - run: make build
+        if: needs.changes.outputs.code == 'true'
 
       - name: ./scripts/${{ matrix.suite }}.sh
         if: needs.changes.outputs.code == 'true'
