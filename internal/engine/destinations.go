@@ -180,12 +180,36 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 		if !keep {
 			toStop = append(toStop, d)
 			delete(e.dests, id)
+			// RECORDED BEFORE THE LOCK IS RELEASED, and that ordering is the
+			// whole point. The entry leaves e.dests here, teardownDest runs
+			// below without the lock, and the child is not asked to stop until
+			// well inside it -- so between this unlock and that stop the process
+			// is alive and belongs to nothing. Status() read that gap and
+			// published a nil Process for a destination that was delivering
+			// (#462). Handing it to retiring keeps it answerable throughout.
+			if d.proc != nil {
+				if e.retiring == nil {
+					e.retiring = map[int64]*destination{}
+				}
+				e.retiring[id] = d
+			}
 		}
 	}
 	e.mu.Unlock()
 
 	for _, d := range toStop {
 		e.teardownDest(d)
+		// AFTER teardown, not before: teardownDest returns once the child has
+		// been asked to stop and its port and subscription released, which is
+		// the first moment nothing is relying on it. A destination that Stop
+		// gave up on -- SIGKILL issued, death unobserved -- is still cleared
+		// here, because the engine has done everything it can and holding the
+		// record forever would report a phantom.
+		if d.row != nil {
+			e.mu.Lock()
+			delete(e.retiring, d.row.ID)
+			e.mu.Unlock()
+		}
 	}
 }
 

@@ -184,6 +184,21 @@ type Engine struct {
 	// so an operator can be told. Neither belongs on the destination struct --
 	// both outlive the process they describe.
 	rolledOver map[int64]string
+	// retiring holds destinations that have left e.dests but whose child has not
+	// been confirmed dead, keyed by destination id and guarded by e.mu with it.
+	//
+	// IT EXISTS BECAUSE Status() COULD OTHERWISE REPORT A LIVE CHILD AS ABSENT.
+	// stopDestinations deletes the entry, releases e.mu, and only then calls
+	// teardownDest -- which does not ask the child to stop until much later. A
+	// status read landing in that window found no destination and published a nil
+	// Process for a destination that was delivering. Measured at 1 run in 6 on a
+	// suite that reads status across a reconcile, where it reads as "the
+	// destination died" (#462).
+	//
+	// A SEPARATE MAP RATHER THAN A FLAG ON destination, because the entry is gone
+	// from e.dests by then -- that is the whole problem -- so there is nothing
+	// left to carry a flag.
+	retiring map[int64]*destination
 
 	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
 	// time a VAAPI rendition actually starts.
@@ -568,6 +583,7 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		rends:      map[int64]*rendition{},
 		loud:       map[int64]*loudnessMon{},
 		rolledOver: map[int64]string{},
+		retiring:   map[int64]*destination{},
 		loudStore:  meters.NewStore(),
 		playProcs:  map[string]*supervisor.Process{},
 		// Promoted fields cannot be set in a composite literal; the placeholder

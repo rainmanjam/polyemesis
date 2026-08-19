@@ -210,8 +210,12 @@ type statusDoc struct {
 		PrimaryLive bool   `json:"primaryLive"`
 	} `json:"failover"`
 	Destinations []struct {
-		Name    string `json:"name"`
-		Process *struct {
+		Name string `json:"name"`
+		// Set while a destination has left the running set but its child has not
+		// been confirmed dead. Decoded so a run can tell a teardown in flight from
+		// a destination that died -- see #462.
+		Transitioning bool `json:"transitioning"`
+		Process       *struct {
 			Restarts int    `json:"restarts"`
 			State    string `json:"state"`
 			// Progress is what the child has actually PRODUCED, and it was on
