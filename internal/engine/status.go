@@ -179,6 +179,52 @@ type Status struct {
 	Loudness []meters.Report `json:"loudness"`
 	// Clips is the rolling capture buffer's state.
 	Clips ClipStatus `json:"clips"`
+	// DestinationHold is why NO destination has a process, when that is a
+	// deliberate decision rather than a fault. Empty whenever destinations are
+	// being planned normally, which is nearly always.
+	//
+	// It exists because this payload could not previously tell three very
+	// different states apart. reconcileOutputs holds every destination while the
+	// ingest layout is unmeasured -- a routing graph compiled against the
+	// placeholder would map tracks that may not exist -- and a held destination
+	// simply has no Process, which is byte-for-byte what a destination that
+	// CRASHED looks like, and what one that was never planned looks like. An
+	// operator reading the dashboard, and the acceptance suite reading /status,
+	// both saw an absence and had to guess at its cause.
+	//
+	// The reason did exist, but only in a settings-save response, via
+	// Engine.LastReload -- so the only way to ask "why is nothing running" was to
+	// save something, which perturbs the thing being asked about. This is the
+	// same answer, readable without changing anything.
+	//
+	// Set from the holdDests decision itself rather than recomputed here: the
+	// predicate has three inputs (measured, the silence tier, and the
+	// unmeasurable fallback) and a second copy of it in the API layer would be
+	// free to drift away from the one that actually decides.
+	//
+	// TOP-LEVEL RATHER THAN PER-DESTINATION because the hold is all-or-nothing by
+	// construction: a held pass plans no destination at all. If destinations ever
+	// start independently of one another this field is the wrong shape and should
+	// move onto DestStatus rather than growing a second meaning here.
+	//
+	// AND IT IS A DISCRIMINATOR, NOT A DIAGNOSIS. Its presence says the engine
+	// chose not to plan; its ABSENCE says only that this particular reason does
+	// not apply, never that a missing process is therefore a fault.
+	DestinationHold *HoldStatus `json:"destinationHold,omitempty"`
+}
+
+// HoldStatus is why the engine is deliberately running no destinations.
+//
+// Two fields rather than one sentence, because they have different readers and
+// different stability. Code is matched by machinery -- the acceptance suite and
+// anything that alerts on this -- so it is a stable identifier that may not
+// change without a deliberate decision. Reason is read by a person and may be
+// reworded freely. Collapsing them means every rewording is a breaking change,
+// and the first draft of this field made exactly that mistake: the suite grepped
+// its prose and a test asserted on one of its words.
+type HoldStatus struct {
+	Code   string `json:"code"`
+	Reason string `json:"reason"`
 }
 
 // procStatus is nil for a process that is not running, which the JSON omits.
@@ -291,13 +337,18 @@ func (e *Engine) Status() Status {
 	source := e.sourceInfoLocked()
 	e.mu.RUnlock()
 
+	// Read outside the lock: it is published atomically by reconcileOutputs and
+	// is not part of the coherent snapshot the lock above exists to give.
+	hold, _ := e.destHold.Load().(*HoldStatus)
+
 	st := Status{
-		Source:       source,
-		Relay:        e.hub.Stats(),
-		Renditions:   e.Renditions(),
-		Destinations: []DestStatus{},
-		Loudness:     e.Loudness(),
-		Clips:        e.ClipBuffer(),
+		DestinationHold: hold,
+		Source:          source,
+		Relay:           e.hub.Stats(),
+		Renditions:      e.Renditions(),
+		Destinations:    []DestStatus{},
+		Loudness:        e.Loudness(),
+		Clips:           e.ClipBuffer(),
 	}
 	st.Ingest = procStatus(ingest)
 	st.Recorder = procStatus(recorder)

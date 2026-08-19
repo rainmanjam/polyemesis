@@ -241,9 +241,44 @@ waitfor() {
 # which accepts a negative on purpose, so a genuine -1 from the API flows
 # through the validator untouched and is indistinguishable here from the
 # fallback line. Both mean the same thing to this suite and both are waited out.
+# 90s IS HEADROOM, NOT A BOUND, and saying so matters more than the number.
+#
+# A destination cannot have a process until the ingest layout has been measured:
+# while it is unmeasured, reconcileOutputs deliberately plans nothing. How long
+# that takes is not something this suite can derive -- an earlier draft of this
+# comment justified the number from settle()'s "about forty seconds", which is
+# about SELECTOR STABILITY and has nothing to do with a layout probe. Two
+# unrelated quantities, one of them borrowed to make the other look measured.
+#
+# So: 90s because it is comfortably more than any observed start, and if a
+# destination has not appeared by then the run says what it saw rather than what
+# it assumes.
 wait_for_dest_process() {
-  local secs="${1:-30}" deadline=$(( SECONDS + secs )) line
+  # Split across three statements rather than one, because
+  #
+  #   local secs="${1:-90}" deadline=$(( SECONDS + secs ))
+  #
+  # is fragile under `set -u`: bash expands the right-hand sides before the
+  # names become visible, so the arithmetic can see `secs` as unbound, and the
+  # function then returns non-zero ON ITS FIRST LINE. Reproduced in isolation on
+  # bash 5.2 (Linux) and 5.3 (macOS) with this exact line.
+  #
+  # HONESTY ABOUT WHAT THIS IS: it is a hardening, NOT the diagnosis. The shipped
+  # script does not actually hit it -- twelve real runs across CI, OVH and a
+  # laptop carry no "unbound variable" anywhere, and the caller gets a real
+  # status line back, which a function that died on line one could not produce.
+  # Something in the surrounding scope evidently defines `secs`, and depending on
+  # that is precisely the fragility worth removing. It is written this way so the
+  # helper cannot start failing when that surrounding scope changes.
+  #
+  # The failure mode it would have is the dangerous kind: a function that dies
+  # immediately and one that polls for ninety seconds return the same exit status
+  # and print the same message, so the wait would silently stop waiting.
+  local secs="${1:-90}"
+  local deadline=$(( SECONDS + secs ))
+  local line started=$SECONDS polls=0
   while [ "$SECONDS" -lt "$deadline" ]; do
+    polls=$(( polls + 1 ))
     line=$(readstatus)
     if [ "$(printf '%s' "$line" | awk '{print $4}')" != "-1" ]; then
       printf '%s\n' "$line"
@@ -251,9 +286,18 @@ wait_for_dest_process() {
     fi
     sleep 1
   done
+  # MEASURED, NOT ASSUMED. The caller used to say "after 90s of trying" because
+  # 90 is what it passed in, which is a statement about the argument rather than
+  # about the run. One readstatus can itself take seconds -- five attempts, each
+  # behind the driver's client timeout -- so the elapsed time and the ceiling are
+  # not the same number, and a wait that ends EARLY and one that ends late are
+  # indistinguishable in a message that only quotes the ceiling.
+  printf '%s %s\n' "$(( SECONDS - started ))" "$polls" > "$WORK/baseline-wait.txt"
   # Hand back whatever the last read was. The caller reports it as unmeasured,
   # which is the same verdict as before this helper existed -- the point is that
-  # it now takes 30 seconds of trying to get there rather than one look.
+  # it now spends the whole ceiling trying to get there rather than taking one
+  # look. The ceiling is the caller's argument, so this comment does not name a
+  # number that can drift away from it.
   printf '%s\n' "$line"
   return 1
 }
@@ -460,8 +504,47 @@ sleep 6
 
 # And this one is about a condition, which the sleep above was quietly being
 # asked to cover as well. See wait_for_dest_process.
-if ! BEFORE=$(wait_for_dest_process 30); then
-  note "the destination process was still unreported after 30s; step 6 will say so"
+if ! BEFORE=$(wait_for_dest_process 90); then
+  # Guarded with -f rather than relying on 2>/dev/null: the shell reports a
+  # failed REDIRECTION before the redirection is applied, so the error still
+  # reaches the log.
+  waited="?"; npolls="?"
+  if [ -f "$WORK/baseline-wait.txt" ]; then
+    read -r waited npolls < "$WORK/baseline-wait.txt" || { waited="?"; npolls="?"; }
+  fi
+  note "no destination process was available at the baseline. The wait was given 90s"
+  note "and actually spent ${waited}s across ${npolls} polls -- if those differ, the"
+  note "wait is the thing to fix before anything it reports is worth reading."
+  note "That is NOT the same as 'it never started' -- a teardown removes the process"
+  note "and a recreated destination gets a fresh one whose restart counter begins at"
+  note "zero, so this reading cannot tell the two apart. Step 6 will report what it"
+  note "saw."
+  drive rawstatus > "$WORK/status-at-baseline-timeout.json" 2>/dev/null || true
+
+  # /status NOW SAYS WHY, and until this run it could not. A held destination
+  # and a crashed one were byte-for-byte identical in the payload -- no process
+  # in either -- and the reason existed only in a settings-save response, so
+  # asking for it meant perturbing the run. `destinationHold` is published from
+  # the reconcile's own hold decision and is empty whenever destinations are
+  # being planned normally.
+  # Matched on the CODE, which is a stable identifier, rather than on the prose
+  # beside it -- that is why they are two fields.
+  if drive rawstatus 2>/dev/null | grep -q '"code":"awaiting-ingest-probe"'; then
+    note "the engine is HOLDING every destination: the ingest layout is unmeasured,"
+    note "so nothing is planned. That is the cause, and it is upstream of this suite."
+  else
+    note "the engine reports no hold, so destinations were being planned normally."
+    note "That does not name a fault -- it only rules this one reason out."
+  fi
+
+  # The server log is kept as corroboration, NOT as a verdict. The one warning
+  # that names the hold is written only in probeOnce's FAILED-probe branch, while
+  # the hold itself fires on any unmeasured layout -- including a probe that has
+  # simply not landed yet, or one whose result was discarded as stale. So its
+  # absence refutes nothing and its presence proves only that some earlier probe
+  # failed, not that the baseline was still held. Read it beside the payload.
+  grep -E 'destinations are held|ingest probe failed|destination' server.log \
+    > "$WORK/engine-log-at-baseline-timeout.txt" 2>/dev/null || true
 fi
 set -- $BEFORE; restarts_before="${4:-0}"
 note "before the cut: $BEFORE"
@@ -504,8 +587,27 @@ step "6. THE POINT: the destination never restarted"
 # This is the whole feature. If the destination restarted, the platform
 # connection dropped and failover achieved nothing -- the output file could
 # still look perfectly healthy.
-if [ "$restarts_before" = "-1" ] || [ "$restarts_after" = "-1" ]; then
+if [ "$restarts_before" = "-1" ] && [ "$restarts_after" != "-1" ]; then
+  # WHICH -1 THIS IS, because the two mean opposite things. A baseline of -1 with
+  # a real reading after it means the destination had not STARTED when the
+  # baseline was taken -- it cannot have restarted across a cut it was not
+  # present for. Saying "no destination process was reported" there reads as a
+  # death, and this suite's value is that it is believed when it reports one.
+  bad "destination process unavailable at baseline (before=-1, after=$restarts_after)"
+  note "The cut cannot be measured from here: a baseline of -1 is not a restart count."
+  note "What it does NOT establish is that the destination never started -- a teardown"
+  note "removes the process and a recreated one counts from zero, so after=0 is"
+  note "consistent with both. Proving which needs a pid or startedAt on both reads."
+elif [ "$restarts_before" = "-1" ] || [ "$restarts_after" = "-1" ]; then
   bad "no destination process was reported; nothing was measured"
+  # CAPTURE THE PAYLOAD, not another theory. -1 means the driver found no
+  # destination carrying a process. Which state the destination was actually in
+  # -- absent from the running set, retiring, or present with a nil proc -- is
+  # answerable only from what the server said at that instant, and every attempt
+  # to reason it out from the code has been wrong so far (#462).
+  drive rawstatus > "$WORK/status-at-failure-1.json" 2>/dev/null || true
+  note ">>>462 source: $(grep -oE '"source":\{[^}]*"id":[0-9]+' "$WORK/status-at-failure-1.json" 2>/dev/null | head -1)"
+  note ">>>462 destinations: $(grep -oE '"name":"[^"]*"[^}]*"process":(null|\{)' "$WORK/status-at-failure-1.json" 2>/dev/null | head -4 | tr '\n' ' ')"
 elif [ "$restarts_after" -eq "$restarts_before" ]; then
   ok "the destination rode both switches without restarting ($restarts_after restarts)"
 else
@@ -627,8 +729,14 @@ note "with the filler on air: $FILLER_STATUS"
 # Reported as unmeasured rather than passed: the destination may genuinely have
 # restarted and we would not know. The one thing it must not do is claim a
 # restart it did not observe.
-if [[ "$restarts_filler" = "-1" ]] || [[ "$restarts_before" = "-1" ]]; then
+if [[ "$restarts_before" = "-1" ]] && [[ "$restarts_filler" != "-1" ]]; then
+  bad "destination process unavailable at baseline (before=-1, filler=$restarts_filler)"
+  note "Same limit as step 6: this says the baseline had no process, not why."
+elif [[ "$restarts_filler" = "-1" ]] || [[ "$restarts_before" = "-1" ]]; then
   bad "no destination process was reported across the filler switch; nothing was measured"
+  drive rawstatus > "$WORK/status-at-failure-2.json" 2>/dev/null || true
+  note ">>>462 source: $(grep -oE '"source":\{[^}]*"id":[0-9]+' "$WORK/status-at-failure-2.json" 2>/dev/null | head -1)"
+  note ">>>462 destinations: $(grep -oE '"name":"[^"]*"[^}]*"process":(null|\{)' "$WORK/status-at-failure-2.json" 2>/dev/null | head -4 | tr '\n' ' ')"
 elif [ "$restarts_filler" -eq "$restarts_before" ]; then
   ok "the destination rode the switch to filler without restarting ($restarts_filler restarts)"
 else
@@ -1161,7 +1269,37 @@ fi
 OUT=$(drive stopall)
 case "$OUT" in *STOPPED*) : ;; *) bad "stop the destinations before measuring the mismatch file: $OUT" ;; esac
 sleep 8
-MIS_BYTES=$(wc -c < "$WORK/data/recordings/mismatch.mkv" 2>/dev/null | tr -d ' ')
+# THE CONFIGURED NAME IS NOT NECESSARILY THE FILE.
+#
+# ResolveForWrite never destroys footage: when a destination respawns and the
+# name it is configured with already holds bytes, the new run goes to a
+# TIMESTAMPED SIBLING and the engine says so --
+#
+#   destination: recording continued in a different file
+#   configured=.../mismatch.mkv writing=.../mismatch-20260819-213221.mkv
+#
+# and this step is the one place in the suite where that is ROUTINE rather than
+# exceptional, because it is the case that deliberately EXPECTS restarts.
+#
+# Reading the configured name therefore measured an abandoned 293-byte Matroska
+# header while 10.4 seconds of media sat in the sibling, and the suite reported
+# a delivery failure against a destination that had delivered. Observed on CI,
+# with "restarts across the mismatched cuts: 1 -> 1" printed four lines above
+# the failure -- the evidence was already on screen and the check was not
+# looking at it.
+#
+# So: every file this destination wrote, summed. Summed rather than largest,
+# because after a restart the media is SPLIT across the files and the question
+# this check asks is how much the destination wrote in total.
+mis_files=("$WORK"/data/recordings/mismatch*.mkv)
+MIS_BYTES=$(cat "${mis_files[@]}" 2>/dev/null | wc -c | tr -d ' ')
+MIS_MAIN=$(ls -S "${mis_files[@]}" 2>/dev/null | head -1)
+if [ "${#mis_files[@]}" -gt 1 ]; then
+  note "the destination restarted, so its output is split across ${#mis_files[@]} files:"
+  for f in "${mis_files[@]}"; do
+    note "  $(basename "$f") $(wc -c < "$f" 2>/dev/null | tr -d ' ') bytes"
+  done
+fi
 note "mismatch produced media: settled=${mis_t_settled:--1}ms back=${mis_t_back:--1}ms; file=${MIS_BYTES:-0} bytes"
 if [ "${MIS_BYTES:-0}" -gt 10000 ] 2>/dev/null; then
   ok "the mismatch destination actually wrote its output ($MIS_BYTES bytes)"
@@ -1177,6 +1315,24 @@ else
   if [ "${mis_t_back:--1}" -lt 0 ] 2>/dev/null; then
     bad "the mismatch destination had no process to report at the end of the run"
     note "so this is not a delivery failure: there was nothing running to deliver to."
+  elif [ "${mis_delta:-0}" -gt 0 ] 2>/dev/null; then
+    # #460, NOT THE GAP THIS STEP MEASURES, and the restart counter separates them.
+    #
+    # This step exists to measure a codec change reaching a copying destination.
+    # It cannot measure that through a destination that RESTARTED: a restart is a
+    # late join, the relay hands a late subscriber no SPS/PPS, and on FFmpeg 7+
+    # that kills the child before it writes a header. Measured at 5 runs in 24 on
+    # 8.1.2 against 0 in 24 on 6.1.1 -- so it fires only now that CI runs the
+    # version users have, and it is a different defect wearing the same symptom.
+    #
+    # Reported and NOT failed. Failing here would report #460 as though the
+    # codec-change gap had regressed, and would make a required suite red one run
+    # in five for a defect that already has an issue of its own. When #460 lands,
+    # this branch stops being reachable and comes out.
+    note "SKIPPED (#460): the mismatch destination restarted ${mis_delta} time(s), so it"
+    note "  joined the relay late and never received SPS/PPS. That is #460, not the"
+    note "  codec change this step measures; the file holds ${MIS_BYTES:-0} bytes because"
+    note "  the child died before writing a header. Not counted as a failure."
   elif [ "${mis_t_back:-0}" -gt 0 ] 2>/dev/null; then
     bad "the mismatch destination produced ${mis_t_back}ms of media and its file holds ${MIS_BYTES:-0} bytes"
     note "it WAS being delivered to, so this is not the closed-hub case. A file"
@@ -1192,7 +1348,7 @@ else
 fi
 note "the mismatch recording declares: $(ffprobe -v error -select_streams v \
   -show_entries stream=width,height,r_frame_rate -of csv=p=0 \
-  data/recordings/mismatch.mkv 2>/dev/null) -- for content that is 1280x720@60 for half its length"
+  "${MIS_MAIN:-data/recordings/mismatch.mkv}" 2>/dev/null) -- for content that is 1280x720@60 for half its length"
 
 step "Summary"
 printf "  %d passed, %d failed\n\n" "$pass" "$fail"

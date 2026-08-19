@@ -76,6 +76,94 @@ func TestAProbeThatIdentifiesNothingCountsTowardGivingUp(t *testing.T) {
 	}
 }
 
+// A PROBE THAT COULD NOT GET A PORT NEVER RAN, AND THAT COUNTS.
+//
+// The third way to measure nothing, and the last one that was both silent and
+// uncounted. Allocate walks the range binding each candidate, so it fails under
+// exactly the conditions that make everything else here fragile: a loaded box
+// with too few free UDP ports.
+//
+// Returning silently made it a PERMANENT, INVISIBLE hold. Destinations wait for
+// a measured layout; the wait ends after probeGiveUp consecutive failures; and a
+// probe that never ran recorded none. The one condition where the box is too
+// busy to probe was the one the exit could not reach, and nothing in the log
+// named it.
+func TestAProbeThatCannotGetAPortCountsTowardGivingUp(t *testing.T) {
+	src := readEngineFile(t, "engine.go")
+	body := funcBody(t, src, "func (e *Engine) probeOnce(ctx context.Context) bool {")
+
+	at := strings.Index(body, "port, err := e.alloc.Allocate()")
+	if at < 0 {
+		t.Fatal("cannot find the port allocation")
+	}
+	branch := body[at:]
+	if end := strings.Index(branch, "\n\t}"); end > 0 {
+		branch = branch[:end]
+	}
+	if !strings.Contains(branch, "e.probeFails.Add(1)") {
+		t.Error("a probe that could not get a relay port does not count as a " +
+			"failure to measure. probeGiveUp is never reached on a box that is " +
+			"too loaded to probe, so every destination stays held indefinitely -- " +
+			"and this path logs nothing, so the log does not say why either")
+	}
+	if !strings.Contains(branch, "e.log.Warn") {
+		t.Error("a probe that could not get a relay port holds every destination " +
+			"and says so nowhere")
+	}
+}
+
+// A PROBE DISCARDED AS STALE MEASURED NOTHING, AND MUST NOT REPORT OTHERWISE.
+//
+// The sibling of the bug above, in the branch nobody re-checked. When the ingest
+// restarts while a probe is reading, the result belongs to a stream that is no
+// longer arriving and is correctly thrown away -- but the counter reset sat
+// ABOVE that return, so throwing the result away still cleared the count.
+//
+// The two conditions compound, which is what makes it an outage rather than a
+// curiosity. A probe takes up to ten seconds, and the window in which an ingest
+// restarts is exactly the window in which an encoder is least stable. On a
+// loaded box every probe can be discarded as stale, each one clearing the very
+// counter that is supposed to end the wait -- so destinations stay held
+// indefinitely, and because this path logs nothing, the log says so nowhere.
+//
+// Asserted on the ORDER rather than through a fake ffprobe, following the
+// identified-nothing test above: the property is positional, and a test that
+// drives it would pin the plumbing instead of the thing that broke.
+func TestAProbeDiscardedAsStaleDoesNotClearTheFailureCount(t *testing.T) {
+	src := readEngineFile(t, "engine.go")
+	body := funcBody(t, src, "func (e *Engine) probeOnce(ctx context.Context) bool {")
+
+	stale := strings.Index(body, "if e.sourceGen != gen {")
+	reset := strings.Index(body, "e.probeFails.Store(0)")
+	if stale < 0 {
+		t.Fatal("cannot find the stale-generation discard")
+	}
+	if reset < 0 {
+		t.Fatal("probeOnce never resets the failure count, so a recovered probe " +
+			"leaves the layout declared unmeasurable for ever")
+	}
+	if reset < stale {
+		t.Error("the failure counter is reset BEFORE the stale-generation return, " +
+			"so a probe whose result is thrown away still reports success to the " +
+			"hold's exit. Every probe discarded as stale then resets the count, " +
+			"probeGiveUp is never reached, and destinations are held with nothing " +
+			"in the log to say why -- the same defect as the identified-nothing " +
+			"branch, in the path that was not re-checked when that one was fixed")
+	}
+
+	// And the discard itself must stay neutral. Counting it would be wrong in
+	// the other direction: a restart is not evidence the layout cannot be read.
+	branch := body[stale:]
+	if end := strings.Index(branch, "\n\t}"); end > 0 {
+		branch = branch[:end]
+	}
+	if strings.Contains(branch, "e.probeFails.Add(1)") {
+		t.Error("a stale discard counts as a failure to measure. Five ingest " +
+			"restarts would then start every destination on a guessed layout " +
+			"without one probe having actually failed")
+	}
+}
+
 // The failure history belongs to a transport. Switching ingest mode must clear
 // it, or five failed RTMP probes start destinations provisionally on the very
 // next reconcile after a switch to SRT -- before one SRT probe has been tried.

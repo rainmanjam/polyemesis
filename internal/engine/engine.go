@@ -376,6 +376,16 @@ type Engine struct {
 	// measured can be told apart from one that has merely not been measured
 	// yet. See probeUnmeasurable and the hold in reconcileOutputs.
 	probeFails atomic.Int64
+	// destHold is why every destination is currently unplanned, or "" when they
+	// are being planned normally. Written by reconcileOutputs from the holdDests
+	// decision, read by Status.
+	//
+	// Atomic rather than under e.mu for the same reason probeFails is: the
+	// decision is made in the middle of reconcileOutputs, which takes and drops
+	// e.mu around the pieces it needs, and reaching for the write lock there to
+	// publish one string would put this on the inside of a lock ordering it has
+	// no business being part of. Nothing reads it together with another field.
+	destHold atomic.Value // *HoldStatus, nil when nothing is held
 
 	levels   ffmpeg.Levels
 	levelsAt time.Time
@@ -2038,6 +2048,25 @@ func (e *Engine) reconcileOutputs() error {
 	// reverts the instant one succeeds.
 	unmeasurable := !measured && e.probeUnmeasurable()
 	holdDests := !measured && silenceSig == "" && !unmeasurable
+	// Published from the decision itself, not recomputed anywhere else, so
+	// /status cannot disagree with the reconcile about why nothing is running.
+	// Cleared on every pass that does not hold, so a stale reason cannot outlive
+	// the condition that produced it.
+	// Worded for an operator watching a dashboard, not for the person who wrote
+	// the hold. "A routing graph compiled against the placeholder would map tracks
+	// that may not exist" is the true reason and belongs in reconcileOutputs'
+	// comment, where it already is; on a card it reads as a fault report about
+	// track mapping, which is not what is happening. What the operator needs is
+	// that this is a normal, transient, pre-stream state and nothing is wrong.
+	var hold *HoldStatus
+	if holdDests {
+		hold = &HoldStatus{
+			Code: "awaiting-ingest-probe",
+			Reason: "Waiting for the first look at the incoming stream. " +
+				"Destinations start once its audio and video tracks are known.",
+		}
+	}
+	e.destHold.Store(hold)
 	switch {
 	case holdDests:
 		e.noteReload("destinations", "all", reloadRestart,
@@ -2786,6 +2815,28 @@ func (e *Engine) probeLoop(ctx context.Context) {
 func (e *Engine) probeOnce(ctx context.Context) bool {
 	port, err := e.alloc.Allocate()
 	if err != nil {
+		// THE THIRD WAY TO MEASURE NOTHING, and it used to be the only one that
+		// said nothing and counted for nothing. Allocate walks the whole range
+		// binding each candidate, so it fails under exactly the conditions that
+		// make everything else here fragile: a box with many children and not
+		// enough free UDP ports.
+		//
+		// Returning silently made that a PERMANENT, INVISIBLE hold. Destinations
+		// are held until a layout is measured; the hold's exit needs
+		// probeGiveUp consecutive failures; and a probe that never ran recorded
+		// no failure. So the one condition where the box is too loaded to probe
+		// was the one condition the exit could not reach.
+		//
+		// Counted and logged like an ffprobe failure, because to the hold they
+		// are the same event: no layout was measured, and the reason it was not
+		// is not something waiting longer will change.
+		if n := e.probeFails.Add(1); !e.probeFailed.Swap(true) {
+			e.log.Warn("no free relay port to probe the ingest; destinations are held until a layout is measured",
+				"err", err, "source", e.sourceID)
+		} else if n == probeGiveUp {
+			e.log.Warn("ingest layout cannot be measured; starting destinations with a runtime downmix instead of their routing matrices",
+				"failures", n, "err", err, "source", e.sourceID)
+		}
 		return false
 	}
 	defer e.alloc.Release(port)
@@ -2853,8 +2904,20 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	}
 	// Reset only once there is a real result to commit. Anything that returns
 	// before this point failed to measure the layout, whatever the reason.
-	e.probeFails.Store(0)
-
+	//
+	// AND THAT INCLUDED A RETURN BELOW THIS LINE, which is why the reset moved.
+	// The stale-generation discard commits nothing -- the stream it measured is
+	// no longer arriving -- but it used to run AFTER the counter had already been
+	// cleared, so a probe that measured nothing reported the same thing to the
+	// hold's exit as one that measured everything. Same shape as the
+	// identified-nothing branch above, whose comment records it being found by
+	// two reviewers; the fix was applied to that branch and not to this one.
+	//
+	// It matters because the two conditions compound. A probe takes up to ten
+	// seconds, and the window where an ingest restarts is exactly the window
+	// where the encoder is least stable -- so on a loaded box every probe can be
+	// discarded as stale, each one resetting the counter that is supposed to end
+	// the wait, and destinations stay held with nothing in the log to say why.
 	src := routing.Source{}
 	for _, a := range res.Audio {
 		src.Tracks = append(src.Tracks, routing.Track{
@@ -2874,9 +2937,18 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 		// what it measured belongs to a stream that is no longer arriving.
 		// Committing it would mark a dead transport's layout `measured` under
 		// the new mode and satisfy the guard permanently.
+		//
+		// The counter is deliberately LEFT ALONE rather than cleared or
+		// incremented. Clearing it is the bug above. Incrementing it would be
+		// wrong too: a restart is not evidence that the layout cannot be read,
+		// and reconcileIngest already resets the count for each new stream on
+		// purpose -- the failures are about THIS stream.
 		e.mu.Unlock()
 		return false
 	}
+	// Committing, so the layout was measured: this is the real result the reset
+	// was always meant to be paired with.
+	e.probeFails.Store(0)
 	e.commitProbe(src, res.Video, e.settings.Ingest.Mode)
 	e.mu.Unlock()
 
