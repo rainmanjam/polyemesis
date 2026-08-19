@@ -108,6 +108,41 @@ poly_stop_server() {
   return 1
 }
 
+# poly_kill_server_uncleanly <port> -- SIGKILL the server the way a crash does,
+# and then reap what a real deployment would have reaped.
+#
+# WHY THE SECOND HALF EXISTS. Two suites kill polyemesis on purpose:
+# acceptance-postprod, to prove a job interrupted by a crash is recovered rather
+# than stranded, and acceptance-mqtt, to prove the broker publishes the will
+# message. A SIGKILL gives polyemesis no chance to signal its children, and each
+# child sits in its own process group, so every encoder it had running survives
+# and reparents to init. That is #448, induced deliberately.
+#
+# On a real box that is not what happens next: the unit is KillMode=mixed, so
+# systemd SIGKILLs the whole cgroup and the encoders go with it. These suites run
+# polyemesis outside systemd, so a crash simulation that stops at the kill is
+# simulating the crash WITHOUT simulating the environment the crash happens in --
+# and it leaves two encoders per run behind for someone else to find.
+#
+# So the children are collected BEFORE the kill, while there is still a parent to
+# ask, and reaped after it. `pgrep -P` rather than a name match, so a publisher
+# the suite is running for its own purposes is not caught up in it.
+poly_kill_server_uncleanly() {
+	local port="$1" pid kid kids=""
+	pid="$(pgrep -f "polyemesis -addr :$port" 2>/dev/null | head -1)"
+	if [ -z "$pid" ]; then
+		return 0
+	fi
+	kids="$(pgrep -P "$pid" 2>/dev/null | tr '\n' ' ')"
+	kill -9 "$pid" 2>/dev/null
+	# SIGKILL, not SIGTERM, because this is standing in for the cgroup kill that
+	# follows a crash -- not for an orderly stop, which is what the suite has just
+	# deliberately denied polyemesis.
+	for kid in $kids; do
+		kill -9 "$kid" 2>/dev/null
+	done
+}
+
 # poly_port_holders prints the PIDs holding a port, or nothing.
 #
 # lsof rather than ss or netstat: it is the one tool present on both the macOS

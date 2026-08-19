@@ -338,7 +338,9 @@ if [ -n "$pid" ]; then
   # the assumption it replaces, and print the same confident `ok`. CI installs
   # lsof for this job (ci.yml:738); a machine without it gets told the check
   # could not be made, rather than told it passed.
-  kill -9 "$pid" 2>/dev/null
+  # Reaps the encoders with the server, as systemd's cgroup would after a crash
+  # on a real box. Without it this step orphans them -- see #448.
+  poly_kill_server_uncleanly "$PORT"
   if ! command -v lsof >/dev/null 2>&1; then
     bad "lsof is missing, so the SIGKILL could not be observed; install it rather than reading the will-message verdict below as a broker result"
   elif poly_free_port "$PORT"; then

@@ -122,7 +122,10 @@ else
   # poly_free_port waits for the port to actually be released and escalates only
   # if it is not, so the claim below is made after the observation rather than
   # before it.
-  pkill -9 -f "polyemesis -addr :$PORT" 2>/dev/null
+  # The children are reaped WITH the server, which is what systemd's cgroup does
+  # after a crash on a real box. Without that this step leaves two encoders behind
+  # on every run -- see poly_kill_server_uncleanly and #448.
+  poly_kill_server_uncleanly "$PORT"
   if poly_free_port "$PORT"; then
     ok "server killed mid-job (SIGKILL, no clean shutdown, no chance to tidy up)"
   else

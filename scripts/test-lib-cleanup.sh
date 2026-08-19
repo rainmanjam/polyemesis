@@ -441,8 +441,39 @@ else
 	fi
 fi
 
+step "13. A suite that kills polyemesis on purpose also reaps its children"
+
+# THE REGRESSION THIS EXISTS FOR. acceptance-postprod and acceptance-mqtt both
+# SIGKILL polyemesis deliberately -- one to prove a crashed job is recovered, the
+# other to prove the broker publishes the will message. A SIGKILL gives polyemesis
+# no chance to signal its children, and each child sits in its own process group,
+# so every encoder survives and reparents to init. On a real box systemd's cgroup
+# reaps them; these suites do not run under systemd, so they have to do it
+# themselves or they leave two encoders per run behind.
+#
+# Checked structurally rather than by running a suite: what must not happen is a
+# THIRD suite adding a deliberate kill and not knowing about any of this.
+offenders=""
+for f in scripts/acceptance-*.sh; do
+	if grep -qE '^[[:space:]]*(pkill|kill)[[:space:]]+-9[^|]*polyemesis' "$f" 2>/dev/null; then
+		offenders="$offenders $(basename "$f")"
+	fi
+done
+if [ -n "$offenders" ]; then
+	bad "these suites SIGKILL polyemesis directly instead of via poly_kill_server_uncleanly, so they orphan its encoders:$offenders"
+else
+	ok "no suite SIGKILLs polyemesis without reaping its children"
+fi
+
+users="$(grep -lE 'poly_kill_server_uncleanly' scripts/acceptance-*.sh 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$users" -lt 2 ]; then
+	bad "only $users suite(s) use poly_kill_server_uncleanly; postprod and mqtt both should, so this check is examining nothing"
+else
+	ok "$users suites route their deliberate kill through the reaping helper"
+fi
+
 total=$((pass + fail))
-EXPECTED_CHECKS=22
+EXPECTED_CHECKS=24
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
 	printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"
