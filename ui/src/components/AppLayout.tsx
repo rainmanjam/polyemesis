@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router";
 
 import { UpdateBanner } from "./UpdateBanner";
 import { TourOffer } from "./Tour";
+import { BrandMark } from "./BrandMark";
 import {
   Activity,
   AudioLines,
@@ -171,10 +172,11 @@ export function AppLayout({
           {mobileOpen ? <X /> : <Menu />}
         </Button>
 
+        {/* No tinted tile behind it: the site sets the mark straight on the
+            background, and the tile was there to give a monochrome glyph
+            something to sit in. The mark carries its own colour. */}
         <div className="flex items-center gap-2">
-          <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/15">
-            <AudioLines className="h-3 w-3 text-primary" />
-          </div>
+          <BrandMark size={18} />
           <span className="text-[13px] font-semibold tracking-tight">polyemesis</span>
         </div>
 
