@@ -511,8 +511,9 @@ if [ "$restarts_before" = "-1" ] || [ "$restarts_after" = "-1" ]; then
   # -- absent from the running set, retiring, or present with a nil proc -- is
   # answerable only from what the server said at that instant, and every attempt
   # to reason it out from the code has been wrong so far (#462).
-  curl -sS "http://127.0.0.1:$PORT/api/v1/status" > "$WORK/status-at-failure-1.json" 2>/dev/null || true
-  note ">>>462 payload captured: $(head -c 400 "$WORK/status-at-failure-1.json" 2>/dev/null)"
+  drive rawstatus > "$WORK/status-at-failure-1.json" 2>/dev/null || true
+  note ">>>462 source: $(grep -oE '"source":\{[^}]*"id":[0-9]+' "$WORK/status-at-failure-1.json" 2>/dev/null | head -1)"
+  note ">>>462 destinations: $(grep -oE '"name":"[^"]*"[^}]*"process":(null|\{)' "$WORK/status-at-failure-1.json" 2>/dev/null | head -4 | tr '\n' ' ')"
 elif [ "$restarts_after" -eq "$restarts_before" ]; then
   ok "the destination rode both switches without restarting ($restarts_after restarts)"
 else
@@ -636,8 +637,9 @@ note "with the filler on air: $FILLER_STATUS"
 # restart it did not observe.
 if [[ "$restarts_filler" = "-1" ]] || [[ "$restarts_before" = "-1" ]]; then
   bad "no destination process was reported across the filler switch; nothing was measured"
-  curl -sS "http://127.0.0.1:$PORT/api/v1/status" > "$WORK/status-at-failure-2.json" 2>/dev/null || true
-  note ">>>462 payload captured: $(head -c 400 "$WORK/status-at-failure-2.json" 2>/dev/null)"
+  drive rawstatus > "$WORK/status-at-failure-2.json" 2>/dev/null || true
+  note ">>>462 source: $(grep -oE '"source":\{[^}]*"id":[0-9]+' "$WORK/status-at-failure-2.json" 2>/dev/null | head -1)"
+  note ">>>462 destinations: $(grep -oE '"name":"[^"]*"[^}]*"process":(null|\{)' "$WORK/status-at-failure-2.json" 2>/dev/null | head -4 | tr '\n' ' ')"
 elif [ "$restarts_filler" -eq "$restarts_before" ]; then
   ok "the destination rode the switch to filler without restarting ($restarts_filler restarts)"
 else
