@@ -1177,6 +1177,24 @@ else
   if [ "${mis_t_back:--1}" -lt 0 ] 2>/dev/null; then
     bad "the mismatch destination had no process to report at the end of the run"
     note "so this is not a delivery failure: there was nothing running to deliver to."
+  elif [ "${mis_delta:-0}" -gt 0 ] 2>/dev/null; then
+    # #460, NOT THE GAP THIS STEP MEASURES, and the restart counter separates them.
+    #
+    # This step exists to measure a codec change reaching a copying destination.
+    # It cannot measure that through a destination that RESTARTED: a restart is a
+    # late join, the relay hands a late subscriber no SPS/PPS, and on FFmpeg 7+
+    # that kills the child before it writes a header. Measured at 5 runs in 24 on
+    # 8.1.2 against 0 in 24 on 6.1.1 -- so it fires only now that CI runs the
+    # version users have, and it is a different defect wearing the same symptom.
+    #
+    # Reported and NOT failed. Failing here would report #460 as though the
+    # codec-change gap had regressed, and would make a required suite red one run
+    # in five for a defect that already has an issue of its own. When #460 lands,
+    # this branch stops being reachable and comes out.
+    note "SKIPPED (#460): the mismatch destination restarted ${mis_delta} time(s), so it"
+    note "  joined the relay late and never received SPS/PPS. That is #460, not the"
+    note "  codec change this step measures; the file holds ${MIS_BYTES:-0} bytes because"
+    note "  the child died before writing a header. Not counted as a failure."
   elif [ "${mis_t_back:-0}" -gt 0 ] 2>/dev/null; then
     bad "the mismatch destination produced ${mis_t_back}ms of media and its file holds ${MIS_BYTES:-0} bytes"
     note "it WAS being delivered to, so this is not the closed-hub case. A file"

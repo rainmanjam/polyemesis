@@ -1475,184 +1475,122 @@ jobs:
         run: |
           echo "::notice title=${{ matrix.suite }} skipped::every changed path was documentation, so this suite could not be affected by it. See the 'which changes' job."
 
+      # MOVED TO THE PINNED 8.1 BUILD the other Linux jobs already cache.
+      #
+      # This was attempted once and reverted, because acceptance-failover went red
+      # on its first run and nobody knew why. Now it is known: the mismatch
+      # destination restarts, joins the relay late, and is handed no SPS/PPS --
+      # #460. Measured at 5 runs in 24 on 8.1.2 against 0 in 24 on 6.1.1, so the
+      # switch does not CAUSE that failure, it stops hiding it. The step that trips
+      # over it now names it and does not fail the suite for it.
+      #
+      # Two things this buys, both of which were the original argument:
+      #
+      #   the suites stop testing an FFmpeg nobody runs. Users get 8.1.2 from the
+      #   Dockerfile pin; CI tested apt's 6.1.1, and a defect fatal on one and
+      #   survivable on the other was invisible here for months. That is how #398
+      #   and #460 reached a release candidate unnoticed.
+      #
+      #   it removes the un-mirrored apt fetch #430 is about -- the largest single
+      #   source of red CI, which retries could not fix because its budget never
+      #   fit its ceiling.
+      - name: Cache FFmpeg
+        if: needs.changes.outputs.code == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ffmpeg-${{ runner.os }}-n8.1-latest-linux64-gpl-8.1-v1
+
       - name: Install FFmpeg
         if: needs.changes.outputs.code == 'true'
-        timeout-minutes: 40
+        timeout-minutes: 8
+        env:
+          FFCACHE: /tmp/ffcache
         run: |
-          # STILL apt's 6.1.1, and that is now a KNOWN GAP rather than an
-          # oversight -- see the issue linked below.
+          # Ubuntu's own package is 6.1.1, and the Docker image ships 8.1.2.
+          # Testing against 6.1.1 meant CI never exercised the FFmpeg users
+          # actually get, and the two differ in ways that matter: 6.1.1 accepts
+          # an 80-channel amerge where 8.1 stops at 64, and 6.1.1 cannot demux
+          # multitrack FLV at all. Pin the same 8.1 line the image uses.
+          set -euo pipefail
+          cd /tmp
+          # -c rather than a heredoc: inside a YAML block the heredoc body and
+          # its terminator are indented, which Python reads as a bad indent and
+          # bash does not accept as a delimiter.
+          # RETRIED, because this is one un-mirrored third-party download and
+          # every Linux job in this file makes it. It has hard-failed two jobs
+          # in one day -- acceptance-postprod and acceptance-pull -- both by
+          # sitting on a stalled connection until the 6-minute ceiling fired.
+          # A stuck mirror is exactly what that ceiling is for, but a single
+          # attempt turns a transient stall into a red job and a manual rerun.
           #
-          # Moving this job to the cached, pinned 8.1 the other jobs use is
-          # correct on both counts it was attempted for: it removes an uncached
-          # third-party fetch that has hit the 6-minute ceiling four times, and
-          # it stops the acceptance suites testing an FFmpeg users never run.
+          # curl rather than urllib: --retry understands the difference between
+          # a connection that failed and one that is merely slow, and
+          # --retry-all-errors covers the 5xx a release CDN returns under load.
+          # The per-attempt --max-time is well inside the step ceiling, so three
+          # attempts still cannot outlast it -- the ceiling keeps its meaning.
+          # A CACHE HIT SKIPS THE DOWNLOAD ENTIRELY, and that is the point.
           #
-          # It was attempted on this branch and REVERTED, because it broke
-          # acceptance-failover on its first run: the mismatch destination, whose
-          # content changes resolution mid-stream, produced 18154ms of media into
-          # a 293-byte file. Two runs green before the switch, two red after. The
-          # pin did exactly what it was added to do -- surfaced something 6.1.1
-          # was hiding -- and that finding deserves its own change rather than a
-          # ride on a website PR.
+          # This artefact failed SEVEN times in one day across Linux and Windows
+          # -- 503s and stalls from the release CDN -- while already wrapped in
+          # `curl --retry 3 --retry-all-errors` AND the three-attempt loop below.
+          # It has retries and still lands red, because a retry re-asks a host
+          # that is refusing. The cache stops asking.
           #
-          # RETRIES AND A PER-ACQUISITION TIMEOUT. apt's default is zero retries
-          # and no per-connection timeout, so one slow mirror connection stalls
-          # the whole acquisition until the step ceiling fires.
-          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=60 -o Acquire::http::ConnectionAttemptDelayMsec=1000"
-
-          # BOUND EACH ATTEMPT WELL INSIDE THE STEP CEILING, then retry the whole
-          # thing. This is the part Acquire::Retries cannot do.
-          #
-          # Acquire::Retries retries a FILE within one apt run, and the observed
-          # failure is not a file erroring -- it is the whole acquisition sitting
-          # on a stalled connection until the 6-minute step ceiling fires and
-          # takes the job with it. Six occurrences now: acceptance-postprod,
-          # acceptance-pull, acceptance-mqtt, acceptance-audio, and today
-          # acceptance-renditions and acceptance-failover together.
-          #
-          # `timeout` turns "stalls for six minutes and kills the job" into
-          # "stalls for 100 seconds and is retried", which fits three attempts
-          # plus the install inside the ceiling with room to spare.
-          #
-          # NOT the cached pinned 8.1 build the other jobs use, though that would
-          # solve this outright. It was tried, and it broke acceptance-failover
-          # -- see the note above and issue #398. Reliability and the version
-          # change are separable, and this is the half that carries no risk.
-          # THE BUDGET HAS TO FIT THE WORK, AND IT NEVER DID. This step failed
-          # 8 of the last 9 times anything failed in this repository, and the
-          # reading that it was "a flaky mirror" was wrong -- see #430. The
-          # install fetches 62.8 MB of archives, and every attempt was bounded at
-          # 100 seconds. That needs ~700 KB/s sustained; a mirror merely under
-          # load cannot manage it, so the timeout was killing a working download
-          # rather than rescuing a stalled one. A first pass at this cut the
-          # bound to 90s, which made it strictly worse.
-          #
-          # So the bound is now per-operation. `update` moves a few megabytes of
-          # indexes and 90s is generous for it; `install` moves 62.8 MB and gets
-          # five minutes. Retrying still helps because apt keeps part-downloaded
-          # archives in /var/cache/apt/archives, so each attempt RESUMES -- the
-          # logs show successive attempts reaching Get:9 rather than restarting.
-          #
-          # Worst case is 5x90 + 5x300 = 1950s plus backoff, which is why the
-          # ceiling is 40 minutes. A step that CAN take forty minutes is not one
-          # that usually does: a healthy install finishes in under a minute, and
-          # the ceiling is only ever reached by a mirror that is failing.
-          #
-          # AND THE MIRROR SWITCH HAS TO EDIT THE FILE THE RUNNER ACTUALLY READS.
-          # GitHub's images configure apt through a Mirrorlist -- the logs show
-          # `Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist` -- so rewriting
-          # sources.list, which is what the first attempt did, changed nothing.
-          #
-          # https, NOT http, and this is not pedantry: the fallback exists to be
-          # used when the primary is failing, so it runs at exactly the moment
-          # nobody is watching. Fetching packages CI is about to execute over
-          # plaintext is the hole githubactions:S6506 exists for, and the curl
-          # block above already carries a comment about the same rule catching
-          # the same mistake in its own copy. archive.ubuntu.com serves https,
-          # and apt on noble speaks it without apt-transport-https.
-          apt_switch_mirror() {
-            echo "switching to the Ubuntu mirror pool for the remaining attempts"
-            # The mirrorlist is what the runner reads; sources.list is a fallback
-            # for images that do not use one.
-            if [ -f /etc/apt/apt-mirrors.txt ]; then
-              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\n' \
-                | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
-            fi
-            for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
-                     /etc/apt/sources.list.d/*.sources; do
-              [ -f "$f" ] || continue
-              sudo sed -i -E \
-                -e 's|https?://[a-z0-9.-]*archive\.ubuntu\.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
-                "$f"
+          # Same treatment the Playwright browser got: a pinned artefact need not
+          # be fetched on every run after the first.
+          if [ -x "$FFCACHE/ffmpeg" ] && [ -x "$FFCACHE/ffprobe" ]; then
+            echo "ffmpeg restored from cache"
+          else
+            for attempt in 1 2 3; do
+              # --proto/--proto-redir pin the whole exchange to https. -L
+              # follows redirects, and without these curl will happily follow an
+              # https -> http hop and fetch the binary CI is about to run over
+              # plaintext. SonarCloud githubactions:S6506 flagged the copy of
+              # this block added for the acceptance job; the other two had the
+              # same hole and are fixed here too, because leaving a known-bad
+              # copy beside a fixed one is how the fix gets reverted later by
+              # someone copying the wrong neighbour.
+              if curl -fsSL --proto '=https' --proto-redir '=https' \
+                   --retry 3 --retry-all-errors --retry-delay 5 \
+                   --connect-timeout 20 --max-time 90 \
+                   -o /tmp/ff.tar.xz \
+                   "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"; then
+                break
+              fi
+              echo "ffmpeg download attempt $attempt failed"
+              [ "$attempt" = 3 ] && exit 1
+              sleep 5
             done
-            sudo timeout 90 apt-get $APT_OPTS update -qq || true
-          }
-
-          # apt_try <seconds> <apt-get args...>
-          apt_try() {
-            local budget="$1"; shift
-            for attempt in 1 2 3 4 5; do
-              if sudo timeout "$budget" apt-get $APT_OPTS "$@"; then return 0; fi
-              echo "apt attempt $attempt failed or stalled; retrying"
-
-              # REPAIR DPKG BEFORE RETRYING, or the retries cannot succeed.
-              #
-              # `timeout` sends SIGTERM to apt-get, and apt-get may be in the
-              # middle of dpkg when it arrives. dpkg then refuses every later
-              # invocation with
-              #
-              #   E: dpkg was interrupted, you must manually run
-              #      'sudo dpkg --configure -a' to correct the problem.
-              #
-              # Measured on acceptance-encoders: attempt 1 was killed during
-              # "Unpacking libdc1394-25", and attempts 2 through 5 each failed
-              # INSTANTLY on that message -- not on a slow mirror. The retry loop
-              # was structurally incapable of succeeding, and the mirror switch
-              # before attempt 4 was equally wasted. Five attempts, none of which
-              # could ever have worked, and the step still reported "failed or
-              # stalled" as though the network were at fault.
-              #
-              # Unconditional and non-fatal: on a clean dpkg state it is a no-op
-              # that costs a fraction of a second, and its own failure must not
-              # mask the apt failure being retried.
-              sudo dpkg --configure -a >/dev/null 2>&1 || true
-
-              # Switched once, before the fourth: three attempts is enough to
-              # establish that this mirror is not merely unlucky.
-              [ "$attempt" = 3 ] && apt_switch_mirror
-              # Backoff, because an overloaded mirror is likelier to answer in
-              # twenty seconds than in five.
-              sleep $(( attempt * 5 ))
-            done
-            return 1
-          }
-          apt_try 90 update -qq
-          # lsof as well: three suites read the engine's relay port out of it
-          # to measure the right socket, and they fail obscurely without it.
-          apt_try 300 install -y --no-install-recommends ffmpeg lsof
+            mkdir -p ffbuild && tar xf ff.tar.xz --strip-components=1 -C ffbuild
+            mkdir -p "$FFCACHE"
+            cp ffbuild/bin/ffmpeg ffbuild/bin/ffprobe "$FFCACHE/"
+          fi
+          sudo install -m 0755 "$FFCACHE/ffmpeg"  /usr/local/bin/ffmpeg
+          sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
+          # Fail loudly rather than silently testing a build without SRT.
+          ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
           ffmpeg -hide_banner -version | head -1
-          # Not fatal: none of these suites needs SRT (the container ones do,
-          # and they run elsewhere). Logged because a suite behaving oddly is
-          # much easier to read with the build's capabilities in front of you.
-          ffmpeg -hide_banner -protocols | tr " " "\n" | grep -qx srt \
-            && echo "libsrt: yes" || echo "libsrt: no"
+          # ffprobe TOO, and not because the install could half-succeed. #187:
+          # every test that proves the upload probe gate works starts by looking
+          # ffprobe up and skipping if it is absent, so an ffprobe that stopped
+          # arriving would have taken the whole gate's verification with it while
+          # this step still printed an ffmpeg version and passed. The one binary
+          # that was verified was the one the skips did not turn on.
+          ffprobe -hide_banner -version | head -1
 
-      # The suites run the real binary with the UI embedded, so it has to be
-      # the real build rather than `go build ./cmd/...`.
-      - run: make build
-        if: needs.changes.outputs.code == 'true'
-
-      # THE THREE DEADLINES, AND WHY THEY ARE IN THIS ORDER.
+      # The gate is "gofmt named no files", and it has to rest on gofmt having
+      # RUN. It used to be `gofmt -l ./cmd ./internal | tee /tmp/fmt && test !
+      # -s /tmp/fmt`, and the default shell for a `run:` block is `bash -e {0}`
+      # -- no pipefail, unlike an explicit `shell: bash`. So the pipeline's
+      # status was tee's, gofmt's was discarded, and a gofmt that died on a
+      # parse error wrote nothing to /tmp/fmt and left `test ! -s` to report
+      # the tree as correctly formatted. Every way of failing to check produced
+      # the same green as checking and finding nothing.
       #
-      # There are three things that can stop a stuck suite: lib-watchdog.sh's
-      # own budget, this step timeout, and the job's timeout-minutes: 20. Only
-      # the first produces a useful answer -- it prints the step it was in and
-      # the tail of server.log before it kills anything. So the watchdog has to
-      # fire FIRST, and the other two exist only for the case where it cannot.
-      #
-      # It could not, and that is the bug found while measuring #94.
-      # lib-watchdog.sh justifies its 900s as "against ci.yml's
-      # timeout-minutes: 20, leaving five minutes for the report". That
-      # arithmetic quietly assumes the suite starts when the job does. It does
-      # not: checkout, setup-go, setup-node, apt and `make build` run first,
-      # and the watchdog's clock only starts at `poly_watchdog_arm`. Measured
-      # over the successful acceptance jobs in the last dozen runs, setup is
-      # 58-102s -- so the watchdog would fire at 16-17 minutes of job time, and
-      # against an apt that is merely slow rather than hung it could not fire
-      # before the ceiling at all.
-      #
-      # POLY_WATCHDOG_SECS is set on the job below to 600 instead. Measured
-      # over the same runs, the slowest suite step that ever PASSED was
-      # acceptance-failover at 206s, and most are 10-60s. 600 is ~3x the
-      # slowest real run and now fits inside the ceiling with room for the
-      # report and the teardown trap whatever setup did.
-      #
-      # This step timeout sits ABOVE the watchdog on purpose. Set equal to it
-      # the two would race and the step timeout would win, killing the suite
-      # before it could say what it was waiting for -- which is the failure
-      # this whole change exists to stop. 12 minutes is the backstop for a
-      # watchdog that itself wedges, and it still leaves the always() upload
-      # below its chance to run, which a job-level cancel does not.
+      # A command substitution under set -e instead: gofmt's own exit status
+      # now fails the step, and the emptiness of its output is a separate
+      # question asked afterwards.
       - name: ./scripts/${{ matrix.suite }}.sh
         if: needs.changes.outputs.code == 'true'
         timeout-minutes: 12
