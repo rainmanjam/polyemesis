@@ -76,6 +76,42 @@ func TestAProbeThatIdentifiesNothingCountsTowardGivingUp(t *testing.T) {
 	}
 }
 
+// A PROBE THAT COULD NOT GET A PORT NEVER RAN, AND THAT COUNTS.
+//
+// The third way to measure nothing, and the last one that was both silent and
+// uncounted. Allocate walks the range binding each candidate, so it fails under
+// exactly the conditions that make everything else here fragile: a loaded box
+// with too few free UDP ports.
+//
+// Returning silently made it a PERMANENT, INVISIBLE hold. Destinations wait for
+// a measured layout; the wait ends after probeGiveUp consecutive failures; and a
+// probe that never ran recorded none. The one condition where the box is too
+// busy to probe was the one the exit could not reach, and nothing in the log
+// named it.
+func TestAProbeThatCannotGetAPortCountsTowardGivingUp(t *testing.T) {
+	src := readEngineFile(t, "engine.go")
+	body := funcBody(t, src, "func (e *Engine) probeOnce(ctx context.Context) bool {")
+
+	at := strings.Index(body, "port, err := e.alloc.Allocate()")
+	if at < 0 {
+		t.Fatal("cannot find the port allocation")
+	}
+	branch := body[at:]
+	if end := strings.Index(branch, "\n\t}"); end > 0 {
+		branch = branch[:end]
+	}
+	if !strings.Contains(branch, "e.probeFails.Add(1)") {
+		t.Error("a probe that could not get a relay port does not count as a " +
+			"failure to measure. probeGiveUp is never reached on a box that is " +
+			"too loaded to probe, so every destination stays held indefinitely -- " +
+			"and this path logs nothing, so the log does not say why either")
+	}
+	if !strings.Contains(branch, "e.log.Warn") {
+		t.Error("a probe that could not get a relay port holds every destination " +
+			"and says so nowhere")
+	}
+}
+
 // A PROBE DISCARDED AS STALE MEASURED NOTHING, AND MUST NOT REPORT OTHERWISE.
 //
 // The sibling of the bug above, in the branch nobody re-checked. When the ingest

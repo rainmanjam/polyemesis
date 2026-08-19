@@ -2815,6 +2815,28 @@ func (e *Engine) probeLoop(ctx context.Context) {
 func (e *Engine) probeOnce(ctx context.Context) bool {
 	port, err := e.alloc.Allocate()
 	if err != nil {
+		// THE THIRD WAY TO MEASURE NOTHING, and it used to be the only one that
+		// said nothing and counted for nothing. Allocate walks the whole range
+		// binding each candidate, so it fails under exactly the conditions that
+		// make everything else here fragile: a box with many children and not
+		// enough free UDP ports.
+		//
+		// Returning silently made that a PERMANENT, INVISIBLE hold. Destinations
+		// are held until a layout is measured; the hold's exit needs
+		// probeGiveUp consecutive failures; and a probe that never ran recorded
+		// no failure. So the one condition where the box is too loaded to probe
+		// was the one condition the exit could not reach.
+		//
+		// Counted and logged like an ffprobe failure, because to the hold they
+		// are the same event: no layout was measured, and the reason it was not
+		// is not something waiting longer will change.
+		if n := e.probeFails.Add(1); !e.probeFailed.Swap(true) {
+			e.log.Warn("no free relay port to probe the ingest; destinations are held until a layout is measured",
+				"err", err, "source", e.sourceID)
+		} else if n == probeGiveUp {
+			e.log.Warn("ingest layout cannot be measured; starting destinations with a runtime downmix instead of their routing matrices",
+				"failures", n, "err", err, "source", e.sourceID)
+		}
 		return false
 	}
 	defer e.alloc.Release(port)
