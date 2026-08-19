@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1586,5 +1587,47 @@ func TestDestinationArgsVideoDelaySurvivesTheExpertSplice(t *testing.T) {
 	}
 	if args[off+1] != "setts=pts=PTS+0.200/TB:dts=DTS+0.200/TB" {
 		t.Errorf("-bsf:v = %q, want the 0.200 setts expression", args[off+1])
+	}
+}
+
+// TestTheRelayFIFOIsNotBelowFFmpegsOwnDefault is the guard for how this went
+// wrong the first time.
+//
+// The value was 5000, and the comment beside it called that "~940 KB of slack".
+// The arithmetic was right and the conclusion was backwards: FFmpeg's default is
+// 28672 packets, so the number written to ADD slack was a 5.7x reduction. Nobody
+// re-derived it because it read as deliberate and generous.
+//
+// The default is asserted against the running binary rather than hardcoded here,
+// because a second hardcoded copy of somebody else's default is the same mistake
+// in a new place. A build that does not report a default is skipped rather than
+// guessed at.
+func TestTheRelayFIFOIsNotBelowFFmpegsOwnDefault(t *testing.T) {
+	bin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skipf("no ffmpeg to ask: %v", err)
+	}
+	out, err := exec.Command(bin, "-hide_banner", "-h", "protocol=udp").CombinedOutput()
+	if err != nil {
+		t.Skipf("ffmpeg -h protocol=udp: %v", err)
+	}
+	m := regexp.MustCompile(`-fifo_size\b[^\n]*\(default (\d+)\)`).FindSubmatch(out)
+	if m == nil {
+		t.Skip("this ffmpeg does not report a fifo_size default; nothing to compare against")
+	}
+	def, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		t.Fatalf("parsing the reported default %q: %v", m[1], err)
+	}
+	if relayFIFOPackets < def {
+		t.Errorf("relayFIFOPackets = %d, below ffmpeg's own default of %d. A receive "+
+			"buffer smaller than the default is a restriction, however generous the "+
+			"comment beside it sounds — see the note on relayFIFOPackets.",
+			relayFIFOPackets, def)
+	}
+	// And the value has to actually reach the URL every consumer builds.
+	if got := RelayInputURL("udp://127.0.0.1:21000"); !strings.Contains(got,
+		"fifo_size="+strconv.Itoa(relayFIFOPackets)) {
+		t.Errorf("RelayInputURL = %q, which does not carry fifo_size=%d", got, relayFIFOPackets)
 	}
 }
