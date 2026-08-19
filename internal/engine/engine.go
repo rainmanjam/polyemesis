@@ -3058,19 +3058,36 @@ func (e *Engine) loudnessWanted(s db.Settings) map[int64]loudnessPlan {
 	}
 	out := make(map[int64]loudnessPlan, len(e.dests))
 	for id, d := range e.dests {
-		if d.proc == nil || d.hub == nil || d.err != "" || d.compiled.FilterComplex == "" {
-			continue
-		}
-		t := meters.TargetFor(d.row.Profile.Loudness,
-			routing.PlatformFor(string(d.row.Platform), string(d.row.Kind)))
-		out[id] = loudnessPlan{
-			id: id, name: d.row.Name, hub: d.hub, compiled: d.compiled, target: t,
-			// d.spec already hashes the graph and the upstream, so this adds
-			// only what the analyser cares about that the destination does not.
-			sig: hashStrings([]string{d.spec, t.Sig()}),
+		if p, ok := loudnessPlanFor(id, d); ok {
+			out[id] = p
 		}
 	}
 	return out
+}
+
+// loudnessPlanFor derives one destination's analyser plan, or reports that this
+// destination earns none.
+//
+// SEPARATED OUT SO THE PREDICATE CAN BE ASKED TWICE. It is evaluated once when a
+// reconcile decides what it wants, and again in startLoudness under the lock that
+// publishes the monitor -- because those are two different moments and the
+// destination can be deleted in between. Inlining it in loudnessWanted, which is
+// where it used to live, made the second check impossible to write without
+// duplicating the first and letting the two drift.
+//
+// Pure in d, and takes no lock: both callers already hold one.
+func loudnessPlanFor(id int64, d *destination) (loudnessPlan, bool) {
+	if d == nil || d.proc == nil || d.hub == nil || d.err != "" || d.compiled.FilterComplex == "" {
+		return loudnessPlan{}, false
+	}
+	t := meters.TargetFor(d.row.Profile.Loudness,
+		routing.PlatformFor(string(d.row.Platform), string(d.row.Kind)))
+	return loudnessPlan{
+		id: id, name: d.row.Name, hub: d.hub, compiled: d.compiled, target: t,
+		// d.spec already hashes the graph and the upstream, so this adds
+		// only what the analyser cares about that the destination does not.
+		sig: hashStrings([]string{d.spec, t.Sig()}),
+	}, true
 }
 
 // reconcileLoudness starts, stops and cycles the analysers to match.
@@ -3164,7 +3181,23 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 	// Shutdown may have run since this reconcile started; publishing under the
 	// same lock Stop collects processes with is what keeps a late start from
 	// becoming an orphan holding a UDP port.
-	if e.stopped {
+	//
+	// AND THE DESTINATION MAY HAVE GONE, which is the same hazard by a different
+	// route and was not covered. This guard read `if e.stopped` alone, so a
+	// reconcile that computed its wanted-set before a destination was deleted and
+	// arrived here after it published a monitor for a destination that no longer
+	// existed -- holding a relay port, subscribed to a hub about to be closed
+	// under it, and receiving nothing forever. Measured: adding then deleting one
+	// destination reliably left exactly one of these behind (#453), and the
+	// comment above already described the failure without covering this path to
+	// it.
+	//
+	// Re-asking loudnessPlanFor rather than testing `e.dests[p.id] != nil` is
+	// deliberate: a destination that was deleted and re-created, or respecced,
+	// is present under the same id but is not the thing this plan was made for.
+	// The signature is what distinguishes them.
+	cur, want := loudnessPlanFor(p.id, e.dests[p.id])
+	if e.stopped || !want || cur.sig != p.sig {
 		e.mu.Unlock()
 		p.hub.Unsubscribe(subName)
 		e.alloc.Release(port)

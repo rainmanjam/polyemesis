@@ -756,14 +756,35 @@ func TestSweepPreviewStopsAnIdleEncoderAndKeepsAWatchedOne(t *testing.T) {
 
 // -------------------------------------------------------------------- loudness
 
-func lifePlan(t *testing.T, hub *relay.Hub) loudnessPlan {
+// lifePlan installs the destination the plan is FOR and then derives the plan
+// from it, rather than hand-writing a plan with a literal signature.
+//
+// It used to do the latter, which built a state that cannot occur: a plan for
+// destination 7 while the engine held no destination 7 at all. startLoudness now
+// re-checks that the destination is still there and still matches before it
+// publishes -- the #453 guard -- so a plan with no destination behind it is
+// refused, correctly, and the fixture had to stop constructing one.
+func lifePlan(t *testing.T, e *Engine, hub *relay.Hub) loudnessPlan {
 	t.Helper()
-	return loudnessPlan{
-		id: 7, name: "yt", hub: hub,
+	d := &destination{
+		row:      &db.Destination{ID: 7, Name: "yt", Kind: db.DestRTMP, Platform: db.PlatformYouTube},
+		proc:     supervisor.New(slog.New(slog.NewTextHandler(io.Discard, nil)), supervisor.Spec{Name: "dest:7", Bin: "true"}),
+		hub:      hub,
 		compiled: routing.Result{FilterComplex: "[0:a:0]anull[aout]", OutLabel: routing.OutLabel},
-		target:   meters.Target{Source: meters.TargetPlatform, LUFS: routing.LUFSStreaming},
-		sig:      "loud-sig",
+		spec:     "life-spec",
 	}
+	e.mu.Lock()
+	if e.dests == nil {
+		e.dests = map[int64]*destination{}
+	}
+	e.dests[7] = d
+	e.mu.Unlock()
+
+	p, ok := loudnessPlanFor(7, d)
+	if !ok {
+		t.Fatal("fixture: this destination must earn an analyser or every test below proves nothing")
+	}
+	return p
 }
 
 // A meter that cannot run must never read as a destination that is compliant.
@@ -773,7 +794,7 @@ func TestALoudnessMonitorThatCannotGetAPortIsReportedAsFailed(t *testing.T) {
 	e.alloc = emptyAllocator(t)
 	hub := lifeHub(t)
 
-	e.startLoudness(lifePlan(t, hub))
+	e.startLoudness(lifePlan(t, e, hub))
 
 	rep, ok := e.loudStore.Get(7)
 	if !ok {
@@ -795,7 +816,7 @@ func TestALoudnessMonitorStartingIntoAShutdownEngineLeavesNoOrphan(t *testing.T)
 	e.stopped = true
 	hub := lifeHub(t)
 
-	e.startLoudness(lifePlan(t, hub))
+	e.startLoudness(lifePlan(t, e, hub))
 
 	if m, ok := e.loud[7]; ok {
 		t.Fatalf("an analyser was published into a stopped engine (%+v); nothing will stop "+
@@ -815,13 +836,14 @@ func TestALoudnessMonitorRoundTripsItsPortAndSubscription(t *testing.T) {
 	e.alloc = oneSlotAllocator(t)
 	hub := lifeHub(t) // the destination's upstream, NOT e.hub
 
-	e.startLoudness(lifePlan(t, hub))
+	plan := lifePlan(t, e, hub)
+	e.startLoudness(plan)
 
 	m := e.loud[7]
 	if m == nil {
 		t.Fatal("the analyser was not published")
 	}
-	if m.subName != loudnessSubPrefix+"7" || m.port == 0 || m.hub != hub || m.sig != "loud-sig" {
+	if m.subName != loudnessSubPrefix+"7" || m.port == 0 || m.hub != hub || m.sig != plan.sig {
 		t.Fatalf("published analyser = %+v, want the subscription, port, hub and signature "+
 			"teardown and the next reconcile both need", m)
 	}
