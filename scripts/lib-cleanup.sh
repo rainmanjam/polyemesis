@@ -58,11 +58,32 @@
 poly_stop_server() {
   local port="$1"
   pkill -f "polyemesis -addr :$port" 2>/dev/null
+
+  # 90 half-seconds, NOT 30, and the number is taken from the shipped unit rather
+  # than chosen. deploy/polyemesis.service sets TimeoutStopSec=45; this is what
+  # polyemesis is given in production, so it is what a teardown that claims to
+  # stop it the ordinary way has to give it too.
+  #
+  # THE OLD 15s WAS BELOW THE PRODUCT'S OWN WORST CASE, which is how
+  # acceptance-postprod came to leak two encoders on every run. main.go spends up
+  # to 20s in httpServer.Shutdown ALONE, then DrainLifecycle, then eng.Stop --
+  # and eng.Stop is the call that tears the destinations down, so a SIGKILL that
+  # lands before it reaches them leaves exactly the orphans #448 is about. The
+  # teardown was manufacturing the leak it was later asked to detect.
   local i
-  for i in $(seq 1 30); do
+  for i in $(seq 1 90); do
     pgrep -f "polyemesis -addr :$port" >/dev/null 2>&1 || return 0
     sleep 0.5
   done
+
+  # SAID OUT LOUD, because this is the moment orphans are created. This function
+  # used to -9 and return 0, so "it stopped" and "it was killed while still
+  # shutting down" reached every caller as the same answer -- and the callers are
+  # teardowns, which is the last place a silent difference of that kind is
+  # useful.
+  printf "  \033[33mFINDING\033[0m  the server on port %s did not stop within 45s of SIGTERM;\n" "$port" >&2
+  printf "            escalating to SIGKILL. Anything it had not yet torn down is about\n" >&2
+  printf "            to be orphaned -- see #448.\n" >&2
 
   # THE LAST STEP WAS MISSING: this used to send -9 and return, which asserted
   # nothing. A signal is a request, and on every platform there is an interval
@@ -85,6 +106,41 @@ poly_stop_server() {
   printf "        check that follows is about to be run against a machine that is\n"
   printf "        not in the state this teardown reported.\n"
   return 1
+}
+
+# poly_kill_server_uncleanly <port> -- SIGKILL the server the way a crash does,
+# and then reap what a real deployment would have reaped.
+#
+# WHY THE SECOND HALF EXISTS. Two suites kill polyemesis on purpose:
+# acceptance-postprod, to prove a job interrupted by a crash is recovered rather
+# than stranded, and acceptance-mqtt, to prove the broker publishes the will
+# message. A SIGKILL gives polyemesis no chance to signal its children, and each
+# child sits in its own process group, so every encoder it had running survives
+# and reparents to init. That is #448, induced deliberately.
+#
+# On a real box that is not what happens next: the unit is KillMode=mixed, so
+# systemd SIGKILLs the whole cgroup and the encoders go with it. These suites run
+# polyemesis outside systemd, so a crash simulation that stops at the kill is
+# simulating the crash WITHOUT simulating the environment the crash happens in --
+# and it leaves two encoders per run behind for someone else to find.
+#
+# So the children are collected BEFORE the kill, while there is still a parent to
+# ask, and reaped after it. `pgrep -P` rather than a name match, so a publisher
+# the suite is running for its own purposes is not caught up in it.
+poly_kill_server_uncleanly() {
+	local port="$1" pid kid kids=""
+	pid="$(pgrep -f "polyemesis -addr :$port" 2>/dev/null | head -1)"
+	if [ -z "$pid" ]; then
+		return 0
+	fi
+	kids="$(pgrep -P "$pid" 2>/dev/null | tr '\n' ' ')"
+	kill -9 "$pid" 2>/dev/null
+	# SIGKILL, not SIGTERM, because this is standing in for the cgroup kill that
+	# follows a crash -- not for an orderly stop, which is what the suite has just
+	# deliberately denied polyemesis.
+	for kid in $kids; do
+		kill -9 "$kid" 2>/dev/null
+	done
 }
 
 # poly_port_holders prints the PIDs holding a port, or nothing.
@@ -287,6 +343,112 @@ poly_wait_jobs() {
 # enough to catch every orphan is also wide enough to kill a suite running in
 # another terminal. Reporting makes the leak visible, which is the one thing it
 # was not before.
+# POLY_FFMPEG_BASELINE is the set of ffmpeg pids that were ALREADY running when
+# this library was sourced, which is before the suite has started anything.
+#
+# IT EXISTS SO THE CHECK BELOW CAN FAIL RATHER THAN MERELY PRINT. A bare count of
+# ffmpeg on the host cannot tell a process this suite leaked from a developer's
+# own transcode, or from a sibling suite running in parallel -- and a teardown
+# check that goes red for someone else's process is one people learn to ignore,
+# which is the state this was already in. Diffing against the baseline attributes
+# the leak, so the failure names only processes this run is responsible for.
+# poly_ffmpeg_pids is the ONE place the process list is obtained, so a test can
+# substitute it. Faking a real process is not portable enough to rely on -- a copy
+# of a system binary renamed to ffmpeg is refused outright on macOS, where the
+# copy loses its code signature -- and the logic worth testing here is the
+# attribution, not whether pgrep can match a name.
+poly_ffmpeg_pids() { pgrep -x ffmpeg 2>/dev/null; }
+
+# `|| true` because pgrep exits non-zero when it matches NOTHING, which is the
+# ordinary case on a clean host. Without it, sourcing this library from a shell
+# with `set -e` inherited would exit at this line -- and would do so precisely
+# when there was nothing wrong. Found by review, not by a failing run.
+POLY_FFMPEG_BASELINE="$(poly_ffmpeg_pids | tr '\n' ' ' || true)"
+
+# poly_report_orphans names the media children that outlived the run, and FAILS
+# when any of them are this run's doing.
+#
+# WHY THE LEAK EXISTS AT ALL. setProcessGroup puts every child in
+# its OWN process group, deliberately, so a Ctrl-C reaches polyemesis and lets
+# it shut its children down in order. The cost is that an ABRUPT death of
+# polyemesis -- SIGKILL, an OOM, a cancelled CI job -- signals nothing, and every
+# ffmpeg it started keeps running. Windows has a backstop for exactly this
+# (job_windows.go, KILL_ON_JOB_CLOSE, whose own warning says "FFmpeg children
+# will survive a polyemesis crash"); Linux has none.
+#
+# The Linux equivalent is Pdeathsig, and it is NOT applied here on purpose: in Go
+# it fires when the parent THREAD exits rather than the process, so a runtime
+# thread retirement could kill live destinations. That trade needs its own
+# testing, not a line in a teardown helper. See #448.
+#
+# So this does not fix the leak -- under systemd nothing needs to, KillMode=mixed
+# SIGKILLs the whole cgroup when the unit stops for any reason. What leaks is
+# every OTHER way polyemesis runs: these suites (as the login user, not the root
+# service), a foreground developer run, a container with a shell entrypoint. That
+# is exactly where the thirteen came from.
+#
+# IT FAILS THE SUITE NOW, where it used to print. Thirteen of these had been
+# running for up to 5.5 days on a dev box before anyone looked, and a cancelled CI
+# job left a polyemesis and five ffmpeg behind. Neither said anything at the time.
+# A finding nobody is forced to read is a finding nobody reads.
+poly_report_orphans() {
+	command -v pgrep >/dev/null 2>&1 || return 0
+	local pid new="" left="" waited=0
+	# In ticks of 0.1s. A seam so the library's own tests do not have to spend the
+	# full settle window twice to assert on what happens after it.
+	local ticks="${POLY_ORPHAN_SETTLE_TICKS:-150}"
+
+	for pid in $(poly_ffmpeg_pids); do
+		case " $POLY_FFMPEG_BASELINE " in
+			*" $pid "*) continue ;;
+		esac
+		new="$new $pid"
+	done
+	[ -n "$new" ] || return 0
+
+	# SETTLE BEFORE JUDGING, and this is not politeness -- without it the check
+	# reports its own race. poly_stop_server waits for POLYEMESIS to exit, and the
+	# instant it does its children reparent to init. A ppid of 1 therefore means
+	# "the parent is already gone", NOT "this one is abandoned": an encoder still
+	# flushing and finalising its output looks identical from outside.
+	# acceptance-postprod runs transcodes and was failed by exactly that race on
+	# the first run of this check, having passed all twelve of its own assertions.
+	#
+	# 15s is above the supervisor's own shutdownGrace (8s) plus its drain (2s), so
+	# anything still here afterwards has outlived every budget the product gives
+	# itself and is genuinely abandoned.
+	while [ "$waited" -lt "$ticks" ]; do
+		left=""
+		for pid in $new; do
+			if kill -0 "$pid" 2>/dev/null; then left="$left $pid"; fi
+		done
+		if [ -z "$left" ]; then return 0; fi
+		sleep 0.1
+		waited=$((waited + 1))
+	done
+
+	printf "  \033[31mFAIL\033[0m  ffmpeg outlived this suite by more than 15s:%s\n" "$left" >&2
+	for pid in $left; do
+		ps -o pid=,ppid=,command= -p "$pid" 2>/dev/null \
+			| sed -E 's#(rtmps?://|srt://)[^ ]*#\1<redacted>#g' | cut -c1-120 | sed 's/^/            /' >&2
+	done
+
+	# REAPED, NOT MERELY NAMED. Reporting alone is what let thirteen of these reach
+	# five and a half days on a shared host. The suite that created them is the last
+	# thing that knows their pids, so it is the last chance anything has to clean up
+	# without a reboot. SIGTERM first, so a process mid-write to a file this suite
+	# may still assert on gets to finalise it.
+	kill $left 2>/dev/null
+	sleep 1
+	for pid in $left; do
+		if kill -0 "$pid" 2>/dev/null; then kill -9 "$pid" 2>/dev/null; fi
+	done
+	printf "            Reaped by this teardown, so the host is left clean -- but nothing\n" >&2
+	printf "            in polyemesis did it, and outside systemd nothing would have.\n" >&2
+	printf "            See #448.\n" >&2
+	return 1
+}
+
 poly_cleanup() {
   local ports="$1" work="${2:-}" bindports="${3:-}"
   local p stopfail=0
@@ -381,6 +543,21 @@ poly_cleanup_exit() {
     # arithmetic expression, where a non-numeric value reads as 0 and would be
     # PROMOTED to 1 -- renumbering a run on exactly the axis the table above
     # forbids renumbering.
+    if [ "$rc" -eq 0 ]; then
+      rc=1
+    fi
+  fi
+  # AFTER poly_cleanup has had its turn, so what this names is what teardown
+  # failed to reach rather than what it had not got to yet.
+  #
+  # IT USED TO BE `trap 'poly_report_orphans' RETURN`, which could not have failed
+  # the run even if it had wanted to: a RETURN trap fires after the return value
+  # is already fixed. Moving it inline is the whole of what turns a printed
+  # finding into a result.
+  #
+  # Same promotion rule as above, for the same reason -- only a 0 is promoted,
+  # because renumbering a red run is the one outcome the table above forbids.
+  if ! poly_report_orphans; then
     if [ "$rc" -eq 0 ]; then
       rc=1
     fi

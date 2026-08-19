@@ -1213,7 +1213,12 @@ printf "  %d passed, %d failed\n\n" "$pass" "$fail"
 # a check, change this line in the same commit.
 # 25 rather than 24 since #226 added the switch-count CEILING alongside its
 # floor. The floor alone passed a tier switching 80 times.
-EXPECTED_CHECKS=25
+#
+# 27, read off a green run rather than derived. The pinned 25 was two below what
+# a clean run produces, so two checks could have stopped running without this
+# noticing. A floor set from arithmetic drifts away from the suite; one read off
+# a green run does not.
+EXPECTED_CHECKS=27
 total=$((pass + fail))
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"

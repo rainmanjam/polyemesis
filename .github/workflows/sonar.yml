@@ -58,6 +58,11 @@ jobs:
   sonar:
     name: SonarCloud analysis
     runs-on: ubuntu-latest
+    # A ceiling, because GitHub's default is SIX HOURS and this was the only job
+    # in the repo without one. It builds the UI and web coverage reports and then
+    # waits on somebody else's scanner, so a hang here is an outage on a service
+    # this repo does not run. Twenty is roughly three times the observed run.
+    timeout-minutes: 20
     steps:
       - name: Is a token configured?
         id: gate

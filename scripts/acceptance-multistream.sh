@@ -435,10 +435,34 @@ esac
 export POLY_LOOPBACK_KEY="$LOOPKEY"
 
 poly_wait_port_ready "$INGEST" 15 || true
-# 150s: long enough for every destination to run its measurement window, be
-# stopped, and for the sinks to finalise, with the publisher still alive at the
-# end so step 9 can tell "the routing was wrong" from "the encoder died".
-publish 150
+# RESOLVED HERE, not beside the sleep it used to live next to: the publisher's
+# duration is derived from it and the publisher starts long before the
+# measurement window opens.
+MS_RUNTIME="${POLY_MS_RUNTIME:-}"
+if [ -z "$MS_RUNTIME" ]; then
+  if [ "$MODE" = dry ]; then MS_RUNTIME=20; else MS_RUNTIME=75; fi
+fi
+case "$MS_RUNTIME" in ''|*[!0-9]*) bad "POLY_MS_RUNTIME must be whole seconds, got: '$MS_RUNTIME'"; exit 1 ;; esac
+[ "$MS_RUNTIME" -ge 5 ] || { bad "POLY_MS_RUNTIME must be at least 5s, got: $MS_RUNTIME"; exit 1; }
+
+# DERIVED FROM THE WINDOW, NOT CONSTANT. This was a literal `publish 150` --
+# the default live window of 75s plus 75s of headroom, long enough for every
+# destination to run its measurement window, be stopped, and for the sinks to
+# finalise, with the publisher still alive at the end so step 9 can tell "the
+# routing was wrong" from "the encoder died".
+#
+# POLY_MS_RUNTIME moved the window and left the publisher at 150. Any value
+# above that produced a run where the source stopped partway through and every
+# platform spent the remainder with no input -- reported by all of them at once
+# as an unstable connection, with the session going offline while the suite went
+# on measuring. NOTHING FAILED AND NOTHING SAID SO: the assertions read bytes
+# that had already arrived, so the run still passed and the only symptom was on
+# somebody else's dashboard.
+#
+# The override exists precisely so a human can watch that dashboard -- see the
+# note beside MS_RUNTIME -- so the case it broke is the case it was added for.
+# Deriving the publisher keeps the headroom whatever window is asked for.
+publish $(( MS_RUNTIME + 75 ))
 sleep 6
 
 # THE INGEST MUST REALLY CARRY TWO AUDIO TRACKS, and this is checked before any
@@ -622,12 +646,6 @@ done
 # successfully, which in dry mode is all of them -- a first attempt keyed on it
 # stretched the dry run to 75s and reported "live platforms configured" while
 # contacting nothing. $MODE is the flag that actually distinguishes them.
-MS_RUNTIME="${POLY_MS_RUNTIME:-}"
-if [ -z "$MS_RUNTIME" ]; then
-  if [ "$MODE" = dry ]; then MS_RUNTIME=20; else MS_RUNTIME=75; fi
-fi
-case "$MS_RUNTIME" in ''|*[!0-9]*) bad "POLY_MS_RUNTIME must be whole seconds, got: '$MS_RUNTIME'"; exit 1 ;; esac
-[ "$MS_RUNTIME" -ge 5 ] || { bad "POLY_MS_RUNTIME must be at least 5s, got: $MS_RUNTIME"; exit 1; }
 note "measuring over ${MS_RUNTIME}s ($MODE mode)"
 sleep "$MS_RUNTIME"
 

@@ -323,6 +323,25 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         run: go vet ./...
 
+      # WINDOWS TOO, because `go vet ./...` above never sees a _windows.go file.
+      # internal/supervisor and internal/fsperm both have Windows-only sources
+      # that use unsafe, and they were type-checked by nothing in this repo until
+      # now -- a build tag is enough to hide a package from every gate.
+      #
+      # It will not catch every unsafe misuse: vet's unsafeptr check looks for
+      # uintptr -> Pointer, and the violation found in #440 is the other
+      # direction. It does catch what vet catches, on files that had no gate at
+      # all, which is the gap being closed rather than the whole class.
+      - name: go vet, for the Windows build
+        # The documentation gate goes on the STEP, never on the job. A skipped
+        # matrix job does not expand its matrix, so its per-leg required contexts
+        # are never created -- absent rather than skipped -- and the PR can never
+        # satisfy branch protection. #351 shipped that and #349 sat unmergeable at
+        # fifteen green checks until #357 undid it. internal/testenv's docs gate
+        # test caught this step missing the condition.
+        if: needs.changes.outputs.code == 'true'
+        run: GOOS=windows go vet ./...
+
       # THE PREFLIGHT'S OWN LIVENESS, and it runs HERE because it was not
       # running anywhere.
       #
@@ -529,7 +548,16 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         timeout-minutes: 10
         run: |
-          sudo apt-get install -y --no-install-recommends lsof
+          # RETRIED. A mirror that is slow rather than down turns one unlucky
+          # fetch into a red run and a rerun, which is #430's complaint in
+          # miniature. Three attempts with a widening pause; the job ceiling
+          # above still bounds the whole thing.
+          for attempt in 1 2 3; do
+            sudo apt-get install -y --no-install-recommends lsof && break
+            echo "apt attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep $(( attempt * 5 ))
+          done
           ./scripts/test-lib-cleanup.sh
 
   # The same build and test, on the operating systems polyemesis actually ships
