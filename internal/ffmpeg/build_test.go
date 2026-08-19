@@ -1603,17 +1603,25 @@ func TestDestinationArgsVideoDelaySurvivesTheExpertSplice(t *testing.T) {
 // in a new place. A build that does not report a default is skipped rather than
 // guessed at.
 func TestTheRelayFIFOIsNotBelowFFmpegsOwnDefault(t *testing.T) {
-	bin, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skipf("no ffmpeg to ask: %v", err)
-	}
+	// needFFmpeg, not a bare LookPath+Skip. testenv.FFmpegBinary turns "this
+	// machine has no ffmpeg" into a FAILURE when POLYEMESIS_REQUIRE_FFMPEG is
+	// armed, which is what stops this check quietly declining to run on the one
+	// machine that matters. A hand-rolled t.Skip here would have been three new
+	// entries in the skip census buying nothing the helper does not already give.
+	bin := needFFmpeg(t, "ffmpeg")[0]
+
 	out, err := exec.Command(bin, "-hide_banner", "-h", "protocol=udp").CombinedOutput()
 	if err != nil {
-		t.Skipf("ffmpeg -h protocol=udp: %v", err)
+		t.Fatalf("ffmpeg -h protocol=udp: %v\n%s", err, out)
 	}
+	// FATAL, not skipped. Every ffmpeg this project supports reports this
+	// default -- verified on 6.1.1 and 8.1.2 -- so not finding it means the
+	// pattern is wrong, which is a defect in this test rather than a property of
+	// the host, and a skip would hide it.
 	m := regexp.MustCompile(`-fifo_size\b[^\n]*\(default (\d+)\)`).FindSubmatch(out)
 	if m == nil {
-		t.Skip("this ffmpeg does not report a fifo_size default; nothing to compare against")
+		t.Fatalf("no fifo_size default in `ffmpeg -h protocol=udp`; the pattern no longer "+
+			"matches this build's help output:\n%s", out)
 	}
 	def, err := strconv.Atoi(string(m[1]))
 	if err != nil {
