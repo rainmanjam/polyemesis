@@ -151,10 +151,13 @@
 /_astro/*
   Cache-Control: public, max-age=31536000, immutable
 
-# Stable but NOT content-hashed: a week, so replacing a screenshot reaches
-# people. Mirrors nginx.conf's 7d on woff2/png/jpg/svg/webm/mp4.
+# Stable but NOT content-hashed: a week, so replacing one reaches people.
+# Mirrors nginx.conf's 7d on woff2/png/jpg/svg/webm/mp4.
+#
+# /shots/* USED TO BE HERE and no longer needs to be. The screenshots moved into
+# src/assets so the build can emit responsive variants of them, which means they
+# come out content-hashed under /_astro/ and are covered by the immutable rule
+# above -- a strictly better answer than a week, because a replaced screenshot
+# gets a new filename and reaches people immediately rather than after the TTL.
 /fonts/*
-  Cache-Control: public, max-age=604800
-
-/shots/*
   Cache-Control: public, max-age=604800
