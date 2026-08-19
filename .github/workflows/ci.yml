@@ -1335,9 +1335,45 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ms-playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
 
+      # THE MIRROR, BEFORE ANYTHING ASKS IT FOR A PACKAGE.
+      #
+      # install-deps is apt, and the runner image's mirrorlist puts
+      # azure.archive.ubuntu.com first. When that host stalls rather than
+      # refuses, apt sits through its full timeout per index, per suite, and the
+      # log fills with `Ign:` lines that look like progress. Measured on this
+      # PR: 22 minutes into a step with no ceiling, still retrying.
+      #
+      # A RETRY RE-ASKS THE HOST THAT IS REFUSING. A different mirror does not,
+      # which is why this drops azure rather than only raising the retry count --
+      # the same distinction issue #430 draws for the FFmpeg install. The lines
+      # are removed rather than the file replaced, so whatever else the image
+      # ships stays; if that empties it, archive.ubuntu.com is written back.
+      #
+      # The options go in a drop-in because playwright SHELLS OUT to apt-get:
+      # there is no argv to pass -o through.
+      - name: Prefer a reachable apt mirror
+        if: matrix.suite == 'acceptance-browser'
+        timeout-minutes: 3
+        run: |
+          sudo tee /etc/apt/apt.conf.d/99polyemesis >/dev/null <<'CONF'
+          Acquire::Retries "3";
+          Acquire::http::Timeout "20";
+          Acquire::https::Timeout "20";
+          CONF
+          m=/etc/apt/apt-mirrors.txt
+          if [ -f "$m" ]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' "$m"
+            [ -s "$m" ] || echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee "$m" >/dev/null
+            echo "apt mirrors now:"; cat "$m"
+          fi
+
+      # A CEILING, for the same reason the suite step below carries one: without
+      # it this step hangs to the job's 45 minutes and names nothing. It is the
+      # step that has actually hung, and it was the one without a limit.
       - name: Install Playwright
         if: matrix.suite == 'acceptance-browser'
         working-directory: ui
+        timeout-minutes: 12
         run: |
           npm ci --ignore-scripts
           # install-deps runs UNCONDITIONALLY: it is apt writing to /usr, which
