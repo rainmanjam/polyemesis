@@ -869,6 +869,21 @@ its first tagged release.
   flowcharts of the installer and of the FFmpeg gate, and `/docs/install`
   draws them instead of printing forty lines of source at the reader.
 
+- **A documented way to remove polyemesis.** `docs/INSTALL.md` had no "Removing
+  it" section, and binary installs shipped no uninstall script, so the only
+  removal instructions were the ones an operator worked out themselves. Both now
+  exist, and the uninstall path is exercised in CI rather than described.
+
+- **The non-systemd caveat, written down.** polyemesis puts each FFmpeg child in
+  its own process group so that stopping one destination stops its helpers and a
+  Ctrl-C reaches polyemesis rather than killing its children mid-write. The cost
+  of that isolation is that a polyemesis which is *killed* rather than asked to
+  stop signals nothing on the way out, and its encoders keep running, reparented
+  to `init`, still holding the relay ports they were reading. Under the shipped
+  unit `KillMode=mixed` closes that — systemd SIGKILLs the whole cgroup. Outside
+  systemd nothing does, and now `INSTALL.md` says so next to the `KillMode` entry.
+  ([#448](https://github.com/rainmanjam/polyemesis/issues/448))
+
 ### Changed
 - **Two features are now labelled EXPERIMENTAL throughout — labelled, not
   gated.** Twitch Enhanced Broadcasting and hardware encoding both shipped in
@@ -1670,6 +1685,36 @@ its first tagged release.
   readable one — two spellings of a single name, never equal. The policy refused
   to request a certificate for the only hostname it was configured with.
 
+- **A Windows build could abort with `fatal error: found pointer to free object`.**
+  The job-object teardown took the address of a local struct, converted it through
+  `unsafe.Pointer` to `uintptr`, and handed that to `SetInformationJobObject`. A
+  `uintptr` is an integer as far as the garbage collector is concerned, so nothing
+  kept the struct alive across the call and the collector was free to reclaim it
+  while the kernel still held the address. `runtime.KeepAlive` now bounds the
+  lifetime at each of the three sites.
+
+  **No vet had ever run for Windows**, which is why a class of defect the tool
+  reports by name went unreported: every vet invocation in CI ran for the host
+  platform, and `_windows.go` files do not compile there. `GOOS=windows go vet
+  ./...` now runs on every code change, so the next one fails a check rather than
+  a customer's stream.
+  ([#440](https://github.com/rainmanjam/polyemesis/issues/440))
+
+- **The generated systemd unit contained the output of `ps`.** The unit template
+  is a heredoc, and one line used a backticked `ps` where it meant to name the
+  command in prose. The shell ran it while writing the file, so the unit grew from
+  40 lines to 215, 176 of them a process listing spliced into the middle of a
+  service definition. `systemd-analyze verify` prints `Missing '='` for those
+  lines **and still exits 0**, so the check that was supposed to catch this
+  reported success; it is now the printed output that is asserted on, not the exit
+  code.
+
+- **Binary mode did not get the guard rails docker mode already had.** Its helper
+  scripts were written in only one of the two branches that need them, and an
+  interrupted install could run its rollback twice. There was also no uninstall
+  script for binary installs at all — so the documented way to remove polyemesis
+  worked for one installation method and silently did not exist for the other.
+
 ### Testing
 - **Ten UI-drift guards, recovered from a branch that was never merged.** They
   check that the React frontend still offers what the Go side expects — the
@@ -1806,6 +1851,72 @@ its first tagged release.
   response reaches every branch with the real component and no OAuth fixture.
   The Go file is deleted. Browser suite 92 → 97.
   ([#259](https://github.com/rainmanjam/polyemesis/issues/259))
+
+- **A required test reached a third party's live servers, and went red when they
+  answered differently.** It constructed `Options{}` — the zero `oauth.Set`, which
+  resolves to the platforms' real hosts — so it called `id.kick.com` and depended
+  on Kick returning 401 *today*. Twice in one afternoon an S3-fronted edge answered
+  `AccessDenied` in XML instead and the required matrix went red for a reason
+  unrelated to the change under review. It now runs against an `httptest` stub.
+  ([#439](https://github.com/rainmanjam/polyemesis/issues/439))
+
+- **Every CI job now has a time ceiling, and the un-retried network installs are
+  retried.** An audit rather than a sprinkle: 30 of 31 jobs already had
+  `timeout-minutes`, and the one that did not was falling back to GitHub's default
+  of six hours while waiting on a third-party scanner. Three network installs had
+  no second attempt and now have three. Deliberately left alone, with the reasoning
+  recorded so it is not redone: `npm ci` (npm already retries twice), the two
+  `curl` sites that carry `--retry 3 --retry-all-errors` *and* a loop, and the
+  installer's own `apt` — where apt is the subject under test and retrying it would
+  hide the failure the job exists to catch.
+
+  The gitleaks download needed more than a flag. It piped `curl` into `tar`, and
+  `--retry` restarts a transfer from the beginning, so retrying would have re-fed
+  bytes into a `tar` that had already consumed part of the stream — surfacing as a
+  corrupt extract rather than the download failure it was. The archive now lands as
+  a file first, which is what makes the retry safe.
+
+- **The installer is now run, instead of only asked what it would do.** CI checked
+  the installer's preflight and stopped there, so every defect above was reachable
+  only by installing on a real machine. A job now installs, verifies the service,
+  uninstalls, and checks the rollback path, on a runner rather than in a container
+  because systemd has to be PID 1 for any of it to mean anything.
+
+- **The acceptance teardown check could not fail, and could not attribute.** It ran
+  as `trap 'poly_report_orphans' RETURN`, and a RETURN trap fires after the return
+  value is already fixed — so the finding could never reach an exit status no matter
+  what it found. It also counted every `ffmpeg` on the host, which cannot tell a
+  suite's own leak from a developer's transcode or a sibling suite running in
+  parallel, and a check that goes red for someone else's process is one people
+  learn to ignore.
+
+  Both are fixed, and fixing them immediately found that **the harness was
+  manufacturing the leak it was later asked to detect**, twice over. `poly_stop_server`
+  escalated to SIGKILL after 15s while polyemesis's own shutdown can spend 20s in
+  `httpServer.Shutdown` alone before it reaches `eng.Stop` — the call that tears the
+  destinations down — so the teardown killed the server mid-shutdown and orphaned its
+  encoders; the grace is now read from the shipped unit's own `TimeoutStopSec`
+  rather than chosen. And two suites SIGKILL polyemesis deliberately, to prove a
+  crashed job is recovered and that the broker publishes its will message; on a real
+  box systemd's cgroup reaps the children, and outside systemd nothing did, so those
+  suites now reap what they knowingly orphan.
+  ([#448](https://github.com/rainmanjam/polyemesis/issues/448))
+
+- **A test helper could not find a free port when the kernel handed it one near
+  the top of the range.** `FreeUDPWindow` probes an ephemeral port and scans
+  *upward* for a run of free numbers, guarded by `start+n < 65535` — which is false
+  on the first iteration when the probe lands within `n` of the ceiling. It then
+  tried not a single bind and reported "no run of 3 free UDP ports" about a machine
+  where everything below was free. Linux's default ephemeral range stops at 60999
+  and never reaches it; macOS runs to 65535 and does, which is why it read as a
+  macOS quirk rather than a bug. The scan now wraps.
+
+- **A stop-path test was budgeted below the stop path's own worst case.** It gave
+  `Stop` five seconds and asserted the error was nil, while this package's own
+  constants put the permitted worst case at `shutdownGrace + drainGrace` = 10s. A
+  loaded runner that merely delayed the child produced a deadline error with nothing
+  wrong — the test failed at 5.01s, its entire budget, having asserted nothing about
+  the code.
 
 ## [0.6.0] — 2026-08-09
 
