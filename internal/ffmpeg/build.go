@@ -555,11 +555,43 @@ func RelayOutputURL(base string) string {
 	return base + "?pkt_size=1316"
 }
 
+// relayFIFOPackets is the receive-side circular buffer, in 188-byte packets.
+//
+// IT USED TO BE 5000, AND THE COMMENT CALLED THAT "~940 KB of slack" -- which is
+// the right arithmetic and the wrong conclusion. FFmpeg's own default is 28672
+// packets (5.39 MB), confirmed from `ffmpeg -h protocol=udp` on both versions
+// this project cares about:
+//
+//	8.1.2: -fifo_size <int> ... (in 188-byte packets) (default 28672)
+//	6.1.1: -fifo_size <int> ... (default 28672)
+//
+// So the value written to add slack was a 5.7x REDUCTION against the default. A
+// setting that reads as generous and measures as restrictive is worse than no
+// setting at all, because nobody re-derives it.
+//
+// AND IT GOT WORSE IN 8.0 WITHOUT THE NUMBER CHANGING. FFmpeg 8.0 (af04a27893)
+// replaced the 4-byte length prefix on each queued datagram with a full header
+// carrying a sockaddr_storage -- about 144 bytes -- inside the same byte budget.
+// The relay sends 1316-byte datagrams (RelayOutputURL), so the per-datagram cost
+// went from 1320 to ~1460 bytes and the same fifo_size now buys ~10% fewer of
+// them. A buffer already below default lost capacity again on the version this
+// project ships.
+//
+// 32768 is a little above FFmpeg's default, chosen so that the REAL capacity on
+// 8.x is at least what the default bought on 6.1 rather than nominally equal to
+// it: 32768*188 = 6.16 MB, about 4200 datagrams at 1460 bytes each, roughly 5.5 MB
+// of payload. At a 12 Mbit/s programme that is ~3.7s of slack for a consumer that
+// stalls, against ~0.6s before.
+//
+// Whether this is the cause of anything is a separate question -- see #398 --
+// but a receive buffer at 17% of default is a defect on its own terms.
+const relayFIFOPackets = 32768
+
 // RelayInputURL adds the receive-side buffering every consumer needs.
 //
-// fifo_size is in 188-byte packets, so 5000 is ~940 KB of slack. overrun_nonfatal
-// turns a momentary overflow into a logged glitch instead of a dead process —
-// which matters because one slow consumer must never take a destination down.
+// overrun_nonfatal turns a momentary overflow into a logged glitch instead of a
+// dead process — which matters because one slow consumer must never take a
+// destination down.
 func RelayInputURL(base string) string {
 	if base == "" {
 		return base
@@ -568,7 +600,7 @@ func RelayInputURL(base string) string {
 	if strings.Contains(base, "?") {
 		sep = "&"
 	}
-	return base + sep + "fifo_size=5000&overrun_nonfatal=1"
+	return base + sep + "fifo_size=" + strconv.Itoa(relayFIFOPackets) + "&overrun_nonfatal=1"
 }
 
 // ---------------------------------------------------------------- destination
