@@ -1591,6 +1591,11 @@ jobs:
       # A command substitution under set -e instead: gofmt's own exit status
       # now fails the step, and the emptiness of its output is a separate
       # question asked afterwards.
+      # Built here rather than earlier so a build failure is not reported as a
+      # missing binary by every one of thirteen suites at once. `make build` and
+      # not `go build ./cmd/...`: the suites run the real build.
+      - run: make build
+
       - name: ./scripts/${{ matrix.suite }}.sh
         if: needs.changes.outputs.code == 'true'
         timeout-minutes: 12
