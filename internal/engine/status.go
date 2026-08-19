@@ -63,6 +63,16 @@ type DestStatus struct {
 	// header and no video, the footage was in a file nobody had been told about,
 	// and the only trace was Process.Restarts moving from 0 to 1.
 	RolledOverTo string `json:"rolledOverTo,omitempty"`
+	// Transitioning is set while a destination has left the running set but its
+	// child has not been confirmed dead. Process is still populated when it is.
+	//
+	// It exists so that "no process" means what it says. Without it, a status
+	// read landing inside a reconcile published a nil Process for a destination
+	// that was still delivering, and every consumer -- the dashboard, the
+	// acceptance suites -- read that as the destination having died (#462).
+	// Reporting the process without this flag would be the opposite lie: a
+	// destination on its way out would look ordinarily live.
+	Transitioning bool `json:"transitioning,omitempty"`
 	// RenditionID is the shared encode this destination reads, nil for
 	// passthrough. RenditionName is its label, empty for passthrough, so the
 	// dashboard can group destinations under the encode they share.
@@ -271,6 +281,13 @@ func (e *Engine) Status() Status {
 	for _, d := range e.dests {
 		dests = append(dests, d)
 	}
+	// Snapshotted under the SAME lock as e.dests, so a destination cannot appear
+	// in neither map: stopDestinations moves it from one to the other while
+	// holding e.mu, and this reads both sides of that move at once.
+	retiring := make(map[int64]*destination, len(e.retiring))
+	for id, d := range e.retiring {
+		retiring[id] = d
+	}
 	source := e.sourceInfoLocked()
 	e.mu.RUnlock()
 
@@ -354,6 +371,17 @@ func (e *Engine) Status() Status {
 				ds.Warnings = live.compiled.Warnings
 				ds.Error = live.err
 				ds.Process = procStatus(live.proc)
+			} else if going := retiring[row.ID]; going != nil {
+				// Left the running set, child not yet confirmed dead. Report the
+				// process it still has, and say plainly that it is on its way
+				// out -- the alternative was reporting nothing at all, which
+				// reads as a destination that died.
+				ds.Summary = going.compiled.Summary
+				ds.Tracks = going.compiled.Tracks
+				ds.FilterComplex = going.compiled.FilterComplex
+				ds.Normalization = going.compiled.Normalization
+				ds.Process = procStatus(going.proc)
+				ds.Transitioning = true
 			} else if c, cerr := routing.Compile(row.Profile, e.Source()); cerr == nil {
 				// Not running: still show what it *would* send, so the card is
 				// informative before the stream is ever started.
