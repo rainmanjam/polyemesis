@@ -2882,8 +2882,20 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	}
 	// Reset only once there is a real result to commit. Anything that returns
 	// before this point failed to measure the layout, whatever the reason.
-	e.probeFails.Store(0)
-
+	//
+	// AND THAT INCLUDED A RETURN BELOW THIS LINE, which is why the reset moved.
+	// The stale-generation discard commits nothing -- the stream it measured is
+	// no longer arriving -- but it used to run AFTER the counter had already been
+	// cleared, so a probe that measured nothing reported the same thing to the
+	// hold's exit as one that measured everything. Same shape as the
+	// identified-nothing branch above, whose comment records it being found by
+	// two reviewers; the fix was applied to that branch and not to this one.
+	//
+	// It matters because the two conditions compound. A probe takes up to ten
+	// seconds, and the window where an ingest restarts is exactly the window
+	// where the encoder is least stable -- so on a loaded box every probe can be
+	// discarded as stale, each one resetting the counter that is supposed to end
+	// the wait, and destinations stay held with nothing in the log to say why.
 	src := routing.Source{}
 	for _, a := range res.Audio {
 		src.Tracks = append(src.Tracks, routing.Track{
@@ -2903,9 +2915,18 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 		// what it measured belongs to a stream that is no longer arriving.
 		// Committing it would mark a dead transport's layout `measured` under
 		// the new mode and satisfy the guard permanently.
+		//
+		// The counter is deliberately LEFT ALONE rather than cleared or
+		// incremented. Clearing it is the bug above. Incrementing it would be
+		// wrong too: a restart is not evidence that the layout cannot be read,
+		// and reconcileIngest already resets the count for each new stream on
+		// purpose -- the failures are about THIS stream.
 		e.mu.Unlock()
 		return false
 	}
+	// Committing, so the layout was measured: this is the real result the reset
+	// was always meant to be paired with.
+	e.probeFails.Store(0)
 	e.commitProbe(src, res.Video, e.settings.Ingest.Mode)
 	e.mu.Unlock()
 
