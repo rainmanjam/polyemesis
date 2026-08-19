@@ -473,16 +473,6 @@ case "$OUT" in
   *DEST_OK*) note ">>>RTMP the rtmp destination was created" ;;
   *) note ">>>RTMP could not create the rtmp destination: $OUT" ;;
 esac
-# POLLED, not slept. -1 means "no destination process at all", which is a
-# different answer from "0 restarts" -- a fixed sleep that lands early records
-# the absence as if it were the measurement.
-RTMP_BEFORE=-1
-for _ in $(seq 1 40); do
-  RTMP_BEFORE=$(drive restarts rtmpdest | tail -1)
-  [ "$RTMP_BEFORE" != "-1" ] && break
-  sleep 1
-done
-note ">>>RTMP baseline restarts=$RTMP_BEFORE outtime=$(drive outtime rtmpdest | tail -1)ms"
 
 step "3. The primary goes on air"
 # Before publishing, not after. The server reporting ready means its HTTP
@@ -498,6 +488,20 @@ else
   publisher_postmortem
   exit 1
 fi
+
+# BASELINE HERE, not at creation. A destination gets no process until there is a
+# source to read, so a baseline taken before the primary is on air reads -1 --
+# "no process at all" -- and the arm then refuses to score itself. Measured: the
+# first attempt polled for 40s before step 3 and never saw one.
+# different answer from "0 restarts" -- a fixed sleep that lands early records
+# the absence as if it were the measurement.
+RTMP_BEFORE=-1
+for _ in $(seq 1 40); do
+  RTMP_BEFORE=$(drive restarts rtmpdest | tail -1)
+  [ "$RTMP_BEFORE" != "-1" ] && break
+  sleep 1
+done
+note ">>>RTMP baseline restarts=$RTMP_BEFORE outtime=$(drive outtime rtmpdest | tail -1)ms"
 # Let a few seconds of real primary land in the file before anything is cut.
 # This one IS about elapsed time -- there has to be primary in the recording for
 # the timeline check at step 9 to have anything to find.
