@@ -87,6 +87,8 @@ func Args(s Spec) []string {
 		"-hide_banner", "-nostdin", "-nostats", "-loglevel", "warning",
 		"-fflags", "+genpts",
 		"-thread_queue_size", "512",
+		"-analyzeduration", ffmpeg.RelayProbeWindow,
+		"-probesize", ffmpeg.RelayProbeSize,
 		"-i", ffmpeg.RelayInputURL(s.RelayURL),
 		"-filter_complex", graph,
 		"-map", "[" + analyserOut + "]",

@@ -587,6 +587,74 @@ func RelayOutputURL(base string) string {
 // but a receive buffer at 17% of default is a defect on its own terms.
 const relayFIFOPackets = 32768
 
+// relayProbeWindow is how long a relay consumer may spend working out what it is
+// receiving before it gives up and reports what it has.
+//
+// THE DEFAULT IS NOT LONG ENOUGH FOR A STREAM YOU JOIN IN THE MIDDLE, and this
+// is measured rather than reasoned. A destination that subscribes to the hub
+// starts reading at whatever point the programme happens to be at. H.264 carries
+// its SPS/PPS in-band at keyframes, so a consumer that joins just after one waits
+// a whole GOP -- two seconds, at playlistmedia's encoding parameters -- before it
+// can know the pixel format. If its probe window closes first it reports:
+//
+//	[h264] non-existing PPS 0 referenced
+//	[in#0/mpegts] Could not find codec parameters for stream 0
+//	   (Video: h264 (High), none(progressive), 1920x1080): unspecified pixel format
+//	Consider increasing the value for the 'analyzeduration' (0) and 'probesize' (5000000)
+//	[out#0/matroska] Could not write header (incorrect codec parameters ?)
+//	[fc#0] Error sending frames to consumers: Invalid data found when processing input
+//
+// -- width and height resolved, pixel format not -- and the muxer cannot write a
+// header without it. On FFmpeg 6.1 that filtergraph failure was logged and the
+// process carried on; from 7.0 a failed task aborts the process, so the same
+// unlucky join that used to cost a warning now costs the whole output. See #398.
+//
+// FIVE SECONDS, SIZED BY MEASUREMENT RATHER THAN BY ARGUMENT. The GOP is two
+// seconds at playlistmedia's encoding parameters, so the window has to span one
+// with margin. I first wrote ten, on the theory that analyzeduration is an upper
+// bound and costs nothing when the data is there. That theory is wrong, and
+// internal/meters caught it: TestAnalyserMeasuresThePerDestinationMixAndNotTheIngest
+// failed at 9.68s with no usable frame, because the probe was still spending a
+// window the test had budgeted for the whole run. Ten seconds of added startup on
+// every relay consumer would be a worse regression than the failure it prevents.
+// Three and five both pass; five is 2.5x the GOP and the one further from the
+// threshold that broke.
+//
+// ffprobe was already told this, in ProbeArgs, with the same reasoning written
+// out -- "a live UDP relay never ends, so ffprobe must be told how long to look".
+// Every consumer that actually reads the relay was left on the default.
+const relayProbeWindow = 5 * 1000000 // microseconds
+
+// RelayProbeWindow and RelayProbeSize are the same numbers as argv strings, for
+// the consumers that build their command line as one slice literal. Exported so
+// the VALUE has a single definition even where the flag names are repeated;
+// TestEveryRelayConsumerIsGivenAProbeWindow is what stops a site being added
+// without them.
+var RelayProbeWindow = strconv.Itoa(relayProbeWindow)
+
+// RelayProbeSize is relayProbeSize as an argv string.
+var RelayProbeSize = strconv.Itoa(relayProbeSize)
+
+// relayProbeSize is the byte budget for the same question, left at FFmpeg's own
+// default: the failure above is a TIME problem, not a bytes problem -- 5 MB of a
+// 1080p programme spans well over a GOP -- and changing both at once would make
+// it impossible to say which mattered.
+const relayProbeSize = 5000000
+
+// RelayInputArgs is the input half of every relay consumer's command line: the
+// probe window, then the URL.
+//
+// One function so the window cannot drift between consumers. They all face the
+// same hazard -- destinations, renditions, meters, the loudness analyser, playout
+// and the selector's own feeds all subscribe to a hub that is already running.
+func RelayInputArgs(base string) []string {
+	return []string{
+		"-analyzeduration", strconv.Itoa(relayProbeWindow),
+		"-probesize", strconv.Itoa(relayProbeSize),
+		"-i", RelayInputURL(base),
+	}
+}
+
 // RelayInputURL adds the receive-side buffering every consumer needs.
 //
 // overrun_nonfatal turns a momentary overflow into a logged glitch instead of a
@@ -1025,7 +1093,7 @@ func DestinationArgs(s DestSpec) []string {
 		// jitter that would otherwise show up as dropped frames.
 		"-thread_queue_size", "1024",
 	)
-	args = append(args, "-i", RelayInputURL(s.RelayURL))
+	args = append(args, RelayInputArgs(s.RelayURL)...)
 
 	// The copy path branches BEFORE -filter_complex, and it has to. A graph
 	// that is compiled and never mapped is not ignored: FFmpeg 8.1.2 answers
@@ -1260,6 +1328,8 @@ func RecorderArgs(s RecorderSpec) []string {
 	args = append(args,
 		"-fflags", "+genpts",
 		"-thread_queue_size", "1024",
+		"-analyzeduration", RelayProbeWindow,
+		"-probesize", RelayProbeSize,
 		"-i", RelayInputURL(s.RelayURL),
 		"-map", "0",
 		"-c", "copy",
@@ -1318,6 +1388,8 @@ func PreviewArgs(s PreviewSpec) []string {
 	args = append(args,
 		"-fflags", "+genpts",
 		"-thread_queue_size", "1024",
+		"-analyzeduration", RelayProbeWindow,
+		"-probesize", RelayProbeSize,
 		"-i", RelayInputURL(s.RelayURL),
 		"-map", "0:v:0",
 		"-map", fmt.Sprintf("0:a:%d?", s.AudioTrack), // '?' => tolerate a video-only ingest
@@ -1493,6 +1565,8 @@ func MetersArgs(s MetersSpec) []string {
 	args = append(args,
 		"-fflags", "+genpts",
 		"-thread_queue_size", "512",
+		"-analyzeduration", RelayProbeWindow,
+		"-probesize", RelayProbeSize,
 		"-i", RelayInputURL(s.RelayURL),
 		"-filter_complex", strings.Join(chains, ";"),
 		"-map", "[mout]",

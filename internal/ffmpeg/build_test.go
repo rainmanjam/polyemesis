@@ -1639,3 +1639,68 @@ func TestTheRelayFIFOIsNotBelowFFmpegsOwnDefault(t *testing.T) {
 		t.Errorf("RelayInputURL = %q, which does not carry fifo_size=%d", got, relayFIFOPackets)
 	}
 }
+
+// TestEveryRelayConsumerIsGivenAProbeWindow is the guard for #398.
+//
+// A consumer that subscribes to the relay starts reading a programme already in
+// progress. H.264 carries SPS/PPS in-band at keyframes, so one that joins just
+// after a keyframe waits a whole GOP before it can know the pixel format — and
+// if its probe window closes first, the muxer cannot write a header and, on
+// FFmpeg 7 and later, the whole process dies rather than logging and carrying on.
+//
+// SOURCE-LEVEL, because the failure is an ABSENCE. No unit test of any single
+// builder can catch a NEW consumer being added without the flags: it would pass
+// by not existing. What must hold is a property of the tree — every call that
+// opens the relay is preceded by a probe window — and the only place to assert
+// that is the source.
+func TestEveryRelayConsumerIsGivenAProbeWindow(t *testing.T) {
+	root := ".."
+	var missing []string
+	checked := 0
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") ||
+			strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		lines := strings.Split(string(src), "\n")
+		for i, l := range lines {
+			// The call that opens the relay, not the helper's own definition.
+			if !strings.Contains(l, "RelayInputURL(") || strings.Contains(l, "func RelayInputURL") {
+				continue
+			}
+			if !strings.Contains(l, `"-i"`) {
+				continue // a use that is not an input, e.g. building a URL to log
+			}
+			checked++
+			// The window has to be on this command line, close enough that a
+			// reader can see it. Four lines back covers the two flags and their
+			// values however they are formatted.
+			lo := i - 4
+			if lo < 0 {
+				lo = 0
+			}
+			if !strings.Contains(strings.Join(lines[lo:i+1], "\n"), "analyzeduration") {
+				missing = append(missing, fmt.Sprintf("%s:%d", path, i+1))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the tree: %v", err)
+	}
+	if checked == 0 {
+		t.Fatal("no relay consumers found at all; this guard is examining nothing, " +
+			"which is the one way it can pass while being useless")
+	}
+	if len(missing) > 0 {
+		t.Errorf("these open the relay with no probe window, so an unlucky join "+
+			"leaves the pixel format unspecified and kills the process on FFmpeg 7+ "+
+			"(#398):\n  %s\nUse RelayProbeWindow / RelayProbeSize, as every other "+
+			"consumer does.", strings.Join(missing, "\n  "))
+	}
+	t.Logf("relay consumers checked: %d", checked)
+}

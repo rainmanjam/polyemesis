@@ -115,6 +115,8 @@ func VariantArgs(s VariantSpec) []string {
 	args = append(args,
 		"-fflags", "+genpts",
 		"-thread_queue_size", "1024",
+		"-analyzeduration", ffmpeg.RelayProbeWindow,
+		"-probesize", ffmpeg.RelayProbeSize,
 		"-i", ffmpeg.RelayInputURL(s.RelayURL),
 	)
 	args = append(args, hlsOutput(s)...)

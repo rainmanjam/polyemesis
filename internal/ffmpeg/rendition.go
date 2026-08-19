@@ -400,6 +400,8 @@ func RenditionArgs(s RenditionSpec) []string {
 	args = append(args,
 		"-fflags", "+genpts",
 		"-thread_queue_size", "1024",
+		"-analyzeduration", RelayProbeWindow,
+		"-probesize", RelayProbeSize,
 		"-i", RelayInputURL(s.InRelayURL),
 	)
 

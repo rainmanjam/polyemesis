@@ -1684,6 +1684,8 @@ func relayFeedArgs(inURL, outURL string, offsetSeconds float64) []string {
 		"-nostats", "-progress", "pipe:1",
 		"-fflags", "+genpts",
 		"-thread_queue_size", "1024",
+		"-analyzeduration", ffmpeg.RelayProbeWindow,
+		"-probesize", ffmpeg.RelayProbeSize,
 		"-i", ffmpeg.RelayInputURL(inURL),
 		"-map", "0",
 		"-c", "copy",
