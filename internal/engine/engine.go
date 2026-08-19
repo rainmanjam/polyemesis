@@ -376,6 +376,16 @@ type Engine struct {
 	// measured can be told apart from one that has merely not been measured
 	// yet. See probeUnmeasurable and the hold in reconcileOutputs.
 	probeFails atomic.Int64
+	// destHold is why every destination is currently unplanned, or "" when they
+	// are being planned normally. Written by reconcileOutputs from the holdDests
+	// decision, read by Status.
+	//
+	// Atomic rather than under e.mu for the same reason probeFails is: the
+	// decision is made in the middle of reconcileOutputs, which takes and drops
+	// e.mu around the pieces it needs, and reaching for the write lock there to
+	// publish one string would put this on the inside of a lock ordering it has
+	// no business being part of. Nothing reads it together with another field.
+	destHold atomic.Value // string
 
 	levels   ffmpeg.Levels
 	levelsAt time.Time
@@ -2038,6 +2048,17 @@ func (e *Engine) reconcileOutputs() error {
 	// reverts the instant one succeeds.
 	unmeasurable := !measured && e.probeUnmeasurable()
 	holdDests := !measured && silenceSig == "" && !unmeasurable
+	// Published from the decision itself, not recomputed anywhere else, so
+	// /status cannot disagree with the reconcile about why nothing is running.
+	// Cleared on every pass that does not hold, so a stale reason cannot outlive
+	// the condition that produced it.
+	hold := ""
+	if holdDests {
+		hold = "the ingest layout has not been probed yet, so no destination is " +
+			"planned: a routing graph compiled against the placeholder would map " +
+			"tracks that may not exist"
+	}
+	e.destHold.Store(hold)
 	switch {
 	case holdDests:
 		e.noteReload("destinations", "all", reloadRestart,

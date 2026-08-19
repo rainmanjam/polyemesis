@@ -1721,5 +1721,6 @@ jobs:
             # question has been thrown away on every failing run so far.
             /tmp/polyemesis-acceptance*/status-at-failure-*.json
             /tmp/polyemesis-acceptance*/status-at-baseline-timeout.json
+            /tmp/polyemesis-acceptance*/engine-log-at-baseline-timeout.txt
           if-no-files-found: ignore
           retention-days: 7

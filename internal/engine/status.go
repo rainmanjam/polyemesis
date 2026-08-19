@@ -179,6 +179,29 @@ type Status struct {
 	Loudness []meters.Report `json:"loudness"`
 	// Clips is the rolling capture buffer's state.
 	Clips ClipStatus `json:"clips"`
+	// DestinationHold is why NO destination has a process, when that is a
+	// deliberate decision rather than a fault. Empty whenever destinations are
+	// being planned normally, which is nearly always.
+	//
+	// It exists because this payload could not previously tell three very
+	// different states apart. reconcileOutputs holds every destination while the
+	// ingest layout is unmeasured -- a routing graph compiled against the
+	// placeholder would map tracks that may not exist -- and a held destination
+	// simply has no Process, which is byte-for-byte what a destination that
+	// CRASHED looks like, and what one that was never planned looks like. An
+	// operator reading the dashboard, and the acceptance suite reading /status,
+	// both saw an absence and had to guess at its cause.
+	//
+	// The reason did exist, but only in a settings-save response, via
+	// Engine.LastReload -- so the only way to ask "why is nothing running" was to
+	// save something, which perturbs the thing being asked about. This is the
+	// same answer, readable without changing anything.
+	//
+	// Set from the holdDests decision itself rather than recomputed here: the
+	// predicate has three inputs (measured, the silence tier, and the
+	// unmeasurable fallback) and a second copy of it in the API layer would be
+	// free to drift away from the one that actually decides.
+	DestinationHold string `json:"destinationHold,omitempty"`
 }
 
 // procStatus is nil for a process that is not running, which the JSON omits.
@@ -291,13 +314,18 @@ func (e *Engine) Status() Status {
 	source := e.sourceInfoLocked()
 	e.mu.RUnlock()
 
+	// Read outside the lock: it is published atomically by reconcileOutputs and
+	// is not part of the coherent snapshot the lock above exists to give.
+	hold, _ := e.destHold.Load().(string)
+
 	st := Status{
-		Source:       source,
-		Relay:        e.hub.Stats(),
-		Renditions:   e.Renditions(),
-		Destinations: []DestStatus{},
-		Loudness:     e.Loudness(),
-		Clips:        e.ClipBuffer(),
+		DestinationHold: hold,
+		Source:          source,
+		Relay:           e.hub.Stats(),
+		Renditions:      e.Renditions(),
+		Destinations:    []DestStatus{},
+		Loudness:        e.Loudness(),
+		Clips:           e.ClipBuffer(),
 	}
 	st.Ingest = procStatus(ingest)
 	st.Recorder = procStatus(recorder)

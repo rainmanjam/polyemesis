@@ -481,6 +481,29 @@ if ! BEFORE=$(wait_for_dest_process 90); then
   note "zero, so this reading cannot tell the two apart. Step 6 will report what it"
   note "saw."
   drive rawstatus > "$WORK/status-at-baseline-timeout.json" 2>/dev/null || true
+
+  # /status NOW SAYS WHY, and until this run it could not. A held destination
+  # and a crashed one were byte-for-byte identical in the payload -- no process
+  # in either -- and the reason existed only in a settings-save response, so
+  # asking for it meant perturbing the run. `destinationHold` is published from
+  # the reconcile's own hold decision and is empty whenever destinations are
+  # being planned normally.
+  hold=$(drive rawstatus 2>/dev/null | tr ',' '\n' | grep -o '"destinationHold":"[^"]*"' | head -1)
+  if [ -n "$hold" ]; then
+    note "the engine is HOLDING every destination: ${hold#*:}"
+  else
+    note "the engine reports no hold, so the destinations were being planned"
+    note "normally and something else left this one without a process."
+  fi
+
+  # The server log is kept as corroboration, NOT as a verdict. The one warning
+  # that names the hold is written only in probeOnce's FAILED-probe branch, while
+  # the hold itself fires on any unmeasured layout -- including a probe that has
+  # simply not landed yet, or one whose result was discarded as stale. So its
+  # absence refutes nothing and its presence proves only that some earlier probe
+  # failed, not that the baseline was still held. Read it beside the payload.
+  grep -E 'destinations are held|ingest probe failed|destination' server.log \
+    > "$WORK/engine-log-at-baseline-timeout.txt" 2>/dev/null || true
 fi
 set -- $BEFORE; restarts_before="${4:-0}"
 note "before the cut: $BEFORE"
