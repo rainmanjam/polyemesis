@@ -32,6 +32,24 @@ script needed.
 | `destination.up` | a destination starts delivering | none |
 | `destination.down` | a destination stops — failed, disabled or deleted | 10s |
 | `broadcast.fault` | a platform refused to start or end a broadcast | none |
+| `destination.rolledover` | a file destination's recording continued into a different file | none |
+
+`destination.rolledover` is also **not** a `destination.down`. Nothing stopped:
+the destination is delivering and the recording is continuing. What changed is
+which file it is continuing into.
+
+A file destination never overwrites footage. If its child exits and is respawned
+while the configured filename already holds real bytes, the replacement is given
+a timestamped sibling — `show.mkv` becomes `show-20260819-021500.mkv` — so the
+earlier take survives. That is the intended behaviour and it is not going to
+change.
+
+What was missing is anyone being told. The respawn is not an error: the child
+can exit cleanly, and a clean exit is logged at Info with nothing in the process
+log ring, so the only trace was a restart counter moving. An operator who looked
+at the filename they configured found a file with a header and no video, and no
+reason anywhere to suspect a sibling existed. `reason` carries the path actually
+written, so a script can follow the recording rather than guess at it.
 
 `broadcast.fault` is **not** a `destination.down` and must not be treated as
 one. The stream is fine: bytes are flowing and the destination is delivering.

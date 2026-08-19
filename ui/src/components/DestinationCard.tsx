@@ -398,6 +398,28 @@ export function DestinationCard({
           </a>
         )}
 
+        {/* WHERE THE FOOTAGE ACTUALLY WENT.
+            A file destination never overwrites an earlier take, so a respawn
+            whose configured name already holds bytes is given a timestamped
+            sibling. That is correct and is not an error -- which is why this is
+            muted text beside the artefact link above rather than a warning tone.
+            What it fixes is silence: before it, the name the operator configured
+            held a container header and no video, and the only trace of the real
+            file was a restart counter moving from 0 to 1.
+
+            Literal English, following the artefact link directly above it. The
+            keyed strings in this card are labels and buttons; these two are
+            inline artefact names, and the catalogue has fifteen locales that a
+            machine translation of this sentence would not serve well. */}
+        {dest.rolledOverTo && (
+          <p className="text-[10px] text-muted-foreground">
+            Recording continued in{" "}
+            <span className="font-mono">{dest.rolledOverTo.split("/").pop()}</span>
+            {" "}— the configured file already held footage and is never overwritten.
+          </p>
+        )}
+
+
         {/* Facebook's own view of the ingest, under the link to the artefact it
             describes. Rendered only for Facebook, for the reason set out at the
             top of that file: Twitch publishes no bitrate or frame rate at all,

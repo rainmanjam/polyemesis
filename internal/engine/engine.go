@@ -176,6 +176,14 @@ type Engine struct {
 	// Keyed by destination id and cleared when that destination next starts, so
 	// it describes the current situation rather than accumulating history.
 	unreaped map[int64]string
+	// rolledOver records, per destination id, the path a file destination's
+	// respawn was actually given when it differed from the configured one.
+	//
+	// Under stopMu with unreaped because it is the same KIND of state: a fact
+	// about something that already happened, observed once, read back by Status
+	// so an operator can be told. Neither belongs on the destination struct --
+	// both outlive the process they describe.
+	rolledOver map[int64]string
 
 	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
 	// time a VAAPI rendition actually starts.
@@ -547,20 +555,21 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 	}
 
 	e := &Engine{
-		sourceID:  sourceID,
-		log:       log,
-		cfg:       cfg,
-		store:     store,
-		tools:     tools,
-		bus:       bus,
-		hub:       hub,
-		alloc:     alloc,
-		host:      host,
-		dests:     map[int64]*destination{},
-		rends:     map[int64]*rendition{},
-		loud:      map[int64]*loudnessMon{},
-		loudStore: meters.NewStore(),
-		playProcs: map[string]*supervisor.Process{},
+		sourceID:   sourceID,
+		log:        log,
+		cfg:        cfg,
+		store:      store,
+		tools:      tools,
+		bus:        bus,
+		hub:        hub,
+		alloc:      alloc,
+		host:       host,
+		dests:      map[int64]*destination{},
+		rends:      map[int64]*rendition{},
+		loud:       map[int64]*loudnessMon{},
+		rolledOver: map[int64]string{},
+		loudStore:  meters.NewStore(),
+		playProcs:  map[string]*supervisor.Process{},
 		// Promoted fields cannot be set in a composite literal; the placeholder
 		// goes in just below.
 		sourceState: sourceState{source: routing.DefaultSource()},

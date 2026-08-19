@@ -48,6 +48,21 @@ type DestStatus struct {
 	// observed, and the reason it has to be said out loud is that Process.State
 	// reads "stopped" on both of Stop's arms and so cannot say it (#209).
 	StopWarning string `json:"stopWarning,omitempty"`
+	// RolledOverTo is the file a file destination is actually writing to, when
+	// that is not the name the operator configured.
+	//
+	// A SEPARATE FIELD FROM Warnings for the same reason StopWarning is separate
+	// from Error: nothing is wrong. The destination is delivering and the
+	// recording is continuing; the configured name simply already held footage,
+	// so the respawn was given a timestamped sibling rather than overwriting it.
+	//
+	// It is said out loud because nothing else says it. The child that stopped
+	// can exit CLEANLY -- FFmpeg 8.1 exits 0 on a demuxer-side failure -- and a
+	// clean exit is logged at Info with no entry in the process log ring, while
+	// LastError stays empty. Before this field the configured filename held a
+	// header and no video, the footage was in a file nobody had been told about,
+	// and the only trace was Process.Restarts moving from 0 to 1.
+	RolledOverTo string `json:"rolledOverTo,omitempty"`
 	// RenditionID is the shared encode this destination reads, nil for
 	// passthrough. RenditionName is its label, empty for passthrough, so the
 	// dashboard can group destinations under the encode they share.
@@ -308,6 +323,7 @@ func (e *Engine) Status() Status {
 			// stopped is gone from e.dests, so anything hung off `live` below
 			// would be silently absent exactly when the warning is true.
 			ds.StopWarning, _ = e.StopUnreaped(row.ID)
+			ds.RolledOverTo, _ = e.RolledOver(row.ID)
 			// Looked up ONCE. This was two identical linear scans of the same
 			// list with the same argument, per row, on a function that runs per
 			// WebSocket push and per telemetry tick.

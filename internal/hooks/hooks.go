@@ -71,6 +71,28 @@ const (
 	// stream because a transition failed -- see internal/api/lifecycle.go, where
 	// that rule is the one invariant with a test of its own.
 	TriggerBroadcastFault Trigger = "broadcast.fault"
+	// TriggerDestinationRolledOver fires when a file destination's respawn was
+	// given a DIFFERENT output path than the one configured, because the
+	// configured one already holds footage.
+	//
+	// A SEPARATE TRIGGER RATHER THAN A destination.down, for the same reason
+	// broadcast.fault is separate: nothing went down. The destination is
+	// delivering, the recording is continuing, and the only thing that changed
+	// is which file it is continuing into. A script mirroring "what are we live
+	// to" must not react, and a script subscribed to destination.down must not
+	// start hearing about this.
+	//
+	// IT EXISTS BECAUSE THE ROLLOVER WAS OTHERWISE INVISIBLE. The child that
+	// stopped is respawned, and the supervisor logs a clean exit at Info with no
+	// entry in the process log ring; LastError is empty because -loglevel warning
+	// suppresses the lines classify would have kept. So the configured filename
+	// held a header and nothing else, the footage was in a sibling nobody had
+	// been told about, and the only trace anywhere was a restart counter moving
+	// from 0 to 1. "My recording is empty" is what that looks like from outside.
+	//
+	// Reason carries the path actually written. It is a filename, not a
+	// credential, but it goes through the same redaction as every other Reason.
+	TriggerDestinationRolledOver Trigger = "destination.rolledover"
 	// TriggerTest is what the test button sends. Never subscribable: a test
 	// that a subscription filter swallows teaches the operator that their
 	// endpoint is broken when it is not.
@@ -89,6 +111,11 @@ func AllTriggers() []Trigger {
 		// empty Triggers list means "everything", so an install that never
 		// narrowed its subscription starts receiving this one on upgrade.
 		TriggerBroadcastFault,
+		// APPENDED, same as broadcast.fault above and for the same two reasons:
+		// no existing row moves under an operator who has learned the order, and
+		// an install whose hook never narrowed its Triggers list starts
+		// receiving this one on upgrade.
+		TriggerDestinationRolledOver,
 	}
 }
 
