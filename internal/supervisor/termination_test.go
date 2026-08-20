@@ -341,17 +341,21 @@ func TestAStopThatLandsWhileTheChildIsBeingSpawnedStillSignalsIt(t *testing.T) {
 // stopPostmortem says WHICH failure a missed stop was, because the three are
 // different bugs and the deadline error alone cannot tell them apart.
 //
-// This exists because the test flaked once in CI and could not be reproduced --
+// This exists because the test flaked once in CI and repetition did not find it:
 // 70 iterations in isolation, 30 of the whole package under 5x CPU contention,
-// none of them failing. That is consistent with the measured rate for its job
-// (`go build, vet, test`, 2/70 = 2.86%, needing ~104 repetitions to catch at 95%
-// confidence -- see poly_repetitions_for in scripts/lib-observe.sh), which the
-// same analysis calls "not reachable at any cap this repository can afford".
+// none failing. The cause was eventually found by READING -- a select tie in
+// stop(), fixed in the same change as this -- which is the honest account of it.
 //
-// So the answer is not more repetitions. It is that the NEXT occurrence has to
-// arrive already diagnosed, which is the same discipline the acceptance suite's
-// "-1" reading needed: an absence that cannot say why it happened costs more
-// than the failure it reports.
+// The measured rate that made repetition unattractive is a JOB rate, not a test
+// rate: `go build, vet, test` fails 2/70 = 2.86% of the time, and
+// poly_repetitions_for puts that at ~104 CI JOB runs for 95% confidence (see
+// scripts/lib-observe.sh), which is minutes each rather than the ~9ms a single
+// iteration of this test costs. Cheap local repetition was worth trying and was
+// tried; it is re-running the whole job a hundred times that is unaffordable.
+//
+// The postmortem stays because the next failure here may not be the one just
+// fixed, and an absence that cannot say why it happened costs more than the
+// failure it reports.
 //
 //	never signalled     terminate() found no cmd to signal -- the mid-spawn
 //	                    reach of #126, which StateRunning is supposed to
@@ -363,6 +367,18 @@ func TestAStopThatLandsWhileTheChildIsBeingSpawnedStillSignalsIt(t *testing.T) {
 //	                    so the blockage is after the reap: the drain, or the
 //	                    run loop's exit path
 func (p *Process) stopPostmortem(exited <-chan struct{}) string {
+	p.runMu.Lock()
+	doneCh := p.done
+	p.runMu.Unlock()
+	done := false
+	if doneCh != nil {
+		select {
+		case <-doneCh:
+			done = true
+		default:
+		}
+	}
+
 	p.cmdMu.Lock()
 	signalled := p.signalled
 	p.cmdMu.Unlock()
@@ -380,18 +396,30 @@ func (p *Process) stopPostmortem(exited <-chan struct{}) string {
 	var verdict string
 	switch {
 	case !signalled:
-		verdict = "NEVER SIGNALLED: terminate() had no cmd to signal. That is the " +
-			"mid-spawn reach of #126, and StateRunning being set after p.cmd is " +
-			"published is what should have made it unreachable here"
+		verdict = "NO TERM ATTEMPT RECORDED: terminate() found no cmd to reserve. That is " +
+			"the mid-spawn reach of #126, which StateRunning being set after p.cmd is " +
+			"published should have made unreachable here"
 	case !reaped:
-		verdict = "SIGNALLED BUT NOT REAPED: the child was sent SIGTERM and did not die. " +
-			"This fake installs no handlers, so the default disposition should have " +
-			"ended it -- look at signalGroup and the process group, not at the escalator"
+		// Deliberately NOT "SIGTERM was delivered". p.signalled records that
+		// terminate() reserved the one allowed attempt, which it sets BEFORE
+		// calling signalGroup -- so it survives a failed syscall, a blocked or
+		// pending signal, and a SIGSTOPped child alike. Saying "delivered" would
+		// send the next reader looking for a child that ignored a signal it may
+		// never have received.
+		verdict = "TERM ATTEMPT RECORDED, NOT REAPED: terminate() reserved the attempt and " +
+			"the child was not reaped. That does NOT establish the signal arrived -- " +
+			"p.signalled is set before signalGroup runs, and its error is discarded. " +
+			"Suspect signalGroup, the process group, or a child that never got it"
+	case done:
+		verdict = "COMPLETED ON THE BOUNDARY: the child was reaped AND the run loop closed " +
+			"`done`, so the stop finished and was reported as a timeout anyway. That is " +
+			"the select tie stop() now breaks in favour of completion; seeing this again " +
+			"means the tie-break regressed"
 	default:
 		verdict = "REAPED BUT `done` DID NOT CLOSE: the child died and the run loop did " +
 			"not finish, so the blockage is after the reap -- the drain (bounded at " +
 			"drainGrace) or the run loop's exit path"
 	}
-	return fmt.Sprintf("  postmortem: signalled=%v reaped=%v state=%q pid=%d\n  %s",
-		signalled, reaped, st.State, st.PID, verdict)
+	return fmt.Sprintf("  postmortem: signalled=%v reaped=%v doneClosed=%v state=%q pid=%d\n  %s",
+		signalled, reaped, done, st.State, st.PID, verdict)
 }

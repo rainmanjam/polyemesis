@@ -602,14 +602,49 @@ func (p *Process) stop(ctx context.Context, retire bool) error {
 	select {
 	case <-done:
 	case <-ctx.Done():
-		// SIGKILL is issued and this returns; it does NOT wait for the child to
-		// die. It cannot: the deadline is already spent, and blocking past it
-		// would hold whatever the caller is holding for an unbounded time. So
-		// the honest thing is to say so rather than to report a clean stop.
-		p.log.Warn("timed out waiting for process to exit; killing")
-		p.kill()
-		err = fmt.Errorf("%w after %s: the child was sent SIGKILL and may still be running",
-			ErrStopDeadline, p.Name())
+		// COMPLETION WINS A TIE, and this second select is the whole reason this
+		// is not one statement.
+		//
+		// Go chooses uniformly at random among ready cases. When the child was
+		// reaped and the deadline expired in the same instant -- which is what a
+		// long deschedule on a loaded machine produces, since this goroutine can
+		// be off the CPU while BOTH become ready -- the outer select is a coin
+		// flip. Losing it reported ErrStopDeadline for a stop that had already
+		// finished cleanly.
+		//
+		// THE HARM IS THE FALSE ERROR, not a stray signal, and the distinction is
+		// worth stating because the obvious worry is the other one. runOnce clears
+		// p.cmd in its teardown BEFORE supervise closes `done`, so by the time
+		// this arm could run, p.kill() finds a nil cmd and does nothing. (If it
+		// did not, killGroup issues a raw syscall.Kill(-pid) that bypasses Go's
+		// ErrProcessDone guard and names a process GROUP by number -- so on a
+		// reaped pid that is a live hazard. It is simply not reachable here.)
+		//
+		// A caller told a clean stop failed does the wrong thing with it: the
+		// question Stop answers is "can I reuse what it was holding yet", and the
+		// answer was yes.
+		//
+		// Observed as a one-off CI flake in the escalator test: Stop returned
+		// the deadline error at 10.01s on a child that honours SIGTERM and dies
+		// in about nine milliseconds. It never reproduced, because reproducing
+		// it needs the deschedule to land in exactly this window.
+		//
+		// Non-blocking, so it cannot reintroduce the unbounded wait this arm
+		// exists to prevent: `done` is either already closed or it is not.
+		select {
+		case <-done:
+			// Finished on the boundary. There is nothing to kill and nothing to
+			// report -- the caller got the stop it asked for.
+		default:
+			// SIGKILL is issued and this returns; it does NOT wait for the child
+			// to die. It cannot: the deadline is already spent, and blocking past
+			// it would hold whatever the caller is holding for an unbounded time.
+			// So the honest thing is to say so rather than to report a clean stop.
+			p.log.Warn("timed out waiting for process to exit; killing")
+			p.kill()
+			err = fmt.Errorf("%w after %s: the child was sent SIGKILL and may still be running",
+				ErrStopDeadline, p.Name())
+		}
 	}
 	p.setState(StateStopped, "")
 	return err
