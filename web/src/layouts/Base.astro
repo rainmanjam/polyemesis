@@ -98,6 +98,20 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
     <slot name="head" />
 
     <meta name="theme-color" content="#0b0d11" />
+    {/* THE .ico IS NOT LEGACY BAGGAGE, and it is listed FIRST on purpose.
+        A browser picks the last <link rel="icon"> whose type it supports, so
+        anything that understands SVG takes the line below and never fetches
+        this one; the order is what makes the .ico a fallback rather than the
+        answer.
+
+        What still asks for it: Google's favicon crawler, which fetches
+        /favicon.ico by convention and is what puts an icon beside the site in
+        search results; Safari's bookmarks and Reading List; Windows pinned
+        sites; and most feed readers. Serving no .ico at all does not make them
+        fall back to the SVG -- it makes them show a blank or a generic globe,
+        so the one place a stranger first sees polyemesis was the one place it
+        had no logo. Generated from favicon.svg at 48, 32 and 16. */}
+    <link rel="icon" href="/favicon.ico" sizes="48x48 32x32 16x16" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     {/* iOS will not use an SVG favicon and will not invent a raster from one --
         without this, a page saved to a home screen gets a blank tile or a
