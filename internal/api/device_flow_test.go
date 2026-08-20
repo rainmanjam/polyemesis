@@ -177,8 +177,8 @@ func pollDeviceFlow(t *testing.T, h http.Handler, sign func(*http.Request), hand
 // entirely reasonable-looking purpose of letting the client poll without a
 // handle, fails here.
 //
-// Mutation to run against it: add a `DeviceCode string \`json:"deviceCode"\``
-// field to deviceAuthView and fill it from authz.DeviceCode.
+// Mutation to run against it: give deviceAuthView its own DeviceCode field,
+// tagged deviceCode, and fill it from authz.DeviceCode.
 // Observed FAIL ("the start response carries the device code").
 func TestStartDeviceAuthGivesTheOperatorACodeAndKeepsTheSecretOnTheServer(t *testing.T) {
 	_, h, stub, sign := deviceFlowServer(t)
