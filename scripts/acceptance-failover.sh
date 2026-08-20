@@ -1294,6 +1294,39 @@ sleep 8
 mis_files=("$WORK"/data/recordings/mismatch*.mkv)
 MIS_BYTES=$(cat "${mis_files[@]}" 2>/dev/null | wc -c | tr -d ' ')
 MIS_MAIN=$(ls -S "${mis_files[@]}" 2>/dev/null | head -1)
+
+# A HEADER-ONLY FILE IS #398's SIGNATURE, AND SUMMING HIDES IT.
+#
+# Reading every file the destination wrote is right for the question this step
+# asks -- how much did it deliver -- and it is what stopped the suite reporting a
+# delivery failure against a destination that had written megabytes to a
+# timestamped sibling. But it also means the abandoned file summed away silently,
+# and that file is the artefact #398 was filed on:
+#
+#   the mismatch destination produced 18154ms of media and its file holds 293 bytes
+#
+# 293 bytes is an EBML header and nothing after it. Measured since: FFmpeg 8.1.2
+# does NOT refuse a mid-stream resolution change -- fed one over a live UDP relay
+# with the relay's own input options it writes megabytes, joining early or late
+# alike, on the exact artefact ci.yml pins. So the empty file is not the muxer
+# refusing the change; it is the file a destination had already stopped writing
+# to when it respawned.
+#
+# What is NOT established is why it respawns at all, and that is the part worth
+# seeing again. Reported rather than asserted: a header-only sibling alongside a
+# healthy one is not a failure of this step -- the destination delivered -- but it
+# is the thing to look at first if #398 recurs.
+if [ "${#mis_files[@]}" -gt 0 ]; then
+  for f in "${mis_files[@]}"; do
+    [ -f "$f" ] || continue
+    sz=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+    if [ "${sz:-0}" -gt 0 ] && [ "${sz:-0}" -lt 1024 ]; then
+      note "#398 watch: $(basename "$f") holds ${sz} bytes -- a header and nothing"
+      note "after it. The destination respawned and its media went elsewhere; see"
+      note "the restart count above for whether this step caused it."
+    fi
+  done
+fi
 if [ "${#mis_files[@]}" -gt 1 ]; then
   note "the destination restarted, so its output is split across ${#mis_files[@]} files:"
   for f in "${mis_files[@]}"; do

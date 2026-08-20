@@ -173,12 +173,19 @@ func TestAStubbedProviderReachesNoRealHost(t *testing.T) {
 		"twitch": func(t *testing.T, base string) map[string]func() {
 			tw := NewTwitch(WithBaseURL(base))
 			return map[string]func(){
-				"Exchange":     func() { _, _ = tw.Exchange(ctx, cid, secret, "https://r.test/cb", "code", "") },
-				"Refresh":      func() { _, _ = tw.Refresh(ctx, cid, secret, "refresh") },
-				"Account":      func() { _, _ = tw.Account(ctx, cid, tok) },
-				"Ingest":       func() { _, _ = tw.Ingest(ctx, cid, tok) },
-				"Stats":        func() { _, _ = tw.Stats(ctx, cid, tok) },
-				"PushMetadata": func() { _, _ = tw.PushMetadata(ctx, cid, tok, "4242", Metadata{Title: "x", Category: "Chess"}) },
+				"Exchange": func() { _, _ = tw.Exchange(ctx, cid, secret, "https://r.test/cb", "code", "") },
+				"Refresh":  func() { _, _ = tw.Refresh(ctx, cid, secret, "refresh") },
+				// Device flow reaches the authorization server twice, and both
+				// halves are enumerated. The start call is the one that would
+				// escape most quietly: it is the only endpoint in this package
+				// that is neither /oauth2/token nor a data API, so a base read
+				// from the wrong accessor would still look plausible.
+				"StartDeviceAuth": func() { _, _ = tw.StartDeviceAuth(ctx, cid) },
+				"PollDeviceAuth":  func() { _, _ = tw.PollDeviceAuth(ctx, cid, "device-code") },
+				"Account":         func() { _, _ = tw.Account(ctx, cid, tok) },
+				"Ingest":          func() { _, _ = tw.Ingest(ctx, cid, tok) },
+				"Stats":           func() { _, _ = tw.Stats(ctx, cid, tok) },
+				"PushMetadata":    func() { _, _ = tw.PushMetadata(ctx, cid, tok, "4242", Metadata{Title: "x", Category: "Chess"}) },
 				"PushCompliance": func() {
 					_, _ = tw.PushCompliance(ctx, cid, tok, ComplianceTarget{AccountRef: "4242"}, db.Compliance{Labels: map[string]bool{"x": true}})
 				},

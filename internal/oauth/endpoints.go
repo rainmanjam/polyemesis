@@ -222,6 +222,23 @@ func (s Set) LifecycleFor(p db.Platform) (BroadcastLifecycler, bool) {
 	return bl, ok
 }
 
+// DeviceFor is the Set twin of the package-level DeviceFor in device.go.
+//
+// The twin is not optional here even though only Twitch implements the
+// capability. A caller holding a stubbed Set that resolved device flow through
+// the package function would get the PRODUCTION Twitch provider, and the first
+// thing it would do is POST an operator's real client id to id.twitch.tv and
+// then poll it every five seconds -- from a test that believed the whole world
+// was pointed at a stub.
+func (s Set) DeviceFor(p db.Platform) (DeviceFlower, bool) {
+	pr, ok := s.All()[p]
+	if !ok {
+		return nil, false
+	}
+	df, ok := pr.(DeviceFlower)
+	return df, ok
+}
+
 func (s Set) ScheduledBroadcastsFor(p db.Platform) (ScheduledBroadcaster, bool) {
 	pr, ok := s.All()[p]
 	if !ok {

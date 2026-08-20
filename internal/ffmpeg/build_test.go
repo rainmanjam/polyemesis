@@ -1686,3 +1686,68 @@ func TestOnlyTheProbeGetsTheReadTimeout(t *testing.T) {
 			"destination reads through this, and a gap between switches would end them", u)
 	}
 }
+
+// EVERY RELAY CONSUMER GETS BOTH PROBE BUDGETS.
+//
+// A consumer that joins mid-GOP has no keyframe, cannot determine the pixel
+// format, and its muxer cannot write a header -- and from FFmpeg 7.0 that aborts
+// the process instead of being logged. It has to be able to reach the NEXT
+// keyframe, which costs one whole GOP of bytes.
+//
+// BOTH, because FFmpeg stops at whichever budget runs out first. Measured on the
+// pinned 8.1.2 artefact, joining 3s into a stream whose next keyframe is 7s away:
+// window 5s + size 5MB fails, window 15s + size 5MB fails IDENTICALLY, and
+// window 15s + size 50MB writes 20 MB. Raising the window alone is raising
+// nothing, which is how the first attempt at this was measured as ineffective
+// and parked.
+func TestEveryRelayConsumerGetsBothProbeBudgets(t *testing.T) {
+	pairs := func(args []string) (window, size string, beforeInput bool) {
+		iAt := -1
+		for i, a := range args {
+			switch a {
+			case "-i":
+				if iAt < 0 {
+					iAt = i
+				}
+			case "-analyzeduration":
+				if i+1 < len(args) {
+					window = args[i+1]
+				}
+			case "-probesize":
+				if i+1 < len(args) {
+					size = args[i+1]
+				}
+			}
+		}
+		for i, a := range args {
+			if (a == "-analyzeduration" || a == "-probesize") && iAt >= 0 && i > iAt {
+				return window, size, false
+			}
+		}
+		return window, size, true
+	}
+
+	spec := DestSpec{RelayURL: "udp://127.0.0.1:21000", Kind: DestFile, Target: "/tmp/x.mkv"}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"destination", DestinationArgs(spec)},
+	} {
+		w, sz, ok := pairs(tc.args)
+		if w == "" || sz == "" {
+			t.Errorf("%s: window=%q size=%q -- a consumer missing EITHER budget stops at "+
+				"the one it still has, so the other buys nothing", tc.name, w, sz)
+			continue
+		}
+		if !ok {
+			t.Errorf("%s: a probe budget appears AFTER -i, where it applies to the "+
+				"output rather than the input it was meant for", tc.name)
+		}
+		if sz == "5000000" {
+			t.Errorf("%s: probesize is still FFmpeg's default. One 1080p GOP exceeds it, "+
+				"so a late joiner cannot reach the keyframe it needs however long it is "+
+				"given -- this is the exact limit the parked attempt left alone", tc.name)
+		}
+	}
+}

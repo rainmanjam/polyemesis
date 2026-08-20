@@ -4,7 +4,6 @@ package supervisor
 
 import (
 	"log/slog"
-	"runtime"
 	"sync"
 	"unsafe"
 
@@ -58,38 +57,21 @@ func ensureJob() {
 		// CreateJobObject with nil attributes yields a non-inheritable handle,
 		// which matters: if children held a handle to the job, the job would
 		// stay alive after we died and KILL_ON_JOB_CLOSE would never fire.
+		// The conversion below is only safe because it sits in the argument list
+		// of setInformationJobObject, which carries //go:uintptrescapes. See the
+		// comment on that function: without it, info stays on the stack and the
+		// integer we hand the kernel can go stale.
 		info := jobLimits()
-		if _, err := windows.SetInformationJobObject(
+		if _, err := setInformationJobObject(
 			h,
 			windows.JobObjectExtendedLimitInformation,
 			uintptr(unsafe.Pointer(&info)),
 			uint32(unsafe.Sizeof(info)),
 		); err != nil {
-			runtime.KeepAlive(&info)
 			_ = windows.CloseHandle(h)
 			slog.Default().Warn("could not set job object limits; FFmpeg children will survive a polyemesis crash", "err", err)
 			return
 		}
-		// KEPT ALIVE ACROSS THE CALL, and this is not decoration.
-		//
-		// unsafe's rules allow Pointer -> uintptr only inside the argument list of
-		// the syscall itself, because that is the one place the compiler and the
-		// runtime treat the value as keeping the object alive.
-		// windows.SetInformationJobObject is an ordinary Go function that happens
-		// to take a uintptr, so at that boundary the only reference to info is an
-		// integer: the compiler may treat info as dead from the conversion onward,
-		// and the collector may reclaim it before the wrapper reaches the real
-		// syscall. The kernel would then write job limits into memory the runtime
-		// has already recycled, and the corruption surfaces later, somewhere with
-		// nothing to do with job objects.
-		//
-		// No tool here catches it. `go vet ./...` runs on Linux, where this file
-		// is not built; and GOOS=windows go vet is clean too, because vet's
-		// unsafeptr check looks for uintptr -> Pointer, the opposite direction.
-		// See #440, which records a "found pointer to free object" on a Windows
-		// runner that this may or may not explain -- the violation is real either
-		// way.
-		runtime.KeepAlive(&info)
 
 		if err := windows.AssignProcessToJobObject(h, windows.CurrentProcess()); err != nil {
 			// Nesting one job inside another needs Windows 8. On anything
@@ -103,6 +85,59 @@ func ensureJob() {
 
 		jobHandle = h
 	})
+}
+
+// setInformationJobObject forwards, unchanged, to
+// windows.SetInformationJobObject. It exists for exactly one reason: to carry
+// the //go:uintptrescapes directive, which is the only thing that makes the
+// uintptr(unsafe.Pointer(&info)) at its call site legal.
+//
+// The rule being obeyed. unsafe's documented pattern (4) allows Pointer ->
+// uintptr only inside the argument list of a call to a function implemented in
+// assembly, "by arranging that the referenced allocated object, if any, is
+// retained AND NOT MOVED until the call completes". Both halves matter.
+// windows.SetInformationJobObject is an ordinary, splittable Go function that
+// happens to take a uintptr -- it is not nosplit and not marked
+// //go:uintptrescapes -- so calling it directly gets neither half:
+//
+//   - Not retained: at that boundary the only reference to info is an integer,
+//     so the compiler may treat info as dead from the conversion onward and the
+//     collector may reclaim it before the wrapper reaches the real syscall.
+//
+//   - Not moved is the harder half, and it is why runtime.KeepAlive alone --
+//     what this code used to do -- was not enough. KeepAlive is special-cased
+//     by the compiler NOT to force its argument to escape, so info stayed a
+//     stack local; `GOOS=windows go build -gcflags=-m ./internal/supervisor`
+//     printed no "moved to heap: info". A stack local can be relocated by
+//     copystack at any preemption point between the conversion here and the
+//     syscall.SyscallN inside the wrapper -- the wrapper's own prologue can
+//     call morestack. The uintptr is an integer, so copystack does not adjust
+//     it. The kernel then writes ~112 bytes of
+//     JOBOBJECT_EXTENDED_LIMIT_INFORMATION into the OLD stack, which by then
+//     has been freed back to the runtime and very likely handed to something
+//     else. That is a write into a dead object, and the failure it produces --
+//     "fatal error: found pointer to free object" -- surfaces later, in
+//     whatever goroutine inherited the memory, with nothing to do with job
+//     objects. #440.
+//
+// //go:uintptrescapes gives back both halves: the compiler forces the
+// pointed-to object onto the heap (heap objects are never moved by Go's
+// collector, so the integer cannot go stale) and retains it for the duration of
+// the call. It is the same directive x/sys/windows puts on Proc.Call and
+// LazyProc.Call, which have this exact shape. //go:nosplit -- the other remedy
+// the compiler documents -- is not available: it would have to hold for this
+// function and every transitive callee, and we do not own
+// windows.SetInformationJobObject or syscall.SyscallN's Go-side wrapper.
+//
+// Nothing in the toolchain catches the unfixed form. `go vet ./...` on Linux
+// never builds this file; GOOS=windows go vet is clean too, because vet's
+// unsafeptr check looks for uintptr -> Pointer, the opposite direction. The
+// guard is job_uintptrescapes_test.go, which runs everywhere and reads the
+// escape analysis back out of the compiler.
+//
+//go:uintptrescapes
+func setInformationJobObject(job windows.Handle, class uint32, info uintptr, size uint32) (int, error) {
+	return windows.SetInformationJobObject(job, class, info, size)
 }
 
 // jobLimits is the one limit that matters: when the last handle to the job
