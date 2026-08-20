@@ -49,7 +49,7 @@ import { InfoHint } from "@/components/InfoHint";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
 import type { Source, SourceView } from "@/lib/types";
-import { withServerHost } from "@/lib/publish-url";
+import { publishRows } from "@/lib/publish-url";
 
 /* ===========================================================================
    Sources: one ingested programme each.
@@ -600,14 +600,8 @@ function SourceCard({
 
             See ui/src/lib/tourSteps.ts. */}
         <div data-tour="source-publish-urls" className="flex flex-col gap-3">
-          {Object.entries(source.publishUrls).map(([proto, raw]) => {
-            // The server sends `<server>` where the hostname goes, because it does
-            // not know which of its addresses this operator can reach. Filled in
-            // ONCE, here, so the address shown and the address copied cannot
-            // differ -- copying something other than what is on screen is the
-            // failure this had.
-            const url = withServerHost(raw, window.location.hostname);
-            return url ? (
+          {publishRows(source.publishUrls, window.location.hostname).map(
+            ({ proto, url }) => (
               <div key={proto} className="flex items-center gap-2">
                 <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
                   {proto}
@@ -624,8 +618,8 @@ function SourceCard({
                   <Copy className="h-3 w-3" />
                 </Button>
               </div>
-            ) : null;
-          })}
+            ),
+          )}
 
           {source.link && (
             /* Per-source uplink health. With several programmes on one install,

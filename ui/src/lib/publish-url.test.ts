@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SERVER_PLACEHOLDER, withServerHost } from "./publish-url";
+import { SERVER_PLACEHOLDER, publishRows, withServerHost } from "./publish-url";
 
 /* Reported from the product: copying the SRT or RTMP ingest URL puts `<server>`
  * on the clipboard instead of the hostname. The server emits that placeholder on
@@ -46,5 +46,33 @@ describe("withServerHost", () => {
     expect(withServerHost("rtmp://already.example/live", "h")).toBe(
       "rtmp://already.example/live",
     );
+  });
+});
+
+describe("publishRows", () => {
+  it("fills the placeholder in every row the page will render", () => {
+    const rows = publishRows(
+      {
+        rtmp: "rtmp://<server>:1935/live",
+        srt: "srt://<server>:6000?mode=caller",
+      },
+      "stream.example.com",
+    );
+    expect(rows).toEqual([
+      { proto: "rtmp", url: "rtmp://stream.example.com:1935/live" },
+      { proto: "srt", url: "srt://stream.example.com:6000?mode=caller" },
+    ]);
+  });
+
+  it("drops empty entries, so the page has no falsy row to guard against", () => {
+    expect(publishRows({ rtmp: "", srt: "srt://<server>:6000" }, "h")).toEqual([
+      { proto: "srt", url: "srt://h:6000" },
+    ]);
+  });
+
+  it("is empty when the source has chosen no ingest, rather than inventing a row", () => {
+    // publishUrls is {} while ingest.mode is unset -- the server declines to
+    // suggest an address for a protocol nobody picked.
+    expect(publishRows({}, "h")).toEqual([]);
   });
 });

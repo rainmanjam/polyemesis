@@ -39,3 +39,23 @@ function bracketIfIPv6(host: string): string {
   // has exactly one and is not something this is ever handed.
   return host.split(":").length > 2 ? `[${host}]` : host;
 }
+
+/** The rows the Sources page renders, with the placeholder already filled in.
+ *
+ *  Extracted from the JSX so the substitution has somewhere to be tested. It was
+ *  previously a `withServerHost` call inside a `.map()`, which is logic in a
+ *  place no unit test can reach -- and the wiring, not the helper, is where the
+ *  bug lived: the helper did not exist at all, and both the displayed URL and
+ *  the copied one used the raw string.
+ *
+ *  Empty entries are dropped here rather than by a `url ? ... : null` at the
+ *  call site, so "which rows exist" is one decision in one place.
+ */
+export function publishRows(
+  urls: Record<string, string>,
+  host: string,
+): { proto: string; url: string }[] {
+  return Object.entries(urls ?? {})
+    .filter(([, raw]) => Boolean(raw))
+    .map(([proto, raw]) => ({ proto, url: withServerHost(raw, host) }));
+}
