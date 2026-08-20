@@ -1,9 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="7" fill="#0f1115"/>
-  <g fill="#5b7fc7">
-    <rect x="6"  y="13" width="3" height="6"  rx="1.5"/>
-    <rect x="11" y="9"  width="3" height="14" rx="1.5"/>
-    <rect x="16" y="5"  width="3" height="22" rx="1.5"/>
-    <rect x="21" y="11" width="3" height="10" rx="1.5"/>
-  </g>
+<!-- The same mark as the website (web/public/favicon.svg) and the same one the
+     app header and sign-in screen now draw. This file used to hold a THIRD
+     variant: four bars instead of five, one colour instead of three, and a
+     #0f1115 tile against the site's #0b0d11 -- so a browser showing a
+     polyemesis tab and a polyemesis.com tab side by side showed two logos. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
+  <rect width="22" height="22" rx="4" fill="#0b0d11"/>
+  <rect x="2.5" y="8" width="2.5" height="6" rx="1.25" fill="#5b7fc7"/>
+  <rect x="6.2" y="4" width="2.5" height="14" rx="1.25" fill="#5b7fc7"/>
+  <rect x="9.9" y="6.5" width="2.5" height="9" rx="1.25" fill="#3ecf6d"/>
+  <rect x="13.6" y="2.5" width="2.5" height="17" rx="1.25" fill="#3ecf6d"/>
+  <rect x="17.3" y="7" width="2.5" height="8" rx="1.25" fill="#45b5d0"/>
 </svg>
