@@ -135,11 +135,15 @@ export function DeviceCodeDialog({
         // good and the operator may still be typing, so this keeps waiting on
         // the floor interval rather than tearing the dialog down over one bad
         // response. The countdown above is what eventually stops it.
-        if (!cancelled) timer = window.setTimeout(() => void tick(), DEVICE_POLL_FLOOR_MS);
+        if (!cancelled)
+          timer = window.setTimeout(() => void tick(), DEVICE_POLL_FLOOR_MS);
       }
     };
 
-    timer = window.setTimeout(() => void tick(), devicePollDelayMs(phase.auth.intervalSeconds));
+    timer = window.setTimeout(
+      () => void tick(),
+      devicePollDelayMs(phase.auth.intervalSeconds),
+    );
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
@@ -153,7 +157,8 @@ export function DeviceCodeDialog({
       setRemaining(null);
       return;
     }
-    const read = () => setRemaining(deviceSecondsRemaining(phase.auth.expiresAt, Date.now()));
+    const read = () =>
+      setRemaining(deviceSecondsRemaining(phase.auth.expiresAt, Date.now()));
     read();
     const id = window.setInterval(read, 1000);
     return () => window.clearInterval(id);
@@ -170,7 +175,9 @@ export function DeviceCodeDialog({
     }
     if (settled.current) return;
     settled.current = true;
-    toast.success(t("device.connected", { account: phase.accountName || platformName }));
+    toast.success(
+      t("device.connected", { account: phase.accountName || platformName }),
+    );
     onConnected();
     onOpenChange(false);
   }, [phase, onConnected, onOpenChange, platformName, t]);
@@ -179,7 +186,9 @@ export function DeviceCodeDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{t("device.title", { platform: platformName })}</DialogTitle>
+          <DialogTitle>
+            {t("device.title", { platform: platformName })}
+          </DialogTitle>
           <DialogDescription>
             {/* Long explanatory prose beside a control stays literal English,
                 per the convention DestinationDialog sets. The labels, buttons
@@ -203,7 +212,11 @@ export function DeviceCodeDialog({
 
             <div className="flex flex-col gap-1.5">
               <Button asChild variant="outline" size="sm">
-                <a href={phase.auth.verificationUri} target="_blank" rel="noreferrer noopener">
+                <a
+                  href={phase.auth.verificationUri}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
                   <ExternalLink aria-hidden /> {t("device.openPage")}
                 </a>
               </Button>
@@ -227,7 +240,9 @@ export function DeviceCodeDialog({
 
         {phase.kind === "failed" && (
           <div className="flex flex-col gap-2 py-2">
-            <p className="text-sm text-warn">{phase.reason || t("device.expired")}</p>
+            <p className="text-sm text-warn">
+              {phase.reason || t("device.expired")}
+            </p>
           </div>
         )}
 
@@ -247,7 +262,9 @@ export function DeviceCodeDialog({
 }
 
 /** The code itself. See the header for why it is rendered like this. */
-function UserCode({ code }: { code: string }) {
+/** Exported for test: the aria-label is the accessibility-critical part of this
+ *  whole feature and deserves an assertion of its own. */
+export function UserCode({ code }: { code: string }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
   return (
@@ -279,7 +296,11 @@ function UserCode({ code }: { code: string }) {
             .catch(() => {});
         }}
       >
-        {copied ? <Check className="size-4" aria-hidden /> : <Copy className="size-4" aria-hidden />}
+        {copied ? (
+          <Check className="size-4" aria-hidden />
+        ) : (
+          <Copy className="size-4" aria-hidden />
+        )}
       </button>
     </div>
   );
