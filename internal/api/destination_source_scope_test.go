@@ -1,6 +1,9 @@
 package api
 
 import (
+	"net/http"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -100,5 +103,81 @@ func TestAnUnknownSourceResolvesToNoEngineRatherThanTheDefault(t *testing.T) {
 	if got := s.engineForSource(nil); got != nil {
 		t.Errorf("a nil source id resolved to an engine (source %d); a destination with "+
 			"no programme belongs to none", got.SourceID())
+	}
+}
+
+// RESTARTING A DESTINATION WHOSE PROGRAMME IS NOT RUNNING SAYS SO, rather than
+// dereferencing nothing or restarting somebody else's.
+//
+// engineForSource answers nil for a source with no engine -- a programme
+// deleted under this request, or one the manager has not reconciled yet. The
+// handler turns that into a 409.
+//
+// WHAT IT REPLACED, MEASURED RATHER THAN ASSUMED. The first draft of this
+// comment said the old code answered 500. It does not. Restoring the fallback
+// and running this test gives:
+//
+//	status = 200, body {"status":"restarting"}
+//
+// The default engine ACCEPTS a restart for a destination it does not own and
+// reports success. So the failure was never an error an operator could see: it
+// was a green answer to a request that restarted nothing, or restarted
+// somebody else's destination if the ids happened to line up. That is why this
+// asserts the status rather than merely asserting "not 500".
+//
+// The fixture creates the source WITHOUT a manager sync, which is exactly the
+// "not reconciled yet" case rather than a contrived one: the manager learns
+// about sources on Sync, so a row written between two syncs genuinely has no
+// engine.
+func TestRestartingADestinationWhoseProgrammeIsNotRunningIsRefused(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	if s.eng() == nil {
+		t.Fatal("no engine in the fixture, so requireSource would answer before the " +
+			"branch under test is reached")
+	}
+
+	// A programme the manager has not been told about.
+	unsynced := &db.Source{Name: "not yet running", Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	if err := s.store.CreateSource(unsynced); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	if got := s.mgr.Engine(unsynced.ID); got != nil {
+		t.Fatalf("source %d has an engine without a sync, so this test cannot reach "+
+			"the branch it is named for", unsynced.ID)
+	}
+
+	// A destination on it, written through the store because the API would
+	// reconcile and give the source an engine.
+	dst, err := s.store.CreateDestination(&db.Destination{
+		Name: "orphan", Kind: db.DestRTMP, Platform: db.PlatformCustom,
+		URL: "rtmp://example.invalid/live", StreamKey: "k", SourceID: &unsynced.ID,
+	})
+	if err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/destinations/"+strconv.FormatInt(dst.ID, 10)+"/restart", nil)
+	sign(r)
+	w := do(t, h, r)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409. A restart aimed at a programme that is not "+
+			"running must say so. Measured with the fallback restored, this answers "+
+			"200 {\"status\":\"restarting\"} -- a green response to a restart that "+
+			"reached the wrong engine (body %s)", w.Code, w.Body.String())
+	}
+	if b := strings.ToLower(w.Body.String()); !strings.Contains(b, "source") {
+		t.Errorf("the refusal does not mention the source, so it names no cause: %s", b)
+	}
+
+	// THE POSITIVE CONTROL. A destination on a programme that IS running must
+	// still restart -- a handler that 409'd every restart would satisfy the
+	// assertions above while being useless.
+	live := createDestination(t, h, sign, destinationBody("running", false, nil))
+	r2 := jsonRequest(t, http.MethodPost, "/api/v1/destinations/"+strconv.FormatInt(live.ID, 10)+"/restart", nil)
+	sign(r2)
+	if w2 := do(t, h, r2); w2.Code == http.StatusConflict {
+		t.Errorf("a destination on a RUNNING programme was also refused with 409, so "+
+			"the check is not discriminating (body %s)", w2.Body.String())
 	}
 }
