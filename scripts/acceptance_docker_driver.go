@@ -275,9 +275,10 @@ func dests() {
 		{"B-track2", "destB.mkv", []int{1}},
 		{"C-all", "destC.mkv", []int{0, 1, 2}},
 	}
+	sid := onlySourceID()
 	for _, w := range want {
 		code, out := do(http.MethodPost, "/destinations", map[string]any{
-			"name": w.name, "kind": "file", "url": w.url,
+			"name": w.name, "kind": "file", "url": w.url, "sourceId": sid,
 			"enabled": true, "audioBitrate": 160, "profile": profile(w.on...),
 		})
 		if code != http.StatusOK && code != http.StatusCreated {
@@ -285,6 +286,27 @@ func dests() {
 		}
 	}
 	fmt.Println("DESTS_OK")
+}
+
+// onlySourceID reads back the programme this install has.
+//
+// Every create now has to name one -- the server no longer picks the first for
+// itself -- and this driver's subcommands are separate `go run` invocations, so
+// the id from setup's POST /sources is long gone by the time dests or rtmpdest
+// runs. Read rather than assumed to be 1: an id that is only ever right because
+// nothing has been deleted yet is the assumption this whole change removes.
+func onlySourceID() int64 {
+	code, out := do(http.MethodGet, "/sources", nil)
+	if code != http.StatusOK {
+		die(fmt.Sprintf("list sources: %d %s", code, out))
+	}
+	var rows []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(out, &rows); err != nil || len(rows) == 0 {
+		die(fmt.Sprintf("no source to attach a destination to: %v %s", err, out))
+	}
+	return rows[0].ID
 }
 
 func tracks() {
@@ -417,7 +439,8 @@ func rtmpDest(name, url, key, track string) {
 	}
 	code, out := do(http.MethodPost, "/destinations", map[string]any{
 		"name": name, "kind": "rtmp", "url": url, "streamKey": key,
-		"enabled": true, "audioBitrate": 160,
+		"sourceId": onlySourceID(),
+		"enabled":  true, "audioBitrate": 160,
 		"profile": profile(tr),
 	})
 	if code != http.StatusOK && code != http.StatusCreated {

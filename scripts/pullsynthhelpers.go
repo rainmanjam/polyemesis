@@ -57,6 +57,12 @@ var (
 	client *http.Client
 	base   string
 	csrf   string
+
+	// The programme setup() created, named on every destination create below.
+	// Captured from the POST /sources response rather than assumed to be 1:
+	// autoincrement stops predicting it the moment a suite creates a second
+	// source or runs against a database that has seen a delete.
+	sourceID int64
 )
 
 // destSpec is one file destination a suite asks for: a name, the file it
@@ -158,11 +164,21 @@ func setup() {
 	}
 	// The programme every step below acts on. A fresh install has none since
 	// #387; see acceptance_driver.go for the full reason.
-	if code, out := do(http.MethodPost, "/sources",
-		map[string]any{"name": "Main", "enabled": true}); code != http.StatusOK &&
-		code != http.StatusCreated {
+	code, out = do(http.MethodPost, "/sources",
+		map[string]any{"name": "Main", "enabled": true})
+	if code != http.StatusOK && code != http.StatusCreated {
 		die(fmt.Sprintf("create the first source: %d %s", code, out))
 	}
+	var src struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(out, &src); err != nil {
+		die("decode created source: " + err.Error())
+	}
+	if src.ID == 0 {
+		die("created source carried no id: " + string(out))
+	}
+	sourceID = src.ID
 	fmt.Println("SETUP_OK")
 }
 
@@ -223,6 +239,10 @@ func dests() {
 		code, out := do(http.MethodPost, "/destinations", map[string]any{
 			"name": w.name, "kind": "file", "url": w.url,
 			"enabled": true, "audioBitrate": 160, "profile": profile(w.track),
+			// Which programme this destination belongs to. Omitting it is a
+			// 400 (source_required); the server no longer guesses the first
+			// source, because guessing mis-assigns silently.
+			"sourceId": sourceID,
 		})
 		if code != http.StatusOK && code != http.StatusCreated {
 			die(fmt.Sprintf("create %s failed: %d %s", w.name, code, out))

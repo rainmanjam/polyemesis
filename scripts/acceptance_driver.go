@@ -23,6 +23,17 @@ var (
 	client *http.Client
 	base   string
 	csrf   string
+	// sourceID is the programme this driver created, captured from the create
+	// response below. Every destination has to name it: a create that omits
+	// sourceId is now refused with 400 source_required, because the server used
+	// to fill an omitted source in with the FIRST source and so could attach a
+	// destination to a programme nobody chose.
+	//
+	// Captured rather than hardcoded to 1. Hardcoding would pass today and
+	// encodes an autoincrement assumption that stops holding the moment a
+	// driver creates a second source or runs against a database that has seen a
+	// delete.
+	sourceID int64
 )
 
 // waitUp, grabCSRF, call and get live in driverhelpers.go, compiled in by
@@ -51,7 +62,12 @@ func main() {
 	// performs, and it means these runs now exercise POST /sources, which no
 	// acceptance suite drove before because nothing ever needed to.
 	fmt.Println("creating the first source")
-	call("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+	created := call("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+	sid, ok := created["id"].(float64)
+	if !ok || sid == 0 {
+		die("created source carried no id: %v", created)
+	}
+	sourceID = int64(sid)
 
 	// Recording off: this test is about destinations, and the recorder would
 	// only add noise to the disk check.
@@ -148,6 +164,7 @@ func dest(name, kind, url string, tracks []int) map[string]any {
 	return map[string]any{
 		"name": name, "kind": kind, "platform": "custom", "url": url,
 		"enabled": true, "audioBitrate": 160,
+		"sourceId": sourceID,
 		"profile": map[string]any{
 			"mode": "simple", "tracks": rows, "normalize": "auto", "sampleRate": 48000,
 		},

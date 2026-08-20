@@ -113,8 +113,11 @@ func main() {
 	// Track 3" and the screenshot argues nothing.
 	annotate()
 
+	// Every destination has to name the programme it belongs to; the server no
+	// longer picks one. Read back rather than assumed to be 1.
+	sid := onlySourceID()
 	for _, d := range demoDestinations {
-		post("/destinations", d.body())
+		post("/destinations", d.body(sid))
 	}
 
 	// Two lines on stdout: the relay port, then the source's publish token.
@@ -145,7 +148,7 @@ type demoDest struct {
 	tracks []int
 }
 
-func (d demoDest) body() map[string]any {
+func (d demoDest) body(sourceID int64) map[string]any {
 	on := map[int]bool{}
 	for _, t := range d.tracks {
 		on[t] = true
@@ -156,7 +159,8 @@ func (d demoDest) body() map[string]any {
 	}
 	return map[string]any{
 		"name": d.name, "kind": "file", "platform": "custom",
-		"url": d.file, "enabled": true, "audioBitrate": 160,
+		"sourceId": sourceID,
+		"url":      d.file, "enabled": true, "audioBitrate": 160,
 		"profile": map[string]any{
 			"mode": "simple", "tracks": rows, "normalize": "auto", "sampleRate": 48000,
 		},
@@ -231,6 +235,26 @@ func waitLive() bool {
 
 // sourceToken returns the default source's publish token, which is its address
 // on the shared SRT port -- `streamid=<token>`. Empty if it cannot be read, and
+// onlySourceID is the programme these demo destinations belong to.
+//
+// Unlike sourceToken this cannot degrade to "" and carry on: a create with no
+// source is refused outright, so a seed that could not find one has nothing to
+// seed and should say so rather than emit a wall of 400s.
+func onlySourceID() int64 {
+	r, err := client.Get(base + "/sources")
+	if err != nil {
+		die("list sources: " + err.Error())
+	}
+	defer r.Body.Close()
+	var list []struct {
+		ID int64 `json:"id"`
+	}
+	if json.NewDecoder(r.Body).Decode(&list) != nil || len(list) == 0 {
+		die("no source to attach the demo destinations to")
+	}
+	return list[0].ID
+}
+
 // the caller falls back to relay injection rather than failing the capture.
 func sourceToken() string {
 	r, err := client.Get(base + "/sources")
