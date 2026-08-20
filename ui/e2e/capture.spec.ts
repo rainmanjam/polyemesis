@@ -62,10 +62,13 @@ test("dashboard — the hero shot", async ({ page }) => {
   await expect(page.getByText("Offline", { exact: true })).toHaveCount(0, {
     timeout: 120_000,
   });
-  // And the preview has to be showing frames, not its placeholder.
-  await expect(page.getByText("Waiting for a stream…")).toHaveCount(0, {
-    timeout: 120_000,
-  });
+  // And the preview has to be showing frames, not its placeholder. BOTH
+  // placeholder texts: the player says "Ingest offline" when nothing is on air
+  // and "Waiting for a stream…" only while it buffers, so asserting the second
+  // alone would pass on a blank tile showing the first.
+  for (const placeholder of ["Waiting for a stream…", "Ingest offline"]) {
+    await expect(page.getByText(placeholder)).toHaveCount(0, { timeout: 120_000 });
+  }
   await settle(page);
   await page.screenshot({ path: `${OUT}/01-dashboard.png` });
 });
