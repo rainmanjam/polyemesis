@@ -48,6 +48,7 @@ import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
 import { InfoHint } from "@/components/InfoHint";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
+import { publishRows } from "@/lib/publish-url";
 import type { Source, SourceView } from "@/lib/types";
 
 /* ===========================================================================
@@ -547,7 +548,7 @@ function SourceCard({
 
             See ui/src/lib/tourSteps.ts. */}
         <div data-tour="source-publish-urls" className="flex flex-col gap-3">
-        {Object.entries(source.publishUrls).map(([proto, url]) =>
+        {publishRows(source.publishUrls, window.location.hostname).map(({ proto, url }) =>
           url ? (
             <div key={proto} className="flex items-center gap-2">
               <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
