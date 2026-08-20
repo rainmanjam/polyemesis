@@ -16,6 +16,7 @@ package supervisor
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -56,12 +57,23 @@ func TestTheGraceEscalatorStopsWaitingOnceTheChildIsReaped(t *testing.T) {
 	p.Start()
 	waitFor(t, "child to start", func() bool { return p.Status().State == StateRunning })
 
+	// SNAPSHOT BEFORE THE STOP, because runOnce sets p.exited to nil on teardown
+	// (supervisor.go's "torn down per spawn" block). Read afterwards, a reaped
+	// child and a child that never existed are the same nil, and the first
+	// version of this postmortem reported "not reaped" for a reap that had
+	// plainly happened. The channel itself survives being unpublished.
+	p.cmdMu.Lock()
+	exitedAtStart := p.exited
+	p.cmdMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	started := time.Now()
 	if err := p.Stop(ctx); err != nil {
-		t.Fatalf("Stop on a child that honours SIGTERM returned %v, want nil: this test is "+
-			"about what the escalator does AFTER a clean stop, and a stop that was not "+
-			"clean does not reach that question", err)
+		t.Fatalf("Stop on a child that honours SIGTERM returned %v after %v, want nil: this "+
+			"test is about what the escalator does AFTER a clean stop, and a stop that was "+
+			"not clean does not reach that question.\n%s",
+			err, time.Since(started).Round(time.Millisecond), p.stopPostmortem(exitedAtStart))
 	}
 
 	// Stop has returned, so the child is reaped -- that is what the nil above
@@ -324,4 +336,62 @@ func TestAStopThatLandsWhileTheChildIsBeingSpawnedStillSignalsIt(t *testing.T) {
 	if alive(spawnedPID) {
 		t.Errorf("pid %d is still alive after a Stop that reported a clean stop", spawnedPID)
 	}
+}
+
+// stopPostmortem says WHICH failure a missed stop was, because the three are
+// different bugs and the deadline error alone cannot tell them apart.
+//
+// This exists because the test flaked once in CI and could not be reproduced --
+// 70 iterations in isolation, 30 of the whole package under 5x CPU contention,
+// none of them failing. That is consistent with the measured rate for its job
+// (`go build, vet, test`, 2/70 = 2.86%, needing ~104 repetitions to catch at 95%
+// confidence -- see poly_repetitions_for in scripts/lib-observe.sh), which the
+// same analysis calls "not reachable at any cap this repository can afford".
+//
+// So the answer is not more repetitions. It is that the NEXT occurrence has to
+// arrive already diagnosed, which is the same discipline the acceptance suite's
+// "-1" reading needed: an absence that cannot say why it happened costs more
+// than the failure it reports.
+//
+//	never signalled     terminate() found no cmd to signal -- the mid-spawn
+//	                    reach of #126, which StateRunning is supposed to
+//	                    foreclose by being set after p.cmd is published
+//	signalled, alive    SIGTERM was delivered and the child did not die,
+//	                    which for a fake with no handlers means the signal
+//	                    went somewhere else -- look at signalGroup and pgid
+//	signalled, reaped   the child DID die and `done` still did not close,
+//	                    so the blockage is after the reap: the drain, or the
+//	                    run loop's exit path
+func (p *Process) stopPostmortem(exited <-chan struct{}) string {
+	p.cmdMu.Lock()
+	signalled := p.signalled
+	p.cmdMu.Unlock()
+
+	reaped := false
+	if exited != nil {
+		select {
+		case <-exited:
+			reaped = true
+		default:
+		}
+	}
+	st := p.Status()
+
+	var verdict string
+	switch {
+	case !signalled:
+		verdict = "NEVER SIGNALLED: terminate() had no cmd to signal. That is the " +
+			"mid-spawn reach of #126, and StateRunning being set after p.cmd is " +
+			"published is what should have made it unreachable here"
+	case !reaped:
+		verdict = "SIGNALLED BUT NOT REAPED: the child was sent SIGTERM and did not die. " +
+			"This fake installs no handlers, so the default disposition should have " +
+			"ended it -- look at signalGroup and the process group, not at the escalator"
+	default:
+		verdict = "REAPED BUT `done` DID NOT CLOSE: the child died and the run loop did " +
+			"not finish, so the blockage is after the reap -- the drain (bounded at " +
+			"drainGrace) or the run loop's exit path"
+	}
+	return fmt.Sprintf("  postmortem: signalled=%v reaped=%v state=%q pid=%d\n  %s",
+		signalled, reaped, st.State, st.PID, verdict)
 }
