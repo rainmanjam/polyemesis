@@ -1639,3 +1639,50 @@ func TestTheRelayFIFOIsNotBelowFFmpegsOwnDefault(t *testing.T) {
 		t.Errorf("RelayInputURL = %q, which does not carry fifo_size=%d", got, relayFIFOPackets)
 	}
 }
+
+// A PROBE MUST NOT WAIT FOR EVER ON A QUIET RELAY.
+//
+// analyzeduration and probesize bound the MEDIA a probe analyses. Neither bounds
+// waiting for bytes, and UDP has no EOF -- so before the read timeout, ffprobe
+// against a silent relay blocked until something killed it. Measured with the
+// exact arguments this function builds: 2.7s against a flowing stream, and no
+// return at all against a socket nothing is sending to.
+//
+// It matters because destinations are HELD until a layout is measured, and the
+// hold's exit needs probeGiveUp consecutive failures. A probe that hangs cannot
+// fail, so the hold it is gating has no bound.
+func TestTheProbeInputCarriesAReadTimeout(t *testing.T) {
+	args := ProbeArgs("udp://127.0.0.1:21000", 3)
+
+	var input string
+	for i, a := range args {
+		if a == "-i" && i+1 < len(args) {
+			input = args[i+1]
+		}
+	}
+	if input == "" {
+		t.Fatal("ProbeArgs names no input")
+	}
+	if !strings.Contains(input, "timeout=3000000") {
+		t.Errorf("probe input %q carries no read timeout. analyzeduration bounds the media "+
+			"analysed, not the wait for bytes, so on a relay that has gone quiet -- which "+
+			"the source selector produces several times in a newly connected encoder's "+
+			"first minute -- this probe blocks until it is killed, and a probe that cannot "+
+			"fail cannot advance the counter that ends the destination hold", input)
+	}
+	// The timeout scales with the caller's budget rather than being a second
+	// constant that can drift away from it.
+	if got := ProbeArgs("udp://127.0.0.1:21000", 7); !strings.Contains(got[len(got)-1], "timeout=7000000") {
+		t.Errorf("the read timeout does not follow the caller's seconds: %q", got[len(got)-1])
+	}
+}
+
+// The relay's OTHER consumers must not inherit it: a destination reading through
+// a quiet patch is a feed between switches, and erroring out would take a
+// working output off air.
+func TestOnlyTheProbeGetsTheReadTimeout(t *testing.T) {
+	if u := RelayInputURL("udp://127.0.0.1:21000"); strings.Contains(u, "timeout=") {
+		t.Errorf("RelayInputURL carries a read timeout (%q). Every rendition and "+
+			"destination reads through this, and a gap between switches would end them", u)
+	}
+}

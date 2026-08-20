@@ -33,6 +33,28 @@ func TestStatusSaysWhyEveryDestinationIsUnplanned(t *testing.T) {
 	e.settings = failoverOnSettings()
 	e.play = playout.New(playout.Deps{Dir: t.TempDir()})
 
+	// STOP WHAT THIS TEST STARTS, because it deliberately ends with destinations
+	// RUNNING -- the last assertion is that re-measuring clears the hold, which
+	// means planning them again.
+	//
+	// Registered after failoverEngine, so it runs BEFORE the store is closed and
+	// the temp dir removed (t.Cleanup is LIFO). Without it the database file is
+	// still held when TempDir tries to delete it, which unlink on Unix does not
+	// mind and Windows refuses:
+	//
+	//   TempDir RemoveAll cleanup: unlinkat ...\test.db: The process cannot
+	//   access the file because it is being used by another process
+	//
+	// The sibling test that shares this fixture does not need it because it ends
+	// on the unmeasured pass, with everything already torn down.
+	t.Cleanup(func() {
+		e.mu.Lock()
+		e.measured, e.probed = false, false
+		e.source = routing.DefaultSource()
+		e.mu.Unlock()
+		_ = e.reconcileOutputs()
+	})
+
 	dest, err := e.store.CreateDestination(&db.Destination{
 		Name: "onair", Kind: db.DestRTMP, Platform: db.PlatformCustom,
 		URL: "rtmp://127.0.0.1:1/rtmp", StreamKey: "key", Enabled: true,

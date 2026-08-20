@@ -603,6 +603,27 @@ func RelayInputURL(base string) string {
 	return base + sep + "fifo_size=" + strconv.Itoa(relayFIFOPackets) + "&overrun_nonfatal=1"
 }
 
+// RelayProbeInputURL is RelayInputURL plus a read timeout, for the one consumer
+// that must not wait for ever.
+//
+// Separate from RelayInputURL rather than folded into it, because the two have
+// opposite requirements. A destination or rendition reading the relay SHOULD
+// block through a quiet patch -- that is a feed between switches, and erroring
+// out would take a working output off air. A probe is asking a question, and a
+// question that never returns is worse than one answered "not yet": the caller
+// retries on a 3s cadence and counts failures toward an exit that a hang can
+// never reach.
+func RelayProbeInputURL(base string, timeoutSeconds int) string {
+	u := RelayInputURL(base)
+	if u == "" || timeoutSeconds <= 0 {
+		return u
+	}
+	// udp's own `timeout` option: "set raise error timeout, in microseconds
+	// (only in read mode)", default 0 meaning none. Named on the URL rather than
+	// passed as -rw_timeout so it applies to this input alone.
+	return u + "&timeout=" + strconv.Itoa(timeoutSeconds*1000000)
+}
+
 // ---------------------------------------------------------------- destination
 
 // DestKind is the output transport.
@@ -1515,6 +1536,52 @@ func ProbeArgs(input string, timeoutSeconds int) []string {
 		// look before reporting what it has seen.
 		"-analyzeduration", strconv.Itoa(timeoutSeconds * 1000000),
 		"-probesize", "5000000",
-		"-i", RelayInputURL(input),
+		// AND HOW LONG TO WAIT FOR BYTES, which is a different limit and the one
+		// that was missing. analyzeduration and probesize bound the MEDIA
+		// analysed -- three seconds of it, five megabytes of it -- and neither
+		// bounds waiting for a socket that has gone quiet. UDP has no EOF, so
+		// ffprobe on a silent relay blocks for ever.
+		//
+		// Measured, with these exact arguments: against a flowing stream the
+		// probe returns in 2.7s; against a socket nothing is sending to, and
+		// against a stream that stops one second in, it does not return at all
+		// and has to be killed. Its only bound was the 10s context in probeOnce,
+		// which is why the CI log for a held destination reads
+		//
+		//   ingest probe failed ... err="ffprobe udp://127.0.0.1:21012: signal: killed"
+		//
+		// A quiet relay is NOT an exceptional condition here: the source selector
+		// leaves the primary for the slate and back several times in the first
+		// minute of a newly connected encoder, and every one of those gaps is a
+		// window in which a probe starting or continuing will hang.
+		//
+		// The cost of hanging is not the wasted seconds, it is that destinations
+		// are HELD until a layout is measured, and the hold's exit needs
+		// probeGiveUp consecutive FAILURES. A probe that hangs does not fail; it
+		// is killed, and only after the caller's whole context. The retry timer
+		// restarts after each attempt RETURNS, so five failures cost five times
+		// (attempt + 3s): about 65s at a ten-second hang, about 30s at this
+		// timeout.
+		//
+		// AND OFTEN IT NO LONGER FAILS AT ALL, which is the better half. Measured
+		// 5/5: a stream that delivers for one second and then stops used to hang;
+		// with the timeout it RETURNS SUCCESSFULLY in 4.25s carrying the correct
+		// layout, because ffprobe reports what it parsed before the read went
+		// quiet. That is the selector-flapping case, and there this does not
+		// merely bound the hold, it ends it.
+		//
+		// VERSION-SPECIFIC, NOT A CONTRACT: on 9.0.1 an inactivity error is taken
+		// as end-of-input and avformat_find_stream_info succeeds if what it
+		// already has is sufficient. It also means "correct" is correct AMONG THE
+		// STREAMS DISCOVERED BEFORE THE GAP -- a late-starting audio track could
+		// still be missed, which is a reason to keep probing rather than to trust
+		// one result for ever.
+		//
+		// The value is a liveness policy in its own right and NOT derived from
+		// analyzeduration despite sharing its number: analyzeduration bounds
+		// media time, this bounds a wait for bytes. Three seconds tolerates
+		// ordinary scheduler jitter and a source switch; five would tolerate a
+		// longer gap at the cost of a slower exit from the hold.
+		"-i", RelayProbeInputURL(input, timeoutSeconds),
 	}
 }
