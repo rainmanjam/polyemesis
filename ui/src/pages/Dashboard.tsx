@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
+import { audioTrackCount, ingestAttribution, processAbsence } from "@/lib/dashboardFacts";
 import { sourceNameById } from "@/lib/destinationSource";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, Square } from "lucide-react";
@@ -15,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { DestinationCard } from "@/components/DestinationCard";
+import { DestinationHoldNote } from "@/components/DestinationHoldNote";
 import { DestinationDialog } from "@/components/DestinationDialog";
 import { ChatPanel } from "@/components/ChatPanel";
 import { StatusDot } from "@/components/signature/StatusDot";
@@ -779,6 +781,17 @@ export function Dashboard() {
   const { status } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
+  // The recorder's and the meters' own settings, kept rather than discarded.
+  //
+  // This page already fetched the whole settings object and threw all but one
+  // boolean away, so the pipeline rows had no way to tell a feature the
+  // operator switched off from one that is on and not running -- and printed
+  // "disabled" for both. `null` until the read lands or when it fails, which
+  // processAbsence() renders as no claim at all.
+  const [featureEnabled, setFeatureEnabled] = useState<{
+    recording: boolean;
+    meters: boolean;
+  } | null>(null);
   // Per-source preview state. Polled rather than taken from the status feed,
   // which is not source-scoped: every engine publishes onto one broker and the
   // app keeps one status, so a grid fed from it would draw every tile from
@@ -832,8 +845,11 @@ export function Dashboard() {
     api.system().then(setSystem).catch(() => {});
     api
       .getSettings()
-      .then((s) => setSettingsPreview(s.preview.enabled))
-      .catch(() => {});
+      .then((s) => {
+        setSettingsPreview(s.preview.enabled);
+        setFeatureEnabled({ recording: s.recording.enabled, meters: s.meters.enabled });
+      })
+      .catch(() => setFeatureEnabled(null));
     readSourceCount();
     // AND KEEP READING IT. The count used to be read once per refreshKey, and
     // every control that bumps refreshKey is inside the pipeline this page
@@ -911,6 +927,17 @@ export function Dashboard() {
   const ingest = status?.ingest;
   const ingestTone = toneForState(ingest?.state);
   const source = status?.source;
+  // The word a pipeline row uses when it has no process. "—" for unknown: a
+  // settings read that has not landed is not a fact about the feature.
+  const absentLabel = (enabled: boolean | null | undefined) => {
+    const verdict = processAbsence(enabled);
+    if (verdict === "disabled") return t("dash.disabled");
+    if (verdict === "idle") return t("dash.idle");
+    return "—";
+  };
+  // Whose figures the Ingest card is showing, on an install where that is
+  // genuinely ambiguous. See ingestAttribution().
+  const attribution = ingestAttribution(sourceCount, source);
   const live = status?.destinations;
   const renditions = status?.renditions ?? [];
 
@@ -1058,10 +1085,23 @@ export function Dashboard() {
               <CardTitle className="flex items-center gap-2">
                 <StatusDot tone={ingestTone} />
                 Ingest
+                {/* WHOSE INGEST. Only on an install with more than one
+                    programme, where the answer is not obvious and the feed
+                    behind these figures is not scoped to either. */}
+                {attribution && (
+                  <Badge variant="outline" className="max-w-40 truncate">
+                    {attribution.name}
+                  </Badge>
+                )}
               </CardTitle>
               <Badge variant={toneBadge[ingestTone]}>{stateLabel(ingest?.state)}</Badge>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
+              {attribution && (
+                <p className="rounded border border-border bg-muted/40 px-2 py-1 text-[10px] leading-relaxed text-muted-foreground">
+                  {t("dash.ingestSharedFeed")}
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Stat
                   label={t("dash.bitrate")}
@@ -1071,7 +1111,8 @@ export function Dashboard() {
                   label={t("dash.uptime")}
                   value={ingest?.state === "running" ? duration(ingest.uptimeSec) : "—"}
                 />
-                <Stat label={t("dash.audioTracks")} value={source?.tracks?.length ?? 0} />
+                {/* "—" until the probe answers, not "0". See audioTrackCount(). */}
+                <Stat label={t("dash.audioTracks")} value={audioTrackCount(source)} />
                 <Stat
                   label={t("dash.reconnects")}
                   value={ingest?.restarts ?? 0}
@@ -1126,14 +1167,22 @@ export function Dashboard() {
               <CardTitle>{t("dash.pipeline")}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-1.5">
+              {/* WHAT "no process" MEANS, per row, from the settings this page
+                  already fetches.
+                  A WARNING, not a control -- nothing here can stop the engine
+                  dropping the recorder on a full disk, and the point is that
+                  the row stops blaming the operator for it. absentLabel() is
+                  processAbsence() in lib/dashboardFacts.ts: on when the feature
+                  is enabled and merely not running, off when it is not, and
+                  silence when the settings read has not landed. */}
               {(
                 [
-                  ["Recorder", status?.recorder, "disabled"],
+                  ["Recorder", status?.recorder, absentLabel(featureEnabled?.recording)],
                   // The preview encoder is started on demand and stopped again
                   // when nobody is watching, so having no process is the normal
                   // idle state rather than a fault or a disabled feature.
                   ["Preview", status?.preview, settingsPreview ? t("dash.idle") : t("dash.disabled")],
-                  ["Meters", status?.meters, "disabled"],
+                  ["Meters", status?.meters, absentLabel(featureEnabled?.meters)],
                 ] as const
               ).map(([label, proc, absent]) => {
                 const tone = proc ? toneForState(proc.state) : "idle";
@@ -1215,6 +1264,10 @@ export function Dashboard() {
         <output aria-live="polite" className="sr-only">
           {moveNote}
         </output>
+
+        {/* Once, above the grid, because the hold is all-or-nothing by
+            construction: a held pass plans no destination at all. */}
+        <DestinationHoldNote hold={status?.destinationHold} />
 
         {destinations.length === 0 ? (
           <Card>

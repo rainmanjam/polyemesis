@@ -120,6 +120,37 @@ func TestLoudnessMonitorTogglesBothWays(t *testing.T) {
 	}
 }
 
+// The Meters page draws a Monitor switch. Nothing on the wire said which way it
+// should be drawn, so the page seeded it `true` and asserted "on" over a monitor
+// the operator had switched off -- then explained the empty report list as
+// "Nothing to measure yet", which is a different claim entirely.
+func TestLoudnessReadReportsWhetherTheMonitorIsOn(t *testing.T) {
+	h, _, sign := sourceServer(t)
+
+	read := func() (bool, bool) {
+		t.Helper()
+		var out map[string]any
+		decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/loudness", nil, http.StatusOK), &out)
+		raw, present := out["enabled"]
+		b, _ := raw.(bool)
+		return b, present
+	}
+
+	if _, present := read(); !present {
+		t.Fatal("GET /api/v1/loudness carried no \"enabled\"; the page has nothing to seed its switch from")
+	}
+
+	send(t, h, sign, http.MethodPut, "/api/v1/loudness", map[string]any{"enabled": false}, http.StatusOK)
+	if on, _ := read(); on {
+		t.Error("the monitor was switched off and the read still reported it on")
+	}
+
+	send(t, h, sign, http.MethodPut, "/api/v1/loudness", map[string]any{"enabled": true}, http.StatusOK)
+	if on, _ := read(); !on {
+		t.Error("the monitor was switched on and the read still reported it off")
+	}
+}
+
 func TestLoudnessReportCarriesItsBounds(t *testing.T) {
 	// The UI colours a reading against these. Shipping the numbers with the
 	// report rather than hard-coding them in the client is what stops the two

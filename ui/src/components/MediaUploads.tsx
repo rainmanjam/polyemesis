@@ -21,6 +21,12 @@ import {
 } from "@/components/ui/card";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { canReverify, uploadNotice } from "@/lib/upload-verdict";
+import {
+  cancelledNames,
+  classifyUpload,
+  failureLines,
+  type UploadResult,
+} from "@/lib/uploadOutcome";
 import type { MediaFile } from "@/lib/types";
 
 /* ===========================================================================
@@ -54,7 +60,10 @@ export function MediaUploads() {
   const t = useT();
   const [files, setFiles] = useState<MediaFile[]>([]);
   const [inFlight, setInFlight] = useState<InFlight[]>([]);
-  const [error, setError] = useState("");
+  /* A LIST, not one slot. The single string was why three of five rejected
+   * uploads were silent: each catch overwrote the last, and the operator was
+   * shown one filename while believing the other two had landed. */
+  const [errors, setErrors] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
   const [copied, setCopied] = useState("");
   const [pendingDelete, setPendingDelete] = useState<MediaFile | null>(null);
@@ -73,7 +82,7 @@ export function MediaUploads() {
     try {
       setFiles(await api.media());
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      setErrors([e instanceof ApiError ? e.message : String(e)]);
     }
   }, []);
 
@@ -83,7 +92,12 @@ export function MediaUploads() {
 
   const upload = useCallback(
     async (list: FileList | File[]) => {
-      setError("");
+      setErrors([]);
+      setNotice("");
+      // Collected across the whole batch and reported once at the end. Reporting
+      // inside the loop is what made the earlier failures invisible: there was
+      // one slot, so the last rejection was the only one that survived.
+      const results: UploadResult[] = [];
       for (const file of Array.from(list)) {
         const controller = new AbortController();
         const entry: InFlight = { name: file.name, fraction: 0, controller };
@@ -97,20 +111,38 @@ export function MediaUploads() {
               ),
             controller.signal,
           );
+          results.push({ name: file.name, kind: "ok" });
         } catch (e) {
           // Named, not swallowed. An upload that fails silently leaves the
           // operator believing a file is on the server when it is not, and
           // they find out when the broadcast they scheduled goes to air.
-          setError(
-            `${file.name}: ${e instanceof ApiError ? e.message : String(e)}`,
+          //
+          // A CANCEL IS NOT A FAILURE, and the signal is what says so. The
+          // rejection for an abort carries the message the API client happens
+          // to write today; `signal.aborted` is the fact, and painting the
+          // operator's own Cancel press in the destructive banner is the app
+          // disagreeing with them about what just happened.
+          results.push(
+            classifyUpload(
+              file.name,
+              controller.signal.aborted,
+              e instanceof ApiError ? e.message : String(e),
+            ),
           );
         } finally {
           setInFlight((cur) => cur.filter((f) => f.controller !== controller));
         }
       }
+      setErrors(failureLines(results));
+      const cancelled = cancelledNames(results);
+      if (cancelled.length > 0) {
+        // The muted notice box, not the destructive banner: this is a report of
+        // something that went as asked.
+        setNotice(t("media.uploadCancelled", { names: cancelled.join(", ") }));
+      }
       void refresh();
     },
-    [refresh],
+    [refresh, t],
   );
 
   const onDrop = useCallback(
@@ -136,7 +168,7 @@ export function MediaUploads() {
    * did nothing". The operator is told what was queued instead, and the row
    * changes on the next refresh after the job lands. */
   async function reverify(f: MediaFile) {
-    setError("");
+    setErrors([]);
     setNotice("");
     setVerifying(f.name);
     try {
@@ -152,11 +184,11 @@ export function MediaUploads() {
     } catch (e) {
       // Named, like every other failure on this card. A re-check that fails
       // silently leaves the operator believing the file is being looked at.
-      setError(
+      setErrors([
         `${t("media.checkFailed", { name: f.name })} ${
           e instanceof ApiError ? e.message : String(e)
         }`,
-      );
+      ]);
     } finally {
       setVerifying("");
     }
@@ -167,7 +199,7 @@ export function MediaUploads() {
       await api.deleteMedia(f.name);
       void refresh();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      setErrors([e instanceof ApiError ? e.message : String(e)]);
     }
   }
 
@@ -226,8 +258,15 @@ export function MediaUploads() {
           }}
         />
 
+        {/* KEYED ON THE NAME ALONE. `f.name + f.fraction` changed on every
+            progress event, so React unmounted and rebuilt this row several
+            times a second and took the Cancel button with it — the click landed
+            on an element that no longer existed, and the button could never
+            hold focus, so it was unreachable from the keyboard too. The one
+            control that stops a large upload was the one control that did not
+            work. */}
         {inFlight.map((f) => (
-          <div key={f.name + f.fraction} className="grid gap-1">
+          <div key={f.name} className="grid gap-1">
             <div className="flex items-center justify-between text-xs">
               <span className="truncate">{f.name}</span>
               <div className="flex items-center gap-2">
@@ -252,9 +291,17 @@ export function MediaUploads() {
           </div>
         ))}
 
-        {error && (
+        {errors.length > 0 && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
-            {error}
+            {errors.length === 1 ? (
+              errors[0]
+            ) : (
+              <ul className="list-disc pl-4">
+                {errors.map((e) => (
+                  <li key={e}>{e}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 

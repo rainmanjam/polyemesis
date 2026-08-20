@@ -75,7 +75,18 @@ import {
   platformSupportsDeviceCode,
 } from "@/lib/platformConnect";
 import { LIMITS } from "@/lib/limits";
-import { PULL_SCHEMES, RTSP_TRANSPORTS } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { pipelineDirty, pipelineSaveCarriesPassword } from "@/lib/pipelineSave";
+import {
+  failedRead,
+  mayClaim,
+  okRead,
+  pendingRead,
+  readFailed,
+  rowsOf,
+  type ReadState,
+} from "@/lib/readState";
+import { PullIngestFields } from "@/components/PullIngestFields";
 import type {
   AcmeCheckId,
   AcmeCheckStatus,
@@ -399,7 +410,7 @@ function IngestSettings({
           </div>
 
           {draft.ingest.mode === "pull" ? (
-            <PullIngestFields draft={draft} setDraft={setDraft} />
+            <SettingsPullIngestFields draft={draft} setDraft={setDraft} />
           ) : draft.ingest.mode === "srt" ? (
             <>
               <div className="grid grid-cols-2 gap-2">
@@ -676,78 +687,25 @@ function FfmpegBadges({ system }: { system: SystemInfo | null }) {
   );
 }
 
-/** The pull source's fields.
+/** The pull source's fields, on the settings tab.
  *
- *  The scheme list and the reconnect bounds are the SAME ones the server
- *  enforces, quoted here so a mistake is a hint under the field rather than a
- *  rejected save. They are a hint and nothing more: the server validates
- *  independently, because a UI check is a convenience and never a control. */
-function PullIngestFields({
+ *  The fields themselves are @/components/PullIngestFields: the Sources page
+ *  offers the same three ingest modes and rendered NOTHING for `pull`, so the
+ *  block had to stop being private to this file. This is the settings-shaped
+ *  adapter over it -- the shared component speaks PullSettings, this tab speaks
+ *  a whole Settings draft. */
+function SettingsPullIngestFields({
   draft,
   setDraft,
 }: {
   draft: Settings;
   setDraft: (s: Settings) => void;
 }) {
-  const t = useT();
-  const pull = draft.ingest.pull ?? { url: "", reconnectDelayMaxSeconds: 30, rtspTransport: "tcp" };
-  const set = (patch: Partial<typeof pull>) =>
-    setDraft({ ...draft, ingest: { ...draft.ingest, pull: { ...pull, ...patch } } });
-
-  const scheme = pull.url.split("://")[0]?.toLowerCase() ?? "";
-  const known = (PULL_SCHEMES as readonly string[]).includes(scheme);
-
   return (
-    <>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="pull-url">{t("set.sourceUrl")}</Label>
-        <Input
-          id="pull-url"
-          value={pull.url}
-          placeholder={t("set.sourceUrlPlaceholder")}
-          onChange={(e) => set({ url: e.target.value })}
-        />
-        {pull.url !== "" && !known ? (
-          <span className="text-[10px] text-warn">
-            {t("set.dialsOnly", { schemes: PULL_SCHEMES.join(", ") })}</span>
-        ) : (
-          <span className="text-[10px] text-muted-foreground">
-            One of {PULL_SCHEMES.join(", ")}. A file:// source is a path RELATIVE to the data
-            directory and may not contain ".." — it is confined there the same way a file
-            destination is.
-          </span>
-        )}
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="pull-reconnect">{t("set.reconnectCap")}</Label>
-          <Input
-            id="pull-reconnect"
-            type="number"
-            value={pull.reconnectDelayMaxSeconds}
-            onChange={(e) => set({ reconnectDelayMaxSeconds: Number(e.target.value) })}
-          />
-          <span className="text-[10px] text-muted-foreground">{t("set.reconnectCapNote")}</span>
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label>{t("set.rtspTransport")}</Label>
-          <Select value={pull.rtspTransport || "tcp"} onValueChange={(v) => set({ rtspTransport: v })}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {RTSP_TRANSPORTS.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {t}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="text-[10px] text-muted-foreground">{t("set.rtspNote")}</span>
-        </div>
-      </div>
-    </>
+    <PullIngestFields
+      value={draft.ingest.pull}
+      onChange={(pull) => setDraft({ ...draft, ingest: { ...draft.ingest, pull } })}
+    />
   );
 }
 
@@ -799,7 +757,41 @@ function PipelineSettings({
   const [mqttPassword, setMqttPassword] = useState("");
   useEffect(() => setMqttPassword(""), [settings]);
 
+  // ONE SAVE FOR THE TAB, and it is a CONTROL rather than a warning.
+  //
+  // There used to be nine buttons over this single draft. Eight of them called
+  // the plain settings save, which does not carry the MQTT broker password --
+  // it is a separate PUT. So: type a broker password, click any of the eight,
+  // and you got "Settings saved.", the password never sent, the box wiped by
+  // the effect above re-seeding from the server's reply, and `hasPassword`
+  // still false. Nothing on screen contradicted the success toast.
+  //
+  // Warning beside eight buttons would have made the loss visible. Routing
+  // every save through one function that carries the password makes it
+  // impossible. And since all nine PUT the whole tab draft anyway, collapsing
+  // them also ends the second half of the same defect: a Save under the
+  // failover slate that silently committed an abandoned chat-retention edit.
+  const dirty = pipelineDirty(settings, draft, mqttPassword);
+  const saveTab = () =>
+    pipelineSaveCarriesPassword(mqttPassword)
+      ? onSaveMqtt(draft, mqttPassword)
+      : onSave(draft);
+
   return (
+    <div className="flex flex-col gap-3">
+      {/* Sticky, because this tab is two long columns and a bar that lives
+          only at the top is a bar the operator editing the last card cannot
+          see. It is also the only place a Save now exists on this tab, so it
+          has to be reachable from everywhere in it. */}
+      <div className="sticky top-0 z-10 flex items-center gap-2 rounded-md border border-border bg-background/95 px-2 py-1.5 backdrop-blur">
+        <span className={cn("mr-auto text-[11px]", dirty ? "text-warn" : "text-muted-foreground")}>
+          {dirty ? t("set.pipelineUnsaved") : t("set.pipelineOneSave")}
+        </span>
+        <Button size="sm" onClick={saveTab} disabled={saving || !dirty}>
+          {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("set.savePipeline")}
+        </Button>
+      </div>
+
     <div className="grid gap-3 lg:grid-cols-2">
       <Card>
         <CardHeader>
@@ -816,9 +808,6 @@ function PipelineSettings({
             />
           </div>
           <span className="text-[10px] text-muted-foreground">{t("set.synthesiseNote")}</span>
-          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
-          </Button>
         </CardContent>
       </Card>
 
@@ -845,13 +834,10 @@ function PipelineSettings({
             <span className="text-[10px] text-muted-foreground">
               {t("set.staggerReconnectNote")}</span>
           </div>
-          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
-          </Button>
         </CardContent>
       </Card>
 
-      <MultitrackHardware draft={draft} setDraft={setDraft} onSave={onSave} saving={saving} />
+      <MultitrackHardware draft={draft} setDraft={setDraft} />
 
       <Card>
         <CardHeader>
@@ -933,9 +919,6 @@ function PipelineSettings({
             page, before any of the stored history is queried &mdash; so raising it costs memory all
             the time to make the first screen fuller.
           </span>
-          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
-          </Button>
         </CardContent>
       </Card>
 
@@ -972,17 +955,9 @@ function PipelineSettings({
           </div>
           <span className="text-[10px] text-muted-foreground">{t("set.attemptsRetryable")}</span>
           <span className="text-[10px] text-muted-foreground">{t("set.attemptsBackoff")}</span>
-          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
-          </Button>
         </CardContent>
       </Card>
 
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-          {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
-        </Button>
-      </div>
 
       <Card>
         <CardHeader>
@@ -1168,9 +1143,6 @@ function PipelineSettings({
             </>
           )}
 
-          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
-          </Button>
         </CardContent>
       </Card>
 
@@ -1363,9 +1335,6 @@ function PipelineSettings({
             </>
           )}
 
-          <Button size="sm" onClick={() => onSaveMqtt(draft, mqttPassword)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")}
-          </Button>
         </CardContent>
       </Card>
 
@@ -1533,10 +1502,6 @@ function PipelineSettings({
         </CardContent>
       </Card>
 
-      <div className="lg:col-span-2">
-        <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-          {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("common.save")} pipeline settings
-        </Button>
       </div>
     </div>
   );
@@ -1567,16 +1532,16 @@ const PCI_VENDORS = [
  *  Broadcasting toggle in DestinationDialog that this block exists to make
  *  work — the two are read together and a half-translated pair is worse than an
  *  untranslated one. */
+/** No Save of its own: this card edits the Pipeline tab's one draft and the
+ *  tab's one Save commits it. Its own button called `onSave(draft)` like the
+ *  other seven, which is how a GPU declaration came to be saved by a button
+ *  that also dropped a typed MQTT password. */
 function MultitrackHardware({
   draft,
   setDraft,
-  onSave,
-  saving,
 }: {
   draft: Settings;
   setDraft: (s: Settings) => void;
-  onSave: (s: Settings) => void;
-  saving: boolean;
 }) {
   const gpus = draft.multitrack?.gpus ?? [];
   // Always sent as an explicit array, never omitted, so clearing the last entry
@@ -1716,9 +1681,6 @@ function MultitrackHardware({
           >
             Add a GPU
           </Button>
-          <Button size="sm" onClick={() => onSave(draft)} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
-          </Button>
         </div>
       </CardContent>
     </Card>
@@ -1729,16 +1691,32 @@ function MultitrackHardware({
 
 function PlatformSettings() {
   const t = useT();
-  const [guides, setGuides] = useState<SetupGuide[]>([]);
-  const [creds, setCreds] = useState<PlatformCreds[]>([]);
-  const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
+  // Three ReadStates, not three swallowed catches.
+  //
+  // `creds.find(...) ?? null` is what PlatformCredCard reads as "this platform
+  // has no stored credentials", so a failed GET drew an UNCONFIGURED INSTALL
+  // over a configured one -- and the operator's response to that screen is to
+  // go and regenerate a client secret that was working. A failed
+  // platformGuides() was worse still: no guides, no cards, a build that
+  // apparently supports no platforms at all.
+  //
+  // A warning rather than a control: nothing here can make the read succeed.
+  // What it can do is refuse to show setup forms it cannot honestly fill in.
+  const [guides, setGuides] = useState<ReadState<SetupGuide[]>>(pendingRead);
+  const [creds, setCreds] = useState<ReadState<PlatformCreds[]>>(pendingRead);
+  const [accounts, setAccounts] = useState<ReadState<PlatformAccount[]>>(pendingRead);
 
   const load = () => {
-    api.platformGuides().then(setGuides).catch(() => {});
-    api.listCreds().then(setCreds).catch(() => {});
-    api.listAccounts().then(setAccounts).catch(() => {});
+    api.platformGuides().then((r) => setGuides(okRead(r))).catch(() => setGuides(failedRead()));
+    api.listCreds().then((r) => setCreds(okRead(r))).catch(() => setCreds(failedRead()));
+    api.listAccounts().then((r) => setAccounts(okRead(r))).catch(() => setAccounts(failedRead()));
   };
   useEffect(load, []);
+
+  // The cards below claim, per platform, that nothing is stored. Only the
+  // creds read can support that claim, so the cards are withheld until it has
+  // -- showing an empty setup form over stored credentials is the failure.
+  const credsUsable = mayClaim(creds);
 
   return (
     <div className="flex flex-col gap-3">
@@ -1751,15 +1729,25 @@ function PlatformSettings() {
         </CardHeader>
       </Card>
 
-      {guides.map((g) => (
-        <PlatformCredCard
-          key={g.platform}
-          guide={g}
-          creds={creds.find((c) => c.platform === g.platform) ?? null}
-          accounts={accounts.filter((a) => a.platform === g.platform)}
-          onChanged={load}
-        />
-      ))}
+      {(readFailed(guides) || readFailed(creds) || readFailed(accounts)) && (
+        <Card>
+          <CardContent className="flex items-start gap-1.5 py-3 text-[11px] text-warn">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>{t("set.platformReadFailed")}</span>
+          </CardContent>
+        </Card>
+      )}
+
+      {credsUsable &&
+        rowsOf(guides).map((g) => (
+          <PlatformCredCard
+            key={g.platform}
+            guide={g}
+            creds={creds.value.find((c) => c.platform === g.platform) ?? null}
+            accounts={rowsOf(accounts).filter((a) => a.platform === g.platform)}
+            onChanged={load}
+          />
+        ))}
     </div>
   );
 }
@@ -2728,7 +2716,12 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
 
 function ApiTokens() {
   const t = useT();
-  const [tokens, setTokens] = useState<ApiToken[]>([]);
+  // A ReadState, not an array. A failed GET /tokens used to be swallowed into
+  // `[]`, which this card renders as "No tokens yet." -- and that sentence is
+  // a claim about WHO CAN ADMINISTER THIS BOX, read by somebody auditing
+  // exactly that. The top of this file has forbidden the pattern since the
+  // sources read was fixed; this was the one list that still did it.
+  const [tokens, setTokens] = useState<ReadState<ApiToken[]>>(pendingRead);
   const [name, setName] = useState("");
   // Read by default, matching the server: a token minted without a thought
   // should be the one that cannot change anything. Choosing admin is a
@@ -2741,9 +2734,16 @@ function ApiTokens() {
   const [copied, setCopied] = useState(false);
 
   const load = () => {
-    api.listTokens().then(setTokens).catch(() => {});
+    api
+      .listTokens()
+      .then((rows) => setTokens(okRead(rows)))
+      // EXPLICIT, and not `[]`. "Could not be read" and "there are none" are
+      // opposite answers to the only question this card exists to answer.
+      .catch(() => setTokens(failedRead()));
   };
   useEffect(load, []);
+
+  const confirmRevoke = useConfirm<ApiToken>();
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2836,11 +2836,15 @@ function ApiTokens() {
           </div>
         )}
 
-        {tokens.length === 0 ? (
+        {readFailed(tokens) ? (
+          <span className="text-[11px] text-warn">{t("set.tokensUnread")}</span>
+        ) : !mayClaim(tokens) ? (
+          <span className="text-[11px] text-muted-foreground">{t("set.tokensLoading")}</span>
+        ) : tokens.value.length === 0 ? (
           <span className="text-[11px] text-muted-foreground">{t("set.noTokens")}</span>
         ) : (
           <div className="flex flex-col gap-1">
-            {tokens.map((t) => (
+            {tokens.value.map((t) => (
               <div
                 key={t.id}
                 className="flex items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1.5"
@@ -2860,10 +2864,17 @@ function ApiTokens() {
                     {tokenLastUsed(t)}
                   </div>
                 </div>
+                {/* Asks, and asks with the name typed. Revoking is
+                    irreversible in the strongest sense this app has: the
+                    plaintext exists nowhere any more, so an accidental revoke
+                    cannot be undone by re-entering it -- every scraper holding
+                    it starts 401ing and a new token has to be distributed.
+                    Removing a platform credential 700 lines up already
+                    required typing; a misclick here was one click. */}
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => revoke(t)}
+                  onClick={() => confirmRevoke.ask(t)}
                   aria-label={`Revoke ${t.name}`}
                 >
                   <Trash2 />
@@ -2873,6 +2884,19 @@ function ApiTokens() {
           </div>
         )}
       </CardContent>
+
+      <ConfirmDestructive
+        open={confirmRevoke.open}
+        onOpenChange={confirmRevoke.onOpenChange}
+        subject={confirmRevoke.target?.name ?? ""}
+        title={t("set.revokeTokenTitle", { name: confirmRevoke.target?.name ?? "" })}
+        description={t("set.revokeTokenDesc")}
+        requireTyping
+        confirmLabel={t("set.revokeToken")}
+        onConfirm={async () => {
+          if (confirmRevoke.target) await revoke(confirmRevoke.target);
+        }}
+      />
     </Card>
   );
 }

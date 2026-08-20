@@ -86,6 +86,27 @@ export function PublicPlayer() {
     return () => window.clearInterval(id);
   }, [phase.kind, load]);
 
+  // And keep asking once there IS something to play, because the view is also
+  // where `viewers` comes from. Gated on `waiting` alone, the count was read
+  // once and froze at whatever it was the moment playback started -- zero, on
+  // the first viewer to arrive -- and never moved again for the rest of the
+  // broadcast.
+  //
+  // Deliberately NOT `load()`: this refresh may never demote the phase. A
+  // transient 404 or a blip would otherwise tear the player down and drop a
+  // viewer who is watching perfectly well, which is a far worse failure than a
+  // stale number. On an error it keeps what it has.
+  useEffect(() => {
+    if (phase.kind !== "ready") return;
+    const id = window.setInterval(() => {
+      api
+        .playoutPublic(token)
+        .then((view) => setPhase({ kind: "ready", view }))
+        .catch(() => {});
+    }, 15000);
+    return () => window.clearInterval(id);
+  }, [phase.kind, token]);
+
   const master = phase.kind === "ready" ? phase.view.master : "";
   // Built from the token rather than taken from `view.poster`, which is the
   // bare path. A poster is an <img> src: it can carry no header, and the

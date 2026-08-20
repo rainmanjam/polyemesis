@@ -3333,7 +3333,7 @@ func (e *Engine) loudnessWanted(s db.Settings) map[int64]loudnessPlan {
 
 	// Gated on the existing meters switch, which is the one an operator
 	// already reaches for when they want the measurement processes to stop.
-	if e.stopped || e.loudOff || !s.Meters.Enabled {
+	if !e.loudnessTierWantedLocked(s) {
 		return nil
 	}
 	out := make(map[int64]loudnessPlan, len(e.dests))
@@ -3343,6 +3343,31 @@ func (e *Engine) loudnessWanted(s db.Settings) map[int64]loudnessPlan {
 		}
 	}
 	return out
+}
+
+// loudnessTierWantedLocked is the gate above, factored out so that the answer
+// the Meters page's switch reads back and the answer reconcile acts on cannot
+// drift apart. The page used to seed that switch from a hardcoded `true`, which
+// is why this needs an accessor at all.
+//
+// Caller holds e.mu (read or write).
+func (e *Engine) loudnessTierWantedLocked(s db.Settings) bool {
+	return !e.stopped && !e.loudOff && s.Meters.Enabled
+}
+
+// LoudnessMonitorEnabled reports whether the analyser tier is currently wanted:
+// the operator's SetLoudnessMonitor override AND the meters switch it follows.
+//
+// A CONTROL rather than a warning: the Meters page cannot assert a state it has
+// not been told, so it asks. Nil receiver for the same reason Loudness has one
+// -- an install with no source has no engine and still renders the page.
+func (e *Engine) LoudnessMonitorEnabled() bool {
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.loudnessTierWantedLocked(e.settings)
 }
 
 // loudnessPlanFor derives one destination's analyser plan, or reports that this

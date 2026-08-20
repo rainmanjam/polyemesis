@@ -58,6 +58,7 @@ import {
   scheduleActionLabel,
   type ScheduleAction,
 } from "@/lib/scheduleActions";
+import { scheduleBlock } from "@/lib/scheduleCreate";
 
 export type AlertFormat = "json" | "discord" | "slack";
 export type AlertSeverity = "info" | "warning" | "critical";
@@ -211,10 +212,18 @@ function toLocalInput(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** "" for an instant that has not been chosen, NOT the epoch.
+ *
+ *  `new Date(0).toISOString()` was the old answer and it is what made an
+ *  unset one-shot indistinguishable from a chosen one: it survives the
+ *  server's Validate, stores as 0, and reads back as unset -- so the schedule
+ *  saved, toasted success, and could never fire. An empty string is a value
+ *  `runAtUnset` can recognise; `save()` is what turns it back into a wire
+ *  value, because the field is a time.Time on the server and cannot take "". */
 function fromLocalInput(value: string): string {
-  if (!value) return new Date(0).toISOString();
+  if (!value) return "";
   const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? new Date(0).toISOString() : d.toISOString();
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString();
 }
 
 function describeSchedule(s: Schedule): string {
@@ -248,11 +257,16 @@ export function AutomationPage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [runs, setRuns] = useState<ScheduleRun[]>([]);
   const [loading, setLoading] = useState(true);
+  // Whether the last full read failed. It exists because a `.catch` that only
+  // toasts leaves four empty lists behind, and an empty list here is a
+  // positive claim: "no alert rules", "no schedules", "Sent 0, Failed 0". The
+  // toast is gone in five seconds and the false claims stay for the session.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const [ruleDraft, setRuleDraft] = useState<AlertRule | null>(null);
   const [scheduleDraft, setScheduleDraft] = useState<Schedule | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback((quiet = false) => {
     Promise.all([
       autoApi.get<AlertRule[]>("/alerts/rules"),
       autoApi.get<AlertsMeta>("/alerts/meta"),
@@ -264,8 +278,14 @@ export function AutomationPage() {
         setMeta(m);
         setSchedules(s ?? []);
         setRuns(runList ?? []);
+        setLoadFailed(false);
       })
-      .catch((err) => toast.error(errText(err, t("auto.couldNotLoadAutomationSettings"))))
+      .catch((err) => {
+        setLoadFailed(true);
+        // The refresher passes `quiet`: the banner is already on screen and
+        // does not need a toast every fifteen seconds to say so again.
+        if (!quiet) toast.error(errText(err, t("auto.couldNotLoadAutomationSettings")));
+      })
       .finally(() => setLoading(false));
   }, [t]);
 
@@ -274,13 +294,15 @@ export function AutomationPage() {
   // The scheduler sweeps every 20 s, so the "next fire" column and the run log
   // go stale on their own. Cheap reads, and the alternative is a page that
   // quietly lies about when the stream starts.
+  //
+  // All four reads, not two. When the refresher only re-read schedules and
+  // runs, one failed load left Alerts empty until a browser reload while
+  // Schedules repopulated on the next tick and looked healthy -- so the half
+  // of the page that was lying was the half with nothing to suggest it.
   useEffect(() => {
-    const t = window.setInterval(() => {
-      autoApi.get<Schedule[]>("/schedules").then((s) => setSchedules(s ?? [])).catch(() => {});
-      autoApi.get<ScheduleRun[]>("/schedules/runs").then((r) => setRuns(r ?? [])).catch(() => {});
-    }, 15000);
+    const t = window.setInterval(() => load(true), 15000);
     return () => window.clearInterval(t);
-  }, []);
+  }, [load]);
 
   return (
     <div className="p-3">
@@ -313,6 +335,7 @@ export function AutomationPage() {
             <AlertRules
               rules={rules}
               meta={meta}
+              loadFailed={loadFailed}
               onReload={load}
               onEdit={setRuleDraft}
               onNew={() =>
@@ -337,6 +360,7 @@ export function AutomationPage() {
             <Schedules
               schedules={schedules}
               runs={runs}
+              loadFailed={loadFailed}
               onReload={load}
               onEdit={setScheduleDraft}
               onNew={() =>
@@ -350,7 +374,9 @@ export function AutomationPage() {
                   tz: browserZone(),
                   atMinutes: 19 * 60,
                   days: [1, 2, 3, 4, 5],
-                  runAt: new Date(0).toISOString(),
+                  // Empty, not the epoch. A blank form must not look like a
+                  // one-shot somebody scheduled for 1 January 1970.
+                  runAt: "",
                   graceSeconds: 300,
                   lastRunAt: "",
                   createdAt: "",
@@ -397,12 +423,14 @@ export function AutomationPage() {
 function AlertRules({
   rules,
   meta,
+  loadFailed,
   onReload,
   onEdit,
   onNew,
 }: {
   rules: AlertRule[];
   meta: AlertsMeta | null;
+  loadFailed: boolean;
   onReload: () => void;
   onEdit: (r: AlertRule) => void;
   onNew: () => void;
@@ -458,7 +486,18 @@ function AlertRules({
           </Button>
         </CardHeader>
         <CardContent className="px-0 pb-0">
-          {rules.length === 0 ? (
+          {/* The failure branch comes FIRST, because the empty state below it
+              is a positive claim -- "this install has no alert rules" -- and a
+              read that never answered has not earned it. This is a warning
+              rather than a control: nothing here can make the read succeed,
+              and the operator's mistake is believing an answer they were never
+              given. */}
+          {loadFailed ? (
+            <div className="flex items-start gap-1.5 px-3 py-8 text-center text-[12px] text-warn">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+              <span className="text-left">{t("auto.rulesUnread")}</span>
+            </div>
+          ) : rules.length === 0 ? (
             <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
               No alert rules. Add one with a Discord, Slack or plain JSON webhook URL and
               polyemesis will tell you when a destination drops, the ingest goes away, or the disk
@@ -551,6 +590,15 @@ function AlertRules({
           <CardTitle>{t("auto.delivery")}</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-2">
+          {/* Six calm zeros over an unread meta call say "nothing has been
+              delivered and nothing has failed", which is the one reading an
+              operator checking on their alerting must not be given. */}
+          {loadFailed && !stats && (
+            <p className="col-span-2 flex items-start gap-1.5 rounded border border-warn/50 bg-warn/5 p-2 text-[10px] text-warn">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+              {t("auto.deliveryUnread")}
+            </p>
+          )}
           <Stat label={t("auto.sent")} value={stats?.sent ?? 0} />
           <Stat label={t("auto.failed")} value={stats?.failed ?? 0} tone={stats?.failed ? "down" : "muted"} />
           <Stat label={t("auto.coalesced")} value={stats?.coalesced ?? 0} tone="muted" />
@@ -778,12 +826,14 @@ function RuleDialog({
 function Schedules({
   schedules,
   runs,
+  loadFailed,
   onReload,
   onEdit,
   onNew,
 }: {
   schedules: Schedule[];
   runs: ScheduleRun[];
+  loadFailed: boolean;
   onReload: () => void;
   onEdit: (s: Schedule) => void;
   onNew: () => void;
@@ -850,7 +900,12 @@ function Schedules({
           </Button>
         </CardHeader>
         <CardContent className="px-0 pb-0">
-          {schedules.length === 0 ? (
+          {loadFailed ? (
+            <div className="flex items-start gap-1.5 px-3 py-8 text-[12px] text-warn">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+              <span className="text-left">{t("auto.schedulesUnread")}</span>
+            </div>
+          ) : schedules.length === 0 ? (
             <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
               No schedules. A schedule flips the same enabled switch you would click, so a
               scheduled start is indistinguishable from a manual one.
@@ -988,6 +1043,13 @@ function ScheduleDialog({
   const days = form.days ?? [];
   const dests = form.destinationIds ?? [];
 
+  // Whether the live snapshot has arrived at all. `status === null` is NOT the
+  // same fact as "this install has no destinations", and the two used to
+  // render identically: an empty checkbox list under a paragraph promising
+  // that none selected means every destination.
+  const destinationsKnown = status !== null;
+  const blocked = scheduleBlock(form, { destinationsKnown, editing, now: Date.now() });
+
   const toggleDay = (d: number) =>
     setForm((f) => {
       const cur = f.days ?? [];
@@ -1015,7 +1077,11 @@ function ScheduleDialog({
         tz: form.tz,
         atMinutes: form.atMinutes,
         days,
-        runAt: form.runAt,
+        // The wire field is a Go time.Time and cannot take "", so the empty
+        // marker becomes the zero instant here -- reachable only for a daily
+        // or weekly schedule, where the server ignores it. `blocked` refuses
+        // to let a one-shot get this far unset.
+        runAt: form.runAt || new Date(0).toISOString(),
         graceSeconds: form.graceSeconds,
       };
       if (editing) await autoApi.put(`/schedules/${form.id}`, body);
@@ -1171,17 +1237,26 @@ function ScheduleDialog({
                 None selected means every destination, which is what "start the show" usually
                 means.
               </p>
-              <div className="grid gap-1.5 sm:grid-cols-2">
-                {(status?.destinations ?? []).map((d) => (
-                  <label key={d.id} className="flex items-center gap-2 text-[11px]">
-                    <Checkbox
-                      checked={dests.includes(d.id)}
-                      onCheckedChange={() => toggleDest(d.id)}
-                    />
-                    <span className="truncate">{d.name}</span>
-                  </label>
-                ))}
-              </div>
+              {destinationsKnown ? (
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  {status.destinations.map((d) => (
+                    <label key={d.id} className="flex items-center gap-2 text-[11px]">
+                      <Checkbox
+                        checked={dests.includes(d.id)}
+                        onCheckedChange={() => toggleDest(d.id)}
+                      />
+                      <span className="truncate">{d.name}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                // An empty list is a positive claim -- "this install has no
+                // destinations" -- and beside the sentence above it becomes
+                // "so this stops all of them". Said plainly instead.
+                <span className="text-[10px] text-warn">
+                  {t("auto.blockDestinationsUnknown")}
+                </span>
+              )}
             </div>
           )}
 
@@ -1202,11 +1277,17 @@ function ScheduleDialog({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          {/* The reason BESIDE the button, not in a title attribute on it:
+              button.tsx sets `disabled:pointer-events-none`, so a title on a
+              disabled button is unreachable by mouse and by keyboard. */}
+          {blocked.kind !== "ok" && blocked.kind !== "name" && (
+            <span className="mr-auto text-left text-[10px] text-warn">{t(blocked.reason)}</span>
+          )}
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="sm" onClick={save} disabled={saving || !form.name.trim()}>
+          <Button size="sm" onClick={save} disabled={saving || blocked.kind !== "ok"}>
             {saving && <Loader2 className="animate-spin" />}
             {editing ? t("auto.saveSchedule") : t("auto.createSchedule")}
           </Button>

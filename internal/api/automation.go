@@ -607,6 +607,11 @@ func (s *Server) handleLoudness(w http.ResponseWriter, r *http.Request) {
 		reports = []meters.Report{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		// Whether the analyser tier is running at all. Without it the page had
+		// no way to seed its Monitor switch and seeded it `true`, so a remount
+		// drew the switch ON over a monitor that was off -- and then explained
+		// the empty list as "nothing to measure yet".
+		"enabled": s.eng().LoudnessMonitorEnabled(),
 		"reports": reports,
 		"bounds": map[string]float64{
 			"toleranceLu":           meters.ToleranceLU,

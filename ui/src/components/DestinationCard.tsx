@@ -280,15 +280,31 @@ export function DestinationCard({
             value={running ? duration(dest.process?.uptimeSec ?? 0) : "—"}
             tone={running ? "default" : "muted"}
           />
+          {/* A DASH IS NOT A ZERO, and these two were the only cells in this
+              grid not obeying the rule its own comment states four lines down.
+
+              Restarts: with no process there is no restart count. `?? 0` said
+              "this destination has restarted zero times" about a destination
+              nobody has reported on — the same reassuring number a healthy
+              never-restarted run produces, so the one reading that would send
+              somebody looking is indistinguishable from the one that says
+              nothing at all.
+
+              Dropped: this is CUMULATIVE OVER A RUN, so a finished run's total
+              stays on screen after the encoder is gone and reads as a live
+              count. "Dropped 0" beside a stopped destination is the worse half:
+              it claims a clean run for a stream nothing is measuring. Gated on
+              `running` like Bitrate, Uptime and Speed beside it, so every cell
+              in the row now answers the same question the same way. */}
           <Stat
             label="Restarts"
-            value={dest.process?.restarts ?? 0}
-            tone={(dest.process?.restarts ?? 0) > 0 ? "warn" : "muted"}
+            value={dest.process ? (dest.process.restarts ?? 0) : "—"}
+            tone={dest.process && (dest.process.restarts ?? 0) > 0 ? "warn" : "muted"}
           />
           <Stat
             label="Dropped"
-            value={progress?.dropFrames ?? 0}
-            tone={(progress?.dropFrames ?? 0) > 0 ? "warn" : "muted"}
+            value={running && progress ? (progress.dropFrames ?? 0) : "—"}
+            tone={running && (progress?.dropFrames ?? 0) > 0 ? "warn" : "muted"}
           />
           {/* Almost every destination here is a passthrough, so there is barely
               any encoding work to be slow at — a speed under 1 means FFmpeg is
@@ -319,6 +335,24 @@ export function DestinationCard({
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span className="line-clamp-2 break-words">{dest.process.lastError}</span>
+          </div>
+        )}
+        {/* THE STOP THAT WAS NOT CONFIRMED.
+            A WARNING, not a control: by the time this arrives the SIGKILL has
+            been issued and not waited for, so there is nothing left to prevent
+            — only something to say. And it is the one thing `process.state`
+            cannot say, because it reads "stopped" on both of Stop's arms
+            (engine/status.go:41-50). Without this, a stop that left a child
+            possibly still publishing to the platform drew byte-for-byte
+            identically to a clean one, and the operator's next move — starting
+            it again — is the move that produces two encoders on one stream key.
+            Amber rather than red for the same reason the field is not `error`:
+            the row is fine and the stop was issued. It is the observation that
+            is missing, not the destination. */}
+        {dest.stopWarning && (
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span className="break-words">{dest.stopWarning}</span>
           </div>
         )}
         {warnings.map((w) => (

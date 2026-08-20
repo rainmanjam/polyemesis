@@ -40,7 +40,14 @@ import { useT } from "@/lib/i18n";
 import { InfoHint } from "@/components/InfoHint";
 import { autoApi } from "@/lib/autoApi";
 import { bytes, shortDuration, timestamp } from "@/lib/format";
-import type { DiskUsage, Recording, Settings } from "@/lib/types";
+import {
+  retentionDirty,
+  retentionDraft,
+  savePolicyBody,
+  switchPatchBody,
+  type RetentionDraft,
+} from "@/lib/retentionDraft";
+import type { DiskUsage, Recording, Settings, StemCodec } from "@/lib/types";
 
 /** One per-track file the recorder wrote beside a master segment.
  *
@@ -70,7 +77,14 @@ export function RecordingsPage() {
   const { recordingsRevision, status } = useLiveData();
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [usage, setUsage] = useState<DiskUsage | null>(null);
+  /* The last thing the SERVER said. Nothing on this card writes to it except a
+     completed save, which is what makes it safe for a switch to build a PUT
+     from. */
   const [settings, setSettings] = useState<Settings | null>(null);
+  /* The four retention numbers, held apart. They used to be edited straight
+     into `settings`, and every switch on the card spread that same object -- so
+     flipping Stems PUT a half-typed segment length with it. */
+  const [draft, setDraft] = useState<RetentionDraft | null>(null);
   const [stems, setStems] = useState<StemFile[]>([]);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -90,6 +104,7 @@ export function RecordingsPage() {
         setRecordings(r);
         setUsage(u);
         setSettings(s);
+        setDraft(retentionDraft(s));
         setStems(st ?? []);
       })
       .catch((err) => toast.error(err instanceof Error ? err.message : t("rec.loadFailed")))
@@ -125,7 +140,11 @@ export function RecordingsPage() {
   const saveRetention = async (next: Settings) => {
     setSaving(true);
     try {
-      setSettings(await api.putSettings(next));
+      const saved = await api.putSettings(next);
+      setSettings(saved);
+      // Re-seeded from what came back, so the boxes show what is stored rather
+      // than what was asked for -- the server clamps some of these.
+      setDraft(retentionDraft(saved));
       toast.success(t("rec.saved"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("rec.saveFailed"));
@@ -143,13 +162,15 @@ export function RecordingsPage() {
     stemCodec?: string;
   };
 
-  const saveRecording = (patch: { stems?: boolean; stemCodec?: string }) => {
+  /* Every switch and select on this card goes through here, and it builds from
+     `settings` -- the server's own last answer -- rather than from anything the
+     operator is mid-way through typing. */
+  const saveRecording = (patch: Partial<Settings["recording"]>) => {
     if (!settings) return;
-    void saveRetention({
-      ...settings,
-      recording: { ...settings.recording, ...patch },
-    } as Settings);
+    void saveRetention(switchPatchBody(settings, patch));
   };
+
+  const dirty = settings ? retentionDirty(settings, draft) : false;
 
   const recorderState = status?.recorder?.state;
 
@@ -329,8 +350,12 @@ export function RecordingsPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-2">
-              <Stat label={t("rec.diskRecordings")} value={usage?.count ?? 0} />
-              <Stat label={t("rec.used")} value={bytes(usage?.usedBytes ?? 0)} />
+              {/* All four follow the same rule. Two of them already did; the
+                  other two printed "Recordings 0, Used 0 B" beside "Free —,
+                  Volume —" when the usage read had simply failed, which reads
+                  as an empty disk rather than as an unanswered question. */}
+              <Stat label={t("rec.diskRecordings")} value={usage ? usage.count : "—"} />
+              <Stat label={t("rec.used")} value={usage ? bytes(usage.usedBytes) : "—"} />
               <Stat
                 label={t("rec.free")}
                 value={usage?.freeBytes ? bytes(usage.freeBytes) : "—"}
@@ -375,12 +400,7 @@ export function RecordingsPage() {
                   <Switch
                     id="rec-enabled"
                     checked={settings.recording.enabled}
-                    onCheckedChange={(v) =>
-                      saveRetention({
-                        ...settings,
-                        recording: { ...settings.recording, enabled: v },
-                      })
-                    }
+                    onCheckedChange={(v) => saveRecording({ enabled: v })}
                   />
                 </div>
 
@@ -407,7 +427,7 @@ export function RecordingsPage() {
                     </Label>
                     <Select
                       value={recSettings.stemCodec || "flac"}
-                      onValueChange={(v) => saveRecording({ stemCodec: v })}
+                      onValueChange={(v) => saveRecording({ stemCodec: v as StemCodec })}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -432,15 +452,9 @@ export function RecordingsPage() {
                     id="rec-seg"
                     type="number"
                     min={10}
-                    value={settings.recording.segmentSeconds}
+                    value={draft?.segmentSeconds ?? settings.recording.segmentSeconds}
                     onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        recording: {
-                          ...settings.recording,
-                          segmentSeconds: Number(e.target.value),
-                        },
-                      })
+                      setDraft((d) => (d ? { ...d, segmentSeconds: Number(e.target.value) } : d))
                     }
                   />
                 </div>
@@ -455,12 +469,9 @@ export function RecordingsPage() {
                     type="number"
                     min={0}
                     step={0.5}
-                    value={settings.recording.maxGb}
+                    value={draft?.maxGb ?? settings.recording.maxGb}
                     onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        recording: { ...settings.recording, maxGb: Number(e.target.value) },
-                      })
+                      setDraft((d) => (d ? { ...d, maxGb: Number(e.target.value) } : d))
                     }
                   />
                   <span className="text-[10px] text-muted-foreground">{t("rec.noSizeLimit")}</span>
@@ -475,15 +486,9 @@ export function RecordingsPage() {
                     id="rec-age"
                     type="number"
                     min={0}
-                    value={settings.recording.maxAgeHours}
+                    value={draft?.maxAgeHours ?? settings.recording.maxAgeHours}
                     onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        recording: {
-                          ...settings.recording,
-                          maxAgeHours: Number(e.target.value),
-                        },
-                      })
+                      setDraft((d) => (d ? { ...d, maxAgeHours: Number(e.target.value) } : d))
                     }
                   />
                   <span className="text-[10px] text-muted-foreground">{t("rec.keepForever")}</span>
@@ -499,15 +504,9 @@ export function RecordingsPage() {
                     type="number"
                     min={0}
                     step={0.5}
-                    value={settings.recording.minFreeGb}
+                    value={draft?.minFreeGb ?? settings.recording.minFreeGb}
                     onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        recording: {
-                          ...settings.recording,
-                          minFreeGb: Number(e.target.value),
-                        },
-                      })
+                      setDraft((d) => (d ? { ...d, minFreeGb: Number(e.target.value) } : d))
                     }
                   />
                   <span className="text-[10px] text-muted-foreground">
@@ -515,7 +514,14 @@ export function RecordingsPage() {
                   </span>
                 </div>
 
-                <Button size="sm" onClick={() => saveRetention(settings)} disabled={saving}>
+                {dirty && (
+                  <span className="text-[10px] text-warn">{t("rec.unsavedRetention")}</span>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => draft && saveRetention(savePolicyBody(settings, draft))}
+                  disabled={saving || !draft}
+                >
                   {saving && <Loader2 className="animate-spin" />}
                   {t("rec.savePolicy")}
                 </Button>

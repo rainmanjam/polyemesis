@@ -36,9 +36,14 @@ var nilEngineAnswers = map[string]bool{
 	"Alerts":      true,
 	"Scheduler":   true,
 	"Loudness":    true,
-	"ClipBuffer":  true,
-	"Failover":    true,
-	"SourceID":    true,
+	// The Meters page's switch, which cannot assert a state it has not been
+	// told. An install with no engine has no analyser tier running, so `false`
+	// is the true answer rather than a placeholder -- and the page draws the
+	// switch off rather than 500ing on the first screen.
+	"LoudnessMonitorEnabled": true,
+	"ClipBuffer":             true,
+	"Failover":               true,
+	"SourceID":               true,
 	// Not a guard of its own: GPUBusy is Status plus a fold, so it inherits the
 	// answer. Recorded rather than left to be rediscovered, because it is the
 	// one method here whose behaviour is decided in another file.

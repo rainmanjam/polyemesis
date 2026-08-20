@@ -20,6 +20,7 @@ import {
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { autoApi } from "@/lib/autoApi";
+import { keyframeVerdict, windowOnBufferToggle } from "@/lib/clipBufferFacts";
 import { bytes, timestamp } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 
@@ -119,6 +120,7 @@ export function ClipsPage() {
   const stats = buffer?.buffer ?? null;
   const clips = view?.clips ?? [];
   const held = stats?.seconds ?? 0;
+  const keyframes = keyframeVerdict(stats, buffer?.running);
 
   const capture = async (seconds: number) => {
     setCapturing(true);
@@ -329,16 +331,46 @@ export function ClipsPage() {
             <CardHeader>
               <CardTitle>{t("clips.buffer")}</CardTitle>
             </CardHeader>
+            {/* Every cell follows the Window cell's `stats ? … : "—"`.
+                Five of the six used to print a zero through `?? 0` with no
+                buffer to have measured it, and two of those zeros are not even
+                possible readings: the Ceiling is a configured constant that is
+                never zero, and Bitrate 0 kbps beside "Keyframes: none" in amber
+                describes an encoder fault on a stream nobody examined. A zero
+                that means "not measured" must not be drawn as a zero that means
+                "none". */}
             <CardContent className="grid grid-cols-2 gap-2">
-              <Stat label={t("clips.held")} value={`${held.toFixed(0)}s`} tone={held > 0 ? "live" : "muted"} />
+              <Stat
+                label={t("clips.held")}
+                value={stats ? `${held.toFixed(0)}s` : "—"}
+                tone={held > 0 ? "live" : "muted"}
+              />
               <Stat label={t("clips.window")} value={`${stats?.windowSeconds.toFixed(0) ?? "—"}s`} />
-              <Stat label={t("clips.inMemory")} value={bytes(stats?.bytes ?? 0)} tone="muted" />
-              <Stat label={t("clips.ceiling")} value={bytes(stats?.maxBytes ?? 0)} tone="muted" />
-              <Stat label={t("clips.bitrate")} value={`${stats?.bitrateKbps ?? 0} kbps`} tone="muted" />
+              <Stat
+                label={t("clips.inMemory")}
+                value={stats ? bytes(stats.bytes) : "—"}
+                tone="muted"
+              />
+              <Stat
+                label={t("clips.ceiling")}
+                value={stats ? bytes(stats.maxBytes) : "—"}
+                tone="muted"
+              />
+              <Stat
+                label={t("clips.bitrate")}
+                value={stats ? `${stats.bitrateKbps} kbps` : "—"}
+                tone="muted"
+              />
               <Stat
                 label={t("clips.keyframes")}
-                value={stats?.videoFound ? t("clips.seen") : t("clips.none")}
-                tone={stats?.videoFound ? "default" : "warn"}
+                value={
+                  keyframes.verdict === "unknown"
+                    ? "—"
+                    : keyframes.verdict === "seen"
+                      ? t("clips.seen")
+                      : t("clips.none")
+                }
+                tone={keyframes.warn ? "warn" : "muted"}
               />
             </CardContent>
           </Card>
@@ -350,10 +382,16 @@ export function ClipsPage() {
             <CardContent className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <Label htmlFor="clip-enabled">{t("clips.keepBuffer")}</Label>
+                {/* The typed window rides along with the enable. Sending a
+                    literal 0 here meant "keep the current window", so the
+                    number the operator had just typed -- with Apply greyed out
+                    because the buffer was off -- was thrown away by the click
+                    that started the buffer, and overwritten in the input by the
+                    3s poll. */}
                 <Switch
                   id="clip-enabled"
                   checked={buffer?.enabled ?? false}
-                  onCheckedChange={(v) => setBuffer(v, 0)}
+                  onCheckedChange={(v) => setBuffer(v, windowOnBufferToggle(v, windowSec))}
                 />
               </div>
 
@@ -377,6 +415,13 @@ export function ClipsPage() {
                     Apply
                   </Button>
                 </div>
+                {/* Apply stays greyed while the buffer is off -- there is
+                    nothing to apply it to -- but the reason is now in words
+                    beside it rather than nowhere, and the sentence says where
+                    the number goes instead. */}
+                {!buffer?.enabled && (
+                  <span className="text-[10px] text-warn">{t("clips.windowAppliesOnEnable")}</span>
+                )}
                 <span className="text-[10px] text-muted-foreground">
                   {view?.bounds.minWindowSeconds ?? 5}–{view?.bounds.maxWindowSeconds ?? 300}s. A
                   longer window costs memory proportional to the stream's bitrate.

@@ -803,7 +803,13 @@ export function ChatPanel({
           onMenu={(m, at) => setMenu({ m, at })}
           compact
           empty={
-            <ChatEmpty loading={loading} configured={configured} error={error} statuses={statuses} />
+            <ChatEmpty
+              loading={loading}
+              configured={configured}
+              error={error}
+              statuses={statuses}
+              hiddenMessages={messages.length - visible.length}
+            />
           }
         />
       )}
@@ -822,11 +828,24 @@ export function ChatEmpty({
   configured,
   error,
   statuses,
+  hiddenMessages = 0,
 }: {
   loading: boolean;
   configured: boolean;
   error: string;
   statuses: ChatStatus[];
+  /** How many messages the platform filter is holding back.
+   *
+   *  THE FIFTH SITUATION, and the reason this prop exists: this component was
+   *  handed the FILTERED list and knew nothing about the filter, so with every
+   *  talking platform switched off it said "Connected and waiting. Nothing has
+   *  been said yet." over a scrollback that was full. The dimmed chip is on
+   *  screen, so it is recoverable — but the sentence is still false, and it is
+   *  false in the direction that makes a moderator stop looking.
+   *
+   *  Optional and zero by default: a caller that has no filter cannot be made
+   *  to think about one. */
+  hiddenMessages?: number;
 }) {
   let body: string;
   if (loading) body = "Loading chat…";
@@ -836,6 +855,12 @@ export function ChatEmpty({
       "Chat is not running on this server. Connect a platform account under Settings → Platform credentials, then restart to attach it.";
   else if (statuses.length === 0)
     body = "Chat is running but no platform account is attached yet.";
+  // Ranked ABOVE "nothing has been said": when the filter is the reason the
+  // pane is empty, it is the only reason worth printing.
+  else if (hiddenMessages > 0)
+    body = `The platform filter is hiding ${hiddenMessages} message${
+      hiddenMessages === 1 ? "" : "s"
+    }. Nothing else has been said. Turn a platform back on above to see them.`;
   else body = "Connected and waiting. Nothing has been said yet.";
 
   return (

@@ -72,13 +72,26 @@ export function HooksCard() {
   const [newSecret, setNewSecret] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<HookDelivery[]>([]);
   const [openDeliveries, setOpenDeliveries] = useState<number | null>(null);
+  /* A failed read is not an empty one, and this card made BOTH of that
+   * mistake's claims at once: "No webhooks." beside Sent 0 / Failed 0 /
+   * Dropped 0 in calm grey. The toast is four seconds long and gone; the two
+   * false sentences stay on screen for as long as the tab is open, and the
+   * operator concludes that nothing is configured and nothing has been tried.
+   *
+   * Rendered IN PLACE of the empty state and the stat grid rather than beside
+   * them, because a reassuring zero next to a warning is still a reassuring
+   * zero -- the same rule the token list and the platform credentials were
+   * moved onto. */
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const [rows, m] = await Promise.all([api.hooks.list(), api.hooks.meta()]);
       setHooks(rows);
       setMeta(m);
+      setLoadFailed(false);
     } catch (err) {
+      setLoadFailed(true);
       toast.error(errText(err, t("hooks.loadFailed")));
     } finally {
       setLoading(false);
@@ -184,7 +197,11 @@ export function HooksCard() {
             </Button>
           </CardHeader>
           <CardContent className="px-0 pb-0">
-            {hooks.length === 0 ? (
+            {loadFailed ? (
+              <div className="px-3 py-8 text-center text-[12px] text-warn">
+                {t("hooks.listUnread")}
+              </div>
+            ) : hooks.length === 0 ? (
               <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
                 {t("hooks.empty")}
               </div>
@@ -371,36 +388,46 @@ export function HooksCard() {
           <CardTitle>{t("hooks.deliveryTitle")}</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-2">
-          <Stat label={t("hooks.statSent")} value={stats?.sent ?? 0} />
-          <Stat
-            label={t("hooks.statFailed")}
-            value={stats?.failed ?? 0}
-            tone={stats?.failed ? "down" : "muted"}
-          />
-          <Stat label={t("hooks.statEndpoints")} value={stats?.endpoints ?? 0} tone="muted" />
-          <Stat label={t("hooks.statQueued")} value={stats?.queued ?? 0} tone="muted" />
-          <Stat
-            label={t("hooks.statDropped")}
-            value={stats?.dropped ?? 0}
-            tone={stats?.dropped ? "warn" : "muted"}
-          />
-          <Stat label={t("hooks.statRetries")} value={stats?.retries ?? 0} tone="muted" />
-          {stats?.lastError && (
-            <p className="col-span-2 flex items-start gap-1.5 rounded border border-down/50 bg-down/5 p-2 text-[10px] text-down">
-              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-              {stats.lastError}
-            </p>
-          )}
-          {meta && (
-            /* One sentence, one key. It used to wrap the header name in a
-               <code>, which meant three fragments a translator cannot reorder --
-               and the header name is monospace-looking on its own. */
-            <p className="col-span-2 text-[10px] text-muted-foreground">
-              {t("hooks.payloadNote", {
-                version: meta.specVersion,
-                header: meta.headers.signature,
-              })}
-            </p>
+          {loadFailed ? (
+            /* The six zeros are the worse half of this defect. "Failed 0" and
+               "Dropped 0" are the two readings an operator checks when a
+               receiver has gone quiet, and rendering them for a read that
+               never answered is the one answer that stops them looking. */
+            <p className="col-span-2 text-[11px] text-warn">{t("hooks.deliveryUnread")}</p>
+          ) : (
+            <>
+              <Stat label={t("hooks.statSent")} value={stats?.sent ?? 0} />
+              <Stat
+                label={t("hooks.statFailed")}
+                value={stats?.failed ?? 0}
+                tone={stats?.failed ? "down" : "muted"}
+              />
+              <Stat label={t("hooks.statEndpoints")} value={stats?.endpoints ?? 0} tone="muted" />
+              <Stat label={t("hooks.statQueued")} value={stats?.queued ?? 0} tone="muted" />
+              <Stat
+                label={t("hooks.statDropped")}
+                value={stats?.dropped ?? 0}
+                tone={stats?.dropped ? "warn" : "muted"}
+              />
+              <Stat label={t("hooks.statRetries")} value={stats?.retries ?? 0} tone="muted" />
+              {stats?.lastError && (
+                <p className="col-span-2 flex items-start gap-1.5 rounded border border-down/50 bg-down/5 p-2 text-[10px] text-down">
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                  {stats.lastError}
+                </p>
+              )}
+              {meta && (
+                /* One sentence, one key. It used to wrap the header name in a
+                   <code>, which meant three fragments a translator cannot reorder --
+                   and the header name is monospace-looking on its own. */
+                <p className="col-span-2 text-[10px] text-muted-foreground">
+                  {t("hooks.payloadNote", {
+                    version: meta.specVersion,
+                    header: meta.headers.signature,
+                  })}
+                </p>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

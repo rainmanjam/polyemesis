@@ -37,6 +37,8 @@ import { FilterString } from "@/components/signature/FilterString";
 import { useLiveData, useSourceTracks } from "@/hooks/useLiveData";
 import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { musicRailMark } from "@/lib/musicRail";
+import { duckSeed } from "@/lib/duckSeed";
 import {
   DEFAULT_DUCK_ATTACK_MS,
   DEFAULT_DUCK_RATIO,
@@ -119,7 +121,7 @@ export function RoutingPage() {
   const t = useT();
   const { id } = useParams();
   const navigate = useNavigate();
-  const { levels, source } = useLiveData();
+  const { connected, levels, source } = useLiveData();
   const tracks = useSourceTracks();
 
   const [list, setList] = useState<DestinationWithRouting[]>([]);
@@ -423,6 +425,11 @@ export function RoutingPage() {
       tracks,
       levels,
       probed: source?.probed ?? false,
+      // The METER FEED's liveness, which `probed` does not describe: probed is
+      // the ingest layout. Without it every track reads "no signal" whenever
+      // the meters are off, on the page where that reading decides whether a
+      // track goes in the mix.
+      meterFeedLive: connected,
       annotations,
       onAnnotate: annotate,
       annotating,
@@ -441,6 +448,7 @@ export function RoutingPage() {
       tracks,
       levels,
       source?.probed,
+      connected,
       annotations,
       annotate,
       annotating,
@@ -518,6 +526,8 @@ export function RoutingPage() {
             {list.map(({ destination: d, routing }) => {
               const pol = policyFor(d)?.policy;
               const guarded = d.profile.excludeRoles?.includes("music") ?? false;
+              // A word, not a colour. See lib/musicRail.ts.
+              const mark = musicRailMark(guarded, pol?.exclude ?? false);
               return (
                 <button
                   key={d.id}
@@ -530,9 +540,16 @@ export function RoutingPage() {
                 >
                   <span className="flex w-full items-center gap-1 truncate text-[12px] font-medium">
                     <span className="truncate">{d.name}</span>
-                    {guarded && <Music className="ml-auto h-3 w-3 shrink-0 text-live" />}
-                    {!guarded && pol?.exclude && (
-                      <Music className="ml-auto h-3 w-3 shrink-0 text-warn" />
+                    {mark && (
+                      <span
+                        className={cn(
+                          "ml-auto flex shrink-0 items-center gap-1 text-[10px]",
+                          mark.tone === "warn" ? "text-warn" : "text-muted-foreground",
+                        )}
+                      >
+                        <Music className="h-3 w-3 shrink-0" />
+                        {t(mark.label)}
+                      </span>
                     )}
                   </span>
                   <span className="truncate font-mono text-[10px] text-muted-foreground">
@@ -692,6 +709,8 @@ interface EditorContext {
   tracks: SourceTrack[];
   levels: Levels | null;
   probed: boolean;
+  /** Whether the socket carrying `levels` is up. See lib/trackSignal. */
+  meterFeedLive: boolean;
   annotations: TrackAnnotation[];
   onAnnotate: (track: number, next: Partial<TrackAnnotation>) => void;
   annotating: boolean;
@@ -897,6 +916,7 @@ function ProfileEditor({
                 selection={profile.tracks ?? []}
                 levels={ctx.levels}
                 probed={ctx.probed}
+                meterFeedLive={ctx.meterFeedLive}
                 onChange={(next: TrackSel[]) => onPatch({ tracks: next })}
                 annotations={ctx.annotations}
                 onAnnotate={ctx.onAnnotate}
@@ -1464,7 +1484,9 @@ function MusicRightsCard({
    Loudness
    ========================================================================== */
 
-function LoudnessCard({
+/* Exported for its test: the Target box is greyed by the preset select
+ * above it, and nothing on screen used to connect the two. */
+export function LoudnessCard({
   loudness,
   normalize,
   onChange,
@@ -1551,6 +1573,18 @@ function LoudnessCard({
           </div>
         )}
 
+        {/* WHY THE TARGET BOX IS GREY. It is bare-disabled whenever the select
+            above is on a named preset, with nothing on screen connecting the
+            two -- and a greyed number field with no reason reads as broken.
+            A WARNING rather than a control: letting a keystroke silently switch
+            the select to Custom would change the operator's chosen preset as a
+            side effect of a typo, which is the larger harm. */}
+        {loudness && value !== LOUDNESS_CUSTOM && (
+          <p className="text-[10px] text-muted-foreground" data-testid="target-locked">
+            {t("route.targetFollowsPreset")}
+          </p>
+        )}
+
         {inert && (
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-[10px] leading-relaxed text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -1590,7 +1624,9 @@ function rest(l: Loudness | null): Partial<Loudness> {
    Delay
    ========================================================================== */
 
-function DelayCard({
+/* Exported for its test: this dropdown decides WHICH stream is delayed, and
+ * rendered its own translation keys at the operator. */
+export function DelayCard({
   delayMs,
   videoDelayMs,
   onChange,
@@ -1633,8 +1669,13 @@ function DelayCard({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="audio">{DELAY_LABEL.audio}</SelectItem>
-              <SelectItem value="video">{DELAY_LABEL.video}</SelectItem>
+              {/* THROUGH t(). DELAY_LABEL holds TranslationKeys, and rendered
+                  bare this dropdown offered "route.audioLaterThanVideo" and
+                  "route.videoLaterThanAudio" -- so the one control that decides
+                  WHICH stream is delayed had to be guessed at, and guessing
+                  wrong restarts a live destination on save. */}
+              <SelectItem value="audio">{t(DELAY_LABEL.audio)}</SelectItem>
+              <SelectItem value="video">{t(DELAY_LABEL.video)}</SelectItem>
             </SelectContent>
           </Select>
           <NumberField
@@ -1681,7 +1722,9 @@ function describeDelay(delayMs: number, videoDelayMs: number): string {
    Ducking
    ========================================================================== */
 
-function DuckingCard({
+/* Exported for its test: the card used to vanish -- Off switch included --
+ * from destinations whose stored duck was still compiling. */
+export function DuckingCard({
   ducking,
   mixedTracks,
   allTracks,
@@ -1695,24 +1738,19 @@ function DuckingCard({
   onChange: (d: Ducking | null) => void;
 }) {
   const t = useT();
-  // A duck needs something to push down and something to push it down with.
-  // Below two tracks in the mix there is no second group, so the controls
-  // would only be able to describe an impossible graph.
-  if (mixedTracks.length < 2) return null;
+  // What turning this on would create, or null when nothing valid can be.
+  // See lib/duckSeed.ts, which is also where the old "< 2 tracks in the mix"
+  // guard is argued down: it hid the card, and with it the Off switch, from
+  // destinations whose stored duck was still compiling and still ducking.
+  const seed = duckSeed(mixedTracks, allTracks, annotations);
+
+  // A stored duck is always reachable. Only CREATION is gated.
+  if (!ducking && !seed) return null;
 
   const enable = (on: boolean) => {
     if (!on) return onChange(null);
-    // Seed from the roles when they exist: mic ducks music is the case this
-    // feature was built for, and it is one click when we already know which is
-    // which.
-    const mics = annotations.filter((a) => a.role === "mic" || a.role === "commentary");
-    const beds = annotations.filter((a) => a.role === "music" || a.role === "game");
-    const trigger = mics.map((a) => a.track).filter((t) => allTracks.includes(t));
-    const target = beds.map((a) => a.track).filter((t) => mixedTracks.includes(t));
-    onChange({
-      trigger: trigger.length ? trigger : [mixedTracks[0]],
-      target: target.length ? target : [mixedTracks[1]],
-    });
+    if (!seed) return;
+    onChange(seed);
   };
 
   const toggle = (group: "trigger" | "target", track: number) => {
@@ -1743,6 +1781,7 @@ function DuckingCard({
           <Switch
             checked={ducking !== null}
             onCheckedChange={enable}
+            disabled={ducking === null && seed === null}
             aria-label={t("route.enableDucking")}
           />
         </label>
@@ -1779,6 +1818,11 @@ function DuckingCard({
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                 Push these down
               </div>
+              {mixedTracks.length === 0 && (
+                <p className="text-[10px] text-warn" data-testid="duck-no-target">
+                  {t("route.duckingNoTargetInMix")}
+                </p>
+              )}
               <div className="flex flex-wrap gap-1.5">
                 {mixedTracks.map((t) => (
                   <TrackChip
