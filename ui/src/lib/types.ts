@@ -1711,6 +1711,45 @@ export interface PlatformAccount {
   reconnect?: ReconnectReason;
 }
 
+/** What `POST /platforms/credentials/{platform}/device` answers with: the code
+ *  the operator types, the page they type it at, and a handle to poll with.
+ *
+ *  THERE IS NO DEVICE CODE HERE AND THERE MUST NOT BE. The device code is the
+ *  bearer-equivalent secret that redeems the token, and it never leaves the
+ *  server — `handle` is an opaque name for the one the server is holding, the
+ *  same shape as the OAuth `state` parameter. A field added here would be a
+ *  credential this UI asked to be sent to a browser. */
+export interface DeviceAuth {
+  handle: string;
+  /** What the operator types. Shown large and copyable; see DeviceCodeDialog. */
+  userCode: string;
+  /** The platform's own page, passed through verbatim — query string included.
+   *  Never assembled from a hostname anybody remembered. */
+  verificationUri: string;
+  /** When the code dies and the flow has to be restarted. */
+  expiresAt: string;
+  /** The minimum wait between polls, as the platform stated it and already
+   *  floored at five seconds by the server. Honour it; see lib/deviceFlow.ts. */
+  intervalSeconds: number;
+}
+
+/** One poll of a device authorization.
+ *
+ *  THREE WORDS, AND `pending` IS NOT AN ERROR. It is the answer to nearly every
+ *  poll — the operator has not finished typing — so it arrives as a 200 and must
+ *  never be rendered as something having gone wrong. `expired` means stop and
+ *  start over; only a real transport failure throws. */
+export interface DevicePoll {
+  state: "pending" | "connected" | "expired";
+  /** Repeated on every pending answer, so a reloaded tab that lost the start
+   *  response still paces itself. */
+  retryInSeconds?: number;
+  /** Present only on `connected`. */
+  account?: PlatformAccount;
+  /** Why an `expired` expired, in words the operator can act on. */
+  reason?: string;
+}
+
 /** Why an account should be reconnected.
  *
  *  An OAuth token carries exactly the scopes it was issued with, and granting a
@@ -1790,6 +1829,15 @@ export interface SetupGuide {
    *  The Go struct has carried this since the Kick stream-key work; this type
    *  never gained it. */
   manualStreamKey?: boolean;
+  /** Present when this platform can connect an account WITHOUT a redirect URI:
+   *  the operator types a code at the platform's own page and the box polls for
+   *  the token.
+   *
+   *  READ THIS RATHER THAN CHECKING FOR "twitch". The server derives it from
+   *  oauth.DeviceFor, so a build that gains or loses the capability changes what
+   *  this UI offers with no edit here — which is the whole reason it is a field
+   *  and not a constant. */
+  deviceFlow?: boolean;
   note?: string;
   /** Computed per request by the API, from the configuration and the Host it
    *  was reached on: reasons the displayed redirect URI may not work. */

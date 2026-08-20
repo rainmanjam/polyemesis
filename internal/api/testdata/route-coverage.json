@@ -12,10 +12,10 @@
   "guardedFloor": 22,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 223,
+    "methodPatternPairs": 225,
     "swept": 66,
     "excused": 50,
-    "denied": 107,
+    "denied": 109,
     "nonTrieProbes": 12,
     "shapesEmitted": 27,
     "shapesNotInspected": 3
@@ -805,6 +805,18 @@
     {
       "method": "POST",
       "pattern": "/api/v1/platforms/credentials/{platform}/check",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/platforms/credentials/{platform}/device",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/platforms/credentials/{platform}/device/poll",
       "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },

@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useIngestLive } from "@/hooks/useLiveData";
 import { AccountLiveStats } from "@/components/AccountLiveStats";
+import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
 import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
@@ -1932,6 +1933,11 @@ function PlatformCredCard({
 
   const confirmCreds = useConfirm<{ name: string }>();
   const confirmDisconnect = useConfirm<PlatformAccount>();
+  // The device code flow, offered only where the SERVER says the platform has
+  // one. Read off the guide rather than matched against a platform name here:
+  // the field is derived from oauth.DeviceFor, so a build that gains or loses
+  // the capability changes this button with no edit on this page.
+  const [deviceOpen, setDeviceOpen] = useState(false);
 
   const remove = async () => {
     await api.deleteCreds(guide.platform);
@@ -2088,6 +2094,17 @@ function PlatformCredCard({
                       <ExternalLink /> Connect an account
                     </a>
                   </Button>
+                  {/* Beside the ordinary Connect button rather than instead of
+                      it. The two are for different situations and only the
+                      operator knows which they are in: the button above needs
+                      a redirect URI the platform accepts, which a box reached
+                      as https://192.168.1.50 or on a self-signed certificate
+                      does not have. Hiding either one would mean guessing. */}
+                  {guide.deviceFlow && (
+                    <Button size="sm" variant="outline" onClick={() => setDeviceOpen(true)}>
+                      <KeyRound /> {t("device.connectWithACode")}
+                    </Button>
+                  )}
                   <Button size="sm" variant="ghost" onClick={() => confirmCreds.ask({ name: guide.name })}>
                     <Trash2 /> Remove
                   </Button>
@@ -2171,6 +2188,15 @@ function PlatformCredCard({
           if (confirmDisconnect.target) await disconnect(confirmDisconnect.target);
         }}
       />
+      {guide.deviceFlow && (
+        <DeviceCodeDialog
+          platform={guide.platform}
+          platformName={guide.name}
+          open={deviceOpen}
+          onOpenChange={setDeviceOpen}
+          onConnected={onChanged}
+        />
+      )}
     </Card>
   );
 }
