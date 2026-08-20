@@ -50,6 +50,11 @@ import (
 	"github.com/rainmanjam/polyemesis/scripts/internal/driverlib"
 )
 
+// sourceID is the programme this run's renditions and destinations belong to,
+// set by EnsureSource in setup. A package var because the helpers below are
+// called from several places and threading it through each would be noise.
+var sourceID int64
+
 var (
 	facts = map[string]string{}
 	// factsFile is written on the way out, successful or not, so a failed run
@@ -195,7 +200,10 @@ func main() {
 	driverlib.Setup("admin", "acceptance-pw")
 	// The programme the renditions and destinations below hang off. Since #387
 	// a fresh install has none; see driverlib.EnsureSource.
-	driverlib.EnsureSource("Main")
+	// The id, not just the side effect. Every rendition and destination below
+	// has to name the programme it belongs to -- the server no longer picks one
+	// -- and EnsureSource has always returned it.
+	sourceID = driverlib.EnsureSource("Main")
 
 	// Recording and metering off. Both spawn FFmpeg processes of their own, and
 	// this suite's central number is how much CPU the ENCODERS use; a recorder
@@ -242,6 +250,7 @@ func main() {
 	for _, t := range tiers {
 		var created renditionResp
 		post("/renditions", map[string]any{
+			"sourceId":     sourceID,
 			"name":         t.name,
 			"width":        t.w,
 			"height":       t.h,
@@ -439,7 +448,8 @@ func post(path string, body, out any) {
 func newDest(name, file string, rendition int64, tracks ...int) string {
 	var out destResp
 	post("/destinations", map[string]any{
-		"name": name, "kind": "file", "platform": "custom", "url": file,
+		"sourceId": sourceID,
+		"name":     name, "kind": "file", "platform": "custom", "url": file,
 		"enabled": true, "audioBitrate": 160, "renditionId": rendition,
 		"profile": map[string]any{
 			"mode": "simple", "tracks": driverlib.Sel(tracks...),

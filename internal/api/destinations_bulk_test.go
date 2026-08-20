@@ -41,7 +41,8 @@ func TestBulkStartAndStopReportOneRowPerDestination(t *testing.T) {
 	ids := make(map[int64]string, len(names))
 	for _, name := range names {
 		r := jsonRequest(t, http.MethodPost, "/api/v1/destinations", map[string]any{
-			"name": name, "kind": "rtmp",
+			"sourceId": onlySourceID(t, h, sign),
+			"name":     name, "kind": "rtmp",
 			"url": "rtmp://example.invalid/live", "streamKey": "k",
 		})
 		sign(r)
@@ -160,7 +161,8 @@ func TestBulkStartIsPacedAndBulkStopIsNot(t *testing.T) {
 	const n = 3
 	for i := 0; i < n; i++ {
 		r := jsonRequest(t, http.MethodPost, "/api/v1/destinations", map[string]any{
-			"name": "dest" + itoa(int64(i)), "kind": "rtmp",
+			"sourceId": onlySourceID(t, h, sign),
+			"name":     "dest" + itoa(int64(i)), "kind": "rtmp",
 			"url": "rtmp://example.invalid/live", "streamKey": "k",
 		})
 		sign(r)
@@ -328,6 +330,7 @@ func TestBulkActsOnEveryPlatformAndOnDestinationsWithNone(t *testing.T) {
 		if platform != "" {
 			body["platform"] = platform
 		}
+		withOnlySource(t, h, sign, body)
 		r := jsonRequest(t, http.MethodPost, "/api/v1/destinations", body)
 		sign(r)
 		if w := do(t, h, r); w.Code != http.StatusOK && w.Code != http.StatusCreated {

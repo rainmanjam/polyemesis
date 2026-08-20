@@ -40,6 +40,13 @@ var (
 	csrf      string
 	facts     = map[string]string{}
 	factsFile string
+	// sourceID is the programme this driver created, read back off the create
+	// response rather than assumed to be 1. Every create below has to name it:
+	// the server no longer fills an omitted sourceId with the first source,
+	// because on a multi-source install that silently attaches a destination to
+	// a programme nobody chose. Hardcoding 1 would pass only until a driver
+	// makes two sources or runs against a database that has seen a delete.
+	sourceID int64
 )
 
 // Each rendition is identified in the process table by its scale filter, which
@@ -71,7 +78,8 @@ func main() {
 	// The programme everything below hangs off. A fresh install has none since
 	// #387; see acceptance_driver.go's copy of this note for the full reason.
 	fmt.Println("creating the first source")
-	call("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+	sourceID = createdSourceID(call("POST", "/sources", map[string]any{"name": "Main", "enabled": true}))
+	fmt.Printf("  source %d\n", sourceID)
 
 	// Neither recording nor metering is under test, and both are extra FFmpeg
 	// processes competing with the encode being counted.
@@ -306,11 +314,22 @@ func startSource(relay string) *exec.Cmd {
 	return src
 }
 
+// createdSourceID reads the id off a POST /sources response. The source view
+// embeds db.Source, so the id is at the top level.
+func createdSourceID(resp map[string]any) int64 {
+	id := int64(intOf(resp["id"]))
+	if id == 0 {
+		die("create source returned no id: %v", resp)
+	}
+	return id
+}
+
 func newRendition(name, encoder string, w, h int) int64 {
 	created := call("POST", "/renditions", map[string]any{
 		"name": name, "width": w, "height": h, "fps": 30,
 		"videoBitrate": 2500, "encoder": encoder,
 		"preset": "veryfast", "gopSeconds": 2,
+		"sourceId": sourceID,
 	})
 	r, ok := created["rendition"].(map[string]any)
 	if !ok {
@@ -329,6 +348,7 @@ func dest(name, file string, rendition int64) map[string]any {
 	return map[string]any{
 		"name": name, "kind": "file", "platform": "custom", "url": file,
 		"enabled": true, "audioBitrate": 160, "renditionId": rendition,
+		"sourceId": sourceID,
 		"profile": map[string]any{
 			"mode": "simple", "tracks": rows, "normalize": "auto", "sampleRate": 48000,
 		},

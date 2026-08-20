@@ -1778,6 +1778,15 @@ func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
 //
 // ui/src/lib/api.ts carries it onto ApiError.code so a caller can branch
 // without reading the sentence.
+// codeSourceRequired is a create body that did not say which programme the
+// thing being created belongs to.
+//
+// DISTINCT FROM codeNoSource, and the difference matters to the operator.
+// no_source means the install has no programme at all and nothing they type
+// will help. source_required means there are several and they have to pick one:
+// the request was well formed, the choice was simply not made.
+const codeSourceRequired = "source_required"
+
 const codeNoSource = "no_source"
 
 // noSourceMsg is the sentence, written once so that twenty routes cannot drift

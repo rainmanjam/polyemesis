@@ -83,7 +83,9 @@ test.describe("the destination editor preserves what it loaded", () => {
   test("saving a Facebook destination unchanged keeps its settings", async ({ page }) => {
     await signIn(page);
 
+    const srcId = await api<{ id: number }[]>(page, "GET", "/api/v1/sources").then((r) => r[0].id);
     const { destination: created } = await api<DestinationEnvelope>(page, "POST", "/api/v1/destinations", {
+      sourceId: srcId,
       name: "e2e round trip",
       kind: "rtmp",
       platform: "facebook",

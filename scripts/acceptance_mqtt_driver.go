@@ -36,6 +36,9 @@ import (
 const (
 	user = "admin"
 	pass = "acceptance-pw-1"
+	// The one programme setup creates, and the one every destination below
+	// belongs to. Named once so setup and sourceID cannot drift apart.
+	sourceName = "Main"
 )
 
 var (
@@ -119,7 +122,7 @@ func setup() {
 	api(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass}, nil)
 	// The programme every step below acts on. A fresh install has none since
 	// #387; see acceptance_driver.go for the full reason.
-	api(http.MethodPost, "/sources", map[string]any{"name": "Main", "enabled": true}, nil)
+	api(http.MethodPost, "/sources", map[string]any{"name": sourceName, "enabled": true}, nil)
 	fmt.Println("SETUP_OK")
 }
 
@@ -147,6 +150,36 @@ func configure(broker, instance string) {
 	fmt.Println("ok")
 }
 
+// sourceID answers the id the server assigned to the programme setup created.
+//
+// READ BACK, NOT ASSUMED TO BE 1. POST /destinations now refuses a create that
+// does not say which source it belongs to, and the obvious patch -- hardcoding
+// 1 -- encodes an autoincrement assumption that stops holding the moment a
+// suite creates a second source or runs against a database that has seen a
+// delete. setup and dest are separate `go run` invocations, so the id cannot be
+// carried in memory from the POST that created it; this reads it off the same
+// server instead.
+//
+// GET /sources renders a view with the stored row FLATTENED into it, so id and
+// name sit at the top level rather than under a "source" key.
+func sourceID() int64 {
+	var rows []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	api(http.MethodGet, "/sources", nil, &rows)
+	for _, r := range rows {
+		if r.Name == sourceName {
+			return r.ID
+		}
+	}
+	if len(rows) > 0 {
+		return rows[0].ID
+	}
+	die("no source exists to attach a destination to; was setup run?")
+	return 0
+}
+
 // dest creates a destination that will never connect. It does not need to: the
 // suite is testing that its STATE is published, and a destination pointing at a
 // black hole has a state.
@@ -159,6 +192,7 @@ func dest(name string) {
 		"streamKey":    "acceptance-stream-key-do-not-publish",
 		"audioBitrate": 160,
 		"enabled":      false,
+		"sourceId":     sourceID(),
 	}, &out)
 	fmt.Println("ok")
 }

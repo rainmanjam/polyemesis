@@ -219,6 +219,13 @@ export interface Destination {
    *  READ-ONLY. The server writes it through one narrow path of its own and
    *  ignores it on a destination save, so sending it back changes nothing. */
   lifecycle?: BroadcastControl;
+  /** The programme this destination carries.
+   *
+   *  Sent on every create -- the server refuses one that names no source, and
+   *  used to pick the first for itself, which is how a destination could end up
+   *  attached to a programme nobody chose. Optional in the type only because a
+   *  response for a row written before sources existed may omit it. */
+  sourceId?: number | null;
   kind: DestKind;
   platform: Platform;
   accountId?: number | null;
@@ -701,6 +708,10 @@ export interface DestStatus {
   /** The shared encode feeding this destination; absent for passthrough. */
   renditionId?: number | null;
   renditionName?: string;
+  /** The programme this destination carries. The dashboard lists every
+   *  destination on the install in one grid, so without this two destinations
+   *  called "Twitch" on different programmes are indistinguishable. */
+  sourceId?: number | null;
   /** The pre-announced scheduled Facebook broadcast, when one exists. */
   facebookBroadcastId?: string;
   /** The file a recording is actually being written to, when that is not the

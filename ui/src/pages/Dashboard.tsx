@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
+import { sourceNameById } from "@/lib/destinationSource";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import type {
   BulkDestReport,
   Destination,
   MetaField,
+  SourceView,
   SystemInfo,
 } from "@/lib/types";
 import { useT, useStateLabel } from "@/lib/i18n";
@@ -786,6 +788,16 @@ export function Dashboard() {
   const [editing, setEditing] = useState<Destination | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // The programmes, so a destination card can say which one it carries. Named
+  // only when there is more than one: on a single-source install every card
+  // would carry the same badge, which is noise that tells nobody anything.
+  const [sources, setSources] = useState<SourceView[]>([]);
+  useEffect(() => {
+    api.listSources().then(setSources).catch(() => setSources([]));
+  }, [refreshKey]);
+  const sourceNames = useMemo(() => sourceNameById(sources), [sources]);
+
   const [pending, setPending] = useState<number[] | null>(null);
   const [moveNote, setMoveNote] = useState("");
   const [sourceCount, setSourceCount] = useState<number | null>(null);
@@ -1227,6 +1239,7 @@ export function Dashboard() {
               <DestinationCard
                 key={d.id}
                 dest={d}
+                sourceName={d.sourceId ? sourceNames.get(d.sourceId) : undefined}
                 busy={busyId === d.id}
                 canMoveEarlier={i > 0}
                 canMoveLater={i < destinations.length - 1}

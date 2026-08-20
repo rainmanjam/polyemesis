@@ -27,6 +27,12 @@ var base = "http://127.0.0.1:8099/api/v1"
 var client *http.Client
 var csrf string
 
+// The programme every destination below is created against. Read from the
+// POST /sources response rather than assumed to be 1: autoincrement stops
+// predicting the id the moment a run creates a second source or reuses a
+// database that has seen a delete.
+var sourceID int64
+
 func main() {
 	jar, _ := cookiejar.New(nil)
 	client = &http.Client{Jar: jar, Timeout: 30 * time.Second}
@@ -46,7 +52,12 @@ func main() {
 	// that removal -- it is the flow an operator actually performs, and this
 	// run now covers POST /sources, which it never did before.
 	step("creating the first source")
-	do("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+	srcRow := do("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+	id, hasID := srcRow["id"].(float64)
+	if !hasID || id == 0 {
+		fail("created source carried no id: %v", srcRow)
+	}
+	sourceID = int64(id)
 
 	step("quiet the recorder and the preview")
 	settings := doGet("/settings")
@@ -567,6 +578,10 @@ func destBody(name, file string, tracks []int) map[string]any {
 	return map[string]any{
 		"name": name, "kind": "file", "platform": "custom",
 		"url": file, "enabled": true, "audioBitrate": 160,
+		// Which programme this destination belongs to. Omitting it is a 400
+		// (source_required); the server no longer fills it with the first
+		// source, because that mis-assigns silently on a multi-source install.
+		"sourceId": sourceID,
 		"profile": map[string]any{
 			"mode": "simple", "tracks": rows, "normalize": "auto", "sampleRate": 48000,
 		},

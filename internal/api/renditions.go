@@ -102,6 +102,9 @@ func (s *Server) handleCreateRendition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row.ID = 0
+	if !s.requireNamedSource(w, row.SourceID) {
+		return
+	}
 	// The store fills in encoder, preset and GOP before validating, so the
 	// smallest useful payload is {name, height, videoBitrate}.
 	created, err := s.store.CreateRendition(&row)

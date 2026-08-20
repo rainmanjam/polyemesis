@@ -72,9 +72,25 @@ export async function purgeByName(page: Page, name: string) {
   }
 }
 
+/** The programme this install has, for the creates that must name one.
+ *
+ *  Every create now names its source: the server used to fill an omitted
+ *  sourceId with the first one, which on a multi-source install attached a
+ *  destination to a programme nobody chose and nothing displayed. These specs
+ *  run against a single-source fixture, so "the only one" is the honest answer
+ *  -- but it is READ BACK rather than assumed to be 1, because an id that is
+ *  only ever right while nothing has been deleted is the same assumption the
+ *  server stopped making. */
+export async function onlySourceId(page: Page): Promise<number> {
+  const rows = await apiFetch<{ id: number }[]>(page, "GET", "/api/v1/sources");
+  if (!rows?.length) throw new Error("no source to attach to; the fixture creates one in setup");
+  return rows[0].id;
+}
+
 export async function createFacebookDestination(page: Page, name: string) {
   await purgeByName(page, name);
   const { destination } = await apiFetch<DestinationEnvelope>(page, "POST", "/api/v1/destinations", {
+    sourceId: await onlySourceId(page),
     name,
     kind: "rtmp",
     platform: "facebook",

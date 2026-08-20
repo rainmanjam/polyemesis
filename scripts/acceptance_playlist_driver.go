@@ -25,6 +25,9 @@ import (
 const (
 	user = "admin"
 	pass = "acceptance-pw-1"
+	// The one programme setup creates, and the one the destination below
+	// belongs to. Named once so setup and sourceID cannot drift apart.
+	sourceName = "Main"
 )
 
 var (
@@ -141,7 +144,7 @@ func setup() {
 	// The programme every step below acts on. A fresh install has none since
 	// #387; see acceptance_driver.go for the full reason.
 	if code, out := do(http.MethodPost, "/sources",
-		map[string]any{"name": "Main", "enabled": true}); code != http.StatusOK &&
+		map[string]any{"name": sourceName, "enabled": true}); code != http.StatusOK &&
 		code != http.StatusCreated {
 		die(fmt.Sprintf("create the first source: %d %s", code, out))
 	}
@@ -183,6 +186,39 @@ func pullMode(rel string) {
 	fmt.Println("PULL_MODE_OK")
 }
 
+// sourceID answers the id the server assigned to the programme setup created.
+//
+// READ BACK, NOT ASSUMED TO BE 1. POST /destinations now refuses a create that
+// does not say which source it belongs to, and the obvious patch -- hardcoding
+// 1 -- encodes an autoincrement assumption that stops holding the moment a
+// suite creates a second source or runs against a database that has seen a
+// delete. setup and dest are separate `go run` invocations, so the id cannot be
+// carried in memory from the POST that created it; this reads it off the same
+// server instead.
+//
+// GET /sources renders a view with the stored row FLATTENED into it, so id and
+// name sit at the top level rather than under a "source" key.
+func sourceID() int64 {
+	_, out := do(http.MethodGet, "/sources", nil)
+	var rows []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(out, &rows); err != nil {
+		die("sources unreadable: " + err.Error())
+	}
+	for _, r := range rows {
+		if r.Name == sourceName {
+			return r.ID
+		}
+	}
+	if len(rows) > 0 {
+		return rows[0].ID
+	}
+	die("no source exists to attach a destination to; was setup run?")
+	return 0
+}
+
 // createDest makes ONE file destination and leaves it DISABLED, because the
 // whole point is that the schedule is what turns it on.
 func createDest() int64 {
@@ -193,6 +229,7 @@ func createDest() int64 {
 	code, out := do(http.MethodPost, "/destinations", map[string]any{
 		"name": "scheduled", "kind": "file", "url": "scheduled.mkv",
 		"enabled": false, "audioBitrate": 160,
+		"sourceId": sourceID(),
 		"profile": map[string]any{
 			"mode": "simple", "tracks": tracks, "matrix": []any{},
 			// Off, so the suite measures the tone's own level rather than a

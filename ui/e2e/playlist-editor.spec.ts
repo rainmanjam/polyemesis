@@ -186,7 +186,17 @@ async function addItem(page: Page, upload: string) {
   // The option list renders through a Radix Portal, outside the card's own
   // DOM subtree -- a card-scoped locator here would never find it.
   await page.getByRole("option", { name: upload }).click();
-  await card.getByRole("button", { name: "Add" }).click();
+  // exact, because getByRole matches an accessible name by SUBSTRING and
+  // case-insensitively. The other buttons in this card are labelled after the
+  // upload -- "Move <name> up", "Remove <name>" -- and these uploads are named
+  // with a random hex digest. Hex is [0-9a-f], so a digest can contain the
+  // letters "add", and when it does every one of those buttons matches this
+  // locator and the click fails on a strict-mode violation.
+  //
+  // Observed: e2e-playlist-b-f22325d88fadd90f.ts resolved to 4 elements. It is
+  // a dice roll, roughly one run in fifty, and it looks exactly like a real
+  // regression when it lands.
+  await card.getByRole("button", { name: "Add", exact: true }).click();
 }
 
 test.describe("playlist editor", () => {

@@ -33,6 +33,13 @@ var (
 	// factsFile is written on the way out, successful or not, so a failed run
 	// still tells the shell script which assertion it got to.
 	factsFile string
+	// sourceID is the programme this driver created, read back off the create
+	// response rather than assumed to be 1. Every create below has to name it:
+	// the server no longer fills an omitted sourceId with the first source,
+	// because on a multi-source install that silently attaches a destination to
+	// a programme nobody chose. Hardcoding 1 would pass only until a driver
+	// makes two sources or runs against a database that has seen a delete.
+	sourceID int64
 )
 
 // encoderMark appears in the rendition encoder's command line and in no other
@@ -73,7 +80,8 @@ func main() {
 	// The programme everything below hangs off. A fresh install has none since
 	// #387; see acceptance_driver.go's copy of this note for the full reason.
 	fmt.Println("creating the first source")
-	call("POST", "/sources", map[string]any{"name": "Main", "enabled": true})
+	sourceID = createdSourceID(call("POST", "/sources", map[string]any{"name": "Main", "enabled": true}))
+	fmt.Printf("  source %d\n", sourceID)
 
 	// Recording and metering off: neither is under test here, and both are
 	// extra FFmpeg processes competing with the encode this test is timing.
@@ -134,6 +142,7 @@ func main() {
 	// which is why the shell reports whether the filter exists before judging.
 	created := call("POST", "/renditions", map[string]any{
 		"name":         "720p30",
+		"sourceId":     sourceID,
 		"width":        1280,
 		"height":       720,
 		"fps":          30,
@@ -206,6 +215,7 @@ func main() {
 	// filter graph the other rendition already covers.
 	capped := call("POST", "/renditions", map[string]any{
 		"name":         "480p30 capped",
+		"sourceId":     sourceID,
 		"width":        854,
 		"height":       480,
 		"fps":          30,
@@ -318,7 +328,7 @@ func dest(name, file string, tracks []int, rendition *int64) map[string]any {
 	}
 	d := map[string]any{
 		"name": name, "kind": "file", "platform": "custom", "url": file,
-		"enabled": true, "audioBitrate": 160,
+		"enabled": true, "audioBitrate": 160, "sourceId": sourceID,
 		"profile": map[string]any{
 			"mode": "simple", "tracks": rows, "normalize": "auto", "sampleRate": 48000,
 		},
@@ -327,6 +337,16 @@ func dest(name, file string, tracks []int, rendition *int64) map[string]any {
 		d["renditionId"] = *rendition
 	}
 	return d
+}
+
+// createdSourceID reads the id off a POST /sources response. The source view
+// embeds db.Source, so the id is at the top level.
+func createdSourceID(resp map[string]any) int64 {
+	id := int64(intOf(resp["id"]))
+	if id == 0 {
+		die("create source returned no id: %v", resp)
+	}
+	return id
 }
 
 func destID(resp map[string]any) string {
