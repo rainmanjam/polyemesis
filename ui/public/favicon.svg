@@ -1,8 +1,17 @@
 <!-- The same mark as the website (web/public/favicon.svg) and the same one the
      app header and sign-in screen now draw. This file used to hold a THIRD
      variant: four bars instead of five, one colour instead of three, and a
-     #0f1115 tile against the site's #0b0d11 -- so a browser showing a
-     polyemesis tab and a polyemesis.com tab side by side showed two logos. -->
+     #0f1115 tile against the site's #0b0d11, so a browser showing a polyemesis
+     tab and a polyemesis.com tab side by side showed two logos.
+
+     NO PAIRED HYPHENS IN THIS COMMENT. SVG is XML, XML forbids a pair of
+     hyphens inside a comment, and an XML parser has no error recovery the way
+     an HTML parser does: one of them makes the whole file unparseable, so the
+     browser drops the tab icon and falls back to a stale or default one while
+     the header carries on drawing the correct mark from BrandMark.tsx. The two
+     surfaces then disagree, which is the exact bug the comment above describes
+     and is how this file shipped for a while. BrandMark.test.tsx parses every
+     icon we ship with a real parser now, so a repeat fails there. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
   <rect width="22" height="22" rx="4" fill="#0b0d11"/>
   <rect x="2.5" y="8" width="2.5" height="6" rx="1.25" fill="#5b7fc7"/>
