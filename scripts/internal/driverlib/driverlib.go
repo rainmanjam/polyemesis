@@ -436,6 +436,22 @@ func Sel(on ...int) []map[string]any {
 	return rows
 }
 
+// OnlySourceID is the programme a single-source suite creates into.
+//
+// Read back rather than assumed to be 1. An id that is only ever right because
+// nothing has been deleted yet is exactly the assumption the server stopped
+// making, and a driver that hardcodes it would pass today and mislead later.
+func OnlySourceID() int64 {
+	var rows []struct {
+		ID int64 `json:"id"`
+	}
+	GetJSON("/sources", "sources", &rows)
+	if len(rows) == 0 {
+		Die("no source to attach a destination to: create one before CreateDest")
+	}
+	return rows[0].ID
+}
+
 // CreateDest posts one destination and prints DEST_OK.
 //
 // The BODY is the caller's, because that is the part that genuinely differs:
@@ -449,6 +465,17 @@ func Sel(on ...int) []map[string]any {
 // validation failure is how it becomes readable without disclosing the key the
 // caller just posted. Nothing here reads the request body back.
 func CreateDest(name string, body map[string]any) {
+	// EVERY create has to name the programme it belongs to. The server used to
+	// fill an omitted source_id with the first source; it now refuses, because
+	// on a multi-source install that fill was a choice nobody made and nothing
+	// displayed.
+	//
+	// Filled here rather than in each caller for the same reason the POST is:
+	// it is the part that does not differ. A caller that DOES name a source --
+	// a suite driving two programmes at once -- keeps its own value.
+	if _, named := body["sourceId"]; !named {
+		body["sourceId"] = OnlySourceID()
+	}
 	code, out := Do(http.MethodPost, "/destinations", body)
 	if code != http.StatusOK && code != http.StatusCreated {
 		Die(fmt.Sprintf("create destination %s failed: %d %s", name, code, out))

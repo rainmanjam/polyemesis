@@ -70,11 +70,14 @@ interface Destination {
 }
 
 async function makeRendition(page: Page, name: string): Promise<Rendition> {
+  // A rendition belongs to a programme too, and the server no longer picks one.
+  const sourceId = await api<{ id: number }[]>(page, "GET", "/api/v1/sources").then((r) => r[0].id);
   const { rendition } = await api<{ rendition: Rendition }>(
     page,
     "POST",
     "/api/v1/renditions",
     {
+      sourceId,
       name,
       width: 1920,
       height: 1080,
