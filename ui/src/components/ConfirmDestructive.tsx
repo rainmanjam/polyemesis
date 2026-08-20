@@ -120,7 +120,10 @@ export function ConfirmDestructive({
               {consequencesLabel}
             </span>
             {consequences.map((c) => (
-              <div key={c.label} className="flex items-baseline justify-between text-[12px]">
+              <div
+                key={c.label}
+                className="flex items-baseline justify-between text-[12px]"
+              >
                 <span>{c.label}</span>
                 <span className="tnum font-mono font-semibold">{c.count}</span>
               </div>
@@ -130,8 +133,25 @@ export function ConfirmDestructive({
 
         {requireTyping && (
           <div className="flex flex-col gap-1.5">
+            {/* normal-case ON THE SUBJECT, because Label is uppercase.
+                
+                Label's base classes carry `uppercase`, which applies to every
+                child -- so a source named "Main" was DISPLAYED as "MAIN" beside
+                an input that requires an exact match against "Main". Someone
+                typing what the dialog showed them could never unlock the button,
+                and nothing on screen said why: the placeholder rendered the true
+                case, but a placeholder disappears the moment you type.
+                
+                The exact match stays. requireTyping is reserved for things that
+                do not come back and the friction is the point; a dialog that
+                asks for a string it is itself misspelling is not friction, it is
+                a dead end. Fix the display, not the comparison. */}
             <Label htmlFor="confirm-subject">
-              Type <span className="font-mono font-semibold">{subject}</span> to confirm
+              Type{" "}
+              <span className="font-mono font-semibold normal-case">
+                {subject}
+              </span>{" "}
+              to confirm
             </Label>
             <Input
               id="confirm-subject"
@@ -146,10 +166,18 @@ export function ConfirmDestructive({
         )}
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={busy}
+          >
             Cancel
           </Button>
-          <Button variant="destructive" onClick={() => void run()} disabled={!unlocked || busy}>
+          <Button
+            variant="destructive"
+            onClick={() => void run()}
+            disabled={!unlocked || busy}
+          >
             {confirmLabel}
           </Button>
         </DialogFooter>
