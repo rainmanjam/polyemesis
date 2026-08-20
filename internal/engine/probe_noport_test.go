@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -66,5 +67,57 @@ func TestAProbeWithNoFreePortCountsAndSaysSo(t *testing.T) {
 	if !strings.Contains(out, "cannot be measured") {
 		t.Error("the transition out of the hold is not announced, so destinations " +
 			"that come up on an approximate mix do so with no explanation")
+	}
+}
+
+/* A PROBE FAILURE AFTER A LAYOUT IS MEASURED MUST NOT CLAIM A HOLD.
+ *
+ * Both consequences in reconcileOutputs are guarded by !measured -- verified at
+ * the `unmeasurable :=` / `holdDests :=` lines -- so once a layout stands,
+ * nothing is held and nothing starts on a guessed one. The log said otherwise on
+ * both counts: "destinations are held until a layout is measured" and "starting
+ * destinations with a runtime downmix instead of their routing matrices".
+ *
+ * It became routine rather than rare when the probe gained a read timeout: a
+ * probe now FAILS on a quiet relay instead of blocking until it is killed, and a
+ * source selector produces quiet relays several times a minute around a slate.
+ * Alarming lines on an ordinary slate transition are how an operator learns to
+ * ignore the line that matters -- and how a genuine downmix later gets dismissed
+ * as "it always says that".
+ */
+func TestAProbeFailureAfterAMeasurementDoesNotClaimAHold(t *testing.T) {
+	var logged bytes.Buffer
+	e := &Engine{
+		log:      slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		sourceID: 1,
+	}
+	e.measured = true
+
+	for i := 0; i < probeGiveUp; i++ {
+		e.probeFailedNow(errors.New("i/o timeout"))
+	}
+
+	out := logged.String()
+	if strings.Contains(out, "destinations are held") {
+		t.Error("a probe failed while a measured layout was in use and the log said " +
+			"destinations are held. They are not: the hold is guarded by !measured")
+	}
+	if strings.Contains(out, "runtime downmix") {
+		t.Error("the log claims destinations started on a guessed layout with a runtime " +
+			"downmix. They did not: that branch is guarded by !measured too, so this " +
+			"line is evidence for an audio fault that never happened")
+	}
+	if !strings.Contains(out, "keeping the layout already measured") {
+		t.Error("nothing says what actually happened -- a probe failed and the existing " +
+			"measurement stands")
+	}
+	// The real risk when they keep failing is STALENESS, and that one is a warning.
+	if !strings.Contains(out, "may no longer match the stream") {
+		t.Error("repeated failures against a measured layout never warn that the layout " +
+			"in use may have gone stale, which is the actual exposure")
+	}
+	if !strings.Contains(out, "level=INFO") {
+		t.Error("the first failure is not INFO. On a selector that quiets the relay " +
+			"several times a minute, WARN here is what trains a reader to skip the line")
 	}
 }
