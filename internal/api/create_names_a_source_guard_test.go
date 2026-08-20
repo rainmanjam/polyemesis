@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,10 +27,23 @@ import (
 // is right until something fails; this test is the same grep, run by CI, that
 // fails immediately and names the file.
 //
-// It is deliberately DUMB. It does not parse; it asks whether a file that posts
-// to these endpoints mentions a source at all. That is enough to catch a whole
-// file nobody converted, which is the failure that actually happened, and it
-// cannot be fooled into a false pass by a clever body it does not understand.
+// It checks EACH CALL SITE, not each file, and that distinction is the whole
+// value. The first version asked only whether a file mentioned sourceId
+// anywhere, and a HALF-CONVERTED file passed:
+//
+//	ui/e2e/video-treatment.spec.ts   makeRendition  named a source
+//	                                 makeDestination did not
+//
+// The file mentioned sourceId, the guard was satisfied, and four browser tests
+// went on failing. The same shape had already appeared in
+// acceptance_docker_driver.go, whose destFor() named a source while dests() and
+// rtmpDest() next door did not -- it was written up as a warning and then
+// reproduced anyway. Twice is a pattern, so this now reads the body that
+// follows each POST.
+//
+// It still does not parse. It takes a window after the endpoint and asks
+// whether a source is named inside it, which is enough to catch a call site
+// nobody converted and cannot be fooled by a sibling call site that was.
 func TestEveryCreateCallerNamesItsSource(t *testing.T) {
 	root := repoRoot(t)
 
@@ -63,6 +77,15 @@ func TestEveryCreateCallerNamesItsSource(t *testing.T) {
 		filepath.Join("scripts", "acceptance_docker_driver.go"): "security() posts unauthenticated on purpose; its other creates do name a source",
 	}
 
+	// How much of the request body to read after the endpoint. Long enough for
+	// a multi-line literal, short enough that the NEXT call site's source
+	// cannot be mistaken for this one's.
+	const bodyWindow = 700
+
+	// The body is written INLINE at the call site when a literal opens right
+	// after the endpoint, allowing for the argument separator and whitespace.
+	inlineBody := regexp.MustCompile(`^[\s,)]*(map\[string\]any)?\{`)
+
 	var missing []string
 	for _, dir := range dirs {
 		err := filepath.Walk(filepath.Join(root, dir), func(path string, info os.FileInfo, err error) error {
@@ -79,17 +102,46 @@ func TestEveryCreateCallerNamesItsSource(t *testing.T) {
 				return err
 			}
 			body := string(b)
-			if !posts.MatchString(body) {
-				return nil
-			}
-			if strings.Contains(body, "sourceId") || strings.Contains(body, "SourceID") {
-				return nil
-			}
 			rel, _ := filepath.Rel(root, path)
 			if _, ok := allowed[rel]; ok {
 				return nil
 			}
-			missing = append(missing, rel)
+			// PER CALL SITE WHERE THE BODY IS WRITTEN INLINE, per file where it
+			// is not. The two need different rules and mixing them is what made
+			// the first two versions of this test wrong in opposite directions.
+			//
+			// An INLINE literal -- `{ name, kind, ... }` or `map[string]any{...}`
+			// right after the endpoint -- is the body, so the source has to be
+			// named inside it. That is the precise check, and it is the one that
+			// catches a half-converted file: makeRendition and makeDestination
+			// in the same spec, one converted and one not.
+			//
+			// A DELEGATED body -- `dest(...)`, `destBody(...)`, or a variable --
+			// is built elsewhere, most often by a helper a few lines up that the
+			// endpoint window cannot see. Demanding sourceId at the call site
+			// there flagged nineteen sites that were all perfectly correct,
+			// including driverlib.CreateDest, which fills the field on the line
+			// BEFORE the post. For those the file-level question is the honest
+			// one this test can answer without parsing Go and TypeScript.
+			for _, loc := range posts.FindAllStringIndex(body, -1) {
+				end := loc[1] + bodyWindow
+				if end > len(body) {
+					end = len(body)
+				}
+				window := body[loc[1]:end]
+				line := 1 + strings.Count(body[:loc[0]], "\n")
+
+				if inlineBody.MatchString(window) {
+					if !namesASource(window) {
+						missing = append(missing, fmt.Sprintf("%s:%d (inline body)", rel, line))
+					}
+					continue
+				}
+				if !namesASource(body) {
+					missing = append(missing, fmt.Sprintf("%s:%d (body built elsewhere in this file, "+
+						"which never names a source)", rel, line))
+				}
+			}
 			return nil
 		})
 		if err != nil {
@@ -98,14 +150,22 @@ func TestEveryCreateCallerNamesItsSource(t *testing.T) {
 	}
 
 	if len(missing) > 0 {
-		t.Errorf("these files create a destination or rendition and never name a "+
-			"programme, so every one of their creates is refused with 400 "+
-			"source_required:\n  %s\n\nThe server no longer fills in an omitted "+
+		t.Errorf("these CALL SITES create a destination or rendition without naming a "+
+			"programme, so each is refused with 400 source_required:\n  %s\n\n"+
+			"A source named elsewhere in the same file does not answer for them -- "+
+			"that is how a half-converted file passed this guard once already.\n\n"+
+			"The server no longer fills in an omitted "+
 			"sourceId -- see requireNamedSource. Read the id back from GET /sources "+
 			"rather than hardcoding 1; an id that is only ever right while nothing "+
 			"has been deleted is the assumption this change removed.",
 			strings.Join(missing, "\n  "))
 	}
+}
+
+// namesASource is the one question this test can answer without parsing two
+// languages: is a programme named anywhere in this text.
+func namesASource(text string) bool {
+	return strings.Contains(text, "sourceId") || strings.Contains(text, "SourceID")
 }
 
 // repoRoot walks up from the test's working directory to the module root.

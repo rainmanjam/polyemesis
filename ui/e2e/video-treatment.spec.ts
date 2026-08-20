@@ -69,9 +69,21 @@ interface Destination {
   renditionId?: number | null;
 }
 
+/** The programme this spec's creates belong to.
+ *
+ *  BOTH creators here need it, and that is the point of the shared helper: the
+ *  first version of this fix gave makeRendition an inline readback and left
+ *  makeDestination alone, and the file-level guard passed because the file
+ *  mentioned sourceId somewhere. Four tests went on failing. One helper, used
+ *  by both, so a future creator in this file has an obvious thing to call. */
+async function onlySourceId(page: Page): Promise<number> {
+  const rows = await api<{ id: number }[]>(page, "GET", "/api/v1/sources");
+  if (!rows?.length) throw new Error("no source; the fixture creates one in setup");
+  return rows[0].id;
+}
+
 async function makeRendition(page: Page, name: string): Promise<Rendition> {
-  // A rendition belongs to a programme too, and the server no longer picks one.
-  const sourceId = await api<{ id: number }[]>(page, "GET", "/api/v1/sources").then((r) => r[0].id);
+  const sourceId = await onlySourceId(page);
   const { rendition } = await api<{ rendition: Rendition }>(
     page,
     "POST",
@@ -104,6 +116,7 @@ async function makeDestination(
     "POST",
     "/api/v1/destinations",
     {
+      sourceId: await onlySourceId(page),
       name,
       kind: "rtmp",
       platform: "custom",
