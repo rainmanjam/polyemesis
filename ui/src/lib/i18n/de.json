@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "Dies entfernt das Ziel und sein Routing-Profil. Die Plattform bleibt unberührt, und Sie können es wieder hinzufügen — das dafür eingerichtete Audiorouting ist jedoch weg.",
   "dash.descriptionPlaceholder": "Worum es in diesem Stream geht.",
   "dash.destDeleted": "Ziel gelöscht.",
+  "dash.destNoneHere": "Noch keine Ziele für dieses Programm.",
+  "dash.destOrphaned": "Diese Ziele nennen ein Programm, das dieser Server nicht aufgeführt hat. Sie sind weiterhin konfiguriert — prüfen Sie, ob ihre Quelle gelöscht wurde.",
   "dash.destinationNeedsASource": "Ein Ziel gehört zu einem Programm, und diese Installation hat noch keines. Legen Sie zuerst eine Quelle an.",
   "dash.disabled": "deaktiviert",
   "dash.endBroadcast": "Übertragung beenden",

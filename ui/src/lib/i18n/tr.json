@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "Bu işlem hedefi ve yönlendirme profilini kaldırır. Platforma dokunulmaz ve hedefi geri ekleyebilirsiniz — ancak onun için kurduğunuz ses yönlendirmesi kaybolur.",
   "dash.descriptionPlaceholder": "Bu yayının ne olduğu.",
   "dash.destDeleted": "Hedef silindi.",
+  "dash.destNoneHere": "Bu programda henüz hedef yok.",
+  "dash.destOrphaned": "Bu hedefler, bu sunucunun listelemediği bir programı belirtiyor. Hâlâ yapılandırılmış durumdalar — kaynaklarının silinip silinmediğini kontrol edin.",
   "dash.destinationNeedsASource": "Bir hedef bir yayına aittir ve bu kurulumda henüz hiç yayın yok. Önce bir kaynak oluşturun.",
   "dash.disabled": "devre dışı",
   "dash.endBroadcast": "Yayını bitir",

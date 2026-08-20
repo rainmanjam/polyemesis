@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "Questo rimuove la destinazione e il suo profilo di routing. La piattaforma resta intatta e puoi riaggiungerla — ma il routing audio che avevi impostato per essa è perduto.",
   "dash.descriptionPlaceholder": "Di cosa parla questo stream.",
   "dash.destDeleted": "Destinazione eliminata.",
+  "dash.destNoneHere": "Nessuna destinazione su questo programma.",
+  "dash.destOrphaned": "Queste destinazioni indicano un programma che questo server non ha elencato. Sono ancora configurate: verifica se la loro sorgente è stata eliminata.",
   "dash.destinationNeedsASource": "Una destinazione appartiene a un programma, e questa installazione non ne ha ancora nessuno. Crea prima una sorgente.",
   "dash.disabled": "disattivato",
   "dash.endBroadcast": "Termina la diretta",

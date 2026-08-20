@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "Esto elimina el destino y su perfil de enrutado. La plataforma queda intacta y puede volver a añadirlo, pero el enrutado de audio que configuró para él desaparece.",
   "dash.descriptionPlaceholder": "De qué va esta transmisión.",
   "dash.destDeleted": "Destino eliminado.",
+  "dash.destNoneHere": "Aún no hay destinos en este programa.",
+  "dash.destOrphaned": "Estos destinos nombran un programa que este servidor no ha listado. Siguen configurados: comprueba si se eliminó su fuente.",
   "dash.destinationNeedsASource": "Un destino pertenece a un programa, y esta instalación aún no tiene ninguno. Cree primero una fuente.",
   "dash.disabled": "desactivado",
   "dash.endBroadcast": "Finalizar emisión",

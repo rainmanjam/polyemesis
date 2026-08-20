@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "配信先とそのルーティングプロファイルを削除します。プラットフォーム側はそのままで、後から追加し直せますが、その配信先のために設定した音声ルーティングは失われます。",
   "dash.descriptionPlaceholder": "この配信の内容。",
   "dash.destDeleted": "配信先を削除しました。",
+  "dash.destNoneHere": "この番組にはまだ配信先がありません。",
+  "dash.destOrphaned": "これらの配信先は、このサーバーが一覧に出していない番組を指しています。設定は残っています。ソースが削除されていないか確認してください。",
   "dash.destinationNeedsASource": "配信先は番組に属しますが、このインストールにはまだ番組がありません。先にソースを作成してください。",
   "dash.disabled": "無効",
   "dash.endBroadcast": "配信を終了",
