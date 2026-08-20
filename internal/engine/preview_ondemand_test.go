@@ -102,8 +102,13 @@ func TestPreviewSigIgnoresIdleTimeout(t *testing.T) {
 // Found in review rather than by the suite, which is why it is pinned.
 func TestASwappedHubDoesNotCountAsFlow(t *testing.T) {
 	e := lifeEngine(t)
+	// FATAL, NOT SKIP. Without a hub this test asserts nothing, and a test that
+	// declines to run still prints ok -- which is the free pass the skip census
+	// exists to refuse. The fixture does provide one; if that ever stops being
+	// true the fixture is broken and should say so.
 	if e.downstreamHub() == nil {
-		t.Skip("fixture has no downstream hub")
+		t.Fatal("fixture: lifeEngine has no downstream hub, so there is nothing to " +
+			"sample and the hub-identity property cannot be exercised")
 	}
 
 	// A baseline remembered from a DIFFERENT hub, carrying a large total, and
