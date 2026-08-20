@@ -538,6 +538,24 @@ func TestTheMetersSidecarIsUnsubscribedFromTheHubItSubscribedTo(t *testing.T) {
 
 // --------------------------------------------------------------------- preview
 
+// markPreviewFlowing puts the engine in the state a live stream leaves behind:
+// the hub the preview reads advanced a moment ago.
+//
+// Needed since the preview refuses to start against a hub that has carried
+// nothing recently. These fixtures never publish, so without this every preview
+// test would be asserting against a start the gate is right to refuse -- and the
+// gate is what stops an encoder being spawned to transcode silence.
+//
+// It stamps the time rather than faking bytes because previewFlowing samples the
+// real hub: with the fixture hub at zero and previewRxBytes at zero it sees no
+// change and leaves the timestamp alone, which is exactly the "flowing a moment
+// ago, quiet right now" state.
+func markPreviewFlowing(e *Engine) {
+	e.mu.Lock()
+	e.previewRxAt = time.Now()
+	e.mu.Unlock()
+}
+
 func previewOnSettings() db.Settings {
 	s := db.DefaultSettings()
 	s.Preview.Enabled = true
@@ -553,6 +571,7 @@ func TestPreviewRequestedRecordsTheRequestEvenWhenItStartsNothing(t *testing.T) 
 	e := lifeEngine(t)
 	e.alloc = oneSlotAllocator(t)
 	setSettings(e, previewOnSettings())
+	markPreviewFlowing(e)
 
 	// A preview that has been running, unwatched, for an hour.
 	e.startPreviewLocked(e.Settings())
@@ -593,6 +612,7 @@ func TestABurstOfPreviewRequestsAgainstADownEncoderSpawnsOne(t *testing.T) {
 	}
 	e.alloc = relay.NewPortAllocator(base, 2)
 	setSettings(e, previewOnSettings())
+	markPreviewFlowing(e)
 
 	e.PreviewRequested()
 	if e.preview == nil {
@@ -626,7 +646,9 @@ func TestStartingThePreviewClearsThePreviousSessionsSegments(t *testing.T) {
 	e := lifeEngine(t)
 	e.alloc = oneSlotAllocator(t)
 
-	dir := e.cfg.HLSDir()
+	// The source's OWN directory, which is where the preview writes now. Reading
+	// the shared parent would assert against a path nothing uses.
+	dir := e.cfg.HLSDirFor(e.sourceID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -635,6 +657,7 @@ func TestStartingThePreviewClearsThePreviousSessionsSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	markPreviewFlowing(e)
 	e.startPreviewLocked(previewOnSettings())
 	t.Cleanup(func() { e.previewMu.Lock(); e.stopPreviewLocked(); e.previewMu.Unlock() })
 
@@ -682,11 +705,12 @@ func TestStoppingThePreviewRemovesThePlaylistAndReturnsThePort(t *testing.T) {
 	e := lifeEngine(t)
 	e.alloc = oneSlotAllocator(t)
 
+	markPreviewFlowing(e)
 	e.startPreviewLocked(previewOnSettings())
 	if e.preview == nil {
 		t.Fatal("the preview did not start")
 	}
-	playlist := filepath.Join(e.cfg.HLSDir(), "preview.m3u8")
+	playlist := filepath.Join(e.cfg.HLSDirFor(e.sourceID), "preview.m3u8")
 	if err := os.WriteFile(playlist, []byte("#EXTM3U"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -727,6 +751,7 @@ func TestSweepPreviewStopsAnIdleEncoderAndKeepsAWatchedOne(t *testing.T) {
 			e := lifeEngine(t)
 			e.alloc = oneSlotAllocator(t)
 			setSettings(e, previewOnSettings())
+			markPreviewFlowing(e)
 
 			e.startPreviewLocked(e.Settings())
 			if e.preview == nil {

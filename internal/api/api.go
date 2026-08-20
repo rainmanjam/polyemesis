@@ -1282,6 +1282,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
 		r.Use(s.requireSession)
+		// Source-qualified first; the bare path stays as an alias for the
+		// default source so an existing player keeps working.
+		hlsSrc := s.hlsSourceHandler()
+		r.Get("/hls/{source:[0-9]+}/*", hlsSrc.ServeHTTP)
+		r.Head("/hls/{source:[0-9]+}/*", hlsSrc.ServeHTTP)
 		hls := s.hlsHandler()
 		r.Get("/hls/*", hls.ServeHTTP)
 		r.Head("/hls/*", hls.ServeHTTP)
