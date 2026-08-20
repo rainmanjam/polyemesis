@@ -311,6 +311,7 @@
   "dash.ingestStreamsEnding": "Ingest streams that stop",
   "dash.ingestUrlCopied": "Ingest URL copied.",
   "dash.keyRefreshed": "Stream key refreshed from the platform.",
+  "dash.laneNoPreview": "No preview yet — start your encoder for this programme.",
   "dash.leaveUnchanged": "Leave unchanged",
   "dash.leaveUnchangedNote": "“Leave unchanged” sends nothing at all, so the platform keeps what it has. Choosing On or Off writes that value.",
   "dash.metaCategory": "Category",
