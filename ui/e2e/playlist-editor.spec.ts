@@ -169,11 +169,25 @@ async function setSwitch(page: Page, id: string, want: boolean): Promise<boolean
 }
 
 function failoverCard(page: Page) {
-  // Scoped by the one Card whose title is exactly "Failover" -- there are
-  // several Save buttons on this page, one per settings card, and an
-  // unscoped getByRole("button", { name: "Save" }) would be ambiguous about
-  // which one it clicked.
+  // Still scoped by the one Card whose title is exactly "Failover", because the
+  // controls INSIDE it -- Add, the item rows, the upload picker -- are
+  // ambiguous page-wide.
   return page.locator(".rounded-lg.border", { has: page.getByText("Failover", { exact: true }) });
+}
+
+/** Commits the Pipeline tab.
+ *
+ *  THERE IS ONE SAVE NOW, and that is the point of it. This tab used to carry a
+ *  Save button per card, each PUTting the whole tab draft -- so saving the
+ *  failover slate also committed an abandoned chat-retention edit three cards
+ *  away, and the MQTT card was the only one that carried the broker password,
+ *  which every other button silently dropped while reporting success.
+ *
+ *  The card-scoped `getByRole("button", { name: "Save" })` this replaced was
+ *  written to disambiguate between those eight. With one button and a banner
+ *  that names the whole tab, scoping it to a card would now find nothing. */
+async function savePipeline(page: Page) {
+  await page.getByRole("button", { name: "Save pipeline settings" }).click();
 }
 
 function itemNames(page: Page) {
@@ -236,7 +250,7 @@ test.describe("playlist editor", () => {
     await card.getByRole("button", { name: `Remove ${b}` }).click();
     await expect.poll(() => itemNames(page)).toEqual([a, c]);
 
-    await card.getByRole("button", { name: "Save" }).click();
+    await savePipeline(page);
     // No toast is asserted here on purpose -- Settings' own save button
     // already has coverage for the request completing; this waits for the
     // draft's own PUT to have landed before reloading, the same debounce
@@ -253,7 +267,7 @@ test.describe("playlist editor", () => {
     await expect.poll(() => itemNames(page)).toEqual([]);
     if (!plWas) await setSwitch(page, "#fo-playlist", false);
     if (!foWas) await setSwitch(page, "#fo-enabled", false);
-    await card.getByRole("button", { name: "Save" }).click();
+    await savePipeline(page);
     await page.waitForTimeout(800);
 
     // 204 each, asserted: the items were removed and saved above, so the
@@ -276,7 +290,7 @@ test.describe("playlist editor", () => {
     const plWas = await setSwitch(page, "#fo-playlist", true);
 
     await addItem(page, gone);
-    await card.getByRole("button", { name: "Save" }).click();
+    await savePipeline(page);
     await page.waitForTimeout(800);
 
     // The upload goes away OUT OF BAND -- see removeUploadOutOfBand. Calling
@@ -341,7 +355,7 @@ test.describe("playlist editor", () => {
     await cleanup.getByRole("button", { name: `Remove ${gone}` }).click();
     if (!plWas) await setSwitch(page, "#fo-playlist", false);
     if (!foWas) await setSwitch(page, "#fo-enabled", false);
-    await cleanup.getByRole("button", { name: "Save" }).click();
+    await savePipeline(page);
     await page.waitForTimeout(800);
 
     // The fixture is deleted rather than left behind -- this file's header
