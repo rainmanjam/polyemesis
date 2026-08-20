@@ -63,14 +63,11 @@ test("dashboard — the hero shot", async ({ page }) => {
     timeout: 120_000,
   });
   // And the preview has to be showing frames, not its placeholder. BOTH
-  // placeholder texts, because the player now says "Ingest offline" when
-  // nothing is on air and "Waiting for a stream…" only while it buffers --
-  // asserting the second alone would pass on a blank tile showing the first,
-  // and this script's whole job is to screenshot a working dashboard.
+  // placeholder texts: the player says "Ingest offline" when nothing is on air
+  // and "Waiting for a stream…" only while it buffers, so asserting the second
+  // alone would pass on a blank tile showing the first.
   for (const placeholder of ["Waiting for a stream…", "Ingest offline"]) {
-    await expect(page.getByText(placeholder)).toHaveCount(0, {
-      timeout: 120_000,
-    });
+    await expect(page.getByText(placeholder)).toHaveCount(0, { timeout: 120_000 });
   }
   await settle(page);
   await page.screenshot({ path: `${OUT}/01-dashboard.png` });
@@ -111,9 +108,7 @@ test("renditions — shared encodes and overlays", async ({ page }) => {
   await page.screenshot({ path: `${OUT}/06-renditions.png` });
 });
 
-test("monitoring — every process, with its own FFmpeg output", async ({
-  page,
-}) => {
+test("monitoring — every process, with its own FFmpeg output", async ({ page }) => {
   await page.goto("/monitoring");
   await settle(page, 2500);
   await page.screenshot({ path: `${OUT}/07-monitoring.png` });
@@ -135,15 +130,10 @@ test("tour — dashboard to routing to meters", async ({ page }) => {
 
   // Walk the destination list so the video shows the selections differing,
   // which is the entire point and is invisible in a single frame.
-  const rows = page
-    .locator("[role='tab'], button")
-    .filter({ hasText: /YouTube|Twitch|Podcast/ });
+  const rows = page.locator("[role='tab'], button").filter({ hasText: /YouTube|Twitch|Podcast/ });
   const n = Math.min(await rows.count(), 3);
   for (let i = 0; i < n; i++) {
-    await rows
-      .nth(i)
-      .click()
-      .catch(() => {});
+    await rows.nth(i).click().catch(() => {});
     await page.waitForTimeout(2200);
   }
 
@@ -217,16 +207,11 @@ test("recordings — segments and retention", async ({ page }) => {
   await page.screenshot({ path: `${OUT}/15-recordings.png` });
 });
 
-test("settings — listeners, and the one-port design in the UI", async ({
-  page,
-}) => {
+test("settings — listeners, and the one-port design in the UI", async ({ page }) => {
   await page.goto("/settings");
   await settle(page, 1500);
   await page.screenshot({ path: `${OUT}/16-settings.png` });
   // Full page as well: settings is long, and the single-viewport crop cuts off
   // most of what the page is for.
-  await page.screenshot({
-    path: `${OUT}/17-settings-full.png`,
-    fullPage: true,
-  });
+  await page.screenshot({ path: `${OUT}/17-settings-full.png`, fullPage: true });
 });
