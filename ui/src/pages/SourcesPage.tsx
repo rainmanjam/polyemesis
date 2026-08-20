@@ -48,8 +48,8 @@ import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
 import { InfoHint } from "@/components/InfoHint";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
-import type { Source, SourceView } from "@/lib/types";
 import { publishRows } from "@/lib/publish-url";
+import type { Source, SourceView } from "@/lib/types";
 
 /* ===========================================================================
    Sources: one ingested programme each.
@@ -71,9 +71,7 @@ function copy(t: Translator, text: string, what: string) {
   void navigator.clipboard
     ?.writeText(text)
     .then(() => toast.success(t("sources.copied", { what })))
-    .catch(() =>
-      toast.error(t("sources.copyFailed", { what: what.toLowerCase() })),
-    );
+    .catch(() => toast.error(t("sources.copyFailed", { what: what.toLowerCase() })));
 }
 
 export function SourcesPage() {
@@ -171,11 +169,7 @@ export function SourcesPage() {
     const wasOnly = sources.length === 1;
     try {
       await api.deleteSource(deleting.id);
-      toast.success(
-        t(wasOnly ? "sources.deletedLast" : "sources.deleted", {
-          name: deleting.name,
-        }),
-      );
+      toast.success(t(wasOnly ? "sources.deletedLast" : "sources.deleted", { name: deleting.name }));
       setDeleting(null);
       await load();
     } catch (e) {
@@ -207,8 +201,7 @@ export function SourcesPage() {
 
       {loading ? (
         <div className="flex items-center gap-2 py-6 text-[12px] text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />{" "}
-          {t("sources.loading")}
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("sources.loading")}
         </div>
       ) : sources.length === 0 ? (
         // THE END OF THE TRAIL. Every refusal on every other screen sends the
@@ -302,10 +295,7 @@ export function SourcesPage() {
         }
         requireTyping
         consequences={[
-          {
-            label: t("sources.destinations"),
-            count: deleting?.destinations ?? 0,
-          },
+          { label: t("sources.destinations"), count: deleting?.destinations ?? 0 },
           { label: t("sources.renditions"), count: deleting?.renditions ?? 0 },
         ]}
         confirmLabel={t("sources.deleteConfirm")}
@@ -350,9 +340,7 @@ function SourceCard({
           <CardTitle className="flex items-center gap-2">
             <RadioTower className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{source.name}</span>
-            {source.isDefault && (
-              <Badge variant="outline">{t("sources.default")}</Badge>
-            )}
+            {source.isDefault && <Badge variant="outline">{t("sources.default")}</Badge>}
             <Badge variant={source.running ? "live" : "warn"}>
               {source.running ? t("sources.running") : t("sources.notRunning")}
             </Badge>
@@ -377,9 +365,7 @@ function SourceCard({
           </CardDescription>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {busy && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-          )}
+          {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
           <Switch
             checked={source.enabled}
             onCheckedChange={(v) => onPatch({ enabled: v })}
@@ -415,18 +401,15 @@ function SourceCard({
             operator to the logs; the server already knows which address failed
             and why, and that sentence is the whole difference between noticing
             and fixing. */}
-        {source.listenerHealth?.state === "degraded" &&
-          source.listenerHealth.detail && (
-            <p className="flex items-start gap-1.5 text-[11px] text-warn">
-              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-              <span>
-                <strong className="font-semibold">
-                  {t("sources.listenerDegraded")}
-                </strong>{" "}
-                {source.listenerHealth.detail}
-              </span>
-            </p>
-          )}
+        {source.listenerHealth?.state === "degraded" && source.listenerHealth.detail && (
+          <p className="flex items-start gap-1.5 text-[11px] text-warn">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>
+              <strong className="font-semibold">{t("sources.listenerDegraded")}</strong>{" "}
+              {source.listenerHealth.detail}
+            </span>
+          </p>
+        )}
 
         {/* The server's sentence, not a badge on its own. It names the FILE and
             says why nothing read it, and those two facts are the whole
@@ -435,15 +418,10 @@ function SourceCard({
             listenerHealth.detail is: the server is the only thing that knows,
             and a second copy of the sentence in the UI would drift from it. */}
         {source.pullUploadUnchecked && (
-          <p
-            className="flex items-start gap-1.5 text-[11px] text-warn"
-            data-testid="pull-unchecked"
-          >
+          <p className="flex items-start gap-1.5 text-[11px] text-warn" data-testid="pull-unchecked">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
-              <strong className="font-semibold">
-                {t("sources.pullUnchecked")}
-              </strong>{" "}
+              <strong className="font-semibold">{t("sources.pullUnchecked")}</strong>{" "}
               {source.pullUploadUnchecked}
             </span>
           </p>
@@ -455,10 +433,7 @@ function SourceCard({
               {t("sources.ingest")}
               <InfoHint body="sources.help.ingest" title="sources.ingest" />
             </Label>
-            <Select
-              value={ing.mode}
-              onValueChange={(v) => setIngest({ mode: v as typeof ing.mode })}
-            >
+            <Select value={ing.mode} onValueChange={(v) => setIngest({ mode: v as typeof ing.mode })}>
               <SelectTrigger
                 className="h-7 text-[11px]"
                 aria-label={t("sources.ingest")}
@@ -482,28 +457,19 @@ function SourceCard({
                 value={ing.srt.latencyMs}
                 min={LIMITS.srtLatencyMs.min}
                 max={LIMITS.srtLatencyMs.max}
-                onChange={(n) =>
-                  setIngest({ srt: { ...ing.srt, latencyMs: n } })
-                }
+                onChange={(n) => setIngest({ srt: { ...ing.srt, latencyMs: n } })}
               />
               <div className="flex flex-col gap-1">
                 <Label className="flex items-center gap-1">
                   {t("sources.passphrase")}
-                  <InfoHint
-                    body="sources.help.passphrase"
-                    title="sources.passphrase"
-                  />
+                  <InfoHint body="sources.help.passphrase" title="sources.passphrase" />
                 </Label>
                 <Input
                   className="h-7 text-[11px]"
                   type="password"
                   value={ing.srt.passphrase}
                   placeholder={t("sources.passphrasePlaceholder")}
-                  onChange={(e) =>
-                    setIngest({
-                      srt: { ...ing.srt, passphrase: e.target.value },
-                    })
-                  }
+                  onChange={(e) => setIngest({ srt: { ...ing.srt, passphrase: e.target.value } })}
                 />
               </div>
             </>
@@ -519,27 +485,18 @@ function SourceCard({
                 <Input
                   className="h-7 text-[11px]"
                   value={ing.rtmp.app}
-                  onChange={(e) =>
-                    setIngest({ rtmp: { ...ing.rtmp, app: e.target.value } })
-                  }
+                  onChange={(e) => setIngest({ rtmp: { ...ing.rtmp, app: e.target.value } })}
                 />
               </div>
               <div className="flex flex-col gap-1">
                 <Label className="flex items-center gap-1">
                   {t("sources.streamKey")}
-                  <InfoHint
-                    body="sources.help.streamKey"
-                    title="sources.streamKey"
-                  />
+                  <InfoHint body="sources.help.streamKey" title="sources.streamKey" />
                 </Label>
                 <SecretInput
                   className="h-7 text-[11px]"
                   value={ing.rtmp.streamKey}
-                  onChange={(e) =>
-                    setIngest({
-                      rtmp: { ...ing.rtmp, streamKey: e.target.value },
-                    })
-                  }
+                  onChange={(e) => setIngest({ rtmp: { ...ing.rtmp, streamKey: e.target.value } })}
                 />
               </div>
             </>
@@ -555,16 +512,9 @@ function SourceCard({
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-warn/40 bg-warn-dim/20 px-2 py-1.5">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warn" />
             <span className="min-w-0 flex-1 text-[11px]">
-              {source.publishing
-                ? t("sources.dirtyPublishing")
-                : t("sources.dirtyIdle")}
+              {source.publishing ? t("sources.dirtyPublishing") : t("sources.dirtyIdle")}
             </span>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setDraft(source.ingest)}
-              disabled={busy}
-            >
+            <Button size="sm" variant="ghost" onClick={() => setDraft(source.ingest)} disabled={busy}>
               {t("common.discard")}
             </Button>
             <Button
@@ -573,9 +523,7 @@ function SourceCard({
               onClick={() => onPatch({ ingest: draft })}
               disabled={busy}
             >
-              {source.publishing
-                ? t("sources.applyAndDrop")
-                : t("common.apply")}
+              {source.publishing ? t("sources.applyAndDrop") : t("common.apply")}
             </Button>
           </div>
         )}
@@ -600,120 +548,108 @@ function SourceCard({
 
             See ui/src/lib/tourSteps.ts. */}
         <div data-tour="source-publish-urls" className="flex flex-col gap-3">
-          {publishRows(source.publishUrls, window.location.hostname).map(
-            ({ proto, url }) => (
-              <div key={proto} className="flex items-center gap-2">
-                <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
-                  {proto}
-                </span>
-                <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-[10px]">
-                  {url}
-                </code>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => copy(t, url, proto.toUpperCase())}
-                  aria-label={t("sources.copyUrlAria", { proto })}
-                >
-                  <Copy className="h-3 w-3" />
-                </Button>
-              </div>
-            ),
-          )}
-
-          {source.link && (
-            /* Per-source uplink health. With several programmes on one install,
-             "why is it breaking up" is a question about one encoder's uplink,
-             and answering it per programme is something Restreamer's UI does
-             not do. */
-            <div className="flex flex-wrap items-center gap-3 rounded-md border border-live/30 bg-live-dim/20 px-2 py-1.5">
-              <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-live">
-                <Activity className="h-3 w-3" /> {t("sources.publishing")}
-              </span>
-              <span className="font-mono text-[10px] text-muted-foreground">
-                {source.link.peer}
-              </span>
-              <span className="tnum font-mono text-[10px]">
-                {t("sources.rtt")} {source.link.rttMs.toFixed(1)} ms
-              </span>
-              <span className="tnum font-mono text-[10px]">
-                {t("sources.loss")} {source.link.lossPackets}
-              </span>
-              <span className="tnum font-mono text-[10px]">
-                {t("sources.retrans")} {source.link.retransPackets}
-              </span>
-            </div>
-          )}
-
-          {/* The token, and the truth about it. */}
-          <div className="flex flex-col gap-1.5 border-t border-border pt-2">
-            <div className="flex items-center gap-2">
+        {publishRows(source.publishUrls, window.location.hostname).map(({ proto, url }) =>
+          url ? (
+            <div key={proto} className="flex items-center gap-2">
               <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
-                {t("sources.token")}
+                {proto}
               </span>
               <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-[10px]">
-                {source.token}
+                {url}
               </code>
               <Button
                 size="icon"
                 variant="ghost"
-                onClick={() => copy(t, source.token, t("sources.token"))}
-                aria-label={t("sources.copyTokenAria")}
+                onClick={() => copy(t, url, proto.toUpperCase())}
+                aria-label={t("sources.copyUrlAria", { proto })}
               >
                 <Copy className="h-3 w-3" />
               </Button>
-              {/* Rotate sat beside Copy with identical weight, though one is
+            </div>
+          ) : null,
+        )}
+
+        {source.link && (
+          /* Per-source uplink health. With several programmes on one install,
+             "why is it breaking up" is a question about one encoder's uplink,
+             and answering it per programme is something Restreamer's UI does
+             not do. */
+          <div className="flex flex-wrap items-center gap-3 rounded-md border border-live/30 bg-live-dim/20 px-2 py-1.5">
+            <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-live">
+              <Activity className="h-3 w-3" /> {t("sources.publishing")}
+            </span>
+            <span className="font-mono text-[10px] text-muted-foreground">{source.link.peer}</span>
+            <span className="tnum font-mono text-[10px]">{t("sources.rtt")} {source.link.rttMs.toFixed(1)} ms</span>
+            <span className="tnum font-mono text-[10px]">{t("sources.loss")} {source.link.lossPackets}</span>
+            <span className="tnum font-mono text-[10px]">{t("sources.retrans")} {source.link.retransPackets}</span>
+          </div>
+        )}
+
+        {/* The token, and the truth about it. */}
+        <div className="flex flex-col gap-1.5 border-t border-border pt-2">
+          <div className="flex items-center gap-2">
+            <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
+              {t("sources.token")}
+            </span>
+            <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-[10px]">
+              {source.token}
+            </code>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => copy(t, source.token, t("sources.token"))}
+              aria-label={t("sources.copyTokenAria")}
+            >
+              <Copy className="h-3 w-3" />
+            </Button>
+            {/* Rotate sat beside Copy with identical weight, though one is
                 idempotent and the other invalidates a credential an encoder may
                 be using right now. Confirmed rather than merely restyled: the
                 consequence is not visual, it is that somebody's publisher stops
                 being able to connect. */}
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-warn/50 text-warn hover:bg-warn-dim/30"
-                onClick={onRotate}
-                disabled={busy}
-              >
-                <KeyRound className="h-3 w-3" /> {t("sources.rotate")}
-                <InfoHint body="sources.help.token" title="sources.token" />
-              </Button>
-            </div>
-            {/* Stated plainly either way. Telling someone a rotated token
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-warn/50 text-warn hover:bg-warn-dim/30"
+              onClick={onRotate}
+              disabled={busy}
+            >
+              <KeyRound className="h-3 w-3" /> {t("sources.rotate")}
+              <InfoHint body="sources.help.token" title="sources.token" />
+            </Button>
+          </div>
+          {/* Stated plainly either way. Telling someone a rotated token
               secures an ingest it does not is the worse error, but hiding that
               it now does is also wrong — so the copy follows the server's
               tokenEnforced, which follows the running listener rather than the
               setting. */}
-            {source.tokenEnforced ? (
-              <p className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
-                <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-live" />
-                <span>
-                  <strong className="font-semibold">
-                    {t("sources.tokenIsCredential")}
-                  </strong>{" "}
-                  {/* Mode-specific, because the two protocols carry the token in
+          {source.tokenEnforced ? (
+            <p className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+              <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-live" />
+              <span>
+                <strong className="font-semibold">{t("sources.tokenIsCredential")}</strong>{" "}
+                {/* Mode-specific, because the two protocols carry the token in
                     different places and the generic sentence named only SRT's.
                     Now that the token is enforced for RTMP too, an RTMP operator
                     was being told to put it in an "SRT streamid" — a field their
                     encoder does not have. */}
-                  {ing.mode === "rtmp"
-                    ? t("sources.tokenEnforcedDetailRtmp")
-                    : t("sources.tokenEnforcedDetailSrt")}
-                </span>
-              </p>
-            ) : (
-              <p className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
-                <Info className="mt-0.5 h-3 w-3 shrink-0" />
-                <span>
-                  <strong className="font-semibold">
-                    {t("sources.tokenNotEnforced")}
-                  </strong>{" "}
-                  {ing.mode === "rtmp"
-                    ? t("sources.tokenNotEnforcedRtmp")
-                    : t("sources.tokenNotEnforcedSrt")}
-                </span>
-              </p>
-            )}
-          </div>
+                {ing.mode === "rtmp"
+                  ? t("sources.tokenEnforcedDetailRtmp")
+                  : t("sources.tokenEnforcedDetailSrt")}
+              </span>
+            </p>
+          ) : (
+            <p className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+              <Info className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>
+                <strong className="font-semibold">{t("sources.tokenNotEnforced")}</strong>{" "}
+                {ing.mode === "rtmp"
+                  ? t("sources.tokenNotEnforcedRtmp")
+                  : t("sources.tokenNotEnforcedSrt")}
+              </span>
+            </p>
+          )}
+        </div>
         </div>
       </CardContent>
     </Card>
