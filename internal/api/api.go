@@ -1284,6 +1284,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 		r.Use(s.requireSession)
 		// Source-qualified first; the bare path stays as an alias for the
 		// default source so an existing player keeps working.
+		// The grid's telemetry. Inside the session-only group with the preview
+		// itself, since it describes the same thing.
+		r.Get("/previews", s.handlePreviews)
 		hlsSrc := s.hlsSourceHandler()
 		r.Get("/hls/{source:[0-9]+}/*", hlsSrc.ServeHTTP)
 		r.Head("/hls/{source:[0-9]+}/*", hlsSrc.ServeHTTP)

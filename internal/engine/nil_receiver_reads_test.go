@@ -75,6 +75,7 @@ var nilEngineAnswers = map[string]bool{
 	"Clips":        false,
 	"ClipUsage":    false,
 	"IngestLive":   false,
+	"OutputLive":   false,
 	"LastReload":   false,
 	"LiveCaptions": false,
 	"Renditions":   false,

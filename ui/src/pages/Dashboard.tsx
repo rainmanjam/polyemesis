@@ -1,6 +1,14 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,7 +42,9 @@ import { useT, useStateLabel } from "@/lib/i18n";
 // preview is off entirely for some installs. Load it alongside the dashboard
 // rather than ahead of it.
 const PreviewPlayer = lazy(() =>
-  import("@/components/PreviewPlayer").then((m) => ({ default: m.PreviewPlayer })),
+  import("@/components/PreviewPlayer").then((m) => ({
+    default: m.PreviewPlayer,
+  })),
 );
 
 // ---------------------------------------------------------- go-live composer
@@ -234,14 +244,17 @@ function GoLiveComposer() {
   }, [jobId, jobDone]);
 
   const accepts = useCallback(
-    (field: MetaField) => (targets ?? []).filter((t) => t.caps.fields.includes(field)),
+    (field: MetaField) =>
+      (targets ?? []).filter((t) => t.caps.fields.includes(field)),
     [targets],
   );
 
   // The counter shows the tightest limit among the platforms being pushed to,
   // because that is the one that will refuse first.
   const titleMax = useMemo(() => {
-    const limits = (targets ?? []).map((t) => t.caps.titleMax ?? 0).filter((n) => n > 0);
+    const limits = (targets ?? [])
+      .map((t) => t.caps.titleMax ?? 0)
+      .filter((n) => n > 0);
     return limits.length > 0 ? Math.min(...limits) : 0;
   }, [targets]);
 
@@ -254,8 +267,11 @@ function GoLiveComposer() {
     [targets, title],
   );
 
-  const categoryHint = (targets ?? []).find((t) => t.caps.categoryHint)?.caps.categoryHint ?? "";
-  const noDescription = (targets ?? []).filter((t) => !t.caps.fields.includes("description"));
+  const categoryHint =
+    (targets ?? []).find((t) => t.caps.categoryHint)?.caps.categoryHint ?? "";
+  const noDescription = (targets ?? []).filter(
+    (t) => !t.caps.fields.includes("description"),
+  );
   // What a push will send BEYOND what is typed here.
   //
   // Compliance is configured per destination and has no field in this composer,
@@ -267,8 +283,10 @@ function GoLiveComposer() {
     const c = t.compliance;
     if (!c) return false;
     return Boolean(
-      c.privacy || c.facebookPrivacy || c.madeForKids !== undefined ||
-        (c.labels && Object.keys(c.labels).length > 0),
+      c.privacy ||
+      c.facebookPrivacy ||
+      c.madeForKids !== undefined ||
+      (c.labels && Object.keys(c.labels).length > 0),
     );
   });
   // Same signal as noDescription/categoryHint above, not the broadcast-window
@@ -281,9 +299,12 @@ function GoLiveComposer() {
   // two YouTube accounts and one still in "ready", the controls stay enabled --
   // disabling them would block an edit that would have worked on one of them.
   const broadcastAccounts = (windows ?? []).filter((w) => w.supported);
-  const lockedRows = broadcastAccounts.filter((w) => w.window?.contentDetailsLocked);
+  const lockedRows = broadcastAccounts.filter(
+    (w) => w.window?.contentDetailsLocked,
+  );
   const contentDetailsLocked =
-    broadcastAccounts.length > 0 && lockedRows.length === broadcastAccounts.length;
+    broadcastAccounts.length > 0 &&
+    lockedRows.length === broadcastAccounts.length;
   const lockedReason = lockedRows[0]?.window?.lockedReason ?? "";
 
   // A tri-state select maps to a pointer: absent when untouched.
@@ -296,18 +317,30 @@ function GoLiveComposer() {
       // make Facebook's resolver search for nothing, so a blank between two
       // commas is dropped rather than sent.
       const tagList =
-        tags.trim() === "" ? undefined : tags.split(",").map((t) => t.trim()).filter(Boolean);
+        tags.trim() === ""
+          ? undefined
+          : tags
+              .split(",")
+              .map((t) => t.trim())
+              .filter(Boolean);
       const broadcast = {
         // YouTube and Kick take tags through PushBroadcastSettings, which is
         // keyed to a broadcast resource neither Facebook nor Twitch has.
         tags: tagList,
-        scheduledStart: scheduledStart.trim() === "" ? undefined : new Date(scheduledStart).toISOString(),
+        scheduledStart:
+          scheduledStart.trim() === ""
+            ? undefined
+            : new Date(scheduledStart).toISOString(),
         // Omitted entirely when locked. Sending them would earn a 403 that
         // reads as though the whole push failed, when the title half of it
         // very likely succeeded.
         enableDvr: contentDetailsLocked ? undefined : boolOrUndef(dvr),
-        enableAutoStart: contentDetailsLocked ? undefined : boolOrUndef(autoStart),
-        enableAutoStop: contentDetailsLocked ? undefined : boolOrUndef(autoStop),
+        enableAutoStart: contentDetailsLocked
+          ? undefined
+          : boolOrUndef(autoStart),
+        enableAutoStop: contentDetailsLocked
+          ? undefined
+          : boolOrUndef(autoStop),
       };
       const started = await metaFetch<MetaJob>("/metadata/push", {
         title,
@@ -321,7 +354,9 @@ function GoLiveComposer() {
       });
       setJob(started);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("dash.couldNotPushTheMetadata"));
+      toast.error(
+        err instanceof Error ? err.message : t("dash.couldNotPushTheMetadata"),
+      );
     } finally {
       setPushing(false);
     }
@@ -332,14 +367,20 @@ function GoLiveComposer() {
   // A broadcast-only push is a real thing an operator does: turning the DVR
   // off before going live without retyping a title that is already correct.
   const broadcastTouched =
-    tags.trim() !== "" || scheduledStart.trim() !== "" ||
-    dvr !== "" || autoStart !== "" || autoStop !== "";
+    tags.trim() !== "" ||
+    scheduledStart.trim() !== "" ||
+    dvr !== "" ||
+    autoStart !== "" ||
+    autoStop !== "";
   // Nothing typed AND nothing stored to send. The second half matters: a push
   // whose whole purpose is applying a stored COPPA declaration or privacy
   // setting types nothing here, and a button greyed out on the composer alone
   // would make the server's own allowance for that unreachable.
   const empty =
-    !title.trim() && !description.trim() && !category.trim() && !broadcastTouched &&
+    !title.trim() &&
+    !description.trim() &&
+    !category.trim() &&
+    !broadcastTouched &&
     withCompliance.length === 0;
   const busy = pushing || (job !== null && !job.done);
 
@@ -375,7 +416,9 @@ function GoLiveComposer() {
                 {titleMax > 0 && (
                   <span
                     className={`tnum font-mono text-[10px] ${
-                      overLimit.length > 0 ? "text-down" : "text-muted-foreground"
+                      overLimit.length > 0
+                        ? "text-down"
+                        : "text-muted-foreground"
                     }`}
                   >
                     {title.length}/{titleMax}
@@ -390,14 +433,17 @@ function GoLiveComposer() {
               />
               {overLimit.length > 0 && (
                 <p className="text-[10px] text-down">
-                  Too long for {overLimit.map((t) => t.platform).join(", ")}; that platform will be
-                  reported as failed and the others still pushed.
+                  Too long for {overLimit.map((t) => t.platform).join(", ")};
+                  that platform will be reported as failed and the others still
+                  pushed.
                 </p>
               )}
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="golive-description">{t("dash.metaDescription")}</Label>
+              <Label htmlFor="golive-description">
+                {t("dash.metaDescription")}
+              </Label>
               <Textarea
                 id="golive-description"
                 value={description}
@@ -407,8 +453,9 @@ function GoLiveComposer() {
               />
               {noDescription.length > 0 && (
                 <p className="text-[10px] text-muted-foreground">
-                  {noDescription.map((t) => t.platform).join(", ")} has no description field, so
-                  this is skipped there rather than failed.
+                  {noDescription.map((t) => t.platform).join(", ")} has no
+                  description field, so this is skipped there rather than
+                  failed.
                 </p>
               )}
             </div>
@@ -438,9 +485,9 @@ function GoLiveComposer() {
                   onChange={(e) => setTags(e.target.value)}
                 />
                 <span className="text-[10px] text-muted-foreground">
-                  Comma separated. These REPLACE the existing tags rather than adding to them,
-                  because that is what each platform's API does. Applies to{" "}
-                  {tagTargets.map((t) => t.platform).join(", ")}.
+                  Comma separated. These REPLACE the existing tags rather than
+                  adding to them, because that is what each platform's API does.
+                  Applies to {tagTargets.map((t) => t.platform).join(", ")}.
                 </span>
               </div>
             )}
@@ -455,7 +502,9 @@ function GoLiveComposer() {
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="golive-start">{t("dash.scheduledStart")}</Label>
+                  <Label htmlFor="golive-start">
+                    {t("dash.scheduledStart")}
+                  </Label>
                   <Input
                     id="golive-start"
                     type="datetime-local"
@@ -469,16 +518,25 @@ function GoLiveComposer() {
 
                 {contentDetailsLocked && (
                   <p className="text-[10px] text-warn">
-                    {lockedReason ||
-                      t("dash.youtubeStopsAcceptingTheseOnce")}
+                    {lockedReason || t("dash.youtubeStopsAcceptingTheseOnce")}
                   </p>
                 )}
 
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { id: "dvr", label: "DVR", value: dvr, set: setDvr },
-                    { id: "autostart", label: "Auto-start", value: autoStart, set: setAutoStart },
-                    { id: "autostop", label: "Auto-stop", value: autoStop, set: setAutoStop },
+                    {
+                      id: "autostart",
+                      label: "Auto-start",
+                      value: autoStart,
+                      set: setAutoStart,
+                    },
+                    {
+                      id: "autostop",
+                      label: "Auto-stop",
+                      value: autoStop,
+                      set: setAutoStop,
+                    },
                   ].map((f) => (
                     <div key={f.id} className="flex flex-col gap-1">
                       <Label htmlFor={`golive-${f.id}`}>{f.label}</Label>
@@ -500,26 +558,34 @@ function GoLiveComposer() {
                   ))}
                 </div>
                 <span className="text-[10px] text-muted-foreground">
-            {t("dash.leaveUnchangedNote")}
+                  {t("dash.leaveUnchangedNote")}
                 </span>
               </div>
             )}
 
             <div className="flex items-center gap-2">
               <Button size="sm" onClick={push} disabled={empty || busy}>
-                <Megaphone /> {busy ? t("dash.pushing") : t("dash.pushToPlatforms")}
+                <Megaphone />{" "}
+                {busy ? t("dash.pushing") : t("dash.pushToPlatforms")}
               </Button>
               <span className="text-[10px] text-muted-foreground">
-                Applies to {accepts("title").length === 1 ? t("dash.theConnectedAccount") : t("dash.everyConnectedAccount")}.
+                Applies to{" "}
+                {accepts("title").length === 1
+                  ? t("dash.theConnectedAccount")
+                  : t("dash.everyConnectedAccount")}
+                .
               </span>
             </div>
 
             {withCompliance.length > 0 && (
               <p className="text-[10px] text-muted-foreground">
                 This push also sends the compliance settings stored on{" "}
-                {withCompliance.map((t) => t.accountName || t.platform).join(", ")} &mdash;
-                visibility, made-for-kids and content labels are configured per destination, not
-                here, and go out whether or not you change anything above.
+                {withCompliance
+                  .map((t) => t.accountName || t.platform)
+                  .join(", ")}{" "}
+                &mdash; visibility, made-for-kids and content labels are
+                configured per destination, not here, and go out whether or not
+                you change anything above.
               </p>
             )}
           </div>
@@ -541,12 +607,16 @@ function GoLiveComposer() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex min-w-0 items-center gap-2">
                         <StatusDot tone={tone} size="sm" />
-                        <span className="truncate text-[11px] font-medium">{res.platform}</span>
+                        <span className="truncate text-[11px] font-medium">
+                          {res.platform}
+                        </span>
                         <span className="truncate font-mono text-[10px] text-muted-foreground">
                           {res.accountName}
                         </span>
                       </div>
-                      <Badge variant={toneBadge[tone]}>{metaLabel[res.state]}</Badge>
+                      <Badge variant={toneBadge[tone]}>
+                        {metaLabel[res.state]}
+                      </Badge>
                     </div>
 
                     {res.applied.length > 0 && (
@@ -561,7 +631,9 @@ function GoLiveComposer() {
                         Not supported here: {res.skipped.join(", ")}
                       </p>
                     )}
-                    {res.message && <p className="text-[10px] text-down">{res.message}</p>}
+                    {res.message && (
+                      <p className="text-[10px] text-down">{res.message}</p>
+                    )}
                     {res.warnings?.map((warn) => (
                       <p key={warn} className="text-[10px] text-warn">
                         {warn}
@@ -649,7 +721,9 @@ function BulkDestinationControl({
     setReport(null);
     try {
       const res =
-        action === "start" ? await api.startAllDestinations() : await api.stopAllDestinations();
+        action === "start"
+          ? await api.startAllDestinations()
+          : await api.stopAllDestinations();
       setReport(res);
       // The count, not a verdict. "Six of eight started" is a sentence an
       // operator can act on; "failed" over eight destinations of which two
@@ -660,7 +734,9 @@ function BulkDestinationControl({
       const params = { done, total: res.results.length };
       if (done === res.results.length) {
         toast.success(
-          action === "start" ? t("dash.bulkStartDone", params) : t("dash.bulkStopDone", params),
+          action === "start"
+            ? t("dash.bulkStartDone", params)
+            : t("dash.bulkStopDone", params),
         );
       } else {
         // Not an error toast: the request succeeded and every destination has
@@ -692,8 +768,13 @@ function BulkDestinationControl({
   return (
     <div className="mb-3 flex flex-col gap-2 rounded-md border border-border p-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={busy !== null} onClick={() => void run("start")}>
-          <Play /> {busy === "start" ? t("dash.bulkStarting") : t("dash.startAll")}
+        <Button
+          size="sm"
+          disabled={busy !== null}
+          onClick={() => void run("start")}
+        >
+          <Play />{" "}
+          {busy === "start" ? t("dash.bulkStarting") : t("dash.startAll")}
         </Button>
         <Button
           size="sm"
@@ -701,7 +782,8 @@ function BulkDestinationControl({
           disabled={busy !== null}
           onClick={() => confirmStopAll.ask(true)}
         >
-          <Square /> {busy === "stop" ? t("dash.bulkStopping") : t("dash.stopAll")}
+          <Square />{" "}
+          {busy === "stop" ? t("dash.bulkStopping") : t("dash.stopAll")}
         </Button>
         <span className="text-[10px] text-muted-foreground">
           {t("dash.bulkAppliesTo", { count })}
@@ -719,7 +801,9 @@ function BulkDestinationControl({
       {/* ---------- what each destination did ---------- */}
       <div aria-live="polite" className="flex flex-col gap-1.5">
         {report === null ? (
-          <p className="text-[11px] text-muted-foreground">{t("dash.bulkResultsEmpty")}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {t("dash.bulkResultsEmpty")}
+          </p>
         ) : (
           report.results.map((res) => {
             const tone = bulkTone[res.outcome];
@@ -731,12 +815,16 @@ function BulkDestinationControl({
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <StatusDot tone={tone} size="sm" />
-                    <span className="truncate text-[11px] font-medium">{res.name}</span>
+                    <span className="truncate text-[11px] font-medium">
+                      {res.name}
+                    </span>
                     <span className="truncate font-mono text-[10px] text-muted-foreground">
                       {res.platform}
                     </span>
                   </div>
-                  <Badge variant={toneBadge[tone]}>{bulkLabel[res.outcome]}</Badge>
+                  <Badge variant={toneBadge[tone]}>
+                    {bulkLabel[res.outcome]}
+                  </Badge>
                 </div>
                 {/* WHY, on every row that is not a clean start or stop. A row
                     that only says "Failed" sends the operator to the card to
@@ -775,6 +863,11 @@ export function Dashboard() {
   const { status } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
+  // Per-source preview state. Polled rather than taken from the status feed,
+  // which is not source-scoped: every engine publishes onto one broker and the
+  // app keeps one status, so a grid fed from it would draw every tile from
+  // whichever engine spoke last.
+  const tiles = usePreviewTiles(settingsPreview);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Destination | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -810,7 +903,10 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    api.system().then(setSystem).catch(() => {});
+    api
+      .system()
+      .then(setSystem)
+      .catch(() => {});
     api
       .getSettings()
       .then((s) => setSettingsPreview(s.preview.enabled))
@@ -877,7 +973,11 @@ export function Dashboard() {
       setEditing(destination);
       setDialogOpen(true);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("dash.couldNotLoadTheDestination"));
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t("dash.couldNotLoadTheDestination"),
+      );
     }
   };
 
@@ -904,7 +1004,8 @@ export function Dashboard() {
     const rank = new Map(pending.map((id, i) => [id, i]));
     return [...rows].sort(
       (a, b) =>
-        (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+        (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+        (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
     );
   }, [live, pending]);
 
@@ -929,13 +1030,19 @@ export function Dashboard() {
     [ids[from], ids[to]] = [ids[to], ids[from]];
 
     setPending(ids);
-    setMoveNote(`${destinations[from].name} moved to position ${to + 1} of ${ids.length}.`);
+    setMoveNote(
+      `${destinations[from].name} moved to position ${to + 1} of ${ids.length}.`,
+    );
     try {
       await api.reorderDestinations(ids);
     } catch (err) {
       setPending(null);
       setMoveNote("");
-      toast.error(err instanceof Error ? err.message : t("dash.couldNotReorderTheDestinations"));
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t("dash.couldNotReorderTheDestinations"),
+      );
     }
   };
 
@@ -965,7 +1072,10 @@ export function Dashboard() {
     return (
       <div className="p-3">
         <PageHeader title={t("dash.title")} subtitle={t("dash.subtitle")} />
-        <NoProgrammeYet title={t("empty.dashTitle")} body={t("empty.dashBody")} />
+        <NoProgrammeYet
+          title={t("empty.dashTitle")}
+          body={t("empty.dashBody")}
+        />
       </div>
     );
   }
@@ -1006,7 +1116,51 @@ export function Dashboard() {
               <div className="aspect-video max-h-[60vh] w-full rounded-md border border-border bg-black" />
             }
           >
-            <PreviewPlayer active={settingsPreview} />
+            {/* ONE TILE PER SOURCE. The preview used to be a single player on
+                whichever source happened to be first in display order, with no
+                way to reach any other -- so with several programmes running you
+                watched one of them and could not say which.
+
+                A tile only costs an encoder while it is watched AND something is
+                on air: the preview is demand-driven and now refuses to start
+                against a hub carrying nothing, so offline programmes in this
+                grid cost nothing. */}
+            {tiles.length > 1 ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {tiles.map((tile) => (
+                  <figure key={tile.id} className="flex flex-col gap-1.5">
+                    <PreviewPlayer
+                      active={settingsPreview}
+                      sourceId={tile.id}
+                      outputLive={tile.outputLive}
+                      ingestLive={tile.ingestLive}
+                      onAir={tile.onAir}
+                      aspect={
+                        tile.width && tile.height
+                          ? { width: tile.width, height: tile.height }
+                          : undefined
+                      }
+                    />
+                    <figcaption className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="truncate">{tile.name}</span>
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            ) : (
+              <PreviewPlayer
+                active={settingsPreview}
+                sourceId={tiles[0]?.id}
+                outputLive={tiles[0]?.outputLive}
+                ingestLive={tiles[0]?.ingestLive}
+                onAir={tiles[0]?.onAir}
+                aspect={
+                  tiles[0]?.width && tiles[0]?.height
+                    ? { width: tiles[0].width, height: tiles[0].height }
+                    : undefined
+                }
+              />
+            )}
           </Suspense>
 
           <Card>
@@ -1015,19 +1169,32 @@ export function Dashboard() {
                 <StatusDot tone={ingestTone} />
                 Ingest
               </CardTitle>
-              <Badge variant={toneBadge[ingestTone]}>{stateLabel(ingest?.state)}</Badge>
+              <Badge variant={toneBadge[ingestTone]}>
+                {stateLabel(ingest?.state)}
+              </Badge>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Stat
                   label={t("dash.bitrate")}
-                  value={ingest?.state === "running" ? kbps(ingest.progress?.bitrateKbps ?? 0) : "—"}
+                  value={
+                    ingest?.state === "running"
+                      ? kbps(ingest.progress?.bitrateKbps ?? 0)
+                      : "—"
+                  }
                 />
                 <Stat
                   label={t("dash.uptime")}
-                  value={ingest?.state === "running" ? duration(ingest.uptimeSec) : "—"}
+                  value={
+                    ingest?.state === "running"
+                      ? duration(ingest.uptimeSec)
+                      : "—"
+                  }
                 />
-                <Stat label={t("dash.audioTracks")} value={source?.tracks?.length ?? 0} />
+                <Stat
+                  label={t("dash.audioTracks")}
+                  value={source?.tracks?.length ?? 0}
+                />
                 <Stat
                   label={t("dash.reconnects")}
                   value={ingest?.restarts ?? 0}
@@ -1037,8 +1204,10 @@ export function Dashboard() {
 
               {source?.video && (
                 <div className="font-mono text-[10px] text-muted-foreground">
-                  {source.video.codec} {source.video.width}×{source.video.height}
-                  {source.video.frameRate > 0 && ` @ ${source.video.frameRate.toFixed(2)}fps`}
+                  {source.video.codec} {source.video.width}×
+                  {source.video.height}
+                  {source.video.frameRate > 0 &&
+                    ` @ ${source.video.frameRate.toFixed(2)}fps`}
                 </div>
               )}
 
@@ -1047,7 +1216,12 @@ export function Dashboard() {
                 <code className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
                   {system?.ingestUrl ?? "…"}
                 </code>
-                <Button variant="ghost" size="icon-sm" onClick={copyIngest} aria-label={t("dash.copyIngestUrl")}>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={copyIngest}
+                  aria-label={t("dash.copyIngestUrl")}
+                >
                   <Copy />
                 </Button>
               </div>
@@ -1060,8 +1234,9 @@ export function Dashboard() {
 
               {system && !system.ffmpeg.hasLibsrt && (
                 <div className="rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn">
-                  This FFmpeg build has no SRT support, so multi-track SRT ingest will not work.
-                  Install a build with <code className="font-mono">--enable-libsrt</code>, or switch
+                  This FFmpeg build has no SRT support, so multi-track SRT
+                  ingest will not work. Install a build with{" "}
+                  <code className="font-mono">--enable-libsrt</code>, or switch
                   the ingest to RTMP in Settings.
                 </div>
               )}
@@ -1088,13 +1263,20 @@ export function Dashboard() {
                   // The preview encoder is started on demand and stopped again
                   // when nobody is watching, so having no process is the normal
                   // idle state rather than a fault or a disabled feature.
-                  ["Preview", status?.preview, settingsPreview ? t("dash.idle") : t("dash.disabled")],
+                  [
+                    "Preview",
+                    status?.preview,
+                    settingsPreview ? t("dash.idle") : t("dash.disabled"),
+                  ],
                   ["Meters", status?.meters, "disabled"],
                 ] as const
               ).map(([label, proc, absent]) => {
                 const tone = proc ? toneForState(proc.state) : "idle";
                 return (
-                  <div key={label} className="flex items-center justify-between">
+                  <div
+                    key={label}
+                    className="flex items-center justify-between"
+                  >
                     <div className="flex items-center gap-2">
                       <StatusDot tone={tone} size="sm" />
                       <span className="text-[11px]">{label}</span>
@@ -1106,7 +1288,9 @@ export function Dashboard() {
                 );
               })}
               <div className="mt-1 flex items-center justify-between border-t border-border pt-1.5">
-                <span className="text-[11px] text-muted-foreground">{t("dash.relaySubscribers")}</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {t("dash.relaySubscribers")}
+                </span>
                 <span className="tnum font-mono text-[10px]">
                   {status?.relay.subscribers?.length ?? 0}
                 </span>
@@ -1118,17 +1302,26 @@ export function Dashboard() {
                   fault, and the destination count is the whole economic
                   argument: three platforms on one tier is still one encode. */}
               <div className="mt-1 flex flex-col gap-1 border-t border-border pt-1.5">
-                <span className="text-[11px] text-muted-foreground">{t("dash.renditions")}</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {t("dash.renditions")}
+                </span>
                 {renditions.length === 0 ? (
                   <span className="font-mono text-[10px] text-muted-foreground">
                     none — every destination is on passthrough
                   </span>
                 ) : (
                   renditions.map((r) => (
-                    <div key={r.id} className="flex items-center justify-between gap-2">
+                    <div
+                      key={r.id}
+                      className="flex items-center justify-between gap-2"
+                    >
                       <div className="flex min-w-0 items-center gap-2">
                         <StatusDot
-                          tone={r.consumers === 0 ? "idle" : toneForState(r.process?.state)}
+                          tone={
+                            r.consumers === 0
+                              ? "idle"
+                              : toneForState(r.process?.state)
+                          }
                           size="sm"
                         />
                         <span className="truncate text-[11px]">{r.name}</span>
@@ -1176,7 +1369,7 @@ export function Dashboard() {
           <Card>
             <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
               <p className="text-[12px] text-muted-foreground">
-            {t("dash.noDestinations")}
+                {t("dash.noDestinations")}
               </p>
               <Button
                 size="sm"
@@ -1200,10 +1393,26 @@ export function Dashboard() {
                 canMoveLater={i < destinations.length - 1}
                 onMoveEarlier={() => move(d.id, -1)}
                 onMoveLater={() => move(d.id, 1)}
-                onStart={() => act(d.id, () => api.startDestination(d.id), "start the destination")}
-                onStop={() => act(d.id, () => api.stopDestination(d.id), "stop the destination")}
+                onStart={() =>
+                  act(
+                    d.id,
+                    () => api.startDestination(d.id),
+                    "start the destination",
+                  )
+                }
+                onStop={() =>
+                  act(
+                    d.id,
+                    () => api.stopDestination(d.id),
+                    "stop the destination",
+                  )
+                }
                 onRestart={() =>
-                  act(d.id, () => api.restartDestination(d.id), "restart the destination")
+                  act(
+                    d.id,
+                    () => api.restartDestination(d.id),
+                    "restart the destination",
+                  )
                 }
                 onEdit={() => openEdit(d.id)}
                 onDelete={() => confirmDelete.ask({ id: d.id, name: d.name })}
@@ -1238,7 +1447,8 @@ export function Dashboard() {
                              * broadcast that is already ending, and reporting
                              * it as a clean success would claim a confirmation
                              * nobody gave. It gets its own sentence. */
-                            if (r.ended) toast.success(t("dash.broadcastEnded"));
+                            if (r.ended)
+                              toast.success(t("dash.broadcastEnded"));
                             else toast.info(t("dash.broadcastEndAccepted"));
                             /* Warnings name what was actually seen — a
                              * read-back that failed, a status that is still

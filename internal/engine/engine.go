@@ -1754,6 +1754,20 @@ func (e *Engine) sweepPreview(now time.Time) {
 	}
 }
 
+// OutputLive reports whether anything is reaching this programme's destinations
+// -- the operator's encoder, a backup, the slate, or a playlist.
+//
+// DIFFERENT FROM IngestLive, and the difference is the whole point. IngestLive
+// asks whether the operator's own encoder is arriving; this asks whether
+// ANYTHING is going out. During a failover they disagree, and that disagreement
+// is what lets a preview show the slate while saying the input is gone, rather
+// than blanking the picture of the thing currently being broadcast.
+// REFUSES A NIL RECEIVER, exactly as IngestLive does. A nil engine is an install
+// with no source, and there is no pipeline to report on: answering false would
+// invent a fact about a programme that does not exist. Every caller reaches this
+// through Manager.Engines(), which yields real engines.
+func (e *Engine) OutputLive() bool { return e.previewFlowing(time.Now()) }
+
 // previewFlowing reports whether the hub the preview would read has carried
 // anything RECENTLY.
 //

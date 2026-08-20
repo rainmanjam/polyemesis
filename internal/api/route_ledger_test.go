@@ -594,6 +594,9 @@ var excusedRoutes = map[string]coverageExcus{
 	// Source-qualified preview. Same posture as the bare alias above: a session
 	// is required and nothing else, because it serves one programme's preview
 	// segments rather than any record.
+	// The grid's telemetry: names and liveness for every source, session-only
+	// like the preview it describes.
+	"GET /previews":                         previewTelemetry(),
 	"GET /hls/{source:[0-9]+}/*":            sourceOnlyPreview(),
 	"HEAD /hls/{source:[0-9]+}/*":           sourceOnlyPreview(),
 	"GET /api/v1/oauth/{platform}/start":    sessionOnly(),
@@ -718,6 +721,15 @@ func sessionOnly() coverageExcus {
 func sourceOnlyPreview() coverageExcus {
 	e := sessionOnly()
 	e.Counterpart = "sourcePreviewManifest"
+	return e
+}
+
+// previewTelemetry carries a counterpart because this route LISTS SOURCES --
+// their names and whether each is on air. A Want asserting a 403 would say
+// nothing about what a bearer sees if that 403 ever became a 200.
+func previewTelemetry() coverageExcus {
+	e := sessionOnly()
+	e.Counterpart = "previewTiles"
 	return e
 }
 
@@ -1137,6 +1149,7 @@ var counterpartProofs = map[string]counterpartProof{
 	"playoutManifestBytes":                  provePlayoutManifest,
 	"notFoundSurfaceIsPrincipalIndependent": proveNotFoundSurface,
 	"sourcePreviewManifest":                 proveSourcePreviewManifest,
+	"previewTiles":                          provePreviewTiles,
 }
 
 // patternDriven drives a request and reports the chi pattern that MATCHED, so a
@@ -1274,6 +1287,19 @@ func provePlayoutManifest(t *testing.T) proofResult {
 // A 404 to the session is the right pass: the fixture writes no preview
 // segments, and a 404 proves the request reached the file server rather than a
 // scope check, which is exactly what the alias's own test relies on.
+// provePreviewTiles drives the grid's telemetry. It lists every source by name,
+// so the session-only rule is about disclosure and not merely about which
+// principal may start an encoder.
+func provePreviewTiles(t *testing.T) proofResult {
+	h, _, sign := plantedServer(t)
+	read := createScopedToken(t, h, sign, "ledger-tiles", db.ScopeRead)
+	return proofResult{
+		Pattern: patternDriven(t, h, http.MethodGet, "/previews"),
+		High:    bodyOf(t, h, sign, "/api/v1/sources"),
+		Read:    rawBody(t, h, bearer(read), "/previews"),
+	}
+}
+
 func proveSourcePreviewManifest(t *testing.T) proofResult {
 	h, _, sign := plantedServer(t)
 	read := createScopedToken(t, h, sign, "ledger-preview", db.ScopeRead)

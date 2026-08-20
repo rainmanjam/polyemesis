@@ -13,9 +13,28 @@ import { cn } from "@/lib/utils";
 export function PreviewPlayer({
   active,
   className,
+  sourceId,
+  outputLive,
+  ingestLive,
+  onAir,
+  aspect,
 }: {
   active: boolean;
   className?: string;
+  /** Which programme to show. Omitted means the default source's alias. */
+  sourceId?: number;
+  /** Anything reaching this programme's destinations -- encoder, backup, slate
+   *  or playlist. Decides whether a picture is worth showing at all. */
+  outputLive?: boolean;
+  /** The operator's own encoder arriving. LABELS the picture; it must not hide
+   *  it, because with the slate on air this is false while something real is
+   *  being broadcast. */
+  ingestLive?: boolean;
+  /** The tier on air: "primary", "backup", "slate", "playlist". */
+  onAir?: string;
+  /** The source's measured geometry, so a vertical or 4:3 programme is not
+   *  letterboxed into a 16:9 box it never filled. */
+  aspect?: { width: number; height: number };
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -25,7 +44,9 @@ export function PreviewPlayer({
     const video = videoRef.current;
     if (!video || !active) return;
 
-    const src = "/hls/index.m3u8";
+    // Source-qualified when a source is named. The bare path remains the
+    // default programme's alias, so a caller that has no id in hand still works.
+    const src = sourceId ? `/hls/${sourceId}/index.m3u8` : "/hls/index.m3u8";
     let hls: Hls | null = null;
     let retry: number | undefined;
 
@@ -55,7 +76,10 @@ export function PreviewPlayer({
         hls.loadSource(src);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          void video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+          void video
+            .play()
+            .then(() => setPlaying(true))
+            .catch(() => setPlaying(false));
         });
         hls.on(Hls.Events.ERROR, (_e, data) => {
           if (!data.fatal) return;
@@ -68,7 +92,10 @@ export function PreviewPlayer({
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
         // Safari plays HLS natively and does not need (or want) hls.js.
         video.src = src;
-        void video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+        void video
+          .play()
+          .then(() => setPlaying(true))
+          .catch(() => setPlaying(false));
       }
     };
 
@@ -76,8 +103,18 @@ export function PreviewPlayer({
     return () => {
       if (retry) window.clearTimeout(retry);
       hls?.destroy();
+      // CLEAR THE PICTURE, not only the player. Destroying the Hls instance
+      // leaves the <video> holding its last decoded frame, so switching source
+      // showed the previous programme under the new one's name until the first
+      // segment of the new one arrived.
+      setPlaying(false);
+      if (video) {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      }
     };
-  }, [active]);
+  }, [active, sourceId]);
 
   /* max-h, because aspect-video alone grows without limit.
    *
@@ -89,19 +126,40 @@ export function PreviewPlayer({
    * on the one page whose job is showing you all of them at once. The bigger
    * the screen, the less of the dashboard you can see, which is exactly
    * backwards.
-     *
+   *
    * Capping the height rather than the app's width is deliberate. This is a
    * monitoring UI: the destination grid, the meters and chat all earn extra
    * width, and a global max-width would throw two thirds of an ultrawide away
    * to fix one component. `object-contain` on the video already letterboxes
    * whatever the source aspect is, so a shorter box crops nothing.
    */
+  // Geometry as a CSS ratio, only once both numbers are real: a 0 would
+  // collapse the tile.
+  const ratio =
+    aspect && aspect.width > 0 && aspect.height > 0
+      ? `${aspect.width} / ${aspect.height}`
+      : undefined;
+
+  // outputLive is undefined for a caller that does not supply telemetry, and
+  // that must behave exactly as before rather than blanking every preview.
+  const onAirKnown = outputLive !== undefined;
+  const offAir = onAirKnown && !outputLive;
+  const showPicture = playing && !offAir;
+  // Something is going out, but it is not the operator's encoder.
+  const standingIn =
+    onAirKnown && outputLive === true && ingestLive === false && Boolean(onAir);
+
   return (
     <div
       className={cn(
-        "relative aspect-video max-h-[60vh] w-full overflow-hidden rounded-md border border-border bg-black",
+        "relative max-h-[60vh] w-full overflow-hidden rounded-md border border-border bg-black",
+        // Falls back to 16:9 only while the geometry is unknown. A measured
+        // source draws in its own shape, so a vertical or 4:3 programme is not
+        // letterboxed into a box it never filled.
+        !ratio && "aspect-video",
         className,
       )}
+      style={ratio ? { aspectRatio: ratio } : undefined}
     >
       <video
         ref={videoRef}
@@ -111,11 +169,43 @@ export function PreviewPlayer({
         controls={false}
       />
 
-      {!playing && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+      {/* OPAQUE, and that is the fix rather than a style choice. The parent's
+          bg-black sits BEHIND the <video>, so a transparent overlay let the last
+          decoded frame of a finished stream show straight through with
+          "Waiting for a stream…" floating on top of it. */}
+      {!showPicture && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black text-muted-foreground">
           <MonitorPlay className="h-6 w-6 opacity-40" />
           <span className="text-[11px]">
-            {active ? "Waiting for a stream…" : "Preview is disabled in Settings"}
+            {!active
+              ? "Preview is disabled in Settings"
+              : offAir
+                ? "Ingest offline"
+                : "Waiting for a stream…"}
+          </span>
+          {offAir && (
+            <span className="text-[10px] opacity-70">
+              Start your encoder to see the preview
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* THE LABEL DOES NOT COVER THE PICTURE. With the slate or a backup on
+          air, something real is being broadcast and the operator needs to see
+          it -- the preview has been blind at exactly this moment. So the state
+          is said in a corner, over a live image, rather than instead of it. */}
+      {/* Not gated on the picture having started. "The input is gone and the
+          slate is going out" is true while the tile is still buffering, and a
+          label that appears only once decoding succeeds is missing during the
+          seconds an operator is most likely to be looking. */}
+      {standingIn && (
+        <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded bg-black/70 px-1.5 py-0.5 backdrop-blur-sm">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-warn">
+            Input offline
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            showing {onAir}
           </span>
         </div>
       )}

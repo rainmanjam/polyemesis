@@ -12,10 +12,10 @@
   "guardedFloor": 22,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 225,
+    "methodPatternPairs": 226,
     "swept": 66,
     "excused": 50,
-    "denied": 109,
+    "denied": 110,
     "nonTrieProbes": 12,
     "shapesEmitted": 27,
     "shapesNotInspected": 3
@@ -1259,6 +1259,12 @@
       "zeroSource": "unguarded"
     },
     {
+      "method": "GET",
+      "pattern": "/previews",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
       "method": "CONNECT",
       "pattern": "/watch",
       "coverage": "excused",
@@ -2140,6 +2146,16 @@
         "anonMatchesRead": true
       },
       "counterpart": "playoutManifestBytes"
+    },
+    {
+      "route": "GET /previews",
+      "scope": "route",
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "previewTiles"
     },
     {
       "route": "HEAD /hls/*",
