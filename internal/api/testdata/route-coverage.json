@@ -12,10 +12,10 @@
   "guardedFloor": 22,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 225,
+    "methodPatternPairs": 228,
     "swept": 66,
     "excused": 50,
-    "denied": 109,
+    "denied": 112,
     "nonTrieProbes": 12,
     "shapesEmitted": 27,
     "shapesNotInspected": 3
@@ -1199,6 +1199,18 @@
       "zeroSource": "unguarded"
     },
     {
+      "method": "GET",
+      "pattern": "/hls/{source:[0-9]+}/*",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "HEAD",
+      "pattern": "/hls/{source:[0-9]+}/*",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
       "method": "CONNECT",
       "pattern": "/playout/*",
       "coverage": "excused",
@@ -1256,6 +1268,12 @@
       "method": "TRACE",
       "pattern": "/playout/*",
       "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/previews",
+      "coverage": "denied",
       "zeroSource": "unguarded"
     },
     {
@@ -2121,6 +2139,16 @@
       "counterpart": ""
     },
     {
+      "route": "GET /hls/{source:[0-9]+}/*",
+      "scope": "route",
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "sourcePreviewManifest"
+    },
+    {
       "route": "GET /playout/*",
       "scope": "route",
       "why": "the public media origin. A STREAMING response -- an HLS manifest and MPEG-TS segments -- which is the shape that escaped the sweep before, since a body scan reads none of it. Gated per request by authorizePlayout.",
@@ -2132,6 +2160,16 @@
       "counterpart": "playoutManifestBytes"
     },
     {
+      "route": "GET /previews",
+      "scope": "route",
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "previewTiles"
+    },
+    {
       "route": "HEAD /hls/*",
       "scope": "route",
       "why": "session-only; no bearer of either scope reaches it",
@@ -2140,6 +2178,16 @@
         "status": 403
       },
       "counterpart": ""
+    },
+    {
+      "route": "HEAD /hls/{source:[0-9]+}/*",
+      "scope": "route",
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "sourcePreviewManifest"
     },
     {
       "route": "POST /api/v1/auth/login",

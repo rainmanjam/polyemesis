@@ -76,6 +76,11 @@ const (
 	// previewIdleDefault is how long the preview encoder outlives the last
 	// playlist request when settings do not say.
 	previewIdleDefault = 30 * time.Second
+	// previewFlowGrace is how long after the last byte the preview still counts
+	// its hub as live. Wider than previewSweep so an ordinary sampling gap
+	// cannot read as a dead stream, and far narrower than previewIdleDefault
+	// because a stream that ended should not hold an encoder for half a minute.
+	previewFlowGrace = 10 * time.Second
 	// previewSweep is how often idleness is re-evaluated. It is well under the
 	// idle window so the stop lands near the deadline without a timer per
 	// request.
@@ -232,9 +237,24 @@ type Engine struct {
 	ingest   *supervisor.Process
 	recorder *supervisor.Process
 	preview  *supervisor.Process
-	meters   *supervisor.Process
-	dests    map[int64]*destination
-	rends    map[int64]*rendition
+	// previewHub is the hub the running preview subscribed to, kept so the stop
+	// path unsubscribes from the one it actually joined and so a swap underneath
+	// it can be noticed. Nil while no preview is running.
+	previewHub *relay.Hub
+	// previewRxBytes and previewRxAt track whether that hub has ADVANCED, which
+	// is a different question from whether it has ever carried anything: a hub
+	// that has gone quiet keeps its total, so a `RxBytes() > 0` test answers yes
+	// for ever after the first byte.
+	previewRxBytes uint64
+	previewRxAt    time.Time
+	// previewRxHub is the hub previewRxBytes was read from. A counter is only
+	// comparable with itself: a DIFFERENT hub starts at zero, and comparing its
+	// zero against the old hub's total reads as "the number changed", which is
+	// the opposite of the truth.
+	previewRxHub *relay.Hub
+	meters       *supervisor.Process
+	dests        map[int64]*destination
+	rends        map[int64]*rendition
 	// silence is the synthetic-audio tier, nil unless the ingest probed with
 	// no audio at all. See silence.go.
 	silence *silenceTier
@@ -1185,17 +1205,23 @@ func (e *Engine) Reconcile() error {
 	e.applyLogging(settings.Logging)
 	e.reconcileIngest(settings, prev)
 	e.reconcileRecorder(settings)
-	e.reconcilePreview(settings)
 	e.reconcileMeters(settings)
 
 	if err := e.reconcileOutputs(); err != nil {
 		return err
 	}
-	// After the outputs, because both of these read the hub that the silence
-	// and selector tiers decide, and reconcileOutputs is where that is settled.
+	// After the outputs, because these read the hub that the silence and
+	// selector tiers decide, and reconcileOutputs is where that is settled.
+	//
+	// THE PREVIEW JOINED THIS LIST when it stopped reading the raw ingest hub.
+	// Run before the outputs it compared its running encoder against the OLD
+	// upstream, decided nothing had changed, and then the hub was swapped
+	// underneath it -- leaving the preview subscribed to a tier that was no
+	// longer on air.
 	// Neither can fail the reconcile: a measurement that will not start and a
 	// capture buffer that will not bind are both worth a log line and nothing
 	// more, and a destination must never be held back by either.
+	e.reconcilePreview(settings)
 	e.reconcileClips()
 	e.reconcileCaptions()
 	e.reconcileLoudness(settings)
@@ -1616,7 +1642,15 @@ func (e *Engine) reconcilePreview(s db.Settings) {
 	}
 
 	want := previewSig(s)
-	if cur != nil && sig == want {
+	// The hub is compared by IDENTITY, not by a label for it. A selector rebuilt
+	// with an equivalent spec produces the same label and a different object, and
+	// a preview left subscribed to the old one receives nothing while reporting
+	// itself healthy.
+	e.mu.RLock()
+	joined := e.previewHub
+	e.mu.RUnlock()
+	sameHub := cur == nil || joined == e.downstreamHub()
+	if cur != nil && sig == want && sameHub {
 		return
 	}
 	if cur != nil {
@@ -1693,7 +1727,12 @@ func (e *Engine) sweepPreview(now time.Time) {
 	running := e.preview != nil
 	e.mu.RUnlock()
 
-	if !running || !previewIdle(s, seen, now) {
+	// A DRY HUB STOPS IT WITHOUT WAITING OUT THE IDLE WINDOW. Idle means "nobody
+	// is watching"; dry means "there is nothing to watch". Waiting the full idle
+	// window for the second one keeps an encoder alive on a stream that ended,
+	// which is most of what made the panel flap.
+	dry := !e.previewFlowing(now)
+	if !running || (!dry && !previewIdle(s, seen, now)) {
 		return
 	}
 
@@ -1704,16 +1743,80 @@ func (e *Engine) sweepPreview(now time.Time) {
 	seen = e.previewSeen
 	running = e.preview != nil
 	e.mu.RUnlock()
-	stop := running && previewIdle(s, seen, now)
+	// RE-READ UNDER THE LOCK. The first sample was taken before previewMu, and a
+	// selector swap in between can retire the hub it looked at while the one now
+	// downstream is carrying a stream -- stopping on the stale answer would kill
+	// an encoder somebody is watching.
+	dry = !e.previewFlowing(now)
+	stop := running && (dry || previewIdle(s, seen, now))
 	if stop {
 		e.stopPreviewLocked()
 	}
 	e.previewMu.Unlock()
 
 	if stop {
-		e.log.Info("preview idle; encoder stopped", "after", previewIdleWindow(s))
+		if dry {
+			e.log.Info("preview stopped; nothing on air to encode")
+		} else {
+			e.log.Info("preview idle; encoder stopped", "after", previewIdleWindow(s))
+		}
 		e.publishStatus()
 	}
+}
+
+// OutputLive reports whether anything is reaching this programme's destinations
+// -- the operator's encoder, a backup, the slate, or a playlist.
+//
+// DIFFERENT FROM IngestLive, and the difference is the whole point. IngestLive
+// asks whether the operator's own encoder is arriving; this asks whether
+// ANYTHING is going out. During a failover they disagree, and that disagreement
+// is what lets a preview show the slate while saying the input is gone, rather
+// than blanking the picture of the thing currently being broadcast.
+// REFUSES A NIL RECEIVER, exactly as IngestLive does. A nil engine is an install
+// with no source, and there is no pipeline to report on: answering false would
+// invent a fact about a programme that does not exist. Every caller reaches this
+// through Manager.Engines(), which yields real engines.
+func (e *Engine) OutputLive() bool { return e.previewFlowing(time.Now()) }
+
+// previewFlowing reports whether the hub the preview would read has carried
+// anything RECENTLY.
+//
+// A byte DELTA, not a total. relay.Hub.RxBytes() only ever grows, so a hub that
+// has gone silent still answers a `> 0` test for the rest of the process's life
+// -- which is the shape of gate that looks right and does nothing.
+//
+// It is the same predicate probeLoop, the alert sweep and the selector's
+// liveness sweep already use, and for the reason probeLoop states: an SRT or
+// RTMP listener sits in "running" for as long as it waits for a publisher, so
+// process state answers the wrong question.
+//
+// Sampled on call rather than by a ticker of its own. Both callers are frequent
+// -- a watching player polls the playlist every few seconds and sweepPreview
+// runs every previewSweep -- so the series is dense enough without another
+// goroutine.
+func (e *Engine) previewFlowing(now time.Time) bool {
+	h := e.downstreamHub()
+	if h == nil {
+		return false
+	}
+	rx := h.RxBytes()
+	e.mu.Lock()
+	switch {
+	case h != e.previewRxHub:
+		// A NEW HUB IS NOT DELIVERY. A selector coming up or going down replaces
+		// the hub, and the replacement starts at zero -- which differs from the
+		// old one's total and would otherwise stamp "flowing" and start an
+		// encoder against silence for the whole grace period. Adopt the new
+		// baseline and wait to SEE it advance.
+		e.previewRxHub, e.previewRxBytes, e.previewRxAt = h, rx, time.Time{}
+	case rx != e.previewRxBytes:
+		e.previewRxBytes, e.previewRxAt = rx, now
+	}
+	at := e.previewRxAt
+	e.mu.Unlock()
+	// Zero until the first advance is observed, which is the honest answer on an
+	// install where nothing has ever published.
+	return !at.IsZero() && now.Sub(at) < previewFlowGrace
 }
 
 // startPreviewLocked spawns the encoder. The caller must hold previewMu.
@@ -1728,7 +1831,24 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 		return
 	}
 
-	dir := e.cfg.HLSDir()
+	// NOTHING ON AIR, NOTHING TO PREVIEW.
+	//
+	// The encoder used to start on any playlist poll. With the relay quiet its
+	// ffmpeg does not fail and does not exit -- it BLOCKS in avformat_open_input
+	// on a UDP socket that has no EOF, the supervisor has no stall watchdog, so
+	// it sits "running" for ever, writes no playlist, and every poll 404s while
+	// a libx264 process holds a port. That is the flapping an operator sees on
+	// the pipeline panel, and the wasted encoder behind it.
+	//
+	// Placed HERE rather than in PreviewRequested so both callers inherit it --
+	// reconcilePreview restarts through this path too. A refused start costs
+	// nothing: PreviewRequested still records the request, so the moment bytes
+	// appear the next poll starts the encoder.
+	if !e.previewFlowing(time.Now()) {
+		return
+	}
+
+	dir := e.cfg.HLSDirFor(e.sourceID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		e.log.Error("cannot create hls directory", "err", err)
 		return
@@ -1742,7 +1862,25 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 		e.log.Error("preview: no relay port", "err", err)
 		return
 	}
-	url := e.hub.Subscribe("preview", port)
+	// THE HUB THAT IS ACTUALLY ON AIR, not the raw primary ingest.
+	//
+	// Every other consumer -- meters, clips, captions, destinations -- reads
+	// downstreamHub(); the preview read e.hub directly, so it saw only the
+	// primary encoder. During a failover the destinations rode the slate or the
+	// backup and the OPERATOR'S PREVIEW SHOWED NOTHING, which is the moment a
+	// preview is worth most.
+	//
+	// The hub itself is remembered rather than a label for it: a label is not
+	// identity, and a selector rebuilt with an equivalent spec would compare
+	// equal while being a different object to unsubscribe from.
+	hub := e.downstreamHub()
+	if hub == nil {
+		return
+	}
+	e.mu.Lock()
+	e.previewHub = hub
+	e.mu.Unlock()
+	url := hub.Subscribe("preview", port)
 
 	args := ffmpeg.PreviewArgs(ffmpeg.PreviewSpec{
 		RelayURL:       url,
@@ -1770,8 +1908,10 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 func (e *Engine) stopPreviewLocked() {
 	e.stopAux(&e.preview, "preview")
 	// The playlist left behind would be served to the next viewer, pointing at
-	// segments the next start is about to delete.
-	clearDir(e.cfg.HLSDir())
+	// segments the next start is about to delete. Scoped to THIS source: while
+	// it cleared the shared directory, an engine tearing down took the live
+	// playlist of whichever engine had since become the default with it.
+	clearDir(e.cfg.HLSDirFor(e.sourceID))
 }
 
 // previewSig hashes the arguments a running encoder was built with. The idle
@@ -2680,8 +2820,10 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 	proc := *slot
 	*slot = nil
 	var port int
-	// The ingest hub unless this consumer says otherwise; only the meters
-	// sidecar ever reads anything else.
+	// The ingest hub unless this consumer says otherwise. The meters sidecar and
+	// the preview both read whichever tier is on air, so both unsubscribe from
+	// the hub they actually JOINED -- unsubscribing from e.hub instead leaves a
+	// live subscription on a selector hub that is about to close.
 	hub := e.hub
 	switch name {
 	case "recorder":
@@ -2690,6 +2832,9 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 	case "preview":
 		port, e.previewPort = e.previewPort, 0
 		e.previewSig = ""
+		if e.previewHub != nil {
+			hub, e.previewHub = e.previewHub, nil
+		}
 	case "meters":
 		port, e.metersPort = e.metersPort, 0
 		e.metersSig = ""

@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/fsperm"
@@ -422,7 +423,24 @@ func ListenPort(addr string) string {
 func (c Config) DBPath() string        { return filepath.Join(c.DataDir, "polyemesis.db") }
 func (c Config) RecordingsDir() string { return filepath.Join(c.DataDir, "recordings") }
 func (c Config) HLSDir() string        { return filepath.Join(c.DataDir, "hls") }
-func (c Config) SecretPath() string    { return filepath.Join(c.DataDir, "secret.key") }
+
+// HLSDirFor is one source's preview directory.
+//
+// PER SOURCE BECAUSE THE PREVIEW IS A FILESYSTEM RESOURCE and there is one
+// engine per source. While every engine wrote into HLSDir() itself, two of them
+// could not coexist: startPreviewLocked clears the directory before it starts,
+// and stopPreviewLocked clears it on the way out, so an engine becoming the
+// default deleted the live playlist of the one it replaced -- and the outgoing
+// engine's idle sweep, up to its whole idle window later, deleted the
+// replacement's. Both are reachable by reordering sources, which is an ordinary
+// operator action.
+//
+// The bare HLSDir() remains, and is where the legacy unscoped /hls route reads
+// from for the default source, so an existing player keeps working.
+func (c Config) HLSDirFor(sourceID int64) string {
+	return filepath.Join(c.HLSDir(), strconv.FormatInt(sourceID, 10))
+}
+func (c Config) SecretPath() string { return filepath.Join(c.DataDir, "secret.key") }
 
 // ModelsDir holds downloaded speech models.
 //

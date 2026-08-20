@@ -588,9 +588,17 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/metadata/broadcast-window":                denied(),
 
 	// ---- session-only: no bearer of either scope reaches these. 403, driven.
-	"GET /api/v1/auth/tokens":               sessionOnly(),
-	"GET /hls/*":                            sessionOnly(),
-	"HEAD /hls/*":                           sessionOnly(),
+	"GET /api/v1/auth/tokens": sessionOnly(),
+	"GET /hls/*":              sessionOnly(),
+	"HEAD /hls/*":             sessionOnly(),
+	// Source-qualified preview. Same posture as the bare alias above: a session
+	// is required and nothing else, because it serves one programme's preview
+	// segments rather than any record.
+	// The grid's telemetry: names and liveness for every source, session-only
+	// like the preview it describes.
+	"GET /previews":                         previewTelemetry(),
+	"GET /hls/{source:[0-9]+}/*":            sourceOnlyPreview(),
+	"HEAD /hls/{source:[0-9]+}/*":           sourceOnlyPreview(),
 	"GET /api/v1/oauth/{platform}/start":    sessionOnly(),
 	"GET /api/v1/oauth/{platform}/callback": sessionOnly(),
 
@@ -706,6 +714,25 @@ func sessionOnly() coverageExcus {
 		Want: &routeWant{As: "read", Status: http.StatusForbidden},
 	}
 }
+
+// sourceOnlyPreview is sessionOnly plus a counterpart that actually drives the
+// route, because this one reads a source id out of the path and a Want alone
+// would not establish that a bearer is refused a programme it was never shown.
+func sourceOnlyPreview() coverageExcus {
+	e := sessionOnly()
+	e.Counterpart = "sourcePreviewManifest"
+	return e
+}
+
+// previewTelemetry carries a counterpart because this route LISTS SOURCES --
+// their names and whether each is on air. A Want asserting a 403 would say
+// nothing about what a bearer sees if that 403 ever became a 200.
+func previewTelemetry() coverageExcus {
+	e := sessionOnly()
+	e.Counterpart = "previewTiles"
+	return e
+}
+
 func notWired() coverageExcus {
 	return coverageExcus{
 		Why:  "503 without a job queue wired; the handler never reaches storage",
@@ -1121,6 +1148,8 @@ var counterpartProofs = map[string]counterpartProof{
 	"playoutPublicView":                     provePlayoutPublicView,
 	"playoutManifestBytes":                  provePlayoutManifest,
 	"notFoundSurfaceIsPrincipalIndependent": proveNotFoundSurface,
+	"sourcePreviewManifest":                 proveSourcePreviewManifest,
+	"previewTiles":                          provePreviewTiles,
 }
 
 // patternDriven drives a request and reports the chi pattern that MATCHED, so a
@@ -1246,6 +1275,41 @@ func provePlayoutManifest(t *testing.T) proofResult {
 // anything to one that it withholds from the other. The positive control is
 // waived with its argument, because no principal is entitled to a credential
 // here and there is therefore nothing to differ.
+// proveSourcePreviewManifest covers /hls/{source}/*, the source-qualified
+// preview.
+//
+// It exists because the bare /hls/* alias and this route are NOT the same
+// posture in one respect that matters: this one takes a source id from the
+// path, so it can be asked about a programme the caller was never shown. The
+// claim is the same session-only rule as its alias -- the browser reaches it,
+// neither bearer does -- driven rather than asserted in prose.
+//
+// A 404 to the session is the right pass: the fixture writes no preview
+// segments, and a 404 proves the request reached the file server rather than a
+// scope check, which is exactly what the alias's own test relies on.
+// provePreviewTiles drives the grid's telemetry. It lists every source by name,
+// so the session-only rule is about disclosure and not merely about which
+// principal may start an encoder.
+func provePreviewTiles(t *testing.T) proofResult {
+	h, _, sign := plantedServer(t)
+	read := createScopedToken(t, h, sign, "ledger-tiles", db.ScopeRead)
+	return proofResult{
+		Pattern: patternDriven(t, h, http.MethodGet, "/previews"),
+		High:    bodyOf(t, h, sign, "/api/v1/sources"),
+		Read:    rawBody(t, h, bearer(read), "/previews"),
+	}
+}
+
+func proveSourcePreviewManifest(t *testing.T) proofResult {
+	h, _, sign := plantedServer(t)
+	read := createScopedToken(t, h, sign, "ledger-preview", db.ScopeRead)
+	return proofResult{
+		Pattern: patternDriven(t, h, http.MethodGet, "/hls/1/index.m3u8"),
+		High:    bodyOf(t, h, sign, "/api/v1/sources"),
+		Read:    rawBody(t, h, bearer(read), "/hls/1/index.m3u8"),
+	}
+}
+
 func proveNotFoundSurface(t *testing.T) proofResult {
 	h, _, sign := plantedServer(t)
 	read := createScopedToken(t, h, sign, "ledger-notfound", db.ScopeRead)
