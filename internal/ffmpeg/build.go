@@ -1557,10 +1557,31 @@ func ProbeArgs(input string, timeoutSeconds int) []string {
 		//
 		// The cost of hanging is not the wasted seconds, it is that destinations
 		// are HELD until a layout is measured, and the hold's exit needs
-		// probeGiveUp consecutive failures. At ten seconds a failure plus the 3s
-		// retry cadence that is over a minute of held destinations; at three it
-		// is under half that, and it fails for a stated reason rather than by
-		// being killed.
+		// probeGiveUp consecutive FAILURES. A probe that hangs does not fail; it
+		// is killed, and only after the caller's whole context. The retry timer
+		// restarts after each attempt RETURNS, so five failures cost five times
+		// (attempt + 3s): about 65s at a ten-second hang, about 30s at this
+		// timeout.
+		//
+		// AND OFTEN IT NO LONGER FAILS AT ALL, which is the better half. Measured
+		// 5/5: a stream that delivers for one second and then stops used to hang;
+		// with the timeout it RETURNS SUCCESSFULLY in 4.25s carrying the correct
+		// layout, because ffprobe reports what it parsed before the read went
+		// quiet. That is the selector-flapping case, and there this does not
+		// merely bound the hold, it ends it.
+		//
+		// VERSION-SPECIFIC, NOT A CONTRACT: on 9.0.1 an inactivity error is taken
+		// as end-of-input and avformat_find_stream_info succeeds if what it
+		// already has is sufficient. It also means "correct" is correct AMONG THE
+		// STREAMS DISCOVERED BEFORE THE GAP -- a late-starting audio track could
+		// still be missed, which is a reason to keep probing rather than to trust
+		// one result for ever.
+		//
+		// The value is a liveness policy in its own right and NOT derived from
+		// analyzeduration despite sharing its number: analyzeduration bounds
+		// media time, this bounds a wait for bytes. Three seconds tolerates
+		// ordinary scheduler jitter and a source switch; five would tolerate a
+		// longer gap at the cost of a slower exit from the hold.
 		"-i", RelayProbeInputURL(input, timeoutSeconds),
 	}
 }

@@ -2812,6 +2812,59 @@ func (e *Engine) probeLoop(ctx context.Context) {
 	}
 }
 
+// probeFailedNow counts a probe that measured nothing and says so at the level
+// the situation deserves, which depends on whether a layout is ALREADY MEASURED.
+//
+// The messages used to be unconditional, and after a layout had been measured
+// both of them were false. "destinations are held until a layout is measured"
+// describes a hold that is not happening; "starting destinations with a runtime
+// downmix instead of their routing matrices" describes a switch that is not
+// happening either. Both branches in reconcileOutputs are guarded by !measured
+// -- verified, so nothing was ever actually held or downmixed on this path --
+// but a log line that asserts a state transition the engine did not make is a
+// bug in its own right.
+//
+// It became routine rather than rare with the probe's read timeout: a probe now
+// FAILS on a relay that has gone quiet instead of blocking until something kills
+// it, and a source selector produces quiet relays several times a minute around
+// a slate. Alarming lines printed on an ordinary slate transition are how an
+// operator learns to ignore the line that matters -- and worse, how a genuine
+// downmix gets dismissed as "it always says that".
+//
+// So after a measurement stands, the honest report is a probe that failed with
+// no consequence, at INFO, and the real risk if it keeps failing is STALENESS --
+// the engine is trusting a cached layout, not falling back to a guessed one.
+func (e *Engine) probeFailedNow(err error) {
+	e.mu.RLock()
+	measured := e.measured
+	e.mu.RUnlock()
+
+	n := e.probeFails.Add(1)
+	first := !e.probeFailed.Swap(true)
+
+	if measured {
+		if first {
+			e.log.Info("ingest probe failed; keeping the layout already measured",
+				"err", err, "source", e.sourceID)
+		} else if n == probeGiveUp {
+			e.log.Warn("ingest probes keep failing; the layout in use is the last one measured and may no longer match the stream",
+				"failures", n, "err", err, "source", e.sourceID)
+		}
+		return
+	}
+
+	if first {
+		e.log.Warn("ingest probe failed; destinations are held until a layout is measured",
+			"err", err, "source", e.sourceID)
+	} else if n == probeGiveUp {
+		// The transition out of the hold, said once and plainly. An operator
+		// whose destinations just came up carrying an approximate mix needs
+		// to be able to find out why from the log alone.
+		e.log.Warn("ingest layout cannot be measured; starting destinations with a runtime downmix instead of their routing matrices",
+			"failures", n, "err", err, "source", e.sourceID)
+	}
+}
+
 func (e *Engine) probeOnce(ctx context.Context) bool {
 	port, err := e.alloc.Allocate()
 	if err != nil {
@@ -2830,13 +2883,7 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 		// Counted and logged like an ffprobe failure, because to the hold they
 		// are the same event: no layout was measured, and the reason it was not
 		// is not something waiting longer will change.
-		if n := e.probeFails.Add(1); !e.probeFailed.Swap(true) {
-			e.log.Warn("no free relay port to probe the ingest; destinations are held until a layout is measured",
-				"err", err, "source", e.sourceID)
-		} else if n == probeGiveUp {
-			e.log.Warn("ingest layout cannot be measured; starting destinations with a runtime downmix instead of their routing matrices",
-				"failures", n, "err", err, "source", e.sourceID)
-		}
+		e.probeFailedNow(fmt.Errorf("no free relay port to probe the ingest: %w", err))
 		return false
 	}
 	defer e.alloc.Release(port)
@@ -2865,16 +2912,7 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 		// Logged once per run of failures rather than every time. probeLoop
 		// retries on a 3s cadence while bytes are flowing, and an unconditional
 		// line here would bury the rest of the log within minutes.
-		if n := e.probeFails.Add(1); !e.probeFailed.Swap(true) {
-			e.log.Warn("ingest probe failed; destinations are held until a layout is measured",
-				"err", err, "source", e.sourceID)
-		} else if n == probeGiveUp {
-			// The transition out of the hold, said once and plainly. An operator
-			// whose destinations just came up carrying an approximate mix needs
-			// to be able to find out why from the log alone.
-			e.log.Warn("ingest layout cannot be measured; starting destinations with a runtime downmix instead of their routing matrices",
-				"failures", n, "err", err, "source", e.sourceID)
-		}
+		e.probeFailedNow(err)
 		return false
 	}
 	if e.probeFailed.Swap(false) {
