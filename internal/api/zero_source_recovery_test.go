@@ -65,9 +65,17 @@ func noSourceCode(t *testing.T, w interface{ Bytes() []byte }) string {
 func TestTheNoSourceRefusalClearsOnceTheOperatorCreatesASource(t *testing.T) {
 	_, h, auth := zeroSourceServer(t)
 
-	// The identical payload throughout. A refusal that clears only for a
-	// DIFFERENT request would not be this feature working, and reusing one map
-	// is what makes that impossible to get wrong by accident.
+	// One payload throughout, and the last step adds exactly one field to it.
+	// A refusal that cleared only for a DIFFERENT request would not be this
+	// feature working, so reusing the map is what stops that happening by
+	// accident.
+	//
+	// The one field is sourceId, and adding it is not a weakening of this test.
+	// Two different conditions are in play and only the first is its subject:
+	// no_source says the INSTALL has no programme, and nothing the operator
+	// types will help; source_required says this REQUEST did not pick one of
+	// the programmes that now exist. Recovering from the first is what is being
+	// asserted, and the last step still fails if the answer is no_source.
 	dest := map[string]any{"name": "out", "kind": "rtmp", "url": "rtmp://example/live"}
 
 	t.Run("first it refuses, and says what to do about it", func(t *testing.T) {
@@ -101,7 +109,11 @@ func TestTheNoSourceRefusalClearsOnceTheOperatorCreatesASource(t *testing.T) {
 		}
 	})
 
-	t.Run("and the same request now works", func(t *testing.T) {
+	t.Run("and the same request, now naming that source, works", func(t *testing.T) {
+		// Named from what the server reports rather than assumed to be 1: the
+		// point of this step is that the install recovered, and reading the id
+		// back is part of showing that.
+		dest["sourceId"] = onlySourceID(t, h, auth)
 		r := jsonRequest(t, http.MethodPost, "/api/v1/destinations", dest)
 		auth(r)
 		w := do(t, h, r)

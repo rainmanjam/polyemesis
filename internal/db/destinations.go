@@ -1172,11 +1172,25 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if err := d.checkRendition(dst.RenditionID); err != nil {
 		return nil, err
 	}
-	// A request that names no source means the one the operator has always
-	// had. Every API client written before sources existed sends exactly that,
-	// and the alternative is a destination with a NULL source_id that no
-	// reconciler ever picks up -- created successfully, never started, with
-	// nothing on screen to explain why.
+	// A caller that names no source gets the default one.
+	//
+	// THIS IS NO LONGER A PUBLIC BEHAVIOUR. It used to be justified by API
+	// clients written before sources existed, which is void -- polyemesis has
+	// not shipped, and handleCreateDestination now refuses a body with no
+	// sourceId outright (requireNamedSource). Nothing a client can send reaches
+	// this branch.
+	//
+	// It stays for the callers that are our own: ~100 test fixtures that mean
+	// "a destination on the default source" and would otherwise each have to
+	// create a source and thread its id through, for no assertion any of them
+	// makes. A guard test pins that no non-test caller relies on it.
+	//
+	// The other half of the original reason still stands and is why this fills
+	// rather than refuses: a destination with a NULL source_id belongs to no
+	// programme, so no reconciler lists it as work -- created successfully,
+	// never started, with nothing on screen to explain why. Between a silent
+	// default and a silent zombie, the default is recoverable. Refusing is
+	// better than both, and that is what the handler now does.
 	if dst.SourceID == nil {
 		id, err := d.DefaultSourceID()
 		if err != nil {

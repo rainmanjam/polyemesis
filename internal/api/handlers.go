@@ -1609,6 +1609,9 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	row.ID = 0
+	if !s.requireNamedSource(w, row.SourceID) {
+		return
+	}
 	// Expert mode is reachable only through its own routes. See
 	// clearExpertArgs.
 	clearExpertArgs(&row)
@@ -2222,4 +2225,43 @@ func (s *Server) hlsHandler() http.Handler {
 		}
 		fs.ServeHTTP(w, r)
 	}))
+}
+
+// requireNamedSource refuses a create whose body does not say which programme
+// the new thing belongs to.
+//
+// THE SERVER USED TO CHOOSE, AND THAT IS THE BUG THIS CLOSES.
+// db.CreateDestination and db.CreateRendition fill an omitted source_id with
+// DefaultSourceID(), which is the first source by id. On a one-source install
+// that is the only possible answer and no choice was ever made. On an install
+// with several it is a coin flip the operator neither made nor saw: the
+// destination is created, attached to a programme nobody picked, and nothing on
+// screen says which. It then carries the wrong feed, or sits idle while its
+// intended programme streams without it.
+//
+// The store keeps its fallback -- it is reached by a hundred test fixtures that
+// legitimately mean "on the default source", and by nothing else once this
+// guard is in front of the two handlers that serve real clients. The rule
+// belongs HERE, at the boundary where a human or a client omits a choice,
+// rather than in the store, where the callers are our own and have already
+// decided.
+//
+// The refusal names the programmes to choose from. A 400 that says "sourceId is
+// required" tells an operator what they failed to type; one that lists the
+// sources tells them what to type instead, which is the difference between a
+// validation message and a usable one.
+func (s *Server) requireNamedSource(w http.ResponseWriter, id *int64) bool {
+	if id != nil && *id != 0 {
+		return true
+	}
+	msg := "this create must say which source it belongs to: set \"sourceId\"."
+	if rows, err := s.store.ListSources(); err == nil && len(rows) > 0 {
+		names := make([]string, 0, len(rows))
+		for _, src := range rows {
+			names = append(names, fmt.Sprintf("%d (%s)", src.ID, src.Name))
+		}
+		msg += " Available: " + strings.Join(names, ", ") + "."
+	}
+	writeErrorCode(w, http.StatusBadRequest, codeSourceRequired, msg)
+	return false
 }

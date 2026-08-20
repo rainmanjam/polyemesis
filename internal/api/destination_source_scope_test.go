@@ -1,6 +1,8 @@
 package api
 
 import (
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -101,4 +103,74 @@ func TestAnUnknownSourceResolvesToNoEngineRatherThanTheDefault(t *testing.T) {
 		t.Errorf("a nil source id resolved to an engine (source %d); a destination with "+
 			"no programme belongs to none", got.SourceID())
 	}
+}
+
+// A CREATE THAT NAMES NO PROGRAMME IS REFUSED, and the server no longer picks
+// one on the operator's behalf.
+//
+// db.CreateDestination fills an omitted source_id with DefaultSourceID(), the
+// first source by id. On a one-source install that is the only possible answer.
+// On an install with several it is a choice the operator never made and was
+// never shown: the destination is created, attached to a programme nobody
+// picked, and nothing on screen says which. It then carries the wrong feed, or
+// sits idle while its intended programme streams without it.
+//
+// DELIBERATELY UNCONDITIONAL. An earlier draft refused only when more than one
+// source existed, which costs no test churn and protects the only case where
+// the choice is ambiguous. It was rejected: a rule that changes with hidden
+// state is a mode, and an operator who learns "sourceId is optional" on their
+// first install meets a different API on their second. One rule.
+//
+// This does NOT go through send() or createDestination(), both of which fill
+// the field in for the tests that are not about it. Going through them would
+// mean this test could not observe the thing it exists to observe.
+func TestACreateThatNamesNoSourceIsRefused(t *testing.T) {
+	h, _, sign := renditionServer(t, defaultTools())
+
+	// A body per endpoint: the decoder rejects unknown fields, so one shared
+	// map would be refused for the wrong reason and this test would pass while
+	// asserting nothing about sources.
+	for _, tc := range []struct {
+		path, what string
+		body       map[string]any
+	}{
+		{"/api/v1/destinations", "destination", map[string]any{
+			"name": "unnamed programme", "kind": "rtmp",
+			"url": "rtmp://example.invalid/live", "streamKey": "k"}},
+		{"/api/v1/renditions", "rendition", map[string]any{
+			"name": "unnamed programme", "height": 720, "videoBitrate": 3000}},
+	} {
+		t.Run(tc.what, func(t *testing.T) {
+			r := jsonRequest(t, http.MethodPost, tc.path, tc.body)
+			sign(r)
+			w := do(t, h, r)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: the server chose a programme the "+
+					"operator did not (body %s)", w.Code, w.Body.String())
+			}
+			if got := noSourceCode(t, w.Body); got != codeSourceRequired {
+				t.Errorf("code = %q, want %q. The UI branches on this to open the "+
+					"source picker rather than show a red toast", got, codeSourceRequired)
+			}
+			// The refusal has to say what to pick, not just that something is
+			// missing. "sourceId is required" tells an operator what they failed
+			// to type; naming the programmes tells them what to type instead.
+			if b := w.Body.String(); !strings.Contains(b, "Available:") {
+				t.Errorf("the refusal lists no programmes to choose from, so it names "+
+					"no way forward: %s", b)
+			}
+		})
+	}
+
+	// THE POSITIVE CONTROL. Every assertion above is "this is refused", and a
+	// handler that refused every create would satisfy them all while being far
+	// worse than the bug.
+	t.Run("positive control: naming one is accepted", func(t *testing.T) {
+		got := createDestination(t, h, sign, destinationBody("named", false, nil))
+		if got == nil || got.SourceID == nil {
+			t.Fatal("a create that named a source was not accepted, so the refusals " +
+				"above prove nothing about the guard")
+		}
+	})
 }

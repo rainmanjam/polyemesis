@@ -855,9 +855,11 @@ func (d *DB) CreateRendition(r *Rendition) (*Rendition, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
-	// Same reasoning as CreateDestination: a payload that names no source means
-	// the one that has always been there. A NULL here would produce a rendition
-	// no reconciler ever starts, which looks like a rendition that does nothing.
+	// Same reasoning as CreateDestination, including why it survives: no client
+	// reaches this any more -- handleCreateRendition refuses a body with no
+	// sourceId -- and it stays for our own test fixtures. A NULL here would
+	// produce a rendition no reconciler ever starts, which looks to an operator
+	// like a rendition that does nothing.
 	if r.SourceID == nil {
 		id, err := d.DefaultSourceID()
 		if err != nil {

@@ -23,6 +23,9 @@ func TestDestinationEndpointsCannotSetExpertArgs(t *testing.T) {
 	h, store, auth := renditionServer(t, defaultTools())
 
 	post := func(path string, body any) *json.Decoder {
+		if m, ok := body.(map[string]any); ok && path == "/api/v1/destinations" {
+			withOnlySource(t, h, auth, m)
+		}
 		t.Helper()
 		r := jsonRequest(t, http.MethodPost, path, body)
 		auth(r)

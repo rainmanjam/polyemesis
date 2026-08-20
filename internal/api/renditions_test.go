@@ -172,6 +172,16 @@ func defaultTools() *ffmpeg.Tools {
 // send signs and performs a request, failing the test unless the status matches.
 func send(t *testing.T, h http.Handler, sign func(*http.Request), method, path string, body any, want int) []byte {
 	t.Helper()
+	// Creates have to name a programme. Filled in here for the same reason
+	// withOnlySource exists, and under the same limits: only a map form, only
+	// when the caller did not set it, and only on the two paths that require
+	// it -- so a test that means to omit sourceId still omits it by passing
+	// something other than a bare map, and the refusal keeps its own test.
+	if method == http.MethodPost && (path == "/api/v1/destinations" || path == "/api/v1/renditions") {
+		if m, ok := body.(map[string]any); ok {
+			withOnlySource(t, h, sign, m)
+		}
+	}
 	r := jsonRequest(t, method, path, body)
 	sign(r)
 	w := do(t, h, r)
@@ -233,6 +243,12 @@ func decodeInto(t *testing.T, raw []byte, v any) {
 
 func createRendition(t *testing.T, h http.Handler, sign func(*http.Request), body any) *db.Rendition {
 	t.Helper()
+	// Only the map form can be filled in. A caller passing a typed body has
+	// already decided what it is sending, including whether it names a source,
+	// and quietly editing that would make its assertion about something else.
+	if m, ok := body.(map[string]any); ok {
+		withOnlySource(t, h, sign, m)
+	}
 	var resp struct {
 		Rendition *db.Rendition `json:"rendition"`
 	}
@@ -242,6 +258,7 @@ func createRendition(t *testing.T, h http.Handler, sign func(*http.Request), bod
 
 func createDestination(t *testing.T, h http.Handler, sign func(*http.Request), body map[string]any) *db.Destination {
 	t.Helper()
+	withOnlySource(t, h, sign, body)
 	var resp struct {
 		Destination *db.Destination `json:"destination"`
 	}
@@ -549,7 +566,12 @@ func TestEveryPresetTemplateCreatesCleanly(t *testing.T) {
 			continue
 		}
 		t.Run(p.Key, func(t *testing.T) {
-			got := createRendition(t, h, sign, p.Rendition)
+			// A typed body, so createRendition will not fill the source in for
+			// it -- deliberately, see withOnlySource. Named here instead.
+			tmpl := p.Rendition
+			src := onlySourceID(t, h, sign)
+			tmpl.SourceID = &src
+			got := createRendition(t, h, sign, tmpl)
 			if got.VideoBitrate != p.Rendition.VideoBitrate || got.FPS != p.Rendition.FPS {
 				t.Errorf("stored %+v, want the template's values", got)
 			}
@@ -713,4 +735,58 @@ func TestADestinationCannotSelectARenditionThatDoesNotExist(t *testing.T) {
 			}
 		})
 	}
+}
+
+// onlySourceID is the programme a fixture creates, for the many tests that are
+// not about sources but must now name one.
+//
+// handleCreateDestination and handleCreateRendition refuse a body with no
+// sourceId, deliberately and without a "unless there is only one" exemption:
+// a rule that changes with hidden state is a mode, and a mode is the thing the
+// refusal exists to remove. That makes every create body in this package name a
+// programme, and this is how the ones that do not care say "the only one".
+//
+// It reads the id back over HTTP rather than assuming 1. The fixtures get their
+// source from a migration, and an id that is only ever right because nothing has
+// renumbered yet is the kind of assumption that fails silently later.
+func onlySourceID(t *testing.T, h http.Handler, sign func(*http.Request)) int64 {
+	t.Helper()
+	r := jsonRequest(t, http.MethodGet, "/api/v1/sources", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list sources: %d %s", w.Code, w.Body.String())
+	}
+	var got []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || len(got) == 0 {
+		t.Fatalf("no source in the fixture (err %v, body %s); every create now has to "+
+			"name one, so this is not a case a test can skip past", err, w.Body.String())
+	}
+	return got[0].ID
+}
+
+// withOnlySource names the fixture's programme on a create body that has not
+// named one.
+//
+// EVERY create now has to say which source it belongs to -- see
+// requireNamedSource, and note it has no "unless there is only one" exemption,
+// because a rule that changes with hidden state is a mode. Most tests in this
+// package are not about sources and have exactly one; saying so once here beats
+// twenty-seven copies of the same line.
+//
+// This does NOT weaken the guard. It fills a field the caller left out, so a
+// test that sets sourceId itself is untouched, and the refusal itself is
+// asserted directly by TestACreateThatNamesNoSourceIsRefused -- which does not
+// go through this helper, precisely so that this helper cannot hide it.
+func withOnlySource(t *testing.T, h http.Handler, sign func(*http.Request), body map[string]any) {
+	t.Helper()
+	if body == nil {
+		return
+	}
+	if _, ok := body["sourceId"]; ok {
+		return
+	}
+	body["sourceId"] = onlySourceID(t, h, sign)
 }

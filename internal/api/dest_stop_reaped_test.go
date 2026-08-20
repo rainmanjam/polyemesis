@@ -25,7 +25,8 @@ func TestStopAnswersWhetherTheChildWasReapedAndStartDoesNot(t *testing.T) {
 	h, _, sign := renditionServer(t, defaultTools())
 
 	create := jsonRequest(t, http.MethodPost, "/api/v1/destinations", map[string]any{
-		"name": "youtube", "kind": "rtmp",
+		"sourceId": onlySourceID(t, h, sign),
+		"name":     "youtube", "kind": "rtmp",
 		"url": "rtmp://example.invalid/live", "streamKey": "k",
 	})
 	sign(create)
