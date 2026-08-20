@@ -100,15 +100,15 @@ func TestAProbeThatCannotGetAPortCountsTowardGivingUp(t *testing.T) {
 	if end := strings.Index(branch, "\n\t}"); end > 0 {
 		branch = branch[:end]
 	}
-	if !strings.Contains(branch, "e.probeFails.Add(1)") {
-		t.Error("a probe that could not get a relay port does not count as a " +
-			"failure to measure. probeGiveUp is never reached on a box that is " +
-			"too loaded to probe, so every destination stays held indefinitely -- " +
-			"and this path logs nothing, so the log does not say why either")
-	}
-	if !strings.Contains(branch, "e.log.Warn") {
-		t.Error("a probe that could not get a relay port holds every destination " +
-			"and says so nowhere")
+	// Delegating rather than counting inline is fine, and is what the code does:
+	// probeFailedNow is the one place that counts a non-measurement and decides
+	// what to say about it. What must not happen is a `return false` that does
+	// neither.
+	if !strings.Contains(branch, "e.probeFailedNow(") {
+		t.Error("a probe that could not get a relay port does not reach " +
+			"probeFailedNow, so it does not count as a failure to measure. " +
+			"probeGiveUp is never reached on a box that is too loaded to probe, " +
+			"so every destination stays held indefinitely -- and nothing logs why")
 	}
 }
 
