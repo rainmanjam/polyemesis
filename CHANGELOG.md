@@ -8,6 +8,27 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+- **The Windows job-object setup handed the kernel an address the Go runtime was
+  free to invalidate, which is a write into freed memory.** `ensureJob`
+  converts `&info` to a `uintptr` and passes the integer to
+  `windows.SetInformationJobObject`. unsafe's rules permit that only where the
+  compiler arranges for the object to be *retained and not moved* until the call
+  completes, and it does not do so here: the x/sys wrapper is an ordinary,
+  splittable Go function that happens to take a `uintptr`. The
+  `runtime.KeepAlive` added earlier covered retention only —
+  `KeepAlive` is deliberately special-cased *not* to force its argument to
+  escape, so the struct stayed a stack local, and any stack growth between the
+  conversion and the syscall relocates it while the integer keeps pointing at
+  the freed old stack. The kernel then writes 112 bytes into memory the runtime
+  has already recycled, and the crash lands later in an unrelated goroutine as
+  `fatal error: found pointer to free object`. The conversions now sit in the
+  argument list of `//go:uintptrescapes` wrappers, which forces the struct onto
+  the heap — where Go's collector never moves it — and retains it for the
+  duration of the call. No tool in the toolchain flags the unfixed form, so the
+  guarantee is now asserted by reading the compiler's escape analysis back out
+  in a test that runs on every platform, not just Windows. (#440)
+
 ## [0.7.0] — 2026-08-17
 
 ### Security
