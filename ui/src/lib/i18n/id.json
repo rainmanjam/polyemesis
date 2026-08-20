@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "Ini menghapus tujuan beserta profil routing-nya. Platformnya tidak diubah, dan Anda bisa menambahkannya kembali — tetapi routing audio yang Anda siapkan untuknya hilang.",
   "dash.descriptionPlaceholder": "Tentang apa siaran ini.",
   "dash.destDeleted": "Tujuan dihapus.",
+  "dash.destNoneHere": "Belum ada tujuan pada program ini.",
+  "dash.destOrphaned": "Tujuan ini menyebut program yang tidak didaftarkan server ini. Semuanya masih dikonfigurasi — periksa apakah sumbernya telah dihapus.",
   "dash.destinationNeedsASource": "Tujuan adalah milik sebuah program, dan instalasi ini belum punya satu pun. Buat sumber terlebih dahulu.",
   "dash.disabled": "dinonaktifkan",
   "dash.endBroadcast": "Akhiri siaran",

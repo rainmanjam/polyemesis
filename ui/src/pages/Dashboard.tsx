@@ -4,9 +4,9 @@ import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
 import { audioTrackCount, ingestAttribution, processAbsence } from "@/lib/dashboardFacts";
-import { sourceNameById } from "@/lib/destinationSource";
+import { destinationLayout } from "@/lib/destinationGroups";
 import { useConfirm } from "@/hooks/useConfirm";
-import { Copy, Megaphone, Play, Plus, Radio, Square } from "lucide-react";
+import { Copy, Megaphone, Play, Plus, Radio, RadioTower, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +30,7 @@ import type {
   BulkDestOutcome,
   BulkDestReport,
   Destination,
+  DestStatus,
   MetaField,
   SourceView,
   SystemInfo,
@@ -797,6 +798,8 @@ export function Dashboard() {
   // app keeps one status, so a grid fed from it would draw every tile from
   // whichever engine spoke last.
   const preview = previewLayout(usePreviewTiles(settingsPreview));
+
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Destination | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -809,7 +812,6 @@ export function Dashboard() {
   useEffect(() => {
     api.listSources().then(setSources).catch(() => setSources([]));
   }, [refreshKey]);
-  const sourceNames = useMemo(() => sourceNameById(sources), [sources]);
 
   const [pending, setPending] = useState<number[] | null>(null);
   const [moveNote, setMoveNote] = useState("");
@@ -953,6 +955,81 @@ export function Dashboard() {
         (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
     );
   }, [live, pending]);
+
+  // How the destination area divides. One programme means no headings at all,
+  // which is the shape this page had before per-source anything.
+  const layout = useMemo(() => destinationLayout(destinations, sources), [destinations, sources]);
+
+  /* ONE CARD, rendered from the GLOBAL index rather than a per-group one.
+   *
+   * The move arrows reorder the whole list and the order is persisted whole, so
+   * a card's neighbours are its neighbours in `destinations`, not in the group
+   * it happens to be drawn under. Computing the index within a group would grey
+   * out "move up" at the top of every heading while the move itself is still
+   * possible -- a disabled control that is lying about why. */
+  const renderDestination = (d: DestStatus, i: number) => (
+              <DestinationCard
+                key={d.id}
+                dest={d}
+                busy={busyId === d.id}
+                canMoveEarlier={i > 0}
+                canMoveLater={i < destinations.length - 1}
+                onMoveEarlier={() => move(d.id, -1)}
+                onMoveLater={() => move(d.id, 1)}
+                onStart={() => act(d.id, () => api.startDestination(d.id), "start the destination")}
+                onStop={() => act(d.id, () => api.stopDestination(d.id), "stop the destination")}
+                onRestart={() =>
+                  act(d.id, () => api.restartDestination(d.id), "restart the destination")
+                }
+                onEdit={() => openEdit(d.id)}
+                onDelete={() => confirmDelete.ask({ id: d.id, name: d.name })}
+                onRefreshKey={async () => {
+                  await act(
+                    d.id,
+                    async () => {
+                      await api.refreshStreamKey(d.id);
+                      toast.success(t("dash.keyRefreshed"));
+                    },
+                    "refresh the stream key",
+                  );
+                }}
+                /* Handed over only for Facebook, so the card's kebab is given
+                 * nothing to show on the platforms that have no broadcast to
+                 * end — the gate is the platform, not a disabled item. */
+                onEndBroadcast={
+                  d.platform === "facebook"
+                    ? async () => {
+                        await act(
+                          d.id,
+                          async () => {
+                            const r = await api.endFacebookBroadcast(d.id);
+                            /* THREE OUTCOMES, NOT TWO, and the middle one is
+                             * why this is not `r.ended ? success : error`.
+                             * EndBroadcast reports Ended only when Facebook
+                             * read the status back as VOD; a false with no
+                             * error means the POST SUCCEEDED and the node has
+                             * not settled yet. Facebook documents that it
+                             * saves the VOD, not how fast — so reporting that
+                             * as a failure would send an operator to end a
+                             * broadcast that is already ending, and reporting
+                             * it as a clean success would claim a confirmation
+                             * nobody gave. It gets its own sentence. */
+                            if (r.ended) toast.success(t("dash.broadcastEnded"));
+                            else toast.info(t("dash.broadcastEndAccepted"));
+                            /* Warnings name what was actually seen — a
+                             * read-back that failed, a status that is still
+                             * LIVE. Advisory beside the sentence above, not
+                             * errors: the end was accepted either way. */
+                            for (const w of r.warnings ?? []) toast.warning(w);
+                          },
+                          "end the Facebook broadcast",
+                        );
+                        setRefreshKey((k) => k + 1);
+                      }
+                    : undefined
+                }
+              />
+  );
 
   // The override is only worth keeping while the server still lists the same
   // destinations in a different order. Once it agrees — or once one is added or
@@ -1287,71 +1364,44 @@ export function Dashboard() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {destinations.map((d, i) => (
-              <DestinationCard
-                key={d.id}
-                dest={d}
-                sourceName={d.sourceId ? sourceNames.get(d.sourceId) : undefined}
-                busy={busyId === d.id}
-                canMoveEarlier={i > 0}
-                canMoveLater={i < destinations.length - 1}
-                onMoveEarlier={() => move(d.id, -1)}
-                onMoveLater={() => move(d.id, 1)}
-                onStart={() => act(d.id, () => api.startDestination(d.id), "start the destination")}
-                onStop={() => act(d.id, () => api.stopDestination(d.id), "stop the destination")}
-                onRestart={() =>
-                  act(d.id, () => api.restartDestination(d.id), "restart the destination")
-                }
-                onEdit={() => openEdit(d.id)}
-                onDelete={() => confirmDelete.ask({ id: d.id, name: d.name })}
-                onRefreshKey={async () => {
-                  await act(
-                    d.id,
-                    async () => {
-                      await api.refreshStreamKey(d.id);
-                      toast.success(t("dash.keyRefreshed"));
-                    },
-                    "refresh the stream key",
-                  );
-                }}
-                /* Handed over only for Facebook, so the card's kebab is given
-                 * nothing to show on the platforms that have no broadcast to
-                 * end — the gate is the platform, not a disabled item. */
-                onEndBroadcast={
-                  d.platform === "facebook"
-                    ? async () => {
-                        await act(
-                          d.id,
-                          async () => {
-                            const r = await api.endFacebookBroadcast(d.id);
-                            /* THREE OUTCOMES, NOT TWO, and the middle one is
-                             * why this is not `r.ended ? success : error`.
-                             * EndBroadcast reports Ended only when Facebook
-                             * read the status back as VOD; a false with no
-                             * error means the POST SUCCEEDED and the node has
-                             * not settled yet. Facebook documents that it
-                             * saves the VOD, not how fast — so reporting that
-                             * as a failure would send an operator to end a
-                             * broadcast that is already ending, and reporting
-                             * it as a clean success would claim a confirmation
-                             * nobody gave. It gets its own sentence. */
-                            if (r.ended) toast.success(t("dash.broadcastEnded"));
-                            else toast.info(t("dash.broadcastEndAccepted"));
-                            /* Warnings name what was actually seen — a
-                             * read-back that failed, a status that is still
-                             * LIVE. Advisory beside the sentence above, not
-                             * errors: the end was accepted either way. */
-                            for (const w of r.warnings ?? []) toast.warning(w);
-                          },
-                          "end the Facebook broadcast",
-                        );
-                        setRefreshKey((k) => k + 1);
-                      }
-                    : undefined
-                }
-              />
-            ))}
+          <div className="flex flex-col gap-5">
+            {layout.groups.map((g, gi) => {
+              if (g.destinations.length === 0 && !layout.grouped) return null;
+              return (
+                <section key={g.sourceId ?? (g.orphans ? "orphans" : `g${gi}`)} className="flex flex-col gap-2">
+                  {layout.grouped && !g.orphans && (
+                    /* The heading is the programme, and it is drawn even when
+                       the programme has no destinations: "nothing configured
+                       here yet" is a state an operator has to see to act on,
+                       and hiding the heading would make it indistinguishable
+                       from a programme that does not exist. */
+                    <h3 className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      <RadioTower className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{g.name}</span>
+                      <span className="font-mono normal-case tracking-normal">
+                        {g.destinations.length}
+                      </span>
+                    </h3>
+                  )}
+                  {g.orphans && (
+                    /* NOT A HEADING, because this is not a programme. These
+                       destinations name a source the server did not list --
+                       deleted in another tab, or a row whose source_id outlived
+                       its programme. They are drawn rather than filtered out:
+                       each is still configured and may still be running, and
+                       this is the only screen that lists them. */
+                    <p className="text-[11px] text-warn">{t("dash.destOrphaned")}</p>
+                  )}
+                  {g.destinations.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">{t("dash.destNoneHere")}</p>
+                  ) : (
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {g.destinations.map((d) => renderDestination(d, destinations.indexOf(d)))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
           </div>
         )}
       </div>

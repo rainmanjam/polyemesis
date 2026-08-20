@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "Dit verwijdert de bestemming en haar routingprofiel. Het platform blijft ongemoeid en je kunt haar weer toevoegen — maar de audiorouting die je ervoor had opgezet is weg.",
   "dash.descriptionPlaceholder": "Waar deze stream over gaat.",
   "dash.destDeleted": "Bestemming verwijderd.",
+  "dash.destNoneHere": "Nog geen bestemmingen op dit programma.",
+  "dash.destOrphaned": "Deze bestemmingen noemen een programma dat deze server niet heeft vermeld. Ze zijn nog steeds geconfigureerd — controleer of hun bron is verwijderd.",
   "dash.destinationNeedsASource": "Een bestemming hoort bij een programma, en deze installatie heeft er nog geen. Maak eerst een bron aan.",
   "dash.disabled": "uitgeschakeld",
   "dash.endBroadcast": "Uitzending beëindigen",

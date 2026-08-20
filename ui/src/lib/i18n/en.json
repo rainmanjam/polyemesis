@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "This removes the destination and its routing profile. The platform is untouched, and you can add it back — but the audio routing you set up for it is gone.",
   "dash.descriptionPlaceholder": "What this stream is.",
   "dash.destDeleted": "Destination deleted.",
+  "dash.destNoneHere": "No destinations on this programme yet.",
+  "dash.destOrphaned": "These destinations name a programme this server did not list. They are still configured — check whether their source was deleted.",
   "dash.destinationNeedsASource": "A destination belongs to a programme, and this install has none yet. Create a source first.",
   "dash.disabled": "disabled",
   "dash.endBroadcast": "End broadcast",

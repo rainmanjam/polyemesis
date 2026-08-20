@@ -285,7 +285,6 @@ test.describe("playlist editor", () => {
 
     await page.goto("/settings");
     await page.getByRole("tab", { name: "Pipeline" }).click();
-    const card = failoverCard(page);
     const foWas = await setSwitch(page, "#fo-enabled", true);
     const plWas = await setSwitch(page, "#fo-playlist", true);
 

@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "Ceci supprime la destination et son profil de routage. La plateforme n'est pas touchée, et vous pouvez la rajouter — mais le routage audio que vous aviez mis en place pour elle est perdu.",
   "dash.descriptionPlaceholder": "Ce qu'est ce flux.",
   "dash.destDeleted": "Destination supprimée.",
+  "dash.destNoneHere": "Aucune destination sur ce programme pour l'instant.",
+  "dash.destOrphaned": "Ces destinations nomment un programme que ce serveur n'a pas répertorié. Elles restent configurées — vérifiez si leur source a été supprimée.",
   "dash.destinationNeedsASource": "Une destination appartient à un programme, et cette installation n'en a encore aucun. Créez d'abord une source.",
   "dash.disabled": "désactivée",
   "dash.endBroadcast": "Terminer la diffusion",
