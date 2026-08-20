@@ -1,6 +1,8 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { usePreviewTiles } from "@/hooks/usePreviewTiles";
+import { previewLayout } from "@/lib/previewLayout";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -775,6 +777,11 @@ export function Dashboard() {
   const { status } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
+  // Per-source preview state. Polled rather than taken from the status feed,
+  // which is not source-scoped: every engine publishes onto one broker and the
+  // app keeps one status, so a grid fed from it would draw every tile from
+  // whichever engine spoke last.
+  const preview = previewLayout(usePreviewTiles(settingsPreview));
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Destination | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -1006,7 +1013,32 @@ export function Dashboard() {
               <div className="aspect-video max-h-[60vh] w-full rounded-md border border-border bg-black" />
             }
           >
-            <PreviewPlayer active={settingsPreview} />
+            {/* ONE TILE PER SOURCE. The preview used to be a single player on
+                whichever source happened to be first in display order, with no
+                way to reach any other. A tile costs an encoder only while it is
+                watched AND something is on air, so offline programmes here cost
+                nothing.
+
+                Which tiles those are, and what each one plays, is decided by
+                previewLayout() in src/lib -- a plain function of the polled
+                telemetry, so the decision is testable without a page test. */}
+            {preview.grid ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {preview.panes.map((pane) => (
+                  <figure key={pane.id} className="flex flex-col gap-1.5">
+                    <PreviewPlayer active={settingsPreview} {...pane.player} />
+                    <figcaption className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="truncate">{pane.label}</span>
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            ) : (
+              <PreviewPlayer
+                active={settingsPreview}
+                {...preview.panes[0].player}
+              />
+            )}
           </Suspense>
 
           <Card>

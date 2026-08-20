@@ -579,3 +579,34 @@ func assertPrivateDir(t *testing.T, path string, want bool) {
 		t.Errorf("TLS private key material is exposed: %v", err)
 	}
 }
+
+// Two programmes must not preview into the same directory.
+//
+// startPreviewLocked clears the directory before it starts and stopPreviewLocked
+// clears it again on the way out. While every engine wrote into HLSDir() itself
+// that made two of them mutually destructive: the one that came up second
+// deleted the live playlist of the one already running, and the outgoing one's
+// idle sweep deleted the replacement's a whole idle window later. Both are
+// reached by reordering sources, which is an ordinary operator action.
+func TestEachSourcePreviewsIntoItsOwnDirectory(t *testing.T) {
+	cfg := Config{DataDir: t.TempDir()}
+
+	one, two := cfg.HLSDirFor(1), cfg.HLSDirFor(2)
+	if one == two {
+		t.Fatalf("sources 1 and 2 both preview into %s, so whichever engine starts "+
+			"second clears the other's live playlist", one)
+	}
+	// The legacy unscoped route still reads HLSDir() itself. A source writing
+	// there too would be the same collision wearing a different name.
+	for id, dir := range map[int64]string{1: one, 2: two} {
+		if dir == cfg.HLSDir() {
+			t.Errorf("source %d previews into the shared root %q, which the unscoped "+
+				"/hls route also serves", id, dir)
+		}
+		// Underneath the shared root rather than beside it, so the disk
+		// accounting and the installer's permissions still reach it.
+		if filepath.Dir(dir) != cfg.HLSDir() {
+			t.Errorf("source %d previews into %q, which is outside %q", id, dir, cfg.HLSDir())
+		}
+	}
+}

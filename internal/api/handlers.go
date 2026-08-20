@@ -2189,13 +2189,58 @@ func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
 
 // ---------------------------------------------------------------------- HLS
 
+// hlsSourceHandler serves ONE source's preview, at /hls/{source}/...
+//
+// Source-qualified because the preview is a filesystem resource and there is one
+// engine per source: while every engine shared a directory, the one that became
+// default deleted the live playlist of the one it replaced. See Config.HLSDirFor.
+//
+// The engine is resolved per request rather than captured, because which engines
+// exist changes as sources are created and removed.
+func (s *Server) hlsSourceHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(chi.URLParam(r, "source"), 10, 64)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		e := s.mgr.Engine(id)
+		if e == nil {
+			// A source that does not exist, or one whose engine has not been
+			// built yet. 404 rather than 400: to a player this is the same
+			// "nothing here yet" it already retries through, and a deleted
+			// source should not read as a client error to a tab left open.
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		if strings.HasSuffix(r.URL.Path, ".m3u8") {
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			e.PreviewRequested()
+		}
+		http.StripPrefix("/hls/"+strconv.FormatInt(id, 10)+"/",
+			http.FileServer(http.Dir(s.cfg.HLSDirFor(id)))).ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) hlsHandler() http.Handler {
-	dir := s.cfg.HLSDir()
-	fs := http.FileServer(http.Dir(dir))
 	return http.StripPrefix("/hls/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The playlist is rewritten every segment; caching it would freeze the
 		// preview a few seconds after it starts.
 		w.Header().Set("Cache-Control", "no-store")
+
+		// READ ONCE. Two calls to engOrNil are two different engine sets -- the
+		// last source can be deleted between them -- so the playlist poke and
+		// the directory must come from the same answer, or they can disagree
+		// about which source this request is for.
+		//
+		// The nil branch is not hypothetical: /hls is registered outside
+		// /api/v1, and Dashboard.tsx mounts PreviewPlayer before GET /settings
+		// has answered, so on an install with no source this is one of the first
+		// requests the browser makes. PreviewRequested is a mutation and must
+		// keep panicking on a nil receiver, so the check is here.
+		e := s.engOrNil()
+
 		if strings.HasSuffix(r.URL.Path, ".m3u8") {
 			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 			// The encoder is on-demand, and playlist polling is what keeps it
@@ -2206,24 +2251,24 @@ func (s *Server) hlsHandler() http.Handler {
 			// A request that starts the encoder is answered 404 below, since
 			// ffmpeg has not written the playlist yet. hls.js retries a failed
 			// manifest load, so the player recovers within a segment or two.
-			//
-			// The nil branch is not hypothetical and it is not covered by the
-			// boundary guard: /hls is registered in its own group outside
-			// /api/v1, and Dashboard.tsx mounts PreviewPlayer with the preview
-			// ON before GET /settings has answered, so on an install with no
-			// source this is one of the FIRST requests the browser makes --
-			// and hls.js then retries it. PreviewRequested is a mutation and
-			// must keep panicking on a nil receiver, so the check is here.
-			//
-			// Falling through to the file server rather than refusing: the
-			// directory is real and possibly non-empty, and a 404 for a
-			// playlist nothing is writing is the same answer a live install
-			// gives in the seconds before the encoder starts.
-			if e := s.engOrNil(); e != nil {
+			if e != nil {
 				e.PreviewRequested()
 			}
 		}
-		fs.ServeHTTP(w, r)
+
+		// Resolved per request rather than captured: the default source can
+		// change under a running server, and a directory fixed at construction
+		// would go on serving the source it happened to start with.
+		//
+		// Falling through to the file server rather than refusing when there is
+		// no engine: the directory is real and possibly non-empty, and a 404 for
+		// a playlist nothing is writing is the same answer a live install gives
+		// in the seconds before the encoder starts.
+		dir := s.cfg.HLSDir()
+		if e != nil {
+			dir = s.cfg.HLSDirFor(e.SourceID())
+		}
+		http.FileServer(http.Dir(dir)).ServeHTTP(w, r)
 	}))
 }
 
