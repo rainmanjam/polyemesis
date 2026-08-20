@@ -634,8 +634,17 @@ type SetupGuide struct {
 	// ManualStreamKey reports that the account connects, but the key is pasted
 	// rather than fetched — the two are separate answers, and Kick is the reason
 	// they had to be. Read it from ManualKeyFor rather than hard-coding it.
-	ManualStreamKey bool   `json:"manualStreamKey,omitempty"`
-	Note            string `json:"note,omitempty"`
+	ManualStreamKey bool `json:"manualStreamKey,omitempty"`
+	// DeviceFlow reports that this platform can connect an account WITHOUT a
+	// redirect URI -- the operator types a code at the platform's own site and
+	// the box polls for the token. Read from DeviceFor for the same reason
+	// ManualStreamKey is read from ManualKeyFor: it is exactly one platform
+	// today (device.go says why the other three are absent, and the reasons
+	// differ), and a UI that hard-coded the name would go on offering the
+	// button for a platform that lost the capability and would never offer it
+	// for one that gained it.
+	DeviceFlow bool   `json:"deviceFlow,omitempty"`
+	Note       string `json:"note,omitempty"`
 	// RedirectWarnings are computed per request by the API layer, which is
 	// where the configuration and the inbound Host live. Empty here; filled in
 	// by handlePlatformGuides.
@@ -644,14 +653,19 @@ type SetupGuide struct {
 
 // Guides returns the setup instructions rendered on the credentials page.
 //
-// ManualStreamKey is filled in from ManualKeyFor rather than written out per
-// entry, so a provider that gains a key endpoint stops advertising the paste
-// step the moment it drops the ManualKey interface.
+// ManualStreamKey and DeviceFlow are filled in from ManualKeyFor and DeviceFor
+// rather than written out per entry, so a provider that gains a key endpoint
+// stops advertising the paste step the moment it drops the ManualKey interface,
+// and a platform that gains or loses a device flow changes what the UI offers
+// without anybody editing a list of platform names.
 func Guides() []SetupGuide {
 	guides := guides()
 	for i := range guides {
 		if _, manual := ManualKeyFor(guides[i].Platform); manual {
 			guides[i].ManualStreamKey = true
+		}
+		if _, device := DeviceFor(guides[i].Platform); device {
+			guides[i].DeviceFlow = true
 		}
 	}
 	return guides

@@ -3,12 +3,26 @@
 package supervisor
 
 import (
-	"runtime"
 	"testing"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+// queryInformationJobObject is the read-direction twin of
+// setInformationJobObject in job_windows.go, and exists for the same single
+// reason: to carry //go:uintptrescapes so that the
+// uintptr(unsafe.Pointer(&got)) at its call site is legal. The hazard is, if
+// anything, WORSE in this direction -- the kernel writes the result through
+// that integer, so a stack copy between the conversion and the syscall would
+// have the kernel scribble a struct into freed stack memory and this test
+// would then read its own uninitialised variable and pass. See the long
+// comment on setInformationJobObject.
+//
+//go:uintptrescapes
+func queryInformationJobObject(job windows.Handle, class int32, info uintptr, size uint32, retlen *uint32) error {
+	return windows.QueryInformationJobObject(job, class, info, size, retlen)
+}
 
 func TestJobLimitsRequestKillOnCloseAndForbidBreakaway(t *testing.T) {
 	got := jobLimits().BasicLimitInformation.LimitFlags
@@ -74,7 +88,7 @@ func TestJobLimitsSurviveARoundTripThroughTheKernel(t *testing.T) {
 	t.Cleanup(func() { _ = windows.CloseHandle(h) })
 
 	want := jobLimits()
-	if _, err := windows.SetInformationJobObject(
+	if _, err := setInformationJobObject(
 		h,
 		windows.JobObjectExtendedLimitInformation,
 		uintptr(unsafe.Pointer(&want)),
@@ -82,13 +96,10 @@ func TestJobLimitsSurviveARoundTripThroughTheKernel(t *testing.T) {
 	); err != nil {
 		t.Fatalf("SetInformationJobObject: %v", err)
 	}
-	// Same rule as job_windows.go: the wrapper takes a uintptr, so nothing keeps
-	// `want` alive across the call unless this does.
-	runtime.KeepAlive(&want)
 
 	var got windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
 	var retlen uint32
-	if err := windows.QueryInformationJobObject(
+	if err := queryInformationJobObject(
 		h,
 		windows.JobObjectExtendedLimitInformation,
 		uintptr(unsafe.Pointer(&got)),
@@ -97,7 +108,6 @@ func TestJobLimitsSurviveARoundTripThroughTheKernel(t *testing.T) {
 	); err != nil {
 		t.Fatalf("QueryInformationJobObject: %v", err)
 	}
-	runtime.KeepAlive(&got)
 
 	if got.BasicLimitInformation.LimitFlags != want.BasicLimitInformation.LimitFlags {
 		t.Fatalf("LimitFlags round-tripped as %#x, want %#x",

@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useIngestLive } from "@/hooks/useLiveData";
 import { AccountLiveStats } from "@/components/AccountLiveStats";
+import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
 import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
@@ -69,6 +70,10 @@ import {
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
+import {
+  platformConnectControls,
+  platformSupportsDeviceCode,
+} from "@/lib/platformConnect";
 import { LIMITS } from "@/lib/limits";
 import { PULL_SCHEMES, RTSP_TRANSPORTS } from "@/lib/types";
 import type {
@@ -1932,6 +1937,11 @@ function PlatformCredCard({
 
   const confirmCreds = useConfirm<{ name: string }>();
   const confirmDisconnect = useConfirm<PlatformAccount>();
+  // Which ways this card offers to connect an account, and whether the device
+  // code flow is one of them. Both are the SERVER'S answer -- see
+  // lib/platformConnect.ts, which holds the rules and the reasons.
+  const connectControls = platformConnectControls(guide, creds);
+  const [deviceOpen, setDeviceOpen] = useState(false);
 
   const remove = async () => {
     await api.deleteCreds(guide.platform);
@@ -2081,17 +2091,27 @@ function PlatformCredCard({
                   {rechecking ? <Loader2 className="animate-spin" /> : <RefreshCw />} Re-check
                 </Button>
               )}
-              {creds && (
-                <>
-                  <Button size="sm" variant="outline" asChild>
-                    <a href={api.connectUrl(guide.platform)}>
-                      <ExternalLink /> Connect an account
-                    </a>
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => confirmCreds.ask({ name: guide.name })}>
-                    <Trash2 /> Remove
-                  </Button>
-                </>
+              {/* Which of these the card offers is decided in
+                  lib/platformConnect.ts, with the reasons -- in particular why
+                  the code route is offered BESIDE the redirect one rather than
+                  instead of it. Written here it was a rule nothing could
+                  reach. */}
+              {connectControls.includes("connectRedirect") && (
+                <Button size="sm" variant="outline" asChild>
+                  <a href={api.connectUrl(guide.platform)}>
+                    <ExternalLink /> Connect an account
+                  </a>
+                </Button>
+              )}
+              {connectControls.includes("connectWithCode") && (
+                <Button size="sm" variant="outline" onClick={() => setDeviceOpen(true)}>
+                  <KeyRound /> {t("device.connectWithACode")}
+                </Button>
+              )}
+              {connectControls.includes("removeCredentials") && (
+                <Button size="sm" variant="ghost" onClick={() => confirmCreds.ask({ name: guide.name })}>
+                  <Trash2 /> Remove
+                </Button>
               )}
             </div>
 
@@ -2171,6 +2191,15 @@ function PlatformCredCard({
           if (confirmDisconnect.target) await disconnect(confirmDisconnect.target);
         }}
       />
+      {platformSupportsDeviceCode(guide) && (
+        <DeviceCodeDialog
+          platform={guide.platform}
+          platformName={guide.name}
+          open={deviceOpen}
+          onOpenChange={setDeviceOpen}
+          onConnected={onChanged}
+        />
+      )}
     </Card>
   );
 }

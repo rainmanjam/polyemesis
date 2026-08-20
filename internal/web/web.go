@@ -74,6 +74,28 @@ func isRegularFile(sub fs.FS, p string) bool {
 	return err == nil && !st.IsDir()
 }
 
+// staticAssetExts are the extensions a request for a FILE ends in. A request
+// for one of these is a browser, a crawler or a tool fetching a resource by
+// name -- never a person navigating to a page -- so a miss is a 404 and not the
+// SPA.
+//
+// Deliberately absent: .html and .htm, which name documents and are what the
+// SPA fallback is for.
+var staticAssetExts = map[string]bool{
+	".ico": true, ".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+	".webp": true, ".avif": true, ".svg": true, ".bmp": true,
+	".css": true, ".js": true, ".mjs": true, ".cjs": true, ".map": true,
+	".json": true, ".txt": true, ".xml": true, ".webmanifest": true,
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
+	".wasm": true, ".pdf": true,
+	".mp4": true, ".webm": true, ".mp3": true, ".wav": true, ".m3u8": true, ".ts": true,
+}
+
+// isStaticAssetPath reports whether p names a file rather than a UI route.
+func isStaticAssetPath(p string) bool {
+	return staticAssetExts[strings.ToLower(path.Ext(p))]
+}
+
 func HandlerFor(sub fs.FS) http.Handler {
 	files := http.FileServer(http.FS(sub))
 
@@ -118,6 +140,37 @@ func HandlerFor(sub fs.FS) http.Handler {
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"no such endpoint"}` + "\n"))
+			return
+		}
+
+		// A MISSING FILE IS NOT A DEEP LINK, and answering one with the SPA is
+		// the same mistake the /api branch above exists to correct, made
+		// against a different kind of caller.
+		//
+		// GET /favicon.ico returned 200 with index.html. The browser asked for
+		// an image, got a page of HTML, could not decode it, and fell back to
+		// its cached or default icon -- so the app appeared to have no favicon
+		// while the server reported success for every request. Nothing in a log
+		// or a status code said otherwise, which is what made it survive: a
+		// missing asset and a served asset are indistinguishable from outside.
+		//
+		// The rule is a WHITELIST of extensions rather than "the last segment
+		// contains a dot", because the dot rule decides the fate of paths this
+		// package cannot see. Today every SPA route is a fixed path whose only
+		// parameters are numeric ids (App.tsx), so the two rules agree -- but
+		// the day someone adds /sources/:name, the dot rule silently starts
+		// 404ing a real route for anyone whose source has a dot in its name,
+		// and it does so in the router rather than in the page, where it would
+		// be hard to trace. A whitelist can only ever be wrong about a file
+		// type nobody serves, which is the cheaper failure.
+		//
+		// .html is deliberately absent: a request for a document is exactly
+		// what the SPA fallback is for.
+		if isStaticAssetPath(p) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("no such file\n"))
 			return
 		}
 

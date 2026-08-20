@@ -374,6 +374,12 @@ type Server struct {
 	// connected Kick channels share the fetch.
 	kickKeys *chat.KickKeyFetcher
 
+	// devices holds the device-code authorizations this process has started but
+	// not finished. A VALUE, not a pointer, because its zero value is usable and
+	// several tests in this package build &Server{} by hand; see device_flow.go
+	// for why the state is in memory rather than in a table.
+	devices deviceFlows
+
 	// revokedMu guards revoked and wsPingEvery.
 	revokedMu sync.RWMutex
 	// revoked is the set of api_tokens.id values this process has deleted.
@@ -1127,6 +1133,16 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// idempotent, and POST puts it behind requireCSRF with the rest of
 			// the state-changing group.
 			r.Post("/platforms/credentials/{platform}/check", s.handleCheckCreds)
+			// The device code flow, for a box with no registrable callback.
+			// POST for the same two reasons /check is: both make an outbound
+			// call to a third party, so neither is safe or idempotent, and
+			// POST puts them behind requireCSRF. The poll is a POST rather
+			// than a GET despite reading a result, because it REDEEMS a
+			// one-time code and, on the poll that succeeds, stores a connected
+			// account -- the same reasoning that keeps the OAuth callback out
+			// of the method-shaped scope rule. See device_flow.go.
+			r.Post("/platforms/credentials/{platform}/device", s.handleStartDeviceAuth)
+			r.Post("/platforms/credentials/{platform}/device/poll", s.handlePollDeviceAuth)
 			r.Delete("/platforms/credentials/{platform}", s.handleDeleteCreds)
 			r.Get("/platforms/accounts", s.handleListAccounts)
 			r.Delete("/platforms/accounts/{id}", s.handleDeleteAccount)

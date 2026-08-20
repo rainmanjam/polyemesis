@@ -18,6 +18,8 @@ import type {
   ChatUserCard,
   CredentialCheck,
   Destination,
+  DeviceAuth,
+  DevicePoll,
   DiskUsage,
   DryRunResult,
   EncoderList,
@@ -970,6 +972,21 @@ export const api = {
    *  secret again -- which most consoles show exactly once. */
   checkCreds: (platform: string) =>
     post<CredentialCheck>(`/platforms/credentials/${platform}/check`),
+  /** Starts the device code flow: the way to connect an account from a box no
+   *  platform can redirect back to.
+   *
+   *  A POST despite creating no row, because it makes an outbound call to the
+   *  platform — the same reasoning that makes `checkCreds` one. */
+  startDeviceAuth: (platform: string) =>
+    post<DeviceAuth>(`/platforms/credentials/${platform}/device`),
+  /** Redeems the device code ONCE.
+   *
+   *  It does not loop and it does not sleep: pacing is the caller's, because a
+   *  request that slept for the code's lifetime could not be cancelled. Wait
+   *  `devicePollDelayMs(res.retryInSeconds)` between calls — the platform
+   *  rate-limits the operator's whole app, not this feature. */
+  pollDeviceAuth: (platform: string, handle: string) =>
+    post<DevicePoll>(`/platforms/credentials/${platform}/device/poll`, { handle }),
   deleteCreds: (platform: string) =>
     del<{ status: string }>(`/platforms/credentials/${platform}`),
   listAccounts: () => get<PlatformAccount[]>("/platforms/accounts"),
