@@ -1361,13 +1361,57 @@ func ApplyAlertSettings(mgr *engine.Manager, a db.AlertSettings) {
 
 // ------------------------------------------------------------- destinations
 
+// engineForSource is the engine that owns one programme, and it exists because
+// s.eng() is s.mgr.Default() -- engines[0] -- which is the RIGHT answer only on
+// an install with one source.
+//
+// applyDestinationEnabled already carries the finding this generalises:
+// "EVERY ENGINE, NOT THE DEFAULT ONE ... The bug is invisible on a single-source
+// install, which is every development box." That fix swept every engine looking
+// for a destination. This one goes straight to the owner, which is possible
+// because db.Destination.SourceID names it and Manager.Engine keys the map by
+// exactly that id.
+//
+// Returns nil when the source has no engine -- a row whose programme was
+// deleted under a request, or a manager that has not reconciled yet. Callers
+// must handle nil rather than dereference, which is why this hands back the
+// engine instead of a value read off it.
+func (s *Server) engineForSource(id *int64) *engine.Engine {
+	if s == nil || s.mgr == nil || id == nil {
+		return nil
+	}
+	return s.mgr.Engine(*id)
+}
+
+// sourceForDestination is the TRACK LAYOUT a destination's routing must be
+// compiled against: its own programme's, never the default programme's.
+//
+// This is not a tidy-up. routing.Source carries Tracks, so compiling a
+// destination's profile against another source's layout answers about an ingest
+// that destination does not read. Two sources are two ingests and routinely
+// differ -- a six-track OBS feed and a stereo camera -- so on a multi-source
+// install the "Tracks 1, 2, 4 -> stereo" summary the dashboard renders was
+// describing the wrong programme, or failing as a routingError for tracks that
+// are perfectly present in the source that destination actually carries.
+//
+// The bool is SourceKnown's: false means nothing has been measured yet and the
+// compile came off the placeholder layout, which the caller flags as
+// provisional rather than withholding.
+func (s *Server) sourceForDestination(sourceID *int64) (routing.Source, bool) {
+	// Falls back to the nil-engine answer -- the placeholder layout, not known
+	// -- which is exactly what s.eng() returned for an absent engine before.
+	return s.engineForSource(sourceID).SourceKnown()
+}
+
 func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.store.ListDestinations()
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	src, srcKnown := s.eng().SourceKnown()
+	// No single `src` here on purpose: it is resolved PER ROW below, because
+	// each destination's routing must be compiled against the programme that
+	// destination carries.
 
 	// A read-scoped token gets the destination with its publish credentials
 	// blanked. db.Destination has no MarshalJSON, so `{"destination": row}` is
@@ -1388,6 +1432,7 @@ func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) 
 			shown = &safe
 		}
 		item := map[string]any{"destination": shown}
+		src, srcKnown := s.sourceForDestination(row.SourceID)
 		if c, err := routing.Compile(row.Profile, src); err == nil {
 			item["routing"] = c
 			// PROVISIONAL until something has been measured. Until then this is
@@ -1428,7 +1473,7 @@ func (s *Server) handleGetDestination(w http.ResponseWriter, r *http.Request) {
 		shown = &safe
 	}
 	resp := map[string]any{"destination": shown}
-	getSrc, getKnown := s.eng().SourceKnown()
+	getSrc, getKnown := s.sourceForDestination(row.SourceID)
 	// Compiled off the ORIGINAL row, not the redacted copy: the routing profile
 	// carries no credential and compiling the copy would only invite a future
 	// reader to wonder whether it differs.
@@ -1651,7 +1696,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := map[string]any{"destination": updated}
-	updSrc, updKnown := s.eng().SourceKnown()
+	updSrc, updKnown := s.sourceForDestination(updated.SourceID)
 	if c, err := routing.Compile(updated.Profile, updSrc); err == nil {
 		resp["routing"] = c
 		if !updKnown {
@@ -1860,7 +1905,28 @@ func (s *Server) handleRestartDestination(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := s.eng().RestartDestination(id); err != nil {
+	// THE OWNING ENGINE, NOT THE DEFAULT ONE. s.eng() is s.mgr.Default(), so a
+	// restart of a destination belonging to any programme but the first was
+	// asked of an engine that has never heard of it: it answered "no such
+	// destination", this handler turned that into a 500, and the destination
+	// the operator was trying to restart carried on exactly as it was. On a
+	// one-source install the two engines are the same object and nothing is
+	// wrong, which is why this survived -- see applyDestinationEnabled, which
+	// found the same shape on the enable path.
+	row, err := s.store.GetDestination(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	eng := s.engineForSource(row.SourceID)
+	if eng == nil {
+		// The programme has no engine: deleted under this request, or the
+		// manager has not reconciled yet. Saying so beats a nil dereference and
+		// beats restarting somebody else's destination.
+		writeError(w, http.StatusConflict, "the source this destination carries is not running")
+		return
+	}
+	if err := eng.RestartDestination(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
