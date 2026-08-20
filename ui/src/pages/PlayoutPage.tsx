@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { useConfirm } from "@/hooks/useConfirm";
 import {
   Check,
   Copy,
@@ -599,7 +601,7 @@ function ProtectionCard({
 
 // ---------------------------------------------------------------- variants
 
-function VariantsCard({
+export function VariantsCard({
   play,
   variants,
   renditions,
@@ -613,6 +615,19 @@ function VariantsCard({
   onSave: (next: PlayoutSettings) => Promise<void>;
 }) {
   const t = useT();
+  /* Removing a rung stopped its muxer and dropped everyone watching it the
+     instant the icon was clicked -- no dialog of any kind, on an install where
+     deleting a recording that can be downloaded again demands typing its
+     filename. The inconsistency was the defect: an operator who has learned
+     "deletes ask first" has had their caution trained out of them exactly
+     where it mattered.
+
+     A CONTROL: the click no longer performs the action, it opens a dialog that
+     names the rung and the viewer count the row is already showing. No
+     requireTyping -- a rung is three fields and comes back with one click, and
+     spending typed confirmation on a recoverable action is how the typed
+     confirmation stops meaning anything on the actions that are not. */
+  const confirmRemove = useConfirm<{ index: number; name: string; viewers: number }>();
   const statusByName = useMemo(() => {
     const m = new Map<string, NonNullable<typeof variants>[number]>();
     for (const v of variants ?? []) m.set(v.name, v);
@@ -756,10 +771,7 @@ function VariantsCard({
                   disabled={busy}
                   aria-label={`Remove ${v.name}`}
                   onClick={() =>
-                    void onSave({
-                      ...play,
-                      variants: play.variants.filter((_, j) => j !== i),
-                    })
+                    confirmRemove.ask({ index: i, name: v.name, viewers: st?.viewers ?? 0 })
                   }
                 >
                   <Trash2 />
@@ -785,6 +797,27 @@ function VariantsCard({
           </Button>
         </div>
       </CardContent>
+
+      <ConfirmDestructive
+        open={confirmRemove.open}
+        onOpenChange={confirmRemove.onOpenChange}
+        subject={confirmRemove.target?.name ?? ""}
+        title={t("play.removeRungTitle", { name: confirmRemove.target?.name ?? "" })}
+        description={t("play.removeRungDescription")}
+        consequencesLabel={t("play.removeRungDrops")}
+        consequences={[
+          { label: t("play.watching"), count: confirmRemove.target?.viewers ?? 0 },
+        ]}
+        confirmLabel={t("play.removeRung")}
+        onConfirm={async () => {
+          const target = confirmRemove.target;
+          if (!target) return;
+          await onSave({
+            ...play,
+            variants: play.variants.filter((_, j) => j !== target.index),
+          });
+        }}
+      />
     </Card>
   );
 }

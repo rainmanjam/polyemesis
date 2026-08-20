@@ -48,6 +48,7 @@ import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toneBadge, toneForState, type SignalTone } from "@/lib/signal";
+import { deleteConsequence } from "@/lib/renditionUsers";
 import type {
   DestStatus,
   EncoderInfo,
@@ -460,6 +461,14 @@ export function RenditionsPage() {
     return m;
   }, [status]);
 
+  // The database's own counts for one rendition, which is what the dialogs
+  // fall back to when the live list has not arrived. `null` when the rows
+  // themselves have not loaded, which is a different thing again from zero.
+  const countsFor = (id: number) => {
+    const v = views.find((x) => x.rendition.id === id);
+    return v ? { destinations: v.destinations, enabledDestinations: v.enabledDestinations } : null;
+  };
+
   const passthrough = (status?.destinations ?? []).filter((d) => d.renditionId == null);
   const running = (status?.renditions ?? []).filter((r) => r.process?.state === "running").length;
   const sourceVideo = status?.source.video ?? null;
@@ -613,13 +622,19 @@ export function RenditionsPage() {
         bounds={bounds}
         source={sourceVideo}
         cores={system?.numCpu}
-        users={editing ? (usersById.get(editing.id) ?? []) : []}
+        /* `null`, NOT `[]`, before the first snapshot. An empty array is a
+           claim that nothing selects this rendition; a socket that has not
+           spoken is not. Both dialogs fall back to the REST counts, which is
+           what RenditionCard has always done. See lib/renditionUsers.ts. */
+        users={status && editing ? (usersById.get(editing.id) ?? []) : null}
+        counts={editing ? countsFor(editing.id) : null}
         onSaved={loadRenditions}
       />
 
       <DeleteRenditionDialog
         rendition={deleting}
-        users={deleting ? (usersById.get(deleting.id) ?? []) : []}
+        users={status && deleting ? (usersById.get(deleting.id) ?? []) : null}
+        counts={deleting ? countsFor(deleting.id) : null}
         onOpenChange={(open) => !open && setDeleting(null)}
         onDeleted={loadRenditions}
       />
@@ -644,7 +659,9 @@ function DestChip({ dest }: { dest: DestStatus }) {
   );
 }
 
-function RenditionCard({
+/* Exported for its test: the card is where a rendition's live state is
+ * asserted, including whether there is anything to restart. */
+export function RenditionCard({
   view,
   live,
   users,
@@ -791,6 +808,18 @@ function RenditionCard({
           >
             {busy ? <Loader2 className="animate-spin" /> : <RotateCw />} Restart
           </Button>
+          {/* THE REASON, IN THE CARD. button.tsx sets
+              `disabled:pointer-events-none`, so the title above never reaches a
+              pointer and never reaches a screen reader either -- the whole
+              explanation for a greyed control lived somewhere unreachable. It
+              says "not reported" rather than "not running" deliberately: `proc`
+              comes from the install-wide status socket, which on a
+              multi-programme install describes whichever engine spoke last. */}
+          {!proc && (
+            <span className="text-[10px] text-muted-foreground" data-testid="restart-reason">
+              {t("rend.noProcessToRestart")}
+            </span>
+          )}
           <Button
             variant="ghost"
             size="icon-sm"
@@ -897,7 +926,9 @@ function sizeKeyFor(width: number, height: number): string {
   return match ? match.key : "custom";
 }
 
-function RenditionDialog({
+/* Exported for its test: the editor renders one hint per control, and one of
+ * them was rendering its own translation key. */
+export function RenditionDialog({
   open,
   onOpenChange,
   rendition,
@@ -911,6 +942,7 @@ function RenditionDialog({
   source,
   cores,
   users,
+  counts,
   onSaved,
 }: {
   open: boolean;
@@ -927,7 +959,12 @@ function RenditionDialog({
   bounds: RenditionBounds;
   source: VideoStream | null;
   cores?: number;
-  users: DestStatus[];
+  /** The live list of destinations reading this rendition, or null when the
+   *  status socket has not answered yet. Never `[]` for "not known": see
+   *  lib/renditionUsers.ts. */
+  users: DestStatus[] | null;
+  /** The database's own counts, which stand in when `users` is null. */
+  counts: { destinations: number; enabledDestinations: number } | null;
   onSaved: () => void;
 }) {
   const t = useT();
@@ -1048,7 +1085,11 @@ function RenditionDialog({
   const encoder = encoders.find((e) => e.name === form.encoder);
   const cost = encodeCost(t, form, encoder, source, cores, hardwareExists);
   const notes = sourceNotes(t, form, source);
-  const enabledUsers = users.filter((d) => d.enabled).length;
+  const consequence = deleteConsequence(users, counts);
+  // How many enabled destinations a save restarts. Zero when that is not known,
+  // so the toast says "saved." rather than naming a count nobody measured.
+  const enabledUsers =
+    consequence.kind === "named" || consequence.kind === "counted" ? consequence.enabled : 0;
   const diagnostics = useMemo(
     () => hardwareDiagnostics(caps?.gpu ?? null, encoders),
     [caps, encoders],
@@ -1391,8 +1432,14 @@ function RenditionDialog({
                   ))}
                 </SelectContent>
               </Select>
+              {/* THROUGH t(), like the SelectItem eleven lines up and like the
+                  aspect-mode hint above. `hint` is a TranslationKey; rendered
+                  bare it printed "rend.deintOffHint" at the operator. */}
               <span className="text-[10px] text-muted-foreground">
-                {DEINTERLACE_MODES.find((m) => m.key === form.deinterlace)?.hint ?? ""}
+                {(() => {
+                  const m = DEINTERLACE_MODES.find((m) => m.key === form.deinterlace);
+                  return m ? t(m.hint) : "";
+                })()}
               </span>
             </div>
           </div>
@@ -1830,20 +1877,33 @@ function RenditionDialog({
             />
           </div>
 
-          {editing && users.length > 0 && (
+          {/* WHO A SAVE RESTARTS. Named when the live list is in hand,
+              counted when only the database's is, and neither claimed as the
+              other -- an editor that says nothing because the socket is quiet
+              is an editor that has hidden the consequence, not one that has
+              none. */}
+          {editing && consequence.kind !== "none" && (
             <div className="flex flex-col gap-1 rounded border border-border bg-background p-2">
               <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
-                Feeds {users.length} destination{users.length === 1 ? "" : "s"}
+                {consequence.kind === "unknown"
+                  ? t("rend.usersUnknown")
+                  : `Feeds ${consequence.kind === "named" ? consequence.users.length : consequence.total} destination${(consequence.kind === "named" ? consequence.users.length : consequence.total) === 1 ? "" : "s"}`}
               </span>
-              <div className="flex flex-wrap gap-1">
-                {users.map((d) => (
-                  <DestChip key={d.id} dest={d} />
-                ))}
-              </div>
-              {enabledUsers > 0 && (
+              {consequence.kind === "named" && (
+                <div className="flex flex-wrap gap-1">
+                  {consequence.users.map((d) => (
+                    <DestChip key={d.id} dest={d} />
+                  ))}
+                </div>
+              )}
+              {consequence.kind === "counted" && (
+                <span className="text-[10px] text-muted-foreground">{t("rend.usersNotNamed")}</span>
+              )}
+              {consequence.kind !== "unknown" && consequence.enabled > 0 && (
                 <span className="text-[10px] text-warn">
-                  Saving restarts this encode, and with it the {enabledUsers} enabled destination
-                  {enabledUsers === 1 ? "" : "s"} above. Their audio routing is untouched.
+                  Saving restarts this encode, and with it the {consequence.enabled} enabled
+                  destination{consequence.enabled === 1 ? "" : "s"} above. Their audio routing is
+                  untouched.
                 </span>
               )}
             </div>
@@ -1871,11 +1931,16 @@ function RenditionDialog({
 function DeleteRenditionDialog({
   rendition,
   users,
+  counts,
   onOpenChange,
   onDeleted,
 }: {
   rendition: Rendition | null;
-  users: DestStatus[];
+  /** null when the live list has not arrived. NOT `[]`: this dialog's whole
+   *  job is the sentence "N destinations fall back to passthrough", and an
+   *  empty array told the operator the opposite of it. */
+  users: DestStatus[] | null;
+  counts: { destinations: number; enabledDestinations: number } | null;
   onOpenChange: (open: boolean) => void;
   onDeleted: () => void;
 }) {
@@ -1898,7 +1963,7 @@ function DeleteRenditionDialog({
     }
   };
 
-  const enabled = users.filter((d) => d.enabled).length;
+  const consequence = deleteConsequence(users, counts);
 
   return (
     <Dialog open={rendition !== null} onOpenChange={onOpenChange}>
@@ -1906,26 +1971,40 @@ function DeleteRenditionDialog({
         <DialogHeader>
           <DialogTitle>{t("rend.deleteRenditionTitle", { name: rendition?.name ?? "" })}</DialogTitle>
           <DialogDescription>
-            {users.length === 0
+            {consequence.kind === "none"
               ? t("rend.deleteNoDestinations")
-              : t(users.length === 1 ? "rend.deleteFallbackOne" : "rend.deleteFallbackMany", {
-                  count: users.length,
-                })}
+              : consequence.kind === "unknown"
+                ? t("rend.deleteUsersUnknown")
+                : t(
+                    (consequence.kind === "named" ? consequence.users.length : consequence.total) === 1
+                      ? "rend.deleteFallbackOne"
+                      : "rend.deleteFallbackMany",
+                    {
+                      count:
+                        consequence.kind === "named" ? consequence.users.length : consequence.total,
+                    },
+                  )}
           </DialogDescription>
         </DialogHeader>
 
-        {users.length > 0 && (
+        {consequence.kind === "counted" && (
+          <p className="text-[10px] text-muted-foreground">{t("rend.usersNotNamed")}</p>
+        )}
+
+        {consequence.kind !== "none" && consequence.kind !== "unknown" && (
           <div className="flex flex-col gap-1.5">
-            <div className="flex flex-wrap gap-1">
-              {users.map((d) => (
-                <DestChip key={d.id} dest={d} />
-              ))}
-            </div>
-            {enabled > 0 && (
+            {consequence.kind === "named" && (
+              <div className="flex flex-wrap gap-1">
+                {consequence.users.map((d) => (
+                  <DestChip key={d.id} dest={d} />
+                ))}
+              </div>
+            )}
+            {consequence.enabled > 0 && (
               <p className="rounded border border-warn/50 bg-warn/5 px-2 py-1.5 text-[10px] text-warn">
-                {enabled} of them {enabled === 1 ? "is" : "are"} enabled and will restart
-                immediately on the source video. None of them is deleted, and their audio routing is
-                untouched.
+                {consequence.enabled} of them {consequence.enabled === 1 ? "is" : "are"} enabled and
+                will restart immediately on the source video. None of them is deleted, and their
+                audio routing is untouched.
               </p>
             )}
           </div>

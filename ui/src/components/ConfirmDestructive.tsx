@@ -90,7 +90,21 @@ export function ConfirmDestructive({
     }
   }, [open]);
 
-  const unlocked = !requireTyping || typed.trim() === subject;
+  // A CONTROL, not a warning: an empty subject cannot unlock the button.
+  //
+  // `"".trim() === ""` is true, so a caller that asked for typing and passed an
+  // empty subject got a dialog whose confirm button was live before the
+  // operator touched anything -- the friction silently absent from exactly the
+  // action that asked for it, and nothing on screen to notice, because the
+  // Label reads "Type  to confirm" with a blank where the name should be.
+  //
+  // No caller reaches this today: all seven requireTyping sites pass a
+  // server-validated non-empty name. That is why this is hardening rather than
+  // a field bug -- and it is the whole reason to close it here, in the one
+  // place the rule lives, rather than trusting seven call sites to keep being
+  // careful. An eighth caller passing `dest?.name ?? ""` is an ordinary line of
+  // code, and it must not be able to turn the control off.
+  const unlocked = !requireTyping || (subject !== "" && typed.trim() === subject);
 
   const run = async () => {
     if (!unlocked || busy) return;

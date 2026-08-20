@@ -42,6 +42,7 @@ import { Stat } from "@/components/signature/Stat";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { api, ApiError } from "@/lib/api";
 import { duration, timestamp } from "@/lib/format";
+import { purgeTone } from "@/lib/purgeOutcome";
 import { cn } from "@/lib/utils";
 import {
   JOB_MODES,
@@ -169,6 +170,28 @@ export function JobsPage() {
     },
     [load, t],
   );
+
+  /** Purging the history, on its own rather than through `act`.
+   *
+   *  It went through `act` before, and "nothing was old enough to purge" was
+   *  raised as an Error so that `act`'s catch would put it on screen. That is
+   *  an exception used as a return channel, and it arrived in the red toast
+   *  kept for things that went wrong -- so an operator who asked a question
+   *  and got the honest answer "none" was told their action failed. The count
+   *  is a RESULT; it is reported as one, in the tone `purgeTone` picks. */
+  const purgeHistory = useCallback(async () => {
+    setBusy(true);
+    try {
+      const { purged } = await api.purgeJobs({});
+      if (purgeTone(purged) === "info") toast.info(t("jobs.nothingWasOldEnoughTo"));
+      else toast.success(t("jobs.historyPurged", { count: purged }));
+      await load();
+    } catch (err) {
+      toast.error(errText(err, t("jobs.thatDidNotWork")));
+    } finally {
+      setBusy(false);
+    }
+  }, [load, t]);
 
   const savePolicy = useCallback(async () => {
     if (!draft) return;
@@ -320,16 +343,7 @@ export function JobsPage() {
                 variant="outline"
                 size="sm"
                 disabled={busy}
-                onClick={() =>
-                  act(async () => {
-                    const { purged } = await api.purgeJobs({});
-                    if (purged === 0) {
-                      throw new Error(
-                        t("jobs.nothingWasOldEnoughTo"),
-                      );
-                    }
-                  }, "History purged.")
-                }
+                onClick={() => void purgeHistory()}
               >
                 <Trash2 />
                 Purge history
@@ -691,8 +705,20 @@ function PolicyEditor({
 
   return (
     <div className="flex flex-col gap-3">
+      {/* STICKY, and the only Save on the tab.
+
+          There used to be a second one at the bottom of the right-hand column
+          rendered under `!dirty` -- a Save button that existed only while
+          there was nothing to save, and was withdrawn the instant there was.
+          An operator who had learnt where it lived edited a field and watched
+          it disappear. (The poll does not clobber the draft: load() guards on
+          `dirtyRef.current`. The defect was the vanishing button alone.)
+
+          Deleting it leaves one Save, and `sticky top-0` is what makes that
+          safe: this tab is a long two-column grid, so a bar that only exists
+          at the top is a bar an operator editing the last card cannot see. */}
       {dirty && (
-        <div className="flex items-center justify-end gap-2">
+        <div className="sticky top-0 z-10 flex items-center justify-end gap-2 rounded-md border border-warn/40 bg-background/95 px-2 py-1.5 backdrop-blur">
           <span className="mr-auto text-[11px] text-warn">{t("jobs.unsavedChanges")}</span>
           <Button variant="ghost" size="sm" disabled={busy} onClick={onRevert}>
             Revert
@@ -978,11 +1004,6 @@ function PolicyEditor({
             </CardContent>
           </Card>
 
-          {!dirty && (
-            <Button variant="outline" size="sm" disabled={busy} onClick={onSave}>
-              Save policy
-            </Button>
-          )}
         </div>
       </div>
     </div>

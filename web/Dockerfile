@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # --- build ------------------------------------------------------------------
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 
 # Dependencies first so a content edit does not invalidate the install layer.
@@ -21,7 +21,7 @@ RUN npm run build
 # breaks both with permission errors that only surface at run time. This variant
 # is built to run rootless and defaults to 8080, which is also what Cloud Run
 # wants.
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 
 # Cloud Run sends SIGTERM and expects the process to go. nginx's default is a
 # graceful stop on SIGQUIT and a FAST stop on SIGTERM, which is what we want

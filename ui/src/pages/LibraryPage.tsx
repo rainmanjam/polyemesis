@@ -414,6 +414,23 @@ export function LibraryPage() {
         </span>
       </div>
 
+      {/* The whole explanation for the greyed captions button lived in a
+          `title` on a disabled <button>, and button.tsx sets
+          `disabled:pointer-events-none` -- so it never reached a pointer and
+          never reached a screen reader either. The prose that did exist only
+          rendered inside an EMPTY SEARCH RESULT, which an operator browsing
+          their recordings never sees.
+
+          A warning rather than a control, deliberately: the button cannot be
+          made to work from here, so the only fix available is to say why once,
+          in reading order, above the rows whose buttons are greyed. */}
+      {view?.jobsAvailable && !view.transcribeAvailable && (
+        <p className="mb-2 text-[11px] text-warn">
+          {t("lib.transcribeUnavailable")}
+          {view.transcribeNote ? ` ${view.transcribeNote}` : ""}
+        </p>
+      )}
+
       {/* ---------------- sessions ---------------- */}
       <div className="flex flex-col gap-2">
         {sessions.length === 0 && (

@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
+import { failedRead, mayClaim, okRead, pendingRead, readFailed, type ReadState } from "@/lib/readState";
 import { accentFor, TIMEOUTS } from "@/lib/chat";
 import { capabilityFor, supportOf } from "@/lib/capabilities";
 import { clockTime } from "@/lib/format";
@@ -55,7 +56,22 @@ export function ChatUserCard({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useT();
-  const [card, setCard] = useState<CardData | null>(null);
+  /* A CONTROL over the two claims this dialog makes about the scrollback.
+   *
+   * It was `.catch(() => setCard(null))`, which STORED A FAILED READ AS THE
+   * SAME VALUE as "loaded, and this person has said nothing" -- and both of
+   * this card's claims are read off that one value. A moderator deciding
+   * whether a bad line was a bad moment or a pattern was shown
+   * "0 messages on record" and "Nothing from this person is in the scrollback",
+   * which is the exact shape of a first offence. The read had simply failed.
+   *
+   * ReadState is a type guard, so the card CANNOT reach a message list for a
+   * read that did not answer: there is no value to render an empty state
+   * beside. Same module the token list, the platform credentials and the
+   * automation lists were moved onto. */
+  const [read, setRead] = useState<ReadState<CardData>>(pendingRead());
+  const card = mayClaim(read) ? read.value : null;
+  const failed = readFailed(read);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState("");
   // A permanent ban asks twice. Everything else does not: friction has to be
@@ -68,14 +84,15 @@ export function ChatUserCard({
     setLoading(true);
     api
       .chatUser({ platform, authorId, limit: 200 })
-      .then(setCard)
-      .catch(() => setCard(null))
+      .then((c) => setRead(okRead(c)))
+      .catch(() => setRead(failedRead()))
       .finally(() => setLoading(false));
   }, [platform, authorId]);
 
   useEffect(() => {
     if (open) {
       setConfirmBan(false);
+      setRead(pendingRead());
       load();
     }
   }, [open, load]);
@@ -128,12 +145,18 @@ export function ChatUserCard({
               {accent.label}
             </Badge>
           </DialogTitle>
+          {/* Literal English, like every other sentence in this dialog. The
+              one keyed string here is the retention caveat, which predates
+              this card's prose; keying one new sentence beside fifteen
+              literal siblings would leave the paragraph half-translated. */}
           <DialogDescription>
             {loading
               ? "Reading this server's scrollback…"
-              : `${messages.length}${card?.truncated ? "+" : ""} message${
-                  messages.length === 1 ? "" : "s"
-                } on record.`}
+              : failed
+                ? "This server's scrollback could not be read."
+                : `${messages.length}${card?.truncated ? "+" : ""} message${
+                    messages.length === 1 ? "" : "s"
+                  } on record.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -143,6 +166,17 @@ export function ChatUserCard({
             <p className="p-2 text-[11px] text-muted-foreground">
               <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
               Loading…
+            </p>
+          ) : failed ? (
+            /* NOT the empty state. "Nothing from this person is in the
+               scrollback" is a positive claim — it says the server answered
+               and this person has said nothing — and a moderator reads it as a
+               first offence. An unanswered question must not produce an
+               answer, least of all the exonerating one. */
+            <p className="p-2 text-[11px] text-warn">
+              This server's scrollback could not be read, so what this person has said here is
+              unknown. This is not an empty history — do not read it as a first offence. Try
+              again, or check the chat log on the server.
             </p>
           ) : messages.length === 0 ? (
             <p className="p-2 text-[11px] text-muted-foreground">
@@ -205,16 +239,38 @@ export function ChatUserCard({
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
+            {/* A CONTROL, and the WARNING beside it, because the two failures
+                here are different.
+
+                The control: this button loops over the messages the card is
+                holding, so with none it hides nothing — and then reported
+                "Hidden in polyemesis only. Everyone watching on twitch can
+                still see them.", a sentence describing work that did not
+                happen. A press with one possible outcome and a success toast
+                is worse than a missing button: the moderator moves on
+                believing the line is gone from their own overlay.
+
+                The warning: `disabled` alone would be a grey button with no
+                reason, which is the mute-control pattern this audit is full
+                of. The sentence below says which of the two cases it is —
+                nothing on record, or nothing readable. */}
             <Button
               size="sm"
               variant="secondary"
-              disabled={busy !== ""}
-              title="Remove their messages from this server only. Everyone watching still sees them."
+              disabled={busy !== "" || messages.length === 0}
+              title={
+                messages.length === 0
+                  ? failed
+                    ? "The scrollback could not be read, so there is nothing here to hide."
+                    : "Nothing from this person is in this server's scrollback, so there is nothing to hide."
+                  : "Remove their messages from this server only. Everyone watching still sees them."
+              }
               onClick={() =>
                 run("Hidden here", async () => {
                   // Local hide has no per-user route: it is per-message by
                   // design, so this applies it to what we are holding. Said
                   // plainly in the button's title rather than implied.
+                  let hidden = 0;
                   for (const m of messages) {
                     await api.hideChatMessage({
                       platform,
@@ -222,9 +278,14 @@ export function ChatUserCard({
                       id: m.id,
                       scope: "local",
                     });
+                    hidden += 1;
                   }
+                  // The COUNT, not just the fact. "Hidden" over a loop that
+                  // ran zero times was the defect; a number the moderator can
+                  // check against what they were looking at is what makes the
+                  // report falsifiable.
                   return {
-                    detail: `Hidden in polyemesis only. Everyone watching on ${platform} can still see them.`,
+                    detail: `${hidden} message${hidden === 1 ? "" : "s"} hidden in polyemesis only. Everyone watching on ${platform} can still see them.`,
                   };
                 })
               }
@@ -232,6 +293,13 @@ export function ChatUserCard({
               <EyeOff className="mr-1 h-3 w-3" />
               Hide here only
             </Button>
+            {messages.length === 0 && !loading && (
+              <span className="text-[10px] text-muted-foreground">
+                {failed
+                  ? "Nothing to hide here — the scrollback could not be read."
+                  : "Nothing to hide here — none of their messages are in this server's scrollback."}
+              </span>
+            )}
 
             <Button
               size="sm"

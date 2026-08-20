@@ -42,6 +42,7 @@ import {
 import { PageHeader } from "@/components/AppLayout";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { SecretInput } from "@/components/SecretInput";
+import { PullIngestFields } from "@/components/PullIngestFields";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
 import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
@@ -305,7 +306,11 @@ export function SourcesPage() {
   );
 }
 
-function SourceCard({
+/* Exported for its test. The card is where a source's whole truth is stated --
+ * whether it is running, whether its token gates anything, and now whether it
+ * accepts publishes at all -- and those are claims worth pinning without
+ * standing up the page around it. */
+export function SourceCard({
   source,
   busy,
   onPatch,
@@ -356,6 +361,22 @@ function SourceCard({
                 running, and it is pulling from a file nothing ever read. */}
             {source.pullUploadUnchecked && (
               <Badge variant="warn">{t("sources.pullUnchecked")}</Badge>
+            )}
+            {/* AND BESIDE IT AGAIN, for the state that reads worst of all.
+                `running` is Engine(id) != nil, and manager.go builds an engine
+                for every row whether or not it is enabled -- so a disabled
+                source keeps its saturated green "running" badge, its publish
+                URLs and its "the token is enforced" line while the listener
+                answers REJ_CLOSE to every encoder that dials it. Nothing else
+                on this card mentions `enabled` but the switch.
+                A WARNING, not a control: refusing to draw the card would be
+                worse, and the switch beside it is already the control. What was
+                missing is the sentence saying which of the two facts on screen
+                wins. */}
+            {!source.enabled && (
+              <Badge variant="outline" data-testid="source-disabled">
+                {t("sources.disabledRefused")}
+              </Badge>
             )}
           </CardTitle>
           <CardDescription>
@@ -448,6 +469,23 @@ function SourceCard({
               </SelectContent>
             </Select>
           </div>
+
+          {/* THE FIELDS THE MODE NEEDS, for every mode the select offers.
+              `pull` was in the list with nothing behind it: db/settings.go
+              refuses the save with "pull url is required", naming a field this
+              card did not have, and a source that already had one stored
+              started dialling a URL nobody was shown. Same component the
+              settings tab renders, so the two can never describe the mode
+              differently. */}
+          {ing.mode === "pull" && (
+            <div className="flex flex-col gap-2 sm:col-span-3">
+              <PullIngestFields
+                idPrefix={`source-${source.id}-pull`}
+                value={ing.pull}
+                onChange={(pull) => setIngest({ pull })}
+              />
+            </div>
+          )}
 
           {ing.mode === "srt" && (
             <>

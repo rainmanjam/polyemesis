@@ -13,6 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AudioMeter } from "./AudioMeter";
 import { channelLabels } from "@/lib/channels";
+import { trackSignal, TRACK_SIGNAL_TEXT, type TrackSignal } from "@/lib/trackSignal";
 import { gainPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
@@ -61,6 +62,14 @@ interface TrackRowsProps {
   selection: TrackSel[];
   levels?: Levels | null;
   probed: boolean;
+  /** Whether the feed carrying `levels` is connected right now.
+   *
+   *  Separate from `probed`, which is the ingest LAYOUT and says nothing about
+   *  whether anything is metering. Without it this component cannot tell a
+   *  track nobody has measured from a track that is silent, and cannot tell a
+   *  frozen last frame from live audio. Optional and defaulting to true so the
+   *  read-only callers that never had a meter feed are unchanged. */
+  meterFeedLive?: boolean;
   onChange: (next: TrackSel[]) => void;
   /** Source-side descriptions, keyed by track index. */
   annotations?: TrackAnnotation[];
@@ -82,6 +91,7 @@ export function TrackRows({
   selection,
   levels,
   probed,
+  meterFeedLive = true,
   onChange,
   annotations = [],
   onAnnotate,
@@ -112,7 +122,16 @@ export function TrackRows({
         const role = ann.role ?? "";
         const peak = levels?.peak?.[t.index] ?? [];
         const rms = levels?.rms?.[t.index] ?? [];
-        const hasLevels = peak.length > 0;
+        /* Liveness is consulted BEFORE the levels, so a frozen last frame
+           cannot be drawn as a live meter. LiveDataProvider now clears `levels`
+           on close as well; this is the second of the two, and it is the one
+           that survives somebody putting a stale frame back. */
+        const signal = trackSignal({
+          hasLevels: peak.length > 0,
+          probed,
+          feedLive: meterFeedLive,
+        });
+        const hasLevels = signal === "meter";
         // A role policy overrules the checkbox, so a checked-but-excluded row
         // has to read as "not sent" rather than as "sent".
         const excluded = role !== "" && excludeRoles.includes(role);
@@ -170,8 +189,15 @@ export function TrackRows({
                     barGap={2}
                   />
                 ) : (
+                  /* THREE STRINGS, NOT TWO. "no signal" was printed for every
+                     track on a healthy ingest whenever the meters were off or
+                     the first frame had not arrived — `probed` is the ingest
+                     layout and says nothing about whether anything is
+                     metering. On the page where routing is decided, "this
+                     track carries nothing" is the reading that gets a track
+                     left out of the mix. */
                   <div className="font-mono text-[10px] text-subtle-foreground">
-                    {probed ? "no signal" : "waiting for stream"}
+                    {TRACK_SIGNAL_TEXT[signal as Exclude<TrackSignal, "meter">]}
                   </div>
                 )}
                 <div className="mt-0.5 flex min-w-0 items-center gap-1.5">

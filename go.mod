@@ -1,6 +1,6 @@
 module github.com/rainmanjam/polyemesis
 
-go 1.26.6
+go 1.27.0
 
 require (
 	github.com/bluenviron/gortmplib v1.0.0

@@ -5,7 +5,7 @@
 // dialog through a PORTAL -- renderToStaticMarkup returns an empty string for
 // it, which is how the first version of this test "passed" nothing at all.
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { ConfirmDestructive } from "./ConfirmDestructive";
 
@@ -53,5 +53,55 @@ describe("ConfirmDestructive", () => {
   it("shows the subject verbatim, whatever its case", () => {
     show("my-webhook");
     expect(screen.getByText("my-webhook", { selector: "span" })).toBeTruthy();
+  });
+});
+
+/* AN EMPTY SUBJECT MUST NOT UNLOCK THE TYPED CHALLENGE.
+ *
+ * `"".trim() === ""` is true, so `requireTyping` with an empty subject handed
+ * the operator a live Delete button before they touched anything -- the
+ * friction absent from exactly the action that asked for it. The Label reads
+ * "Type  to confirm" with a blank where the name should be, so there is
+ * nothing on screen to notice either.
+ *
+ * Hardening rather than a live hazard: every current caller passes a
+ * server-validated non-empty name. The point is that the guarantee lives HERE,
+ * so an eighth caller writing `subject={dest?.name ?? ""}` cannot switch the
+ * control off by accident.
+ */
+describe("ConfirmDestructive: the typed challenge with no subject", () => {
+  afterEach(cleanup);
+
+  const showWith = (subject: string) =>
+    render(
+      <ConfirmDestructive
+        open
+        onOpenChange={() => {}}
+        subject={subject}
+        title="Delete"
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        requireTyping
+        onConfirm={() => {}}
+      />,
+    );
+
+  it("keeps the button locked when the subject is empty and nothing was typed", () => {
+    showWith("");
+    const button = screen.getByRole("button", { name: "Delete" });
+    expect(
+      (button as HTMLButtonElement).disabled,
+      "requireTyping with an empty subject unlocked before the operator typed anything: " +
+        "the confirmation was on screen with its control already off",
+    ).toBe(true);
+  });
+
+  it("still unlocks for a real subject once it is typed", () => {
+    showWith("Main");
+    const input = screen.getByPlaceholderText("Main");
+    fireEvent.change(input, { target: { value: "Main" } });
+    expect((screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 });

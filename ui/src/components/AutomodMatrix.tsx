@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { armedCount, isOperable } from "@/lib/automodArmed";
 import type {
   AutomodAction,
   AutomodCell,
@@ -202,7 +203,23 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
 
         {view.platforms.map((platform) => {
           const platformOn = automod.platformEnabled?.[platform] !== false;
-          const armed = view.summary[platform] ?? 0;
+          /* FROM THE DRAFT, not from `view.summary`.
+             `view.summary` is the server's count from the one fetch at mount,
+             and every other thing on this card — the cells, the irreversible
+             banner — reads the draft. So this line could say "nothing
+             automatic" directly beneath "An irreversible action is armed", and
+             mid-raid could keep reading "5 automatic actions" after everything
+             had been disarmed. It is the only thing an operator sees without
+             expanding sixty cells, which is exactly why it must not be the
+             stale one. Counted by the same rule the server uses, in lib so the
+             two cannot drift again. */
+          const armed = armedCount({
+            platform,
+            actions: view.actions,
+            checkers: view.checkers,
+            on: automod.on,
+            available: (key) => byKey.get(key)?.available ?? false,
+          });
           const isOpen = expanded[platform] ?? false;
 
           return (
@@ -284,13 +301,21 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                 </span>
                               )}
                             </div>
-                            <button
-                              type="button"
-                              className="text-[10px] text-muted-foreground underline"
-                              onClick={() => setRow(platform, action, false)}
-                            >
-                              clear row
-                            </button>
+                            {/* No "clear row" on a row that cannot be cleared;
+                                the sentence that says why, instead. */}
+                            {isOperable(action) ? (
+                              <button
+                                type="button"
+                                className="text-[10px] text-muted-foreground underline"
+                                onClick={() => setRow(platform, action, false)}
+                              >
+                                clear row
+                              </button>
+                            ) : (
+                              <div className="text-[10px] text-muted-foreground">
+                                recorded for review, never acted on
+                              </div>
+                            )}
                           </td>
                           {view.checkers.map((checker) => {
                             const key = `${platform}/${action}/${checker}`;
@@ -298,7 +323,36 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                             const available = cell?.available ?? false;
                             return (
                               <td key={checker} className="px-2 py-2 text-center">
-                                {available ? (
+                                {!isOperable(action) ? (
+                                  /* FIXED TEXT, NOT A SWITCH — a CONTROL, and
+                                     the same one this file already applies to
+                                     an unavailable cell twelve lines down.
+
+                                     Flagging is recorded before the matrix is
+                                     consulted (chat/automod.go's recordAutomod
+                                     logs every finding in the verdict) and the
+                                     worker returns immediately for the flag
+                                     action, so these twelve switches had one
+                                     possible outcome each. Rendering them
+                                     disabled would be no better: a greyed
+                                     switch still says "this could be turned
+                                     on", and an operator who turns flagging
+                                     "off" to quieten a raid and sees the row
+                                     go dark believes something changed.
+
+                                     The server agrees, which is where the
+                                     inconsistency showed: Summary excludes
+                                     this action from the armed count
+                                     (automod/matrix.go:220), so the collapsed
+                                     line and these switches were already
+                                     disagreeing about what "armed" means. */
+                                  <span
+                                    className="cursor-help text-[10px] text-muted-foreground"
+                                    title="Every checker's findings are recorded before this matrix is consulted, and recording is all flagging does. There is nothing here to switch."
+                                  >
+                                    always on
+                                  </span>
+                                ) : available ? (
                                   <Switch
                                     checked={Boolean(automod.on?.[key])}
                                     onCheckedChange={(v) => setCell(key, v)}

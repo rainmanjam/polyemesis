@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,9 +8,10 @@ import { PageHeader } from "@/components/AppLayout";
 import { AudioMeter, MeterScale } from "@/components/signature/AudioMeter";
 import { channelLabels } from "@/lib/channels";
 import { Stat } from "@/components/signature/Stat";
-import { useLiveData, useSourceTracks } from "@/hooks/useLiveData";
+import { useLiveData, useSourceTracks, useStaleTracker } from "@/hooks/useLiveData";
 import { autoApi } from "@/lib/autoApi";
 import { db } from "@/lib/format";
+import { loudnessMeasured } from "@/lib/meterFacts";
 import { toneBadge, type SignalTone } from "@/lib/signal";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -44,6 +45,10 @@ interface LoudnessReport {
 }
 
 interface LoudnessView {
+  /** Whether the analyser tier is running at all: the operator's monitor
+   *  override AND the meters switch it follows. The page has no way to know
+   *  this on its own, which is why it used to assume it. */
+  enabled?: boolean;
   reports: LoudnessReport[];
   bounds: {
     toleranceLu: number;
@@ -101,7 +106,25 @@ export function MetersPage() {
   const probed = source?.probed ?? false;
   const metersRunning = status?.meters?.state === "running";
   const [loudness, setLoudness] = useState<LoudnessView | null>(null);
-  const [monitorOn, setMonitorOn] = useState(true);
+  /* null until the server has said. The switch used to be seeded `true` and
+     never seeded again, so every remount drew it ON -- over a monitor the
+     operator had switched off, and above a sentence explaining the empty list
+     as "Nothing to measure yet. Each running destination gets its own EBU R128
+     analyser", which is a claim about a tier that was not running.
+
+     A CONTROL: the page cannot state a setting it has not been told, so the
+     switch is indeterminate until the first read answers. */
+  const [monitorOn, setMonitorOn] = useState<boolean | null>(null);
+  /* True from the operator's click until the server has answered. A poll
+     already in flight carries the state from BEFORE the click, and letting it
+     land flips the switch back under their finger. */
+  const toggling = useRef(false);
+
+  /* A failing poll is silent while it might recover and explicit once it has
+     not -- the same tracker MonitoringPage uses on its process list. Without
+     it the last verdicts sat on screen for ever with no clock and no "as of",
+     and a stale pass reads exactly like a live one. */
+  const freshness = useStaleTracker();
 
   // Polled rather than pushed: the analyser publishes once a second, and a
   // second socket subscription for one card is not worth the wiring.
@@ -109,21 +132,30 @@ export function MetersPage() {
     const read = () =>
       autoApi
         .get<LoudnessView>("/loudness")
-        .then(setLoudness)
-        .catch(() => {});
+        .then((v) => {
+          setLoudness(v);
+          if (!toggling.current) setMonitorOn(v.enabled ?? null);
+          freshness.ok();
+        })
+        .catch(freshness.failed);
     void read();
     const t = window.setInterval(read, 2000);
     return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const reports = loudness?.reports ?? [];
 
   const toggleMonitor = async (on: boolean) => {
+    toggling.current = true;
     setMonitorOn(on);
     try {
-      await autoApi.put("/loudness", { enabled: on });
+      const res = await autoApi.put<{ enabled: boolean }>("/loudness", { enabled: on });
+      setMonitorOn(res?.enabled ?? on);
     } catch {
       setMonitorOn(!on);
+    } finally {
+      toggling.current = false;
     }
   };
 
@@ -157,19 +189,37 @@ export function MetersPage() {
           only one of those is a number somebody else acts on. */}
       <Card className="mb-3">
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>{t("meters.loudness")}</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            {t("meters.loudness")}
+            {freshness.stale && (
+              <Badge variant="warn" title={t("meters.notUpdatingTitle", { count: freshness.failures })}>
+                {t("meters.notUpdating")}
+              </Badge>
+            )}
+          </CardTitle>
           <div className="flex items-center gap-2">
             <Label htmlFor="loud-monitor" className="text-[10px] text-muted-foreground">
               Monitor
             </Label>
-            <Switch id="loud-monitor" checked={monitorOn} onCheckedChange={toggleMonitor} />
+            {/* Disabled rather than guessed while the state is unknown: a
+                switch drawn in a position nobody chose is a lie one click
+                deep. */}
+            <Switch
+              id="loud-monitor"
+              checked={monitorOn ?? false}
+              disabled={monitorOn === null}
+              onCheckedChange={toggleMonitor}
+            />
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {reports.length === 0 ? (
             <p className="text-[11px] text-muted-foreground">
-              {monitorOn
-                ? t("meters.nothingToMeasure") : t("meters.monitorOff")}
+              {monitorOn === null
+                ? t("meters.monitorUnknown")
+                : monitorOn
+                  ? t("meters.nothingToMeasure")
+                  : t("meters.monitorOff")}
             </p>
           ) : (
             reports.map((rep) => (
@@ -276,7 +326,7 @@ export function MetersPage() {
  *  are trustworthy depends on whether a target exists and whether enough
  *  programme has been measured, and that logic does not belong inlined in a
  *  page that is otherwise about bars moving. */
-function ComplianceRow({
+export function ComplianceRow({
   report,
   truePeakFailOverDb,
 }: {
@@ -286,8 +336,13 @@ function ComplianceRow({
   const t = useT();
   const tone = VERDICT_TONE[report.verdict] ?? "idle";
   const targeted = report.target.source !== "none";
+  /* Nothing has gone through the analyser yet: every float is still at its
+     zero value, and zero is the loudest reading on both of these scales. */
+  const measured = loudnessMeasured(report);
   const peakOver =
-    targeted && report.truePeakDbtp > report.target.truePeakDbtp + truePeakFailOverDb;
+    measured &&
+    targeted &&
+    report.truePeakDbtp > report.target.truePeakDbtp + truePeakFailOverDb;
 
   return (
     <div className="flex flex-col gap-1.5 border-b border-border pb-2 last:border-0 last:pb-0">
@@ -315,26 +370,41 @@ function ComplianceRow({
       ) : (
         <>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-            <Stat label={t("meters.momentary")} value={lufs(report.momentaryLufs)} unit="LUFS" />
-            <Stat label={t("meters.shortTerm")} value={lufs(report.shortTermLufs)} unit="LUFS" />
+            {/* Every one of these is a dash until something has been measured,
+                not just the two that happened to be guarded. */}
+            <Stat
+              label={t("meters.momentary")}
+              value={measured ? lufs(report.momentaryLufs) : "—"}
+              unit="LUFS"
+            />
+            <Stat
+              label={t("meters.shortTerm")}
+              value={measured ? lufs(report.shortTermLufs) : "—"}
+              unit="LUFS"
+            />
             {/* The only figure a platform normalizes against, so it carries the
                 verdict's colour and the others stay neutral. */}
             <Stat
               label={t("meters.integrated")}
-              value={report.integrated ? lufs(report.integratedLufs) : "—"}
+              value={measured && report.integrated ? lufs(report.integratedLufs) : "—"}
               unit="LUFS"
               tone={VERDICT_STAT[report.verdict] ?? "muted"}
             />
             <Stat
               label={t("meters.deviation")}
-              value={targeted && report.integrated ? signed(report.deviationLu) : "—"}
+              value={measured && targeted && report.integrated ? signed(report.deviationLu) : "—"}
               unit="LU"
               tone="muted"
             />
-            <Stat label={t("meters.range")} value={lufs(report.rangeLu)} unit="LU" tone="muted" />
+            <Stat
+              label={t("meters.range")}
+              value={measured ? lufs(report.rangeLu) : "—"}
+              unit="LU"
+              tone="muted"
+            />
             <Stat
               label={t("meters.truePeak")}
-              value={dbtp(report.truePeakDbtp)}
+              value={measured ? dbtp(report.truePeakDbtp) : "—"}
               unit="dBTP"
               tone={peakOver ? "down" : "default"}
             />

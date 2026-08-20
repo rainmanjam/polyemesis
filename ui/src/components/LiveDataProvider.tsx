@@ -104,6 +104,15 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
 
       ws.onclose = () => {
         setConnected(false);
+        // THE FROZEN METERS. Every other value here is a description of
+        // configuration or of a process, and holding the last one through a
+        // reconnect is right: the destinations did not stop existing because a
+        // socket did. `levels` is the exception, because it is a MEASUREMENT OF
+        // NOW. Left in place it keeps drawing the last frame before the
+        // disconnection — bars bouncing at nothing, indistinguishable from live
+        // audio — on the page where somebody is deciding which tracks carry
+        // sound. A CONTROL: there is no stale frame left to render as current.
+        setLevels(null);
         wsRef.current = null;
         if (closedRef.current) return;
         // Back off the same way the server's supervisor does, so a restarting

@@ -124,6 +124,28 @@ export function ChatMessageMenu({
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
 
+        {/* THE REASON, WHERE IT CAN BE READ.
+            `modReason` was computed correctly and rendered only into `title`
+            on items that carry `data-[disabled]:pointer-events-none`
+            (ui/dropdown-menu.tsx:36) — an element that receives no pointer
+            events never fires the hover a native tooltip needs, so the
+            sentence could not be reached by any means. Which contradicted this
+            file's own header: "shown DISABLED with the reason, never hidden —
+            a missing button reads as a broken tool, not as an unsupported
+            platform." Greyed items with no reason read as a broken tool too.
+
+            A label under the separator rather than a note per item: the reason
+            is the same for every greyed item in the menu, and repeating it
+            five times is how a short menu turns back into a form. */}
+        {modReason !== "" && (
+          <>
+            <DropdownMenuLabel className="whitespace-normal text-[10px] font-normal leading-snug text-warn">
+              {modReason}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+          </>
+        )}
+
         <DropdownMenuItem
           onSelect={() => {
             close();

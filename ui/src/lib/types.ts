@@ -178,6 +178,17 @@ export interface VideoStream {
 }
 
 export interface SourceInfo {
+  /** Which programme this snapshot describes. The server has always sent both
+   *  (engine.SourceInfo) and nothing here declared them, so every screen fed
+   *  from the status socket rendered one engine's figures with no way to say
+   *  whose they were -- and the socket is install-wide, so on a two-programme
+   *  install the Ingest card alternates between two feeds every two seconds.
+   *
+   *  Declaring them does not scope the socket. It lets the page NAME what it is
+   *  showing, which is the difference between an unlabelled flicker and a
+   *  reading an operator can attribute. */
+  id: number;
+  name: string;
   probed: boolean;
   tracks: SourceTrack[] | null;
   video?: VideoStream | null;
@@ -705,6 +716,16 @@ export interface DestStatus {
   warnings: string[] | null;
   error?: string;
   process?: ProcessStatus | null;
+  /** Why the LAST stop of this destination could not be confirmed: the stop
+   *  ended on Stop's deadline arm, so SIGKILL was issued and never waited for
+   *  and the child may still be running and still publishing.
+   *
+   *  Separate from `error` for the reason engine/status.go:41-50 gives —
+   *  nothing about the row is wrong, the port and the subscription were
+   *  released, and `process.state` reads "stopped" on BOTH of Stop's arms and
+   *  so cannot say this. It arrives in every status snapshot, not only on the
+   *  POST response, which is why the card can render it with no API change. */
+  stopWarning?: string;
   /** The shared encode feeding this destination; absent for passthrough. */
   renditionId?: number | null;
   renditionName?: string;
@@ -917,6 +938,13 @@ export interface Status {
   destinations: DestStatus[];
   source: SourceInfo;
   relay: RelayStats;
+  /** Why NO destination has a process, when that is a deliberate decision
+   *  rather than a fault. Absent whenever destinations are planned normally.
+   *
+   *  Mirrors engine.HoldStatus. `code` is the stable identifier machinery
+   *  matches on; `reason` is the sentence a person reads, and may be reworded
+   *  freely -- so the UI renders `reason` and never branches on it. */
+  destinationHold?: { code: string; reason: string } | null;
 }
 
 /** peak[track][channel] and rms[track][channel], in dBFS. */

@@ -52,7 +52,7 @@ RUN mkdir -p /src/internal/web && npm run build
 # Cross-compiling is safe because CGO_ENABLED=0 already: there is no C
 # toolchain in the picture, so a native Go compiler targeting another GOARCH
 # produces the same static binary emulation would have.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
