@@ -656,6 +656,7 @@ told so. The schedule still saves and still runs.
 | `GET` | `/platforms/credentials` |
 | `PUT` `DELETE` | `/platforms/credentials/{platform}` |
 | `POST` | `/platforms/credentials/{platform}/check` |
+| `POST` | `/platforms/credentials/{platform}/device`, `/platforms/credentials/{platform}/device/poll` |
 | `GET` | `/platforms/accounts`, `/platforms/accounts/{id}/stats`, `/destinations/{id}/facebook/stream-health` |
 | `DELETE` | `/platforms/accounts/{id}` |
 | `GET` | `/oauth/{platform}/start`, `/callback` |
@@ -674,6 +675,42 @@ stored client credentials for it are still good, and answers with a verdict —
 never with the credential. It is a `POST` because it makes an outbound call, and
 it is refused to `read` tokens for the same reason: a route that exercises a
 stored secret is not a read, whatever its verb.
+
+#### Connecting an account with no callback URL
+
+`/platforms/credentials/{platform}/device` is the **device code flow**: the way
+to connect an account from a box no platform can redirect back to. The ordinary
+`/oauth/{platform}/start` flow needs a redirect URI the platform will accept, and
+a server reached as `https://192.168.1.50` or on a self-signed certificate has
+none. This one removes the callback from the problem.
+
+`POST …/device` asks the platform for a code and answers with `userCode`,
+`verificationUri`, `expiresAt`, `intervalSeconds` and an opaque `handle`. The
+operator types the code at the platform's own page — on a phone, on anything with
+a browser — while the server holds the device code that redeems the token. **The
+device code is never sent to the client.** The handle is what the client polls
+with, exactly as the `state` parameter names a pending authorization-code flow.
+
+`POST …/device/poll`, body `{"handle": "…"}`, answers `200` with a `state` of:
+
+| `state` | meaning |
+|---|---|
+| `pending` | the operator has not finished yet. Wait `retryInSeconds` and ask again. **Not an error.** |
+| `connected` | the account is stored and is in `account`. Stop polling. |
+| `expired` | the code was used, timed out, or the server no longer holds the handle. Stop polling and start again. |
+
+Only a real transport failure — the platform is down, rate-limiting, or refused
+the token for an unclassified reason — leaves as a `502`, and the flow survives
+one so a hiccup does not cost the operator their code.
+
+The interval is enforced **on the server**: a poll that arrives early is answered
+`pending` without a request leaving the process, because a client polling faster
+than the platform asked spends the operator's whole app's rate limit mid-connect.
+
+Exactly one platform offers this today, and the guide's `deviceFlow` field says
+which — read it rather than hard-coding a name. A platform without it is refused
+with a `400` naming the platform. `internal/oauth/device.go` records why the
+other three are absent, and the three reasons differ.
 
 `/metadata/broadcast-window` reports the period each platform will accept a
 scheduled broadcast in, because they disagree and the composer has to say so
