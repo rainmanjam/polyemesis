@@ -70,6 +70,10 @@ import {
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
+import {
+  platformConnectControls,
+  platformSupportsDeviceCode,
+} from "@/lib/platformConnect";
 import { LIMITS } from "@/lib/limits";
 import { PULL_SCHEMES, RTSP_TRANSPORTS } from "@/lib/types";
 import type {
@@ -1933,10 +1937,10 @@ function PlatformCredCard({
 
   const confirmCreds = useConfirm<{ name: string }>();
   const confirmDisconnect = useConfirm<PlatformAccount>();
-  // The device code flow, offered only where the SERVER says the platform has
-  // one. Read off the guide rather than matched against a platform name here:
-  // the field is derived from oauth.DeviceFor, so a build that gains or loses
-  // the capability changes this button with no edit on this page.
+  // Which ways this card offers to connect an account, and whether the device
+  // code flow is one of them. Both are the SERVER'S answer -- see
+  // lib/platformConnect.ts, which holds the rules and the reasons.
+  const connectControls = platformConnectControls(guide, creds);
   const [deviceOpen, setDeviceOpen] = useState(false);
 
   const remove = async () => {
@@ -2087,28 +2091,27 @@ function PlatformCredCard({
                   {rechecking ? <Loader2 className="animate-spin" /> : <RefreshCw />} Re-check
                 </Button>
               )}
-              {creds && (
-                <>
-                  <Button size="sm" variant="outline" asChild>
-                    <a href={api.connectUrl(guide.platform)}>
-                      <ExternalLink /> Connect an account
-                    </a>
-                  </Button>
-                  {/* Beside the ordinary Connect button rather than instead of
-                      it. The two are for different situations and only the
-                      operator knows which they are in: the button above needs
-                      a redirect URI the platform accepts, which a box reached
-                      as https://192.168.1.50 or on a self-signed certificate
-                      does not have. Hiding either one would mean guessing. */}
-                  {guide.deviceFlow && (
-                    <Button size="sm" variant="outline" onClick={() => setDeviceOpen(true)}>
-                      <KeyRound /> {t("device.connectWithACode")}
-                    </Button>
-                  )}
-                  <Button size="sm" variant="ghost" onClick={() => confirmCreds.ask({ name: guide.name })}>
-                    <Trash2 /> Remove
-                  </Button>
-                </>
+              {/* Which of these the card offers is decided in
+                  lib/platformConnect.ts, with the reasons -- in particular why
+                  the code route is offered BESIDE the redirect one rather than
+                  instead of it. Written here it was a rule nothing could
+                  reach. */}
+              {connectControls.includes("connectRedirect") && (
+                <Button size="sm" variant="outline" asChild>
+                  <a href={api.connectUrl(guide.platform)}>
+                    <ExternalLink /> Connect an account
+                  </a>
+                </Button>
+              )}
+              {connectControls.includes("connectWithCode") && (
+                <Button size="sm" variant="outline" onClick={() => setDeviceOpen(true)}>
+                  <KeyRound /> {t("device.connectWithACode")}
+                </Button>
+              )}
+              {connectControls.includes("removeCredentials") && (
+                <Button size="sm" variant="ghost" onClick={() => confirmCreds.ask({ name: guide.name })}>
+                  <Trash2 /> Remove
+                </Button>
               )}
             </div>
 
@@ -2188,7 +2191,7 @@ function PlatformCredCard({
           if (confirmDisconnect.target) await disconnect(confirmDisconnect.target);
         }}
       />
-      {guide.deviceFlow && (
+      {platformSupportsDeviceCode(guide) && (
         <DeviceCodeDialog
           platform={guide.platform}
           platformName={guide.name}

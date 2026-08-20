@@ -12,6 +12,8 @@ package api
 // whole behaviour under test.
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +21,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -38,10 +42,13 @@ type twitchDeviceStub struct {
 	tokenAnswers []stubAnswer
 	// deviceAnswer overrides the device endpoint's reply.
 	deviceAnswer *stubAnswer
-	tokenCalls   int
-	deviceCalls  int
-	seenScopes   []string
-	seenCodes    []string
+	// usersAnswer overrides Helix's /users, which is how the identity read that
+	// happens AFTER a token has been minted is made to fail.
+	usersAnswer *stubAnswer
+	tokenCalls  int
+	deviceCalls int
+	seenScopes  []string
+	seenCodes   []string
 }
 
 type stubAnswer struct {
@@ -99,6 +106,10 @@ func (s *twitchDeviceStub) serve(w http.ResponseWriter, r *http.Request) {
 		write(w, a)
 
 	case r.URL.Path == "/users":
+		if s.usersAnswer != nil {
+			write(w, *s.usersAnswer)
+			return
+		}
 		write(w, stubAnswer{http.StatusOK,
 			`{"data":[{"id":"44322889","login":"dallas","display_name":"Dallas"}]}`})
 
@@ -485,6 +496,226 @@ func TestAHandleCannotBeRedeemedAgainstAnotherPlatform(t *testing.T) {
 	send(t, h, sign, http.MethodPost,
 		"/api/v1/platforms/credentials/youtube/device/poll",
 		map[string]any{"handle": start.Handle}, http.StatusBadRequest)
+}
+
+// TestAStartThePlatformRefusesIsA502AndLeavesNoFlowBehind. The status is the
+// assertion: 502 says the far end misbehaved, 500 would blame this process for
+// something it did not do, and 400 would send the operator to the Settings page
+// to re-check a client id that is very probably fine.
+func TestAStartThePlatformRefusesIsA502AndLeavesNoFlowBehind(t *testing.T) {
+	s, h, stub, sign := deviceFlowServer(t)
+	stub.deviceAnswer = &stubAnswer{http.StatusInternalServerError,
+		`{"status":500,"message":"internal server error"}`}
+
+	send(t, h, sign, http.MethodPost,
+		"/api/v1/platforms/credentials/twitch/device", nil, http.StatusBadGateway)
+
+	// Nothing was issued, so nothing may be held. A handle recorded here would be
+	// one the UI could poll forever against a device code that does not exist.
+	s.devices.mu.Lock()
+	defer s.devices.mu.Unlock()
+	if n := len(s.devices.byHandle); n != 0 {
+		t.Errorf("%d flow(s) recorded from a start that never received a device code", n)
+	}
+}
+
+// TestAnAbandonedFlowIsSweptWhenTheNextOneStarts is the only thing that ever
+// removes a flow nobody came back for.
+//
+// The operator closed the dialog, or the tab went away. No poll will arrive, so
+// no poll can notice the expiry, and the entry holds a bearer-equivalent secret
+// in memory. The sweep on the next start is the whole of the cleanup -- see
+// deviceFlows.put -- so a change that dropped it would leak an entry per
+// abandoned attempt for the life of the process.
+func TestAnAbandonedFlowIsSweptWhenTheNextOneStarts(t *testing.T) {
+	s, h, _, sign := deviceFlowServer(t)
+
+	// Two operators, or two tabs. Only one of them walks away.
+	stillTyping := startDeviceFlow(t, h, sign)
+	abandoned := startDeviceFlow(t, h, sign)
+	s.devices.mu.Lock()
+	s.devices.byHandle[abandoned.Handle].expiresAt = time.Now().Add(-time.Second)
+	s.devices.mu.Unlock()
+
+	fresh := startDeviceFlow(t, h, sign)
+
+	if _, held := s.devices.take(abandoned.Handle); held {
+		t.Error("a device code that died of old age is still being held; nothing polls it and " +
+			"nothing else removes it, so it stays until the process ends")
+	}
+	// The other half of the claim: the sweep takes the dead one and ONLY the dead
+	// one. This is the assertion a put that simply emptied the map would fail --
+	// stillTyping was already there when the sweep ran, so clearing the map takes
+	// it, and the operator staring at that code polls a handle the server has
+	// forgotten. The just-started one cannot test this: it is written in after
+	// the sweep, so it survives an emptied map too.
+	if _, held := s.devices.take(stillTyping.Handle); !held {
+		t.Error("the sweep took a live flow with a code an operator may still be entering")
+	}
+	if _, held := s.devices.take(fresh.Handle); !held {
+		t.Error("the sweep took the flow that had just been started")
+	}
+}
+
+// TestAPollBodyTheServerCannotReadIsRefusedBeforeThePlatformIsCalled.
+//
+// The handle is the ONLY thing a poll may name -- that is the entire point of
+// handing out an opaque one -- so a client that tries to supply the device code
+// itself is refused rather than humoured. The flow survives, because a
+// malformed request is the client's mistake and not a reason to make the
+// operator start over.
+func TestAPollBodyTheServerCannotReadIsRefusedBeforeThePlatformIsCalled(t *testing.T) {
+	s, h, stub, sign := deviceFlowServer(t)
+	stub.tokenAnswers = []stubAnswer{{http.StatusOK, twitchTokenBody}}
+
+	start := startDeviceFlow(t, h, sign)
+	openThePollGate(t, s, start.Handle)
+
+	send(t, h, sign, http.MethodPost,
+		"/api/v1/platforms/credentials/twitch/device/poll",
+		map[string]any{"handle": start.Handle, "deviceCode": "DEV-CODE-SECRET"},
+		http.StatusBadRequest)
+
+	stub.mu.Lock()
+	calls := stub.tokenCalls
+	stub.mu.Unlock()
+	if calls != 0 {
+		t.Errorf("%d token request(s) went out for a body the server had already rejected", calls)
+	}
+	if _, held := s.devices.take(start.Handle); !held {
+		t.Error("a malformed poll threw the flow away; the operator would have to start over " +
+			"because their browser sent a field the server does not accept")
+	}
+}
+
+// TestAFlowWhosePlatformLostItsDeviceSupportIsRefusedRatherThanPanicking.
+//
+// Only reachable if the build changed under a live flow -- which is a restart,
+// which drops the registry -- so the branch is unreachable in production and
+// worth keeping anyway: the alternative to answering is resolving a nil
+// DeviceFlower and calling a method on it, which takes the request handler down
+// rather than the request. The held flow's platform is rewritten by hand --
+// s.devices.byHandle, not the oauth provider registry -- because a start
+// against Kick is refused up front, so that is the only way to end up holding a
+// live flow whose platform has no device provider.
+func TestAFlowWhosePlatformLostItsDeviceSupportIsRefusedRatherThanPanicking(t *testing.T) {
+	s, h, stub, sign := deviceFlowServer(t)
+	start := startDeviceFlow(t, h, sign)
+
+	s.devices.mu.Lock()
+	s.devices.byHandle[start.Handle].platform = db.PlatformKick
+	s.devices.byHandle[start.Handle].nextPollAt = time.Now().Add(-time.Second)
+	s.devices.mu.Unlock()
+
+	raw := send(t, h, sign, http.MethodPost,
+		"/api/v1/platforms/credentials/kick/device/poll",
+		map[string]any{"handle": start.Handle}, http.StatusBadRequest)
+	if !strings.Contains(string(raw), string(db.PlatformKick)) {
+		t.Errorf("the refusal does not name the platform it is about: %s", raw)
+	}
+	// And the handle goes, because no future poll of it can end differently.
+	if _, held := s.devices.take(start.Handle); held {
+		t.Error("the server is still holding a flow it has no way to redeem")
+	}
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if stub.tokenCalls != 0 {
+		t.Errorf("%d token request(s) went out for a platform with no device flow", stub.tokenCalls)
+	}
+}
+
+// TestATokenWhoseAccountCannotBeReadEndsTheFlow is the window between the two
+// calls a successful poll makes.
+//
+// Twitch has minted the token, so the device code is spent whatever happens
+// next; it will not mint a second one. Keeping the handle would leave the UI
+// polling a code that can only answer "invalid device code" from here on, and
+// the operator watching a spinner. So the handle goes and the answer is a 502 --
+// the platform's fault, not the operator's -- and no half-built account is
+// stored.
+func TestATokenWhoseAccountCannotBeReadEndsTheFlow(t *testing.T) {
+	s, h, stub, sign := deviceFlowServer(t)
+	stub.tokenAnswers = []stubAnswer{{http.StatusOK, twitchTokenBody}}
+	stub.usersAnswer = &stubAnswer{http.StatusInternalServerError,
+		`{"error":"Internal Server Error","status":500}`}
+
+	start := startDeviceFlow(t, h, sign)
+	openThePollGate(t, s, start.Handle)
+
+	send(t, h, sign, http.MethodPost,
+		"/api/v1/platforms/credentials/twitch/device/poll",
+		map[string]any{"handle": start.Handle}, http.StatusBadGateway)
+
+	if _, held := s.devices.take(start.Handle); held {
+		t.Error("the server is still holding a device code Twitch has already redeemed; every " +
+			"further poll of it can only answer that it is invalid")
+	}
+	accounts, err := s.store.ListPlatformAccounts()
+	if err != nil {
+		t.Fatalf("list accounts: %v", err)
+	}
+	if len(accounts) != 0 {
+		t.Errorf("%d account(s) stored from a token whose identity was never read", len(accounts))
+	}
+}
+
+// TestAStoreThatRefusesTheAccountEndsTheFlowRatherThanLeavingItPollable is the
+// same window one step later: the token is real, the identity is read, and the
+// write fails.
+//
+// The device code is just as spent as in the case above, so the handle has to
+// go for the same reason. What must NOT happen is a "connected" answer with no
+// row behind it -- the UI would close the dialog and list an account that is not
+// there.
+func TestAStoreThatRefusesTheAccountEndsTheFlowRatherThanLeavingItPollable(t *testing.T) {
+	s, h, stub, sign := deviceFlowServer(t)
+	stub.tokenAnswers = []stubAnswer{{http.StatusOK, twitchTokenBody}}
+
+	start := startDeviceFlow(t, h, sign)
+	openThePollGate(t, s, start.Handle)
+
+	// Taking the store away is the one failure a test can stage at exactly this
+	// point: the platform calls have already happened and the write has not.
+	if err := s.store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	w := pollWithoutTheRouter(t, s, string(db.PlatformTwitch), start.Handle)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("poll status = %d, want %d; a store that cannot answer is this process's "+
+			"failure and not the platform's", w.Code, http.StatusInternalServerError)
+	}
+	if strings.Contains(w.Body.String(), string(deviceConnected)) {
+		t.Errorf("the poll reported a connection that was never written: %s", w.Body.String())
+	}
+	if _, held := s.devices.take(start.Handle); held {
+		t.Error("the server is still holding a device code that has already been redeemed")
+	}
+}
+
+// pollWithoutTheRouter drives handlePollDeviceAuth directly, for the one test
+// that needs the store to be gone.
+//
+// The session middleware reads the same store, so a request through the handler
+// chain would be turned away at the door and never reach the branch under test.
+// Everything the handler itself reads -- the platform URL parameter and the JSON
+// body -- is supplied here exactly as chi and the SPA supply it.
+func pollWithoutTheRouter(t *testing.T, s *Server, platform, handle string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(map[string]string{"handle": handle})
+	if err != nil {
+		t.Fatalf("encode poll body: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodPost,
+		"/api/v1/platforms/credentials/"+platform+"/device/poll", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("platform", platform)
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+
+	w := httptest.NewRecorder()
+	s.handlePollDeviceAuth(w, r)
+	return w
 }
 
 // openThePollGate winds the pacing clock back so a test can take the next poll

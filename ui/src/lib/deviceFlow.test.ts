@@ -92,6 +92,17 @@ describe("deviceFlowAfterPoll", () => {
     }
   });
 
+  // An expiry the server did not explain still has to STOP the flow. The empty
+  // reason is not a placeholder to be shown: DeviceCodeDialog renders
+  // `phase.reason || t("device.expired")`, so "" is what lets the dialog fall
+  // back to its own sentence. A paraphrase invented here would win that `||`
+  // and permanently replace a translated string with an English one.
+  it("stops on an expiry the server sent no words for, leaving the reason empty", () => {
+    const next = deviceFlowAfterPoll(waiting, { state: "expired" });
+    expect(next).toEqual({ kind: "failed", reason: "" });
+    expect(deviceFlowIsPolling(next)).toBe(false);
+  });
+
   // A poll that resolves after the dialog was closed, or after something else
   // settled the flow, must not resurrect it. Every polling panel has this race
   // and most find it in production.

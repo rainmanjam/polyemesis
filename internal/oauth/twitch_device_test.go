@@ -174,6 +174,32 @@ func TestTwitchStartDeviceAuthNeverInventsAVerificationAddress(t *testing.T) {
 	}
 }
 
+// The authorization server can also just say no -- a client id that was
+// revoked, an app whose device grant is not enabled. That has to reach the
+// operator with the status attached: it is the difference between "fix your
+// credentials" and "try again later", and the support ticket is written from
+// this string.
+func TestTwitchStartDeviceAuthPassesTheAuthorizationServersRefusalOn(t *testing.T) {
+	tw, _ := twitchDeviceStub(t, func(w http.ResponseWriter, _ *http.Request, _ url.Values) {
+		w.WriteHeader(http.StatusUnauthorized)
+		io.WriteString(w, `{"status":401,"message":"invalid client"}`)
+	})
+
+	auth, err := tw.StartDeviceAuth(context.Background(), "cid")
+	if err == nil {
+		t.Fatalf("StartDeviceAuth succeeded on a 401 and returned %#v", auth)
+	}
+	if auth != nil {
+		t.Errorf("StartDeviceAuth returned %#v alongside an error", auth)
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("the error dropped the status the authorization server answered with: %v", err)
+	}
+	if !strings.Contains(err.Error(), "invalid client") {
+		t.Errorf("the error dropped what the platform said, so nobody can act on it: %v", err)
+	}
+}
+
 // ------------------------------------------------------------------ polling
 
 func TestTwitchPollDeviceAuthSendsTheDocumentedGrant(t *testing.T) {
@@ -348,6 +374,46 @@ func TestTwitchPollDeviceAuthRefusesAnEmptyCodeWithoutAskingTwitch(t *testing.T)
 	}
 }
 
+// TestAnUnreachableAuthorizationServerIsAFailureAndNotOneOfTheSentinels is the
+// third answer a poll can get, after "keep waiting" and "start over": nothing
+// at all.
+//
+// classifyTwitchDeviceError reads the status and the body, and a connection
+// that never opened has neither. Both sentinels would be wrong: pending would
+// poll into a dead network for the code's whole 1800 seconds, and spent would
+// throw away an authorization the operator is very likely still completing. The
+// caller's own branch for a real failure -- which keeps the flow and retries --
+// is the only correct one, and it is reached by returning the error untouched.
+//
+// StartDeviceAuth is asserted alongside it because the two share postFormJSON
+// and the same base URL: if a dead host produced a nil error anywhere in that
+// path, the start would hand the dialog a blank code rather than a message, and
+// the poll's classification would never be reached to be judged.
+func TestAnUnreachableAuthorizationServerIsAFailureAndNotOneOfTheSentinels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	base := srv.URL
+	// Closed before a single call, so both endpoints refuse the connection.
+	srv.Close()
+	tw := NewTwitch(WithBaseURL(base))
+
+	if auth, err := tw.StartDeviceAuth(context.Background(), "cid"); err == nil {
+		t.Errorf("StartDeviceAuth succeeded against a host that is not listening: %#v", auth)
+	}
+
+	tok, err := tw.PollDeviceAuth(context.Background(), "cid", "dev-code")
+	if err == nil {
+		t.Fatalf("PollDeviceAuth succeeded against a host that is not listening: %#v", tok)
+	}
+	if errors.Is(err, ErrDeviceAuthPending) {
+		t.Errorf("a dead network was read as a pending authorization, so a caller would poll "+
+			"it until the code expired: %v", err)
+	}
+	if errors.Is(err, ErrDeviceCodeSpent) {
+		t.Errorf("a dead network was read as a spent code, so a caller would abandon a live "+
+			"authorization over one refused connection: %v", err)
+	}
+}
+
 // --------------------------------------------------------- who has this flow
 
 // TestDeviceFlowIsTwitchOnlyAndSaysWhyForEachPlatformThatLacksIt is the
@@ -400,6 +466,17 @@ func TestDeviceFlowIsTwitchOnlyAndSaysWhyForEachPlatformThatLacksIt(t *testing.T
 	if _, ok := DeviceFor(db.PlatformTwitch); !ok {
 		t.Fatal("Twitch is the only device flow there is, and it did not resolve")
 	}
+
+	// A platform string nobody registered is refused the same way as one that is
+	// registered but has no device flow: (nil, false). It reaches here from a URL
+	// parameter --
+	// internal/api reads the platform out of the path -- so it is a value an
+	// operator can type, and a nil interface returned alongside true would panic
+	// on the first method call rather than being refused by name.
+	if df, ok := DeviceFor(db.Platform("peertube")); ok || df != nil {
+		t.Errorf("DeviceFor(peertube) answered (%#v, %v) for a platform that has no provider "+
+			"at all", df, ok)
+	}
 }
 
 // The Set twin, for the reason endpoints.go states in prose: a caller holding a
@@ -429,5 +506,13 @@ func TestSetDeviceForResolvesAgainstTheSetAndNotTheRealTwitch(t *testing.T) {
 	// interface that panics on use.
 	if _, ok := set.DeviceFor(db.PlatformKick); ok {
 		t.Error("Set.DeviceFor(kick) resolved; Kick has no device authorization endpoint")
+	}
+	// And a platform the set does not contain at all, which is the other way in:
+	// the platform arrives as a URL parameter, so "there is no such provider" is
+	// as ordinary an answer as "that provider has no device flow", and both have
+	// to leave the caller with a nil it was told about rather than one it wasn't.
+	if df, ok := set.DeviceFor(db.Platform("peertube")); ok || df != nil {
+		t.Errorf("Set.DeviceFor(peertube) answered (%#v, %v) for a platform the set does not "+
+			"hold", df, ok)
 	}
 }
