@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { AudioLines, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -94,9 +95,7 @@ export function AuthScreen({
     <div className="flex min-h-dvh items-center justify-center bg-surface p-4">
       <div className="w-full max-w-sm">
         <div className="mb-4 flex items-center justify-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded bg-primary/15">
-            <AudioLines className="h-4 w-4 text-primary" />
-          </div>
+          <BrandMark size={26} />
           <span className="text-lg font-semibold tracking-tight">polyemesis</span>
         </div>
 
