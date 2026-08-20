@@ -247,9 +247,14 @@ type Engine struct {
 	// for ever after the first byte.
 	previewRxBytes uint64
 	previewRxAt    time.Time
-	meters         *supervisor.Process
-	dests          map[int64]*destination
-	rends          map[int64]*rendition
+	// previewRxHub is the hub previewRxBytes was read from. A counter is only
+	// comparable with itself: a DIFFERENT hub starts at zero, and comparing its
+	// zero against the old hub's total reads as "the number changed", which is
+	// the opposite of the truth.
+	previewRxHub *relay.Hub
+	meters       *supervisor.Process
+	dests        map[int64]*destination
+	rends        map[int64]*rendition
 	// silence is the synthetic-audio tier, nil unless the ingest probed with
 	// no audio at all. See silence.go.
 	silence *silenceTier
@@ -1738,6 +1743,11 @@ func (e *Engine) sweepPreview(now time.Time) {
 	seen = e.previewSeen
 	running = e.preview != nil
 	e.mu.RUnlock()
+	// RE-READ UNDER THE LOCK. The first sample was taken before previewMu, and a
+	// selector swap in between can retire the hub it looked at while the one now
+	// downstream is carrying a stream -- stopping on the stale answer would kill
+	// an encoder somebody is watching.
+	dry = !e.previewFlowing(now)
 	stop := running && (dry || previewIdle(s, seen, now))
 	if stop {
 		e.stopPreviewLocked()
@@ -1791,7 +1801,15 @@ func (e *Engine) previewFlowing(now time.Time) bool {
 	}
 	rx := h.RxBytes()
 	e.mu.Lock()
-	if rx != e.previewRxBytes {
+	switch {
+	case h != e.previewRxHub:
+		// A NEW HUB IS NOT DELIVERY. A selector coming up or going down replaces
+		// the hub, and the replacement starts at zero -- which differs from the
+		// old one's total and would otherwise stamp "flowing" and start an
+		// encoder against silence for the whole grace period. Adopt the new
+		// baseline and wait to SEE it advance.
+		e.previewRxHub, e.previewRxBytes, e.previewRxAt = h, rx, time.Time{}
+	case rx != e.previewRxBytes:
 		e.previewRxBytes, e.previewRxAt = rx, now
 	}
 	at := e.previewRxAt

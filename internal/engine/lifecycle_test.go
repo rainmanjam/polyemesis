@@ -551,7 +551,13 @@ func TestTheMetersSidecarIsUnsubscribedFromTheHubItSubscribedTo(t *testing.T) {
 // change and leaves the timestamp alone, which is exactly the "flowing a moment
 // ago, quiet right now" state.
 func markPreviewFlowing(e *Engine) {
+	// The hub is adopted as well as the timestamp. previewFlowing keys its
+	// baseline to the hub it sampled, so a stamp against no hub is discarded on
+	// the next call as "this is a different hub, wait and see" -- which is the
+	// behaviour that stops a selector swap starting an encoder against silence.
+	h := e.downstreamHub()
 	e.mu.Lock()
+	e.previewRxHub = h
 	e.previewRxAt = time.Now()
 	e.mu.Unlock()
 }

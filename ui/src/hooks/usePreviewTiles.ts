@@ -41,15 +41,28 @@ export function usePreviewTiles(
       return;
     }
     let cancelled = false;
+    // SINGLE-FLIGHT, AND ORDERED. setInterval will start another request while a
+    // slow one is still in the air, and the responses can land out of order --
+    // an older outputLive:true overwriting a newer false lifts the opaque
+    // overlay and puts the stale frame back on screen, which is the exact bug
+    // this grid exists to fix.
+    let inFlight = false;
+    let latest = 0;
     const read = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      const seq = ++latest;
       try {
         const r = await fetch("/previews", { credentials: "same-origin" });
         if (!r.ok) return;
         const body = (await r.json()) as PreviewTile[];
-        if (!cancelled && Array.isArray(body)) setTiles(body);
+        // Discard anything a later request has already answered.
+        if (!cancelled && seq === latest && Array.isArray(body)) setTiles(body);
       } catch {
         // A failed poll leaves the last answer standing. Blanking the grid on
         // one dropped request would flicker every tile for a reload.
+      } finally {
+        inFlight = false;
       }
     };
     void read();
