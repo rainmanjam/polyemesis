@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
+import { previewLayout } from "@/lib/previewLayout";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -780,7 +781,7 @@ export function Dashboard() {
   // which is not source-scoped: every engine publishes onto one broker and the
   // app keeps one status, so a grid fed from it would draw every tile from
   // whichever engine spoke last.
-  const tiles = usePreviewTiles(settingsPreview);
+  const preview = previewLayout(usePreviewTiles(settingsPreview));
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Destination | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -1016,25 +1017,18 @@ export function Dashboard() {
                 whichever source happened to be first in display order, with no
                 way to reach any other. A tile costs an encoder only while it is
                 watched AND something is on air, so offline programmes here cost
-                nothing. */}
-            {tiles.length > 1 ? (
+                nothing.
+
+                Which tiles those are, and what each one plays, is decided by
+                previewLayout() in src/lib -- a plain function of the polled
+                telemetry, so the decision is testable without a page test. */}
+            {preview.grid ? (
               <div className="grid gap-3 sm:grid-cols-2">
-                {tiles.map((tile) => (
-                  <figure key={tile.id} className="flex flex-col gap-1.5">
-                    <PreviewPlayer
-                      active={settingsPreview}
-                      sourceId={tile.id}
-                      outputLive={tile.outputLive}
-                      ingestLive={tile.ingestLive}
-                      onAir={tile.onAir}
-                      aspect={
-                        tile.width && tile.height
-                          ? { width: tile.width, height: tile.height }
-                          : undefined
-                      }
-                    />
+                {preview.panes.map((pane) => (
+                  <figure key={pane.id} className="flex flex-col gap-1.5">
+                    <PreviewPlayer active={settingsPreview} {...pane.player} />
                     <figcaption className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <span className="truncate">{tile.name}</span>
+                      <span className="truncate">{pane.label}</span>
                     </figcaption>
                   </figure>
                 ))}
@@ -1042,15 +1036,7 @@ export function Dashboard() {
             ) : (
               <PreviewPlayer
                 active={settingsPreview}
-                sourceId={tiles[0]?.id}
-                outputLive={tiles[0]?.outputLive}
-                ingestLive={tiles[0]?.ingestLive}
-                onAir={tiles[0]?.onAir}
-                aspect={
-                  tiles[0]?.width && tiles[0]?.height
-                    ? { width: tiles[0].width, height: tiles[0].height }
-                    : undefined
-                }
+                {...preview.panes[0].player}
               />
             )}
           </Suspense>

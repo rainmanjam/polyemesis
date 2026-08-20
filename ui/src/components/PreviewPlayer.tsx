@@ -108,11 +108,13 @@ export function PreviewPlayer({
       // showed the previous programme under the new one's name until the first
       // segment of the new one arrived.
       setPlaying(false);
-      if (video) {
-        video.pause();
-        video.removeAttribute("src");
-        video.load();
-      }
+      // No null check: the effect returned early unless `video` was already
+      // there, and it is a const, so this cannot be reached with nothing to
+      // clear. load() is the part that matters -- removing the attribute alone
+      // does not release the frame the element is already showing.
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
     };
   }, [active, sourceId]);
 

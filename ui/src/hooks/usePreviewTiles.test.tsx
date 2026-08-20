@@ -89,4 +89,64 @@ describe("usePreviewTiles", () => {
       "one dropped request flickered every tile",
     ).toHaveLength(1);
   });
+
+  it("keeps the last answer when the server answers with an error", async () => {
+    // An error that arrives as a RESOLVED response rather than a rejected
+    // promise, so the catch below never sees it -- and whose body still parses
+    // as a list, so Array.isArray waves it through. The status is the only
+    // thing that says this is not an answer.
+    //
+    // The empty list matters: an error page or an error envelope that happens
+    // to be an empty array is how a 500 mid-restart blanks a grid of live
+    // programmes, and the operator watching them loses every picture for as
+    // long as the restart takes.
+    vi.mocked(fetch).mockImplementationOnce(() => respond([tile(1)]));
+    const { result } = renderHook(() => usePreviewTiles(true, 20));
+    await waitFor(() => expect(result.current).toHaveLength(1));
+
+    vi.mocked(fetch).mockImplementation(() =>
+      Promise.resolve({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve([]),
+      } as unknown as Response),
+    );
+    await new Promise((r) => setTimeout(r, 60));
+    expect(
+      result.current,
+      "an error response blanked the grid, and every tile with it",
+    ).toHaveLength(1);
+  });
+
+  it("ignores a body that is not a list of tiles", async () => {
+    // /previews behind a portal or a login page answers 200 with something else
+    // entirely. Handing that to the grid renders tiles off `undefined`.
+    vi.mocked(fetch).mockImplementationOnce(() => respond([tile(1)]));
+    const { result } = renderHook(() => usePreviewTiles(true, 20));
+    await waitFor(() => expect(result.current).toHaveLength(1));
+
+    vi.mocked(fetch).mockImplementation(() =>
+      respond({ error: "unauthorized" }),
+    );
+    await new Promise((r) => setTimeout(r, 60));
+    expect(
+      Array.isArray(result.current) && result.current,
+      "a non-array body was handed to the grid as its tiles",
+    ).toHaveLength(1);
+  });
+
+  it("clears the grid when the operator turns the preview off", async () => {
+    // Settings can disable the preview while the dashboard is open. Leaving the
+    // last tiles up would keep showing pictures the operator has just said they
+    // do not want, and each one costs an encoder.
+    vi.mocked(fetch).mockImplementation(() => respond([tile(1), tile(2)]));
+    const { result, rerender } = renderHook(
+      ({ on }: { on: boolean }) => usePreviewTiles(on, 20),
+      { initialProps: { on: true } },
+    );
+    await waitFor(() => expect(result.current).toHaveLength(2));
+
+    rerender({ on: false });
+    expect(result.current).toHaveLength(0);
+  });
 });
