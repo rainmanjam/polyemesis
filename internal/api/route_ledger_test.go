@@ -1319,6 +1319,9 @@ const (
 	webBranchAPIJSON404 = "api-json-404"    // an /api path that matched no route
 	webBranchUINotBuilt = "ui-not-built"    // no index.html to fall back to
 	webBranchSPAIndex   = "spa-index"       // the SPA fallback, or index.html itself
+	// a path naming a FILE that is not there -- 404 rather than the SPA, so a
+	// browser asking for an image is not handed a page and a 200
+	webBranchAssetMissing = "asset-404"
 )
 
 // notFoundProbes is the NotFound surface, hand-declared because chi.Walk cannot
@@ -1336,8 +1339,12 @@ func notFoundProbes() []nonTrieProbe {
 		{http.MethodGet, "/", "the SPA root", webBranchUINotBuilt, webBranchSPAIndex, "", ""},
 		{http.MethodGet, "/assets/app.js", "a bundled asset PATH -- and not a bundled asset: " +
 			"Vite fingerprints its output, so nothing is ever named this. It reaches the " +
-			"asset branch in neither configuration, which is why assetProbe below exists",
-			webBranchUINotBuilt, webBranchSPAIndex, "", ""},
+			"asset branch in neither configuration, which is why assetProbe below exists. " +
+			"It now takes the asset-404 branch in BOTH columns, and that is the point of " +
+			"that branch: a .js that is not there is answered as a missing file rather " +
+			"than with the SPA, so a stale bundle reference after a redeploy fails as a " +
+			"404 instead of executing index.html as JavaScript",
+			webBranchAssetMissing, webBranchAssetMissing, "", ""},
 		{http.MethodGet, "/.env", "the credential file every scanner asks for first",
 			webBranchUINotBuilt, webBranchSPAIndex, "", ""},
 		{http.MethodGet, "/debug/pprof/", "the profiler surface, if anything ever mounted it",
@@ -1382,11 +1389,18 @@ func stampTerminal(name, provenance string, probes []nonTrieProbe) []nonTrieProb
 // filesystem: through the real mux, in this repository's build, it is just
 // another 404. The branch assertion drives it in the built column, where it is
 // the ONLY probe that reaches the immutable-cache branch.
+//
+// Its BARE column moved from "UI not built" to asset-404 when missing files
+// stopped being answered with the SPA, and the new answer is the more accurate
+// of the two: with no UI compiled, the honest thing to say about a request for
+// one specific bundle is that the file is not there, not that the whole
+// application is missing. The old branch is still reached in that column by
+// every probe that names a PAGE rather than a file.
 func assetProbe() nonTrieProbe {
 	return stampTerminal(terminalNotFound, provenanceRegistered, []nonTrieProbe{{http.MethodGet,
 		"/assets/index-abc123.js",
 		"a fingerprinted bundle, the only path shape that reaches the asset branch",
-		webBranchUINotBuilt, webBranchAsset, "", ""}})[0]
+		webBranchAssetMissing, webBranchAsset, "", ""}})[0]
 }
 
 // builtUIFS is a synthetic `dist` -- an index.html and one fingerprinted bundle
@@ -1461,6 +1475,9 @@ func observedWebBranch(w *httptest.ResponseRecorder) string {
 		return webBranchAPIJSON404
 	case w.Code == http.StatusNotFound && strings.Contains(body, "UI not built."):
 		return webBranchUINotBuilt
+	case w.Code == http.StatusNotFound && strings.HasPrefix(ct, "text/plain") &&
+		strings.Contains(body, "no such file"):
+		return webBranchAssetMissing
 	case w.Code == http.StatusOK && strings.HasPrefix(ct, "text/html"):
 		return webBranchSPAIndex
 	}
@@ -1540,9 +1557,16 @@ func assertNotFoundProbesEnterTheirBranches(t *testing.T, s *Server) {
 	for _, want := range []struct{ column, branch string }{
 		{"bare", webBranchUINotBuilt},
 		{"bare", webBranchAPIJSON404},
+		{"bare", webBranchAssetMissing},
 		{"built", webBranchSPAIndex},
 		{"built", webBranchAsset},
 		{"built", webBranchAPIJSON404},
+		// Asserted in BOTH columns deliberately. The branch answers before the
+		// index.html lookup, so like the /api one it does not depend on whether
+		// a UI was compiled -- and a version of it that only fired when the UI
+		// was missing would leave the shipped configuration, which is the one
+		// that had the bug, untested.
+		{"built", webBranchAssetMissing},
 	} {
 		if !entered[want.column][want.branch] {
 			t.Errorf("no probe entered the %q branch of internal/web.HandlerFor against the "+

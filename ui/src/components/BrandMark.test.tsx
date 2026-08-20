@@ -71,6 +71,29 @@ describe("BrandMark", () => {
     expect(strip(appIcon)).toBe(strip(siteIcon));
   });
 
+  /* THE RASTERS, held to the same rule as the SVG above and for a stronger
+   * reason: nobody can read a PNG in a diff.
+   *
+   * Both are generated from favicon.svg, so "regenerate one and forget the
+   * other" is the drift that actually happens, and it would be invisible in
+   * review -- the whole failure mode the parity check above exists for, except
+   * that here there is no markup to compare by eye. Bytes, or nothing.
+   *
+   * The app had NEITHER of these files until the site's copies were brought
+   * over. A browser asking for /favicon.ico got the SPA's index.html with a
+   * 200, and an iOS home screen got a screenshot of the page.
+   */
+  it.each([
+    ["favicon.ico", "../../public/favicon.ico", "../../../web/public/favicon.ico"],
+    ["apple-touch-icon.png", "../../public/apple-touch-icon.png", "../../../web/public/apple-touch-icon.png"],
+  ])("ships the same %s as the website, byte for byte", (_name, appRel, siteRel) => {
+    const app = readFileSync(new URL(appRel, import.meta.url));
+    const site = readFileSync(new URL(siteRel, import.meta.url));
+    expect(app.equals(site)).toBe(true);
+    // A zero-length file would satisfy equality above while shipping no icon.
+    expect(app.byteLength).toBeGreaterThan(0);
+  });
+
   it("uses the same colours as the favicon, which is the mark's identity", () => {
     const favicon = readFileSync(new URL("../../public/favicon.svg", import.meta.url), "utf8");
     // The favicon's first rect is its background tile; the bars are the rest.
