@@ -592,6 +592,56 @@ const relayFIFOPackets = 32768
 // overrun_nonfatal turns a momentary overflow into a logged glitch instead of a
 // dead process — which matters because one slow consumer must never take a
 // destination down.
+
+// relayProbeSize and relayProbeWindow are how much a relay CONSUMER may spend
+// working out what it is receiving, before it gives up and refuses to start.
+//
+// BOTH, AND THAT IS THE WHOLE POINT. FFmpeg stops probing at whichever budget
+// runs out first, so raising one and leaving the other is raising nothing.
+// fix/398-relay-probe-window raised the window to 5s, left the size at FFmpeg's
+// own 5 MB default -- its comment says so -- and measured 3/23 against 5/24,
+// which was read as "the idea does not work" and parked. The idea was right and
+// the implementation moved the limit that was not binding.
+//
+// MEASURED, on the exact artefact ci.yml pins (n8.1.2-44-g7c533d0f86), a
+// consumer joining 3s into a stream whose next keyframe is 7s away:
+//
+//	window  5s, size  5MB   Could not write header (incorrect codec parameters ?)
+//	window 15s, size  5MB   Could not write header  -- time alone changes nothing
+//	window 15s, size 50MB   20,796,827 bytes written
+//
+// WHY A LATE JOINER NEEDS SO MUCH. It arrives mid-GOP, so it has no keyframe and
+// cannot determine the pixel format -- the demuxer reports the codec and the
+// resolution and then "unspecified pixel format", the muxer cannot write a
+// header, and from FFmpeg 7.0 a failed scheduler task aborts the process rather
+// than logging and carrying on. It must therefore be able to reach the NEXT
+// keyframe, which costs one whole GOP of bytes.
+//
+// THESE ARE CEILINGS, NOT WAITS, which is what makes generous values free.
+// Probing ends the moment the parameters are known, so a stream joined at a
+// keyframe pays nothing for a budget it never spends. The cost is bounded
+// memory during a start that would otherwise have failed.
+//
+// 32 MB covers one 2-second GOP -- what OBS ships by default -- up to about
+// 128 Mbit/s, and a 10-second GOP at a comfortable broadcast rate. 15 seconds
+// covers a GOP far longer than anything this product produces.
+const (
+	relayProbeSize   = 32 << 20
+	relayProbeWindow = 15 * 1000000 // microseconds
+)
+
+// RelayInputArgs are the input options every relay consumer needs, and they must
+// come BEFORE the -i they belong to.
+//
+// A function rather than a slice so no caller can append to a shared array and
+// change what the next one gets.
+func RelayInputArgs() []string {
+	return []string{
+		"-analyzeduration", strconv.Itoa(relayProbeWindow),
+		"-probesize", strconv.Itoa(relayProbeSize),
+	}
+}
+
 func RelayInputURL(base string) string {
 	if base == "" {
 		return base
@@ -1046,6 +1096,7 @@ func DestinationArgs(s DestSpec) []string {
 		// jitter that would otherwise show up as dropped frames.
 		"-thread_queue_size", "1024",
 	)
+	args = append(args, RelayInputArgs()...)
 	args = append(args, "-i", RelayInputURL(s.RelayURL))
 
 	// The copy path branches BEFORE -filter_complex, and it has to. A graph
@@ -1281,6 +1332,8 @@ func RecorderArgs(s RecorderSpec) []string {
 	args = append(args,
 		"-fflags", "+genpts",
 		"-thread_queue_size", "1024",
+		"-analyzeduration", strconv.Itoa(relayProbeWindow),
+		"-probesize", strconv.Itoa(relayProbeSize),
 		"-i", RelayInputURL(s.RelayURL),
 		"-map", "0",
 		"-c", "copy",
@@ -1339,6 +1392,8 @@ func PreviewArgs(s PreviewSpec) []string {
 	args = append(args,
 		"-fflags", "+genpts",
 		"-thread_queue_size", "1024",
+		"-analyzeduration", strconv.Itoa(relayProbeWindow),
+		"-probesize", strconv.Itoa(relayProbeSize),
 		"-i", RelayInputURL(s.RelayURL),
 		"-map", "0:v:0",
 		"-map", fmt.Sprintf("0:a:%d?", s.AudioTrack), // '?' => tolerate a video-only ingest
@@ -1514,6 +1569,8 @@ func MetersArgs(s MetersSpec) []string {
 	args = append(args,
 		"-fflags", "+genpts",
 		"-thread_queue_size", "512",
+		"-analyzeduration", strconv.Itoa(relayProbeWindow),
+		"-probesize", strconv.Itoa(relayProbeSize),
 		"-i", RelayInputURL(s.RelayURL),
 		"-filter_complex", strings.Join(chains, ";"),
 		"-map", "[mout]",
