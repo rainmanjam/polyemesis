@@ -15,9 +15,19 @@ import (
  *
  *   the encoder side  the ingest's remux (-c copy -f mpegts, exactly
  *                     IngestArgs) puts an SPS in-band before EVERY IDR --
- *                     6/6 keyframes on FFmpeg 8.1.2 AND 9.0.1, including
- *                     across a mid-stream resolution change, which carries
- *                     both geometries' parameter sets.
+ *                     6/6 keyframes, including across a mid-stream resolution
+ *                     change, which carries both geometries' parameter sets.
+ *
+ *                     ON EVERY BINARY THE PRODUCT ACTUALLY RUNS, because the
+ *                     first pass used whatever was on PATH and that is not the
+ *                     same thing. BtbN n8.1.2-44 (the exact artefact ci.yml
+ *                     pins), Alpine 8.1.2 (what the released container gets
+ *                     from the Dockerfile's FFMPEG_VERSION), BtbN n8.1.2-34 (a
+ *                     deploy box), and 9.0.1 (a laptop). The pinned CI build
+ *                     and the box build were TEN COMMITS APART, which is
+ *                     exactly the gap that makes "I tested 8.1" not mean much
+ *                     on its own -- BtbN's `latest` tag is rolling, as ci.yml
+ *                     says in its own comment.
  *
  *   the fanout        driving this Hub with that stream and subscribing part
  *                     way through, the late consumer held a parameter set
