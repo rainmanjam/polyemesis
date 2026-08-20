@@ -71,8 +71,13 @@ export function DestinationCard({
   canMoveEarlier,
   canMoveLater,
   busy,
+  sourceName,
 }: {
   dest: DestStatus;
+  /** The programme this destination carries, when the install has more than
+   *  one. Undefined on a single-source install, where naming it would be noise
+   *  on every card and would tell the operator nothing they could act on. */
+  sourceName?: string;
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
@@ -173,6 +178,16 @@ export function DestinationCard({
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
+            {/* WHICH PROGRAMME THIS CARRIES. Neutral outline, never a signal
+                colour: the five saturated tokens mean the state of a
+                destination, and a programme name is not a state. See
+                Experimental.tsx, which makes the same argument for the same
+                reason. */}
+            {sourceName && (
+              <Badge variant="outline" className="max-w-[10rem] truncate font-normal">
+                {sourceName}
+              </Badge>
+            )}
             <Badge variant={dest.enabled ? toneBadge[tone] : "outline"}>
               {dest.enabled ? stateLabel(state) : t("state.stopped")}
             </Badge>

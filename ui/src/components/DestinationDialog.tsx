@@ -24,6 +24,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api, isNoSource } from "@/lib/api";
+import {
+  initialSourceValue,
+  sourceChoices,
+  sourceIdForSave,
+  sourceIsChosen,
+} from "@/lib/destinationSource";
 import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
 import { useT } from "@/lib/i18n";
 import { computeLeaving, joinConsequence, leaveConsequence } from "@/lib/rendition-consequence";
@@ -53,6 +59,7 @@ import type {
   PlatformPresetInfo,
   ServiceInfo,
   RenditionView,
+  SourceView,
 } from "@/lib/types";
 
 /** The transport a preset's ingest is reached over. Finer-grained than DestKind
@@ -618,6 +625,21 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // picking an encode starts a new one or joins a running one. That fact is
   // the entire argument for renditions existing, and the UI could not state it.
   const [renditions, setRenditions] = useState<RenditionView[]>([]);
+  const [sources, setSources] = useState<SourceView[]>([]);
+  // Which programme this destination carries. A string because that is what the
+  // Select speaks; "" means nobody has chosen yet, which is a state the save
+  // button reads rather than a value it sends.
+  const [sourceId, setSourceId] = useState<string>("");
+  const choices = useMemo(() => sourceChoices(sources), [sources]);
+  // The starting value has to wait for the list, because what it should be
+  // DEPENDS on the list: the only programme when there is one, and deliberately
+  // nothing when there are several. Applied only while nothing has been chosen,
+  // so it cannot overwrite an operator mid-edit or reset an existing
+  // destination's programme when the fetch resolves late.
+  useEffect(() => {
+    if (!open || choices.length === 0) return;
+    setSourceId((current) => (current === "" ? initialSourceValue(destination, choices) : current));
+  }, [open, choices, destination]);
   const [guidance, setGuidance] = useState<PlatformPresetInfo[]>([]);
   const [services, setServices] = useState<ServiceInfo[]>([]);
 
@@ -657,6 +679,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       .listRenditions()
       .then(setRenditions)
       .catch(() => setRenditions([]));
+    api.listSources().then(setSources).catch(() => setSources([]));
     // Fetched, not mirrored. The UI keeps its own preset list so the picker
     // renders before any request resolves, but the researched numbers carry a
     // source and a date and a second copy of them here would drift silently —
@@ -698,6 +721,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
       setRenditionId(destination.renditionId ? String(destination.renditionId) : PASSTHROUGH);
+      setSourceId(destination.sourceId ? String(destination.sourceId) : "");
     } else {
       setTransport({});
       setResilience({});
@@ -859,6 +883,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         accountId: accountId === "none" ? null : Number(accountId),
         // null is passthrough: no encode, no process, straight off the ingest.
         renditionId: renditionId === PASSTHROUGH ? null : Number(renditionId),
+        // Which programme this carries. Never undefined: the server refuses a
+        // create that names none, and the save below cannot be reached until
+        // sourceIsChosen agrees.
+        sourceId: sourceIdForSave(sourceId, choices) ?? undefined,
         transport,
         resilience,
         // copyOn rather than audio.copy: switching the transport to RTMP has to
@@ -958,6 +986,46 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               placeholder={t("dest.namePlaceholder")}
             />
           </div>
+
+          {/* WHICH PROGRAMME THIS CARRIES, and it is second only to the name
+              because everything below it is scoped by the answer.
+
+              Shown only when there is a decision to make. With one programme
+              this is a control whose every use is the same, and
+              DestinationDialog already rules that out for the multitrack switch:
+              "offering it elsewhere would be a control that cannot do anything."
+              The value is still sent -- initialSourceValue supplies it -- so the
+              server's requirement is met without asking for a click that has one
+              possible outcome.
+
+              The placeholder is not a default. Nothing is selected until
+              somebody selects it, and the save stays disabled meanwhile, which
+              is the whole point: the server used to choose the first programme
+              when a request named none, and a preselected first item here would
+              be the same silent choice wearing a control. */}
+          {choices.length > 1 && (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="dest-source">{t("dest.source")}</Label>
+              <Select value={sourceId} onValueChange={setSourceId}>
+                <SelectTrigger id="dest-source" data-testid="source-picker">
+                  <SelectValue placeholder={t("dest.sourcePlaceholder")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {choices.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {/* A disabled control says why, next to itself -- DESIGN-SYSTEM.md.
+                  Without this the save button is simply dead and the reason is
+                  three fields away. */}
+              {!sourceIsChosen(sourceId, choices) && (
+                <p className="text-[12px] text-muted-foreground">{t("dest.sourceRequired")}</p>
+              )}
+            </div>
+          )}
 
           <div className="flex flex-col gap-1">
             <Label>{t("dest.platform")}</Label>
@@ -2228,7 +2296,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={busy || !name.trim()}>
+          <Button onClick={save} disabled={busy || !name.trim() || !sourceIsChosen(sourceId, choices)}>
             {busy && <Loader2 className="animate-spin" />}
             {editing ? "Save" : "Create"}
           </Button>

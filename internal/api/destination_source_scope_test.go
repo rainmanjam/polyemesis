@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -173,4 +174,61 @@ func TestACreateThatNamesNoSourceIsRefused(t *testing.T) {
 				"above prove nothing about the guard")
 		}
 	})
+}
+
+// THE STATUS PAYLOAD SAYS WHICH PROGRAMME EACH DESTINATION CARRIES.
+//
+// The dashboard draws every destination on the install in one grid, from this
+// payload. Nothing in it named a programme, so on a multi-source install two
+// destinations called "Twitch" were the same card twice with no way to tell
+// them apart -- and a UI badge added to fix that would have rendered nothing at
+// all, silently, because the field it reads was never sent.
+//
+// That is the failure this pins: not a wrong value, an absent one. It is
+// asserted on the wire rather than on the struct, because a json tag is the
+// half that actually reaches the browser.
+func TestTheStatusPayloadNamesEachDestinationsProgramme(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	if s.eng() == nil {
+		t.Fatal("no engine in the fixture, so there is no status to read")
+	}
+
+	made := createDestination(t, h, sign, destinationBody("twitch", false, nil))
+	if made.SourceID == nil {
+		t.Fatal("the created destination carries no source, so this test cannot tell " +
+			"an absent field from an absent value")
+	}
+
+	r := jsonRequest(t, http.MethodGet, "/api/v1/status", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d %s", w.Code, w.Body.String())
+	}
+
+	var got struct {
+		Destinations []struct {
+			ID       int64  `json:"id"`
+			Name     string `json:"name"`
+			SourceID *int64 `json:"sourceId"`
+		} `json:"destinations"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if len(got.Destinations) == 0 {
+		t.Fatal("the status lists no destinations, so the field below is not being " +
+			"checked on anything")
+	}
+	for _, d := range got.Destinations {
+		if d.SourceID == nil {
+			t.Errorf("destination %d (%q) reports no sourceId. A card cannot say which "+
+				"programme it carries, and a badge reading this field renders nothing "+
+				"while looking like it works", d.ID, d.Name)
+			continue
+		}
+		if *d.SourceID != *made.SourceID {
+			t.Errorf("destination %d reports source %d, want %d", d.ID, *d.SourceID, *made.SourceID)
+		}
+	}
 }

@@ -76,7 +76,15 @@ type DestStatus struct {
 	// RenditionID is the shared encode this destination reads, nil for
 	// passthrough. RenditionName is its label, empty for passthrough, so the
 	// dashboard can group destinations under the encode they share.
-	RenditionID   *int64 `json:"renditionId,omitempty"`
+	RenditionID *int64 `json:"renditionId,omitempty"`
+	// SourceID is the programme this destination carries.
+	//
+	// Here because the dashboard draws every destination on the install in one
+	// list, from THIS payload, and nothing in it said which programme any of
+	// them belonged to -- so on a multi-source install two destinations called
+	// "Twitch" were indistinguishable. db.Destination has carried the field all
+	// along; the status simply never passed it on.
+	SourceID      *int64 `json:"sourceId,omitempty"`
 	RenditionName string `json:"renditionName,omitempty"`
 	// BackupProcess is the redundant output's live state, absent when this
 	// destination has none.
@@ -381,6 +389,7 @@ func (e *Engine) Status() Status {
 				ID: row.ID, Name: row.Name, Kind: row.Kind,
 				Platform: row.Platform, Enabled: row.Enabled,
 				RenditionID: row.RenditionID,
+				SourceID:    row.SourceID,
 			}
 			if row.RenditionID != nil {
 				ds.RenditionName = names[*row.RenditionID]
