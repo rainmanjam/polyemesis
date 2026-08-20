@@ -71,3 +71,22 @@ export function sourceIsChosen(value: string, sources: readonly SourceChoice[]):
 export function sourceIdForSave(value: string, sources: readonly SourceChoice[]): number | null {
   return sourceIsChosen(value, sources) ? Number(value) : null;
 }
+
+/**
+ * Which programme name to show on each destination card, keyed by source id.
+ *
+ * EMPTY WHEN THERE IS ONLY ONE PROGRAMME, and that is the decision worth
+ * having in a function rather than inline in the page. A badge on every card
+ * reading the same word is noise: it costs a glance per card and answers a
+ * question nobody has on a single-source install. DestinationDialog makes the
+ * same call about its picker, for the same reason.
+ *
+ * Callers treat a miss as "say nothing" rather than as an error, so a
+ * destination whose programme has just been deleted loses its badge rather
+ * than rendering "undefined".
+ */
+export function sourceNameById(sources: readonly SourceView[]): Map<number, string> {
+  const choices = sourceChoices(sources);
+  if (choices.length < 2) return new Map<number, string>();
+  return new Map(choices.map((c) => [c.id, c.name]));
+}

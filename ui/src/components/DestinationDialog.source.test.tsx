@@ -46,12 +46,28 @@ const two = [
   { id: 2, name: "Studio B", publishUrls: {}, isDefault: false },
 ];
 
-function open(sources: unknown[]) {
+function open(sources: unknown[], destination: unknown = null) {
   listSources.mockResolvedValue(sources);
   return render(
-    <DestinationDialog open onOpenChange={() => {}} destination={null} onSaved={() => {}} />,
+    <DestinationDialog
+      open
+      onOpenChange={() => {}}
+      destination={destination as never}
+      onSaved={() => {}}
+    />,
   );
 }
+
+/** A stored destination, for the EDIT path. */
+const saved = (sourceId: number) => ({
+  id: 9,
+  name: "Twitch",
+  kind: "rtmp",
+  platform: "custom",
+  url: "rtmp://example.invalid/live",
+  streamKey: "k",
+  sourceId,
+});
 
 describe("the destination dialog's programme picker", () => {
   beforeEach(() => listSources.mockReset());
@@ -86,5 +102,26 @@ describe("the destination dialog's programme picker", () => {
     open(two);
     await waitFor(() => expect(screen.getByTestId("source-picker")).toBeTruthy());
     expect(screen.getByText(/which programme/i)).toBeTruthy();
+  });
+
+  it("opens an existing destination on ITS programme, not the first", async () => {
+    // The edit path, which the create tests above never reach. Opening a
+    // destination that carries Studio B while showing Main would be an offer to
+    // move it that nobody made -- and the operator would have to notice the
+    // difference to decline it.
+    open(two, saved(2));
+    const trigger = await waitFor(() => screen.getByTestId("source-picker"));
+    await waitFor(() => expect(trigger.textContent).toContain("Studio B"));
+    expect(trigger.textContent).not.toContain("Main");
+  });
+
+  it("does not nag about a choice already made", async () => {
+    // The "which programme" line is guidance for an unanswered question. On a
+    // destination that already names one it is noise, and DESIGN-SYSTEM.md puts
+    // the reason next to the disabled control precisely so it disappears when
+    // the control is no longer blocking.
+    open(two, saved(2));
+    await waitFor(() => expect(screen.getByTestId("source-picker")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByText(/which programme/i)).toBeNull());
   });
 });

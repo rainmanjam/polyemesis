@@ -721,7 +721,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
       setRenditionId(destination.renditionId ? String(destination.renditionId) : PASSTHROUGH);
-      setSourceId(destination.sourceId ? String(destination.sourceId) : "");
+      // sourceId is NOT set here. The effect that applies initialSourceValue
+      // does it, and does it correctly for this case: it reads the
+      // destination's own programme. Setting it here as well was belt and
+      // braces that no test could distinguish -- removing the line changed no
+      // behaviour and no assertion, which is the definition of a line that is
+      // not doing anything. Found by mutating it and watching six tests pass.
     } else {
       setTransport({});
       setResilience({});

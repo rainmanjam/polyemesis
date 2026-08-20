@@ -5,6 +5,7 @@ import {
   sourceChoices,
   sourceIdForSave,
   sourceIsChosen,
+  sourceNameById,
 } from "./destinationSource";
 
 const two = [
@@ -83,5 +84,37 @@ describe("sourceIdForSave", () => {
     // payload. This is the second line of that, after the disabled save.
     expect(sourceIdForSave("", two)).toBeNull();
     expect(sourceIdForSave("99", two)).toBeNull();
+  });
+});
+
+describe("sourceNameById", () => {
+  it("is empty when there is only one programme", () => {
+    // A badge on every card reading the same word is noise: a glance per card
+    // spent answering a question nobody has on a single-source install.
+    expect(sourceNameById([{ id: 1, name: "Main" }] as never).size).toBe(0);
+  });
+
+  it("is empty when there are none at all", () => {
+    expect(sourceNameById([] as never).size).toBe(0);
+  });
+
+  it("names each programme once there is a choice to disambiguate", () => {
+    const got = sourceNameById(two as never);
+    expect(got.get(1)).toBe("Main");
+    expect(got.get(2)).toBe("Studio B");
+    expect(got.size).toBe(2);
+  });
+
+  it("gives a nameless programme the same stand-in the picker uses", () => {
+    // Or the card and the picker would disagree about what the same source is
+    // called, which is worse than either label alone.
+    const got = sourceNameById([{ id: 7, name: "" }, { id: 8, name: "x" }] as never);
+    expect(got.get(7)).toBe("Source 7");
+  });
+
+  it("answers nothing for a programme it does not know", () => {
+    // The card renders no badge on a miss rather than the word "undefined",
+    // which is what happens to a destination whose source was just deleted.
+    expect(sourceNameById(two as never).get(999)).toBeUndefined();
   });
 });

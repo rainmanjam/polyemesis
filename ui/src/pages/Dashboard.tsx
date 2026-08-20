@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
-import { sourceChoices } from "@/lib/destinationSource";
+import { sourceNameById } from "@/lib/destinationSource";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -796,11 +796,7 @@ export function Dashboard() {
   useEffect(() => {
     api.listSources().then(setSources).catch(() => setSources([]));
   }, [refreshKey]);
-  const sourceNames = useMemo(() => {
-    const choices = sourceChoices(sources);
-    if (choices.length < 2) return new Map<number, string>();
-    return new Map(choices.map((c) => [c.id, c.name]));
-  }, [sources]);
+  const sourceNames = useMemo(() => sourceNameById(sources), [sources]);
 
   const [pending, setPending] = useState<number[] | null>(null);
   const [moveNote, setMoveNote] = useState("");
