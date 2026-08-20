@@ -2,7 +2,19 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <!-- Same three icons the website serves, and the same files: the app is the
+         other place this product is seen in a tab, and it had only the SVG.
+         The .ico is listed first because a browser takes the last rel="icon"
+         whose type it supports, so SVG-capable ones never fetch it -- it is
+         what answers the clients that ask for /favicon.ico regardless (Safari
+         bookmarks, Windows pinned sites), which until now got the SPA's
+         index.html with a 200 and showed a blank.
+         The apple-touch-icon is full-bleed square on purpose; Apple applies its
+         own squircle mask, and rounding it here shows the theme's corners
+         inside Apple's. See web/src/layouts/Base.astro, which says the same. -->
+    <link rel="icon" href="/favicon.ico" sizes="48x48 32x32 16x16" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <!-- Paint the shell colour before the bundle loads, so a slow first load

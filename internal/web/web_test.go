@@ -191,3 +191,87 @@ func TestADirectoryUnderTheAssetRootIsNotServedAsAListing(t *testing.T) {
 			w.Code, w.Header().Get("Content-Type"), w.Body.String())
 	}
 }
+
+// TestAMissingFileIs404NotTheSPA is /api's bug, made against a browser.
+//
+// Measured on a live install before the fix, with the UI embedded:
+//
+//	GET /favicon.ico        -> 200 text/html  (1036 bytes of index.html)
+//	GET /apple-touch-icon.png -> 200 text/html
+//
+// The browser asked for an image, was handed a page, could not decode it, and
+// fell back to its cached or default icon. Nothing anywhere reported a problem:
+// the server logged a 200 for every one of them, so "the file is missing" and
+// "the file was served" looked identical from outside. That is what let the app
+// ship with no favicon of its own for as long as it did.
+//
+// The positive control is first and it is load-bearing. Every assertion below
+// is "this 404s", and a handler that 404'd EVERYTHING -- including the real
+// bundle -- would satisfy all of them while being far more broken than the bug.
+func TestAMissingFileIs404NotTheSPA(t *testing.T) {
+	h := HandlerFor(builtDist())
+
+	t.Run("positive control: a real asset is still served", func(t *testing.T) {
+		rec := get(t, h, "/assets/index-abc123.js")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("a file that EXISTS answered %d; every 404 asserted below is "+
+				"meaningless if the handler simply refuses assets", rec.Code)
+		}
+	})
+
+	for _, p := range []string{
+		"/favicon.ico",
+		"/apple-touch-icon.png",
+		"/site.webmanifest",
+		"/robots.txt",
+		"/assets/index-deadbeef.js", // a plausible stale bundle, after a redeploy
+		"/assets/style.css",
+	} {
+		t.Run(p, func(t *testing.T) {
+			rec := get(t, h, p)
+
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want %d -- a missing file answered as if it existed",
+					rec.Code, http.StatusNotFound)
+			}
+			// The status alone is not the assertion. Handing back HTML is the
+			// specific harm: a caller that decodes by Content-Type gets a
+			// document where it asked for an image or a script.
+			if ct := rec.Header().Get("Content-Type"); strings.Contains(ct, "text/html") {
+				t.Errorf("Content-Type = %q -- still serving the SPA to a file request", ct)
+			}
+		})
+	}
+}
+
+// TestADottedRouteIsStillADeepLink pins the choice of a whitelist over "the
+// last segment contains a dot", which is the tempting one-liner.
+//
+// The dot rule would decide the fate of paths this package cannot see. Every
+// SPA route today is a fixed path whose only parameters are numeric ids, so the
+// two rules agree and this test looks redundant. It is not: it fails the day
+// someone adds a route that takes a name, which is exactly when the dot rule
+// would start 404ing real routes in the router rather than in the page, where
+// nobody would think to look.
+func TestADottedRouteIsStillADeepLink(t *testing.T) {
+	h := HandlerFor(builtDist())
+
+	for _, p := range []string{
+		"/sources/my.source",  // a name with a dot in it
+		"/library/2026.08.19", // a date-shaped segment
+		"/clips/v1.2",         // a version-shaped segment
+		"/settings/audio.routing",
+	} {
+		t.Run(p, func(t *testing.T) {
+			rec := get(t, h, p)
+
+			if rec.Code != http.StatusOK {
+				t.Errorf("status = %d, want %d -- a UI route with a dot in it was "+
+					"mistaken for a missing file", rec.Code, http.StatusOK)
+			}
+			if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+				t.Errorf("Content-Type = %q, want HTML -- the SPA must still answer", ct)
+			}
+		})
+	}
+}
