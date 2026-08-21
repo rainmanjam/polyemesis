@@ -8,28 +8,8 @@ its first tagged release.
 
 ## [Unreleased]
 
-### Fixed
-- **The Windows job-object setup handed the kernel an address the Go runtime was
-  free to invalidate, which is a write into freed memory.** `ensureJob`
-  converts `&info` to a `uintptr` and passes the integer to
-  `windows.SetInformationJobObject`. unsafe's rules permit that only where the
-  compiler arranges for the object to be *retained and not moved* until the call
-  completes, and it does not do so here: the x/sys wrapper is an ordinary,
-  splittable Go function that happens to take a `uintptr`. The
-  `runtime.KeepAlive` added earlier covered retention only —
-  `KeepAlive` is deliberately special-cased *not* to force its argument to
-  escape, so the struct stayed a stack local, and any stack growth between the
-  conversion and the syscall relocates it while the integer keeps pointing at
-  the freed old stack. The kernel then writes 112 bytes into memory the runtime
-  has already recycled, and the crash lands later in an unrelated goroutine as
-  `fatal error: found pointer to free object`. The conversions now sit in the
-  argument list of `//go:uintptrescapes` wrappers, which forces the struct onto
-  the heap — where Go's collector never moves it — and retains it for the
-  duration of the call. No tool in the toolchain flags the unfixed form, so the
-  guarantee is now asserted by reading the compiler's escape analysis back out
-  in a test that runs on every platform, not just Windows. (#440)
 
-## [0.7.0] — 2026-08-17
+## [0.7.0] — 2026-08-21
 
 ### Security
 - **0.7.0's seal-at-rest migration left the plaintext stream keys it replaced
@@ -492,6 +472,17 @@ its first tagged release.
   works.
 
 ### Added
+- **A lane per programme, so position says which is which.** Headings put a
+  programme's name above its destinations but left its preview elsewhere on the
+  page, so answering "is THIS one on air, and where is it going?" meant reading
+  a name in two places and trusting they matched. A lane answers it by position:
+  the picture and the destinations carrying it are the same box. (#483)
+- **Destinations grouped under the programme they carry.** (#481)
+- **The programme a destination carries is chosen, not guessed.** Creating a
+  destination on a multi-source install silently attached it to whichever source
+  the server picked. (#479)
+- **A preview per source, following what is on air, that stops when unwatched.**
+  (#472)
 - **The second (VOD) audio mix has a UI.** `vodProfile` shipped complete — the
   column, the migration, the API, `routing.CompilePair`, the engine's gate on
   Twitch's one-track ingest — and appeared in the frontend exactly once, as a
@@ -1155,6 +1146,40 @@ its first tagged release.
   ten-minute window centred on the point in question.
 
 ### Fixed
+- **The Windows job-object setup handed the kernel an address the Go runtime was
+  free to invalidate, which is a write into freed memory.** `ensureJob`
+  converts `&info` to a `uintptr` and passes the integer to
+  `windows.SetInformationJobObject`. unsafe's rules permit that only where the
+  compiler arranges for the object to be *retained and not moved* until the call
+  completes, and it does not do so here: the x/sys wrapper is an ordinary,
+  splittable Go function that happens to take a `uintptr`. The
+  `runtime.KeepAlive` added earlier covered retention only —
+  `KeepAlive` is deliberately special-cased *not* to force its argument to
+  escape, so the struct stayed a stack local, and any stack growth between the
+  conversion and the syscall relocates it while the integer keeps pointing at
+  the freed old stack. The kernel then writes 112 bytes into memory the runtime
+  has already recycled, and the crash lands later in an unrelated goroutine as
+  `fatal error: found pointer to free object`. The conversions now sit in the
+  argument list of `//go:uintptrescapes` wrappers, which forces the struct onto
+  the heap — where Go's collector never moves it — and retains it for the
+  duration of the call. No tool in the toolchain flags the unfixed form, so the
+  guarantee is now asserted by reading the compiler's escape analysis back out
+  in a test that runs on every platform, not just Windows. (#440)
+- **The destination hold was bounded on a clock nobody was measuring.**
+  `reconcileOutputs` holds every destination until the ingest layout is probed,
+  and its only exit was five CONSECUTIVE probe failures. But `probeLoop` probes
+  only while the relay is carrying data, so the counter advances during flowing
+  stretches and freezes, unreset, during quiet ones — and a relay that goes
+  quiet and back is routine in an encoder's first minute, because the selector
+  leaves the primary for the slate and returns. The exit therefore needs 65s of
+  FLOW, and the wall-clock cost is that plus every quiet spell in between,
+  without limit. Adds a wall-clock ceiling set above the counter's own worst
+  case, so on a stream being probed the counter still reaches five first and the
+  ceiling only bites where the counter is blind. (#473, #485)
+- **A destination was answered for by the first programme's engine rather than
+  its own.** `s.eng()` is `mgr.Default()`, which is `engines[0]` — correct only
+  on a single-source install. (#478)
+- **47 mistake-proofing defects, and the toolchain they were found on.** (#480)
 - **The upgrade guard refused upgrades it was written to protect.** The
   generated `update.sh` checked its backup with `tar tzf … | grep -q secret.key`
   under `set -o pipefail`. `grep -q` exits on its first match, `tar` then takes
@@ -1737,6 +1762,31 @@ its first tagged release.
   worked for one installation method and silently did not exist for the other.
 
 ### Testing
+- **A test that asserted a state it could not reach, and quarantined itself
+  instead of failing.** `TestASilenceTierLiftsTheHoldOnAnUnmeasuredLayout`
+  exists to make the second term of `holdDests := !measured && silenceSig == ""`
+  load-bearing — its own comment says deleting that term would otherwise pass
+  every test in the file. Its setup asked for a silence tier on an unmeasured
+  video-only probe with the slate off, and neither path to a non-empty
+  `silenceSig` is open in that state: `wantSilence` returns "" unless `measured`,
+  deliberately, and `holdSilence` only carries a frozen signature while the
+  selector is off the primary. Verified by deleting the term, which passed.
+  Rebuilt on the one state that does reach the branch — selector on the slate,
+  signature frozen, layout unmeasured, which is an ingest that dropped out
+  mid-event rather than one that never arrived — and it now asserts it got there
+  before asserting anything else. `internal/engine` reports no quarantined
+  tests. (#161, #486)
+- **A supervisor warning failed an unrelated test, twice.** The second sweep in
+  `TestEnsureFeedHolds...` asserted the log buffer was EMPTY, meaning to say the
+  refusal was not repeated. `buf` is wired to `e.log`, the whole engine's
+  logger, and the engine runs a source whose binary cannot start, so its
+  supervisor retries on a backoff and logs "process exited" for the length of
+  the test. Any retry landing between Reset and String failed it and then
+  reported that WARN as a refusal storm. Narrowed to the refusal itself.
+  (#474, #484)
+- **flake-rate can run the Go mode under `-race`.** The Windows corruption in
+  #440 is the only place the crash appears, and `ci.yml` runs `-race` on ubuntu
+  alone, so no required job could see it. (#482)
 - **Ten UI-drift guards, recovered from a branch that was never merged.** They
   check that the React frontend still offers what the Go side expects — the
   Facebook crosspost and donate controls, the destination dialog's save payload,
