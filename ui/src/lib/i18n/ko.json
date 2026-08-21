@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "대상과 해당 라우팅 프로필을 제거합니다. 플랫폼 쪽은 그대로이며 다시 추가할 수 있지만, 그 대상을 위해 설정한 오디오 라우팅은 사라집니다.",
   "dash.descriptionPlaceholder": "이 방송이 무엇인지.",
   "dash.destDeleted": "대상을 삭제했습니다.",
+  "dash.destNoneHere": "이 프로그램에는 아직 대상이 없습니다.",
+  "dash.destOrphaned": "이 대상들은 이 서버가 나열하지 않은 프로그램을 가리킵니다. 설정은 그대로입니다. 소스가 삭제되었는지 확인하세요.",
   "dash.destinationNeedsASource": "대상은 프로그램에 속하는데, 이 설치에는 아직 프로그램이 없습니다. 먼저 소스를 만드세요.",
   "dash.disabled": "비활성화됨",
   "dash.endBroadcast": "방송 종료",

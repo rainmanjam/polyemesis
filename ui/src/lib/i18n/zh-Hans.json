@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "此操作会删除该推流目标及其路由配置。平台本身不受影响，你也可以把它加回来——但为它设置的音频路由会一并消失。",
   "dash.descriptionPlaceholder": "这场直播是什么。",
   "dash.destDeleted": "推流目标已删除。",
+  "dash.destNoneHere": "此节目下暂无推流目标。",
+  "dash.destOrphaned": "这些推流目标指向本服务器未列出的节目。它们仍处于已配置状态，请检查其信号源是否已被删除。",
   "dash.destinationNeedsASource": "推流目标属于某一路节目，而本安装还没有节目。请先创建信号源。",
   "dash.disabled": "已禁用",
   "dash.endBroadcast": "结束直播",

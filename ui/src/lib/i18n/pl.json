@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "To usuwa cel i jego profil routingu. Platforma pozostaje nietknięta i możesz dodać cel z powrotem — ale skonfigurowany dla niego routing dźwięku przepada.",
   "dash.descriptionPlaceholder": "Czym jest ta transmisja.",
   "dash.destDeleted": "Cel usunięty.",
+  "dash.destNoneHere": "Brak miejsc docelowych w tym programie.",
+  "dash.destOrphaned": "Te miejsca docelowe wskazują program, którego ten serwer nie wymienił. Nadal są skonfigurowane — sprawdź, czy ich źródło nie zostało usunięte.",
   "dash.destinationNeedsASource": "Cel należy do programu, a ta instalacja nie ma jeszcze żadnego. Najpierw utwórz źródło.",
   "dash.disabled": "wyłączone",
   "dash.endBroadcast": "Zakończ transmisję",

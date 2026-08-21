@@ -297,6 +297,8 @@
   "dash.deleteDestDescription": "Isto remove o destino e o perfil de roteamento dele. A plataforma não é alterada, e você pode adicioná-lo de volta — mas o roteamento de áudio que você configurou para ele se perde.",
   "dash.descriptionPlaceholder": "O que é esta transmissão.",
   "dash.destDeleted": "Destino excluído.",
+  "dash.destNoneHere": "Ainda não há destinos neste programa.",
+  "dash.destOrphaned": "Estes destinos nomeiam um programa que este servidor não listou. Continuam configurados — verifique se a fonte foi excluída.",
   "dash.destinationNeedsASource": "Um destino pertence a um programa, e esta instalação ainda não tem nenhum. Crie uma fonte primeiro.",
   "dash.disabled": "desativado",
   "dash.endBroadcast": "Encerrar transmissão",
