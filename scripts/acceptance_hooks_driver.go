@@ -247,6 +247,13 @@ type rig struct {
 // for the hook to be picked up would be five seconds added to every step and it
 // is not the thing under test.
 func start(h hooks.Hook) *rig {
+	// EVERY hook in this driver points at an httptest server on 127.0.0.1,
+	// which the SSRF guard refuses by default (poka-yoke audit #4). Set here
+	// rather than on each of the five literals below, because it is one fact
+	// about this whole file -- these endpoints are local ON PURPOSE -- and a
+	// per-literal flag is one more thing a sixth case can forget, which is how
+	// the suite would go quietly green while delivering nothing.
+	h.AllowPrivateTarget = true
 	logs := &safeBuf{}
 	d := hooks.NewDispatcher(
 		slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
@@ -762,6 +769,9 @@ func testButton() {
 		ID: 1, Name: "acceptance", Enabled: true,
 		URL: far.srv.URL + "/webhook/" + pathSecret, Secret: signSecret,
 		TimeoutSeconds: 5, MaxAttempts: 1,
+		// Built here rather than through start(), so it needs the local-target
+		// opt-in of its own. far.srv is httptest on 127.0.0.1.
+		AllowPrivateTarget: true,
 	}.Normalized()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

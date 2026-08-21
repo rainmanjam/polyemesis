@@ -74,6 +74,29 @@ describe("SourceCard, on a disabled source", () => {
   });
 });
 
+describe("SourceCard, while busy", () => {
+  it("disables Delete along with the rest of the card (#18)", () => {
+    // Rotate has always disabled itself under `busy`; Delete did not, because
+    // SourcesPage.remove() never set busyId in the first place. This is the
+    // card-level half of that fix -- see SourcesPage.delete.test.tsx for the
+    // page-level half, which pins that remove() actually sets it.
+    //
+    // jest-dom is not installed (see DebugSettings.test.tsx), so the disabled
+    // state is read off the element directly rather than through a matcher.
+    render(
+      <SourceCard source={source()} busy onPatch={noop} onRotate={noop} onDelete={noop} />,
+    );
+    expect((screen.getByLabelText("Delete Main") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("leaves Delete enabled when the card is idle", () => {
+    render(
+      <SourceCard source={source()} busy={false} onPatch={noop} onRotate={noop} onDelete={noop} />,
+    );
+    expect((screen.getByLabelText("Delete Main") as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
 describe("SourceCard, on a pull ingest", () => {
   it("renders the URL field the mode needs", () => {
     // The select has always offered Pull; only the srt and rtmp branches drew

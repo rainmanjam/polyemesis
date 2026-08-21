@@ -35,6 +35,15 @@ export interface LiveData {
   logs: LogLine[];
   /** Bumped whenever the server says the recordings list changed. */
   recordingsRevision: number;
+  /** A frame arrived on the socket that could not be parsed as JSON and was
+   *  dropped. `connected` alone cannot say this: the socket is open and
+   *  `onclose` never fires, so nothing else tells the operator that whatever
+   *  that frame was carrying -- a status, a level, a log line -- never landed.
+   *  Sticky rather than self-clearing on the next good frame: a console that
+   *  quietly ate one malformed message once is a console worth doubting for
+   *  the rest of the session, not a blip to forget the instant the socket
+   *  recovers. */
+  frameError: boolean;
   clearLogs: () => void;
 }
 

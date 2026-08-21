@@ -42,6 +42,13 @@ interface FeedState {
    *  block it feeds is refreshed by the reload button, not by every message. */
   stats: ChatStats | null;
   error: string;
+  /** A socket frame arrived that could not be parsed as JSON and was dropped
+   *  (#13/#21). `connected` cannot say this -- the socket stays open, so a
+   *  chat message, a state update or a retraction just silently never
+   *  landed. Sticky for the same reason LiveData.frameError is: forgetting it
+   *  the moment the next frame parses cleanly would hide the one message that
+   *  did not. */
+  frameError: boolean;
 }
 
 const EMPTY: FeedState = {
@@ -54,6 +61,7 @@ const EMPTY: FeedState = {
   messages: [],
   stats: null,
   error: "",
+  frameError: false,
 };
 
 let feed: FeedState = EMPTY;
@@ -181,6 +189,10 @@ function openSocket() {
     try {
       msg = JSON.parse(ev.data as string) as { type: string; data: unknown };
     } catch {
+      // See LiveDataProvider.tsx's identical guard: `connected` stays true
+      // and nothing else notices a dropped chat/state/retraction frame unless
+      // something says so here.
+      emit({ frameError: true });
       return;
     }
     if (msg.type === "chat") {

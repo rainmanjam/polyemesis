@@ -64,6 +64,7 @@ import {
   ROLE_LABEL,
   TRACK_ROLES,
   type Destination,
+  type DestinationId,
   type Ducking,
   type Levels,
   type Loudness,
@@ -174,7 +175,7 @@ export function RoutingPage() {
   // inside an async callback reads what they were when the button was clicked —
   // which is exactly the question being asked. These are written at the same
   // moments the state they mirror is.
-  const selectedIdRef = useRef<number | null>(null);
+  const selectedIdRef = useRef<DestinationId | null>(null);
   const vodEnabledRef = useRef(false);
   // One counter per mix, so a live-mix preset and a second-mix preset in flight
   // at the same time do not cancel each other.
@@ -360,7 +361,11 @@ export function RoutingPage() {
       const destAtClick = selectedIdRef.current;
       const seq = (presetSeq.current[mix] += 1);
       try {
-        const res = await api.applyPreset(presetId, presetOpts);
+        // #9: without this the server had nothing to apply the preset
+        // against but the shared default engine's source -- right for the
+        // destination on screen only on a single-source install. See
+        // api.applyPreset's note.
+        const res = await api.applyPreset(presetId, presetOpts, destAtClick ?? undefined);
         if (seq !== presetSeq.current[mix]) return null;
         if (selectedIdRef.current !== destAtClick) return null;
         if (mix === "vod" && !vodEnabledRef.current) return null;
@@ -568,6 +573,7 @@ export function RoutingPage() {
               idPrefix="live"
               ctx={ctx}
               profile={profile}
+              destinationId={selected.id}
               onPatch={patch}
               onApplyPreset={applyPreset}
               onCompileError={setLiveError}
@@ -607,6 +613,7 @@ export function RoutingPage() {
                 idPrefix="vod"
                 ctx={ctx}
                 profile={vodProfile}
+                destinationId={selected.id}
                 onPatch={patchVod}
                 onApplyPreset={applyVodPreset}
                 onCompileError={setVodError}
@@ -730,6 +737,7 @@ function ProfileEditor({
   idPrefix,
   ctx,
   profile,
+  destinationId,
   onPatch,
   onApplyPreset,
   onCompileError,
@@ -740,6 +748,8 @@ function ProfileEditor({
   idPrefix: string;
   ctx: EditorContext;
   profile: RoutingProfile;
+  /** #9: which destination's source to compile against. See api.compileRouting. */
+  destinationId: DestinationId;
   onPatch: (next: Partial<RoutingProfile>) => void;
   /** Applies the preset to THIS editor's profile and resolves with the routing
    *  the endpoint compiled for it, or null when the answer was discarded (a
@@ -775,7 +785,7 @@ function ProfileEditor({
     window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
       api
-        .compileRouting(profile)
+        .compileRouting(profile, destinationId)
         .then((res) => {
           if (cancelled) return;
           setCompiled(res.routing);
@@ -794,7 +804,7 @@ function ProfileEditor({
       cancelled = true;
       window.clearTimeout(debounceRef.current);
     };
-  }, [profile, t, onCompileError]);
+  }, [profile, destinationId, t, onCompileError]);
 
   // An editor that unmounts — the second mix being switched off — must not
   // leave its last error behind, or the Save button stays disabled by a mix

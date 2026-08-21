@@ -708,8 +708,18 @@ export function ChatPanel({
   className?: string;
   showComposer?: boolean;
 }) {
-  const { messages, statuses, limits, configured, loading, connected, stored, error, remove } =
-    useChatFeed();
+  const {
+    messages,
+    statuses,
+    limits,
+    configured,
+    loading,
+    connected,
+    stored,
+    error,
+    frameError,
+    remove,
+  } = useChatFeed();
   const [hidden, setHidden] = useState<Set<ChatPlatform>>(new Set());
 
   const visible = useMemo(
@@ -779,6 +789,16 @@ export function ChatPanel({
         {configured && !connected && (
           <Badge variant="warn" title="The live socket is closed; messages will resume when it reconnects.">
             offline
+          </Badge>
+        )}
+        {/* #13/#21: unlike a closed socket, a frame that failed to parse gives
+            no other signal at all -- `connected` still reads true. */}
+        {frameError && (
+          <Badge
+            variant="warn"
+            title="A message could not be understood and was dropped. The timeline may be missing something."
+          >
+            frame error
           </Badge>
         )}
         <div className="ml-auto">

@@ -5,7 +5,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 
 import { useFacebookStreamHealth } from "./useFacebookStreamHealth";
 import { ApiError } from "@/lib/api";
-import { FACEBOOK_STREAM_HEALTH_INTERVAL_MS } from "@/lib/types";
+import { asDestinationId, FACEBOOK_STREAM_HEALTH_INTERVAL_MS } from "@/lib/types";
 
 /* THE ONLY FILE IN ui/src WITH ITS OWN ENVIRONMENT, AND THE REASON IS WORTH
  * STATING RATHER THAN LEAVING TO WHOEVER FINDS IT.
@@ -62,7 +62,7 @@ describe("useFacebookStreamHealth", () => {
     // `enabled` is what keeps this poll off every other card on the dashboard.
     // If it leaked, every destination on the page would poll a Facebook route
     // every two seconds — including the ones that are not Facebook.
-    const { result } = renderHook(() => useFacebookStreamHealth(7, false));
+    const { result } = renderHook(() => useFacebookStreamHealth(asDestinationId(7), false));
 
     await tick(3);
 
@@ -76,7 +76,7 @@ describe("useFacebookStreamHealth", () => {
       streams: [{ id: "ingest-1", health: { video_bitrate: 5400 } }],
     });
 
-    const { result } = renderHook(() => useFacebookStreamHealth(7, true));
+    const { result } = renderHook(() => useFacebookStreamHealth(asDestinationId(7), true));
 
     await waitFor(() => expect(result.current.kind).toBe("ok"));
     expect(result.current).toEqual({
@@ -91,7 +91,7 @@ describe("useFacebookStreamHealth", () => {
     // `streams ?? []` is what keeps this out of the error branch.
     facebookStreamHealth.mockResolvedValue({ supported: true });
 
-    const { result } = renderHook(() => useFacebookStreamHealth(7, true));
+    const { result } = renderHook(() => useFacebookStreamHealth(asDestinationId(7), true));
 
     await waitFor(() => expect(result.current.kind).toBe("ok"));
     expect(result.current).toEqual({ kind: "ok", streams: [] });
@@ -100,7 +100,7 @@ describe("useFacebookStreamHealth", () => {
   it("distinguishes 'this platform publishes none' from a failure", async () => {
     facebookStreamHealth.mockResolvedValue({ supported: false });
 
-    const { result } = renderHook(() => useFacebookStreamHealth(7, true));
+    const { result } = renderHook(() => useFacebookStreamHealth(asDestinationId(7), true));
 
     await waitFor(() => expect(result.current.kind).toBe("unsupported"));
   });
@@ -117,7 +117,7 @@ describe("useFacebookStreamHealth", () => {
     async (status) => {
       facebookStreamHealth.mockRejectedValue(new ApiError(status, "no such route"));
 
-      const { result } = renderHook(() => useFacebookStreamHealth(7, true));
+      const { result } = renderHook(() => useFacebookStreamHealth(asDestinationId(7), true));
 
       await waitFor(() => expect(result.current.kind).toBe("unavailable"));
       const afterFirst = facebookStreamHealth.mock.calls.length;
@@ -135,7 +135,7 @@ describe("useFacebookStreamHealth", () => {
     // restarting.
     facebookStreamHealth.mockRejectedValue(new ApiError(500, "upstream is unwell"));
 
-    const { result } = renderHook(() => useFacebookStreamHealth(7, true));
+    const { result } = renderHook(() => useFacebookStreamHealth(asDestinationId(7), true));
 
     await waitFor(() => expect(result.current.kind).toBe("error"));
     const afterFirst = facebookStreamHealth.mock.calls.length;
@@ -152,7 +152,7 @@ describe("useFacebookStreamHealth", () => {
     facebookStreamHealth.mockRejectedValueOnce(new Error("network blip"));
     facebookStreamHealth.mockResolvedValue({ supported: true, streams: [] });
 
-    const { result } = renderHook(() => useFacebookStreamHealth(7, true));
+    const { result } = renderHook(() => useFacebookStreamHealth(asDestinationId(7), true));
 
     await waitFor(() => expect(result.current.kind).toBe("error"));
     // It says what went wrong rather than going quiet, which would leave a
@@ -170,7 +170,7 @@ describe("useFacebookStreamHealth", () => {
     // of them at once.
     facebookStreamHealth.mockResolvedValue({ supported: true, streams: [] });
 
-    const { unmount } = renderHook(() => useFacebookStreamHealth(7, true));
+    const { unmount } = renderHook(() => useFacebookStreamHealth(asDestinationId(7), true));
     await waitFor(() => expect(facebookStreamHealth).toHaveBeenCalled());
 
     unmount();
@@ -188,7 +188,7 @@ describe("useFacebookStreamHealth", () => {
     // subject of a test beside it.
     facebookStreamHealth.mockResolvedValue({ supported: true, streams: [] });
 
-    renderHook(() => useFacebookStreamHealth(7, true));
+    renderHook(() => useFacebookStreamHealth(asDestinationId(7), true));
     await waitFor(() => expect(facebookStreamHealth).toHaveBeenCalledTimes(1));
 
     await tick();

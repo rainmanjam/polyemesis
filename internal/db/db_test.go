@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -949,6 +950,75 @@ func TestTakeOAuthStateRejectsAndConsumesAnExpiredState(t *testing.T) {
 	}
 	if n != 0 {
 		t.Error("an expired state was left in the table for a second attempt")
+	}
+}
+
+// TestTakeOAuthStateReturningWorksWithThisDriver pins the fact the fix for #8
+// depends on: modernc.org/sqlite (the only driver this repo ships) honours
+// `DELETE ... RETURNING`. Nothing else in the tree used RETURNING before this,
+// so a driver upgrade that dropped it would otherwise only be caught by
+// TakeOAuthState itself returning the wrong error, which reads like an
+// unrelated failure.
+func TestTakeOAuthStateReturningWorksWithThisDriver(t *testing.T) {
+	d := testDB(t)
+	if err := d.PutOAuthState("returning-probe", PlatformYouTube, "v"); err != nil {
+		t.Fatalf("PutOAuthState: %v", err)
+	}
+	var p Platform
+	var verifier string
+	var created int64
+	err := d.SQL().QueryRow(`DELETE FROM oauth_states WHERE state = ? RETURNING platform, verifier, created_at`,
+		"returning-probe").Scan(&p, &verifier, &created)
+	if err != nil {
+		t.Fatalf("DELETE ... RETURNING is not supported by this driver/SQLite build: %v", err)
+	}
+	if p != PlatformYouTube || verifier != "v" {
+		t.Errorf("RETURNING gave back (%q, %q), want (%q, %q)", p, verifier, PlatformYouTube, "v")
+	}
+}
+
+// TestTakeOAuthStateIsAtomicUnderConcurrentCallbacks is finding #8: the old
+// implementation ran a SELECT and then a separate DELETE. db.go's
+// SetMaxOpenConns(1) only holds the pool's single connection for one
+// statement at a time, not across two, so a second concurrent callback with
+// the same state could acquire the connection between the first callback's
+// SELECT and its DELETE and see the row too -- both callbacks would then
+// treat a single-use state as valid. Two goroutines race the same state many
+// times over; with the atomic `DELETE ... RETURNING` fix, exactly one can
+// ever win, every time.
+//
+// Mutation: put the SELECT and DELETE back as two separate statements in
+// TakeOAuthState (any two-statement form still compiles) -- observed FAIL,
+// "trial N: 2 concurrent callbacks consumed state".
+func TestTakeOAuthStateIsAtomicUnderConcurrentCallbacks(t *testing.T) {
+	d := testDB(t)
+	const trials = 30
+	for i := 0; i < trials; i++ {
+		state := fmt.Sprintf("race-state-%d", i)
+		if err := d.PutOAuthState(state, PlatformYouTube, "verifier"); err != nil {
+			t.Fatalf("PutOAuthState: %v", err)
+		}
+
+		var successes int32
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		wg.Add(2)
+		for g := 0; g < 2; g++ {
+			go func() {
+				defer wg.Done()
+				<-start
+				if _, _, err := d.TakeOAuthState(state); err == nil {
+					atomic.AddInt32(&successes, 1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+
+		if successes != 1 {
+			t.Fatalf("trial %d: %d concurrent callbacks consumed state %q; want exactly 1 (single-use is not atomic)",
+				i, successes, state)
+		}
 	}
 }
 

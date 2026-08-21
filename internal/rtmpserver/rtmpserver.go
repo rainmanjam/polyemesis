@@ -56,6 +56,7 @@ import (
 
 	"github.com/bluenviron/gortmplib"
 	"github.com/bluenviron/gortmplib/pkg/message"
+	"github.com/rainmanjam/polyemesis/internal/authgate"
 )
 
 // handshakeTimeout bounds how long a connection may take to get through the
@@ -255,6 +256,10 @@ type Server struct {
 	// for it. See subscriberChanged.
 	subChange chan struct{}
 	done      chan struct{}
+	// gate throttles a peer that has presented enough wrong stream keys to
+	// look like guessing. Shared with internal/srtserver -- see
+	// internal/authgate for why this is not forked per protocol.
+	gate *authgate.Gate
 }
 
 // New builds a server. It binds nothing until Start.
@@ -267,6 +272,7 @@ func New(log *slog.Logger, addr string, lookup Lookup) *Server {
 		streams: map[PublisherKey]*stream{},
 		waiters: map[PublisherKey]int{},
 		done:    make(chan struct{}),
+		gate:    authgate.New(),
 	}
 }
 
@@ -378,6 +384,17 @@ func (s *Server) handle(conn net.Conn) {
 	peer := conn.RemoteAddr().String()
 	defer func() { _ = conn.Close() }()
 
+	// Checked before the handshake is even attempted, so a peer already
+	// blocked for guessing wrong keys does not get to spend a fresh handshake
+	// on every subsequent try. See internal/authgate for why this is scoped
+	// per peer rather than global.
+	host := authgate.PeerHost(conn.RemoteAddr())
+	if s.gate.Blocked(host) {
+		s.log.Debug("rtmp connect refused: peer is rate-limited after repeated wrong keys",
+			"component", "rtmp-ingest", "peer", peer)
+		return
+	}
+
 	_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
 
 	sc := &gortmplib.ServerConn{RW: conn}
@@ -451,6 +468,14 @@ func (s *Server) handle(conn net.Conn) {
 			// source that does not exist have to be the same event, or the log
 			// becomes an oracle for whoever can read it.
 			s.log.Info("rtmp publish refused", "component", "rtmp-ingest", "peer", peer)
+			// Only an unrecognised key counts as a guess. A found-but-disabled
+			// or found-but-not-ready target already proved this caller holds a
+			// real credential, so neither of those branches reaches here. See
+			// internal/authgate.
+			if s.gate.Fail(host) {
+				s.log.Warn("rtmp: peer rate-limited after repeated wrong stream keys",
+					"component", "rtmp-ingest", "peer", peer)
+			}
 		} else {
 			// Past here the publisher has already proved it holds a valid key,
 			// so naming the reason leaks nothing it does not already know --
@@ -464,6 +489,9 @@ func (s *Server) handle(conn net.Conn) {
 		}
 		return
 	}
+	// A real key was just presented successfully; nothing this peer guessed
+	// wrong earlier should still count against it.
+	s.gate.Succeed(host)
 
 	// The handshake deadline must not survive into the session: a live stream
 	// is legitimately quiet between keyframes, and an unrenewed deadline would
@@ -485,14 +513,24 @@ const (
 
 func (v verdict) String() string {
 	switch v {
+	case admitPublish:
+		return "admitted"
 	case refuseDisabled:
 		return "source disabled"
 	case refuseNotReady:
 		return "no pipeline for source"
 	case refuseUnknownKey:
 		return "unrecognised"
+	default:
+		// Never falls through to "admitted". The old default did exactly
+		// that -- an unhandled value read as a successful publish on the log
+		// line that is the ONLY place a refusal reason is told apart (#14,
+		// poka-yoke audit) -- which is the one direction a refusal must never
+		// silently become. TestVerdictStringHasNoSilentAdmit and
+		// TestEveryVerdictConstantIsHandled keep this switch honest as the
+		// const block above it grows.
+		return fmt.Sprintf("BUG: unhandled verdict %d", int(v))
 	}
-	return "admitted"
 }
 
 // admit is the whole admission decision, separated from the connection so every

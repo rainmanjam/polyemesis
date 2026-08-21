@@ -31,12 +31,13 @@ import { api } from "@/lib/api";
 import { bytes, clockTime, duration, kbps, pct } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
 import { cn } from "@/lib/utils";
-import type {
-  Destination,
-  DryRunResult,
-  ExpertResponse,
-  LogLine,
-  ProcessInfo,
+import {
+  asDestinationId,
+  type Destination,
+  type DryRunResult,
+  type ExpertResponse,
+  type LogLine,
+  type ProcessInfo,
 } from "@/lib/types";
 import { useT, type TranslationKey, useStateLabel } from "@/lib/i18n";
 
@@ -144,7 +145,7 @@ function ExpertPanel() {
     setSaved("");
     setDraft({ inputArgs: "", outputArgs: "" });
     setAck(false);
-    void api.getExpert(Number(value))
+    void api.getExpert(asDestinationId(Number(value)))
       .then((r) => {
         setDraft({ inputArgs: r.args.inputArgs, outputArgs: r.args.outputArgs });
         setAck(r.args.ackReencode);
@@ -185,7 +186,7 @@ function ExpertPanel() {
     () =>
       run("preview", async () => {
         const snapshot = draft;
-        const r = await api.previewExpert(Number(selected), { ...snapshot, ackReencode: ack });
+        const r = await api.previewExpert(asDestinationId(Number(selected)), { ...snapshot, ackReencode: ack });
         setResolved(r);
         setResolvedFor(snapshot);
         setSaved("");
@@ -197,7 +198,7 @@ function ExpertPanel() {
     () =>
       run("dryrun", async () => {
         setDryRun(
-          await api.dryRunExpert(Number(selected), { ...draft, ackReencode: ack }),
+          await api.dryRunExpert(asDestinationId(Number(selected)), { ...draft, ackReencode: ack }),
         );
       }),
     [run, draft, selected, ack],
@@ -206,7 +207,7 @@ function ExpertPanel() {
   const apply = useCallback(
     () =>
       run("apply", async () => {
-        const r = await api.putExpert(Number(selected), { ...draft, ackReencode: ack, confirm: true });
+        const r = await api.putExpert(asDestinationId(Number(selected)), { ...draft, ackReencode: ack, confirm: true });
         setResolved(r);
         setResolvedFor(draft);
         setSaved(r.warning ?? "Saved.");
@@ -217,7 +218,7 @@ function ExpertPanel() {
   const clear = useCallback(
     () =>
       run("clear", async () => {
-        const r = await api.deleteExpert(Number(selected));
+        const r = await api.deleteExpert(asDestinationId(Number(selected)));
         setDraft({ inputArgs: "", outputArgs: "" });
         setAck(false);
         setDryRun(null);

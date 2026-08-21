@@ -35,6 +35,8 @@ import (
 	"time"
 
 	srt "github.com/datarhei/gosrt"
+
+	"github.com/rainmanjam/polyemesis/internal/authgate"
 )
 
 const (
@@ -136,6 +138,11 @@ type Server struct {
 	live map[PublisherKey]*session // by (source id, role)
 
 	started atomic.Bool
+
+	// gate throttles a peer that has presented enough wrong tokens to look
+	// like guessing. Shared with internal/rtmpserver -- see internal/authgate
+	// for why this is not forked per protocol.
+	gate *authgate.Gate
 }
 
 // BindReport is which address families the listener asked for and which it got.
@@ -284,6 +291,7 @@ func New(log *slog.Logger, addr string, lookup Lookup) *Server {
 		addr:   addr,
 		lookup: lookup,
 		live:   map[PublisherKey]*session{},
+		gate:   authgate.New(),
 	}
 }
 
@@ -422,6 +430,17 @@ func (s *Server) handleConnect(req srt.ConnRequest) srt.ConnType {
 	peer := req.RemoteAddr().String()
 	streamID := req.StreamId()
 
+	// Checked before the token is even looked at, so a peer already blocked
+	// for guessing wrong tokens does not get a fresh lookup on every retry.
+	// See internal/authgate for why this is scoped per peer rather than global.
+	host := authgate.PeerHost(req.RemoteAddr())
+	if s.gate.Blocked(host) {
+		req.SetRejectionReason(srt.REJ_BADSECRET)
+		s.log.Debug("srt connect refused: peer is rate-limited after repeated wrong tokens",
+			"peer", peer)
+		return srt.REJECT
+	}
+
 	if l := len(streamID); l == 0 || l > MaxStreamIDLength {
 		req.SetRejectionReason(srt.REJ_ROGUE)
 		s.log.Warn("srt publish refused: unusable streamid", "peer", peer, "length", l)
@@ -435,6 +454,11 @@ func (s *Server) handleConnect(req srt.ConnRequest) srt.ConnType {
 		// apart. The token is never logged.
 		req.SetRejectionReason(srt.REJ_BADSECRET)
 		s.log.Warn("srt publish refused: token not recognised", "peer", peer)
+		// Only an unrecognised token counts as a guess -- every refusal below
+		// this point already proved the caller holds a real one.
+		if s.gate.Fail(host) {
+			s.log.Warn("srt: peer rate-limited after repeated wrong tokens", "peer", peer)
+		}
 		return srt.REJECT
 	}
 	if !target.Enabled {
@@ -486,6 +510,9 @@ func (s *Server) handleConnect(req srt.ConnRequest) srt.ConnType {
 		return srt.REJECT
 	}
 
+	// A real token was just presented successfully; nothing this peer guessed
+	// wrong earlier should still count against it.
+	s.gate.Succeed(host)
 	return srt.PUBLISH
 }
 

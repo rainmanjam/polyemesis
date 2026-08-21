@@ -18,6 +18,7 @@ import type {
   ChatUserCard,
   CredentialCheck,
   Destination,
+  DestinationId,
   DeviceAuth,
   DevicePoll,
   DiskUsage,
@@ -64,6 +65,7 @@ import type {
   Settings,
   SetupGuide,
   Source,
+  SourceId,
   SourceInfo,
   SourceView,
   Status,
@@ -422,7 +424,7 @@ export const api = {
 
   // --- destinations ---
   listDestinations: () => get<DestinationWithRouting[]>("/destinations"),
-  getDestination: (id: number) =>
+  getDestination: (id: DestinationId) =>
     get<DestinationWithRouting>(`/destinations/${id}`),
   /**
    * `warnings` names any platform-specific settings the server dropped because
@@ -431,17 +433,17 @@ export const api = {
    */
   createDestination: (d: Partial<Destination>) =>
     post<{ destination: Destination; warnings?: string[] }>("/destinations", d),
-  updateDestination: (id: number, d: Partial<Destination>) =>
+  updateDestination: (id: DestinationId, d: Partial<Destination>) =>
     put<DestinationWithRouting & { warnings?: string[] }>(`/destinations/${id}`, d),
-  deleteDestination: (id: number) => del<{ status: string }>(`/destinations/${id}`),
+  deleteDestination: (id: DestinationId) => del<{ status: string }>(`/destinations/${id}`),
   /** Display order only — the server does not restart anything for this. */
-  reorderDestinations: (ids: number[]) =>
-    put<{ ids: number[] }>("/destinations/order", { ids }),
-  startDestination: (id: number) =>
+  reorderDestinations: (ids: DestinationId[]) =>
+    put<{ ids: DestinationId[] }>("/destinations/order", { ids }),
+  startDestination: (id: DestinationId) =>
     post<{ enabled: boolean }>(`/destinations/${id}/start`),
-  stopDestination: (id: number) =>
+  stopDestination: (id: DestinationId) =>
     post<{ enabled: boolean }>(`/destinations/${id}/stop`),
-  restartDestination: (id: number) =>
+  restartDestination: (id: DestinationId) =>
     post<{ status: string }>(`/destinations/${id}/restart`),
 
   /* --- every destination at once ----------------------------------------
@@ -461,8 +463,14 @@ export const api = {
    *  puts video back on the wire; it does not bring the broadcasts back. See
    *  internal/api/destinations_bulk.go. */
   startAllDestinations: () => post<BulkDestReport>("/destinations/start-all"),
-  stopAllDestinations: () => post<BulkDestReport>("/destinations/stop-all"),
-  refreshStreamKey: (id: number) =>
+  /** Stop every destination. Carries `confirm` because the server refuses this
+   *  route without it: it ends every live broadcast on the install, and a
+   *  broadcast that has ended cannot be resumed. The dialog in front of this
+   *  call is what the flag attests to -- the server cannot see that dialog, so
+   *  a caller that never showed one is exactly who the refusal is for. */
+  stopAllDestinations: () =>
+    post<BulkDestReport>("/destinations/stop-all", { confirm: true }),
+  refreshStreamKey: (id: DestinationId) =>
     post<{ destination: Destination }>(`/destinations/${id}/refresh-key`),
 
   /* --- Facebook broadcast lifecycle -------------------------------------
@@ -502,13 +510,13 @@ export const api = {
    */
   /** Ends the destination's Facebook live video. See the block above: the
    *  route is not implemented server-side yet. */
-  endFacebookBroadcast: (id: number) =>
+  endFacebookBroadcast: (id: DestinationId) =>
     post<BroadcastEnd>(`/destinations/${id}/facebook/end-broadcast`),
   /** Reads Facebook's view of the encoder feed. Callers must not poll faster
    *  than FACEBOOK_STREAM_HEALTH_INTERVAL_MS — that is Facebook's published
    *  floor, quoted beside the constant in types.ts. See the block above: the
    *  route is not implemented server-side yet. */
-  facebookStreamHealth: (id: number) =>
+  facebookStreamHealth: (id: DestinationId) =>
     get<StreamHealthView>(`/destinations/${id}/facebook/stream-health`),
 
   // --- debug mode ---
@@ -558,12 +566,12 @@ export const api = {
   // act on the default source, which is what keeps every other page working
   // without knowing sources exist.
   listSources: () => get<SourceView[]>("/sources"),
-  getSource: (id: number) => get<SourceView>(`/sources/${id}`),
+  getSource: (id: SourceId) => get<SourceView>(`/sources/${id}`),
   createSource: (s: Partial<Source>) => post<SourceView>("/sources", s),
-  updateSource: (id: number, s: Partial<Source>) =>
+  updateSource: (id: SourceId, s: Partial<Source>) =>
     put<SourceView>(`/sources/${id}`, s),
-  deleteSource: (id: number) => del<void>(`/sources/${id}`),
-  rotateSourceToken: (id: number) =>
+  deleteSource: (id: SourceId) => del<void>(`/sources/${id}`),
+  rotateSourceToken: (id: SourceId) =>
     post<SourceView>(`/sources/${id}/token`),
 
   // --- renditions ---
@@ -630,17 +638,30 @@ export const api = {
   // --- routing ---
   /** Compiles against the engine's live source layout, which is what makes the
    *  filter string under the editor honest: it comes from the same Go code
-   *  that will run, not from a TypeScript reimplementation. */
-  compileRouting: (profile: RoutingProfile) =>
+   *  that will run, not from a TypeScript reimplementation.
+   *
+   *  `destinationId` is finding #9's fix, UI half: neither this route nor
+   *  applyPreset below is scoped by URL, so on a multi-source install the
+   *  server had nothing to compile against but the shared default engine's
+   *  source (`s.eng().Source()`, `engines[0]`) -- correct for the destination
+   *  being edited only by coincidence, on whichever install has exactly one
+   *  source. routingSourceOverride (internal/api/handlers.go) resolves
+   *  `?destinationId=` to that destination's own source when sent; RoutingPage
+   *  always knows which destination it is editing (the `:id` route param), so
+   *  it always has one to send. Optional so any other caller keeps today's
+   *  behaviour rather than being broken by a newly-required id. */
+  compileRouting: (profile: RoutingProfile, destinationId?: DestinationId) =>
     post<{ routing: RoutingResult; profile: RoutingProfile }>(
-      "/routing/compile",
+      `/routing/compile${destinationId !== undefined ? `?destinationId=${destinationId}` : ""}`,
       { profile },
     ),
   listPresets: () =>
     get<{ presets: Preset[]; defaults: PresetOpts }>("/routing/presets"),
-  applyPreset: (id: string, opts: PresetOpts) =>
+  /** See compileRouting's note on `destinationId` -- the same fix, the same
+   *  reason, the same optional query parameter. */
+  applyPreset: (id: string, opts: PresetOpts, destinationId?: DestinationId) =>
     post<{ profile: RoutingProfile; routing: RoutingResult }>(
-      `/routing/presets/${encodeURIComponent(id)}`,
+      `/routing/presets/${encodeURIComponent(id)}${destinationId !== undefined ? `?destinationId=${destinationId}` : ""}`,
       opts,
     ),
 
@@ -718,14 +739,14 @@ export const api = {
   //
   // Preview and dry-run are POSTs because they carry a candidate edit in the
   // body, not because they change anything: neither writes.
-  getExpert: (id: number) => get<ExpertResponse>(`/destinations/${id}/expert`),
-  previewExpert: (id: number, args: ExpertArgs) =>
+  getExpert: (id: DestinationId) => get<ExpertResponse>(`/destinations/${id}/expert`),
+  previewExpert: (id: DestinationId, args: ExpertArgs) =>
     post<ExpertResponse>(`/destinations/${id}/expert/preview`, args),
-  dryRunExpert: (id: number, args: ExpertArgs) =>
+  dryRunExpert: (id: DestinationId, args: ExpertArgs) =>
     post<DryRunResult>(`/destinations/${id}/expert/dry-run`, args),
-  putExpert: (id: number, args: ExpertArgs & { confirm: boolean }) =>
+  putExpert: (id: DestinationId, args: ExpertArgs & { confirm: boolean }) =>
     put<ExpertResponse>(`/destinations/${id}/expert`, args),
-  deleteExpert: (id: number) => del<ExpertResponse>(`/destinations/${id}/expert`),
+  deleteExpert: (id: DestinationId) => del<ExpertResponse>(`/destinations/${id}/expert`),
 
   // --- background jobs ---
   //

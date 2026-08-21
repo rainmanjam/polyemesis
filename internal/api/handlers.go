@@ -1938,6 +1938,57 @@ func (s *Server) handleRestartDestination(w http.ResponseWriter, r *http.Request
 
 // -------------------------------------------------------------- routing API
 
+// routingSourceOverride is engineForSource/sourceForDestination's device,
+// applied here.
+//
+// Finding #9, poka-yoke audit 2026-08-21: handleCompileRouting and
+// handleApplyPreset still fell back to s.eng().Source() -- engines[0],
+// correct only on a single-source install -- the same bug PR #478 fixed for
+// handleListDestinations, handleGetDestination, handleUpdateDestination and
+// handleRestartDestination with engineForSource/sourceForDestination.
+//
+// Unlike those four, neither route is mounted under /destinations/{id}: the
+// request carries a routing.Profile or a routing.PresetOpts, never a
+// destination id, so there is nothing to scope by until a caller sends one.
+// ?destinationId= rather than a body field -- handleApplyPreset decodes its
+// body directly as routing.PresetOpts with DisallowUnknownFields, and that
+// type belongs to package routing, not this file.
+//
+// Optional, and answered by the shared default engine's source when absent,
+// so every caller that does not send it keeps exactly today's behaviour
+// (right on a single-source install, wrong on a multi-source one) rather than
+// being broken outright. Closing the bug for the routing editor, which always
+// knows the destination it is editing (see ui/src/pages/RoutingPage.tsx's
+// :id route param), needs that page updated to send it -- out of scope here,
+// see the fix report.
+func (s *Server) routingSourceOverride(r *http.Request) (routing.Source, error) {
+	raw := r.URL.Query().Get("destinationId")
+	if raw == "" {
+		return s.eng().Source(), nil
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return routing.Source{}, badRequestError{"invalid destinationId: " + err.Error()}
+	}
+	dest, err := s.store.GetDestination(id)
+	if err != nil {
+		return routing.Source{}, err
+	}
+	src, _ := s.sourceForDestination(dest.SourceID)
+	return src, nil
+}
+
+// writeRoutingSourceError renders routingSourceOverride's two failure shapes:
+// a malformed id is the caller's fault, anything else is the store's.
+func writeRoutingSourceError(w http.ResponseWriter, err error) {
+	var badRequest badRequestError
+	if errors.As(err, &badRequest) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeStoreError(w, err)
+}
+
 func (s *Server) handleCompileRouting(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Profile routing.Profile `json:"profile"`
@@ -1947,9 +1998,15 @@ func (s *Server) handleCompileRouting(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Profile.ApplyDefaults()
 
+	src, err := s.routingSourceOverride(r)
+	if err != nil {
+		writeRoutingSourceError(w, err)
+		return
+	}
+
 	// This backs the live filter-string preview in the routing editor: the
 	// user sees exactly what their checkboxes compile to, before saving.
-	res, err := routing.Compile(req.Profile, s.eng().Source())
+	res, err := routing.Compile(req.Profile, src)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error":   err.Error(),
@@ -2001,12 +2058,17 @@ func (s *Server) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	profile, err := routing.ApplyPreset(chi.URLParam(r, "preset"), s.eng().Source(), opts)
+	src, err := s.routingSourceOverride(r)
+	if err != nil {
+		writeRoutingSourceError(w, err)
+		return
+	}
+	profile, err := routing.ApplyPreset(chi.URLParam(r, "preset"), src, opts)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	res, err := routing.Compile(profile, s.eng().Source())
+	res, err := routing.Compile(profile, src)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -798,11 +799,78 @@ func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientI
 	return &oauth.Broadcast{Ingest: *ing}, nil
 }
 
+// refreshLocks serializes concurrent token refreshes of the SAME account. The
+// 10-minute RefreshLoop tick and an on-demand tokenFor call (or two on-demand
+// calls from two in-flight publishes) can both see the same account as
+// expired and both call the platform's refresh endpoint; UpsertPlatformAccount
+// has no compare-and-swap, so whichever write lands second overwrites a live
+// token with one the platform may already have invalidated -- a refresh
+// failure mid-broadcast. #6.
+var refreshLocks = newKeyedMutex()
+
+// keyedMutex hands out one *sync.Mutex per key, reference-counted so a key with
+// no waiters is removed rather than accumulating forever (accounts get
+// deleted; their lock entries must not outlive them). The refcount increment
+// happens under the same map lock as lookup/creation, so a key can never be
+// deleted while a waiter still holds a reference to it -- the classic race in
+// a naive "delete on unlock" keyed mutex.
+type keyedMutex struct {
+	mu    sync.Mutex
+	locks map[int64]*refcountedMutex
+}
+
+type refcountedMutex struct {
+	mu  sync.Mutex
+	ref int
+}
+
+func newKeyedMutex() *keyedMutex {
+	return &keyedMutex{locks: make(map[int64]*refcountedMutex)}
+}
+
+// Lock blocks until key is exclusively held and returns the func that releases
+// it. Different keys never block each other.
+func (k *keyedMutex) Lock(key int64) func() {
+	k.mu.Lock()
+	l, ok := k.locks[key]
+	if !ok {
+		l = &refcountedMutex{}
+		k.locks[key] = l
+	}
+	l.ref++
+	k.mu.Unlock()
+
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		k.mu.Lock()
+		l.ref--
+		if l.ref == 0 {
+			delete(k.locks, key)
+		}
+		k.mu.Unlock()
+	}
+}
+
 // tokenFor loads an account and refreshes its access token if it is expired or
 // close to it. Refresh-on-use plus the background loop in RefreshLoop means a
 // long broadcast never hits an expired token mid-stream.
 func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAccount, error) {
 	acct, err := s.store.GetPlatformAccount(s.box, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if !acct.Expired() {
+		return acct, nil
+	}
+
+	// Serialize refreshes of this one account; other accounts proceed in
+	// parallel. Re-read after acquiring the lock: the racing caller may have
+	// already refreshed while we waited, in which case we reuse its result
+	// instead of hitting the platform -- and overwriting it -- a second time.
+	unlock := refreshLocks.Lock(accountID)
+	defer unlock()
+	acct, err = s.store.GetPlatformAccount(s.box, accountID)
 	if err != nil {
 		return nil, err
 	}

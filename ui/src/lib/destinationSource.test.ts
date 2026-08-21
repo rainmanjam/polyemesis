@@ -7,10 +7,11 @@ import {
   sourceIsChosen,
   sourceNameById,
 } from "./destinationSource";
+import { asSourceId } from "@/lib/types";
 
 const two = [
-  { id: 1, name: "Main" },
-  { id: 2, name: "Studio B" },
+  { id: asSourceId(1), name: "Main" },
+  { id: asSourceId(2), name: "Studio B" },
 ];
 
 describe("sourceChoices", () => {
@@ -41,13 +42,13 @@ describe("initialSourceValue", () => {
   });
 
   it("starts on the destination's own programme when editing", () => {
-    expect(initialSourceValue({ sourceId: 2 }, two)).toBe("2");
+    expect(initialSourceValue({ sourceId: asSourceId(2) }, two)).toBe("2");
   });
 
   it("does not offer to move a destination just because another source exists", () => {
     // A destination on source 2 must not open showing source 1, whatever the
     // order the list arrives in.
-    expect(initialSourceValue({ sourceId: 2 }, [two[1], two[0]])).toBe("2");
+    expect(initialSourceValue({ sourceId: asSourceId(2) }, [two[1], two[0]])).toBe("2");
   });
 });
 
@@ -100,8 +101,8 @@ describe("sourceNameById", () => {
 
   it("names each programme once there is a choice to disambiguate", () => {
     const got = sourceNameById(two as never);
-    expect(got.get(1)).toBe("Main");
-    expect(got.get(2)).toBe("Studio B");
+    expect(got.get(asSourceId(1))).toBe("Main");
+    expect(got.get(asSourceId(2))).toBe("Studio B");
     expect(got.size).toBe(2);
   });
 
@@ -109,12 +110,12 @@ describe("sourceNameById", () => {
     // Or the card and the picker would disagree about what the same source is
     // called, which is worse than either label alone.
     const got = sourceNameById([{ id: 7, name: "" }, { id: 8, name: "x" }] as never);
-    expect(got.get(7)).toBe("Source 7");
+    expect(got.get(asSourceId(7))).toBe("Source 7");
   });
 
   it("answers nothing for a programme it does not know", () => {
     // The card renders no badge on a miss rather than the word "undefined",
     // which is what happens to a destination whose source was just deleted.
-    expect(sourceNameById(two as never).get(999)).toBeUndefined();
+    expect(sourceNameById(two as never).get(asSourceId(999))).toBeUndefined();
   });
 });

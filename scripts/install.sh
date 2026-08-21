@@ -852,6 +852,96 @@ warn_if_taken() {
   fi
 }
 
+# --------------------------------------------------------------- validation
+
+# resolve_path canonicalizes a path with GNU realpath -m, which tolerates
+# components that do not exist yet (DATA_DIR usually doesn't, before mkdir
+# runs) and follows any symlink in the part that does. Falls back to a manual
+# walk when -m isn't available -- not this installer's Linux target, but this
+# script's own tests must still run wherever they're developed.
+resolve_path() {
+  local p="$1" resolved
+  if resolved="$(realpath -m -- "$p" 2>/dev/null)"; then
+    printf '%s' "$resolved"
+    return 0
+  fi
+  local dir="$p" tail=""
+  while [ -n "$dir" ] && [ "$dir" != "/" ] && ! [ -d "$dir" ]; do
+    tail="/$(basename -- "$dir")$tail"
+    dir="$(dirname -- "$dir")"
+  done
+  local existing
+  existing="$(cd "$dir" 2>/dev/null && pwd -P)" || existing="$dir"
+  if [ -z "$tail" ]; then
+    printf '%s' "$existing"
+  elif [ "$existing" = "/" ]; then
+    printf '%s' "$tail"
+  else
+    printf '%s%s' "$existing" "$tail"
+  fi
+}
+
+# validate_data_dir guards the chown -R in install_binary_mode against the
+# one place an operator-supplied value reaches it: the "Data directory"
+# prompt below. Empty, "/", a ".." component, or a top-level system
+# directory (typed directly or reached through a symlink) all die here,
+# before confirm_plan even prints a summary -- not after mkdir/chown have
+# already run. poka-yoke audit #5.
+validate_data_dir() {
+  local raw="$1" varname="$2"
+
+  [ -n "$raw" ] || die "data directory is empty — refusing to chown -R an empty/unset path"
+  case "$raw" in
+    /*) ;;
+    *) die "data directory '$raw' is not an absolute path" ;;
+  esac
+  case "/${raw}/" in
+    */../*) die "data directory '$raw' contains a '..' component — refusing" ;;
+  esac
+
+  local resolved
+  resolved="$(resolve_path "$raw")"
+
+  if [ "$resolved" = "/" ]; then
+    die "data directory '$raw' resolves to '/' — refusing to chown -R the entire filesystem"
+  fi
+
+  local first="${resolved#/}"
+  first="${first%%/*}"
+  if [ "$resolved" = "/$first" ]; then
+    case "$first" in
+      bin|boot|dev|etc|home|lib|lib32|lib64|libx32|media|mnt|opt|proc|root|run|sbin|srv|sys|tmp|usr|var)
+        die "data directory '$raw' resolves to /$first — a top-level system directory. Refusing to chown -R it." ;;
+    esac
+  fi
+
+  if [ "$resolved" != "$raw" ]; then
+    warn "data directory '$raw' resolves to '$resolved' — using the resolved path"
+  fi
+  printf -v "$varname" '%s' "$resolved"
+}
+
+# preserve_existing snapshots a file this run is about to overwrite, so
+# re-running the installer over an existing install cannot silently destroy
+# operator edits. Both config.yaml files this installer writes say "Edit and
+# `docker compose up -d`/restart to apply" -- an invitation a plain overwrite
+# erases without a trace. Never overwrites its own previous snapshot: a
+# same-second rerun (as in this script's own tests) gets a numbered suffix
+# instead. poka-yoke audit #11.
+preserve_existing() { # preserve_existing <path-about-to-be-overwritten>
+  local f="$1"
+  [ -e "$f" ] || return 0
+  local stamp dest suffix="" n=2
+  stamp="$(date +%Y%m%dT%H%M%S)"
+  dest="${f}.bak-${stamp}"
+  while [ -e "${dest}${suffix}" ]; do
+    suffix=".${n}"
+    n=$((n + 1))
+  done
+  cp -a "$f" "${dest}${suffix}"
+  warn "existing $(basename -- "$f") found — your previous copy was kept at ${dest}${suffix}"
+}
+
 # ----------------------------------------------------------------- interview
 
 gather_configuration() {
@@ -995,6 +1085,7 @@ gather_configuration() {
   echo "  Holds the database, secret.key (which decrypts your stored platform"
   echo "  tokens), recordings and TLS material. Back it up; treat it as secret."
   [ "$MODE" = "binary" ] && ask "Data directory" "$DATA_DIR" DATA_DIR
+  [ "$MODE" = "binary" ] && validate_data_dir "$DATA_DIR" DATA_DIR
 
   header "=== Firewall ==="
   if command -v ufw >/dev/null 2>&1 || command -v firewall-cmd >/dev/null 2>&1; then
@@ -1065,6 +1156,7 @@ install_docker_mode() {
   mkdir -p "$INSTALL_DIR"
   DIRS_CREATED=true
 
+  preserve_existing "$INSTALL_DIR/config.yaml"
   {
     printf '# Written by scripts/install.sh. Edit and `docker compose up -d` to apply.\n'
     printf 'dataDir: "/data"\n'
@@ -1072,6 +1164,7 @@ install_docker_mode() {
     tls_yaml
   } > "$INSTALL_DIR/config.yaml"
 
+  preserve_existing "$INSTALL_DIR/docker-compose.yml"
   {
     printf 'services:\n'
     printf '  polyemesis:\n'
@@ -1223,6 +1316,7 @@ install_binary_mode() {
   DIRS_CREATED=true
   chown -R "$RUN_USER:$RUN_USER" "$DATA_DIR"
 
+  preserve_existing "$CONFIG_DIR/config.yaml"
   {
     printf '# Written by scripts/install.sh.\n'
     printf '# Only what must be known before the database opens lives here.\n'
@@ -1482,7 +1576,18 @@ write_helper_scripts() {
 set -euo pipefail
 cd "$INSTALL_DIR"
 stamp="\$(date +%F-%H%M)"
-echo "backing up to $INSTALL_DIR/backup-\${stamp}.tar.gz"
+dest="$INSTALL_DIR/backup-\${stamp}.tar.gz"
+echo "backing up to \$dest"
+
+# Same-minute reruns produce the SAME stamp, and \`tar czf\` overwrites an
+# existing archive with no warning. That archive is the only way back from
+# an upgrade that just went wrong -- exactly when a rerun is likeliest.
+# Refuse rather than silently replace it.
+if [ -e "\$dest" ]; then
+  echo "ERROR: \$dest already exists. Refusing to overwrite the existing backup." >&2
+  echo "Wait a minute and re-run, or move the old archive aside first." >&2
+  exit 1
+fi
 
 # \`docker run -v\` CREATES a missing volume rather than failing, so a wrong or
 # renamed volume backs up an empty directory, exits 0, and the upgrade below
@@ -1511,7 +1616,7 @@ docker run --rm -v polyemesis-data:/data -v "$INSTALL_DIR:/backup" alpine \\
 # Herestrings rather than \`printf | grep\`, because printf takes SIGPIPE too --
 # reordering the pipeline would move the bug, not remove it. This also walks the
 # archive once instead of twice.
-listing="\$(tar tzf "$INSTALL_DIR/backup-\${stamp}.tar.gz")"
+listing="\$(tar tzf "\$dest")"
 
 # A backup that exists but holds nothing is worse than no backup, because it
 # reads as success. tar always writes the './' entry, so anything under two

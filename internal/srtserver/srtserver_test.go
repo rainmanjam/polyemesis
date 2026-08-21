@@ -9,6 +9,7 @@ import (
 	"time"
 
 	srt "github.com/datarhei/gosrt"
+	"github.com/rainmanjam/polyemesis/internal/authgate"
 	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
@@ -122,6 +123,47 @@ func TestAnUnknownTokenIsRefused(t *testing.T) {
 	if conn, err := dial(t, addr, "not-a-real-token"); err == nil {
 		conn.Close()
 		t.Fatal("an unknown token was accepted; anyone could publish")
+	}
+}
+
+// TestHandleConnectRateLimitsPeerAfterRepeatedUnknownTokens is the
+// network-level half of the #19 poka-yoke fix, run against the real listener
+// rather than the gate in isolation: an unrecognised token must count
+// against the peer's authgate.Gate, and once that peer crosses the
+// threshold, every further connect from it -- even one presenting a token
+// that would otherwise be accepted -- must be rejected outright, before the
+// token is even looked up.
+func TestHandleConnectRateLimitsPeerAfterRepeatedUnknownTokens(t *testing.T) {
+	tg := Target{SourceID: 1, Name: "horizontal", Enabled: true, Sink: &recorder{}}
+	s, addr := serve(t, tg)
+
+	for i := 0; i < authgate.Threshold; i++ {
+		if conn, err := dial(t, addr, "not-a-real-token"); err == nil {
+			conn.Close()
+			t.Fatalf("attempt %d: an unknown token was accepted", i)
+		}
+	}
+
+	// Wait for the count rather than assuming it: dial returns on the CLIENT
+	// side, and the server records the failure after it. See the sibling test
+	// in internal/rtmpserver for the flake this prevents.
+	deadline := time.Now().Add(2 * time.Second)
+	for !s.gate.Blocked("127.0.0.1") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the gate never blocked 127.0.0.1 after %d failed tokens",
+				authgate.Threshold)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// The peer is now blocked. A further connect -- even one presenting the
+	// correct token -- must be refused, which is the whole point of the
+	// gate: past the threshold, an attacker gains nothing by trying the
+	// right value.
+	if conn, err := dial(t, addr, tokenFor(tg)); err == nil {
+		conn.Close()
+		t.Fatal("a peer that just crossed the gate's threshold was still " +
+			"admitted with a valid token")
 	}
 }
 

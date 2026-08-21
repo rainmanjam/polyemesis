@@ -2193,7 +2193,12 @@ func inspectOutboundHookBody(t *testing.T, rig shapeRig) shapeObservation {
 	endpoint, rec := egressEndpoint(t)
 	const path = "/receiver/ledger-shape"
 	created := createHook(t, rig.h, rig.sign, map[string]any{
+		// httptest binds 127.0.0.1, which the SSRF guard added for poka-yoke
+		// audit #4 refuses by default. This fixture targets a local endpoint
+		// ON PURPOSE, so it takes the same deliberate opt-in a self-hosted
+		// operator would -- rather than the guard being loosened for a test.
 		"name": "ledger-shape-egress", "url": endpoint.URL + path,
+		"allowPrivateTarget": true,
 	})
 	id := int64(created["id"].(float64))
 	secret, _ := created["secret"].(string)
@@ -2205,6 +2210,9 @@ func inspectOutboundHookBody(t *testing.T, rig shapeRig) shapeObservation {
 				ID: id, Name: "ledger-shape-egress", Enabled: true,
 				URL: endpoint.URL + path, Secret: secret,
 				MaxAttempts: 1, TimeoutSeconds: 5,
+				// httptest binds 127.0.0.1; this fixture targets it on purpose,
+				// so it takes the opt-in rather than the dial guard being weakened.
+				AllowPrivateTarget: true,
 			}.Normalized()}, nil
 		}),
 		hooks.WithReloadInterval(5*time.Millisecond),
