@@ -567,22 +567,35 @@ func TestChangingTheIngestModeInvalidatesTheMeasuredLayout(t *testing.T) {
 // The silence tier's layout is a measured one, so it lifts the hold.
 //
 // `holdDests := !measured && silenceSig == ""` has two ways to be false and the
-// other tests only cover one of them. This is the second: nothing has ever been
-// probed, but a silence tier is standing in, and reconcileOutputs has already
-// substituted synthTrack() for e.source above the guard. That IS a real layout —
-// synthesised rather than observed, but exact and known — so there is nothing
+// other tests only cover one of them. This is the second: nothing is measured
+// right now, but a silence tier is standing in, and reconcileOutputs has already
+// substituted synthTrack() for e.source above the guard. That IS a real layout --
+// synthesised rather than observed, but exact and known -- so there is nothing
 // for the placeholder to mislead and destinations must start normally.
 //
 // Without this, deleting `&& silenceSig == ""` from the guard would pass every
 // other test in this file: a video-only ingest would simply stop publishing
 // audio, silently, which is the failure mode the silence tier exists to prevent.
+//
+// WHY THE SETUP LOOKS ROUNDABOUT, and why this test was quarantined for a while.
+// It used to assert the state directly -- measured=false, a video-only probe,
+// slate off -- and wait for wantSilence to raise a tier. It cannot: wantSilence
+// returns "" unless `measured`, deliberately, so that a probe which can never
+// succeed cannot be papered over by a synthesised bed. With the selector off as
+// well, silenceSig is then "" by construction whenever !measured, so the branch
+// under test was unreachable and the test quarantined itself rather than
+// asserting on a state that could not happen.
+//
+// There is exactly one path to a non-empty silenceSig on an unmeasured layout,
+// and holdSilence is it: while the selector sits on anything other than the
+// primary, the tier's signature is FROZEN at its last value rather than
+// recomputed. That is the real shape of "a bed is on air while nothing is being
+// measured" -- an ingest that dropped out mid-event, not one that never
+// arrived -- so it is what this test now builds.
 func TestASilenceTierLiftsTheHoldOnAnUnmeasuredLayout(t *testing.T) {
 	e := failoverEngine(t)
 	s := failoverOnSettings()
-	// Slate off, so the selector is not the thing standing in; the silence tier
-	// is what this test is about.
-	s.Failover.Enabled = false
-	s.Failover.Slate.Enabled = false
+	s.Synth.SilenceOnVideoOnly = true
 	e.settings = s
 	e.play = playout.New(playout.Deps{Dir: t.TempDir()})
 
@@ -599,23 +612,38 @@ func TestASilenceTierLiftsTheHoldOnAnUnmeasuredLayout(t *testing.T) {
 	}
 	e.sourceID = *dest.SourceID
 
-	// Unmeasured, which on its own would hold. A video-only probe is what puts
-	// the silence tier on: no audio arriving, so one is synthesised.
+	// The selector is running and is NOT on the primary, which is what freezes
+	// the tier's signature; see holdSilence.
+	e.reconcileSelector(s, wantSelector(s), "")
+	if e.selectorHub() == nil {
+		t.Fatal("the selector tier did not start, so nothing freezes the signature")
+	}
+	t.Cleanup(func() {
+		e.selMu.Lock()
+		defer e.selMu.Unlock()
+		e.teardownFeed(e.sel.feed)
+	})
+
+	// Unmeasured, with a bed already on air: the ingest dropped out mid-event.
 	e.mu.Lock()
 	e.measured = false
 	e.probed = true
 	e.source = routing.Source{}
 	e.videoInfo = &ffmpeg.VideoStream{Width: 1280, Height: 720}
+	e.sel.active = sourceSlate
+	e.heldSilenceSig = hashStrings([]string{"silence", "stereo", "48000"})
 	e.mu.Unlock()
+
+	// The state the branch under test needs. Asserted rather than assumed,
+	// because the previous version of this test silently did NOT reach it.
+	if sig := e.holdSilence(e.wantSilence(e.settings)); sig == "" {
+		t.Fatalf("silenceSig is empty, so `!measured && silenceSig == \"\"` is true " +
+			"and this test is exercising the ordinary hold rather than the tier " +
+			"standing in -- the exact way it stopped testing anything before")
+	}
 
 	if err := e.reconcileOutputs(); err != nil {
 		t.Fatalf("reconcileOutputs: %v", err)
-	}
-
-	if e.wantSilence(e.settings) == "" {
-		// Was a bare t.Skip. It fires when the behaviour under test stopped
-		// happening, which is the finding rather than the exemption.
-		testenv.Quarantine(t, "engine-rtmp-ingest-no-silence-tier")
 	}
 	if len(e.dests) == 0 {
 		t.Error("the hold was applied even though a silence tier was standing in. " +
