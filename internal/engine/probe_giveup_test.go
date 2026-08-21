@@ -192,9 +192,14 @@ func TestAModeChangeClearsTheFailureHistory(t *testing.T) {
 func TestTheHoldExitIsWiredIntoReconcileOutputs(t *testing.T) {
 	src := readEngineFile(t, "engine.go")
 
-	if !strings.Contains(src, "unmeasurable := !measured && e.probeUnmeasurable()") {
+	// BOTH EXITS, pinned together. The counter answers "probing has definitively
+	// failed"; the ceiling answers "probing is not happening at all", which the
+	// counter cannot see because it only advances while the relay flows (#473).
+	// Losing either one puts destinations back in a hold with no way out of it.
+	if !strings.Contains(src, "unmeasurable := !measured && (e.probeUnmeasurable() || e.holdExpired(now))") {
 		t.Error("reconcileOutputs no longer asks whether the layout is unmeasurable; " +
-			"a probe that can never succeed holds every destination down forever")
+			"a probe that can never succeed, or one that is never attempted, holds " +
+			"every destination down forever")
 	}
 	if !strings.Contains(src, "holdDests := !measured && silenceSig == \"\" && !unmeasurable") {
 		t.Error("the hold no longer has its exit; see probeUnmeasurable")

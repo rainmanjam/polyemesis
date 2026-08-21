@@ -406,6 +406,10 @@ type Engine struct {
 	// publish one string would put this on the inside of a lock ordering it has
 	// no business being part of. Nothing reads it together with another field.
 	destHold atomic.Value // *HoldStatus, nil when nothing is held
+	// holdSince is when the CURRENT hold began, unix nanos, 0 when nothing is
+	// held. Atomic for the same reason probeFails is: read from the probe loop
+	// and written from reconcile.
+	holdSince atomic.Int64
 
 	levels   ffmpeg.Levels
 	levelsAt time.Time
@@ -1528,10 +1532,68 @@ func stemPlanFor(rec db.RecordingSettings, src routing.Source, known bool) []rec
 // for the length of an event.
 const probeGiveUp = 5
 
+// The probe loop's two cadences and the bound on one attempt. Named rather than
+// written inline because holdCeiling below is only correct in relation to them,
+// and a relationship spelled out in three separate literals is one edit away
+// from being silently false. TestTheHoldCeilingCannotPreemptTheCounter pins it.
+const (
+	probeFastCadence    = 3 * time.Second
+	probeSlowCadence    = 30 * time.Second
+	probeAttemptTimeout = 10 * time.Second
+)
+
+// holdCeiling bounds the hold in WALL-CLOCK TIME, which probeGiveUp does not.
+//
+// probeGiveUp counts CONSECUTIVE FAILURES, and probeLoop only probes while the
+// relay is carrying data (see the `flowing` branch). A relay that alternates
+// quiet and flowing -- routine in an encoder's first minute, because the
+// selector leaves the primary for the slate and back -- advances the counter
+// only during the flowing stretches and freezes it, unreset, during the quiet
+// ones. So "after enough consecutive failures" has no bound on the clock an
+// operator or a test actually measures: 5 failures need 65s of FLOW, and the
+// wall-clock cost is that plus every quiet spell in between, without limit.
+// That is #473: a hold outliving the acceptance suite's 90s ceiling with no
+// single component being slow.
+//
+// WHY THIS IS NOT THE TIMEOUT THAT WAS REJECTED. reconcileOutputs argues,
+// correctly, that a timeout "reintroduces the original bug on a schedule,
+// because it fires just as readily while a probe is merely slow". That argument
+// is about a timeout REPLACING the counter. This one is strictly weaker: it sits
+// ABOVE the counter's own worst case on a flowing stream
+//
+//	probeGiveUp * (probeAttemptTimeout + probeFastCadence) = 5 * 13s = 65s
+//
+// so on any stream where probes actually run back to back the counter reaches
+// five first and this never fires. It bites only where the counter is blind --
+// when probes are not being attempted at all -- which is exactly the case a
+// consecutive-failure count cannot see.
+//
+// Below the suite's 90s ceiling on purpose, so the exit is observable rather
+// than racing the thing measuring it.
+const holdCeiling = 75 * time.Second
+
 // probeUnmeasurable reports that probing has failed enough times in a row to
 // stop waiting for it.
 func (e *Engine) probeUnmeasurable() bool {
 	return e.probeFails.Load() >= probeGiveUp
+}
+
+// holdBegan starts the hold's clock, and leaves it alone if it is already
+// running. Restamping on every reconcile would reset the ceiling on each pass
+// and it could never be reached -- the same shape as the give-up counter reset
+// that made probeGiveUp unreachable (#469).
+func (e *Engine) holdBegan(now time.Time) {
+	e.holdSince.CompareAndSwap(0, now.UnixNano())
+}
+
+// holdExpired reports that the current hold has outlasted holdCeiling. False
+// when nothing is held, so a fresh engine never starts destinations on a guess.
+func (e *Engine) holdExpired(now time.Time) bool {
+	since := e.holdSince.Load()
+	if since == 0 {
+		return false
+	}
+	return now.Sub(time.Unix(0, since)) >= holdCeiling
 }
 
 func (e *Engine) reconcileRecorder(s db.Settings) {
@@ -2186,8 +2248,22 @@ func (e *Engine) reconcileOutputs() error {
 	// original bug on a schedule, because it fires just as readily while a probe
 	// is merely slow. This fires only when probing has actually failed, and it
 	// reverts the instant one succeeds.
-	unmeasurable := !measured && e.probeUnmeasurable()
+	//
+	// AND A CEILING ON THE CLOCK, because the count above is blind to time: it
+	// only advances while the relay is flowing, so a stream that goes quiet and
+	// back can sit held indefinitely without five failures ever accruing. See
+	// holdCeiling, which is set above this path's own worst case so it cannot
+	// preempt it on a stream that is genuinely being probed.
+	now := time.Now()
+	unmeasurable := !measured && (e.probeUnmeasurable() || e.holdExpired(now))
 	holdDests := !measured && silenceSig == "" && !unmeasurable
+	// Stamped from the decision, so the clock starts with the hold and cannot
+	// keep running once it is over.
+	if holdDests {
+		e.holdBegan(now)
+	} else {
+		e.holdSince.Store(0)
+	}
 	// Published from the decision itself, not recomputed anywhere else, so
 	// /status cannot disagree with the reconcile about why nothing is running.
 	// Cleared on every pass that does not hold, so a stale reason cannot outlive
@@ -2864,8 +2940,8 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 // streamer who changes their OBS track count mid-session is picked up without
 // a restart.
 func (e *Engine) probeLoop(ctx context.Context) {
-	fast := 3 * time.Second
-	slow := 30 * time.Second
+	fast := probeFastCadence
+	slow := probeSlowCadence
 	timer := time.NewTimer(fast)
 	defer timer.Stop()
 
@@ -3044,7 +3120,7 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	gen := e.sourceGen
 	e.mu.RUnlock()
 
-	pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	pctx, cancel := context.WithTimeout(ctx, probeAttemptTimeout)
 	defer cancel()
 
 	res, err := ffmpeg.Probe(pctx, e.tools.FFprobe, url, 3)
