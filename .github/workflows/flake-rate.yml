@@ -134,6 +134,10 @@ on:
         description: "Runner labels for the Go mode only, comma separated"
         type: string
         default: "ubuntu-latest"
+      race:
+        description: "Run the Go mode under -race. Needed for #440: the corruption is Windows-only and ci.yml runs -race on ubuntu alone, so no required job can see it."
+        type: boolean
+        default: false
 
 # Declared per job rather than once at the top. The two jobs genuinely differ:
 # plan never checks anything out, so it needs nothing at all, and saying so is
@@ -425,6 +429,7 @@ jobs:
         env:
           GOTEST: ${{ inputs.gotest }}
           RUNS: ${{ inputs.runs }}
+          RACE: ${{ inputs.race }}
         run: |
           set -uo pipefail
 
@@ -449,6 +454,34 @@ jobs:
           printf '%s' "$PKG" | grep -qE '^\./[A-Za-z0-9._/-]+$' || {
             echo "package has characters this workflow will not pass to go test: '$PKG'" >&2; exit 1; }
           ARGS=("$PKG" -count=1)
+          # -race, AND THE REASON IT HAD TO BE ADDED HERE RATHER THAN TO ci.yml.
+          #
+          # Issue #440 is a heap corruption that has now been observed three
+          # times, all on `test: windows-latest`, all in internal/engine, and
+          # each with a different assertion -- "found pointer to free object"
+          # twice, then "s.allocCount != s.nelems". The runtime's own message
+          # names two possible causes, "bad use of unsafe.Pointer or having race
+          # conditions", and only the first was ever examined: the suspected
+          # unsafe.Pointer site was corrected in #475 and the crash came back.
+          #
+          # -race is the instrument for the other half, because it names the
+          # WRITER AND THE READER with both stacks, which no amount of reading a
+          # GC dump will produce. ci.yml runs it on ubuntu only (one job, one
+          # repetition), so a Windows-only window is invisible to every required
+          # check -- the same structural blindness the header of this file
+          # records for #180, fixed there by adding the runner dimension and
+          # here by adding the flag that dimension needs to be useful.
+          #
+          # IT IS SLOW AND THAT IS THE POINT OF NOT PUTTING IT IN ci.yml.
+          # -race costs roughly 2-10x in time and memory, and this workflow
+          # repeats. Combined with `runs` it is a deliberate, dispatched
+          # measurement rather than a per-PR tax.
+          #
+          # It needs cgo, so the runner must have a C toolchain. GitHub's
+          # windows-latest image ships mingw-w64 and ubuntu/macos have theirs;
+          # if that ever stops being true this fails loudly at compile time
+          # rather than silently measuring nothing.
+          if [ "$RACE" = "true" ]; then ARGS+=(-race); fi
           if [ -n "$FLAG" ]; then
             [ "$FLAG" = "-run" ] || { echo "the only accepted flag is -run, got: '$FLAG'" >&2; exit 1; }
             printf '%s' "$PATTERN" | grep -qE '^[A-Za-z0-9_|/^$.()-]+$' || {
