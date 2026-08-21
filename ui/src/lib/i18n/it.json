@@ -311,6 +311,7 @@
   "dash.ingestStreamsEnding": "Flussi in ingresso che si fermano",
   "dash.ingestUrlCopied": "URL di ingresso copiato.",
   "dash.keyRefreshed": "Chiave di stream aggiornata dalla piattaforma.",
+  "dash.laneNoPreview": "Nessuna anteprima — avvia il tuo encoder per questo programma.",
   "dash.leaveUnchanged": "Lascia invariato",
   "dash.leaveUnchangedNote": "«Lascia invariato» non invia proprio nulla, quindi la piattaforma mantiene ciò che ha. Scegliere On o Off scrive quel valore.",
   "dash.metaCategory": "Categoria",

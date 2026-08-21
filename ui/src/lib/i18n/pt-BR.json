@@ -311,6 +311,7 @@
   "dash.ingestStreamsEnding": "Fluxos de entrada que param",
   "dash.ingestUrlCopied": "URL de entrada copiada.",
   "dash.keyRefreshed": "Chave de transmissão atualizada a partir da plataforma.",
+  "dash.laneNoPreview": "Ainda sem pré-visualização — inicie seu codificador para este programa.",
   "dash.leaveUnchanged": "Deixar sem alteração",
   "dash.leaveUnchangedNote": "“Deixar sem alteração” não envia absolutamente nada, então a plataforma mantém o que tem. Escolher Ligado ou Desligado grava aquele valor.",
   "dash.metaCategory": "Categoria",

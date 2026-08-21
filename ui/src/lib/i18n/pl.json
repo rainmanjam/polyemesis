@@ -311,6 +311,7 @@
   "dash.ingestStreamsEnding": "Strumienie wejściowe, które się zatrzymają",
   "dash.ingestUrlCopied": "Skopiowano adres URL wejścia.",
   "dash.keyRefreshed": "Klucz strumienia odświeżony z platformy.",
+  "dash.laneNoPreview": "Brak podglądu — uruchom koder dla tego programu.",
   "dash.leaveUnchanged": "Pozostaw bez zmian",
   "dash.leaveUnchangedNote": "„Pozostaw bez zmian” nie wysyła niczego, więc platforma zachowuje to, co ma. Wybranie Włączone lub Wyłączone zapisuje tę wartość.",
   "dash.metaCategory": "Kategoria",

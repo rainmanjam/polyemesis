@@ -311,6 +311,7 @@
   "dash.ingestStreamsEnding": "Duracak giriş akışları",
   "dash.ingestUrlCopied": "Giriş URL'si kopyalandı.",
   "dash.keyRefreshed": "Yayın anahtarı platformdan yenilendi.",
+  "dash.laneNoPreview": "Henüz önizleme yok — bu program için kodlayıcınızı başlatın.",
   "dash.leaveUnchanged": "Değiştirmeden bırak",
   "dash.leaveUnchangedNote": "“Değiştirmeden bırak” hiçbir şey göndermez, böylece platform elindekini korur. Açık ya da Kapalı seçmek o değeri yazar.",
   "dash.metaCategory": "Kategori",

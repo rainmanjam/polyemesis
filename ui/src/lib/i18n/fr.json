@@ -311,6 +311,7 @@
   "dash.ingestStreamsEnding": "Flux entrants qui s'arrêtent",
   "dash.ingestUrlCopied": "URL d'entrée copiée.",
   "dash.keyRefreshed": "Clé de flux actualisée depuis la plateforme.",
+  "dash.laneNoPreview": "Pas encore d'aperçu — démarrez votre encodeur pour ce programme.",
   "dash.leaveUnchanged": "Laisser inchangé",
   "dash.leaveUnchangedNote": "« Laisser inchangé » n'envoie strictement rien, la plateforme conserve donc ce qu'elle a. Choisir Activé ou Désactivé écrit cette valeur.",
   "dash.metaCategory": "Catégorie",

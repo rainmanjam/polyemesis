@@ -4,7 +4,7 @@ import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
 import { audioTrackCount, ingestAttribution, processAbsence } from "@/lib/dashboardFacts";
-import { destinationLayout } from "@/lib/destinationGroups";
+import { laneLayout } from "@/lib/sourceLanes";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, RadioTower, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -797,7 +797,10 @@ export function Dashboard() {
   // which is not source-scoped: every engine publishes onto one broker and the
   // app keeps one status, so a grid fed from it would draw every tile from
   // whichever engine spoke last.
-  const preview = previewLayout(usePreviewTiles(settingsPreview));
+  // Hoisted so the preview grid and the lanes read the SAME poll rather than
+  // subscribing twice; usePreviewTiles is what costs an encoder.
+  const tiles = usePreviewTiles(settingsPreview);
+  const preview = previewLayout(tiles);
 
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -958,7 +961,12 @@ export function Dashboard() {
 
   // How the destination area divides. One programme means no headings at all,
   // which is the shape this page had before per-source anything.
-  const layout = useMemo(() => destinationLayout(destinations, sources), [destinations, sources]);
+  // The whole dashboard, divided by programme. Composed from the two layout
+  // functions rather than restating their rules -- see sourceLanes.ts.
+  const lanes = useMemo(
+    () => laneLayout(tiles, destinations, sources),
+    [tiles, destinations, sources],
+  );
 
   /* ONE CARD, rendered from the GLOBAL index rather than a per-group one.
    *
@@ -1138,7 +1146,7 @@ export function Dashboard() {
                 Which tiles those are, and what each one plays, is decided by
                 previewLayout() in src/lib -- a plain function of the polled
                 telemetry, so the decision is testable without a page test. */}
-            {preview.grid ? (
+            {lanes.laned ? null : preview.grid ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 {preview.panes.map((pane) => (
                   <figure key={pane.id} className="flex flex-col gap-1.5">
@@ -1365,43 +1373,75 @@ export function Dashboard() {
           </Card>
         ) : (
           <div className="flex flex-col gap-5">
-            {layout.groups.map((g, gi) => {
-              if (g.destinations.length === 0 && !layout.grouped) return null;
-              return (
-                <section key={g.sourceId ?? (g.orphans ? "orphans" : `g${gi}`)} className="flex flex-col gap-2">
-                  {layout.grouped && !g.orphans && (
-                    /* The heading is the programme, and it is drawn even when
-                       the programme has no destinations: "nothing configured
-                       here yet" is a state an operator has to see to act on,
-                       and hiding the heading would make it indistinguishable
-                       from a programme that does not exist. */
-                    <h3 className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      <RadioTower className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{g.name}</span>
-                      <span className="font-mono normal-case tracking-normal">
-                        {g.destinations.length}
-                      </span>
-                    </h3>
-                  )}
-                  {g.orphans && (
-                    /* NOT A HEADING, because this is not a programme. These
-                       destinations name a source the server did not list --
-                       deleted in another tab, or a row whose source_id outlived
-                       its programme. They are drawn rather than filtered out:
-                       each is still configured and may still be running, and
-                       this is the only screen that lists them. */
-                    <p className="text-[11px] text-warn">{t("dash.destOrphaned")}</p>
-                  )}
-                  {g.destinations.length === 0 ? (
-                    <p className="text-[11px] text-muted-foreground">{t("dash.destNoneHere")}</p>
-                  ) : (
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                      {g.destinations.map((d) => renderDestination(d, destinations.indexOf(d)))}
+            {lanes.laned ? (
+              /* ONE LANE PER PROGRAMME: its picture and the destinations that
+                 carry it, in the same box.
+              
+                 Headings answered "which programme is this card on?" by name.
+                 A lane answers "is THIS one on air, and where is it going?" by
+                 position, which is the stronger form -- there is no pair of
+                 labels for a reader to match up, and no way for them to
+                 disagree. laneLayout pins that a lane can never hold another
+                 programme's pane.
+              
+                 THE PLAYER MOVES HERE RATHER THAN BEING COPIED. A tile costs an
+                 encoder while it is watched and something is on air, so drawing
+                 the same source twice would cost twice. The preview area above
+                 renders nothing while lanes are on. */
+              lanes.lanes.map((lane) => (
+                <section key={lane.sourceId} className="flex flex-col gap-2">
+                  <h3 className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    <RadioTower className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{lane.name}</span>
+                    <span className="font-mono normal-case tracking-normal">
+                      {lane.destinations.length}
+                    </span>
+                  </h3>
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    <Suspense
+                      fallback={
+                        <div className="aspect-video w-full rounded-md border border-border bg-black" />
+                      }
+                    >
+                      {lane.pane ? (
+                        <PreviewPlayer active={settingsPreview} {...lane.pane.player} />
+                      ) : (
+                        /* A lane with no telemetry keeps its place rather than
+                           collapsing: the programme exists, and a lane that
+                           vanished until a tile arrived would read as a
+                           programme that does not. */
+                        <div className="flex aspect-video w-full items-center justify-center rounded-md border border-border bg-black text-[11px] text-muted-foreground">
+                          {t("dash.laneNoPreview")}
+                        </div>
+                      )}
+                    </Suspense>
+                    <div className="grid gap-3 lg:col-span-2 xl:grid-cols-2">
+                      {lane.destinations.length === 0 ? (
+                        <p className="text-[11px] text-muted-foreground">{t("dash.destNoneHere")}</p>
+                      ) : (
+                        lane.destinations.map((d) => renderDestination(d, destinations.indexOf(d)))
+                      )}
                     </div>
-                  )}
+                  </div>
                 </section>
-              );
-            })}
+              ))
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {destinations.map((d, i) => renderDestination(d, i))}
+              </div>
+            )}
+
+            {lanes.orphans.length > 0 && (
+              /* NOT A LANE, because these name no programme this server listed.
+                 Drawn rather than filtered out: each is still configured and may
+                 still be running, and this is the only screen that lists it. */
+              <section className="flex flex-col gap-2">
+                <p className="text-[11px] text-warn">{t("dash.destOrphaned")}</p>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {lanes.orphans.map((d) => renderDestination(d, destinations.indexOf(d)))}
+                </div>
+              </section>
+            )}
           </div>
         )}
       </div>
