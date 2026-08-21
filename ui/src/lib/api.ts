@@ -463,7 +463,13 @@ export const api = {
    *  puts video back on the wire; it does not bring the broadcasts back. See
    *  internal/api/destinations_bulk.go. */
   startAllDestinations: () => post<BulkDestReport>("/destinations/start-all"),
-  stopAllDestinations: () => post<BulkDestReport>("/destinations/stop-all"),
+  /** Stop every destination. Carries `confirm` because the server refuses this
+   *  route without it: it ends every live broadcast on the install, and a
+   *  broadcast that has ended cannot be resumed. The dialog in front of this
+   *  call is what the flag attests to -- the server cannot see that dialog, so
+   *  a caller that never showed one is exactly who the refusal is for. */
+  stopAllDestinations: () =>
+    post<BulkDestReport>("/destinations/stop-all", { confirm: true }),
   refreshStreamKey: (id: DestinationId) =>
     post<{ destination: Destination }>(`/destinations/${id}/refresh-key`),
 

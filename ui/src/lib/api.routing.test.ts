@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
 import { asDestinationId, type RoutingProfile } from "./types";
@@ -86,5 +86,29 @@ describe("api.applyPreset", () => {
     );
 
     expect(calls[0][0]).toBe("/api/v1/routing/presets/obs-default?destinationId=12");
+  });
+});
+
+// The server refuses stop-all without {"confirm":true} (audit finding #2). The
+// UI method omitted it, so the dashboard's Stop All returned 400 every time --
+// the control was dead while both halves looked correct on their own. Found in
+// review of #489.
+describe("stopAllDestinations", () => {
+  it("sends the confirmation the server requires", async () => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return new Response(JSON.stringify({ results: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await api.stopAllDestinations();
+    vi.unstubAllGlobals();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain("/destinations/stop-all");
+    expect(calls[0].body).toMatchObject({ confirm: true });
   });
 });

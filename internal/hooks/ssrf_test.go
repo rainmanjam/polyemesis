@@ -160,3 +160,41 @@ func TestSafeDialContextReportsADialFailureForAPublicAddress(t *testing.T) {
 			"attempt to fail against the context deadline")
 	}
 }
+
+// net.IP.IsPrivate covers RFC1918 and IPv6 ULA and nothing else, so the ranges
+// below reached the dialer while looking public. 100.64.0.0/10 is the one that
+// matters in practice: carrier NAT, and what Tailscale hands out, so a webhook
+// could be pointed straight into an overlay network. Found in review of #489.
+func TestIsPublicAddrRefusesReachableButNotRoutableRanges(t *testing.T) {
+	for _, tc := range []struct{ name, ip string }{
+		{"RFC6598 CGNAT / Tailscale", "100.64.0.1"},
+		{"RFC6598 upper bound", "100.127.255.254"},
+		{"IETF protocol assignments", "192.0.0.1"},
+		{"benchmarking", "198.18.0.1"},
+		{"TEST-NET-1", "192.0.2.1"},
+		{"reserved", "240.0.0.1"},
+		{"NAT64 embedding a v4 target", "64:ff9b::c000:221"},
+		// The same address wearing its IPv6 clothes must not slip past.
+		{"IPv4-mapped RFC1918", "::ffff:10.0.0.1"},
+		{"IPv4-mapped CGNAT", "::ffff:100.64.0.1"},
+		{"IPv4-mapped loopback", "::ffff:127.0.0.1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ip := net.ParseIP(tc.ip)
+			if ip == nil {
+				t.Fatalf("%q did not parse, so this case tests nothing", tc.ip)
+			}
+			if isPublicAddr(ip) {
+				t.Errorf("%s (%s) is treated as public, so a webhook may be "+
+					"pointed at it with no opt-in", tc.name, tc.ip)
+			}
+		})
+	}
+	// And the guard must not have become "refuse everything", which would pass
+	// every case above while breaking every real webhook.
+	for _, ok := range []string{"1.1.1.1", "93.184.216.34", "2606:4700:4700::1111"} {
+		if !isPublicAddr(net.ParseIP(ok)) {
+			t.Errorf("%s is refused; the guard now blocks legitimate targets", ok)
+		}
+	}
+}

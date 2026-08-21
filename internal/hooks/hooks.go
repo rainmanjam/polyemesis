@@ -357,5 +357,40 @@ func isPublicAddr(ip net.IP) bool {
 		ip.IsMulticast():
 		return false
 	}
+	// net.IP.IsPrivate is RFC1918 and IPv6 ULA and NOTHING ELSE, which leaves
+	// ranges that are unroutable on the public internet but very much reachable
+	// from the host. 100.64.0.0/10 is the practical one: carrier NAT, and the
+	// range Tailscale hands out -- so without this a hook to http://100.64.0.1
+	// was accepted and dialed, which is the overlay network the guard most
+	// needs to keep a webhook out of.
+	for _, cidr := range nonPublicRanges {
+		if cidr.Contains(ip) {
+			return false
+		}
+	}
 	return true
 }
+
+// nonPublicRanges are reachable-but-not-globally-routable networks that
+// net.IP.IsPrivate does not know about. Parsed once; a bad constant here would
+// panic at init rather than silently letting a range through.
+var nonPublicRanges = func() []*net.IPNet {
+	out := make([]*net.IPNet, 0, 8)
+	for _, s := range []string{
+		"100.64.0.0/10",   // RFC6598 shared address space (CGNAT, Tailscale)
+		"192.0.0.0/24",    // RFC6890 IETF protocol assignments
+		"198.18.0.0/15",   // RFC2544 benchmarking
+		"192.0.2.0/24",    // RFC5737 TEST-NET-1
+		"198.51.100.0/24", // TEST-NET-2
+		"203.0.113.0/24",  // TEST-NET-3
+		"240.0.0.0/4",     // RFC1112 reserved
+		"64:ff9b::/96",    // RFC6052 IPv4/IPv6 translation -- an embedded v4 target
+	} {
+		_, n, err := net.ParseCIDR(s)
+		if err != nil {
+			panic("hooks: bad non-public CIDR " + s + ": " + err.Error())
+		}
+		out = append(out, n)
+	}
+	return out
+}()
