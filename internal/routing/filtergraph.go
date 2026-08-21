@@ -276,7 +276,49 @@ func trackGain(p Profile, track int) float64 {
 // selects and downmixes its channels, plus noise suppression when the source
 // says the track needs it.
 func trackChain(src Source, track int, cells []Cell) string {
-	return denoised(src, track, PanFilter(cells))
+	return denoised(src, track, seamPin(src, track)+PanFilter(cells))
+}
+
+// seamPin fixes a track's channel layout at the head of its chain, so that the
+// pan behind it always receives the layout it was compiled against.
+//
+// WHY, MEASURED. A pan matrix is compiled once, from a probe, and then names
+// input channels by number: `pan=stereo|c0=1*c0|c1=1*c1`. That is a promise
+// about what will arrive. The selector can break it mid-stream -- switching to
+// the playlist filler, to the slate, back to the primary -- and a destination
+// copying video does not restart across a switch, by design, so the same
+// long-lived FFmpeg meets a layout its graph was not built for.
+//
+// On FFmpeg 6.1 that was survivable, because a failed filter task was logged and
+// ignored unless -xerror was set. From 7.0 the filtergraph runs as a scheduler
+// task and its failure ends the process. Captured on a real switch, 8.1.2:
+//
+//	WARN source switched to=playlist reason="the primary ingest stopped delivering"
+//	WARN process exited process=dest:2 ranFor=17s
+//	     err="exit status 183: [fc#0] Error sending frames to consumers:
+//	          Invalid data found when processing input"
+//
+// fc#0 is the filtergraph. See #398.
+//
+// aformat converts rather than refuses: whatever arrives is negotiated to the
+// pinned layout by libswresample. This is the same instrument, for the same
+// reason, as ProvisionalFilter below -- "it negotiates against the layout that
+// ACTUALLY ARRIVES rather than the one we assumed" -- which until now was
+// reached for only when the layout had never been measured. A measured layout
+// can also stop being true; it just takes a source switch rather than a missing
+// probe.
+//
+// EMPTY WHEN THE LAYOUT IS UNKNOWN, which is the fail-open direction this
+// package takes everywhere: a pin invented from a guess would convert every
+// track to a layout nobody measured, and that is worse than the failure it
+// prevents. An unmeasured layout takes provisionalChain instead, which already
+// negotiates at runtime and needs no pin.
+func seamPin(src Source, track int) string {
+	t, ok := src.TrackByIndex(track)
+	if !ok || t.Layout == "" {
+		return ""
+	}
+	return "aformat=channel_layouts=" + t.Layout + ","
 }
 
 // ProvisionalFilter is the per-track chain used when the ingest layout has NOT
