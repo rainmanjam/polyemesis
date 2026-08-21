@@ -135,13 +135,25 @@ func TestAnUnknownTokenIsRefused(t *testing.T) {
 // token is even looked up.
 func TestHandleConnectRateLimitsPeerAfterRepeatedUnknownTokens(t *testing.T) {
 	tg := Target{SourceID: 1, Name: "horizontal", Enabled: true, Sink: &recorder{}}
-	_, addr := serve(t, tg)
+	s, addr := serve(t, tg)
 
 	for i := 0; i < authgate.Threshold; i++ {
 		if conn, err := dial(t, addr, "not-a-real-token"); err == nil {
 			conn.Close()
 			t.Fatalf("attempt %d: an unknown token was accepted", i)
 		}
+	}
+
+	// Wait for the count rather than assuming it: dial returns on the CLIENT
+	// side, and the server records the failure after it. See the sibling test
+	// in internal/rtmpserver for the flake this prevents.
+	deadline := time.Now().Add(2 * time.Second)
+	for !s.gate.Blocked("127.0.0.1") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the gate never blocked 127.0.0.1 after %d failed tokens",
+				authgate.Threshold)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 
 	// The peer is now blocked. A further connect -- even one presenting the

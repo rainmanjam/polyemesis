@@ -474,6 +474,22 @@ func TestHandleRateLimitsPeerAfterRepeatedUnknownKeys(t *testing.T) {
 		}
 	}
 
+	// WAIT FOR THE COUNT, do not assume it. dialPublish returns when the
+	// CLIENT's handshake completes; the server records the failure afterwards,
+	// at key lookup. Reading the gate immediately raced that: on a slower
+	// runner the fifth failure had not landed yet, the peer was not blocked,
+	// and the good key was admitted -- a flake in a test guarding a security
+	// control, which is the worst place to have one. Bounded well under
+	// authgate.Block so an actually-broken gate still fails rather than hangs.
+	deadline := time.Now().Add(2 * time.Second)
+	for !s.gate.Blocked("127.0.0.1") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the gate never blocked 127.0.0.1 after %d failed keys",
+				authgate.Threshold)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
 	// The peer is now blocked. A further connection -- even one presenting
 	// the correct key -- must be refused before the handshake is even
 	// attempted, which surfaces here as the handshake itself failing.
