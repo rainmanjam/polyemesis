@@ -222,7 +222,14 @@ func TestEnsureFeedHoldsTheRunningFeedRatherThanBuildingAKindItCannotBuild(t *te
 	e.selMu.Lock()
 	e.ensureFeed(s, "", sourceUnbuilt, "a kind no feed can run", time.Now())
 	e.selMu.Unlock()
-	if repeated := buf.String(); repeated != "" {
+	// SCOPED TO THE REFUSAL, not to the buffer being empty. e.log is the whole
+	// engine's logger, and this engine is running a source whose binary cannot
+	// start, so its supervisor retries on a backoff and logs "process exited"
+	// for the length of the test. An assertion that fires on ANY line fires on
+	// that one -- intermittently, whenever a retry lands in the window between
+	// Reset and String -- and then reports an unrelated WARN as a refusal
+	// storm. That misdescription is why #474 read as unexplained twice.
+	if repeated := buf.String(); strings.Contains(repeated, "no feed can run") {
 		t.Errorf("the same refusal logged again on the next sweep: %s", repeated)
 	}
 }
