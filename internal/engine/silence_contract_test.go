@@ -50,7 +50,7 @@ func TestWantSilenceRaisesATierOnlyForAMeasuredVideoOnlySource(t *testing.T) {
 					t.Errorf("wantSilence = %q, want empty: a tier was raised for a "+
 						"state that must not have one", got)
 				case got == "":
-					t.Errorf("wantSilence = empty, want the video-only tier: a "+
+					t.Errorf("wantSilence = empty, want the video-only tier: a " +
 						"video-only ingest publishes no audio at all")
 				default:
 					t.Errorf("wantSilence = %q, want %q: the tier's signature drifted, "+
