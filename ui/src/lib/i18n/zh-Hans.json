@@ -311,6 +311,7 @@
   "dash.ingestStreamsEnding": "将停止的接入流",
   "dash.ingestUrlCopied": "输入 URL 已复制。",
   "dash.keyRefreshed": "已从平台刷新推流密钥。",
+  "dash.laneNoPreview": "暂无预览 — 请为此节目启动编码器。",
   "dash.leaveUnchanged": "保持不变",
   "dash.leaveUnchangedNote": "“保持不变”完全不发送任何内容，因此平台会沿用它已有的值。选择“开”或“关”则会写入该值。",
   "dash.metaCategory": "分类",

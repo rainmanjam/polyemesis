@@ -311,6 +311,7 @@
   "dash.ingestStreamsEnding": "Aliran masuk yang berhenti",
   "dash.ingestUrlCopied": "URL masukan disalin.",
   "dash.keyRefreshed": "Kunci siaran disegarkan dari platform.",
+  "dash.laneNoPreview": "Belum ada pratinjau — mulai encoder untuk program ini.",
   "dash.leaveUnchanged": "Biarkan tidak berubah",
   "dash.leaveUnchangedNote": "“Biarkan tidak berubah” sama sekali tidak mengirim apa pun, jadi platform mempertahankan nilai yang sudah ada. Memilih Aktif atau Mati akan menuliskan nilai itu.",
   "dash.metaCategory": "Kategori",
