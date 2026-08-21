@@ -15,13 +15,6 @@
       "why": "the fixture started no destination, so the assertion below has nothing to look at. This is the SAME SHAPE as #150's /processes finding -- a sweep against a fixture that started nothing, reported as covered -- and it is a skip rather than a failure, so it never appeared in any count.",
       "whatItWouldTake": "assert that the fixture DID start a destination, and fail if it did not. A fixture that silently builds nothing is the finding, not the reason to stand down.",
       "issue": "#161"
-    },
-    {
-      "id": "engine-rtmp-ingest-no-silence-tier",
-      "site": "internal/engine/rtmp_ingest_test.go:611",
-      "why": "skips when this build raises no silence tier for a video-only source, which is exactly the behaviour the test exists to pin. It fires because the subject changed.",
-      "whatItWouldTake": "pin the expected tier for a video-only source and fail on drift, the way internal/oauth now pins scope versions in a golden.",
-      "issue": "#161"
     }
   ]
 }
