@@ -273,6 +273,10 @@ CREATE TABLE IF NOT EXISTS hooks (
     triggers        TEXT    NOT NULL DEFAULT '[]',   -- JSON array; empty = every trigger
     timeout_seconds INTEGER NOT NULL DEFAULT 10,
     max_attempts    INTEGER NOT NULL DEFAULT 3,
+    -- The operator saying they meant a private target. DEFAULT 0 so an
+    -- upgraded install keeps refusing them, which is the safe direction:
+    -- see hooks.Validate and safeDialContext (poka-yoke audit #4).
+    allow_private_target INTEGER NOT NULL DEFAULT 0,
     created_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL
 );

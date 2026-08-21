@@ -61,6 +61,62 @@ env:
   PUBLISH: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
 
 jobs:
+  # RB-1: a tag push shares nothing with ci.yml. `needs:` only orders jobs
+  # WITHIN this workflow, and ci.yml triggers on push-to-main and pull_request
+  # -- a different trigger entirely, on a different SHA history. Before this
+  # job, `binaries:` had no `needs:` at all: the only thing standing between a
+  # red commit and a published release was someone remembering to check main
+  # was green before typing `git tag`. That is rung zero -- a bad release
+  # looks identical to a good one right up until someone runs the binary.
+  #
+  # This asks the platform directly, by commit SHA, rather than trusting
+  # branch protection: even if the required-checks list drifts, or the tag
+  # targets a commit that was never main's HEAD, a commit with no successful
+  # ci.yml run cannot publish. FAILS CLOSED -- an API error, a rate limit, an
+  # empty result all read as "not proven green" and block everything below.
+  ci-gate:
+    name: CI gate (fail closed)
+    runs-on: ubuntu-latest
+    permissions:
+      # Read-only: this job asks about other runs, it never touches them.
+      contents: read
+      actions: read
+    timeout-minutes: 5
+    steps:
+      - name: Require a successful ci.yml run for this commit before publishing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # A rehearsal (workflow_dispatch, dry_run=true) builds and publishes
+          # nothing -- see PUBLISH above -- so there is nothing here for this
+          # gate to protect. Gating it anyway would block rehearsing a branch
+          # that never had its own green ci.yml run, which is exactly the case
+          # the rehearsal exists to serve.
+          if [ "${PUBLISH}" != "true" ]; then
+            echo "Dry run: nothing will be published, skipping the CI gate."
+            exit 0
+          fi
+
+          echo "Looking for a successful ci.yml run against ${SHA}..."
+          runs_json=$(gh api \
+            "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=20") || {
+            echo "::error::Could not reach the Actions API to check CI status for ${SHA}. Refusing to publish an unverified release."
+            exit 1
+          }
+
+          successes=$(echo "${runs_json}" | jq '[.workflow_runs[]? | select(.status == "completed" and .conclusion == "success")] | length')
+
+          if [ "${successes:-0}" -lt 1 ]; then
+            echo "::error::No successful ci.yml run found for commit ${SHA}. A version tag must point at a commit that has passed CI. Refusing to publish."
+            exit 1
+          fi
+
+          echo "Found ${successes} successful ci.yml run(s) for ${SHA}. Proceeding."
+
   images:
     name: container images
     runs-on: ubuntu-latest
@@ -237,6 +293,10 @@ jobs:
   binaries:
     name: native binaries
     runs-on: ubuntu-latest
+    # RB-1: without this, nothing in the workflow ever asked whether the
+    # tagged commit passed CI -- see ci-gate above for why `needs:` alone
+    # cannot reach ci.yml's runs directly.
+    needs: ci-gate
     permissions:
       # Creates the GitHub Release and uploads the assets. No packages: write —
       # this job pushes no images.

@@ -3,6 +3,8 @@ package db
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/secrets"
@@ -107,6 +109,46 @@ type PlatformAccount struct {
 	ScopeVer  int       `json:"scopeVer"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// String redacts AccessToken and RefreshToken so a stray %v/%+v -- in a log
+// line, a wrapped error, a test failure message -- cannot print a live
+// token. AccessToken/RefreshToken already carry `json:"-"` for the API
+// boundary; this closes the same hole for Go's own formatting and logging,
+// which json:"-" does nothing against. Defined on the value receiver: Go
+// always includes value-receiver methods in the pointer's method set (never
+// the other way round), so this single definition is also what fmt reaches
+// for a *PlatformAccount. #16.
+func (a PlatformAccount) String() string {
+	return fmt.Sprintf("PlatformAccount{ID:%d, Platform:%s, AccountName:%q, AccountRef:%q, "+
+		"AccessToken:%s, RefreshToken:%s, ExpiresAt:%s, Scopes:%q, ScopeVer:%d}",
+		a.ID, a.Platform, a.AccountName, a.AccountRef,
+		redactSecret(a.AccessToken), redactSecret(a.RefreshToken), a.ExpiresAt, a.Scopes, a.ScopeVer)
+}
+
+// LogValue redacts the same fields for slog, so slog.Any("account", acct) is
+// as safe as fmt-printing it.
+func (a PlatformAccount) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.Int64("id", a.ID),
+		slog.String("platform", string(a.Platform)),
+		slog.String("account_name", a.AccountName),
+		slog.String("account_ref", a.AccountRef),
+		slog.String("access_token", redactSecret(a.AccessToken)),
+		slog.String("refresh_token", redactSecret(a.RefreshToken)),
+		slog.Time("expires_at", a.ExpiresAt),
+		slog.String("scopes", a.Scopes),
+		slog.Int("scope_ver", a.ScopeVer),
+	)
+}
+
+// redactSecret stands in for a secret value in a String()/LogValue(); it
+// leaves an unset secret visibly empty rather than claiming one is present.
+func redactSecret(s string) string {
+	if s == "" {
+		return ""
+	}
+	return "[redacted]"
 }
 
 // Expired reports whether the access token needs refreshing. The one-minute
@@ -247,21 +289,26 @@ func (d *DB) PutOAuthState(state string, p Platform, verifier string) error {
 
 // TakeOAuthState consumes a state parameter, returning its platform and PKCE
 // verifier. Single-use: a replayed callback finds nothing.
+//
+// SELECT-then-DELETE would not actually be single-use: db.go's
+// SetMaxOpenConns(1) holds the pool's one connection only for the duration of
+// each statement, not across the two, so two concurrent callbacks with the
+// same state could both pass the SELECT before either's DELETE ran. DELETE
+// ... RETURNING (SQLite 3.35+, confirmed against modernc.org/sqlite in
+// TestTakeOAuthStateReturningWorksWithThisDriver) makes the read and the
+// consume one statement, so a second caller finds the row already gone. #8.
 func (d *DB) TakeOAuthState(state string) (Platform, string, error) {
 	var (
 		p        Platform
 		verifier string
 		created  int64
 	)
-	err := d.sql.QueryRow(`SELECT platform, verifier, created_at FROM oauth_states WHERE state = ?`, state).
+	err := d.sql.QueryRow(`DELETE FROM oauth_states WHERE state = ? RETURNING platform, verifier, created_at`, state).
 		Scan(&p, &verifier, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", errors.New("unknown or already-used OAuth state")
 	}
 	if err != nil {
-		return "", "", err
-	}
-	if _, err := d.sql.Exec(`DELETE FROM oauth_states WHERE state = ?`, state); err != nil {
 		return "", "", err
 	}
 	if time.Since(time.Unix(created, 0)) > 10*time.Minute {

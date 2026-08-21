@@ -53,20 +53,71 @@ const (
 	StateDeferred State = "deferred"
 )
 
+// AllStates is every State declared above, in declaration order.
+//
+// Poka-yoke audit #15: State is a string, not an iota, so Go gives no
+// exhaustiveness check over it at all -- a switch with an explicit case list
+// silently falls to its default for a state nobody remembered to add. This
+// list is what breaks that silence: TestAllStatesIsTheWholeConstBlock
+// (jobs_states_test.go) AST-parses this file and fails if AllStates ever
+// drifts from the const block, and Valid and stateTerminal below are both
+// driven by it rather than carrying their own case list to go stale.
+//
+// Converting State itself to an iota was considered and rejected: it is
+// persisted as the literal string ("queued", "running", ...) in the jobs
+// table and read back with jobs.State(state) (internal/db/jobs.go), and
+// carried over the API as JSON via the same string. An iota changes both
+// wire formats the moment MarshalJSON stops being the free string conversion
+// it is today, and neither internal/db nor internal/api is this fix's to
+// touch. The list-plus-test below is the affordable device; RULE 3 in the
+// fix brief calls that Warning against Control if it announces itself
+// immediately at `go test ./...` -- which TestAllStatesIsTheWholeConstBlock
+// does not defer to production, so it stands with the same weight as
+// events.AllTypes()'s guard in internal/api/ws_policy.go, the pattern this
+// copies.
+func AllStates() []State {
+	return []State{
+		StateQueued,
+		StateRunning,
+		StateDone,
+		StateFailed,
+		StateCancelled,
+		StateDeferred,
+	}
+}
+
+// stateTerminal is the closed table of which states end a job's life, kept as
+// a map rather than a switch's case list so TestEveryStateHasATerminalEntry
+// can force every member of AllStates() to have an explicit answer here. A
+// state missing from a switch's cases falls through to that switch's default
+// with no signal; a state missing from this map is caught by that test
+// instead, by checking for the key's PRESENCE rather than trusting its
+// zero-value bool -- an unclassified state must fail loudly, not read as
+// "not terminal" by accident.
+var stateTerminal = map[State]bool{
+	StateQueued:    false,
+	StateRunning:   false,
+	StateDone:      true,
+	StateFailed:    true,
+	StateCancelled: true,
+	StateDeferred:  false,
+}
+
 // Terminal reports whether a job in this state will never run again.
 func (s State) Terminal() bool {
-	switch s {
-	case StateDone, StateFailed, StateCancelled:
-		return true
-	}
-	return false
+	return stateTerminal[s]
 }
 
 // Valid reports whether s is a state this package writes.
+//
+// Driven by AllStates rather than its own case list: a state added to the
+// const block and to AllStates is valid here automatically, with nothing
+// left for an author to forget in a second place.
 func (s State) Valid() bool {
-	switch s {
-	case StateQueued, StateRunning, StateDone, StateFailed, StateCancelled, StateDeferred:
-		return true
+	for _, v := range AllStates() {
+		if s == v {
+			return true
+		}
 	}
 	return false
 }

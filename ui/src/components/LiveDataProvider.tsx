@@ -39,6 +39,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [bitrate, setBitrate] = useState<BitrateSample[]>([]);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
+  const [frameError, setFrameError] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
@@ -67,6 +68,14 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         try {
           msg = JSON.parse(ev.data as string);
         } catch {
+          // A CONTROL FOR THE OPERATOR, NOT JUST A LOG LINE (#13/#21). This
+          // frame's status/level/log update is gone and `onclose` will not
+          // fire to say so -- the socket stays open and every other value
+          // keeps looking current. Silently returning here is how an
+          // operator ends up trusting numbers that stopped updating. The
+          // chrome renders this the same way it already renders a dropped
+          // socket.
+          setFrameError(true);
           return;
         }
         switch (msg.type) {
@@ -158,9 +167,21 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       bitrate,
       logs,
       recordingsRevision,
+      frameError,
       clearLogs,
     }),
-    [connected, status, source, levels, system, bitrate, logs, recordingsRevision, clearLogs],
+    [
+      connected,
+      status,
+      source,
+      levels,
+      system,
+      bitrate,
+      logs,
+      recordingsRevision,
+      frameError,
+      clearLogs,
+    ],
   );
 
   return <LiveDataContext.Provider value={value}>{children}</LiveDataContext.Provider>;

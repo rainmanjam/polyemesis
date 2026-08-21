@@ -1,9 +1,14 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -133,5 +138,92 @@ func TestRefreshKeySendsTheDestinationsStoredFacebookOptionsToTheProvider(t *tes
 	// ABSENT key rather than an empty one.
 	if _, ok := create.Query["enable_backup_ingest"]; ok {
 		t.Errorf("enable_backup_ingest was sent for a destination that never asked for it: %s", create)
+	}
+}
+
+// TestTokenForSerializesConcurrentRefreshesOfTheSameAccount is finding #6:
+// RefreshLoop's ticker and an on-demand tokenFor call (or two on-demand calls
+// from two publishes in flight) can both see the same account as expired and
+// both hit the platform's refresh endpoint. UpsertPlatformAccount has no
+// compare-and-swap, so the loser's write can land after and store a token the
+// platform has already invalidated -- surfacing as a refresh failure
+// mid-broadcast.
+//
+// A dedicated single-endpoint stub replaces the shared platformStub here
+// because the shared one has no case for a token endpoint and would answer
+// with a Facebook live-video body carrying no access_token, which fails the
+// refresh outright and would make both callers legitimately re-attempt --
+// masking exactly the race this test exists to catch.
+//
+// Two goroutines both call tokenFor for one already-expired account. The
+// stub blocks the FIRST refresh mid-flight and only then releases it, so a
+// second, unserialized caller would have every opportunity to race in and
+// hit the endpoint too. Mutation: comment out the `unlock := refreshLocks...`
+// line and its lock/defer in tokenFor (leaving the re-read in place so it
+// still compiles) -- observed FAIL, "provider.Refresh reached Twitch 2 times".
+func TestTokenForSerializesConcurrentRefreshesOfTheSameAccount(t *testing.T) {
+	var calls int32
+	entered := make(chan struct{}, 1)
+	proceed := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/oauth2/token" {
+			http.NotFound(w, r)
+			return
+		}
+		n := atomic.AddInt32(&calls, 1)
+		if n == 1 {
+			// Hold the first refresh open long enough that a second,
+			// unserialized caller would reach this handler too.
+			entered <- struct{}{}
+			<-proceed
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"access_token":"refreshed-%d","refresh_token":"rt-%d","expires_in":3600}`, n, n)
+	}))
+	t.Cleanup(srv.Close)
+
+	s, _, store, _ := engineServer(t, defaultTools(), Options{Providers: oauth.NewSet(oauth.WithBaseURL(srv.URL))})
+
+	acct, err := store.UpsertPlatformAccount(s.box, &db.PlatformAccount{
+		Platform: db.PlatformTwitch, AccountName: "ada", AccountRef: "ada-ref",
+		AccessToken: "old-access", RefreshToken: "old-refresh",
+		ExpiresAt: time.Now().Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	if err := store.PutPlatformCreds(s.box, db.PlatformTwitch, "cid", "secret"); err != nil {
+		t.Fatalf("creds: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	results := make([]*db.PlatformAccount, 2)
+	errs := make([]error, 2)
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = s.tokenFor(context.Background(), acct.ID)
+		}()
+	}
+
+	<-entered
+	close(proceed)
+	wg.Wait()
+
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Fatalf("provider.Refresh reached Twitch %d times for one account refreshed by two concurrent callers; want 1 -- "+
+			"the second caller should have waited for the first and reused its result instead of racing it to UpsertPlatformAccount (#6)", n)
+	}
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("tokenFor[%d]: %v", i, err)
+		}
+	}
+	if results[0].AccessToken != "refreshed-1" || results[1].AccessToken != "refreshed-1" {
+		t.Fatalf("both callers should observe the single refreshed token; got %q and %q",
+			results[0].AccessToken, results[1].AccessToken)
 	}
 }

@@ -30,6 +30,7 @@ import type {
   BulkDestOutcome,
   BulkDestReport,
   Destination,
+  DestinationId,
   DestStatus,
   MetaField,
   SourceView,
@@ -805,7 +806,7 @@ export function Dashboard() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Destination | null>(null);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const [busyId, setBusyId] = useState<DestinationId | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   // The programmes, so a destination card can say which one it carries. Named
@@ -816,7 +817,7 @@ export function Dashboard() {
     api.listSources().then(setSources).catch(() => setSources([]));
   }, [refreshKey]);
 
-  const [pending, setPending] = useState<number[] | null>(null);
+  const [pending, setPending] = useState<DestinationId[] | null>(null);
   const [moveNote, setMoveNote] = useState("");
   const [sourceCount, setSourceCount] = useState<number | null>(null);
 
@@ -874,7 +875,7 @@ export function Dashboard() {
   }, [refreshKey, readSourceCount]);
 
   const act = useCallback(
-    async (id: number, fn: () => Promise<unknown>, label: string) => {
+    async (id: DestinationId, fn: () => Promise<unknown>, label: string) => {
       setBusyId(id);
       try {
         await fn();
@@ -911,7 +912,7 @@ export function Dashboard() {
     [readSourceCount, t],
   );
 
-  const openEdit = async (id: number) => {
+  const openEdit = async (id: DestinationId) => {
     try {
       const { destination } = await api.getDestination(id);
       setEditing(destination);
@@ -921,9 +922,9 @@ export function Dashboard() {
     }
   };
 
-  const confirmDelete = useConfirm<{ id: number; name: string }>();
+  const confirmDelete = useConfirm<{ id: DestinationId; name: string }>();
 
-  const remove = async (id: number) => {
+  const remove = async (id: DestinationId) => {
     await act(id, () => api.deleteDestination(id), "delete the destination");
     toast.success(t("dash.destDeleted"));
     setRefreshKey((k) => k + 1);
@@ -1052,7 +1053,7 @@ export function Dashboard() {
     if (!awaitingServer) setPending(null);
   }, [live, pending]);
 
-  const move = async (id: number, delta: -1 | 1) => {
+  const move = async (id: DestinationId, delta: -1 | 1) => {
     const ids = destinations.map((d) => d.id);
     const from = ids.indexOf(id);
     const to = from + delta;

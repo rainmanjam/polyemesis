@@ -283,10 +283,16 @@ describe("the screens that meet an install with no source", () => {
      * nothing else -- `disabled={sources.length === 1}` under a renamed prop is
      * what a later change would actually write, and it sailed through. Both
      * assertions here are about the delete button and the card that renders it,
-     * so any name for the same rule fails them. */
+     * so any name for the same rule fails them.
+     *
+     * Matched against COUNT-SHAPED conditions specifically, not the bare word
+     * `disabled`, since #18 gave this button a legitimate `disabled={busy}` --
+     * a double-submit guard that has nothing to do with how many sources
+     * exist and must not trip this. A regex on `sources.length` or `only`
+     * still catches the rule this test exists for, under any prop name. */
     const del = jsxTagWith(src, "Button", "onClick={onDelete}");
     expect(del, "the delete control is disabled again on the only source, for a delete " +
-      "the store now accepts").not.toMatch(/\bdisabled\b/);
+      "the store now accepts").not.toMatch(/disabled=\{[^}]*(sources\.length|only)/i);
     const card = jsxTagWith(src, "SourceCard", "source={s}");
     expect(card, "the source card is being told again how many sources there are, which " +
       "it has no remaining use for except to withhold the delete")

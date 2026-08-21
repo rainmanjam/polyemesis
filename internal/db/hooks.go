@@ -22,7 +22,7 @@ import (
 // drive should not hand anybody the ability to forge deliveries.
 
 const hookColumns = `id, name, enabled, url, secret, triggers,
-	timeout_seconds, max_attempts, created_at, updated_at`
+	timeout_seconds, max_attempts, allow_private_target, created_at, updated_at`
 
 const (
 	hooksQuery        = `SELECT ` + hookColumns + ` FROM hooks ORDER BY id`
@@ -34,15 +34,20 @@ func scanHook(box *secrets.Box, s interface{ Scan(...any) error }) (*hooks.Hook,
 	var (
 		h                hooks.Hook
 		enabled          int
+		allowPrivate     int
 		sealed           []byte
 		triggersJSON     string
 		created, updated int64
 	)
 	if err := s.Scan(&h.ID, &h.Name, &enabled, &h.URL, &sealed, &triggersJSON,
-		&h.TimeoutSeconds, &h.MaxAttempts, &created, &updated); err != nil {
+		&h.TimeoutSeconds, &h.MaxAttempts, &allowPrivate, &created, &updated); err != nil {
 		return nil, err
 	}
 	h.Enabled = enabled != 0
+	// Dropped on the way through storage, this reads back false and
+	// safeDialContext refuses a hook the operator deliberately allowed -- so
+	// the hook is accepted at create time and then silently never fires.
+	h.AllowPrivateTarget = allowPrivate != 0
 	// A secret that will not open leaves the hook UNSIGNED rather than
 	// unreadable. The alternative -- failing the whole read -- would take every
 	// other hook down with it, and an unsigned delivery that arrives is more
@@ -137,10 +142,10 @@ func (d *DB) CreateHook(box *secrets.Box, h *hooks.Hook) (*hooks.Hook, string, e
 	}
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(`INSERT INTO hooks
-		(name, enabled, url, secret, triggers, timeout_seconds, max_attempts, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?)`,
+		(name, enabled, url, secret, triggers, timeout_seconds, max_attempts, allow_private_target, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`,
 		norm.Name, boolToInt(norm.Enabled), norm.URL, sealed, triggers,
-		norm.TimeoutSeconds, norm.MaxAttempts, now, now)
+		norm.TimeoutSeconds, norm.MaxAttempts, boolToInt(norm.AllowPrivateTarget), now, now)
 	if err != nil {
 		return nil, "", err
 	}
@@ -189,9 +194,10 @@ func (d *DB) UpdateHook(box *secrets.Box, h *hooks.Hook) (*hooks.Hook, error) {
 	}
 	res, err := d.sql.Exec(`UPDATE hooks SET
 		name=?, enabled=?, url=?, secret=CASE WHEN ? THEN secret ELSE ? END, triggers=?,
-		timeout_seconds=?, max_attempts=?, updated_at=? WHERE id=?`,
+		timeout_seconds=?, max_attempts=?, allow_private_target=?, updated_at=? WHERE id=?`,
 		norm.Name, boolToInt(norm.Enabled), norm.URL, boolToInt(keepSecret), sealed, triggers,
-		norm.TimeoutSeconds, norm.MaxAttempts, time.Now().Unix(), norm.ID)
+		norm.TimeoutSeconds, norm.MaxAttempts, boolToInt(norm.AllowPrivateTarget),
+		time.Now().Unix(), norm.ID)
 	if err != nil {
 		return nil, err
 	}

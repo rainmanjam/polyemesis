@@ -24,6 +24,7 @@ package hooks
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -199,6 +200,15 @@ type Hook struct {
 	MaxAttempts    int       `json:"maxAttempts"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
+	// AllowPrivateTarget is the deliberate opt-in past the SSRF guard in
+	// Validate and Dispatcher's dial-time check. Default false, because the
+	// ordinary webhook targets a public service and a hook aimed at
+	// 169.254.169.254 or a LAN address with nobody having decided that on
+	// purpose is a pivot from the operator console into the metadata service or
+	// the rest of the network, not a feature. An operator who genuinely wants a
+	// hook to hit something on their own LAN sets this explicitly; a refusal
+	// with no escape hatch would just get the whole feature disabled instead.
+	AllowPrivateTarget bool `json:"allowPrivateTarget"`
 }
 
 // RedactedURL is what a response or a log line may show.
@@ -291,6 +301,25 @@ func (h Hook) Validate() error {
 	if u.Host == "" {
 		return fmt.Errorf("hook %q has a URL with no host", h.Name)
 	}
+	// SSRF guard, part one of two. If the operator wrote a literal IP -- the
+	// cloud metadata address, a loopback, a LAN range -- catch it here with no
+	// network call, at the moment they save it. A HOSTNAME is deliberately NOT
+	// resolved in this path: DNS from inside a save request is slow, flaky in
+	// an offline test or sandbox, and its answer can legitimately change by the
+	// time the hook is dispatched anyway. Dispatcher's dial-time guard (see
+	// dispatch.go) is what actually enforces this for a hostname, because it
+	// runs at the one point that cannot be lied to by a DNS answer that changed
+	// after Validate ran -- otherwise known as DNS rebinding. This literal-IP
+	// check exists in addition because rejecting an obviously bad hook at save
+	// time, rather than only discovering it three retries into a delivery
+	// attempt, is worth the duplication.
+	if !h.AllowPrivateTarget {
+		if ip := net.ParseIP(u.Hostname()); ip != nil && !isPublicAddr(ip) {
+			return fmt.Errorf("hook %q targets a non-public address; set "+
+				"allowPrivateTarget to permit a self-hosted endpoint on purpose",
+				h.Name)
+		}
+	}
 	for _, tr := range h.Triggers {
 		if !KnownTrigger(tr) {
 			return fmt.Errorf("hook %q subscribes to unknown trigger %q", h.Name, tr)
@@ -307,4 +336,26 @@ func clampInt(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// isPublicAddr reports whether ip is safe to let a webhook actually reach:
+// not loopback, not link-local (which covers 169.254.169.254, the cloud
+// metadata address, and IPv6 fe80::/10 alike), not a private range (RFC1918,
+// and IPv6 ULA fc00::/7 -- both covered by net.IP.IsPrivate), not the
+// unspecified address, and not multicast. Used at two points that must agree:
+// Validate's literal-IP check above and Dispatcher's dial-time guard.
+func isPublicAddr(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	switch {
+	case ip.IsLoopback(),
+		ip.IsLinkLocalUnicast(),
+		ip.IsLinkLocalMulticast(),
+		ip.IsPrivate(),
+		ip.IsUnspecified(),
+		ip.IsMulticast():
+		return false
+	}
+	return true
 }

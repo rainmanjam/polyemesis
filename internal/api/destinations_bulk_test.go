@@ -22,6 +22,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -63,7 +64,7 @@ func TestBulkStartAndStopReportOneRowPerDestination(t *testing.T) {
 
 	post := func(path string) (bulkAnswer, time.Duration) {
 		t.Helper()
-		r := jsonRequest(t, http.MethodPost, path, nil)
+		r := jsonRequest(t, http.MethodPost, path, bulkConfirmBodyFor(path))
 		sign(r)
 		started := time.Now()
 		w := do(t, h, r)
@@ -138,7 +139,7 @@ func TestBulkStartAndStopReportOneRowPerDestination(t *testing.T) {
 	// Driven rather than reasoned about: decode into a map and look. A future
 	// edit that adds {"ok": false} beside the list would restore exactly the
 	// boolean the list replaces, and every assertion above would still pass.
-	r := jsonRequest(t, http.MethodPost, "/api/v1/destinations/stop-all", nil)
+	r := jsonRequest(t, http.MethodPost, "/api/v1/destinations/stop-all", map[string]any{"confirm": true})
 	sign(r)
 	var raw map[string]any
 	if err := json.Unmarshal(do(t, h, r).Body.Bytes(), &raw); err != nil {
@@ -173,7 +174,7 @@ func TestBulkStartIsPacedAndBulkStopIsNot(t *testing.T) {
 
 	timed := func(path string) time.Duration {
 		t.Helper()
-		r := jsonRequest(t, http.MethodPost, path, nil)
+		r := jsonRequest(t, http.MethodPost, path, bulkConfirmBodyFor(path))
 		sign(r)
 		started := time.Now()
 		if w := do(t, h, r); w.Code != http.StatusOK {
@@ -339,7 +340,8 @@ func TestBulkActsOnEveryPlatformAndOnDestinationsWithNone(t *testing.T) {
 	}
 
 	for _, route := range []string{"stop-all", "start-all"} {
-		r := jsonRequest(t, http.MethodPost, "/api/v1/destinations/"+route, nil)
+		path := "/api/v1/destinations/" + route
+		r := jsonRequest(t, http.MethodPost, path, bulkConfirmBodyFor(path))
 		sign(r)
 		w := do(t, h, r)
 		if w.Code != http.StatusOK {
@@ -368,6 +370,119 @@ func TestBulkActsOnEveryPlatformAndOnDestinationsWithNone(t *testing.T) {
 		if len(got.Results) != len(want) {
 			t.Errorf("%s returned %d rows, want %d", route, len(got.Results), len(want))
 		}
+	}
+}
+
+// bulkConfirmBodyFor is the body every OTHER test in this file needs on
+// stop-all now that it requires one -- see TestStopAllRefusesWithoutConfirm.
+// Centralised here so a future third bulk route does not need every existing
+// call site taught about it by hand.
+func bulkConfirmBodyFor(path string) any {
+	if strings.HasSuffix(path, "/stop-all") {
+		return map[string]any{"confirm": true}
+	}
+	return nil
+}
+
+// Finding #2, poka-yoke audit 2026-08-21: stop-all permanently ends every live
+// YouTube broadcast on the install and used to be gated only by a UI dialog an
+// API caller never sees. MUTATION: comment out the `if !req.Confirm` refusal
+// in handleStopAllDestinations and this fails, because the bare POST below
+// would then reach bulkSetDestinationsEnabled and answer 200.
+func TestStopAllRefusesWithoutConfirm(t *testing.T) {
+	h, _, sign := renditionServer(t, defaultTools())
+	withOnlySource(t, h, sign, map[string]any{
+		"name": "yt main", "kind": "rtmp",
+		"url": "rtmp://example.invalid/live", "streamKey": "k",
+	})
+	r := jsonRequest(t, http.MethodPost, "/api/v1/destinations", map[string]any{
+		"sourceId": onlySourceID(t, h, sign),
+		"name":     "yt main", "kind": "rtmp",
+		"url": "rtmp://example.invalid/live", "streamKey": "k",
+	})
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusOK && w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+
+	for _, tc := range []struct {
+		name string
+		body any
+	}{
+		{"no body at all", nil},
+		{"confirm explicitly false", map[string]any{"confirm": false}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := jsonRequest(t, http.MethodPost, "/api/v1/destinations/stop-all", tc.body)
+			sign(r)
+			w := do(t, h, r)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400. stop-all ends every live broadcast on "+
+					"the install permanently, and an API caller that never confirmed must "+
+					"not be able to trigger that: %s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "confirm") {
+				t.Errorf("refusal %q does not say what the caller needs to do", w.Body.String())
+			}
+		})
+	}
+
+	// The positive case: with confirm true, the same route still works.
+	r = jsonRequest(t, http.MethodPost, "/api/v1/destinations/stop-all",
+		map[string]any{"confirm": true})
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusOK {
+		t.Fatalf("confirmed stop-all: status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+}
+
+// Finding #3, poka-yoke audit 2026-08-21: start-all and stop-all used to be
+// one bare boolean apart. This does not (and cannot) catch a future author
+// writing the wrong named constant at the call site, but it does pin the
+// observable contract the type exists to protect: POST .../start-all always
+// enables and POST .../stop-all (once confirmed) always disables, so a
+// reviewer diffing the two one-line handlers is checking a fact this test
+// enforces, not trusting the diff by eye. MUTATION: swap bulkStart and
+// bulkStop in the two handler bodies and this fails, because "start-all"
+// would then report bulkStopped/bulkFailed instead of bulkStarted.
+func TestBulkActionIsNotTransposedBetweenStartAndStop(t *testing.T) {
+	h, _, sign := renditionServer(t, defaultTools())
+	r := jsonRequest(t, http.MethodPost, "/api/v1/destinations", map[string]any{
+		"sourceId": onlySourceID(t, h, sign),
+		"name":     "only dest", "kind": "rtmp",
+		"url": "rtmp://example.invalid/live", "streamKey": "k",
+	})
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusOK && w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+
+	callAndOutcome := func(path string, body any) bulkOutcome {
+		t.Helper()
+		r := jsonRequest(t, http.MethodPost, path, body)
+		sign(r)
+		w := do(t, h, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("POST %s: %d %s", path, w.Code, w.Body.String())
+		}
+		var got bulkAnswer
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatalf("POST %s: decode: %v", path, err)
+		}
+		if len(got.Results) != 1 {
+			t.Fatalf("POST %s: %d rows, want 1", path, len(got.Results))
+		}
+		return got.Results[0].Outcome
+	}
+
+	if got := callAndOutcome("/api/v1/destinations/start-all", nil); got != bulkStarted {
+		t.Errorf("start-all reported outcome %q, want %q -- this is the bug: the boolean "+
+			"reached bulkSetDestinationsEnabled backwards", got, bulkStarted)
+	}
+	if got := callAndOutcome("/api/v1/destinations/stop-all",
+		map[string]any{"confirm": true}); got != bulkStopped {
+		t.Errorf("stop-all reported outcome %q, want %q -- this is the bug: the boolean "+
+			"reached bulkSetDestinationsEnabled backwards", got, bulkStopped)
 	}
 }
 

@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -43,6 +44,36 @@ type Token struct {
 	RefreshToken string
 	ExpiresAt    time.Time
 	Scopes       string
+}
+
+// String redacts AccessToken and RefreshToken so a stray %v/%+v -- in a log
+// line, a wrapped error, a test failure message -- cannot print a live token.
+// Defined on the value receiver: Go always includes value-receiver methods in
+// the pointer's method set (never the other way round), so this single
+// definition is also what fmt reaches for a *Token. #16.
+func (t Token) String() string {
+	return fmt.Sprintf("Token{AccessToken:%s, RefreshToken:%s, ExpiresAt:%s, Scopes:%q}",
+		redactSecret(t.AccessToken), redactSecret(t.RefreshToken), t.ExpiresAt, t.Scopes)
+}
+
+// LogValue redacts the same fields for slog, so slog.Any("token", tok) is as
+// safe as fmt-printing it.
+func (t Token) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("access_token", redactSecret(t.AccessToken)),
+		slog.String("refresh_token", redactSecret(t.RefreshToken)),
+		slog.Time("expires_at", t.ExpiresAt),
+		slog.String("scopes", t.Scopes),
+	)
+}
+
+// redactSecret stands in for a secret value in a String()/LogValue(); it
+// leaves an unset secret visibly empty rather than claiming one is present.
+func redactSecret(s string) string {
+	if s == "" {
+		return ""
+	}
+	return "[redacted]"
 }
 
 // Account identifies the connected channel.

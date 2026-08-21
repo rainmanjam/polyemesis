@@ -29,6 +29,12 @@ type hookRequest struct {
 	Triggers       *[]hooks.Trigger `json:"triggers"`
 	TimeoutSeconds *int             `json:"timeoutSeconds"`
 	MaxAttempts    *int             `json:"maxAttempts"`
+	// AllowPrivateTarget is the operator saying they meant a self-hosted
+	// endpoint. Without it here the SSRF guard added for poka-yoke audit #4
+	// would be unreachable through the API -- the domain type would carry an
+	// opt-in nobody could set, which is how a guard that blocks a legitimate
+	// workflow gets removed wholesale instead of used.
+	AllowPrivateTarget *bool `json:"allowPrivateTarget"`
 }
 
 func (q hookRequest) applyTo(h hooks.Hook) hooks.Hook {
@@ -61,6 +67,9 @@ func (q hookRequest) applyTo(h hooks.Hook) hooks.Hook {
 	}
 	if q.MaxAttempts != nil {
 		h.MaxAttempts = *q.MaxAttempts
+	}
+	if q.AllowPrivateTarget != nil {
+		h.AllowPrivateTarget = *q.AllowPrivateTarget
 	}
 	return h
 }

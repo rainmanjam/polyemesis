@@ -759,3 +759,84 @@ func TestReconnectClearsTheSetupCacheConsistently(t *testing.T) {
 			"which describes a stream that has ended")
 	}
 }
+
+// TestEveryVerdictConstantIsHandled pins the exact set of verdict constants
+// this switch is written against. A new constant added to the const block
+// without a case here is exactly the shape of change TestVerdictStringHasNoSilentAdmit
+// below cannot catch on its own (it only proves the DEFAULT case is safe, not
+// that every real constant still gets its own line) -- so this enumerates the
+// known set explicitly and both tests must be kept in sync with the const block.
+func TestEveryVerdictConstantIsHandled(t *testing.T) {
+	want := map[verdict]string{
+		admitPublish:     "admitted",
+		refuseUnknownKey: "unrecognised",
+		refuseDisabled:   "source disabled",
+		refuseNotReady:   "no pipeline for source",
+	}
+	for v, s := range want {
+		if got := v.String(); got != s {
+			t.Errorf("verdict(%d).String() = %q, want %q", int(v), got, s)
+		}
+	}
+}
+
+// TestVerdictStringHasNoSilentAdmit is the #14 poka-yoke audit fix. verdict.String
+// used to fall through an unhandled case to the hardcoded "admitted" -- so any
+// value the switch had not been taught about read as a successful publish on
+// the one log line that distinguishes a refusal's reason. A refusal must never
+// silently become "admitted" in the log an operator is reading to find out why
+// a publisher was turned away.
+func TestVerdictStringHasNoSilentAdmit(t *testing.T) {
+	unhandled := verdict(99)
+	if got := unhandled.String(); got == "admitted" {
+		t.Fatalf("verdict(99).String() = %q, want anything but the success "+
+			"string -- an unhandled verdict must not read as admitted", got)
+	} else if !strings.Contains(got, "BUG") {
+		t.Errorf("verdict(99).String() = %q, want it to visibly announce it is "+
+			"an unhandled case rather than looking like an ordinary refusal reason", got)
+	}
+}
+
+// TestAuthGateThrottlesRepeatedWrongKeysButNotASuccess is the #19 poka-yoke
+// audit fix: nothing bounded how many stream keys one peer could try per
+// second before this, so a brute-force guess was limited only by TCP
+// handshake cost. This proves the gate trips after enough wrong guesses from
+// one peer, and -- the part that matters more -- that a single legitimate
+// success clears it, so an encoder that mistyped its key a couple of times
+// before getting it right is never left blocked.
+func TestAuthGateThrottlesRepeatedWrongKeysButNotASuccess(t *testing.T) {
+	g := newAuthGate()
+	const peer = "203.0.113.7"
+
+	if g.blocked(peer) {
+		t.Fatal("a peer that has never failed is already blocked")
+	}
+	for i := 0; i < authGateThreshold-1; i++ {
+		if g.fail(peer) {
+			t.Fatalf("gate blocked after %d failures, want it to hold off until %d", i+1, authGateThreshold)
+		}
+	}
+	if g.blocked(peer) {
+		t.Fatal("gate blocked before crossing its own threshold")
+	}
+	if !g.fail(peer) {
+		t.Fatalf("gate did not report crossing the threshold on failure #%d", authGateThreshold)
+	}
+	if !g.blocked(peer) {
+		t.Fatal("gate did not block a peer that just crossed the threshold")
+	}
+
+	// A DIFFERENT peer must never inherit this one's penalty -- that is the
+	// whole reason this is scoped per peer instead of one shared counter.
+	if g.blocked("198.51.100.9") {
+		t.Fatal("an unrelated peer was blocked by another peer's failures")
+	}
+
+	// The legitimate case: this peer eventually presents a real key.
+	g.succeed(peer)
+	if g.blocked(peer) {
+		t.Fatal("a successful admit did not clear the peer's penalty -- a " +
+			"reconnecting encoder that once mistyped its key would stay " +
+			"throttled forever")
+	}
+}
