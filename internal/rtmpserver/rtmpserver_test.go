@@ -12,6 +12,7 @@ import (
 
 	"github.com/bluenviron/gortmplib"
 	"github.com/bluenviron/gortmplib/pkg/message"
+	"github.com/rainmanjam/polyemesis/internal/authgate"
 	"time"
 )
 
@@ -417,6 +418,71 @@ func pubAndSub(t *testing.T, targets map[string]Target, pubKey, subKey string) b
 	}
 }
 
+// dialPublish runs a real RTMP publish handshake against addr with key, and
+// reports the error from it, if any.
+//
+// gortmplib's ServerConn.Accept completes the RTMP-level publish handshake
+// for ANY key, valid or not -- key validation is application logic that runs
+// only after Accept returns. So a nil error here does not mean the key was
+// accepted, only that the connection got that far; the caller has to close
+// the client. An error here does mean the connection was refused before or
+// during the handshake itself, which is what a peer blocked by authgate
+// looks like: handle returns without ever calling sc.Initialize.
+func dialPublish(t *testing.T, addr, key string) error {
+	t.Helper()
+	u, err := url.Parse("rtmp://" + addr + "/live/" + key)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	c := &gortmplib.Client{URL: u, Publish: true}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = c.Initialize(ctx)
+	if err == nil {
+		c.Close()
+	}
+	return err
+}
+
+// TestHandleRateLimitsPeerAfterRepeatedUnknownKeys is the network-level half
+// of the #19 poka-yoke fix, run against the real listener rather than the
+// gate in isolation: an unrecognised stream key must count against the
+// peer's authgate.Gate, and once that peer crosses the threshold, every
+// further connection from it -- even one presenting a key that would
+// otherwise be accepted -- must be refused before the RTMP handshake is even
+// attempted.
+func TestHandleRateLimitsPeerAfterRepeatedUnknownKeys(t *testing.T) {
+	target := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
+	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"good-key": target}))
+	if err := s.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer s.Stop()
+	s.mu.Lock()
+	addr := s.ln.Addr().String()
+	s.mu.Unlock()
+
+	// Enough wrong-key attempts from this one loopback peer to cross the
+	// gate's threshold. Each of these must still complete its own RTMP
+	// handshake -- Accept succeeds regardless of the key -- and only then get
+	// refused at the application layer, once the key fails lookup.
+	for i := 0; i < authgate.Threshold; i++ {
+		if err := dialPublish(t, addr, "wrong-key"); err != nil {
+			t.Fatalf("attempt %d: the RTMP handshake itself should still "+
+				"succeed for an unrecognised key -- refusal happens after, "+
+				"at the application layer -- got %v", i, err)
+		}
+	}
+
+	// The peer is now blocked. A further connection -- even one presenting
+	// the correct key -- must be refused before the handshake is even
+	// attempted, which surfaces here as the handshake itself failing.
+	if err := dialPublish(t, addr, "good-key"); err == nil {
+		t.Fatal("a peer that just crossed the gate's threshold was still " +
+			"able to complete a handshake with a valid key")
+	}
+}
+
 // The bug this package shipped with: the stream table was keyed by the STRING
 // the publisher typed, but a source has several valid keys at once — the
 // current token, the previous one during a rotation grace window, and any
@@ -794,49 +860,5 @@ func TestVerdictStringHasNoSilentAdmit(t *testing.T) {
 	} else if !strings.Contains(got, "BUG") {
 		t.Errorf("verdict(99).String() = %q, want it to visibly announce it is "+
 			"an unhandled case rather than looking like an ordinary refusal reason", got)
-	}
-}
-
-// TestAuthGateThrottlesRepeatedWrongKeysButNotASuccess is the #19 poka-yoke
-// audit fix: nothing bounded how many stream keys one peer could try per
-// second before this, so a brute-force guess was limited only by TCP
-// handshake cost. This proves the gate trips after enough wrong guesses from
-// one peer, and -- the part that matters more -- that a single legitimate
-// success clears it, so an encoder that mistyped its key a couple of times
-// before getting it right is never left blocked.
-func TestAuthGateThrottlesRepeatedWrongKeysButNotASuccess(t *testing.T) {
-	g := newAuthGate()
-	const peer = "203.0.113.7"
-
-	if g.blocked(peer) {
-		t.Fatal("a peer that has never failed is already blocked")
-	}
-	for i := 0; i < authGateThreshold-1; i++ {
-		if g.fail(peer) {
-			t.Fatalf("gate blocked after %d failures, want it to hold off until %d", i+1, authGateThreshold)
-		}
-	}
-	if g.blocked(peer) {
-		t.Fatal("gate blocked before crossing its own threshold")
-	}
-	if !g.fail(peer) {
-		t.Fatalf("gate did not report crossing the threshold on failure #%d", authGateThreshold)
-	}
-	if !g.blocked(peer) {
-		t.Fatal("gate did not block a peer that just crossed the threshold")
-	}
-
-	// A DIFFERENT peer must never inherit this one's penalty -- that is the
-	// whole reason this is scoped per peer instead of one shared counter.
-	if g.blocked("198.51.100.9") {
-		t.Fatal("an unrelated peer was blocked by another peer's failures")
-	}
-
-	// The legitimate case: this peer eventually presents a real key.
-	g.succeed(peer)
-	if g.blocked(peer) {
-		t.Fatal("a successful admit did not clear the peer's penalty -- a " +
-			"reconnecting encoder that once mistyped its key would stay " +
-			"throttled forever")
 	}
 }

@@ -56,6 +56,7 @@ import (
 
 	"github.com/bluenviron/gortmplib"
 	"github.com/bluenviron/gortmplib/pkg/message"
+	"github.com/rainmanjam/polyemesis/internal/authgate"
 )
 
 // handshakeTimeout bounds how long a connection may take to get through the
@@ -256,8 +257,9 @@ type Server struct {
 	subChange chan struct{}
 	done      chan struct{}
 	// gate throttles a peer that has presented enough wrong stream keys to
-	// look like guessing. See authgate.go.
-	gate *authGate
+	// look like guessing. Shared with internal/srtserver -- see
+	// internal/authgate for why this is not forked per protocol.
+	gate *authgate.Gate
 }
 
 // New builds a server. It binds nothing until Start.
@@ -270,7 +272,7 @@ func New(log *slog.Logger, addr string, lookup Lookup) *Server {
 		streams: map[PublisherKey]*stream{},
 		waiters: map[PublisherKey]int{},
 		done:    make(chan struct{}),
-		gate:    newAuthGate(),
+		gate:    authgate.New(),
 	}
 }
 
@@ -384,10 +386,10 @@ func (s *Server) handle(conn net.Conn) {
 
 	// Checked before the handshake is even attempted, so a peer already
 	// blocked for guessing wrong keys does not get to spend a fresh handshake
-	// on every subsequent try. See authgate.go for why this is scoped per
-	// peer rather than global.
-	host := peerHost(conn.RemoteAddr())
-	if s.gate.blocked(host) {
+	// on every subsequent try. See internal/authgate for why this is scoped
+	// per peer rather than global.
+	host := authgate.PeerHost(conn.RemoteAddr())
+	if s.gate.Blocked(host) {
 		s.log.Debug("rtmp connect refused: peer is rate-limited after repeated wrong keys",
 			"component", "rtmp-ingest", "peer", peer)
 		return
@@ -469,8 +471,8 @@ func (s *Server) handle(conn net.Conn) {
 			// Only an unrecognised key counts as a guess. A found-but-disabled
 			// or found-but-not-ready target already proved this caller holds a
 			// real credential, so neither of those branches reaches here. See
-			// authgate.go.
-			if s.gate.fail(host) {
+			// internal/authgate.
+			if s.gate.Fail(host) {
 				s.log.Warn("rtmp: peer rate-limited after repeated wrong stream keys",
 					"component", "rtmp-ingest", "peer", peer)
 			}
@@ -489,7 +491,7 @@ func (s *Server) handle(conn net.Conn) {
 	}
 	// A real key was just presented successfully; nothing this peer guessed
 	// wrong earlier should still count against it.
-	s.gate.succeed(host)
+	s.gate.Succeed(host)
 
 	// The handshake deadline must not survive into the session: a live stream
 	// is legitimately quiet between keyframes, and an unrenewed deadline would

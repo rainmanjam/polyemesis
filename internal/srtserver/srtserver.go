@@ -35,6 +35,8 @@ import (
 	"time"
 
 	srt "github.com/datarhei/gosrt"
+
+	"github.com/rainmanjam/polyemesis/internal/authgate"
 )
 
 const (
@@ -138,8 +140,9 @@ type Server struct {
 	started atomic.Bool
 
 	// gate throttles a peer that has presented enough wrong tokens to look
-	// like guessing. See authgate.go.
-	gate *authGate
+	// like guessing. Shared with internal/rtmpserver -- see internal/authgate
+	// for why this is not forked per protocol.
+	gate *authgate.Gate
 }
 
 // BindReport is which address families the listener asked for and which it got.
@@ -288,7 +291,7 @@ func New(log *slog.Logger, addr string, lookup Lookup) *Server {
 		addr:   addr,
 		lookup: lookup,
 		live:   map[PublisherKey]*session{},
-		gate:   newAuthGate(),
+		gate:   authgate.New(),
 	}
 }
 
@@ -429,9 +432,9 @@ func (s *Server) handleConnect(req srt.ConnRequest) srt.ConnType {
 
 	// Checked before the token is even looked at, so a peer already blocked
 	// for guessing wrong tokens does not get a fresh lookup on every retry.
-	// See authgate.go for why this is scoped per peer rather than global.
-	host := peerHost(req.RemoteAddr())
-	if s.gate.blocked(host) {
+	// See internal/authgate for why this is scoped per peer rather than global.
+	host := authgate.PeerHost(req.RemoteAddr())
+	if s.gate.Blocked(host) {
 		req.SetRejectionReason(srt.REJ_BADSECRET)
 		s.log.Debug("srt connect refused: peer is rate-limited after repeated wrong tokens",
 			"peer", peer)
@@ -453,7 +456,7 @@ func (s *Server) handleConnect(req srt.ConnRequest) srt.ConnType {
 		s.log.Warn("srt publish refused: token not recognised", "peer", peer)
 		// Only an unrecognised token counts as a guess -- every refusal below
 		// this point already proved the caller holds a real one.
-		if s.gate.fail(host) {
+		if s.gate.Fail(host) {
 			s.log.Warn("srt: peer rate-limited after repeated wrong tokens", "peer", peer)
 		}
 		return srt.REJECT
@@ -509,7 +512,7 @@ func (s *Server) handleConnect(req srt.ConnRequest) srt.ConnType {
 
 	// A real token was just presented successfully; nothing this peer guessed
 	// wrong earlier should still count against it.
-	s.gate.succeed(host)
+	s.gate.Succeed(host)
 	return srt.PUBLISH
 }
 

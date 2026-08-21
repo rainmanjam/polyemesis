@@ -20,8 +20,10 @@ package api
 // published. See destinations_bulk.go.
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -433,6 +435,56 @@ func TestStopAllRefusesWithoutConfirm(t *testing.T) {
 	sign(r)
 	if w := do(t, h, r); w.Code != http.StatusOK {
 		t.Fatalf("confirmed stop-all: status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestStopAllRefusesMalformedJSON covers the decode-error branch of
+// handleStopAllDestinations: a body that IS present but does not parse as
+// bulkStopRequest must be answered with the decode error, distinctly from
+// "you must confirm" -- a caller who sent garbage needs to be told the body
+// was garbage, not that they forgot a field they may well have included.
+func TestStopAllRefusesMalformedJSON(t *testing.T) {
+	h, _, sign := renditionServer(t, defaultTools())
+	withOnlySource(t, h, sign, map[string]any{
+		"name": "yt main", "kind": "rtmp",
+		"url": "rtmp://example.invalid/live", "streamKey": "k",
+	})
+
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/destinations/stop-all",
+		strings.NewReader("{not valid json"))
+	r.Header.Set("Content-Type", "application/json")
+	r.RemoteAddr = "203.0.113.5:44444"
+	sign(r)
+
+	w := do(t, h, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a malformed body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "invalid request body") {
+		t.Errorf("refusal %q does not say the body itself was the problem", w.Body.String())
+	}
+}
+
+// TestStopAllRefusesAnOversizedBody covers readJSONBody's own guard: a body
+// past the 1MiB ceiling must fail the READ, before anything is decoded or any
+// confirm field is even looked at.
+func TestStopAllRefusesAnOversizedBody(t *testing.T) {
+	h, _, sign := renditionServer(t, defaultTools())
+	withOnlySource(t, h, sign, map[string]any{
+		"name": "yt main", "kind": "rtmp",
+		"url": "rtmp://example.invalid/live", "streamKey": "k",
+	})
+
+	oversized := bytes.Repeat([]byte(" "), (1<<20)+16)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/destinations/stop-all",
+		bytes.NewReader(oversized))
+	r.Header.Set("Content-Type", "application/json")
+	r.RemoteAddr = "203.0.113.5:44444"
+	sign(r)
+
+	w := do(t, h, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a body over the size ceiling: %s", w.Code, w.Body.String())
 	}
 }
 

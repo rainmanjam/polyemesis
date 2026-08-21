@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestIsPublicAddrRejectsMetadataAndPrivateRanges is the mutation-checked
@@ -47,6 +48,13 @@ func TestIsPublicAddrRejectsMetadataAndPrivateRanges(t *testing.T) {
 			t.Errorf("isPublicAddr(%s) = false, want true -- an ordinary "+
 				"public address must not be refused", s)
 		}
+	}
+
+	// An address that failed to parse must read as non-public rather than
+	// panicking on a nil receiver -- callers pass net.ParseIP's result
+	// straight through, and a malformed literal must fail closed.
+	if isPublicAddr(nil) {
+		t.Error("isPublicAddr(nil) = true, want false")
 	}
 }
 
@@ -112,4 +120,43 @@ func TestSafeDialContextClosesTheDNSRebindingGap(t *testing.T) {
 			"Validate", err)
 	}
 	_ = conn.Close()
+}
+
+// TestSafeDialContextRejectsAnUnsplittableAddress covers the guard ahead of
+// resolution: an addr with no port cannot even be split, and that must be
+// reported as the dial failing rather than panicking or silently resolving
+// the wrong thing.
+func TestSafeDialContextRejectsAnUnsplittableAddress(t *testing.T) {
+	if _, err := safeDialContext(context.Background(), "tcp", "no-port-here"); err == nil {
+		t.Fatal("safeDialContext accepted an address with no port")
+	}
+}
+
+// TestSafeDialContextReportsAResolutionFailure covers the branch where the
+// address DOES split but the host half fails to resolve. An empty host is
+// the fastest deterministic way to force that failure without depending on
+// real DNS or network access: net.SplitHostPort(":0") accepts the empty
+// host as syntactically valid, and looking up "" fails locally, with no
+// network round trip.
+func TestSafeDialContextReportsAResolutionFailure(t *testing.T) {
+	if _, err := safeDialContext(context.Background(), "tcp", ":0"); err == nil {
+		t.Fatal("safeDialContext resolved an empty host")
+	}
+}
+
+// TestSafeDialContextReportsADialFailureForAPublicAddress covers the loop's
+// other branch: an address that resolves and passes isPublicAddr, but where
+// the actual dial then fails. 192.0.2.1 is TEST-NET-1 (RFC 5737) --
+// deliberately reserved for documentation and never routed -- so it is
+// "public" by isPublicAddr's rules (not loopback, private, link-local,
+// multicast or unspecified) while being safe to dial in a test: the attempt
+// times out against the context deadline rather than reaching anything real,
+// and the deadline bounds the test to well under a second either way.
+func TestSafeDialContextReportsADialFailureForAPublicAddress(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if _, err := safeDialContext(ctx, "tcp", "192.0.2.1:81"); err == nil {
+		t.Fatal("safeDialContext dialed a TEST-NET-1 address; want the " +
+			"attempt to fail against the context deadline")
+	}
 }
