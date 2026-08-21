@@ -277,6 +277,9 @@ func Open(path string, opts ...Option) (*DB, error) {
 	// be there. It also creates the first source from the existing ingest
 	// configuration, which is what keeps an upgraded install reachable by the
 	// encoder that was already pointed at it.
+	if err := d.MigrateHookAllowPrivateTarget(); err != nil {
+		return nil, err
+	}
 	if err := d.MigrateSources(); err != nil {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)

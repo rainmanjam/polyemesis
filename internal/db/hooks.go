@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/hooks"
@@ -230,4 +231,39 @@ func marshalTriggers(list []hooks.Trigger) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// MigrateHookAllowPrivateTarget adds hooks.allow_private_target to a database
+// created before the SSRF guard existed.
+//
+// WHY THIS EXISTS AT ALL, since schema.sql already declares the column: that
+// file is CREATE TABLE IF NOT EXISTS, so on an install whose hooks table is
+// already there it does nothing. The column arrived with the guard (poka-yoke
+// audit #4) and every hook read now names it, so without this an upgraded
+// install answers "no such column: allow_private_target" on the first hook
+// query and keeps doing it -- the hooks page empty, deliveries stopped, and
+// nothing in the schema to suggest why. Measured against a database built from
+// the previous schema before this was written.
+//
+// DEFAULT 0, so an upgraded install keeps refusing private targets. The safe
+// direction: an operator who wants one opts in deliberately, exactly as a new
+// install would.
+func (d *DB) MigrateHookAllowPrivateTarget() error {
+	// Checked before any transaction opens, for the reason
+	// MigrateDestinationExpertArgs records: db.go sets SetMaxOpenConns(1), so a
+	// read issued while a transaction holds the one connection waits for a
+	// connection that transaction will not release, and startup hangs for ever.
+	has, err := columnExists(d.sql, "hooks", "allow_private_target")
+	if err != nil {
+		return fmt.Errorf("inspect hooks columns: %w", err)
+	}
+	if has {
+		return nil
+	}
+	if _, err := d.sql.Exec(
+		`ALTER TABLE hooks ADD COLUMN allow_private_target INTEGER NOT NULL DEFAULT 0`,
+	); err != nil {
+		return fmt.Errorf("add hooks.allow_private_target: %w", err)
+	}
+	return nil
 }
