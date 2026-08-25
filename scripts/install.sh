@@ -1536,6 +1536,81 @@ BIN_PATH="$BIN_PATH"
 CONFIG_DIR="$CONFIG_DIR"
 DATA_DIR="$DATA_DIR"
 
+REMOVE_DATA=false
+FORCE=false
+for arg in "\$@"; do
+	case "\$arg" in
+		--force|-f)     FORCE=true ;;
+		--remove-data)  REMOVE_DATA=true ;;
+		-h|--help)
+			echo "usage: uninstall.sh [--force] [--remove-data]"
+			echo
+			echo "  --force        do not ask, and do not refuse while a broadcast is on air"
+			echo "  --remove-data  also delete \$DATA_DIR (database, secret.key, recordings)"
+			exit 0 ;;
+		*) echo "unknown option: \$arg" >&2; exit 2 ;;
+	esac
+done
+
+# ROOT BEFORE THE FIRST MUTATION. Without this the systemctl call is swallowed
+# by its own \`|| true\` and the rm below dies under set -e, leaving the service
+# disabled, the unit file present and the binary present -- a half-uninstalled
+# host whose next \`systemctl start\` fails against nothing.
+if [ "\$(id -u)" != 0 ]; then
+	echo "uninstall.sh must run as root: sudo \$0 \$*" >&2
+	exit 1
+fi
+
+# IS ANYTHING ON AIR? Stopping this service ends every live broadcast on the
+# install, and a completed broadcast cannot be returned to. The installer asks
+# before the REVERSIBLE act of installing; this is the irreversible one.
+#
+# Scoped to the unit's own cgroup rather than every ffmpeg on the box: an
+# unrelated ffmpeg, or one left behind by a test run, is not this service's
+# broadcast and must not block an uninstall.
+publishing_now() {
+	local cg="/sys/fs/cgroup/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
+	local pid args n=0
+	[ -r "\$cg" ] || return 1
+	while read -r pid; do
+		[ -r "/proc/\$pid/cmdline" ] || continue
+		args=\$(tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null || true)
+		case "\$args" in
+			*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+				n=\$((n+1))
+				echo "    pid \$pid: \$(echo "\$args" | grep -oE '(rtmp|srt)://[^ ]{0,40}' | tail -1)" >&2 ;;
+		esac
+	done < "\$cg"
+	[ "\$n" -gt 0 ]
+}
+
+if [ "\$FORCE" != true ]; then
+	if publishing_now; then
+		echo >&2
+		echo "REFUSING: \$SERVICE_NAME is publishing right now (listed above)." >&2
+		echo "Uninstalling stops it, and a live broadcast that ends cannot be resumed." >&2
+		echo "Stop the destinations first, or pass --force if you mean to end them." >&2
+		exit 1
+	fi
+	# Not on air, but still destructive. A terminal gets asked; a run with no
+	# terminal is REFUSED rather than assumed, so an unattended job cannot
+	# uninstall a broadcast server by inheriting this script.
+	reply=""
+	if { printf 'This removes %s, its unit file, %s and %s.\\nType the service name (%s) to confirm: ' \\
+			"\$BIN_PATH" "\$CONFIG_DIR" \\
+			"\$([ "\$REMOVE_DATA" = true ] && echo "\$DATA_DIR" || echo "nothing else")" \\
+			"\$SERVICE_NAME" > /dev/tty; } 2>/dev/null; then
+		IFS= read -r reply < /dev/tty 2>/dev/null || reply=""
+	else
+		echo "No terminal to confirm on. Pass --force if you mean this." >&2
+		exit 1
+	fi
+	if [ "\$reply" != "\$SERVICE_NAME" ]; then
+		echo "Not confirmed; nothing was changed." >&2
+		exit 1
+	fi
+fi
+
 systemctl disable --now "\$SERVICE_NAME" >/dev/null 2>&1 || true
 rm -f "/etc/systemd/system/\$SERVICE_NAME.service"
 systemctl daemon-reload >/dev/null 2>&1 || true
@@ -1544,12 +1619,31 @@ rm -rf "\$CONFIG_DIR"
 
 echo
 echo "Removed the service, the unit file, \$BIN_PATH and \$CONFIG_DIR."
-echo
-echo "\$DATA_DIR was KEPT - it holds your database, secret.key and recordings."
-echo "secret.key is what decrypts your stored platform tokens. To destroy it"
-echo "permanently:"
-echo
-echo "    sudo rm -rf \$DATA_DIR"
+
+if [ "\$REMOVE_DATA" = true ]; then
+	# GUARDED, because the alternative this replaces was printing
+	# \`sudo rm -rf \$DATA_DIR\` for the operator to paste -- an unguarded
+	# recursive delete, handed over as a instruction, of the one directory
+	# holding unrepeatable recordings.
+	case "\$DATA_DIR" in
+		""|"/") echo "refusing to delete '\$DATA_DIR'" >&2; exit 1 ;;
+		/*) : ;;
+		*) echo "refusing to delete a non-absolute data directory '\$DATA_DIR'" >&2; exit 1 ;;
+	esac
+	case "\$DATA_DIR" in
+		/bin|/boot|/dev|/etc|/home|/lib|/lib32|/lib64|/media|/mnt|/opt|/proc|/root|/run|/sbin|/srv|/sys|/tmp|/usr|/var)
+			echo "refusing to delete '\$DATA_DIR': that is a system directory" >&2; exit 1 ;;
+	esac
+	rm -rf "\$DATA_DIR"
+	echo "Deleted \$DATA_DIR - database, secret.key and recordings are gone."
+else
+	echo
+	echo "\$DATA_DIR was KEPT - it holds your database, secret.key and recordings."
+	echo "secret.key is what decrypts your stored platform tokens. To destroy it,"
+	echo "re-run with the flag, which checks the path before deleting anything:"
+	echo
+	echo "    sudo \$0 --remove-data"
+fi
 echo
 EOF
 	chmod +x "$INSTALL_DIR/uninstall.sh"
@@ -1648,15 +1742,71 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$INSTALL_DIR"
+
+REMOVE_DATA=false
+FORCE=false
+for arg in "\$@"; do
+	case "\$arg" in
+		--force|-f)    FORCE=true ;;
+		--remove-data) REMOVE_DATA=true ;;
+		-h|--help)
+			echo "usage: uninstall.sh [--force] [--remove-data]"
+			echo
+			echo "  --force        do not ask, and do not refuse while a broadcast is on air"
+			echo "  --remove-data  also delete the polyemesis-data volume"
+			exit 0 ;;
+		*) echo "unknown option: \$arg" >&2; exit 2 ;;
+	esac
+done
+
+# IS ANYTHING ON AIR? \`compose down\` ends every live broadcast the container is
+# carrying, and a completed broadcast cannot be returned to. Asked of the
+# container's own process table, so an ffmpeg elsewhere on the host is not
+# mistaken for this install's broadcast.
+publishing_now() {
+	local out
+	out=\$($COMPOSE_CMD top 2>/dev/null || true)
+	case "\$out" in
+		*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+			echo "\$out" | grep -E 'ffmpeg.*(rtmp|srt):' | head -3 >&2
+			return 0 ;;
+	esac
+	return 1
+}
+
+if [ "\$FORCE" != true ]; then
+	if publishing_now; then
+		echo >&2
+		echo "REFUSING: this install is publishing right now (listed above)." >&2
+		echo "Uninstalling stops it, and a live broadcast that ends cannot be resumed." >&2
+		echo "Stop the destinations first, or pass --force if you mean to end them." >&2
+		exit 1
+	fi
+	reply=""
+	if { printf 'This stops and removes the container in %s.\\nType "remove" to confirm: ' "$INSTALL_DIR" > /dev/tty; } 2>/dev/null; then
+		IFS= read -r reply < /dev/tty 2>/dev/null || reply=""
+	else
+		echo "No terminal to confirm on. Pass --force if you mean this." >&2
+		exit 1
+	fi
+	[ "\$reply" = "remove" ] || { echo "Not confirmed; nothing was changed." >&2; exit 1; }
+fi
+
 $COMPOSE_CMD down --remove-orphans
 echo
 echo "Stopped and removed the container."
-echo "The 'polyemesis-data' volume was KEPT — it holds your database, secret.key"
-echo "and recordings. To destroy it permanently:"
+
+if [ "\$REMOVE_DATA" = true ]; then
+	docker volume rm polyemesis-data
+	echo "Deleted the polyemesis-data volume - database, secret.key and recordings are gone."
+else
+	echo "The 'polyemesis-data' volume was KEPT — it holds your database, secret.key"
+	echo "and recordings. To destroy it:"
+	echo
+	echo "    \$0 --remove-data"
+fi
 echo
-echo "    docker volume rm polyemesis-data"
-echo
-echo "Then: rm -rf $INSTALL_DIR"
+echo "The install directory is left in place: $INSTALL_DIR"
 EOF
   chmod +x "$INSTALL_DIR/uninstall.sh"
   ok "wrote update.sh and uninstall.sh"

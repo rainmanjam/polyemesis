@@ -51,6 +51,7 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPTS/lib-watchdog.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
+. "$SCRIPTS/lib-preflight.sh"
 
 # THE SOURCE HAS TO BE BIG ENOUGH TO STEP DOWN FROM. The other suites use small
 # fixtures deliberately, for speed; a ladder cannot, because 720p and 480p are
@@ -83,7 +84,12 @@ cleanup() {
 }
 trap 'poly_teardown_trap $? cleanup' EXIT
 
-[[ -x "$BIN" ]] || { echo "build first: make build"; exit 1; }
+# poka-yoke: the driver below runs via `go run` and measures real ffmpeg
+# renditions with ffprobe -- see lib-preflight.sh.
+poly_require_exec "$BIN"
+poly_require_cmd go "needed to run the acceptance driver via 'go run'"
+poly_require_cmd ffmpeg
+poly_require_cmd ffprobe
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK" || exit 1
 # Armed here rather than earlier: the watchdog is a separate process and
 # inherits this directory, which is where server.log will be written and where

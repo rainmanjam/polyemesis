@@ -510,6 +510,82 @@ do
   fi
 done
 
+step "12. The generated uninstaller refuses before it can end a broadcast"
+
+# EVERY PATH HERE USES TEMP DIRECTORIES. An earlier hand-test of this script ran
+# the generated uninstaller with --force against the real /usr/local/bin and
+# /etc/polyemesis; it happened to be a machine with no install, which is luck
+# rather than a test design. A suite that can uninstall the host it runs on is
+# not a suite.
+WORK_UNINST="$work/uninst"; mkdir -p "$WORK_UNINST/out" "$WORK_UNINST/bin"
+printf '#!/bin/sh\necho 0\n' > "$WORK_UNINST/bin/id"; chmod +x "$WORK_UNINST/bin/id"
+
+(
+  load_install_defs || exit 1
+  INSTALL_DIR="$WORK_UNINST/out"
+  SERVICE_NAME="polyemesis"
+  BIN_PATH="$WORK_UNINST/fake-bin"
+  CONFIG_DIR="$WORK_UNINST/fake-cfg"
+  DATA_DIR="$WORK_UNINST/fake-data"
+  write_binary_uninstall_script >/dev/null 2>&1
+) || bad "could not generate the uninstaller"
+
+U="$WORK_UNINST/out/uninstall.sh"
+if [ -f "$U" ]; then
+  bash -n "$U" && ok "the generated uninstaller is syntactically valid" \
+                || bad "the generated uninstaller does not parse"
+
+  # The escaping is the thing that breaks: a runtime variable expanded at
+  # GENERATION time bakes one install's paths into every copy.
+  if grep -q 'SERVICE_NAME="polyemesis"' "$U" && grep -q '"\$SERVICE_NAME"' "$U"; then
+    ok "install-time values are baked in and runtime references survive"
+  else
+    bad "heredoc escaping is wrong: check \$ vs \\\$ in write_binary_uninstall_script"
+  fi
+
+  bash "$U" --wat >/dev/null 2>&1
+  [ "$?" = 2 ] && ok "an unknown option is refused" || bad "an unknown option was accepted"
+
+  out="$(bash "$U" 2>&1)"; rc=$?
+  if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q 'must run as root'; then
+    ok "a non-root run is refused before the first mutation"
+  else
+    bad "a non-root run was not refused (rc=$rc)"
+  fi
+
+  # No terminal to confirm on must REFUSE, not assume. An unattended job that
+  # inherits this script must not be able to uninstall a broadcast server.
+  out="$(PATH="$WORK_UNINST/bin:$PATH" bash "$U" </dev/null 2>&1)"; rc=$?
+  if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q 'No terminal to confirm on'; then
+    ok "with no terminal to confirm on, it refuses rather than assuming"
+  else
+    bad "a run with no terminal was not refused (rc=$rc): $out"
+  fi
+
+  # --remove-data must refuse a path that would take the system with it, and
+  # must still work for a real one -- a guard that refuses everything passes
+  # every negative case and is useless.
+  for badpath in "" "/" "/usr" "relative/path"; do
+    sed "s|^DATA_DIR=.*|DATA_DIR=\"$badpath\"|" "$U" > "$WORK_UNINST/g.sh"
+    out="$(PATH="$WORK_UNINST/bin:$PATH" bash "$WORK_UNINST/g.sh" --remove-data --force 2>&1)"; rc=$?
+    if [ "$rc" != 0 ] && printf '%s' "$out" | grep -qi refus; then
+      ok "--remove-data refuses DATA_DIR='$badpath'"
+    else
+      bad "--remove-data accepted DATA_DIR='$badpath' (rc=$rc)"
+    fi
+  done
+
+  mkdir -p "$WORK_UNINST/fake-data"; : > "$WORK_UNINST/fake-data/marker"
+  out="$(PATH="$WORK_UNINST/bin:$PATH" bash "$U" --remove-data --force 2>&1)"; rc=$?
+  if [ "$rc" = 0 ] && [ ! -e "$WORK_UNINST/fake-data" ]; then
+    ok "--remove-data deletes a legitimate data directory"
+  else
+    bad "--remove-data did not delete a legitimate data directory (rc=$rc)"
+  fi
+else
+  bad "no uninstaller was generated"
+fi
+
 printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"
 [ "$fail" -eq 0 ] || { printf "\n  \033[31mINSTALLER ACCEPTANCE FAILED\033[0m\n"; exit 1; }
 printf "\n  \033[32mINSTALLER ACCEPTANCE PASSED\033[0m\n"

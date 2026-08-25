@@ -30,6 +30,7 @@
 #>
 [CmdletBinding()]
 param(
+    [switch]$Force,
     [switch]$RemoveData,
     [string]$DataDir = (Join-Path $env:ProgramData 'polyemesis'),
     [string]$InstallDir = (Join-Path $env:ProgramFiles 'polyemesis'),
@@ -50,6 +51,38 @@ function Assert-Administrator {
 }
 
 Assert-Administrator
+
+# IS ANYTHING ON AIR? Stopping the service ends every live broadcast this host
+# is carrying, and a completed broadcast cannot be returned to. The Linux
+# uninstaller refuses the same way; this is the Windows half of that device.
+function Get-PublishingFfmpeg {
+    try {
+        Get-CimInstance Win32_Process -Filter "Name='ffmpeg.exe'" -ErrorAction Stop |
+            Where-Object { $_.CommandLine -and ($_.CommandLine -match 'rtmp:|srt:|-f\s+flv') }
+    } catch {
+        # If the process table cannot be read we cannot prove the host is idle.
+        # Say so rather than returning "nothing found", which would read as safe.
+        Write-Warning "Could not inspect running processes: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+if (-not $Force) {
+    $live = Get-PublishingFfmpeg
+    if ($null -eq $live) {
+        throw 'Cannot determine whether a broadcast is live. Re-run with -Force if you mean to stop the service anyway.'
+    }
+    if ($live.Count -gt 0) {
+        foreach ($p in $live) { Write-Host ("    pid {0}: {1}" -f $p.ProcessId, ($p.CommandLine -replace '^.*?((rtmp|srt)://\S{0,40}).*$','$1')) }
+        throw "REFUSING: $ServiceName is publishing right now (listed above). Uninstalling stops it, and a live broadcast that ends cannot be resumed. Stop the destinations first, or pass -Force if you mean to end them."
+    }
+
+    $target = if ($RemoveData) { "$InstallDir and $DataDir" } else { $InstallDir }
+    $answer = Read-Host "This removes the $ServiceName service and $target. Type the service name ($ServiceName) to confirm"
+    if ($answer -ne $ServiceName) {
+        throw 'Not confirmed; nothing was changed.'
+    }
+}
 
 $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($service) {

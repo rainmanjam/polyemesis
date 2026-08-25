@@ -43,6 +43,7 @@ CONTAINER=polyemesis-obs-publisher
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
+. "$SCRIPTS/lib-preflight.sh"
 
 pass=0; fail=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
@@ -77,14 +78,21 @@ cleanup() {
 }
 trap 'poly_teardown_trap $? cleanup' EXIT
 
-command -v docker >/dev/null || { echo "docker is required"; exit 1; }
-docker info >/dev/null 2>&1 || { echo "docker is not running"; exit 1; }
+# poka-yoke: every prerequisite this suite needs, checked before the first
+# assertion below -- a check that ran only after "polyemesis built" had
+# already printed a pass (as ffmpeg/ffprobe's used to) leaves a suite that
+# refuses partway through, tallying a partial pass indistinguishable from a
+# real one. See lib-preflight.sh.
+poly_require_docker
+poly_require_cmd ffmpeg "the round-trip probe below needs a real mux/demux"
+poly_require_cmd ffprobe "the round-trip probe below needs a real mux/demux"
+poly_require_cmd openssl "used to generate the E2E admin password"
 
 # Built here, not assumed. The failover suite used to run whatever binary was
 # lying in the repo root and passed against code from hours earlier; the capture
 # script did the same with a week-old container image. Both hid real bugs.
 step "1. Build"
-go build -o "$BIN" "$ROOT/cmd/polyemesis" || { echo "cannot build polyemesis"; exit 1; }
+poly_require_build "$BIN" "$ROOT/cmd/polyemesis" polyemesis
 ok "polyemesis built"
 
 # CAN THIS HOST SEE MULTITRACK AT ALL? Measured before anything else, because
@@ -109,8 +117,6 @@ ok "polyemesis built"
 # returns 2; 6.1.1 refuses the mux with "at most one audio stream is supported
 # in flv" and returns 0. That measures the capability this suite depends on
 # rather than a number somebody has to map onto it.
-command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null \
-  || { echo "ffmpeg and ffprobe are required on the host"; exit 1; }
 MT=$(mktemp -d)
 ffmpeg -hide_banner -loglevel error \
   -f lavfi -i sine=f=300:d=0.3 -f lavfi -i sine=f=500:d=0.3 \
@@ -151,7 +157,7 @@ DATA="$WORK/data"
 
 export E2E_PASSWORD="E2E-$(openssl rand -hex 16)"
 DRIVER="$WORK/obs-driver"
-go build -o "$DRIVER" "$SCRIPTS/acceptance_obs_driver.go" || { echo "cannot build the driver"; exit 1; }
+poly_require_build "$DRIVER" "$SCRIPTS/acceptance_obs_driver.go" "the obs driver"
 drive() { "$DRIVER" "http://127.0.0.1:$PORT" "$@" 2>&1; }
 
 step "2. Server, on RTMP ingest"

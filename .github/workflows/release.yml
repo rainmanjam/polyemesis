@@ -158,29 +158,49 @@ jobs:
           # v0.7.0 -> 0.7.0
           tag_version="${REF_NAME#v}"
 
-          # The FIRST dated heading, top-down. "## [Unreleased]" carries no
-          # date and is skipped by the pattern itself; the first heading that
-          # DOES have one is the release CHANGELOG.md currently claims.
-          heading=$(grep -m1 -E '^## \[[0-9]+\.[0-9]+\.[0-9]+\] — [0-9]{4}-[0-9]{2}-[0-9]{2}' CHANGELOG.md || true)
+          # THE FIRST VERSION HEADING OF ANY KIND, dated or not. "## [Unreleased]"
+          # carries no version and is skipped by the pattern; anything with a
+          # version number is not.
+          #
+          # Matching only DATED headings was a hole, found by simulating this
+          # gate against the real file before v0.7.0 was tagged. `## [0.7.0] —
+          # unreleased` is undated, so the pattern skipped straight past it to
+          # `## [0.6.0] — 2026-08-09` and answered with THAT. Two ways to be
+          # wrong: pushing v0.7.0 was refused with "does not match top dated
+          # heading (0.6.0)", which reads as "the changelog describes 0.6.0"
+          # and sends the operator to edit the wrong entry -- and re-pushing
+          # v0.6.0 was ACCEPTED, because 0.6.0's own heading answered for a
+          # release that had already shipped. A gate that skips the entry it is
+          # meant to be checking has an older one waiting to agree with it.
+          heading=$(grep -m1 -E '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md || true)
 
           if [ -z "${heading}" ]; then
-            echo "::error::Could not find a dated '## [x.y.z] — YYYY-MM-DD' heading in CHANGELOG.md. Refusing to publish ${REF_NAME}: an unparseable changelog cannot be verified to match the tag."
+            echo "::error::Could not find any '## [x.y.z]' heading in CHANGELOG.md. Refusing to publish ${REF_NAME}: an unparseable changelog cannot be verified to match the tag."
             exit 1
           fi
 
           heading_version=$(echo "${heading}" | sed -E 's/^## \[([0-9]+\.[0-9]+\.[0-9]+)\].*/\1/')
 
           if [ -z "${heading_version}" ]; then
-            echo "::error::Found a dated heading in CHANGELOG.md but could not extract a version from it: '${heading}'. Refusing to publish ${REF_NAME}."
+            echo "::error::Found a heading in CHANGELOG.md but could not extract a version from it: '${heading}'. Refusing to publish ${REF_NAME}."
             exit 1
           fi
 
           if [ "${heading_version}" != "${tag_version}" ]; then
-            echo "::error::Tag ${REF_NAME} does not match CHANGELOG.md's top dated heading (${heading_version}). Update CHANGELOG.md to describe ${tag_version}, or tag v${heading_version} instead. Refusing to publish."
+            echo "::error::Tag ${REF_NAME} does not match CHANGELOG.md's top version heading (${heading_version}). Update CHANGELOG.md to describe ${tag_version}, or tag v${heading_version} instead. Refusing to publish."
             exit 1
           fi
 
-          echo "Tag ${REF_NAME} matches CHANGELOG.md's top dated heading (${heading_version})."
+          # DATED, not just present. The heading is written undated while the
+          # release is being prepared, which is correct; it stops being correct
+          # the moment a tag claims that release has shipped. Naming the exact
+          # edit, because the previous message named the wrong entry entirely.
+          if ! echo "${heading}" | grep -qE '— [0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$'; then
+            echo "::error::CHANGELOG.md's ${heading_version} heading is not dated: '${heading}'. A tag says this release shipped, so date it before tagging -- change it to '## [${heading_version}] — $(date -u +%Y-%m-%d)' and push the tag again. Refusing to publish."
+            exit 1
+          fi
+
+          echo "Tag ${REF_NAME} matches CHANGELOG.md's top version heading (${heading_version}), and it is dated." 
 
   images:
     name: container images

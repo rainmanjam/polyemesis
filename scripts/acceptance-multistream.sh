@@ -146,11 +146,12 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPTS/lib-observe.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
+. "$SCRIPTS/lib-preflight.sh"
 
 # BUILT HERE, for acceptance-failover.sh's reason: a suite that runs whatever
 # binary happened to be lying in the repo root is testing a different program
 # from the one under review, and that hid a real ingest regression for a session.
-go build -o "$BIN" "$ROOT/cmd/polyemesis" || { echo "cannot build polyemesis"; exit 1; }
+poly_require_build "$BIN" "$ROOT/cmd/polyemesis" polyemesis
 
 pass=0; fail=0; skip=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
@@ -170,9 +171,9 @@ cleanup() {
 }
 trap 'poly_teardown_trap $? cleanup' EXIT
 
-[ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
-command -v ffmpeg >/dev/null || { echo "ffmpeg is required"; exit 1; }
-command -v ffprobe >/dev/null || { echo "ffprobe is required"; exit 1; }
+poly_require_exec "$BIN"
+poly_require_cmd ffmpeg
+poly_require_cmd ffprobe
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK" || exit 1
 poly_watchdog_arm
 WORK="$(pwd)"
@@ -186,8 +187,8 @@ mkdir -p "$DATA/recordings"
 # resolves a module import against the current directory's go.mod, and this
 # line runs after the cd into $WORK -- which is outside the module.
 DRIVER="$WORK/multistream-driver"
-( cd "$ROOT" && go build -o "$DRIVER" "$SCRIPTS/acceptance_multistream_driver.go" ) || {
-  echo "cannot build the driver"; exit 1; }
+( cd "$ROOT" && go build -o "$DRIVER" "$SCRIPTS/acceptance_multistream_driver.go" ) || \
+  poly_preflight_fail "could not build the driver"
 drive() { "$DRIVER" "http://127.0.0.1:$PORT" "$@" 2>&1; }
 
 # ---------------------------------------------------------------- the fixture

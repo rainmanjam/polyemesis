@@ -26,6 +26,7 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPTS/lib-watchdog.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
+. "$SCRIPTS/lib-preflight.sh"
 
 # One port per case so a lingering process from a previous run cannot be
 # mistaken for this one's.
@@ -42,8 +43,11 @@ step() { printf "\n\033[1m%s\033[0m\n" "$1"; poly_step_record "$1"; }
 cleanup() { poly_cleanup_exit "${1:-0}" "$PORT_OFF $PORT_MANUAL $PORT_SELF $PORT_PROXY" "${WORK:-}"; }
 trap 'poly_teardown_trap $? cleanup' EXIT
 
-[ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
-command -v openssl >/dev/null || { echo "openssl is required"; exit 1; }
+# poka-yoke: every check below hits the server with curl and inspects the
+# cert with openssl -- see lib-preflight.sh.
+poly_require_exec "$BIN"
+poly_require_cmd openssl
+poly_require_cmd curl
 
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
 # Armed here rather than earlier: the watchdog is a separate process and
