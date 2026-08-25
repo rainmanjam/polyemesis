@@ -21,7 +21,7 @@ import { DestinationDialog } from "@/components/DestinationDialog";
 import { ChatPanel } from "@/components/ChatPanel";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
-import { useLiveData } from "@/hooks/useLiveData";
+import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
 import { api, isNoSource } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
@@ -931,7 +931,16 @@ export function Dashboard() {
   };
 
   const ingest = status?.ingest;
-  const ingestTone = toneForState(ingest?.state);
+  // BYTES ARRIVING, not a process running -- the same question AppLayout's
+  // header got wrong until it was fixed, asked a second time here. For SRT the
+  // answer is inverted rather than imprecise: engine.reconcileIngest returns
+  // early for SRT on purpose, so `status.ingest` is null on a HEALTHY install,
+  // stateLabel(undefined) is "Offline", and this card reported the ingest down
+  // over three live programmes in a demo capture. useIngestLive is the app's
+  // one definition of "a broadcast is going out"; ingest?.state is only the
+  // process, consulted below for the bitrate where it exists. See #514.
+  const ingestLive = useIngestLive();
+  const ingestTone = ingestLive ? "live" : toneForState(ingest?.state);
   const source = status?.source;
   // The word a pipeline row uses when it has no process. "—" for unknown: a
   // settings read that has not landed is not a fact about the feature.
@@ -1180,7 +1189,9 @@ export function Dashboard() {
                   </Badge>
                 )}
               </CardTitle>
-              <Badge variant={toneBadge[ingestTone]}>{stateLabel(ingest?.state)}</Badge>
+              <Badge variant={toneBadge[ingestTone]}>
+                {ingestLive ? stateLabel("running") : stateLabel(ingest?.state)}
+              </Badge>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {attribution && (
