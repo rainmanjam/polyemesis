@@ -508,8 +508,17 @@ func failoverEngine(t *testing.T) *Engine {
 	t.Cleanup(func() { _ = hub.Close() })
 
 	store := dbtest.OpenAt(t, filepath.Join(t.TempDir(), "test.db"))
+	// This helper builds the struct directly rather than going through New, so
+	// every field New would have set has to be set here. sourceID is one of
+	// them: Status scopes its destination read to it, and the zero value is a
+	// valid-looking id that matches no rows -- so leaving it unset made two
+	// status tests report an empty payload rather than anything about failover.
+	sourceID, err := store.DefaultSourceID()
+	if err != nil {
+		t.Fatalf("DefaultSourceID: %v", err)
+	}
 
-	return &Engine{log: log, store: store, bus: events.NewBroker(), hub: hub, alloc: relay.NewPortAllocator(relayPortBase+relayPortSpan, 64), tools: &ffmpeg.Tools{FFmpeg: "polyemesis-no-such-binary"}, dests: map[int64]*destination{}, rends: map[int64]*rendition{}, playProcs: map[string]*supervisor.Process{}, sourceState: sourceState{source: routing.DefaultSource()}}
+	return &Engine{log: log, store: store, sourceID: sourceID, bus: events.NewBroker(), hub: hub, alloc: relay.NewPortAllocator(relayPortBase+relayPortSpan, 64), tools: &ffmpeg.Tools{FFmpeg: "polyemesis-no-such-binary"}, dests: map[int64]*destination{}, rends: map[int64]*rendition{}, playProcs: map[string]*supervisor.Process{}, sourceState: sourceState{source: routing.DefaultSource()}}
 }
 
 func failoverOnSettings() db.Settings {
