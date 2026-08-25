@@ -37,6 +37,25 @@
    spends the colour that makes the matrix legible. Use primary for emphasis.
    The comparison page's Restreamer callout was exactly this mistake and now
    uses primary.
+
+   THIS IS ALSO 60-30-10. --color-ink/--color-surface/--color-raised and the
+   text colours are the 60. --color-primary and its -bright/-dim variants are
+   the 30 — the one thing on this page that says "act here". --color-live,
+   --color-cross, --color-meter, --color-down, --color-cohost and --color-game
+   are the 10: saturated, and each one spends real meaning (see --color-cross's
+   own note below, and the track-colour note further down). A new saturated
+   token belongs in that list by name, with its meaning stated, not slipped in
+   as a one-off hex value on a component.
+
+   A BRAND SPINE, NOT A COINCIDENCE. --color-ink, --color-primary,
+   --color-primary-dim, --color-live, --color-live-dim and --color-meter are
+   bit-for-bit the app's own --background, --primary, --primary-dim, --live,
+   --live-dim and --armed (ui/src/index.css). That equality is the point: one
+   product, one set of brand facts, restated here because Astro/Tailwind and
+   Vite/Tailwind share no build step that could hold one literal both read.
+   Each is marked SPINE below; the mirrored note lives in ui/src/index.css.
+
+   --color-cross is deliberately NOT on that list — see its own note below.
    --------------------------------------------------------------------------- */
 
 @theme {
@@ -48,7 +67,8 @@
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --color-ink: oklch(15.9% 0.0091 264.3);
+  /* --- 60 / NEUTRAL --- */
+  --color-ink: oklch(15.9% 0.0091 264.3); /* SPINE: == app --background (ui/src/index.css) */
   --color-surface: oklch(19.6% 0.0149 266.8);
   --color-raised: oklch(22.9% 0.0215 260.5);
   --color-line: oklch(28.1% 0.0256 265.4);
@@ -68,14 +88,29 @@
      5.36 and 5.25, which leaves room to move without re-failing. */
   --color-subtle: oklch(62.1% 0.0282 261.1);
 
-  --color-primary: oklch(60.2% 0.1177 263.2);
+  /* --- 30 / THE ONE ACCENT --- */
+  --color-primary: oklch(60.2% 0.1177 263.2); /* SPINE: == app --primary (ui/src/index.css) */
   --color-primary-bright: oklch(71.9% 0.1090 257.4);
-  --color-primary-dim: oklch(31.3% 0.0447 262.9);
-  --color-live: oklch(75.6% 0.1840 149.9);
-  --color-live-dim: oklch(32.4% 0.0629 154.8);
-  --color-cross: oklch(76.5% 0.1399 72.9); /* active crosspoint ONLY */
+  --color-primary-dim: oklch(31.3% 0.0447 262.9); /* SPINE: == app --primary-dim */
+
+  /* --- 10 / SIGNAL, SATURATED. Every token below spends real meaning — see
+     the reservation at the top of this file and the track-colour note further
+     down — so a new one here is a decision about a new kind of state, not a
+     free accent colour. --- */
+  --color-live: oklch(75.6% 0.1840 149.9); /* SPINE: == app --live */
+  --color-live-dim: oklch(32.4% 0.0629 154.8); /* SPINE: == app --live-dim */
+  /* active crosspoint ONLY (see the reservation above). NOT SPINE: this used
+     to be bit-for-bit the app's --warn (ui/src/index.css — "reconnecting,
+     degraded, near clip"), which was a coincidence, not a shared brand fact —
+     a crosspoint being lit and a stream degrading are unrelated states that
+     happened to land on the same oklch literal. Holding the app's exact value
+     invited exactly the mistake this rule exists to prevent: someone "syncing
+     the palettes" and moving an operator's degraded-stream colour because a
+     designer retuned this crosspoint. If a future pass proposes folding these
+     two into one token, that is the mistake -- refuse it here. */
+  --color-cross: oklch(76.5% 0.1399 72.9);
   --color-cross-dim: oklch(31.4% 0.0482 83.5);
-  --color-meter: oklch(72.1% 0.1065 216.8);
+  --color-meter: oklch(72.1% 0.1065 216.8); /* SPINE: == app --armed */
   --color-down: oklch(64.7% 0.1678 23.0);
   /* Two more TRACK colours. The hero panel names four tracks at once — mic,
      music, co-host, game — and the palette had only two that read as signal, so

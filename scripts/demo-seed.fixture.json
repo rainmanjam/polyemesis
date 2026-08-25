@@ -1,0 +1,418 @@
+{
+  "_": [
+    "The demo installation, as data. scripts/demo-seed.sh stands it up and",
+    "scripts/demo_seed_driver.go applies it; neither of them decides what is in",
+    "it, which is why this file exists separately from both.",
+    "",
+    "TWO RULES GOVERN EVERY VALUE BELOW, and they are not style preferences.",
+    "",
+    "1. NO URL HERE MAY RESOLVE. Every hostname is under .invalid, which RFC",
+    "   2606 reserves so that it can never be delegated. A demo seed that",
+    "   publishes to a real ingest is a broadcast nobody meant to make, and the",
+    "   person running it would find out from their audience.",
+    "",
+    "2. NO VALUE HERE MAY RESEMBLE A CREDENTIAL. This repository runs gitleaks",
+    "   over its whole history and has already published an advisory about",
+    "   stream keys escaping into logs. The keys below are deliberately",
+    "   repetitive, low-entropy and self-describing so that a human reading a",
+    "   screenshot, a log line or this file cannot mistake one for the real",
+    "   thing -- and so the scanner does not have to be told to ignore them.",
+    "   scripts/demo-seed.sh runs gitleaks against this file when it is",
+    "   installed, rather than trusting that the rule above was followed.",
+    "",
+    "The platform destinations are created DISABLED and that is the honest",
+    "consequence of rule 1: an enabled destination pointing at a name that",
+    "cannot resolve spends the whole capture in failed/reconnecting, and a",
+    "dashboard of red cards is a photograph of a broken product. Disabled they",
+    "read 'Stopped' -- configured, armed, not started -- which is the state an",
+    "install is genuinely in ten minutes before a show. Everything that CAN run",
+    "without leaving the machine does run: the ingests, the rendition ladder,",
+    "the archive and compliance file destinations, the podcast mix, the",
+    "meters."
+  ],
+
+  "settings": {
+    "recording": {
+      "enabled": false,
+      "segmentSeconds": 600,
+      "maxGb": 500,
+      "maxAgeHours": 8760,
+      "minFreeGb": 1
+    },
+    "preview": { "enabled": true },
+    "playout": { "enabled": true }
+  },
+
+  "sources": [
+    {
+      "name": "Main Programme — Studio A",
+      "video": { "lavfi": "testsrc2=size=1920x1080:rate=30", "kbps": 6000 },
+      "audio": [
+        {
+          "label": "Host mic",
+          "role": "mic",
+          "language": "en",
+          "lavfi": "sine=frequency=180:sample_rate=48000,volume=volume='0.40+0.28*sin(2*PI*t/4.3)':eval=frame"
+        },
+        {
+          "label": "Co-host mic",
+          "role": "commentary",
+          "language": "en",
+          "lavfi": "sine=frequency=430:sample_rate=48000,volume=volume='0.30+0.24*sin(2*PI*t/6.7)':eval=frame"
+        },
+        {
+          "label": "Music bed (licensed)",
+          "role": "music",
+          "lavfi": "sine=frequency=980:sample_rate=48000,volume=volume='0.22+0.10*sin(2*PI*t/11.0)':eval=frame"
+        },
+        {
+          "label": "Crowd / room",
+          "role": "other",
+          "lavfi": "sine=frequency=2400:sample_rate=48000,volume=volume='0.10+0.07*sin(2*PI*t/8.1)':eval=frame"
+        }
+      ],
+      "renditions": [
+        {
+          "name": "1080p — primary",
+          "width": 1920, "height": 1080, "fps": 30,
+          "videoBitrate": 6000, "maxrateKbps": 6600, "bufsizeKbps": 12000,
+          "encoder": "libx264", "preset": "ultrafast", "gopSeconds": 2,
+          "note": "Full-resolution tier. YouTube and the contribution feed take this one."
+        },
+        {
+          "name": "720p — secondary",
+          "width": 1280, "height": 720, "fps": 30,
+          "videoBitrate": 3000, "maxrateKbps": 3300, "bufsizeKbps": 6000,
+          "encoder": "libx264", "preset": "ultrafast", "gopSeconds": 2,
+          "note": "The tier most platforms actually want. Twitch and Facebook share it."
+        },
+        {
+          "name": "480p — mobile",
+          "width": 854, "height": 480, "fps": 30,
+          "videoBitrate": 1200, "maxrateKbps": 1400, "bufsizeKbps": 2400,
+          "encoder": "libx264", "preset": "ultrafast", "gopSeconds": 2,
+          "note": "Low-bitrate tier for constrained uplinks and the compliance log."
+        }
+      ],
+      "destinations": [
+        {
+          "name": "YouTube — main channel",
+          "kind": "rtmp", "platform": "youtube",
+          "url": "rtmp://a.rtmp.ingest.demo.invalid/live2",
+          "streamKey": "demo-not-a-real-key-demo-not-a-real-key",
+          "rendition": "1080p — primary",
+          "enabled": false,
+          "audioBitrate": 192,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 1.0 },
+              { "track": 2, "enabled": true, "gain": 0.8 },
+              { "track": 3, "enabled": true, "gain": 0.45 }
+            ],
+            "normalize": "loudnorm",
+            "sampleRate": 48000,
+            "loudness": { "targetLufs": -14, "truePeakDb": -1 }
+          }
+        },
+        {
+          "name": "Twitch — primary",
+          "kind": "rtmp", "platform": "twitch",
+          "url": "rtmp://lhr.contribute.demo.invalid/app",
+          "streamKey": "demo-not-a-real-key-demo-not-a-real-key",
+          "rendition": "720p — secondary",
+          "enabled": false,
+          "audioBitrate": 160,
+          "profile": {
+            "mode": "matrix",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 1.0 },
+              { "track": 2, "enabled": false, "gain": 1.0 },
+              { "track": 3, "enabled": true, "gain": 0.4 }
+            ],
+            "matrix": [
+              { "track": 0, "channel": 0, "out": 0, "gain": 1.0 },
+              { "track": 0, "channel": 0, "out": 1, "gain": 1.0 },
+              { "track": 1, "channel": 0, "out": 0, "gain": 0.85 },
+              { "track": 1, "channel": 0, "out": 1, "gain": 0.85 },
+              { "track": 3, "channel": 0, "out": 0, "gain": 0.4 },
+              { "track": 3, "channel": 1, "out": 1, "gain": 0.4 }
+            ],
+            "normalize": "loudnorm",
+            "sampleRate": 48000,
+            "loudness": { "targetLufs": -14, "truePeakDb": -1 },
+            "excludeRoles": ["music"]
+          }
+        },
+        {
+          "name": "Facebook Live — page",
+          "kind": "rtmp", "platform": "facebook",
+          "url": "rtmps://live-api-s.demo.invalid:443/rtmp/",
+          "streamKey": "demo-not-a-real-key-demo-not-a-real-key",
+          "rendition": "720p — secondary",
+          "enabled": false,
+          "audioBitrate": 128,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 1.0 },
+              { "track": 2, "enabled": false, "gain": 1.0 },
+              { "track": 3, "enabled": true, "gain": 0.4 }
+            ],
+            "normalize": "loudnorm",
+            "sampleRate": 48000,
+            "loudness": { "targetLufs": -16, "truePeakDb": -1 },
+            "excludeRoles": ["music"]
+          }
+        },
+        {
+          "name": "Kick — mobile tier",
+          "kind": "rtmp", "platform": "kick",
+          "url": "rtmp://ingest.demo.invalid/live",
+          "streamKey": "demo-not-a-real-key-demo-not-a-real-key",
+          "rendition": "480p — mobile",
+          "enabled": false,
+          "audioBitrate": 128,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 1.0 },
+              { "track": 2, "enabled": true, "gain": 0.7 },
+              { "track": 3, "enabled": true, "gain": 0.35 }
+            ],
+            "normalize": "auto",
+            "sampleRate": 48000
+          }
+        },
+        {
+          "name": "Partner CDN — custom RTMP",
+          "kind": "rtmp", "platform": "custom",
+          "url": "rtmp://origin.partner-cdn.demo.invalid/live",
+          "streamKey": "demo-not-a-real-key-demo-not-a-real-key",
+          "rendition": "1080p — primary",
+          "enabled": false,
+          "audioBitrate": 192,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 1.0 },
+              { "track": 2, "enabled": true, "gain": 0.8 },
+              { "track": 3, "enabled": true, "gain": 0.45 }
+            ],
+            "normalize": "auto",
+            "sampleRate": 48000
+          }
+        },
+        {
+          "name": "Master control — SRT contribution",
+          "kind": "srt", "platform": "custom",
+          "url": "srt://master-control.demo.invalid:9001?mode=caller&latency=200000",
+          "rendition": "1080p — primary",
+          "enabled": false,
+          "audioBitrate": 256,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 1.0 },
+              { "track": 2, "enabled": true, "gain": 1.0 },
+              { "track": 3, "enabled": true, "gain": 1.0 }
+            ],
+            "normalize": "off",
+            "sampleRate": 48000
+          }
+        },
+        {
+          "name": "Archive — as-transmitted master",
+          "kind": "file", "platform": "custom",
+          "url": "archive-main-full-mix.mkv",
+          "rendition": "1080p — primary",
+          "enabled": true,
+          "audioBitrate": 256,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 1.0 },
+              { "track": 2, "enabled": true, "gain": 1.0 },
+              { "track": 3, "enabled": true, "gain": 1.0 }
+            ],
+            "normalize": "off",
+            "sampleRate": 48000
+          }
+        },
+        {
+          "name": "Compliance log — 480p",
+          "kind": "file", "platform": "custom",
+          "url": "compliance-log.mkv",
+          "rendition": "480p — mobile",
+          "enabled": true,
+          "audioBitrate": 96,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 1.0 },
+              { "track": 2, "enabled": true, "gain": 1.0 },
+              { "track": 3, "enabled": true, "gain": 1.0 }
+            ],
+            "normalize": "auto",
+            "sampleRate": 48000
+          }
+        },
+        {
+          "name": "Podcast mix — mics only",
+          "kind": "file", "platform": "custom",
+          "url": "podcast-mix-mics-only.mkv",
+          "rendition": "720p — secondary",
+          "enabled": true,
+          "audioBitrate": 192,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 1.0 },
+              { "track": 2, "enabled": false, "gain": 1.0 },
+              { "track": 3, "enabled": false, "gain": 1.0 }
+            ],
+            "normalize": "loudnorm",
+            "sampleRate": 48000,
+            "loudness": { "targetLufs": -16, "truePeakDb": -1 },
+            "excludeRoles": ["music"]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Commentary Booth — Studio B",
+      "video": { "lavfi": "testsrc2=size=1280x720:rate=30", "kbps": 3000 },
+      "audio": [
+        {
+          "label": "Commentary A",
+          "role": "commentary",
+          "language": "en",
+          "lavfi": "sine=frequency=320:sample_rate=48000,volume=volume='0.34+0.24*sin(2*PI*t/5.1)':eval=frame"
+        },
+        {
+          "label": "Commentary B (es)",
+          "role": "commentary",
+          "language": "es",
+          "lavfi": "sine=frequency=760:sample_rate=48000,volume=volume='0.26+0.20*sin(2*PI*t/7.9)':eval=frame"
+        }
+      ],
+      "renditions": [],
+      "destinations": [
+        {
+          "name": "YouTube — Spanish commentary",
+          "kind": "rtmp", "platform": "youtube",
+          "url": "rtmp://b.rtmp.ingest.demo.invalid/live2",
+          "streamKey": "demo-not-a-real-key-demo-not-a-real-key",
+          "enabled": false,
+          "audioBitrate": 128,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": false, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 1.0 }
+            ],
+            "normalize": "auto",
+            "sampleRate": 48000
+          }
+        },
+        {
+          "name": "Archive — commentary booth",
+          "kind": "file", "platform": "custom",
+          "url": "archive-studio-b.mkv",
+          "enabled": true,
+          "audioBitrate": 192,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 1.0 }
+            ],
+            "normalize": "off",
+            "sampleRate": 48000
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Vertical Cut — 9:16",
+      "video": { "lavfi": "testsrc2=size=720x1280:rate=30", "kbps": 2500 },
+      "audio": [
+        {
+          "label": "Programme mix",
+          "role": "clean",
+          "language": "en",
+          "lavfi": "sine=frequency=250:sample_rate=48000,volume=volume='0.36+0.26*sin(2*PI*t/3.7)':eval=frame"
+        },
+        {
+          "label": "Music bed (licensed)",
+          "role": "music",
+          "lavfi": "sine=frequency=1400:sample_rate=48000,volume=volume='0.20+0.12*sin(2*PI*t/9.3)':eval=frame"
+        }
+      ],
+      "renditions": [],
+      "destinations": [
+        {
+          "name": "Kick — vertical",
+          "kind": "rtmp", "platform": "kick",
+          "url": "rtmp://ingest.demo.invalid/live",
+          "streamKey": "demo-not-a-real-key-demo-not-a-real-key",
+          "enabled": false,
+          "audioBitrate": 128,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": true, "gain": 0.7 }
+            ],
+            "normalize": "auto",
+            "sampleRate": 48000
+          }
+        },
+        {
+          "name": "Archive — vertical clean",
+          "kind": "file", "platform": "custom",
+          "url": "archive-vertical-clean.mkv",
+          "enabled": true,
+          "audioBitrate": 160,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              { "track": 0, "enabled": true, "gain": 1.0 },
+              { "track": 1, "enabled": false, "gain": 1.0 }
+            ],
+            "normalize": "auto",
+            "sampleRate": 48000,
+            "excludeRoles": ["music"]
+          }
+        }
+      ]
+    }
+  ],
+
+  "_recordings": [
+    "CONTIGUOUS ON PURPOSE: each entry starts exactly where the previous one",
+    "ended. The library groups segments into sessions by the gap between them,",
+    "so five recordings an hour apart are five one-segment sessions -- which is",
+    "what a recorder that crashed four times looks like, not what a two-night",
+    "archive looks like. Two runs here: last night in three segments, and the",
+    "night before in two."
+  ],
+  "recordings": [
+    { "startedAgoMinutes": 1290, "minutes": 10 },
+    { "startedAgoMinutes": 1280, "minutes": 10 },
+    { "startedAgoMinutes": 1270, "minutes": 6 },
+    { "startedAgoMinutes": 4020, "minutes": 10 },
+    { "startedAgoMinutes": 4010, "minutes": 4 }
+  ]
+}
