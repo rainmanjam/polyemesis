@@ -178,6 +178,9 @@ type subscriber struct {
 	// wakes the goroutine but leaves the TCP connection to the departed FFmpeg
 	// open.
 	conn net.Conn
+	// closeOnce is what makes teardown idempotent; its zero value is ready, so
+	// a subscriber built as a literal is safe. See close.
+	closeOnce sync.Once
 }
 
 // watchPeer closes the subscriber when its socket does. Run as a goroutine for
@@ -215,17 +218,23 @@ func (sub *subscriber) watchPeer() {
 	}
 }
 
-// close wakes the subscriber and drops its socket. Safe to call twice: Stop and
-// the subscriber's own defer race on shutdown.
+// close wakes the subscriber and drops its socket. Callable any number of
+// times, from any goroutine, in any order.
+//
+// The guard is a sync.Once and not the select-on-done it used to be, because
+// `select { case <-done: default: close(done) }` is check-then-act, not atomic:
+// two of the three teardown paths -- watchPeer, serveSubscriber's defer, and
+// Server.Stop -- could both reach `default` before either closed, and the
+// second close panicked. Nothing in this package recovers, so that panic took
+// the daemon down and ended every live broadcast on the install at once, which
+// for a completed broadcast is unrecoverable. See #496.
 func (sub *subscriber) close() {
-	select {
-	case <-sub.done:
-	default:
+	sub.closeOnce.Do(func() {
 		close(sub.done)
-	}
-	if sub.conn != nil {
-		_ = sub.conn.Close()
-	}
+		if sub.conn != nil {
+			_ = sub.conn.Close()
+		}
+	})
 }
 
 // session is one live publisher.
@@ -307,6 +316,11 @@ func (s *Server) acceptLoop(ln net.Listener) {
 // Stop closes the listener and every live session.
 func (s *Server) Stop() {
 	s.mu.Lock()
+	// The same check-then-act shape that panicked on subscribers (#496), and it
+	// is safe here only because s.mu is held across it and this is the only site
+	// that closes s.done. That invariant is load-bearing: move this guard out
+	// from under the lock, or add a second closer, and two Stops race into
+	// `default` and the second one panics the daemon.
 	select {
 	case <-s.done:
 	default:

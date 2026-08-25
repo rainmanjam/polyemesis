@@ -29,14 +29,25 @@ name: pages
 on:
   # Pull requests build and check but never publish — see the `if` on the
   # publish step, which requires refs/heads/main as well as the credential.
+  #
+  # docs/** (RB-5, #499): content.config.ts loads with `base: "../docs"` and
+  # astro.config.mjs maps every `/docs/${slug}` route straight onto
+  # `../docs/${file}` — this build renders the REPO'S docs/, not a copy under
+  # web/. Without docs/** here, a push that only touches docs/ matches no
+  # `paths:` filter, this workflow never runs, and a docs-only correction
+  # merges to main and never redeploys. That is exactly the failure mode
+  # this issue is named for: the fix for the false 0.7.0 claim would itself
+  # have been unable to reach the published site.
   pull_request:
     paths:
       - "web/**"
+      - "docs/**"
       - ".github/workflows/pages.yml"
   push:
     branches: [main]
     paths:
       - "web/**"
+      - "docs/**"
       - ".github/workflows/pages.yml"
   # The escape hatch for the first deploy: after adding the secrets the
   # maintainer needs a run without waiting for a commit that touches web/.

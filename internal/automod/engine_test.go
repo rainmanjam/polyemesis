@@ -21,10 +21,20 @@ func modelServer(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	return srv
 }
 
-// respondVerdict builds a well-formed OpenAI-shaped reply.
+// respondVerdict builds a well-formed OpenAI-shaped reply, with a category the
+// parser accepts. A verdict without one is now discarded (#495), so the
+// well-formed helper has to carry one or every test here would exercise the
+// rejection path instead of the thing it is about.
 func respondVerdict(abusive bool, confidence float64, reason string) http.HandlerFunc {
+	return respondCategorised(abusive, confidence, string(CategoryHarassment), reason)
+}
+
+// respondCategorised is the same, with the category under the test's control.
+func respondCategorised(abusive bool, confidence float64, category, reason string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		inner, _ := json.Marshal(modelVerdict{Abusive: abusive, Confidence: confidence, Reason: reason})
+		inner, _ := json.Marshal(modelVerdict{
+			Abusive: abusive, Confidence: confidence, Category: category, Reason: reason,
+		})
 		json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{
 				{"message": map[string]string{"content": string(inner)}},

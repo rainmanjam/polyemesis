@@ -61,6 +61,72 @@ env:
   PUBLISH: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
 
 jobs:
+  # RB-5 (#499): CHANGELOG.md claimed 0.7.0 shipped -- a dated `## [0.7.0] —
+  # 2026-08-21` heading -- while no v0.7.0 tag existed anywhere: not in git,
+  # not on GitHub Releases, not on Docker Hub. Every install path therefore
+  # delivered 0.6.0, which lacks the seal-at-rest fix the heading described.
+  # An operator reading the changelog had no way to know the tag and the
+  # document had drifted apart.
+  #
+  # This closes the gap the other direction from ci-gate: that job proves the
+  # commit is safe to publish, this one proves the TAG BEING PUSHED is the
+  # release CHANGELOG.md actually describes. Same discipline -- FAILS CLOSED.
+  # An unparseable changelog, a missing dated heading, or a version mismatch
+  # all refuse the publish rather than guess which one is stale.
+  changelog-gate:
+    name: Tag / CHANGELOG agreement (fail closed)
+    runs-on: ubuntu-latest
+    permissions:
+      # Read-only: this job only reads CHANGELOG.md, it never writes anything.
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Require the pushed tag to match CHANGELOG.md's top dated heading
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+
+          # A workflow_dispatch rehearsal runs from a BRANCH, not a tag --
+          # REF_NAME is something like "docs/accuracy-pass", which was never
+          # going to match a "## [x.y.z] — date" heading and isn't claiming
+          # to. Nothing here would be published either way (see PUBLISH), so
+          # there is nothing for this gate to protect.
+          if [ "${REF_TYPE}" != "tag" ]; then
+            echo "Not a tag push (${REF_TYPE} '${REF_NAME}'); nothing to compare against CHANGELOG.md."
+            exit 0
+          fi
+
+          # v0.7.0 -> 0.7.0
+          tag_version="${REF_NAME#v}"
+
+          # The FIRST dated heading, top-down. "## [Unreleased]" carries no
+          # date and is skipped by the pattern itself; the first heading that
+          # DOES have one is the release CHANGELOG.md currently claims.
+          heading=$(grep -m1 -E '^## \[[0-9]+\.[0-9]+\.[0-9]+\] — [0-9]{4}-[0-9]{2}-[0-9]{2}' CHANGELOG.md || true)
+
+          if [ -z "${heading}" ]; then
+            echo "::error::Could not find a dated '## [x.y.z] — YYYY-MM-DD' heading in CHANGELOG.md. Refusing to publish ${REF_NAME}: an unparseable changelog cannot be verified to match the tag."
+            exit 1
+          fi
+
+          heading_version=$(echo "${heading}" | sed -E 's/^## \[([0-9]+\.[0-9]+\.[0-9]+)\].*/\1/')
+
+          if [ -z "${heading_version}" ]; then
+            echo "::error::Found a dated heading in CHANGELOG.md but could not extract a version from it: '${heading}'. Refusing to publish ${REF_NAME}."
+            exit 1
+          fi
+
+          if [ "${heading_version}" != "${tag_version}" ]; then
+            echo "::error::Tag ${REF_NAME} does not match CHANGELOG.md's top dated heading (${heading_version}). Update CHANGELOG.md to describe ${tag_version}, or tag v${heading_version} instead. Refusing to publish."
+            exit 1
+          fi
+
+          echo "Tag ${REF_NAME} matches CHANGELOG.md's top dated heading (${heading_version})."
+
   images:
     name: container images
     runs-on: ubuntu-latest
@@ -237,6 +303,11 @@ jobs:
   binaries:
     name: native binaries
     runs-on: ubuntu-latest
+    # RB-5 (#499): without this, nothing in the workflow ever asked whether
+    # the tag being pushed is the release CHANGELOG.md claims it is -- see
+    # changelog-gate above. `images` already needs `binaries`, so both publish
+    # paths are gated transitively through this one edge.
+    needs: changelog-gate
     permissions:
       # Creates the GitHub Release and uploads the assets. No packages: write —
       # this job pushes no images.

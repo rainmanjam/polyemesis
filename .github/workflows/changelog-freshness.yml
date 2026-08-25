@@ -1,0 +1,138 @@
+# Alarm when CHANGELOG.md's top heading claims a release that was never tagged.
+#
+# RB-5 (#499). CHANGELOG.md carried "## [0.7.0] — 2026-08-21" -- a dated,
+# shipped-looking heading -- for over four days with no v0.7.0 tag anywhere:
+# not in git, not on GitHub Releases, not on Docker Hub. Every install path
+# kept delivering 0.6.0, which lacks the seal-at-rest fix the heading
+# described. release.yml's changelog-gate stops a mismatched TAG from
+# publishing, but nothing noticed the drift on main while there was no tag
+# push to gate -- the doc could sit there, wrong, indefinitely.
+#
+# THE DESIGN PROBLEM THIS EXISTS TO SOLVE. The heading is dated WHILE
+# PREPARING a release, and the tag is pushed some time after -- see #487,
+# which dated this heading, and #499, which found the tag deliberately held.
+# That ordering is correct and normal: every real release spends some time
+# with a dated heading and no tag yet. A check that fails the instant those
+# two facts are both true would fail on every single release in progress,
+# which is not a signal anyone could act on -- it would either get disabled
+# or ignored within a week, and a disabled guardrail is worse than none.
+#
+# So this is time-based rather than instant, and it runs on a SCHEDULE rather
+# than on push. A push-triggered check can only ever re-evaluate when someone
+# commits; the exact failure mode here was "nobody touched CHANGELOG.md again
+# for four days", which a push trigger would never have re-checked. Only a
+# schedule keeps re-asking "how long has this been true" independent of
+# whether anyone happens to push.
+#
+# GRACE_HOURS = 48, chosen against this repository's own history: #487 dated
+# the 0.7.0 heading at 2026-08-20T21:12 and the tag still did not exist four
+# and a half days later when #499 caught it. 48 hours is comfortably inside a
+# normal same-day-or-next-day fold-then-tag, and comfortably catches a release
+# that has stalled for days -- which is the only case this workflow needs to
+# catch, since anything faster than that is what the ordinary process looks
+# like while it is working correctly.
+#
+# RUNG: this is Warning, not Control, and that is a deliberate, not a lazy,
+# choice. Control -- refusing to let the dated commit merge at all -- would
+# require rejecting the exact ordering (heading dated once, tag pushed later)
+# that this project treats as normal, and there is no way to ask the type
+# system or a merge-time check to see the future tag that has not been pushed
+# yet. The only device that fits the real workflow is one that notices when
+# the SECOND half stops arriving, which is inherently a "detect after some
+# time has passed" property, not a "block the merge" one. Control lives at
+# release.yml's changelog-gate instead, on the half of this that a gate CAN
+# hold: the tag itself is never allowed to disagree with the changelog it
+# ships next to.
+#
+# WHAT HAPPENS ON FAILURE. This workflow does not open an issue or page
+# anyone -- it fails a scheduled run, and GitHub's default notification for a
+# failed scheduled workflow goes to the repository's watchers. That is a
+# blunt instrument on a busier repository; here, with one maintainer, it is
+# sufficient and it is honest about being Warning rather than Control.
+name: changelog freshness
+
+on:
+  workflow_dispatch:
+    inputs:
+      grace_hours:
+        description: "Hours a dated heading may sit with no matching tag before this fails"
+        type: string
+        default: "48"
+  schedule:
+    # 09:00 UTC. Off the hour and clear of cache-prune's 04:17, so a shared
+    # runner-queue delay on one never explains a delay on the other.
+    - cron: "0 9 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: dated heading vs. matching tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # fetch-depth: 0, not the default shallow clone. This needs the full
+      # tag list (to know whether v<version> exists at all) and the full
+      # commit history for CHANGELOG.md (to find when the current heading was
+      # introduced, via `git log -S`) -- a shallow clone would answer both
+      # questions wrong in a way that reads as "fine".
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Check CHANGELOG.md's top dated heading against the tag list
+        env:
+          GRACE_HOURS: ${{ inputs.grace_hours || '48' }}
+        run: |
+          set -euo pipefail
+
+          heading=$(grep -m1 -E '^## \[[0-9]+\.[0-9]+\.[0-9]+\] — [0-9]{4}-[0-9]{2}-[0-9]{2}' CHANGELOG.md || true)
+
+          if [ -z "${heading}" ]; then
+            echo "No dated top heading in CHANGELOG.md (top entry is [Unreleased] or unreleased-labelled). Nothing to check."
+            exit 0
+          fi
+
+          version=$(echo "${heading}" | sed -E 's/^## \[([0-9]+\.[0-9]+\.[0-9]+)\].*/\1/')
+
+          if [ -z "${version}" ]; then
+            echo "::error::Found a dated heading in CHANGELOG.md but could not extract a version from it: '${heading}'."
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/v${version}" >/dev/null; then
+            echo "CHANGELOG.md's top heading (${version}) has a matching tag v${version}. Nothing stale."
+            exit 0
+          fi
+
+          # When did THIS EXACT heading line first appear? Pickaxe search
+          # rather than "CHANGELOG.md's last-modified commit" -- any other
+          # edit to the file (a typo fix three sections down) would reset a
+          # last-modified timestamp and hide real drift behind an unrelated
+          # commit.
+          introduced=$(git log -1 --format=%cI -S"${heading}" -- CHANGELOG.md || true)
+
+          if [ -z "${introduced}" ]; then
+            echo "::error::CHANGELOG.md has a dated heading (${version}) with no matching tag, and its introduction commit could not be found. Refusing to assume this is fresh."
+            exit 1
+          fi
+
+          # python3, not `date -d`/`date -j`: GNU and BSD date disagree on
+          # ISO-8601 offset parsing, and this script should behave the same
+          # on a maintainer's laptop as it does on ubuntu-latest. python3's
+          # datetime handles both without a platform branch.
+          elapsed_hours=$(python3 -c "
+          from datetime import datetime, timezone
+          introduced = datetime.fromisoformat('${introduced}')
+          now = datetime.now(timezone.utc)
+          print(int((now - introduced).total_seconds() // 3600))
+          ")
+
+          if [ "${elapsed_hours}" -lt "${GRACE_HOURS}" ]; then
+            echo "CHANGELOG.md's top heading (${version}) has no tag yet, but was only dated ${elapsed_hours}h ago (grace period is ${GRACE_HOURS}h). Likely mid release-prep; not alarming."
+            exit 0
+          fi
+
+          echo "::error::CHANGELOG.md has claimed '${version}' shipped for ${elapsed_hours}h (since ${introduced}) with no matching v${version} tag anywhere -- git, GitHub Releases, or Docker Hub. Every install path is delivering an older release than the docs describe. Either cut the v${version} tag now, or change the heading back to '## [${version}] — unreleased' until it is ready."
+          exit 1

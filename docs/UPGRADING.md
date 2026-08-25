@@ -7,7 +7,9 @@ is: stop, replace the binary or pull the image, start.
 
 **Back up `<dataDir>` first, and check that the backup contains `secret.key`.**
 Migrations run forward only — there is no downgrade path, and a backup is the
-only way back. From 0.7.0 a backup without that one file is not a backup; see
+only way back. Once 0.7.0 ships *(not yet released — see the
+[CHANGELOG](../CHANGELOG.md))*, a backup without that one file will not be a
+backup; see
 [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back)
 before you start.
 
@@ -77,6 +79,16 @@ unsupported and may fail in ways that are not obvious. Restore the backup
 instead.
 
 ## Version-specific notes
+
+> **0.7.0 has not been released.** No `v0.7.0` tag exists in git, on GitHub
+> Releases, or on Docker Hub as of this writing — every install path still
+> delivers 0.6.0. The rest of this section documents what 0.7.0 will do once
+> it is tagged, written in advance so it ships with the release rather than
+> after it; nothing below applies to a build you can install today.
+> `.github/workflows/release.yml`'s changelog-gate refuses to let a tag
+> publish unless [CHANGELOG.md](../CHANGELOG.md)'s top dated heading agrees
+> with it, which is what keeps this note itself from going stale the way the
+> changelog heading did (RB-5, #499).
 
 ### Upgrading to 0.7.0: sealed stream keys — **breaking to roll back**
 
