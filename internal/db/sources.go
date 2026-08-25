@@ -235,7 +235,11 @@ func createSource(x execQuerier, s *Source) error {
 		 VALUES (?, ?, ?, ?, '', 0, ?, ?, ?)`,
 		s.Name, boolToInt(s.Enabled), string(blob), s.Token, s.Position, now, now)
 	if err != nil {
-		return err
+		// A caller-supplied token that another source already holds is refused
+		// here by sourceTokenUniqueIndex (#505). Named, because "UNIQUE
+		// constraint failed: index 'idx_sources_token_unique'" is not a sentence
+		// an operator can act on.
+		return asTokenTaken(err)
 	}
 	s.ID, _ = res.LastInsertId()
 	s.CreatedAt = time.Unix(now, 0)
@@ -243,20 +247,31 @@ func createSource(x execQuerier, s *Source) error {
 	return nil
 }
 
-// UpdateSource writes every mutable field.
+// UpdateSource writes every mutable field EXCEPT the publish token.
+//
+// THE TOKEN COLUMNS ARE NOT IN THE UPDATE, and that is the device rather than
+// an omission (#505). PUT /sources/{id} decodes the request body over the
+// stored row and the UI round-trips every field it was handed, so a browser tab
+// opened before a rotation still holds the retired secret and posts it back
+// with the operator's next save -- a rename, a bitrate change, anything. This
+// statement used to write it, which silently undid the rotation and made a
+// token the operator believed they had revoked work again, with nothing on any
+// screen to say so. A column the general update path cannot write is a rollback
+// that cannot happen; RotateSourceToken is the only way the secret moves, and
+// it is also the only path that keeps the replaced token alive for its grace
+// window instead of cutting a live encoder off.
+//
+// Control rather than Warning: refusing a PUT whose token disagrees with
+// storage would announce the mistake, but it would also make an ordinary save
+// from an ordinary stale tab fail, and the operator's real intent -- rename the
+// programme -- is unambiguous and safe to honour.
+//
+// The token fields are refreshed from storage before this returns, so a caller
+// that renders the result (the API does, straight back into the page the tab is
+// showing) shows what is stored rather than echoing the stale value it sent.
 func (d *DB) UpdateSource(s *Source) error {
 	if err := validateSource(s); err != nil {
 		return err
-	}
-	if s.Token == "" {
-		// An empty token would mean "anyone who reaches the port may publish
-		// here", which is precisely what per-source tokens exist to prevent.
-		// Mint one rather than storing the gap.
-		tok, err := NewSourceToken()
-		if err != nil {
-			return fmt.Errorf("mint source token: %w", err)
-		}
-		s.Token = tok
 	}
 	blob, err := json.Marshal(s.Ingest)
 	if err != nil {
@@ -264,17 +279,20 @@ func (d *DB) UpdateSource(s *Source) error {
 	}
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(
-		`UPDATE sources SET name = ?, enabled = ?, ingest = ?, token = ?,
-		 prev_token = ?, prev_token_until = ?, position = ?, updated_at = ?
+		`UPDATE sources SET name = ?, enabled = ?, ingest = ?, position = ?, updated_at = ?
 		 WHERE id = ?`,
-		s.Name, boolToInt(s.Enabled), string(blob), s.Token,
-		s.PrevToken, unixOrZero(s.PrevTokenUntil), s.Position, now, s.ID)
+		s.Name, boolToInt(s.Enabled), string(blob), s.Position, now, s.ID)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrSourceNotFound
 	}
+	stored, err := d.GetSource(s.ID)
+	if err != nil {
+		return err
+	}
+	s.Token, s.PrevToken, s.PrevTokenUntil = stored.Token, stored.PrevToken, stored.PrevTokenUntil
 	s.UpdatedAt = time.Unix(now, 0)
 	return nil
 }
@@ -505,6 +523,189 @@ func sourceEverExisted(sqldb *sql.DB) (bool, error) {
 	return n > 0, nil
 }
 
+// sourceTokenUniqueIndex is the partial unique index that makes two sources
+// sharing one publish token impossible (#505).
+//
+// PARTIAL, on `token <> ”`, and that is not a nicety: the column defaults to
+// the empty string, a plain UNIQUE would therefore refuse the SECOND source
+// that has no token yet, and an install can legitimately hold several -- a row
+// blanked by the remedy DuplicateSourceTokensError prints, or one restored from
+// a backup taken before tokens existed. Uniqueness is only meaningful over
+// tokens that actually authenticate somebody.
+const sourceTokenUniqueIndex = "idx_sources_token_unique"
+
+// ErrSourceTokenTaken is returned when a write would give two sources the same
+// publish token. The lookup that resolves an encoder to a programme is
+// `WHERE token = ?`, so a duplicate does not fail -- it silently picks one, and
+// the encoder is admitted into a programme that is not the operator's.
+var ErrSourceTokenTaken = errors.New("that publish token already belongs to another source")
+
+// asTokenTaken translates SQLite's unique-violation on the token index into
+// ErrSourceTokenTaken, so a caller sees a sentence about a token rather than
+// the name of an index.
+//
+// Matched on the column, not merely on "UNIQUE constraint failed": any other
+// unique violation on this table is somebody else's bug and must not be
+// relabelled as this one. Both spellings are checked because SQLite names the
+// COLUMN ("sources.token", which is what modernc's driver reports here) while
+// some versions name the INDEX, and a message that changes shape must not
+// silently turn this back into a raw constraint error.
+func asTokenTaken(err error) error {
+	if err == nil || !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		return err
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "sources.token") || strings.Contains(msg, sourceTokenUniqueIndex) {
+		return ErrSourceTokenTaken
+	}
+	return err
+}
+
+// indexExists reports whether an index of this name is already in the schema.
+// The counterpart of columnExists, and it exists for the same reason: it is the
+// guard a migration checks BEFORE opening a transaction.
+func indexExists(sqldb *sql.DB, name string) (bool, error) {
+	var n int
+	err := sqldb.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&n)
+	return n > 0, err
+}
+
+// DuplicateSourceTokensError reports the sources that share a publish token,
+// and is what stops the server starting until an operator has said which of
+// them keeps it.
+//
+// It names ids and names and NEVER the token itself. The startup log is read by
+// journalctl, shipped to whatever collects it, and pasted into issues; a
+// publish secret printed there is a secret leaked to everyone who can read any
+// of that, which is the problem this whole change exists to narrow.
+type DuplicateSourceTokensError struct {
+	// Groups holds one entry per shared token: the sources that share it, in id
+	// order. Exported so a test can assert on the grouping rather than on the
+	// wording of the sentence.
+	Groups [][]duplicateTokenSource
+}
+
+type duplicateTokenSource struct {
+	ID   int64
+	Name string
+}
+
+func (e *DuplicateSourceTokensError) Error() string {
+	var b strings.Builder
+	b.WriteString("two or more sources share a publish token, so an encoder can be " +
+		"admitted into the wrong programme (issue #505):")
+	for _, g := range e.Groups {
+		b.WriteString("\n  one token is shared by")
+		for i, s := range g {
+			if i > 0 {
+				b.WriteString(" and")
+			}
+			fmt.Fprintf(&b, " source %d (%q)", s.ID, s.Name)
+		}
+	}
+	b.WriteString("\npolyemesis will not start until each source has its own token. " +
+		"It cannot pick for you: whichever row keeps the token is the programme the " +
+		"encoder already publishing on it lands in, and choosing wrong moves a live " +
+		"broadcast with nothing on screen to say it happened.\n" +
+		"Decide which source in each group above keeps its token, then for every OTHER " +
+		"source in that group run, with polyemesis stopped:\n" +
+		`  sqlite3 <database> "UPDATE sources SET token = '', prev_token = '', prev_token_until = 0 WHERE id = <id>;"` +
+		"\nThat source then has no publish token and cannot be published to. Start " +
+		"polyemesis, open its Sources page and use Rotate to issue a fresh one, then " +
+		"point the encoder that belongs to it at the new stream key.")
+	return b.String()
+}
+
+// duplicateSourceTokens returns the groups of sources that share a non-empty
+// token, ordered so the message it feeds is stable between runs.
+func duplicateSourceTokens(sqldb *sql.DB) ([][]duplicateTokenSource, error) {
+	rows, err := sqldb.Query(
+		`SELECT s.token, s.id, s.name FROM sources s
+		 WHERE s.token <> ''
+		   AND (SELECT COUNT(*) FROM sources t WHERE t.token = s.token) > 1
+		 ORDER BY s.token, s.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var (
+		groups [][]duplicateTokenSource
+		last   string
+	)
+	for rows.Next() {
+		var (
+			token string
+			s     duplicateTokenSource
+		)
+		if err := rows.Scan(&token, &s.ID, &s.Name); err != nil {
+			return nil, err
+		}
+		if len(groups) == 0 || token != last {
+			groups = append(groups, nil)
+			last = token
+		}
+		groups[len(groups)-1] = append(groups[len(groups)-1], s)
+	}
+	return groups, rows.Err()
+}
+
+// MigrateSourceTokenUnique creates the partial unique index on sources.token,
+// or refuses to open the database when the rows already there cannot carry it.
+//
+// WHY IT IS NOT IN schema.sql, which is where a reader will look for it: a
+// partial unique index cannot be written inside CREATE TABLE at all, and a bare
+// CREATE UNIQUE INDEX in that file would run on EVERY open of EVERY install --
+// including one that already holds duplicates, where it fails and aborts the
+// whole script. The operator would get "apply schema: UNIQUE constraint failed:
+// index ..." and no idea which two rows or what to do about it. MigrateSources
+// records the same reasoning for the plain indexes next to it. This function
+// runs on every open, fresh installs included, so both kinds of install end up
+// with the same constraint by the one path that can explain a refusal.
+//
+// REFUSING TO START is the deliberate choice among three, and the other two
+// were rejected on the record. De-duplicating here would mean picking which row
+// keeps the token, and that pick decides which programme the encoder already
+// publishing on it is admitted into -- an operator's data mutated on a judgement
+// this code has no basis for making, silently, at boot, which is the shape of
+// the loss #387 was about. Logging and skipping the index leaves the install
+// running with exactly the defect this exists to remove, behind a line nobody
+// reads. Refusal is loud, happens before anything is written, and leaves every
+// row exactly as the operator left it; the error carries the ids, the reason,
+// and the two commands that resolve it.
+//
+// Duplicates are unreachable once the index exists, so the scan below is paid
+// once and skipped by the guard on every boot afterwards.
+func (d *DB) MigrateSourceTokenUnique() error {
+	// Checked before any transaction opens, for the reason MigrateSources and
+	// MigrateDestinationExpertArgs both record: db.go sets SetMaxOpenConns(1),
+	// so a read issued while a transaction holds the one connection waits for a
+	// connection that transaction will not release, and startup hangs for ever
+	// rather than failing.
+	has, err := indexExists(d.sql, sourceTokenUniqueIndex)
+	if err != nil {
+		return fmt.Errorf("inspect sources indexes: %w", err)
+	}
+	if has {
+		return nil
+	}
+	groups, err := duplicateSourceTokens(d.sql)
+	if err != nil {
+		return fmt.Errorf("check for duplicate source tokens: %w", err)
+	}
+	if len(groups) > 0 {
+		return &DuplicateSourceTokensError{Groups: groups}
+	}
+	if _, err := d.sql.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS ` + sourceTokenUniqueIndex +
+			` ON sources(token) WHERE token <> ''`,
+	); err != nil {
+		return fmt.Errorf("create %s: %w", sourceTokenUniqueIndex, err)
+	}
+	return nil
+}
+
 // MigrateSources brings a single-ingest database up to the sources model.
 //
 // Three steps, each idempotent, because this runs on every open:
@@ -529,6 +730,17 @@ func sourceEverExisted(sqldb *sql.DB) (bool, error) {
 // configure; skip an upgrading one and their encoder stops connecting with no
 // visible cause.
 func (d *DB) MigrateSources() error {
+	// FIRST, and outside the transaction below. Called from here rather than
+	// from Open's list because it belongs to the sources table and because it
+	// must run before this function's Begin: it reads, and this database has one
+	// connection (db.go's SetMaxOpenConns(1)), so a read issued once that
+	// transaction holds it would hang startup rather than fail. Running it first
+	// also means an install this build is going to refuse is refused before any
+	// ALTER has been applied to it.
+	if err := d.MigrateSourceTokenUnique(); err != nil {
+		return err
+	}
+
 	// EVERY read happens before the transaction opens, and that is not
 	// stylistic. columnExists and the probes below query d.sql, and db.go sets
 	// SetMaxOpenConns(1) -- a read issued while a transaction holds the one

@@ -260,13 +260,15 @@ func TestSweepDeletesSegmentsOlderThanMaxAge(t *testing.T) {
 			wantKept:    []time.Duration{1 * time.Hour, 26 * time.Hour, 50 * time.Hour},
 		},
 		{
-			// The age policy has no last-segment guard and needs none: the
-			// segment being written right now started ~now, so it can never be
-			// past the cutoff.
-			name:        "an archive of nothing but expired segments is emptied",
+			// #504: a max-age shorter than a segment's own length is a
+			// plausible operator mistake, and it means the live segment can
+			// be past the cutoff too. It must survive its own age -- the
+			// most recent segment here stands in for "the one still being
+			// written" -- while the older, non-live segment is still culled.
+			name:        "the live segment outlasts the cutoff even when every segment is expired",
 			maxAgeHours: 24,
 			ages:        []time.Duration{26 * time.Hour, 50 * time.Hour},
-			wantKept:    nil,
+			wantKept:    []time.Duration{26 * time.Hour},
 		},
 	}
 
@@ -285,6 +287,58 @@ func TestSweepDeletesSegmentsOlderThanMaxAge(t *testing.T) {
 			}
 			if want := len(tc.wantKept) != len(tc.ages); deleted != want {
 				t.Errorf("sweep reported deleted = %v, want %v", deleted, want)
+			}
+
+			want := namesFor(now, tc.wantKept)
+			if got := filesOnDisk(t, dir); !slices.Equal(got, want) {
+				t.Errorf("files on disk %v, want %v", got, want)
+			}
+			if got := indexedFilenames(t, store); !slices.Equal(got, want) {
+				t.Errorf("indexed %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// #504: a max-age setting shorter than a segment's own length is a plausible
+// operator mistake, and the sweep runs every 30 seconds -- long enough to
+// find the open file and unlink footage that cannot be recreated. The live
+// segment (the most recent by start time, standing in for "the one still
+// being written") must survive its own age no matter how the cutoff compares
+// to it; an older, non-live segment past the cutoff must still go, or
+// retention stops working entirely.
+func TestSweepNeverDeletesTheLiveSegmentByAge(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxAgeHours int
+		ages        []time.Duration
+		wantKept    []time.Duration
+	}{
+		{
+			name:        "a lone segment survives even though it is already past the cutoff",
+			maxAgeHours: 1,
+			ages:        []time.Duration{2 * time.Hour},
+			wantKept:    []time.Duration{2 * time.Hour},
+		},
+		{
+			name:        "the live segment survives past the cutoff while an older, non-live one is still deleted",
+			maxAgeHours: 1,
+			ages:        []time.Duration{2 * time.Hour, 5 * time.Hour},
+			wantKept:    []time.Duration{2 * time.Hour},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, dir, store := newManager(t)
+			now := time.Now()
+			writeSegments(t, dir, now, tc.ages, nil)
+			if _, err := m.Scan(); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+
+			if _, err := m.Sweep(db.RecordingSettings{MaxAgeHours: tc.maxAgeHours}); err != nil {
+				t.Fatalf("sweep: %v", err)
 			}
 
 			want := namesFor(now, tc.wantKept)
