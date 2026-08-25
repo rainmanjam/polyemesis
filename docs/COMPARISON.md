@@ -218,9 +218,29 @@ fourth number was wrong and contradicted the site's own table.
 | **Studio** — browser production, remote guests | **Missing.** Multi-source plus compositing is the closest path |
 | **Pre-recorded upload, go live later** | ✅ **Have.** Upload the file, it is normalised on import, and a scheduled `playlist.start` puts it on air at a chosen time. Needs the failover tier on, since that is where the playlist lives |
 | **Teams, roles, multiple workspaces** | **Missing.** Exactly one admin identity |
+| **Webinars** — private, attendee caps, Slack delivery (+$99–299/mo) | **Missing.** No webinar mode. A private destination plus the built-in chat is the closest path |
+| **Website player** — embeddable, 1000 viewers (Business) | **Missing.** The HLS preview is operator-facing and auth-gated; there is no public player route |
+| **Guest/paired channels** — guests attach their own destinations to your event | **Missing.** Follows from the single admin identity |
+| **Automatic clip selection** — "TikTok-ready clips" (+$19–59/mo) | **Partial.** `internal/clipper` cuts keyframe-accurate clips from the archive and `internal/clips` holds a live 30-second ring buffer — but an operator picks the in and out points. The missing half is *automatic* highlight selection, not clipping |
+| **Dual format** — vertical and horizontal at once (Professional, $49/mo) | ✅ **Have.** A rendition takes an explicit width×height with `AspectCrop` (centre-crop) or `AspectBlurredPad`; a 1080x1920 preset ships. `internal/ffmpeg/rendition.go:61` |
+| **SRT ingest** (enterprise only — "book a demo") | ✅ **Have**, and it is the primary operated ingest path |
+| **Stream backup** (enterprise only — "book a demo") | ✅ **Have**, and the implementation is the stronger one — see below |
 | Hosted chat across platforms | Have, self-hosted |
 | Live health monitor | Have |
 | No server to run | By design, no |
+
+The seven rows above were added 2026-08-25 from restream.io's live pricing page.
+Four are gaps this table had missed entirely; three are capabilities polyemesis
+already had and this document was not crediting — dual format and SRT ingest are
+priced features there, and stream backup is behind "book a demo".
+
+**On stream backup specifically.** Restream's is a hosted safety net. polyemesis's
+source-selector tier (`internal/engine/selector.go`) is a different and stronger
+shape: destinations subscribe to a permanent hub whose identity never changes, and
+only the *feed* into it is switched — primary, standby ingest, a looping playlist
+file, then the slate. The platform connection is therefore never dropped when the
+encoder disappears, which is the failure the whole tier exists to prevent. It is
+OFF by default (`failover.enabled`), which is its real weakness — see issue #512.
 
 **Teams and roles is the one to take seriously.** polyemesis has a single admin
 identity, and access to the UI is full control of the server's streaming. Any
