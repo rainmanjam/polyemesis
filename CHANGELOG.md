@@ -9,7 +9,7 @@ its first tagged release.
 ## [Unreleased]
 
 
-## [0.7.0] — unreleased
+## [0.7.0] — 2026-08-25
 
 <!-- RB-5 (#499): this heading was dated 2026-08-21 in #487, while preparing
 the tag -- and the tag was then deliberately held. Nothing noticed, so this
