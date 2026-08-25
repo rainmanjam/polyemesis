@@ -22,6 +22,8 @@ import {
   Menu,
   MessagesSquare,
   Radio,
+  Rows2,
+  Rows4,
   Scissors,
   Settings as SettingsIcon,
   Sliders,
@@ -44,6 +46,7 @@ import {
 } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
+import { useDensity } from "@/hooks/useDensity";
 import { useNavCollapsed } from "@/hooks/useNavCollapsed";
 import { toneForState } from "@/lib/signal";
 import { duration, kbps } from "@/lib/format";
@@ -102,6 +105,7 @@ export function AppLayout({
   const { status, connected, frameError } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
+  const [density, toggleDensity] = useDensity();
   const location = useLocation();
   const t = useT();
   const stateLabel = useStateLabel();
@@ -236,6 +240,30 @@ export function AppLayout({
             </Badge>
           )}
           <span className="hidden text-[11px] text-muted-foreground lg:inline">{username}</span>
+
+          {/* Beside the language switcher and for the same reason: it is a
+              property of how this operator reads the console, not of what the
+              console is doing, and an install with thirteen destinations needs
+              it reachable from every page rather than from Settings.
+
+              Plain English rather than a t() key, matching the "frame error"
+              badge above: a key costs a correct translation in all fifteen
+              locales, which lib/i18n.test.ts enforces, and the pass that lifts
+              this page's remaining literals should lift them together.
+
+              The label names the mode this SWITCHES TO, because that is what
+              pressing it does; the icon shows the same thing, so the two cannot
+              be read as contradicting each other. */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={toggleDensity}
+            aria-pressed={density === "compact"}
+            aria-label={density === "compact" ? "Comfortable layout" : "Compact layout"}
+            title={density === "compact" ? "Comfortable layout" : "Compact layout"}
+          >
+            {density === "compact" ? <Rows2 /> : <Rows4 />}
+          </Button>
 
           {/* Sits in the chrome rather than on Settings: the operator who needs
               it cannot necessarily read the nav item that would lead there. */}

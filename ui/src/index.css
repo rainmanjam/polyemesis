@@ -299,6 +299,52 @@
   }
 }
 
+/* ===========================================================================
+   DENSITY. One console, two installs.
+
+   Two destinations and thirteen destinations are not the same screen. The
+   comfortable spacing this app was drawn at leaves a thirteen-destination
+   operator scrolling past the thing they are watching; compacting everything
+   for that operator would make the two-destination install look broken.
+
+   ONE VARIABLE, NOT A SECOND STYLESHEET. Tailwind v4 compiles every spacing
+   utility -- p-3, gap-2, h-11, w-44, the lot -- to `calc(var(--spacing) * n)`,
+   so redefining --spacing on a subtree rescales all of them at once. The
+   alternative was a `compact:` variant on several hundred class strings, which
+   is several hundred chances for two modes to disagree.
+
+   SCOPED TO <main>, DELIBERATELY. The chrome is not the thing that runs out of
+   room, and shrinking it would move the sign-out and language buttons under an
+   operator's cursor mid-broadcast for no gain. Radix renders dialogs and menus
+   into a portal on <body>, outside this selector, so they stay comfortable too:
+   a dialog is a thing you have stopped to read.
+
+   TYPE IS NOT RESCALED, and that is the point of compacting whitespace rather
+   than everything. The type scale above is already sized for glancing at a
+   number under load; a console that answers "too many destinations" by making
+   them harder to read has answered the wrong question. Two things follow the
+   same rule and are floored in rem inside components/ui/button.tsx rather than
+   here: a control's minimum size, and the icon that is the only label on half
+   of them. --spacing would have shrunk both.
+   =========================================================================== */
+:root[data-density="compact"] main {
+  --spacing: 0.1875rem; /* 0.75x of Tailwind's 0.25rem default */
+}
+
+/* Tighter gaps alone do not fix a wide screen with thirteen cards on it — that
+   is a column problem, and no amount of --spacing adds a column. Opt-in by
+   class rather than applied to every grid: a card grid can take a fourth
+   column, and the dashboard's preview/side-column split cannot.
+
+   Above 1280px only. Below it the extra column is narrower than a destination
+   name, and a card that truncates the one thing identifying it has traded the
+   scroll for something worse. */
+@media (min-width: 1280px) {
+  :root[data-density="compact"] .dense-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 @layer utilities {
   /* A steady pulse for "live". Slow enough to read as a heartbeat rather than
      an alarm. */

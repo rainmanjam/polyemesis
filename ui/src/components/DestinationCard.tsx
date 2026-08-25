@@ -71,6 +71,7 @@ export function DestinationCard({
   canMoveEarlier,
   canMoveLater,
   busy,
+  domId,
 }: {
   dest: DestStatus;
   onStart: () => void;
@@ -88,6 +89,13 @@ export function DestinationCard({
   canMoveEarlier: boolean;
   canMoveLater: boolean;
   busy?: boolean;
+  /** An anchor for the dashboard's attention list to send the operator to.
+   *
+   *  Optional because a card that nothing links to should not be a tab stop:
+   *  `tabIndex={-1}` below is what makes focus() land here, and adding it to
+   *  every card unconditionally would put a stop with no controls on it between
+   *  each pair of real ones. */
+  domId?: string;
 }) {
   const t = useT();
   const stateLabel = useStateLabel();
@@ -158,7 +166,16 @@ export function DestinationCard({
     : "source, copied";
 
   return (
-    <Card className="overflow-hidden">
+    <Card
+      id={domId}
+      // -1, not 0: reachable by the summary above and by nothing else.
+      // `focus:` rather than `focus-visible:` on purpose — this focus arrives
+      // from a mouse click on another element, which is exactly the case
+      // focus-visible suppresses, and a jump that lands with no ring is a jump
+      // that does not say where it landed.
+      tabIndex={domId ? -1 : undefined}
+      className="overflow-hidden focus:outline-none focus:ring-2 focus:ring-ring"
+    >
       <CardContent className="flex flex-col gap-2.5 p-3">
         {/* --- identity + state --- */}
         <div className="flex items-start justify-between gap-2">
