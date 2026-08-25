@@ -1142,10 +1142,10 @@ jobs:
           # closed (the deliberate "cannot prove it is idle" path).
           function Get-CimInstance { param($ClassName, $Filter, $ErrorAction); throw 'WMI unavailable (simulated)' }
           $result = Get-PublishingFfmpeg
-          if ($null -ne $result) {
-            $failures.Add("expected `$null when Get-CimInstance throws (fail-closed), got: $result")
+          if ($result.Checked) {
+            $failures.Add("expected Checked=false when Get-CimInstance throws (fail-closed), got Checked=$($result.Checked)")
           } else {
-            Write-Host "PASS: an unreadable process table returns `$null (fail-closed)"
+            Write-Host "PASS: an unreadable process table reports Checked=false (fail-closed)"
           }
 
           # Case 2: a publishing ffmpeg is present and must be found.
@@ -1153,9 +1153,9 @@ jobs:
             param($ClassName, $Filter, $ErrorAction)
             [pscustomobject]@{ ProcessId = 4242; CommandLine = 'ffmpeg.exe -i in.mp4 -f flv rtmp://example.invalid/live' }
           }
-          $result = @(Get-PublishingFfmpeg)
-          if ($result.Count -ne 1) {
-            $failures.Add("expected 1 matching process for a publishing ffmpeg, got $($result.Count)")
+          $result = Get-PublishingFfmpeg
+          if (-not $result.Checked -or $result.Procs.Count -ne 1) {
+            $failures.Add("expected Checked=true and 1 matching process, got Checked=$($result.Checked) Count=$($result.Procs.Count)")
           } else {
             Write-Host "PASS: a publishing ffmpeg (rtmp:) is detected"
           }
@@ -1166,9 +1166,9 @@ jobs:
             param($ClassName, $Filter, $ErrorAction)
             [pscustomobject]@{ ProcessId = 4343; CommandLine = 'ffmpeg.exe -i in.mp4 out.mp4' }
           }
-          $result = @(Get-PublishingFfmpeg)
-          if ($result.Count -ne 0) {
-            $failures.Add("expected 0 matches for a non-publishing ffmpeg, got $($result.Count)")
+          $result = Get-PublishingFfmpeg
+          if (-not $result.Checked -or $result.Procs.Count -ne 0) {
+            $failures.Add("expected Checked=true and 0 matches for a non-publishing ffmpeg, got Checked=$($result.Checked) Count=$($result.Procs.Count)")
           } else {
             Write-Host "PASS: a non-publishing ffmpeg process is correctly ignored"
           }
@@ -1236,7 +1236,7 @@ jobs:
           # --- Scenario 1: -Force bypasses BOTH the live check and the confirmation ---
           $Force = $true; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
           $script:calls = 0
-          function Get-PublishingFfmpeg { $script:calls++; @() }
+          function Get-PublishingFfmpeg { $script:calls++; [pscustomobject]@{ Checked = $true; Procs = @() } }
           function Read-Host { param($Prompt); $script:calls++; 'polyemesis' }
           try {
             Invoke-Scenario $ifBlockText
@@ -1251,7 +1251,7 @@ jobs:
 
           # --- Scenario 2: a stubbed process table shows a publishing ffmpeg -> throws ---
           $Force = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
-          function Get-PublishingFfmpeg { ,([pscustomobject]@{ ProcessId = 4242; CommandLine = 'ffmpeg.exe -i in -f flv rtmp://example.invalid/live' }) }
+          function Get-PublishingFfmpeg { [pscustomobject]@{ Checked = $true; Procs = @([pscustomobject]@{ ProcessId = 4242; CommandLine = 'ffmpeg.exe -i in -f flv rtmp://example.invalid/live' }) } }
           function Read-Host { param($Prompt); throw 'Read-Host must not be reached while a broadcast is live' }
           try {
             Invoke-Scenario $ifBlockText
@@ -1266,7 +1266,7 @@ jobs:
 
           # --- Scenario 3: the process table cannot be read -> throws (fail closed) ---
           $Force = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
-          function Get-PublishingFfmpeg { $null }
+          function Get-PublishingFfmpeg { [pscustomobject]@{ Checked = $false; Procs = @() } }
           function Read-Host { param($Prompt); throw 'Read-Host must not be reached when the process table could not be read' }
           try {
             Invoke-Scenario $ifBlockText
@@ -1281,7 +1281,7 @@ jobs:
 
           # --- Scenario 4: a wrong confirmation answer is rejected ---
           $Force = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
-          function Get-PublishingFfmpeg { @() }
+          function Get-PublishingFfmpeg { [pscustomobject]@{ Checked = $true; Procs = @() } }
           function Read-Host { param($Prompt); 'definitely-the-wrong-answer' }
           try {
             Invoke-Scenario $ifBlockText
