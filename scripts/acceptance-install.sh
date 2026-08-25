@@ -546,12 +546,18 @@ if [ -f "$U" ]; then
   bash "$U" --wat >/dev/null 2>&1
   [ "$?" = 2 ] && ok "an unknown option is refused" || bad "an unknown option was accepted"
 
-  out="$(bash "$U" 2>&1)"; rc=$?
+  # id is STUBBED to a non-zero uid rather than relying on who runs this. CI
+  # runs as root, so the unstubbed version passed the root check, failed later
+  # for an unrelated reason, and reported "a non-root run was not refused" --
+  # a test whose answer depended on its environment rather than on the code.
+  printf '#!/bin/sh\necho 1000\n' > "$WORK_UNINST/bin/id"; chmod +x "$WORK_UNINST/bin/id"
+  out="$(PATH="$WORK_UNINST/bin:$PATH" bash "$U" 2>&1)"; rc=$?
   if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q 'must run as root'; then
     ok "a non-root run is refused before the first mutation"
   else
     bad "a non-root run was not refused (rc=$rc)"
   fi
+  printf '#!/bin/sh\necho 0\n' > "$WORK_UNINST/bin/id"; chmod +x "$WORK_UNINST/bin/id"
 
   # No terminal to confirm on must REFUSE, not assume. An unattended job that
   # inherits this script must not be able to uninstall a broadcast server.

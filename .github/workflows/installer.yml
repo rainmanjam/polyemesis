@@ -460,7 +460,12 @@ jobs:
       - name: Uninstall removes what it added and keeps what is yours
         run: |
           before="$(sudo md5sum /var/lib/polyemesis/secret.key | cut -d' ' -f1)"
-          sudo /opt/polyemesis/uninstall.sh
+          # --force because the uninstaller now REFUSES a run it cannot confirm:
+          # it ends every live broadcast on the install, so a terminal is asked
+          # and a run without one is refused rather than assumed. CI is exactly
+          # the unattended caller that refusal is aimed at, so it has to say it
+          # means this -- which is the flag doing its job, not a workaround.
+          sudo /opt/polyemesis/uninstall.sh --force
           for gone in /usr/local/bin/polyemesis /etc/polyemesis /etc/systemd/system/polyemesis.service; do
             if [ -e "$gone" ]; then echo "uninstall left $gone behind"; exit 1; fi
           done
