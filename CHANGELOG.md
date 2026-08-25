@@ -11,6 +11,18 @@ its first tagged release.
 
 ## [0.7.0] — unreleased
 
+### Fixed
+- **The RTMP relay stopped answering publish and play once gortmplib reached
+  v1.0.1.** That release split `ServerConn.Accept` into `AcceptConn` (the
+  connection, and reading the play/publish command) and `AcceptAction` (the
+  response that admits it). `Accept` still exists, still compiles, and is now an
+  alias for `AcceptConn` alone — so the connection came up and no peer was ever
+  answered: subscribers reported `Input/output error`, publishers a refused
+  connect, against a healthy relay. Nothing in the type system marked the
+  change; the end-to-end tests that run real FFmpeg against a real listener are
+  what caught it. The bump is taken together with the migration, because
+  merging it alone ships broken RTMP.
+
 <!-- RB-5 (#499): this heading was dated 2026-08-21 in #487, while preparing
 the tag -- and the tag was then deliberately held. Nothing noticed, so this
 section described a shipped release for four days while every install path
