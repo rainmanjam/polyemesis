@@ -11,6 +11,18 @@ its first tagged release.
 
 ## [0.7.0] — unreleased
 
+### Fixed
+- **The RTMP relay stopped answering publish and play once gortmplib reached
+  v1.0.1.** That release split `ServerConn.Accept` into `AcceptConn` (the
+  connection, and reading the play/publish command) and `AcceptAction` (the
+  response that admits it). `Accept` still exists, still compiles, and is now an
+  alias for `AcceptConn` alone — so the connection came up and no peer was ever
+  answered: subscribers reported `Input/output error`, publishers a refused
+  connect, against a healthy relay. Nothing in the type system marked the
+  change; the end-to-end tests that run real FFmpeg against a real listener are
+  what caught it. The bump is taken together with the migration, because
+  merging it alone ships broken RTMP.
+
 <!-- RB-5 (#499): this heading was dated 2026-08-21 in #487, while preparing
 the tag -- and the tag was then deliberately held. Nothing noticed, so this
 section described a shipped release for four days while every install path
@@ -22,6 +34,25 @@ changelog-freshness.yml alarms if a dated heading ever again sits this long
 with no matching tag. -->
 
 ### Security
+- **Two sources could share a publish token, and an encoder would land in
+  whichever one the lookup happened to return.** `sources.token` had no unique
+  constraint and RTMP's target map is last-writer-wins, so a duplicate admitted a
+  publisher into the wrong programme — the same class of cross-programme mistake
+  this release fixes elsewhere. Now a partial unique index, partial because the
+  column defaults to empty and several sources legitimately have no token yet.
+
+  **This can stop an upgrade.** A database that already holds duplicate tokens is
+  REFUSED at open, before anything is written, naming the sources by id and name
+  (never the token — a startup log is not a place for a publish secret) and
+  carrying the exact command to clear one. That is deliberate: de-duplicating
+  automatically would mean choosing which source keeps the token, and that choice
+  decides which programme an already-publishing encoder lands in — a judgement
+  the code has no basis for making at boot. Clear the duplicate, restart, then
+  rotate the affected source's token from the UI.
+
+  Duplicates could only arise from a client writing one, which is also fixed:
+  the general update path no longer touches the token at all, so a stale browser
+  tab can no longer roll a rotation back. Rotation is now the only writer. (#505)
 - **A viewer's chat message could put text on a permanent third-party ban
   record.** The moderation model's own prose was passed as the ban reason to
   Twitch, and to Kick — a second sink found only when the fix was written. The
@@ -1197,6 +1228,13 @@ with no matching tag. -->
   ten-minute window centred on the point in question.
 
 ### Fixed
+- **The retention sweep could delete the recording being written.** The age
+  branch removed anything past the cutoff with nothing protecting the open
+  segment, which a segment length longer than the max-age reaches in the ordinary
+  course of things — and the sweep runs every thirty seconds, so it would find it.
+  Both branches now skip the live segment by filename. The size cap's existing
+  guard was positional rather than identity-based — it protected whichever row
+  sorted last — so it has been replaced rather than copied. (#504)
 - **Two goroutines racing could kill the process and end every live broadcast.**
   A subscriber's `close()` was select-then-close, which is check-then-act rather
   than atomic; three teardown paths call it and nothing in the package recovers,
@@ -1833,6 +1871,20 @@ with no matching tag. -->
   worked for one installation method and silently did not exist for the other.
 
 ### Testing
+- **The Windows uninstaller had never been parsed by anything.** No workflow
+  referenced `deploy/windows/` at all, so a syntax error in a script that ends
+  live broadcasts would have shipped undetected. It is now parsed and exercised
+  on `windows-latest`, inside the existing required job rather than a new one,
+  since branch protection names a fixed set of contexts and a new job would never
+  gate a merge.
+
+  The gate found a defect immediately: the live-broadcast check returned its
+  results through a bare pipeline, and a pipeline that matches nothing emits
+  nothing — so "no encoder is publishing" and "the process table could not be
+  read" arrived as the same value. The caller treats the second as fatal, so on
+  an idle host every uninstall refused with a message about the wrong thing, and
+  the confirmation prompt was unreachable. It failed safe, but it did not work.
+  (#509)
 - **A test that asserted a state it could not reach, and quarantined itself
   instead of failing.** `TestASilenceTierLiftsTheHoldOnAnUnmeasuredLayout`
   exists to make the second term of `holdDests := !measured && silenceSig == ""`

@@ -56,24 +56,41 @@ Assert-Administrator
 # is carrying, and a completed broadcast cannot be returned to. The Linux
 # uninstaller refuses the same way; this is the Windows half of that device.
 function Get-PublishingFfmpeg {
+    # TWO FACTS, TWO FIELDS: whether the look succeeded, and what it found.
+    #
+    # This function has now been wrong twice, both times because it tried to
+    # carry both facts in one return value (#509). PowerShell unrolls arrays
+    # into the pipeline, so an empty result and no result are the same thing:
+    #
+    #   bare pipeline  -> "nothing is publishing" arrived as $null, which the
+    #                     caller reads as "could not check", so every uninstall
+    #                     on an IDLE host refused and the confirmation below was
+    #                     unreachable.
+    #   return ,$found -> the unary comma stops the unrolling, but wraps: an
+    #                     empty $found became an array containing an empty
+    #                     array, .Count = 1, so an idle host looked BUSY.
+    #
+    # Both failed safe and neither worked. A sentinel cannot express "no
+    # results" and "no answer" at once, so it does not try to.
     try {
-        Get-CimInstance Win32_Process -Filter "Name='ffmpeg.exe'" -ErrorAction Stop |
-            Where-Object { $_.CommandLine -and ($_.CommandLine -match 'rtmp:|srt:|-f\s+flv') }
+        $procs = @(Get-CimInstance Win32_Process -Filter "Name='ffmpeg.exe'" -ErrorAction Stop |
+            Where-Object { $_.CommandLine -and ($_.CommandLine -match 'rtmp:|srt:|-f\s+flv') })
+        return [pscustomobject]@{ Checked = $true; Procs = $procs }
     } catch {
         # If the process table cannot be read we cannot prove the host is idle.
-        # Say so rather than returning "nothing found", which would read as safe.
+        # Say so rather than reporting "nothing found", which would read as safe.
         Write-Warning "Could not inspect running processes: $($_.Exception.Message)"
-        return $null
+        return [pscustomobject]@{ Checked = $false; Procs = @() }
     }
 }
 
 if (-not $Force) {
     $live = Get-PublishingFfmpeg
-    if ($null -eq $live) {
+    if (-not $live.Checked) {
         throw 'Cannot determine whether a broadcast is live. Re-run with -Force if you mean to stop the service anyway.'
     }
-    if ($live.Count -gt 0) {
-        foreach ($p in $live) { Write-Host ("    pid {0}: {1}" -f $p.ProcessId, ($p.CommandLine -replace '^.*?((rtmp|srt)://\S{0,40}).*$','$1')) }
+    if ($live.Procs.Count -gt 0) {
+        foreach ($p in $live.Procs) { Write-Host ("    pid {0}: {1}" -f $p.ProcessId, ($p.CommandLine -replace '^.*?((rtmp|srt)://\S{0,40}).*$','$1')) }
         throw "REFUSING: $ServiceName is publishing right now (listed above). Uninstalling stops it, and a live broadcast that ends cannot be resumed. Stop the destinations first, or pass -Force if you mean to end them."
     }
 

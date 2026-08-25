@@ -388,11 +388,22 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 
 	deleted := false
 
+	// #504: the age branch used to carry no protection for the segment the
+	// recorder is still appending to, while the size branch four lines below
+	// protected it only by array position ("the last element of recs"), a
+	// heuristic that happened to work but never named what it was protecting.
+	// Neither branch actually asks the recorder which file is open -- that
+	// process is owned by another package and does not report it here -- so
+	// both now derive the same identity from the index (latest start time)
+	// through one shared helper, instead of one branch remembering a rule the
+	// other never got.
+	live := liveSegment(recs)
+
 	if s.MaxAgeHours > 0 {
 		cutoff := time.Now().Add(-time.Duration(s.MaxAgeHours) * time.Hour)
 		remaining := recs[:0]
 		for _, r := range recs {
-			if r.StartedAt.Before(cutoff) {
+			if r.Filename != live && r.StartedAt.Before(cutoff) {
 				if m.delete(r, fmt.Sprintf("older than %dh", s.MaxAgeHours)) {
 					deleted = true
 					continue
@@ -421,10 +432,11 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 		for _, st := range stems {
 			total += st.bytes
 		}
-		// Never delete the last remaining segment: it is almost certainly the
-		// one being written right now, and deleting it would fight the
-		// recorder rather than free space.
-		for i := 0; total > limit && i < len(recs)-1; i++ {
+		// Never delete the live segment: see the #504 note above liveSegment.
+		for i := 0; total > limit && i < len(recs); i++ {
+			if recs[i].Filename == live {
+				continue
+			}
 			if !m.delete(recs[i], fmt.Sprintf("size cap %.1f GB exceeded", s.MaxGB)) {
 				continue
 			}
@@ -432,12 +444,33 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 			// SweepStems runs straight after this and orphans everything
 			// starting before the oldest surviving master, so those bytes are
 			// as good as freed already.
-			total -= creditStems(stems, recs[i+1].StartedAt.Add(-stemSweepSlack))
+			if i+1 < len(recs) {
+				total -= creditStems(stems, recs[i+1].StartedAt.Add(-stemSweepSlack))
+			}
 			deleted = true
 		}
 	}
 
 	return deleted, nil
+}
+
+// liveSegment names the one recording retention must never delete: the
+// segment with the latest start time, which is the one the recorder is
+// presumably still appending to. This is the same heuristic Scan uses (see
+// newestSegment) -- start time, not file position -- applied here so the age
+// and size branches of Sweep share one notion of "the open file" instead of
+// each keeping (or forgetting) their own. It is still an inference from the
+// index, not a query of the recorder's actual open file handle: the recorder
+// process belongs to another package and this one has no channel to ask it.
+func liveSegment(recs []db.Recording) string {
+	live := ""
+	var at time.Time
+	for _, r := range recs {
+		if live == "" || r.StartedAt.After(at) || (r.StartedAt.Equal(at) && r.Filename > live) {
+			live, at = r.Filename, r.StartedAt
+		}
+	}
+	return live
 }
 
 // stemSize is one stem file as the size cap sees it: when its master started,
