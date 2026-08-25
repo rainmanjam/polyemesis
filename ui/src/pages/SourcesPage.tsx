@@ -50,7 +50,7 @@ import { InfoHint } from "@/components/InfoHint";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
 import { publishRows } from "@/lib/publish-url";
-import type { Source, SourceView } from "@/lib/types";
+import type { Source, SourceId, SourceView } from "@/lib/types";
 
 /* ===========================================================================
    Sources: one ingested programme each.
@@ -83,7 +83,7 @@ export function SourcesPage() {
   const [newName, setNewName] = useState("");
   const [deleting, setDeleting] = useState<SourceView | null>(null);
   const [rotating, setRotating] = useState<SourceView | null>(null);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const [busyId, setBusyId] = useState<SourceId | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -168,6 +168,12 @@ export function SourcesPage() {
     // is a different act. The toast is what is left on screen once it is true,
     // and saying the ordinary thing there takes that back.
     const wasOnly = sources.length === 1;
+    // #18: matches patch()/rotate() above. ConfirmDestructive disables its own
+    // Confirm button while busy, but that guard dies with the dialog -- Escape
+    // or an overlay click closes it without waiting for this to finish, and an
+    // in-flight delete left the Trash2 button on this row clickable again,
+    // open to a second delete of a row already gone. busyId disables it too.
+    setBusyId(deleting.id);
     try {
       await api.deleteSource(deleting.id);
       toast.success(t(wasOnly ? "sources.deletedLast" : "sources.deleted", { name: deleting.name }));
@@ -175,6 +181,8 @@ export function SourcesPage() {
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("sources.deleteFailed"));
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -402,6 +410,7 @@ export function SourceCard({
             size="icon"
             variant="ghost"
             onClick={onDelete}
+            disabled={busy}
             title={t("sources.deleteThis")}
             aria-label={t("sources.deleteAria", { name: source.name })}
           >

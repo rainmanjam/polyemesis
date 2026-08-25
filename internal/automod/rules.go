@@ -130,8 +130,12 @@ func (s *RuleSet) Check(text string) []Finding {
 				Checker:        CheckerRules,
 				Action:         r.Action,
 				TimeoutSeconds: r.TimeoutSeconds,
-				Reason:         fmt.Sprintf("matched rule %q", r.Name),
-				RuleID:         r.ID,
+				// The rule's NAME stays server-side. It is the operator's own
+				// free text, and PlatformReason deliberately has no path to any
+				// free-text field -- see finding.go and #495.
+				Category: CategoryFilterMatch,
+				Reason:   fmt.Sprintf("matched rule %q", r.Name),
+				RuleID:   r.ID,
 			})
 		}
 	}

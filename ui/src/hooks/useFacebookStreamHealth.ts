@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import {
   FACEBOOK_STREAM_HEALTH_INTERVAL_MS,
+  type DestinationId,
   type IngestStreamHealth,
 } from "@/lib/types";
 
@@ -55,7 +56,7 @@ export type HealthState =
  *  limit queries to no more than once every 2 seconds." Polling faster asks for
  *  the same numbers twice and spends somebody's rate limit doing it. */
 export function useFacebookStreamHealth(
-  destId: number,
+  destId: DestinationId,
   enabled: boolean,
 ): HealthState {
   const [state, setState] = useState<HealthState>({ kind: "loading" });

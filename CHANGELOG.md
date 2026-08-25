@@ -9,9 +9,45 @@ its first tagged release.
 ## [Unreleased]
 
 
-## [0.7.0] — 2026-08-21
+## [0.7.0] — unreleased
+
+<!-- RB-5 (#499): this heading was dated 2026-08-21 in #487, while preparing
+the tag -- and the tag was then deliberately held. Nothing noticed, so this
+section described a shipped release for four days while every install path
+(git, GitHub Releases, Docker Hub) still ended at v0.6.0, lacking the
+seal-at-rest fix below. Dating it again is a release act, not a docs edit:
+`.github/workflows/release.yml`'s changelog-gate now refuses to publish any
+tag whose version does not match the top dated heading here, and
+changelog-freshness.yml alarms if a dated heading ever again sits this long
+with no matching tag. -->
 
 ### Security
+- **A viewer's chat message could put text on a permanent third-party ban
+  record.** The moderation model's own prose was passed as the ban reason to
+  Twitch, and to Kick — a second sink found only when the fix was written. The
+  only thing between the model and the platform was a 1000-rune truncation, so a
+  crafted message wrote arbitrary text onto a moderation record under the
+  broadcaster's credential, and the operator's system prompt could travel back
+  out the same field. `PlatformReason()` is now a pure function of a closed
+  `Category`: it takes no argument and reads no free-text field, so there is no
+  expression that gets model output to a platform write. The model may not even
+  claim the categories only a deterministic checker produces. Fail-open on an
+  unrecognised category is kept deliberately — it is this package's tested
+  contract, and inverting it was the plausible wrong move. (#495)
+- **Webhook targets could reach the network the server sits on.** Validation
+  checked scheme and host and stopped, so a hook could be pointed at cloud
+  metadata, loopback, or a private range. Now refused at save time with a
+  deliberate per-hook opt-in for self-hosted endpoints, plus a dial-time check
+  that closes DNS rebinding by dialling the address it just verified. RFC6598
+  carrier-NAT space — what Tailscale hands out — is refused too: `net.IP.IsPrivate`
+  covers RFC1918 and IPv6 ULA and nothing else. (#489)
+- **Editing a track label on one programme rewrote another's ingest.** A 500 ms
+  debounce autosaved to a route that carried no source, and the handler resolved
+  the default engine, so a keystroke on programme 2 rewrote programme 1 and
+  restarted its live destinations. Routes now refuse rather than falling back —
+  the fallback is what made it silent — and an AST test requires every caller
+  reaching for the default engine to be recorded with a reason, so a new handler
+  that forgets fails the build. (#497)
 - **0.7.0's seal-at-rest migration left the plaintext stream keys it replaced
   legible in the database file.** The migration writes the ciphertext and blanks
   the `stream_key` column, and every check that reads the row back through SQL
@@ -897,6 +933,21 @@ its first tagged release.
   ([#448](https://github.com/rainmanjam/polyemesis/issues/448))
 
 ### Changed
+- **The uninstaller refuses while a broadcast is on air.** Stopping the service
+  ends every live broadcast on the install, and a completed broadcast cannot be
+  returned to — yet the installer asked "Proceed?" before the reversible act of
+  installing while the uninstaller asked nothing before the irreversible one.
+  All three uninstallers (systemd, Docker, Windows) now refuse while the service
+  is publishing, name what is live, and require the service name typed to
+  confirm. A run with no terminal is refused rather than assumed, so an
+  unattended job cannot uninstall a broadcast server by inheriting the script.
+  `--remove-data` performs the deletion with guards instead of printing an
+  unguarded `rm -rf` for the operator to paste.
+- **A version tag cannot publish a release the changelog does not describe.**
+  `release.yml` gained two gates: one requiring a successful CI run against the
+  tagged commit, and one requiring the tag to match the top version heading in
+  this file, dated. Both fail closed — an API error, an unparseable changelog or
+  an undated heading all refuse rather than guess. (#499)
 - **Two features are now labelled EXPERIMENTAL throughout — labelled, not
   gated.** Twitch Enhanced Broadcasting and hardware encoding both shipped in
   0.7.0 with a gap in the evidence behind them, and the label names where each
@@ -1146,6 +1197,26 @@ its first tagged release.
   ten-minute window centred on the point in question.
 
 ### Fixed
+- **Two goroutines racing could kill the process and end every live broadcast.**
+  A subscriber's `close()` was select-then-close, which is check-then-act rather
+  than atomic; three teardown paths call it and nothing in the package recovers,
+  so the second close panicked the daemon. A per-instance `sync.Once` makes the
+  double close unrepresentable. (#496)
+- **A rollback to 0.6.x would have silently dropped every destination.** 0.7.0 is
+  the first release that seals stream keys at rest, so an older binary would open
+  the database, read an empty key and publish nowhere, with nothing refusing and
+  nothing explaining. The schema is now stamped with `PRAGMA user_version` and a
+  database written by a newer release is refused before any write, naming both
+  versions. This protects rollbacks *from* 0.7.0 onward; it cannot protect the
+  0.7.0→0.6.x rollback itself, because the binary doing the reading is already
+  shipped. (#498)
+- **The upgrade path was not exercised by anything.** A column declared only in
+  `schema.sql` reached fresh installs and not upgraded ones, because the file is
+  `CREATE TABLE IF NOT EXISTS` — so every hook read on an upgraded install
+  answered "no such column" while the whole test suite stayed green, since every
+  test builds a fresh database. Migration added, and with it a test that creates
+  a row, drops the column, asserts the database is unreadable in that state, then
+  migrates and checks the row survived. (#489)
 - **The Windows job-object setup handed the kernel an address the Go runtime was
   free to invalidate, which is a write into freed memory.** `ensureJob`
   converts `&info` to a `uintptr` and passes the integer to

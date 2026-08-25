@@ -6,8 +6,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -185,13 +187,72 @@ type Dispatcher struct {
 	stats   Stats
 }
 
+// allowPrivateTargetKey carries one hook's AllowPrivateTarget opt-in through
+// to safeDialContext via the request context. It has to travel this way
+// because Doer.Do only ever sees an *http.Request, and the dial-time guard
+// runs inside http.Transport, several layers below anything that still has
+// the Hook value in hand.
+type allowPrivateTargetKey struct{}
+
+// withAllowPrivateTarget marks a request as belonging to a hook whose
+// operator deliberately opted into a private destination (Hook.AllowPrivateTarget),
+// so safeDialContext does not re-refuse what Validate already let through on
+// purpose.
+func withAllowPrivateTarget(ctx context.Context, allow bool) context.Context {
+	return context.WithValue(ctx, allowPrivateTargetKey{}, allow)
+}
+
+// safeDialContext is the SSRF guard's second and controlling half.
+//
+// Validate (hooks.go) catches a literal private IP at save time, but it
+// deliberately does not resolve a hostname -- DNS from inside a save request
+// is slow and flaky, and more importantly its answer is not binding: the same
+// name can resolve somewhere else by the time a delivery actually dials it.
+// That gap is DNS rebinding, and it is closed here rather than there, because
+// this is the only point that cannot be lied to by a stale answer -- it
+// resolves and dials in the same breath, and it dials the IP it just checked,
+// never the hostname a second time. Every delivery goes through this: it is
+// the http.Transport's DialContext on the default Doer, not a call site
+// somebody could forget.
+func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	if allow, _ := ctx.Value(allowPrivateTargetKey{}).(bool); allow {
+		return dialer.DialContext(ctx, network, addr)
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	var lastErr error
+	for _, a := range addrs {
+		if !isPublicAddr(a.IP) {
+			lastErr = fmt.Errorf("refusing to dial non-public address %s "+
+				"(hook has no allowPrivateTarget opt-in)", a.IP)
+			continue
+		}
+		conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(a.IP.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no addresses resolved for %s", host)
+	}
+	return nil, lastErr
+}
+
 // NewDispatcher builds a dispatcher. It does nothing until Run is called, which
 // is what lets main wire it before it has a context.
 func NewDispatcher(log *slog.Logger, src Source, opts ...Option) *Dispatcher {
 	d := &Dispatcher{
 		log:         log,
 		src:         src,
-		doer:        &http.Client{},
+		doer:        &http.Client{Transport: &http.Transport{DialContext: safeDialContext}},
 		now:         time.Now,
 		sleep:       sleepCtx,
 		reloadEvery: reloadEvery,
@@ -490,6 +551,7 @@ func (d *Dispatcher) deliver(ctx context.Context, w *worker, ev Event) {
 func (d *Dispatcher) attempt(ctx context.Context, h Hook, body []byte, env Envelope) (status int, snippet string, retry bool, err error) {
 	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(h.TimeoutSeconds)*time.Second)
 	defer cancel()
+	reqCtx = withAllowPrivateTarget(reqCtx, h.AllowPrivateTarget)
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, h.URL, bytes.NewReader(body))
 	if err != nil {

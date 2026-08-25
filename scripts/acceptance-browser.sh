@@ -18,6 +18,7 @@ set -uo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
+. "$SCRIPTS/lib-preflight.sh"
 
 IMAGE=polyemesis:browser
 CTR=poly-browser
@@ -31,8 +32,11 @@ cleanup() {
 trap cleanup EXIT
 cleanup
 
-command -v docker >/dev/null || { echo "docker not found"; exit 1; }
-docker info >/dev/null 2>&1 || { echo "docker daemon not running"; exit 1; }
+# poka-yoke: this suite's own header says "Requires: docker, node" but node
+# was never checked -- see lib-preflight.sh.
+poly_require_docker
+poly_require_cmd node "needed to run 'npx playwright'"
+poly_require_cmd npx "needed to run the playwright suite in ui/"
 
 printf "\n\033[1m1. Build and start the shipped image\033[0m\n"
 if ! docker build -t "$IMAGE" --build-arg VERSION=browser "$ROOT" >/tmp/poly-browser-build.log 2>&1; then
@@ -70,11 +74,8 @@ cd "$ROOT/ui" || exit 1
 # leave a four-character password that fails the eight-character floor, and the
 # suite would fail at sign-in rather than at the missing tool.
 if [ -z "${E2E_PASSWORD:-}" ]; then
-  command -v openssl >/dev/null 2>&1 || {
-    echo "openssl is needed to generate E2E_PASSWORD;" >&2
-    echo "export one yourself instead" >&2
-    exit 1
-  }
+  command -v openssl >/dev/null 2>&1 || \
+    poly_preflight_fail "openssl is needed to generate E2E_PASSWORD; export one yourself instead"
   E2E_PASSWORD="E2E-$(openssl rand -hex 16)"
 fi
 export E2E_PASSWORD

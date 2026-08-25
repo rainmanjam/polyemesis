@@ -26,6 +26,7 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPTS/lib-watchdog.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
+. "$SCRIPTS/lib-preflight.sh"
 
 pass=0; fail=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
@@ -35,8 +36,10 @@ step() { printf "\n\033[1m%s\033[0m\n" "$1"; poly_step_record "$1"; }
 cleanup() { poly_cleanup_exit "${1:-0}" "$PORT" "${WORK:-}"; }
 trap 'poly_teardown_trap $? cleanup' EXIT
 
-[ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
-command -v ffmpeg >/dev/null || { echo "ffmpeg is required"; exit 1; }
+# poka-yoke: the driver below runs via `go run` -- see lib-preflight.sh.
+poly_require_exec "$BIN"
+poly_require_cmd go "needed to run the acceptance driver via 'go run'"
+poly_require_cmd ffmpeg
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
 # Armed here rather than earlier: the watchdog is a separate process and
 # inherits this directory, which is where server.log will be written and where

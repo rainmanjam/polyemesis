@@ -44,6 +44,7 @@ export function ChatPage() {
     loading,
     stored,
     error,
+    frameError,
     reload,
     remove,
   } = useChatFeed();
@@ -111,6 +112,16 @@ export function ChatPage() {
               <Badge variant="warn">
                 <WifiOff className="h-3 w-3" />
                 socket offline
+              </Badge>
+            )}
+            {/* #13/#21: `connected` cannot say this -- the socket stays open
+                while a frame it delivered fails to parse and is dropped. */}
+            {frameError && (
+              <Badge
+                variant="warn"
+                title="A message from the server could not be understood and was dropped."
+              >
+                frame error
               </Badge>
             )}
             <Button variant="ghost" size="icon-sm" onClick={() => void reload()} aria-label={t("chatpage.reload")}>

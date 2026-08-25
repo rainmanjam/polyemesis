@@ -56,6 +56,7 @@ import (
 
 	"github.com/bluenviron/gortmplib"
 	"github.com/bluenviron/gortmplib/pkg/message"
+	"github.com/rainmanjam/polyemesis/internal/authgate"
 )
 
 // handshakeTimeout bounds how long a connection may take to get through the
@@ -178,6 +179,9 @@ type subscriber struct {
 	// wakes the goroutine but leaves the TCP connection to the departed FFmpeg
 	// open.
 	conn net.Conn
+	// closeOnce is what makes teardown idempotent; its zero value is ready, so
+	// a subscriber built as a literal is safe. See close.
+	closeOnce sync.Once
 }
 
 // watchPeer closes the subscriber when its socket does. Run as a goroutine for
@@ -215,17 +219,23 @@ func (sub *subscriber) watchPeer() {
 	}
 }
 
-// close wakes the subscriber and drops its socket. Safe to call twice: Stop and
-// the subscriber's own defer race on shutdown.
+// close wakes the subscriber and drops its socket. Callable any number of
+// times, from any goroutine, in any order.
+//
+// The guard is a sync.Once and not the select-on-done it used to be, because
+// `select { case <-done: default: close(done) }` is check-then-act, not atomic:
+// two of the three teardown paths -- watchPeer, serveSubscriber's defer, and
+// Server.Stop -- could both reach `default` before either closed, and the
+// second close panicked. Nothing in this package recovers, so that panic took
+// the daemon down and ended every live broadcast on the install at once, which
+// for a completed broadcast is unrecoverable. See #496.
 func (sub *subscriber) close() {
-	select {
-	case <-sub.done:
-	default:
+	sub.closeOnce.Do(func() {
 		close(sub.done)
-	}
-	if sub.conn != nil {
-		_ = sub.conn.Close()
-	}
+		if sub.conn != nil {
+			_ = sub.conn.Close()
+		}
+	})
 }
 
 // session is one live publisher.
@@ -255,6 +265,10 @@ type Server struct {
 	// for it. See subscriberChanged.
 	subChange chan struct{}
 	done      chan struct{}
+	// gate throttles a peer that has presented enough wrong stream keys to
+	// look like guessing. Shared with internal/srtserver -- see
+	// internal/authgate for why this is not forked per protocol.
+	gate *authgate.Gate
 }
 
 // New builds a server. It binds nothing until Start.
@@ -267,6 +281,7 @@ func New(log *slog.Logger, addr string, lookup Lookup) *Server {
 		streams: map[PublisherKey]*stream{},
 		waiters: map[PublisherKey]int{},
 		done:    make(chan struct{}),
+		gate:    authgate.New(),
 	}
 }
 
@@ -307,6 +322,11 @@ func (s *Server) acceptLoop(ln net.Listener) {
 // Stop closes the listener and every live session.
 func (s *Server) Stop() {
 	s.mu.Lock()
+	// The same check-then-act shape that panicked on subscribers (#496), and it
+	// is safe here only because s.mu is held across it and this is the only site
+	// that closes s.done. That invariant is load-bearing: move this guard out
+	// from under the lock, or add a second closer, and two Stops race into
+	// `default` and the second one panics the daemon.
 	select {
 	case <-s.done:
 	default:
@@ -377,6 +397,17 @@ func StreamKey(u *url.URL) string {
 func (s *Server) handle(conn net.Conn) {
 	peer := conn.RemoteAddr().String()
 	defer func() { _ = conn.Close() }()
+
+	// Checked before the handshake is even attempted, so a peer already
+	// blocked for guessing wrong keys does not get to spend a fresh handshake
+	// on every subsequent try. See internal/authgate for why this is scoped
+	// per peer rather than global.
+	host := authgate.PeerHost(conn.RemoteAddr())
+	if s.gate.Blocked(host) {
+		s.log.Debug("rtmp connect refused: peer is rate-limited after repeated wrong keys",
+			"component", "rtmp-ingest", "peer", peer)
+		return
+	}
 
 	_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
 
@@ -451,6 +482,14 @@ func (s *Server) handle(conn net.Conn) {
 			// source that does not exist have to be the same event, or the log
 			// becomes an oracle for whoever can read it.
 			s.log.Info("rtmp publish refused", "component", "rtmp-ingest", "peer", peer)
+			// Only an unrecognised key counts as a guess. A found-but-disabled
+			// or found-but-not-ready target already proved this caller holds a
+			// real credential, so neither of those branches reaches here. See
+			// internal/authgate.
+			if s.gate.Fail(host) {
+				s.log.Warn("rtmp: peer rate-limited after repeated wrong stream keys",
+					"component", "rtmp-ingest", "peer", peer)
+			}
 		} else {
 			// Past here the publisher has already proved it holds a valid key,
 			// so naming the reason leaks nothing it does not already know --
@@ -464,6 +503,9 @@ func (s *Server) handle(conn net.Conn) {
 		}
 		return
 	}
+	// A real key was just presented successfully; nothing this peer guessed
+	// wrong earlier should still count against it.
+	s.gate.Succeed(host)
 
 	// The handshake deadline must not survive into the session: a live stream
 	// is legitimately quiet between keyframes, and an unrenewed deadline would
@@ -485,14 +527,24 @@ const (
 
 func (v verdict) String() string {
 	switch v {
+	case admitPublish:
+		return "admitted"
 	case refuseDisabled:
 		return "source disabled"
 	case refuseNotReady:
 		return "no pipeline for source"
 	case refuseUnknownKey:
 		return "unrecognised"
+	default:
+		// Never falls through to "admitted". The old default did exactly
+		// that -- an unhandled value read as a successful publish on the log
+		// line that is the ONLY place a refusal reason is told apart (#14,
+		// poka-yoke audit) -- which is the one direction a refusal must never
+		// silently become. TestVerdictStringHasNoSilentAdmit and
+		// TestEveryVerdictConstantIsHandled keep this switch honest as the
+		// const block above it grows.
+		return fmt.Sprintf("BUG: unhandled verdict %d", int(v))
 	}
-	return "admitted"
 }
 
 // admit is the whole admission decision, separated from the connection so every

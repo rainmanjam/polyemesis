@@ -176,7 +176,10 @@ func TestOutboundHookPayloadCarriesNoStoredCredential(t *testing.T) {
 	// build failure waiting to happen.
 	const hookPath = "/receiver/marmalade"
 	created := createHook(t, h, sign, map[string]any{
+		// Local endpoint on purpose; takes the SSRF opt-in rather than
+		// weakening the guard. See poka-yoke audit #4.
 		"name": "ledger-egress", "url": endpoint.URL + hookPath,
+		"allowPrivateTarget": true,
 	})
 	id := int64(created["id"].(float64))
 	secret, _ := created["secret"].(string)
@@ -191,6 +194,9 @@ func TestOutboundHookPayloadCarriesNoStoredCredential(t *testing.T) {
 				ID: id, Name: "ledger-egress", Enabled: true,
 				URL: endpoint.URL + hookPath, Secret: secret,
 				MaxAttempts: 1, TimeoutSeconds: 5,
+				// Built directly rather than through the API, so it must carry
+				// the opt-in itself or safeDialContext refuses the dial.
+				AllowPrivateTarget: true,
 			}.Normalized()}, nil
 		}),
 		hooks.WithReloadInterval(5*time.Millisecond),

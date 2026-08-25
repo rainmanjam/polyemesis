@@ -17,6 +17,7 @@ set -uo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
+. "$SCRIPTS/lib-preflight.sh"
 DRIVER="$SCRIPTS/acceptance_docker_driver.go"
 
 IMAGE=polyemesis:multisource
@@ -87,7 +88,10 @@ rms() {
 }
 louder_than() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a+0 > b+0)}'; }
 
-docker info >/dev/null 2>&1 || { echo "docker daemon not running"; exit 1; }
+# poka-yoke: this suite's own header says "Requires: docker, go" but only the
+# daemon was ever checked, and only this late -- see lib-preflight.sh.
+poly_require_docker
+poly_require_cmd go "needed to run the acceptance driver via 'go run'"
 
 step "1. Image and container"
 docker build -t "$IMAGE" --build-arg VERSION=multisource "$ROOT" >/tmp/poly-ms-build.log 2>&1 \

@@ -18,7 +18,15 @@ set -uo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
+. "$SCRIPTS/lib-preflight.sh"
 DRIVER="$SCRIPTS/acceptance_docker_driver.go"
+
+# poka-yoke: this suite's own header says "Requires: docker (with a running
+# daemon), go" but nothing checked either -- a missing one used to surface
+# only much later, as an opaque `docker run`/`go run` failure mid-suite,
+# indistinguishable from a real defect. See lib-preflight.sh.
+poly_require_docker
+poly_require_cmd go "needed to run the acceptance driver via 'go run'"
 
 IMAGE=polyemesis:acceptance
 CTR=poly-acc

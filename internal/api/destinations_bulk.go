@@ -158,12 +158,76 @@ type bulkDestResult struct {
 	Message string `json:"message,omitempty"`
 }
 
+// bulkAction is which of the two things a bulk control does, and it exists so
+// that "start everything" and "stop everything" cannot be transposed by a typo.
+//
+// Finding #3, poka-yoke audit 2026-08-21: the two routes below were one bare
+// boolean apart --
+//
+//	func (s *Server) handleStartAllDestinations(...) { s.bulkSetDestinationsEnabled(w, r, true) }
+//	func (s *Server) handleStopAllDestinations(...)  { s.bulkSetDestinationsEnabled(w, r, false) }
+//
+// -- on the single most destructive operation in the system (see the file
+// header). A named type does not stop a future author writing the wrong
+// constant, but it stops the mistake THIS finding was about: swapping `true`
+// and `false`, or fat-fingering one to the other in a merge, produces a
+// compile-time-visible `bulkStop`/`bulkStart` at the call site instead of a
+// silent, unreadable boolean.
+type bulkAction int
+
+const (
+	bulkStop bulkAction = iota
+	bulkStart
+)
+
+// enabled is the bool applyDestinationEnabled and classifyBulkEffect still
+// take -- kept at the boundary between this type and the rest of the package,
+// so the transposition risk stays confined to the two one-line handlers above
+// it and does not spread through the file.
+func (a bulkAction) enabled() bool { return a == bulkStart }
+
 func (s *Server) handleStartAllDestinations(w http.ResponseWriter, r *http.Request) {
-	s.bulkSetDestinationsEnabled(w, r, true)
+	s.bulkSetDestinationsEnabled(w, r, bulkStart)
+}
+
+// bulkStopRequest is stop-all's only accepted body.
+type bulkStopRequest struct {
+	// Confirm is required. Finding #2, poka-yoke audit 2026-08-21: this route
+	// permanently ends every live YouTube broadcast on the install (see the
+	// file header) and its only gate used to be a dialog in the UI -- a
+	// confirmation an API caller, a script, or a replayed request never sees.
+	// Lifted from expert.go's PUT, which requires the same field for a
+	// strictly smaller hazard (an FFmpeg argument override). Deliberately NOT
+	// required on start-all: starting is recoverable by stopping again, but a
+	// completed YouTube broadcast cannot return to live (lifecycle.go:838), so
+	// only the irreversible half of this pair needs a caller to say they meant it.
+	Confirm bool `json:"confirm"`
 }
 
 func (s *Server) handleStopAllDestinations(w http.ResponseWriter, r *http.Request) {
-	s.bulkSetDestinationsEnabled(w, r, false)
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+	var req bulkStopRequest
+	// An absent body is a caller who sent no confirmation at all, not a
+	// malformed request -- decoding it anyway would answer "invalid request
+	// body: EOF" instead of the actual refusal, which is "you must confirm".
+	if len(body) > 0 {
+		if err := decodeJSONInto(body, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if !req.Confirm {
+		writeError(w, http.StatusBadRequest,
+			"stopping every destination ends any live YouTube broadcast on this install, "+
+				"permanently -- starting them again puts video back on the wire but does not "+
+				"bring the broadcast back. Repeat this request with a JSON body of "+
+				`{"confirm": true} once that is intended.`)
+		return
+	}
+	s.bulkSetDestinationsEnabled(w, r, bulkStop)
 }
 
 // bulkSetDestinationsEnabled starts or stops every destination, one at a time.
@@ -175,7 +239,8 @@ func (s *Server) handleStopAllDestinations(w http.ResponseWriter, r *http.Reques
 // than an acknowledgement they would have to go and verify. The caller's
 // context is honoured so a client that gives up stops the pacing rather than
 // driving the rest of the list at a browser nobody is reading.
-func (s *Server) bulkSetDestinationsEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
+func (s *Server) bulkSetDestinationsEnabled(w http.ResponseWriter, r *http.Request, action bulkAction) {
+	enabled := action.enabled()
 	rows, err := s.store.ListDestinations()
 	if err != nil {
 		writeStoreError(w, err)

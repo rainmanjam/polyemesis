@@ -12,6 +12,7 @@ import (
 
 	"github.com/bluenviron/gortmplib"
 	"github.com/bluenviron/gortmplib/pkg/message"
+	"github.com/rainmanjam/polyemesis/internal/authgate"
 	"time"
 )
 
@@ -417,6 +418,87 @@ func pubAndSub(t *testing.T, targets map[string]Target, pubKey, subKey string) b
 	}
 }
 
+// dialPublish runs a real RTMP publish handshake against addr with key, and
+// reports the error from it, if any.
+//
+// gortmplib's ServerConn.Accept completes the RTMP-level publish handshake
+// for ANY key, valid or not -- key validation is application logic that runs
+// only after Accept returns. So a nil error here does not mean the key was
+// accepted, only that the connection got that far; the caller has to close
+// the client. An error here does mean the connection was refused before or
+// during the handshake itself, which is what a peer blocked by authgate
+// looks like: handle returns without ever calling sc.Initialize.
+func dialPublish(t *testing.T, addr, key string) error {
+	t.Helper()
+	u, err := url.Parse("rtmp://" + addr + "/live/" + key)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	c := &gortmplib.Client{URL: u, Publish: true}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = c.Initialize(ctx)
+	if err == nil {
+		c.Close()
+	}
+	return err
+}
+
+// TestHandleRateLimitsPeerAfterRepeatedUnknownKeys is the network-level half
+// of the #19 poka-yoke fix, run against the real listener rather than the
+// gate in isolation: an unrecognised stream key must count against the
+// peer's authgate.Gate, and once that peer crosses the threshold, every
+// further connection from it -- even one presenting a key that would
+// otherwise be accepted -- must be refused before the RTMP handshake is even
+// attempted.
+func TestHandleRateLimitsPeerAfterRepeatedUnknownKeys(t *testing.T) {
+	target := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
+	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"good-key": target}))
+	if err := s.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer s.Stop()
+	s.mu.Lock()
+	addr := s.ln.Addr().String()
+	s.mu.Unlock()
+
+	// Enough wrong-key attempts from this one loopback peer to cross the
+	// gate's threshold. Each of these must still complete its own RTMP
+	// handshake -- Accept succeeds regardless of the key -- and only then get
+	// refused at the application layer, once the key fails lookup.
+	for i := 0; i < authgate.Threshold; i++ {
+		if err := dialPublish(t, addr, "wrong-key"); err != nil {
+			t.Fatalf("attempt %d: the RTMP handshake itself should still "+
+				"succeed for an unrecognised key -- refusal happens after, "+
+				"at the application layer -- got %v", i, err)
+		}
+	}
+
+	// WAIT FOR THE COUNT, do not assume it. dialPublish returns when the
+	// CLIENT's handshake completes; the server records the failure afterwards,
+	// at key lookup. Reading the gate immediately raced that: on a slower
+	// runner the fifth failure had not landed yet, the peer was not blocked,
+	// and the good key was admitted -- a flake in a test guarding a security
+	// control, which is the worst place to have one. Bounded well under
+	// authgate.Block so an actually-broken gate still fails rather than hangs.
+	deadline := time.Now().Add(2 * time.Second)
+	for !s.gate.Blocked("127.0.0.1") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the gate never blocked 127.0.0.1 after %d failed keys",
+				authgate.Threshold)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// The peer is now blocked. A further connection -- even one presenting
+	// the correct key -- must be refused before the handshake is even
+	// attempted, which surfaces here as the handshake itself failing.
+	if err := dialPublish(t, addr, "good-key"); err == nil {
+		t.Fatal("a peer that just crossed the gate's threshold was still " +
+			"able to complete a handshake with a valid key")
+	}
+}
+
 // The bug this package shipped with: the stream table was keyed by the STRING
 // the publisher typed, but a source has several valid keys at once — the
 // current token, the previous one during a rotation grace window, and any
@@ -757,5 +839,42 @@ func TestReconnectClearsTheSetupCacheConsistently(t *testing.T) {
 	if st.setup[0] == first {
 		t.Error("the reconnected session replayed the PREVIOUS encode's sequence header, " +
 			"which describes a stream that has ended")
+	}
+}
+
+// TestEveryVerdictConstantIsHandled pins the exact set of verdict constants
+// this switch is written against. A new constant added to the const block
+// without a case here is exactly the shape of change TestVerdictStringHasNoSilentAdmit
+// below cannot catch on its own (it only proves the DEFAULT case is safe, not
+// that every real constant still gets its own line) -- so this enumerates the
+// known set explicitly and both tests must be kept in sync with the const block.
+func TestEveryVerdictConstantIsHandled(t *testing.T) {
+	want := map[verdict]string{
+		admitPublish:     "admitted",
+		refuseUnknownKey: "unrecognised",
+		refuseDisabled:   "source disabled",
+		refuseNotReady:   "no pipeline for source",
+	}
+	for v, s := range want {
+		if got := v.String(); got != s {
+			t.Errorf("verdict(%d).String() = %q, want %q", int(v), got, s)
+		}
+	}
+}
+
+// TestVerdictStringHasNoSilentAdmit is the #14 poka-yoke audit fix. verdict.String
+// used to fall through an unhandled case to the hardcoded "admitted" -- so any
+// value the switch had not been taught about read as a successful publish on
+// the one log line that distinguishes a refusal's reason. A refusal must never
+// silently become "admitted" in the log an operator is reading to find out why
+// a publisher was turned away.
+func TestVerdictStringHasNoSilentAdmit(t *testing.T) {
+	unhandled := verdict(99)
+	if got := unhandled.String(); got == "admitted" {
+		t.Fatalf("verdict(99).String() = %q, want anything but the success "+
+			"string -- an unhandled verdict must not read as admitted", got)
+	} else if !strings.Contains(got, "BUG") {
+		t.Errorf("verdict(99).String() = %q, want it to visibly announce it is "+
+			"an unhandled case rather than looking like an ordinary refusal reason", got)
 	}
 }

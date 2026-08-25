@@ -27,6 +27,7 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPTS/lib-watchdog.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
+. "$SCRIPTS/lib-preflight.sh"
 
 # What the driver configured. Kept in step with acceptance_audio_driver.go.
 TARGET_LUFS=-14
@@ -45,7 +46,13 @@ cleanup() {
 }
 trap 'poly_teardown_trap $? cleanup' EXIT
 
-[ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
+# poka-yoke: the driver below runs via `go run`, and every measurement runs
+# ffmpeg/ffprobe against real output. Missing any of the three used to print
+# as ordinary FAILs -- see lib-preflight.sh.
+poly_require_exec "$BIN"
+poly_require_cmd go "needed to run the acceptance driver via 'go run'"
+poly_require_cmd ffmpeg
+poly_require_cmd ffprobe
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
 # Armed here rather than earlier: the watchdog is a separate process and
 # inherits this directory, which is where server.log will be written and where

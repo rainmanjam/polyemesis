@@ -99,7 +99,7 @@ export function AppLayout({
   username: string;
   onSignOut: () => void;
 }) {
-  const { status, connected } = useLiveData();
+  const { status, connected, frameError } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
   const location = useLocation();
@@ -218,6 +218,21 @@ export function AppLayout({
           {!connected && (
             <Badge variant="warn" title={t("chrome.socketOfflineHint")}>
               {t("chrome.socketOffline")}
+            </Badge>
+          )}
+          {/* #13/#21: a frame the socket delivered could not be parsed and was
+              dropped -- silently before this. `connected` cannot say it: the
+              socket stayed open. Plain English rather than a t() key, matching
+              ChatPage's own "socket offline" badge -- adding a key here means
+              adding it correctly translated to all sixteen locales, which
+              lib/i18n.test.ts enforces, and this is a rare fault path rather
+              than a string worth that cost today. */}
+          {frameError && (
+            <Badge
+              variant="warn"
+              title="A status update from the server could not be understood and was dropped. Numbers on this page may be stale."
+            >
+              frame error
             </Badge>
           )}
           <span className="hidden text-[11px] text-muted-foreground lg:inline">{username}</span>

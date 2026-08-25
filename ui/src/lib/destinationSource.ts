@@ -1,8 +1,8 @@
-import type { SourceView } from "@/lib/types";
+import { asSourceId, type SourceId, type SourceView } from "@/lib/types";
 
 /** A programme a destination can be attached to. */
 export interface SourceChoice {
-  id: number;
+  id: SourceId;
   name: string;
 }
 
@@ -40,7 +40,7 @@ export function sourceChoices(sources: readonly SourceView[]): SourceChoice[] {
  * empty and the save stays disabled until someone chooses.
  */
 export function initialSourceValue(
-  destination: { sourceId?: number | null } | null,
+  destination: { sourceId?: SourceId | null } | null,
   sources: readonly SourceChoice[],
 ): string {
   if (destination?.sourceId) return String(destination.sourceId);
@@ -68,8 +68,8 @@ export function sourceIsChosen(value: string, sources: readonly SourceChoice[]):
  * source, so a caller that reads null must not send -- which is what
  * sourceIsChosen gates, and this returning null is the second line of that.
  */
-export function sourceIdForSave(value: string, sources: readonly SourceChoice[]): number | null {
-  return sourceIsChosen(value, sources) ? Number(value) : null;
+export function sourceIdForSave(value: string, sources: readonly SourceChoice[]): SourceId | null {
+  return sourceIsChosen(value, sources) ? asSourceId(Number(value)) : null;
 }
 
 /**
@@ -85,8 +85,8 @@ export function sourceIdForSave(value: string, sources: readonly SourceChoice[])
  * destination whose programme has just been deleted loses its badge rather
  * than rendering "undefined".
  */
-export function sourceNameById(sources: readonly SourceView[]): Map<number, string> {
+export function sourceNameById(sources: readonly SourceView[]): Map<SourceId, string> {
   const choices = sourceChoices(sources);
-  if (choices.length < 2) return new Map<number, string>();
+  if (choices.length < 2) return new Map<SourceId, string>();
   return new Map(choices.map((c) => [c.id, c.name]));
 }

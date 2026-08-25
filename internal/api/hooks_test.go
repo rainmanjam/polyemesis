@@ -120,7 +120,10 @@ func TestUpdatingAHookWithTheMaskedURLKeepsTheRealOne(t *testing.T) {
 	defer endpoint.Close()
 
 	created := createHook(t, h, sign, map[string]any{
+		// httptest binds 127.0.0.1, refused by default since the SSRF guard
+		// (poka-yoke audit #4). Targeting it is the point of this fixture.
 		"name": "deploy", "url": endpoint.URL + secretPath,
+		"allowPrivateTarget": true,
 	})
 	id := int64(created["id"].(float64))
 	path := "/api/v1/hooks/" + strconv.FormatInt(id, 10)

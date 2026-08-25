@@ -61,6 +61,147 @@ env:
   PUBLISH: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
 
 jobs:
+  # RB-1: a tag push shares nothing with ci.yml. `needs:` only orders jobs
+  # WITHIN this workflow, and ci.yml triggers on push-to-main and pull_request
+  # -- a different trigger entirely, on a different SHA history. Before this
+  # job, `binaries:` had no `needs:` at all: the only thing standing between a
+  # red commit and a published release was someone remembering to check main
+  # was green before typing `git tag`. That is rung zero -- a bad release
+  # looks identical to a good one right up until someone runs the binary.
+  #
+  # This asks the platform directly, by commit SHA, rather than trusting
+  # branch protection: even if the required-checks list drifts, or the tag
+  # targets a commit that was never main's HEAD, a commit with no successful
+  # ci.yml run cannot publish. FAILS CLOSED -- an API error, a rate limit, an
+  # empty result all read as "not proven green" and block everything below.
+  ci-gate:
+    name: CI gate (fail closed)
+    runs-on: ubuntu-latest
+    permissions:
+      # Read-only: this job asks about other runs, it never touches them.
+      contents: read
+      actions: read
+    timeout-minutes: 5
+    steps:
+      - name: Require a successful ci.yml run for this commit before publishing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # A rehearsal (workflow_dispatch, dry_run=true) builds and publishes
+          # nothing -- see PUBLISH above -- so there is nothing here for this
+          # gate to protect. Gating it anyway would block rehearsing a branch
+          # that never had its own green ci.yml run, which is exactly the case
+          # the rehearsal exists to serve.
+          if [ "${PUBLISH}" != "true" ]; then
+            echo "Dry run: nothing will be published, skipping the CI gate."
+            exit 0
+          fi
+
+          echo "Looking for a successful ci.yml run against ${SHA}..."
+          runs_json=$(gh api \
+            "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=20") || {
+            echo "::error::Could not reach the Actions API to check CI status for ${SHA}. Refusing to publish an unverified release."
+            exit 1
+          }
+
+          successes=$(echo "${runs_json}" | jq '[.workflow_runs[]? | select(.status == "completed" and .conclusion == "success")] | length')
+
+          if [ "${successes:-0}" -lt 1 ]; then
+            echo "::error::No successful ci.yml run found for commit ${SHA}. A version tag must point at a commit that has passed CI. Refusing to publish."
+            exit 1
+          fi
+
+          echo "Found ${successes} successful ci.yml run(s) for ${SHA}. Proceeding."
+  # RB-5 (#499): CHANGELOG.md claimed 0.7.0 shipped -- a dated `## [0.7.0] —
+  # 2026-08-21` heading -- while no v0.7.0 tag existed anywhere: not in git,
+  # not on GitHub Releases, not on Docker Hub. Every install path therefore
+  # delivered 0.6.0, which lacks the seal-at-rest fix the heading described.
+  # An operator reading the changelog had no way to know the tag and the
+  # document had drifted apart.
+  #
+  # This closes the gap the other direction from ci-gate: that job proves the
+  # commit is safe to publish, this one proves the TAG BEING PUSHED is the
+  # release CHANGELOG.md actually describes. Same discipline -- FAILS CLOSED.
+  # An unparseable changelog, a missing dated heading, or a version mismatch
+  # all refuse the publish rather than guess which one is stale.
+  changelog-gate:
+    name: Tag / CHANGELOG agreement (fail closed)
+    runs-on: ubuntu-latest
+    permissions:
+      # Read-only: this job only reads CHANGELOG.md, it never writes anything.
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Require the pushed tag to match CHANGELOG.md's top dated heading
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+
+          # A workflow_dispatch rehearsal runs from a BRANCH, not a tag --
+          # REF_NAME is something like "docs/accuracy-pass", which was never
+          # going to match a "## [x.y.z] — date" heading and isn't claiming
+          # to. Nothing here would be published either way (see PUBLISH), so
+          # there is nothing for this gate to protect.
+          if [ "${REF_TYPE}" != "tag" ]; then
+            echo "Not a tag push (${REF_TYPE} '${REF_NAME}'); nothing to compare against CHANGELOG.md."
+            exit 0
+          fi
+
+          # v0.7.0 -> 0.7.0
+          tag_version="${REF_NAME#v}"
+
+          # THE FIRST VERSION HEADING OF ANY KIND, dated or not. "## [Unreleased]"
+          # carries no version and is skipped by the pattern; anything with a
+          # version number is not.
+          #
+          # Matching only DATED headings was a hole, found by simulating this
+          # gate against the real file before v0.7.0 was tagged. `## [0.7.0] —
+          # unreleased` is undated, so the pattern skipped straight past it to
+          # `## [0.6.0] — 2026-08-09` and answered with THAT. Two ways to be
+          # wrong: pushing v0.7.0 was refused with "does not match top dated
+          # heading (0.6.0)", which reads as "the changelog describes 0.6.0"
+          # and sends the operator to edit the wrong entry -- and re-pushing
+          # v0.6.0 was ACCEPTED, because 0.6.0's own heading answered for a
+          # release that had already shipped. A gate that skips the entry it is
+          # meant to be checking has an older one waiting to agree with it.
+          heading=$(grep -m1 -E '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md || true)
+
+          if [ -z "${heading}" ]; then
+            echo "::error::Could not find any '## [x.y.z]' heading in CHANGELOG.md. Refusing to publish ${REF_NAME}: an unparseable changelog cannot be verified to match the tag."
+            exit 1
+          fi
+
+          heading_version=$(echo "${heading}" | sed -E 's/^## \[([0-9]+\.[0-9]+\.[0-9]+)\].*/\1/')
+
+          if [ -z "${heading_version}" ]; then
+            echo "::error::Found a heading in CHANGELOG.md but could not extract a version from it: '${heading}'. Refusing to publish ${REF_NAME}."
+            exit 1
+          fi
+
+          if [ "${heading_version}" != "${tag_version}" ]; then
+            echo "::error::Tag ${REF_NAME} does not match CHANGELOG.md's top version heading (${heading_version}). Update CHANGELOG.md to describe ${tag_version}, or tag v${heading_version} instead. Refusing to publish."
+            exit 1
+          fi
+
+          # DATED, not just present. The heading is written undated while the
+          # release is being prepared, which is correct; it stops being correct
+          # the moment a tag claims that release has shipped. Naming the exact
+          # edit, because the previous message named the wrong entry entirely.
+          if ! echo "${heading}" | grep -qE '— [0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$'; then
+            echo "::error::CHANGELOG.md's ${heading_version} heading is not dated: '${heading}'. A tag says this release shipped, so date it before tagging -- change it to '## [${heading_version}] — $(date -u +%Y-%m-%d)' and push the tag again. Refusing to publish."
+            exit 1
+          fi
+
+          echo "Tag ${REF_NAME} matches CHANGELOG.md's top version heading (${heading_version}), and it is dated." 
+
   images:
     name: container images
     runs-on: ubuntu-latest
@@ -237,6 +378,14 @@ jobs:
   binaries:
     name: native binaries
     runs-on: ubuntu-latest
+    # BOTH gates, because they answer different questions and a release needs
+    # both answers. ci-gate (RB-1) asks whether the tagged COMMIT passed CI;
+    # changelog-gate (RB-5, #499) asks whether the TAG is the release
+    # CHANGELOG.md actually describes. A green commit tagged as the wrong
+    # version, and a correctly-named tag on a red commit, are both bad
+    # releases, and each gate is blind to the other's failure. `images`
+    # already needs `binaries`, so both publish paths are gated through here.
+    needs: [ci-gate, changelog-gate]
     permissions:
       # Creates the GitHub Release and uploads the assets. No packages: write —
       # this job pushes no images.

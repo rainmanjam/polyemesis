@@ -56,7 +56,10 @@ func TestPublicIngestURLIsCalledOnlyFromTheAllowlist(t *testing.T) {
 		}
 		if info.IsDir() {
 			switch info.Name() {
-			case ".git", "node_modules", "dist", "vendor", "web", "ui":
+			// .claude holds nested git worktrees. Walking them makes this
+			// guard report call sites from a DIFFERENT checkout -- a failure
+			// nobody can act on, which is how a guard gets ignored.
+			case ".git", ".claude", "node_modules", "dist", "vendor", "web", "ui":
 				return filepath.SkipDir
 			}
 			return nil

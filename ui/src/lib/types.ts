@@ -6,6 +6,29 @@
  *  as the fallback for code that renders before capabilities have loaded. */
 export const MAX_TRACKS = 32;
 
+// ------------------------------------------------------------------ ids
+//
+// A Source and a Destination are two independent per-programme entities,
+// told apart only by which endpoint an id is sent to -- the UI mirror of
+// #478/#479, where a Go handler took the same shape of mistake. Branding
+// makes `api.deleteDestination(sourceId)` a compile error instead of a row
+// deleted on the wrong table. Compile-time only, like every other field in
+// this file that is asserted onto server JSON with no runtime check.
+declare const SOURCE_ID: unique symbol;
+export type SourceId = number & { readonly [SOURCE_ID]: never };
+declare const DESTINATION_ID: unique symbol;
+export type DestinationId = number & { readonly [DESTINATION_ID]: never };
+
+/** Mint a branded id from a raw number at the one place it is freshly
+ *  parsed -- a Select's string value, a route param -- rather than carried
+ *  through from a server response that already has the brand. */
+export function asSourceId(n: number): SourceId {
+  return n as SourceId;
+}
+export function asDestinationId(n: number): DestinationId {
+  return n as DestinationId;
+}
+
 export type RoutingMode = "simple" | "matrix";
 export type NormalizeMode = "auto" | "off" | "limiter" | "loudnorm";
 
@@ -204,7 +227,7 @@ export type DestKind = "rtmp" | "srt" | "file";
 export type Platform = "custom" | "youtube" | "twitch" | "kick" | "facebook";
 
 export interface Destination {
-  id: number;
+  id: DestinationId;
   name: string;
   /** Optional muxer and socket tuning. Always present in a server response and
    *  empty for a destination that has not opted in. */
@@ -236,7 +259,7 @@ export interface Destination {
    *  used to pick the first for itself, which is how a destination could end up
    *  attached to a programme nobody chose. Optional in the type only because a
    *  response for a row written before sources existed may omit it. */
-  sourceId?: number | null;
+  sourceId?: SourceId | null;
   kind: DestKind;
   platform: Platform;
   accountId?: number | null;
@@ -704,7 +727,7 @@ export interface ProcessStatus {
 }
 
 export interface DestStatus {
-  id: number;
+  id: DestinationId;
   name: string;
   kind: DestKind;
   platform: Platform;
@@ -732,7 +755,7 @@ export interface DestStatus {
   /** The programme this destination carries. The dashboard lists every
    *  destination on the install in one grid, so without this two destinations
    *  called "Twitch" on different programmes are indistinguishable. */
-  sourceId?: number | null;
+  sourceId?: SourceId | null;
   /** The pre-announced scheduled Facebook broadcast, when one exists. */
   facebookBroadcastId?: string;
   /** The file a recording is actually being written to, when that is not the
@@ -1008,7 +1031,7 @@ export interface PullSettings {
  *  the other. Each source carries its own ingest, and owns its own
  *  destinations and renditions. */
 export interface Source {
-  id: number;
+  id: SourceId;
   name: string;
   enabled: boolean;
   /** Same shape as Settings.ingest, deliberately: one form serves both. */

@@ -180,7 +180,10 @@ func (h *History) Observe(p db.Platform, authorID, text string) []Finding {
 			Checker:        CheckerHistory,
 			Action:         h.limits.Action,
 			TimeoutSeconds: h.limits.TimeoutSeconds,
-			Reason:         reason,
+			// Every detector here is a flooding shape; the counted detail is
+			// the operator's, and stays in Reason. See finding.go, #495.
+			Category: CategoryFlood,
+			Reason:   reason,
 		})
 	}
 

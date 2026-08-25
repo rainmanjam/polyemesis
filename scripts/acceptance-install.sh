@@ -341,9 +341,16 @@ bash -n "$docker_dir/update.sh" \
 out="$(run_docker_update "$docker_dir" "$work/no-such-volume")"; st=$?
 check_refusal "a missing volume is refused" "$st" "$out" "no docker volume named"
 
+# Each case below is a FRESH scenario, not a rerun -- clear whatever the
+# previous case left behind so this test drives the volume/archive checks in
+# isolation from the same-minute collision guard, which gets its own case.
+rm -f "$docker_dir"/backup-*.tar.gz
+
 vol="$work/vol-empty"; mkdir -p "$vol"
 out="$(run_docker_update "$docker_dir" "$vol")"; st=$?
 check_refusal "an empty volume is refused" "$st" "$out" "archive is empty"
+
+rm -f "$docker_dir"/backup-*.tar.gz
 
 vol="$work/vol-nokey"; mkdir -p "$vol"
 printf 'sqlite\n' > "$vol/polyemesis.db"
@@ -353,6 +360,8 @@ case "$out" in
   *disabled*) ok "and it says what that costs: every destination back disabled" ;;
   *) bad "the docker secret.key refusal no longer explains the consequence" ;;
 esac
+
+rm -f "$docker_dir"/backup-*.tar.gz
 
 vol="$work/vol-ok"; mkdir -p "$vol"
 printf 'sqlite\n' > "$vol/polyemesis.db"
@@ -369,12 +378,219 @@ case "$out" in
   *) bad "the happy path never reached \`compose pull\`" ;;
 esac
 
-# NOT ASSERTED, and named so it is not mistaken for covered: a second docker
-# run inside the same minute writes backup-STAMP.tar.gz again, and tar
-# TRUNCATES. The binary branch refuses that collision; this one overwrites the
-# pre-upgrade backup with whatever the half-migrated volume holds now, which is
-# the exact moment an operator has least to spare. Fixing it is a change to
-# install.sh, not to this suite.
+step "9. A second docker update in the same minute does not overwrite the backup"
+# Same stamp, same dest -- tar czf would otherwise TRUNCATE the archive from
+# the happy-path run above, replacing the pre-upgrade backup with whatever the
+# half-migrated volume holds now, at the exact moment an operator has least to
+# spare. The archive from the "both files" case above is still on disk here.
+before="$(find "$docker_dir" -maxdepth 1 -name 'backup-*.tar.gz' | sort)"
+before_sum="$(cat "$docker_dir"/backup-*.tar.gz | cksum)"
+out2="$(run_docker_update "$docker_dir" "$vol")"; st2=$?
+check_refusal "a same-minute rerun is refused" "$st2" "$out2" "already exists"
+after="$(find "$docker_dir" -maxdepth 1 -name 'backup-*.tar.gz' | sort)"
+after_sum="$(cat "$docker_dir"/backup-*.tar.gz | cksum)"
+if [ "$before" = "$after" ] && [ "$before_sum" = "$after_sum" ]; then
+  ok "and the existing backup was left byte-for-byte intact"
+else
+  bad "the existing backup changed even though the rerun was refused"
+fi
+
+# ------------------------------------------------------ DATA_DIR validation
+#
+# validate_data_dir is the guard in front of `chown -R "$RUN_USER:$RUN_USER"
+# "$DATA_DIR"` -- the one operator-supplied value that reaches it, via the
+# "Data directory" prompt in binary mode. Each case below runs in its own
+# subshell so a `die` in validate_data_dir (which exits) only ends that
+# subshell, not this whole suite.
+
+step "10. validate_data_dir refuses what would make chown -R a filesystem-wide mistake"
+
+check_data_dir() { # check_data_dir <desc> <value> <accept|reject> [message substring]
+  local desc="$1" val="$2" want="$3" substr="${4:-}" out st
+  out="$( ( load_install_defs || exit 2
+            validate_data_dir "$val" RESULT || exit 1
+            printf '%s' "$RESULT" ) 2>&1 )"
+  st=$?
+  if [ "$want" = accept ]; then
+    if [ "$st" -eq 0 ]; then ok "$desc (-> $out)"
+    else bad "$desc: expected acceptance, got exit $st: $out"; fi
+    return
+  fi
+  if [ "$st" -eq 0 ]; then
+    bad "$desc: expected a refusal, but it was accepted (-> $out)"
+    return
+  fi
+  case "$out" in
+    *"$substr"*) ok "$desc" ;;
+    *) bad "$desc: refused, but the message doesn't mention \"$substr\": $out" ;;
+  esac
+}
+
+check_data_dir "an empty value is refused"                 ""                       reject "empty"
+check_data_dir "a relative path is refused"                "var/lib/polyemesis"     reject "absolute"
+check_data_dir "'/' is refused"                             "/"                      reject "entire filesystem"
+check_data_dir "a top-level system directory is refused"    "/usr"                   reject "top-level system directory"
+check_data_dir "a '..' component is refused"                "/var/lib/../../etc"     reject "component"
+check_data_dir "an ordinary nested path is accepted"         "/srv/polyemesis-data"   accept
+
+if grep -q 'validate_data_dir "\$DATA_DIR" DATA_DIR' "$INSTALL"; then
+  ok "gather_configuration actually calls the guard after the Data directory prompt"
+else
+  bad "the Data directory prompt no longer calls validate_data_dir — the check above is now testing dead code"
+fi
+
+# --------------------------------------------------------- config preservation
+#
+# preserve_existing runs immediately before each `} > file` that would
+# otherwise truncate a config.yaml (or docker-compose.yml) a re-run might be
+# overwriting. It must never touch the file about to be overwritten, must
+# snapshot what was there, and must never let a second snapshot destroy the
+# first.
+
+step "11. preserve_existing snapshots instead of silently losing an edited config"
+
+WORK_PRESERVE="$work/preserve"; mkdir -p "$WORK_PRESERVE"
+(
+  load_install_defs || exit 1
+  d="$WORK_PRESERVE"
+  f="$d/config.yaml"
+  printf 'dataDir: "/first"\n' > "$f"
+
+  preserve_existing "$f" >/dev/null
+  preserve_existing "$f" >/dev/null   # same-second rerun, on purpose
+
+  [ -f "$f" ] && grep -q '/first' "$f" && echo ORIGINAL_OK || echo ORIGINAL_CHANGED
+  n="$(find "$d" -maxdepth 1 -name 'config.yaml.bak-*' | wc -l | tr -d ' ')"
+  echo "BACKUP_COUNT=$n"
+  bad_backup=0
+  for b in "$d"/config.yaml.bak-*; do
+    grep -q '/first' "$b" || bad_backup=1
+  done
+  [ "$bad_backup" -eq 0 ] && echo BACKUP_CONTENT_OK || echo BACKUP_CONTENT_BAD
+
+  np="$d/does-not-exist.yaml"
+  preserve_existing "$np" && echo NOOP_OK || echo NOOP_BAD
+  n2="$(find "$d" -maxdepth 1 -name 'does-not-exist.yaml.bak-*' | wc -l | tr -d ' ')"
+  echo "NOOP_BACKUPS=$n2"
+) > "$WORK_PRESERVE.out" 2>&1
+
+out="$(cat "$WORK_PRESERVE.out")"
+case "$out" in
+  *ORIGINAL_OK*) ok "the file about to be overwritten is untouched by preserve_existing itself" ;;
+  *) bad "preserve_existing modified the file it was supposed to be snapshotting: $out" ;;
+esac
+n="$(printf '%s\n' "$out" | sed -n 's/^BACKUP_COUNT=//p')"
+if [ "${n:-0}" -ge 2 ]; then
+  ok "two calls produced two snapshots, not one overwritten by the other ($n found)"
+else
+  bad "expected at least 2 snapshots after two calls, found ${n:-0}: $out"
+fi
+case "$out" in
+  *BACKUP_CONTENT_OK*) ok "every snapshot holds the pre-overwrite content" ;;
+  *) bad "a snapshot's content is wrong: $out" ;;
+esac
+case "$out" in
+  *NOOP_OK*) ok "a file that does not exist yet is left alone (nothing to preserve on a first install)" ;;
+  *) bad "preserve_existing failed on a nonexistent path, which install.sh always calls it with once: $out" ;;
+esac
+n2="$(printf '%s\n' "$out" | sed -n 's/^NOOP_BACKUPS=//p')"
+[ "${n2:-1}" = 0 ] \
+  && ok "and it created no backup for a file that was never there" \
+  || bad "it created a backup for a file that does not exist: $out"
+
+for site in \
+  'preserve_existing "$INSTALL_DIR/config.yaml"' \
+  'preserve_existing "$INSTALL_DIR/docker-compose.yml"' \
+  'preserve_existing "$CONFIG_DIR/config.yaml"'
+do
+  if grep -qF "$site" "$INSTALL"; then
+    ok "call site present: $site"
+  else
+    bad "missing call site, config could be silently overwritten: $site"
+  fi
+done
+
+step "12. The generated uninstaller refuses before it can end a broadcast"
+
+# EVERY PATH HERE USES TEMP DIRECTORIES. An earlier hand-test of this script ran
+# the generated uninstaller with --force against the real /usr/local/bin and
+# /etc/polyemesis; it happened to be a machine with no install, which is luck
+# rather than a test design. A suite that can uninstall the host it runs on is
+# not a suite.
+WORK_UNINST="$work/uninst"; mkdir -p "$WORK_UNINST/out" "$WORK_UNINST/bin"
+printf '#!/bin/sh\necho 0\n' > "$WORK_UNINST/bin/id"; chmod +x "$WORK_UNINST/bin/id"
+
+(
+  load_install_defs || exit 1
+  INSTALL_DIR="$WORK_UNINST/out"
+  SERVICE_NAME="polyemesis"
+  BIN_PATH="$WORK_UNINST/fake-bin"
+  CONFIG_DIR="$WORK_UNINST/fake-cfg"
+  DATA_DIR="$WORK_UNINST/fake-data"
+  write_binary_uninstall_script >/dev/null 2>&1
+) || bad "could not generate the uninstaller"
+
+U="$WORK_UNINST/out/uninstall.sh"
+if [ -f "$U" ]; then
+  bash -n "$U" && ok "the generated uninstaller is syntactically valid" \
+                || bad "the generated uninstaller does not parse"
+
+  # The escaping is the thing that breaks: a runtime variable expanded at
+  # GENERATION time bakes one install's paths into every copy.
+  if grep -q 'SERVICE_NAME="polyemesis"' "$U" && grep -q '"\$SERVICE_NAME"' "$U"; then
+    ok "install-time values are baked in and runtime references survive"
+  else
+    bad "heredoc escaping is wrong: check \$ vs \\\$ in write_binary_uninstall_script"
+  fi
+
+  bash "$U" --wat >/dev/null 2>&1
+  [ "$?" = 2 ] && ok "an unknown option is refused" || bad "an unknown option was accepted"
+
+  # id is STUBBED to a non-zero uid rather than relying on who runs this. CI
+  # runs as root, so the unstubbed version passed the root check, failed later
+  # for an unrelated reason, and reported "a non-root run was not refused" --
+  # a test whose answer depended on its environment rather than on the code.
+  printf '#!/bin/sh\necho 1000\n' > "$WORK_UNINST/bin/id"; chmod +x "$WORK_UNINST/bin/id"
+  out="$(PATH="$WORK_UNINST/bin:$PATH" bash "$U" 2>&1)"; rc=$?
+  if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q 'must run as root'; then
+    ok "a non-root run is refused before the first mutation"
+  else
+    bad "a non-root run was not refused (rc=$rc)"
+  fi
+  printf '#!/bin/sh\necho 0\n' > "$WORK_UNINST/bin/id"; chmod +x "$WORK_UNINST/bin/id"
+
+  # No terminal to confirm on must REFUSE, not assume. An unattended job that
+  # inherits this script must not be able to uninstall a broadcast server.
+  out="$(PATH="$WORK_UNINST/bin:$PATH" bash "$U" </dev/null 2>&1)"; rc=$?
+  if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q 'No terminal to confirm on'; then
+    ok "with no terminal to confirm on, it refuses rather than assuming"
+  else
+    bad "a run with no terminal was not refused (rc=$rc): $out"
+  fi
+
+  # --remove-data must refuse a path that would take the system with it, and
+  # must still work for a real one -- a guard that refuses everything passes
+  # every negative case and is useless.
+  for badpath in "" "/" "/usr" "relative/path"; do
+    sed "s|^DATA_DIR=.*|DATA_DIR=\"$badpath\"|" "$U" > "$WORK_UNINST/g.sh"
+    out="$(PATH="$WORK_UNINST/bin:$PATH" bash "$WORK_UNINST/g.sh" --remove-data --force 2>&1)"; rc=$?
+    if [ "$rc" != 0 ] && printf '%s' "$out" | grep -qi refus; then
+      ok "--remove-data refuses DATA_DIR='$badpath'"
+    else
+      bad "--remove-data accepted DATA_DIR='$badpath' (rc=$rc)"
+    fi
+  done
+
+  mkdir -p "$WORK_UNINST/fake-data"; : > "$WORK_UNINST/fake-data/marker"
+  out="$(PATH="$WORK_UNINST/bin:$PATH" bash "$U" --remove-data --force 2>&1)"; rc=$?
+  if [ "$rc" = 0 ] && [ ! -e "$WORK_UNINST/fake-data" ]; then
+    ok "--remove-data deletes a legitimate data directory"
+  else
+    bad "--remove-data did not delete a legitimate data directory (rc=$rc)"
+  fi
+else
+  bad "no uninstaller was generated"
+fi
 
 printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"
 [ "$fail" -eq 0 ] || { printf "\n  \033[31mINSTALLER ACCEPTANCE FAILED\033[0m\n"; exit 1; }

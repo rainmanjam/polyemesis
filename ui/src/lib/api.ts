@@ -18,6 +18,7 @@ import type {
   ChatUserCard,
   CredentialCheck,
   Destination,
+  DestinationId,
   DeviceAuth,
   DevicePoll,
   DiskUsage,
@@ -64,6 +65,7 @@ import type {
   Settings,
   SetupGuide,
   Source,
+  SourceId,
   SourceInfo,
   SourceView,
   Status,
@@ -201,6 +203,24 @@ const del = <T,>(p: string) => request<T>(p, { method: "DELETE" });
  *  the only handles a player page has on those requests. */
 function tokenQuery(token?: string): string {
   return token ? `?t=${encodeURIComponent(token)}` : "";
+}
+
+/** `?source=<id>` — WHICH PROGRAMME a request is for.
+ *
+ *  Issue #497: a handful of routes resolved their engine through the server's
+ *  DEFAULT one, which is the right answer only on an install with a single
+ *  source. Editing a track label while looking at programme 2 therefore
+ *  rewrote programme 1's ingest and restarted its live destinations, with no
+ *  click and no confirmation — a 500 ms debounce fired it.
+ *
+ *  The server now refuses these routes without an id whenever the install runs
+ *  more than one programme, so an omitted argument here fails loudly on the
+ *  installs where it would have been wrong and changes nothing on the ones
+ *  where it cannot be. Optional in the type for exactly that reason: a
+ *  destination row written before sources existed carries no `sourceId`, and
+ *  guessing one on its behalf is the bug this parameter exists to end. */
+function sourceQuery(sourceId?: number | null): string {
+  return sourceId == null ? "" : `?source=${encodeURIComponent(String(sourceId))}`;
 }
 
 export interface DestinationWithRouting {
@@ -422,7 +442,7 @@ export const api = {
 
   // --- destinations ---
   listDestinations: () => get<DestinationWithRouting[]>("/destinations"),
-  getDestination: (id: number) =>
+  getDestination: (id: DestinationId) =>
     get<DestinationWithRouting>(`/destinations/${id}`),
   /**
    * `warnings` names any platform-specific settings the server dropped because
@@ -431,17 +451,17 @@ export const api = {
    */
   createDestination: (d: Partial<Destination>) =>
     post<{ destination: Destination; warnings?: string[] }>("/destinations", d),
-  updateDestination: (id: number, d: Partial<Destination>) =>
+  updateDestination: (id: DestinationId, d: Partial<Destination>) =>
     put<DestinationWithRouting & { warnings?: string[] }>(`/destinations/${id}`, d),
-  deleteDestination: (id: number) => del<{ status: string }>(`/destinations/${id}`),
+  deleteDestination: (id: DestinationId) => del<{ status: string }>(`/destinations/${id}`),
   /** Display order only — the server does not restart anything for this. */
-  reorderDestinations: (ids: number[]) =>
-    put<{ ids: number[] }>("/destinations/order", { ids }),
-  startDestination: (id: number) =>
+  reorderDestinations: (ids: DestinationId[]) =>
+    put<{ ids: DestinationId[] }>("/destinations/order", { ids }),
+  startDestination: (id: DestinationId) =>
     post<{ enabled: boolean }>(`/destinations/${id}/start`),
-  stopDestination: (id: number) =>
+  stopDestination: (id: DestinationId) =>
     post<{ enabled: boolean }>(`/destinations/${id}/stop`),
-  restartDestination: (id: number) =>
+  restartDestination: (id: DestinationId) =>
     post<{ status: string }>(`/destinations/${id}/restart`),
 
   /* --- every destination at once ----------------------------------------
@@ -461,8 +481,14 @@ export const api = {
    *  puts video back on the wire; it does not bring the broadcasts back. See
    *  internal/api/destinations_bulk.go. */
   startAllDestinations: () => post<BulkDestReport>("/destinations/start-all"),
-  stopAllDestinations: () => post<BulkDestReport>("/destinations/stop-all"),
-  refreshStreamKey: (id: number) =>
+  /** Stop every destination. Carries `confirm` because the server refuses this
+   *  route without it: it ends every live broadcast on the install, and a
+   *  broadcast that has ended cannot be resumed. The dialog in front of this
+   *  call is what the flag attests to -- the server cannot see that dialog, so
+   *  a caller that never showed one is exactly who the refusal is for. */
+  stopAllDestinations: () =>
+    post<BulkDestReport>("/destinations/stop-all", { confirm: true }),
+  refreshStreamKey: (id: DestinationId) =>
     post<{ destination: Destination }>(`/destinations/${id}/refresh-key`),
 
   /* --- Facebook broadcast lifecycle -------------------------------------
@@ -502,13 +528,13 @@ export const api = {
    */
   /** Ends the destination's Facebook live video. See the block above: the
    *  route is not implemented server-side yet. */
-  endFacebookBroadcast: (id: number) =>
+  endFacebookBroadcast: (id: DestinationId) =>
     post<BroadcastEnd>(`/destinations/${id}/facebook/end-broadcast`),
   /** Reads Facebook's view of the encoder feed. Callers must not poll faster
    *  than FACEBOOK_STREAM_HEALTH_INTERVAL_MS — that is Facebook's published
    *  floor, quoted beside the constant in types.ts. See the block above: the
    *  route is not implemented server-side yet. */
-  facebookStreamHealth: (id: number) =>
+  facebookStreamHealth: (id: DestinationId) =>
     get<StreamHealthView>(`/destinations/${id}/facebook/stream-health`),
 
   // --- debug mode ---
@@ -558,12 +584,12 @@ export const api = {
   // act on the default source, which is what keeps every other page working
   // without knowing sources exist.
   listSources: () => get<SourceView[]>("/sources"),
-  getSource: (id: number) => get<SourceView>(`/sources/${id}`),
+  getSource: (id: SourceId) => get<SourceView>(`/sources/${id}`),
   createSource: (s: Partial<Source>) => post<SourceView>("/sources", s),
-  updateSource: (id: number, s: Partial<Source>) =>
+  updateSource: (id: SourceId, s: Partial<Source>) =>
     put<SourceView>(`/sources/${id}`, s),
-  deleteSource: (id: number) => del<void>(`/sources/${id}`),
-  rotateSourceToken: (id: number) =>
+  deleteSource: (id: SourceId) => del<void>(`/sources/${id}`),
+  rotateSourceToken: (id: SourceId) =>
     post<SourceView>(`/sources/${id}/token`),
 
   // --- renditions ---
@@ -631,16 +657,16 @@ export const api = {
   /** Compiles against the engine's live source layout, which is what makes the
    *  filter string under the editor honest: it comes from the same Go code
    *  that will run, not from a TypeScript reimplementation. */
-  compileRouting: (profile: RoutingProfile) =>
+  compileRouting: (profile: RoutingProfile, sourceId?: number | null) =>
     post<{ routing: RoutingResult; profile: RoutingProfile }>(
-      "/routing/compile",
+      "/routing/compile" + sourceQuery(sourceId),
       { profile },
     ),
   listPresets: () =>
     get<{ presets: Preset[]; defaults: PresetOpts }>("/routing/presets"),
-  applyPreset: (id: string, opts: PresetOpts) =>
+  applyPreset: (id: string, opts: PresetOpts, sourceId?: number | null) =>
     post<{ profile: RoutingProfile; routing: RoutingResult }>(
-      `/routing/presets/${encodeURIComponent(id)}`,
+      `/routing/presets/${encodeURIComponent(id)}` + sourceQuery(sourceId),
       opts,
     ),
 
@@ -653,11 +679,17 @@ export const api = {
    *  A server that predates the feature has no route here and answers 404. The
    *  routing editor treats that as "not stored yet" and keeps editing locally
    *  rather than refusing the whole page: a missing endpoint is not a reason to
-   *  take the mixer away. */
-  putAnnotations: (annotations: TrackAnnotation[]) =>
-    put<{ annotations: TrackAnnotation[] | null }>("/source/annotations", {
-      annotations,
-    }),
+   *  take the mixer away.
+   *
+   *  `sourceId` is WHICH programme's tracks these describe, and it is not
+   *  optional in spirit — see sourceQuery and #497. This write restarts the
+   *  live destinations whose graph it changes, so an unscoped one restarted a
+   *  programme the operator was not looking at. */
+  putAnnotations: (annotations: TrackAnnotation[], sourceId?: number | null) =>
+    put<{ annotations: TrackAnnotation[] | null }>(
+      "/source/annotations" + sourceQuery(sourceId),
+      { annotations },
+    ),
 
   // --- recordings ---
   listRecordings: () => get<Recording[]>("/recordings"),
@@ -708,24 +740,30 @@ export const api = {
     "/playout/master.m3u8" + tokenQuery(token),
 
   // --- monitoring ---
-  listProcesses: () => get<ProcessInfo[]>("/processes"),
-  processLogs: (name: string) =>
+  /** Every process is called `ingest`, `recorder`, `preview` or `meters` in
+   *  EVERY engine — the name says what the child does, not which programme it
+   *  does it for — so without `sourceId` a multi-source install served
+   *  programme 1's FFmpeg log for a question about programme 2 (#497). The
+   *  server now refuses instead of answering for the wrong one. */
+  listProcesses: (sourceId?: number | null) =>
+    get<ProcessInfo[]>("/processes" + sourceQuery(sourceId)),
+  processLogs: (name: string, sourceId?: number | null) =>
     get<{ name: string; command: string; lines: LogLine[] | null }>(
-      `/processes/${encodeURIComponent(name)}/logs`,
+      `/processes/${encodeURIComponent(name)}/logs` + sourceQuery(sourceId),
     ),
 
   // --- expert mode ---
   //
   // Preview and dry-run are POSTs because they carry a candidate edit in the
   // body, not because they change anything: neither writes.
-  getExpert: (id: number) => get<ExpertResponse>(`/destinations/${id}/expert`),
-  previewExpert: (id: number, args: ExpertArgs) =>
+  getExpert: (id: DestinationId) => get<ExpertResponse>(`/destinations/${id}/expert`),
+  previewExpert: (id: DestinationId, args: ExpertArgs) =>
     post<ExpertResponse>(`/destinations/${id}/expert/preview`, args),
-  dryRunExpert: (id: number, args: ExpertArgs) =>
+  dryRunExpert: (id: DestinationId, args: ExpertArgs) =>
     post<DryRunResult>(`/destinations/${id}/expert/dry-run`, args),
-  putExpert: (id: number, args: ExpertArgs & { confirm: boolean }) =>
+  putExpert: (id: DestinationId, args: ExpertArgs & { confirm: boolean }) =>
     put<ExpertResponse>(`/destinations/${id}/expert`, args),
-  deleteExpert: (id: number) => del<ExpertResponse>(`/destinations/${id}/expert`),
+  deleteExpert: (id: DestinationId) => del<ExpertResponse>(`/destinations/${id}/expert`),
 
   // --- background jobs ---
   //

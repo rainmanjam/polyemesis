@@ -239,9 +239,14 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 		})
 	}
 	for _, f := range v.Findings {
+		// modelNote is the model's own prose and is LABELLED as such, because
+		// the model was handed a viewer's message and anything here may be that
+		// viewer's words. It is logged and goes no further: it is `json:"-"` on
+		// the Finding and PlatformReason cannot reach it. #495.
 		h.log.Info("automod model finding",
 			"platform", job.platform, "action", f.Action,
-			"confidence", f.Confidence, "reason", f.Reason)
+			"confidence", f.Confidence, "category", f.Category,
+			"reason", f.Reason, "modelNote", f.Note)
 	}
 }
 
@@ -263,6 +268,17 @@ func (h *Hub) performAutomod(ctx context.Context, s *automodState, job automodJo
 	// generation also abandons an action already in flight.
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+
+	// PlatformReason, NEVER finding.Reason.
+	//
+	// Twitch and Kick both POST the ban reason under the broadcaster's
+	// credential onto a moderation record that is PERMANENT and attributed to
+	// them. This used to be the model checker's own prose, which meant a viewer
+	// whose message steered the model wrote text of their choosing onto it, and
+	// the operator's system-prompt instruction could come back out the same
+	// field. PlatformReason is a pure function of the closed Category set, so
+	// there is no free-text field left for anything to travel in. #495.
+	reason := job.finding.PlatformReason()
 
 	var err error
 	switch job.finding.Action {
@@ -287,10 +303,10 @@ func (h *Hub) performAutomod(ctx context.Context, s *automodState, job automodJo
 		// Compile now refuses to create such a rule; this is what protects the
 		// ones already stored, which no validation change can reach.
 		err = h.Ban(ctx, job.platform, job.account, job.authorID,
-			automod.TimeoutDuration(job.finding.TimeoutSeconds), job.finding.Reason)
+			automod.TimeoutDuration(job.finding.TimeoutSeconds), reason)
 	case automod.ActionBan:
 		// Zero duration is a permanent ban, same as the moderator UI sends.
-		err = h.Ban(ctx, job.platform, job.account, job.authorID, 0, job.finding.Reason)
+		err = h.Ban(ctx, job.platform, job.account, job.authorID, 0, reason)
 	default:
 		h.log.Warn("automod asked for an action this build does not know",
 			"action", job.finding.Action)
@@ -304,9 +320,13 @@ func (h *Hub) performAutomod(ctx context.Context, s *automodState, job automodJo
 			"platform", job.platform, "action", job.finding.Action, "err", err)
 		return
 	}
+	// Both: what the operator's own record says, and what the platform was
+	// actually told. They differ by design now, and an audit that showed only
+	// one of them could not answer either question.
 	h.log.Info("automod acted",
 		"platform", job.platform, "action", job.finding.Action,
-		"checker", job.finding.Checker, "reason", job.finding.Reason)
+		"checker", job.finding.Checker, "category", job.finding.Category,
+		"reason", job.finding.Reason, "sentReason", reason)
 }
 
 // ModelStats reports the live engine's spend, or a zero value with none wired.

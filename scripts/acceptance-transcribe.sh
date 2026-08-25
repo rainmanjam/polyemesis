@@ -97,6 +97,15 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 DRIVER="$ROOT/scripts/acceptance_transcribe_driver.go"
 
+# poka-yoke: this suite's own `drive` is nothing but `go run`, and steps 8-10
+# build fixtures with ffmpeg directly. Without this, a host missing either
+# gets its error text parsed as driver/ffprobe output and reports an
+# ordinary-looking 0 passed / N failed -- see lib-preflight.sh for the
+# incident that found this.
+. "$SCRIPTS/lib-preflight.sh"
+poly_require_cmd go "needed to run the acceptance driver via 'go run'"
+poly_require_cmd ffmpeg "needed to build the fixture recordings"
+
 cd "$ROOT" || exit 1
 
 pass=0; fail=0; skip=0

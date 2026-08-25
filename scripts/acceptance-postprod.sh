@@ -34,6 +34,7 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPTS/lib-watchdog.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
+. "$SCRIPTS/lib-preflight.sh"
 
 pass=0; fail=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
@@ -48,7 +49,13 @@ cleanup() {
 }
 trap 'poly_teardown_trap $? cleanup' EXIT
 
-[ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
+# poka-yoke: start_server polls with curl, the governor driver runs via
+# `go run`, and the heavy job it measures is real ffmpeg proxy generation
+# (see this file's header) -- see lib-preflight.sh.
+poly_require_exec "$BIN"
+poly_require_cmd go "needed to run the acceptance driver via 'go run'"
+poly_require_cmd curl "used to poll the server's health endpoint"
+poly_require_cmd ffmpeg "the governor's heavy job is real ffmpeg proxy generation"
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
 # Armed here rather than earlier: the watchdog is a separate process and
 # inherits this directory, which is where server.log will be written and where

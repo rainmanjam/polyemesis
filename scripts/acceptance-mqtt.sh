@@ -48,6 +48,7 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPTS/lib-observe.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
+. "$SCRIPTS/lib-preflight.sh"
 DRIVER="$ROOT/scripts/acceptance_mqtt_driver.go"
 API="http://127.0.0.1:$PORT"
 
@@ -63,9 +64,9 @@ cleanup() {
 }
 trap 'poly_teardown_trap $? cleanup' EXIT
 
-[ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
-command -v go >/dev/null || { echo "go is required to run the driver"; exit 1; }
-command -v docker >/dev/null || { echo "docker is required: the broker runs as a container so no host install is needed"; exit 1; }
+poly_require_exec "$BIN"
+poly_require_cmd go "needed to run the driver via 'go run'"
+poly_require_docker "the broker runs as a container so no host install is needed"
 
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
 # Armed here rather than earlier: the watchdog is a separate process and

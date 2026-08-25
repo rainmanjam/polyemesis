@@ -347,6 +347,22 @@ func main() {
 	facts["RATE_TOTAL_A0"] = f2(a0.totalRate())
 	facts["RATE_TOTAL_A1"] = f2(a1.totalRate())
 
+	// PER TIER, BOTH WINDOWS, so the shell can measure the shared rung against
+	// the ones nothing was added to.
+	//
+	// The total-only form asserted "the rise is below one cheapest tier" and
+	// failed on a loaded runner with 1080p 0.27->0.33, 720p 0.22->0.27, 480p
+	// 0.16->0.22: every tier drifted up about 0.06, the total rose 0.17 against
+	// a 0.16 yardstick, and the suite reported "the tier was not shared" while
+	// the process count, the encoder pid and the 2/1/1 consumer counts in the
+	// same run all said it plainly was. The shared rung had in fact risen the
+	// LEAST of the three. A threshold that a machine getting busier can cross
+	// measures the machine.
+	for _, t := range tiers {
+		facts["RATE_TIER_"+t.label+"_A0"] = f2(a0.rate[t.label])
+		facts["RATE_TIER_"+t.label+"_A1"] = f2(a1.rate[t.label])
+	}
+
 	// ------------------------------------------------- ref counting DOWNWARDS
 	fmt.Println("removing destination B — the 720p rung still has D on it")
 	remove(facts["DEST_B_ID"])

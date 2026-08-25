@@ -136,8 +136,24 @@ func NewModel(cfg ModelConfig) *Model {
 type modelVerdict struct {
 	Abusive    bool    `json:"abusive"`
 	Confidence float64 `json:"confidence"`
-	Reason     string  `json:"reason"`
+	// Category must be one of ModelCategories(). A string here rather than a
+	// Category because this is the wire, and typing it as Category would make
+	// an unchecked conversion look like a parse.
+	Category string `json:"category"`
+	// Reason is the model's prose. It goes to Finding.Note, never to a
+	// platform: see category.go.
+	Reason string `json:"reason"`
 }
+
+// errUnknownCategory is the rejection, and it carries NO model-authored text.
+//
+// It reaches ModelStats.LastError, which the operator's spend panel renders and
+// the settings API returns, so echoing the invented label here would move the
+// injection from the platform's record into the operator's own UI -- a smaller
+// blast radius than #495, and still one worth not creating.
+var errUnknownCategory = errors.New(
+	"the model answered with a category this build does not offer, so the verdict " +
+		"cannot be acted on and the message passes")
 
 // Check asks the model about one message.
 //
@@ -154,13 +170,38 @@ func (m *Model) Check(ctx context.Context, text string) ([]Finding, error) {
 	}
 
 	v, err := m.ask(ctx, text)
+
+	// Would this verdict act? Only then is the category load-bearing.
+	acting := err == nil && v.Abusive && v.Confidence >= m.cfg.MinConfidence
+
+	// THE REJECTING HALF. Listing the categories in the prompt asks the model
+	// to comply; this is what happens when it does not, and #495 is the reason
+	// there has to be a "when it does not". Checked only on a verdict that
+	// would act, because a clean message needs no label and demanding one would
+	// report a failure -- and log a fail-open warning -- for every ordinary
+	// line of chat, which is how a real signal gets tuned out.
+	var cat Category
+	if acting {
+		var ok bool
+		if cat, ok = ParseModelCategory(v.Category); !ok {
+			// FAIL OPEN, not closed, and not "map it to other". This package's
+			// contract is that a verdict it could not read is not a verdict --
+			// the same treatment the malformed-JSON case above gets -- and
+			// acting on a classification whose label we rejected would be
+			// inventing the missing half of it. Loud, though: it goes through
+			// record() into the operator's failure count and LastError, and
+			// internal/chat warns per message.
+			err = errUnknownCategory
+		}
+	}
+
 	m.record(err)
 	if err != nil {
 		// Fail open, and say so out loud. Silence here would be
 		// indistinguishable from "the model saw it and was fine with it".
 		return nil, err
 	}
-	if !v.Abusive || v.Confidence < m.cfg.MinConfidence {
+	if !acting {
 		return nil, nil
 	}
 	return []Finding{{
@@ -168,8 +209,45 @@ func (m *Model) Check(ctx context.Context, text string) ([]Finding, error) {
 		Action:         m.cfg.Action,
 		TimeoutSeconds: m.cfg.TimeoutSeconds,
 		Confidence:     v.Confidence,
-		Reason:         strings.TrimSpace(v.Reason),
+		Category:       cat,
+		// The category's fixed sentence, NOT v.Reason. Reason is read by the
+		// operator and stored; Note is where the model's own words go, and
+		// PlatformReason is what an adapter is given.
+		Reason: cat.Reason(),
+		Note:   modelNote(v.Reason),
 	}}, nil
+}
+
+// modelNoteMaxRunes bounds what is kept of the model's prose.
+//
+// The wider read is already capped at 1 MiB, but this string is written to the
+// server log once per finding, and a model persuaded to emit a wall of text
+// should cost a line, not a log rotation.
+const modelNoteMaxRunes = 200
+
+// modelNote makes the model's prose safe to put in a log line.
+//
+// Control characters go first. slog's handlers quote what needs quoting, but
+// this note is one Warn away from an operator's terminal and one grep away from
+// a support ticket, and a viewer who can steer the model into emitting newlines
+// can otherwise forge whole log entries. Flattening them costs nothing: this is
+// a one-sentence note by contract.
+func modelNote(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	n := 0
+	for _, r := range strings.TrimSpace(s) {
+		if n >= modelNoteMaxRunes {
+			b.WriteString("…")
+			break
+		}
+		if r < 0x20 || r == 0x7f {
+			r = ' '
+		}
+		b.WriteRune(r)
+		n++
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // reserve takes one call from the hourly budget, or reports that it cannot.
@@ -330,15 +408,28 @@ func redactEndpoint(err error) error {
 	return &url.Error{Op: ue.Op, URL: alerts.RedactURL(ue.URL), Err: ue.Err}
 }
 
+// systemPrompt asks for the schema. Asking is rung zero -- ParseModelCategory
+// is what makes it true -- but the two must describe the same set, so the list
+// here is generated from ModelCategories() rather than written out beside it.
 func (m *Model) systemPrompt() string {
+	cats := make([]string, 0, len(ModelCategories()))
+	for _, c := range ModelCategories() {
+		cats = append(cats, string(c))
+	}
+	list := strings.Join(cats, ", ")
 	return strings.TrimSpace(`
 You are a chat moderation assistant for a live stream.
 
 ` + m.cfg.Instruction + `
 
 Reply with JSON only, matching exactly:
-{"abusive": <true|false>, "confidence": <0.0-1.0>, "reason": "<short reason>"}
+{"abusive": <true|false>, "confidence": <0.0-1.0>, "category": "<one of: ` + list + `>", "reason": "<short reason>"}
 
-The reason is shown to a human moderator, so keep it to one short sentence and
-describe what was wrong rather than restating the message.`)
+When abusive is true, category MUST be exactly one of: ` + list + `.
+Any other value is discarded and the message is let through, so pick the
+closest fit and use "other" if none of them apply.
+
+The reason is a note for the operator's own log. It is never sent to the
+platform and never changes what happens to the viewer, so keep it to one short
+sentence describing what was wrong rather than restating the message.`)
 }

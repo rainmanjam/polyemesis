@@ -31,6 +31,7 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPTS/lib-watchdog.sh"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
+. "$SCRIPTS/lib-preflight.sh"
 
 pass=0; fail=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
@@ -43,10 +44,15 @@ cleanup() {
 }
 trap 'poly_teardown_trap $? cleanup' EXIT
 
-[ -x "$BIN" ] || { echo "build first: make build"; exit 1; }
-command -v ffmpeg >/dev/null || { echo "ffmpeg is required"; exit 1; }
-ffmpeg -hide_banner -protocols 2>/dev/null | tr ' ' '\n' | grep -qx srt || {
-  echo "this suite needs an FFmpeg with libsrt"; exit 1; }
+# poka-yoke: this suite drives the API with curl, builds its fixture
+# documents with python3 heredocs, and needs an ffmpeg with libsrt -- see
+# lib-preflight.sh.
+poly_require_exec "$BIN"
+poly_require_cmd curl "used to drive the server's API"
+poly_require_cmd python3 "used to build the settings/source JSON documents"
+command -v ffmpeg >/dev/null || poly_preflight_fail "ffmpeg is required"
+ffmpeg -hide_banner -protocols 2>/dev/null | tr ' ' '\n' | grep -qx srt || \
+  poly_preflight_fail "this suite needs an FFmpeg with libsrt"
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
 poly_watchdog_arm
 
