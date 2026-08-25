@@ -76,6 +76,17 @@ CREATE TABLE IF NOT EXISTS sources (
     name       TEXT    NOT NULL,
     enabled    INTEGER NOT NULL DEFAULT 1,
     ingest     TEXT    NOT NULL,               -- db.IngestSettings as JSON
+    -- token is UNIQUE where it is non-empty, and the constraint is NOT here.
+    -- It is a partial unique index (idx_sources_token_unique), which CREATE
+    -- TABLE has no syntax for, created by MigrateSourceTokenUnique -- which
+    -- runs on every open, so fresh and upgraded installs get the same rule.
+    -- Partial because this column defaults to '' and an install may hold
+    -- several sources with no token yet; a plain UNIQUE would refuse the
+    -- second. Do not add UNIQUE here and do not put a bare CREATE UNIQUE INDEX
+    -- at the foot of this file: a database that already holds duplicates would
+    -- fail it, and a failure in this script aborts the whole schema and stops
+    -- the server booting with an error naming an index instead of the two rows
+    -- an operator has to choose between. Issue #505 has the rest.
     token      TEXT    NOT NULL DEFAULT '',    -- per-source publish secret
     -- The token this one replaced, still accepted until prev_token_until.
     -- Rotation that instantly kills a live stream is rotation nobody performs,

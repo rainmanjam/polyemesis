@@ -57,8 +57,20 @@ Assert-Administrator
 # uninstaller refuses the same way; this is the Windows half of that device.
 function Get-PublishingFfmpeg {
     try {
-        Get-CimInstance Win32_Process -Filter "Name='ffmpeg.exe'" -ErrorAction Stop |
-            Where-Object { $_.CommandLine -and ($_.CommandLine -match 'rtmp:|srt:|-f\s+flv') }
+        # @() then the unary comma, so this ALWAYS returns an array -- empty for
+        # "nothing is publishing", never $null.
+        #
+        # Written as a bare pipeline first, and that was a bug (#509): a pipeline
+        # matching nothing emits nothing, so PowerShell collapsed it to $null --
+        # the same value the catch below returns for "could not check". The
+        # caller tests `$null -eq $live` to mean "cannot determine", so on an
+        # IDLE host, which is the ordinary case, the uninstaller threw "Cannot
+        # determine whether a broadcast is live" and the confirmation below was
+        # unreachable. Fail-closed, so nothing was destroyed, but every ordinary
+        # uninstall refused with a message about the wrong thing.
+        $found = @(Get-CimInstance Win32_Process -Filter "Name='ffmpeg.exe'" -ErrorAction Stop |
+            Where-Object { $_.CommandLine -and ($_.CommandLine -match 'rtmp:|srt:|-f\s+flv') })
+        return ,$found
     } catch {
         # If the process table cannot be read we cannot prove the host is idle.
         # Say so rather than returning "nothing found", which would read as safe.
