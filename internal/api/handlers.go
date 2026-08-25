@@ -707,7 +707,17 @@ func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
 // mean a save can move audio: a role exclusion or a denoise tick changes the
 // filter string, and the reconcile below restarts the destinations that
 // changed. Destinations whose graph is unaffected are left running.
+//
+// WHICH programme is therefore not a detail: this route restarts live
+// destinations, and it restarted the DEFAULT programme's whatever the operator
+// was looking at (#497) -- fired by a 500 ms debounce, with no click and no
+// confirmation. scopedEngine refuses rather than guessing on an install that
+// runs more than one.
 func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		Annotations []routing.TrackAnnotation `json:"annotations"`
 	}
@@ -730,7 +740,7 @@ func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
 	// source row instead they silently stopped arriving: role exclusion stopped
 	// dropping the music track and stems went back to being named track1,
 	// track2, track3. The audio acceptance suite caught it.
-	src, err := s.store.GetSource(s.eng().SourceID())
+	src, err := s.store.GetSource(eng.SourceID())
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -758,17 +768,26 @@ func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
 	// broken -- but it means GET /settings can report annotations that differ
 	// from the source row until the underlying invalidity is fixed. The engine
 	// reads the SOURCE, so nothing on air is affected.
-	if _, err := s.store.UpdateSettings(func(settings *db.Settings) error {
-		settings.Ingest.Annotations = req.Annotations
-		return nil
-	}); err != nil {
-		s.log.Warn("annotations saved to the source but not mirrored to settings", "err", err)
+	//
+	// ONLY FOR THE DEFAULT PROGRAMME, which is the only one the settings
+	// singleton can describe. There is one settings document and several
+	// sources, so mirroring programme 2's labels into it would overwrite
+	// programme 1's for every reader of GET /settings -- the same
+	// one-document-many-programmes confusion as #497, arriving through the
+	// back door of a compatibility mirror.
+	if eng.SourceID() == s.eng().SourceID() {
+		if _, err := s.store.UpdateSettings(func(settings *db.Settings) error {
+			settings.Ingest.Annotations = req.Annotations
+			return nil
+		}); err != nil {
+			s.log.Warn("annotations saved to the source but not mirrored to settings", "err", err)
+		}
 	}
 	if err := s.reconcile(); err != nil {
 		writeError(w, http.StatusInternalServerError, "annotations saved but reconcile failed: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.eng().SourceInfo())
+	writeJSON(w, http.StatusOK, eng.SourceInfo())
 }
 
 // handleSwitchSource puts one failover source on air by hand.
@@ -777,20 +796,29 @@ func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
 // can ever hand control back after an automatic switch is another automatic
 // switch — the operator would watch the slate with no way to leave it. "auto"
 // clears the pin and returns the tier to its detector.
+//
+// Scoped like every other member of the #497 family: a failover switch is one
+// programme going to its backup feed, and asking the default engine for it put
+// a DIFFERENT programme on its slate while reporting success for the one the
+// operator named.
 func (s *Server) handleSwitchSource(w http.ResponseWriter, r *http.Request) {
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		Source string `json:"source"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := s.eng().SwitchSource(req.Source); err != nil {
+	if err := eng.SwitchSource(req.Source); err != nil {
 		// Every failure here is the operator asking for something this
 		// configuration cannot do — an unknown name, or a tier that is off.
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.eng().Failover())
+	writeJSON(w, http.StatusOK, eng.Failover())
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -1403,6 +1431,96 @@ func (s *Server) sourceForDestination(sourceID *int64) (routing.Source, bool) {
 	return s.engineForSource(sourceID).SourceKnown()
 }
 
+// ------------------------------------------------- naming the programme
+
+// sourceParam is the query parameter a programme-scoped route reads, written
+// once so that six routes cannot drift into six spellings of it.
+const sourceParam = "source"
+
+// scopedEngine is the engine a request NAMES, and the point of it is what it
+// refuses.
+//
+// #497: editing a track label while looking at programme 2 rewrote programme
+// 1's ingest and restarted its live destinations. Every route in this family
+// resolved its engine through s.eng() -- s.mgr.Default(), Engines()[0] --
+// which is the right answer only on an install with one source. There was no
+// click and no confirmation: a 500 ms debounce in the routing editor fired it,
+// and the compile preview beside it was reading the same default engine, so
+// the page showed a plausible answer for the wrong saved state.
+//
+// THE FALLBACK IS THE DEFECT, so it is removed exactly where it can be wrong.
+// An install with one source (or none) has no other programme to hit and keeps
+// the default, which is what every existing client sends -- the monitoring
+// page, a script, a UI bundle older than this one. An install with two or more
+// must say which, and is refused with source_required until it does. A route
+// that cannot work out the programme now says "pick one" instead of picking
+// programme 1.
+//
+// A QUERY PARAMETER rather than `sourceId` in the body, which is what
+// requireNamedSource reads on a create: this has to serve GETs (/processes)
+// and one POST whose body is a full-replacement routing.PresetOpts with no
+// room for a field that is not a preset option. One spelling for every method
+// is one thing to remember instead of two.
+//
+// Returns the engine, never nil when ok is true except on an install with no
+// source at all -- the zero-source reads (/processes) answer for that state on
+// purpose and must keep doing so, which is why the count of zero takes the
+// same branch as the count of one rather than being refused here.
+func (s *Server) scopedEngine(w http.ResponseWriter, r *http.Request) (*engine.Engine, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get(sourceParam))
+	if raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
+				`"`+sourceParam+`" must be a source id.`+s.availableSources())
+			return nil, false
+		}
+		eng := s.engineForSource(&id)
+		if eng == nil {
+			// Named a programme that is not running: deleted under this
+			// request, never created, or the manager has not reconciled yet.
+			// Saying so beats acting on somebody else's programme, which is
+			// the whole of #497.
+			writeError(w, http.StatusConflict, fmt.Sprintf(
+				"source %d is not running, so there is nothing here to answer for it", id))
+			return nil, false
+		}
+		return eng, true
+	}
+
+	n, err := s.store.CountSources()
+	if err != nil {
+		// The count is what makes the omission safe. Without it the choice
+		// cannot be shown to be unambiguous, so it is not made.
+		writeStoreError(w, err)
+		return nil, false
+	}
+	if n > 1 {
+		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
+			"this install runs several programmes, so this request must say which one it is "+
+				`for: add "?`+sourceParam+`=<id>".`+s.availableSources())
+		return nil, false
+	}
+	return s.eng(), true
+}
+
+// availableSources is the "Available: 1 (Main), 2 (Studio B)." tail both
+// source_required refusals carry, or "" when the list cannot be read.
+//
+// An operator meeting "say which programme" with no way to see the ids has been
+// told to make a choice and not shown the options.
+func (s *Server) availableSources() string {
+	rows, err := s.store.ListSources()
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(rows))
+	for _, src := range rows {
+		names = append(names, fmt.Sprintf("%d (%s)", src.ID, src.Name))
+	}
+	return " Available: " + strings.Join(names, ", ") + "."
+}
+
 func (s *Server) handleListDestinations(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.store.ListDestinations()
 	if err != nil {
@@ -1938,58 +2056,18 @@ func (s *Server) handleRestartDestination(w http.ResponseWriter, r *http.Request
 
 // -------------------------------------------------------------- routing API
 
-// routingSourceOverride is engineForSource/sourceForDestination's device,
-// applied here.
+// handleCompileRouting compiles a candidate profile without saving it.
 //
-// Finding #9, poka-yoke audit 2026-08-21: handleCompileRouting and
-// handleApplyPreset still fell back to s.eng().Source() -- engines[0],
-// correct only on a single-source install -- the same bug PR #478 fixed for
-// handleListDestinations, handleGetDestination, handleUpdateDestination and
-// handleRestartDestination with engineForSource/sourceForDestination.
-//
-// Unlike those four, neither route is mounted under /destinations/{id}: the
-// request carries a routing.Profile or a routing.PresetOpts, never a
-// destination id, so there is nothing to scope by until a caller sends one.
-// ?destinationId= rather than a body field -- handleApplyPreset decodes its
-// body directly as routing.PresetOpts with DisallowUnknownFields, and that
-// type belongs to package routing, not this file.
-//
-// Optional, and answered by the shared default engine's source when absent,
-// so every caller that does not send it keeps exactly today's behaviour
-// (right on a single-source install, wrong on a multi-source one) rather than
-// being broken outright. Closing the bug for the routing editor, which always
-// knows the destination it is editing (see ui/src/pages/RoutingPage.tsx's
-// :id route param), needs that page updated to send it -- out of scope here,
-// see the fix report.
-func (s *Server) routingSourceOverride(r *http.Request) (routing.Source, error) {
-	raw := r.URL.Query().Get("destinationId")
-	if raw == "" {
-		return s.eng().Source(), nil
-	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return routing.Source{}, badRequestError{"invalid destinationId: " + err.Error()}
-	}
-	dest, err := s.store.GetDestination(id)
-	if err != nil {
-		return routing.Source{}, err
-	}
-	src, _ := s.sourceForDestination(dest.SourceID)
-	return src, nil
-}
-
-// writeRoutingSourceError renders routingSourceOverride's two failure shapes:
-// a malformed id is the caller's fault, anything else is the store's.
-func writeRoutingSourceError(w http.ResponseWriter, err error) {
-	var badRequest badRequestError
-	if errors.As(err, &badRequest) {
-		writeError(w, http.StatusBadRequest, err.Error())
+// SCOPED, and #497 said this preview already was -- it was not. It compiled
+// against the default engine's track layout like everything else in that
+// family, which is worse here than a wrong number: the preview is the page's
+// claim that the graph shown is the graph that will run, and on a
+// multi-source install it was describing a different programme's ingest.
+func (s *Server) handleCompileRouting(w http.ResponseWriter, r *http.Request) {
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
 		return
 	}
-	writeStoreError(w, err)
-}
-
-func (s *Server) handleCompileRouting(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Profile routing.Profile `json:"profile"`
 	}
@@ -1998,15 +2076,9 @@ func (s *Server) handleCompileRouting(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Profile.ApplyDefaults()
 
-	src, err := s.routingSourceOverride(r)
-	if err != nil {
-		writeRoutingSourceError(w, err)
-		return
-	}
-
 	// This backs the live filter-string preview in the routing editor: the
 	// user sees exactly what their checkboxes compile to, before saving.
-	res, err := routing.Compile(req.Profile, src)
+	res, err := routing.Compile(req.Profile, eng.Source())
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error":   err.Error(),
@@ -2024,7 +2096,19 @@ func (s *Server) handleListPresets(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleApplyPreset compiles one of the catalogue's mixes against this
+// programme's ingest.
+//
+// Scoped through the query rather than the body: the body is a
+// FULL-REPLACEMENT routing.PresetOpts (see below) and has no room for a field
+// that is not a preset option. Same family as #497 -- a preset applied against
+// the default programme's track layout picks track indices out of an ingest the
+// destination does not read.
 func (s *Server) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
 	// A body is optional: without one the OBS-convention defaults apply --
 	// which is what GET /routing/presets advertises under "defaults", and what
 	// this handler's own comment has always claimed.
@@ -2058,17 +2142,12 @@ func (s *Server) handleApplyPreset(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	src, err := s.routingSourceOverride(r)
-	if err != nil {
-		writeRoutingSourceError(w, err)
-		return
-	}
-	profile, err := routing.ApplyPreset(chi.URLParam(r, "preset"), src, opts)
+	profile, err := routing.ApplyPreset(chi.URLParam(r, "preset"), eng.Source(), opts)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	res, err := routing.Compile(profile, src)
+	res, err := routing.Compile(profile, eng.Source())
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -2220,8 +2299,24 @@ func processDetail(name string, p *supervisor.Process) map[string]any {
 	}
 }
 
+// handleListProcesses and handleProcessLogs are the #497 sibling with no id of
+// its own to be scoped by.
+//
+// A process is named "ingest", "recorder", "preview", "meters" -- IDENTICALLY
+// in every engine, because the name says what the child does and not which
+// programme it does it for. So a request for programme 2's FFmpeg log matched
+// programme 1's process and served it, and nothing in the answer said which
+// programme it came from: an operator diagnosing a failing broadcast was
+// reading a healthy one's log. Naming them per source would fix it at the
+// source but the names are the engine's and the supervisor's, not this
+// package's; scoping the request is the half that fits here, and it refuses
+// rather than answering for the wrong programme.
 func (s *Server) handleListProcesses(w http.ResponseWriter, r *http.Request) {
-	procs := s.eng().Processes()
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
+	procs := eng.Processes()
 	out := make([]map[string]any, 0, len(procs))
 	for _, p := range procs {
 		out = append(out, processSummary(p))
@@ -2230,6 +2325,10 @@ func (s *Server) handleListProcesses(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
 	// Unescaped by hand because chi routes on RawPath whenever it differs from
 	// Path, so URLParam hands back the still-encoded segment. Every process
 	// whose name contains a colon — "dest:1", "rendition:2", "playout:source" —
@@ -2240,7 +2339,7 @@ func (s *Server) handleProcessLogs(w http.ResponseWriter, r *http.Request) {
 	if decoded, err := url.PathUnescape(name); err == nil {
 		name = decoded
 	}
-	for _, p := range s.eng().Processes() {
+	for _, p := range eng.Processes() {
 		if p.Name() == name {
 			writeJSON(w, http.StatusOK, processDetail(name, p))
 			return
@@ -2361,14 +2460,7 @@ func (s *Server) requireNamedSource(w http.ResponseWriter, id *int64) bool {
 	if id != nil && *id != 0 {
 		return true
 	}
-	msg := "this create must say which source it belongs to: set \"sourceId\"."
-	if rows, err := s.store.ListSources(); err == nil && len(rows) > 0 {
-		names := make([]string, 0, len(rows))
-		for _, src := range rows {
-			names = append(names, fmt.Sprintf("%d (%s)", src.ID, src.Name))
-		}
-		msg += " Available: " + strings.Join(names, ", ") + "."
-	}
+	msg := "this create must say which source it belongs to: set \"sourceId\"." + s.availableSources()
 	writeErrorCode(w, http.StatusBadRequest, codeSourceRequired, msg)
 	return false
 }

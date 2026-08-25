@@ -205,6 +205,24 @@ function tokenQuery(token?: string): string {
   return token ? `?t=${encodeURIComponent(token)}` : "";
 }
 
+/** `?source=<id>` — WHICH PROGRAMME a request is for.
+ *
+ *  Issue #497: a handful of routes resolved their engine through the server's
+ *  DEFAULT one, which is the right answer only on an install with a single
+ *  source. Editing a track label while looking at programme 2 therefore
+ *  rewrote programme 1's ingest and restarted its live destinations, with no
+ *  click and no confirmation — a 500 ms debounce fired it.
+ *
+ *  The server now refuses these routes without an id whenever the install runs
+ *  more than one programme, so an omitted argument here fails loudly on the
+ *  installs where it would have been wrong and changes nothing on the ones
+ *  where it cannot be. Optional in the type for exactly that reason: a
+ *  destination row written before sources existed carries no `sourceId`, and
+ *  guessing one on its behalf is the bug this parameter exists to end. */
+function sourceQuery(sourceId?: number | null): string {
+  return sourceId == null ? "" : `?source=${encodeURIComponent(String(sourceId))}`;
+}
+
 export interface DestinationWithRouting {
   destination: Destination;
   routing?: RoutingResult;
@@ -638,30 +656,17 @@ export const api = {
   // --- routing ---
   /** Compiles against the engine's live source layout, which is what makes the
    *  filter string under the editor honest: it comes from the same Go code
-   *  that will run, not from a TypeScript reimplementation.
-   *
-   *  `destinationId` is finding #9's fix, UI half: neither this route nor
-   *  applyPreset below is scoped by URL, so on a multi-source install the
-   *  server had nothing to compile against but the shared default engine's
-   *  source (`s.eng().Source()`, `engines[0]`) -- correct for the destination
-   *  being edited only by coincidence, on whichever install has exactly one
-   *  source. routingSourceOverride (internal/api/handlers.go) resolves
-   *  `?destinationId=` to that destination's own source when sent; RoutingPage
-   *  always knows which destination it is editing (the `:id` route param), so
-   *  it always has one to send. Optional so any other caller keeps today's
-   *  behaviour rather than being broken by a newly-required id. */
-  compileRouting: (profile: RoutingProfile, destinationId?: DestinationId) =>
+   *  that will run, not from a TypeScript reimplementation. */
+  compileRouting: (profile: RoutingProfile, sourceId?: number | null) =>
     post<{ routing: RoutingResult; profile: RoutingProfile }>(
-      `/routing/compile${destinationId !== undefined ? `?destinationId=${destinationId}` : ""}`,
+      "/routing/compile" + sourceQuery(sourceId),
       { profile },
     ),
   listPresets: () =>
     get<{ presets: Preset[]; defaults: PresetOpts }>("/routing/presets"),
-  /** See compileRouting's note on `destinationId` -- the same fix, the same
-   *  reason, the same optional query parameter. */
-  applyPreset: (id: string, opts: PresetOpts, destinationId?: DestinationId) =>
+  applyPreset: (id: string, opts: PresetOpts, sourceId?: number | null) =>
     post<{ profile: RoutingProfile; routing: RoutingResult }>(
-      `/routing/presets/${encodeURIComponent(id)}${destinationId !== undefined ? `?destinationId=${destinationId}` : ""}`,
+      `/routing/presets/${encodeURIComponent(id)}` + sourceQuery(sourceId),
       opts,
     ),
 
@@ -674,11 +679,17 @@ export const api = {
    *  A server that predates the feature has no route here and answers 404. The
    *  routing editor treats that as "not stored yet" and keeps editing locally
    *  rather than refusing the whole page: a missing endpoint is not a reason to
-   *  take the mixer away. */
-  putAnnotations: (annotations: TrackAnnotation[]) =>
-    put<{ annotations: TrackAnnotation[] | null }>("/source/annotations", {
-      annotations,
-    }),
+   *  take the mixer away.
+   *
+   *  `sourceId` is WHICH programme's tracks these describe, and it is not
+   *  optional in spirit — see sourceQuery and #497. This write restarts the
+   *  live destinations whose graph it changes, so an unscoped one restarted a
+   *  programme the operator was not looking at. */
+  putAnnotations: (annotations: TrackAnnotation[], sourceId?: number | null) =>
+    put<{ annotations: TrackAnnotation[] | null }>(
+      "/source/annotations" + sourceQuery(sourceId),
+      { annotations },
+    ),
 
   // --- recordings ---
   listRecordings: () => get<Recording[]>("/recordings"),
@@ -729,10 +740,16 @@ export const api = {
     "/playout/master.m3u8" + tokenQuery(token),
 
   // --- monitoring ---
-  listProcesses: () => get<ProcessInfo[]>("/processes"),
-  processLogs: (name: string) =>
+  /** Every process is called `ingest`, `recorder`, `preview` or `meters` in
+   *  EVERY engine — the name says what the child does, not which programme it
+   *  does it for — so without `sourceId` a multi-source install served
+   *  programme 1's FFmpeg log for a question about programme 2 (#497). The
+   *  server now refuses instead of answering for the wrong one. */
+  listProcesses: (sourceId?: number | null) =>
+    get<ProcessInfo[]>("/processes" + sourceQuery(sourceId)),
+  processLogs: (name: string, sourceId?: number | null) =>
     get<{ name: string; command: string; lines: LogLine[] | null }>(
-      `/processes/${encodeURIComponent(name)}/logs`,
+      `/processes/${encodeURIComponent(name)}/logs` + sourceQuery(sourceId),
     ),
 
   // --- expert mode ---

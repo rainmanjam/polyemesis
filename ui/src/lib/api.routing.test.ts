@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
-import { asDestinationId, type RoutingProfile } from "./types";
+import { type RoutingProfile } from "./types";
 
 /* #9: handleCompileRouting and handleApplyPreset had nothing to compile
  * against but the shared default engine's source (`s.eng().Source()`,
@@ -54,19 +54,23 @@ const profile: RoutingProfile = {
 };
 
 describe("api.compileRouting", () => {
-  it("sends the destination it is compiling for, when told one", async () => {
+  // Named by SOURCE, not by destination. Both branches of the v0.7.0 work
+  // scoped this route; the destinationId form was replaced at merge because
+  // scopedEngine REFUSES an unnamed request on a multi-source install, where
+  // the destinationId form fell back to the default engine and so left the
+  // bug intact for any caller that sent nothing (#497).
+  it("names the programme it is compiling for", async () => {
     capture(respond({ routing: {}, profile }));
 
-    await api.compileRouting(profile, asDestinationId(7));
+    await api.compileRouting(profile, 7);
 
-    expect(calls[0][0]).toBe("/api/v1/routing/compile?destinationId=7");
+    expect(calls[0][0]).toBe("/api/v1/routing/compile?source=7");
   });
 
-  it("sends no destinationId when the caller has none to give", async () => {
-    // The compat path: routingSourceOverride falls back to the shared
-    // default engine's source when the parameter is absent, so an
-    // omitted id must arrive as an omitted parameter, not as
-    // `destinationId=undefined`.
+  it("sends no source when the caller has none to give", async () => {
+    // An omitted id must arrive as an omitted parameter, not as
+    // `source=undefined` -- the server distinguishes absent (refuse, or the
+    // single-source install's own programme) from a value it cannot parse.
     capture(respond({ routing: {}, profile }));
 
     await api.compileRouting(profile);
@@ -76,16 +80,18 @@ describe("api.compileRouting", () => {
 });
 
 describe("api.applyPreset", () => {
-  it("sends the destination the preset is being applied to", async () => {
+  it("names the programme the preset is being applied to", async () => {
+    // A preset picks track INDICES, so applying one against the default
+    // programme's layout writes indices from a different ingest (#497).
     capture(respond({ profile, routing: {} }));
 
     await api.applyPreset(
       "obs-default",
       { musicTrack: 0, micTrack: 2, surroundTrack: 0, cleanTrack: 1 },
-      asDestinationId(12),
+      12,
     );
 
-    expect(calls[0][0]).toBe("/api/v1/routing/presets/obs-default?destinationId=12");
+    expect(calls[0][0]).toBe("/api/v1/routing/presets/obs-default?source=12");
   });
 });
 

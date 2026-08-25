@@ -167,6 +167,18 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("ping sqlite %s: %w", path, err)
 	}
+	// BEFORE schemaSQL, before any Migrate*, before the stream-key backfill --
+	// nothing below this line runs against a database written by a newer
+	// schema. Issue #498: an operator rolling back from a bad release is
+	// exactly the moment an older binary meets a newer database, and this
+	// version cannot know that a future migration's ALTER, or a future
+	// backfill's read of a column it does not expect, is safe to run against
+	// schema it postdates. Refusing before the first write is what makes that
+	// true regardless of what future migrations turn out to do.
+	if err := refuseNewerSchema(sqldb); err != nil {
+		sqldb.Close()
+		return nil, err
+	}
 	// THE FILE HOLDS EVERY DESTINATION STREAM KEY IN PLAINTEXT, and SQLite
 	// creates it under the process umask -- 0644 on a default install, measured.
 	// Issue #297.
@@ -296,7 +308,93 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// LAST of all -- see MigrateSchemaVersion's comment for why the order
+	// matters and what this does and does not protect (issue #498).
+	if err := d.MigrateSchemaVersion(); err != nil {
+		sqldb.Close()
+		return nil, err
+	}
 	return d, nil
+}
+
+// currentSchemaVersion is stamped into PRAGMA user_version by every
+// successful Open (MigrateSchemaVersion) and checked against on every Open
+// before anything is read or written (refuseNewerSchema).
+//
+// A BARE INCREMENTING INTEGER, deliberately not this release's semver.
+// Not every release changes the schema, and encoding "0.7.0" as an integer
+// invites exactly the kind of mismatch this stamp exists to prevent -- is
+// 0.7.1 schema version 701, 71, or the same 70 as 0.7.0? Bump this only when
+// a change in this package would make it dangerous for an OLDER binary,
+// unaware of the change, to open the resulting database -- the way 0.6.x
+// silently reading a sealed stream_key as an empty string was dangerous. Most Migrate*
+// additions do not qualify: an ALTER TABLE ADD COLUMN behind columnExists is
+// invisible to an older binary that never looks at the new column, and stays
+// at whatever version was last dangerous.
+//
+// 1 is the seal-at-rest schema: destinations.stream_key_enc and
+// backup_stream_key_enc exist, and backfillDestinationStreamKeys has run.
+const currentSchemaVersion = 1
+
+// refuseNewerSchema refuses to open a database stamped with a schema version
+// newer than this binary's.
+//
+// THIS IS WARNING, NOT CONTROL, and the gap is not an oversight: Control
+// would be the OLD binary refusing to open a NEWER database, and the old
+// binary here is 0.6.x -- already released, already installed on whatever
+// machine an operator rolls back to, and not something this codebase can
+// patch after the fact. Nothing added in 0.7.0 protects the rollback that
+// issue #498 was actually filed about. What THIS buys is every rollback from
+// here forward: reinstall 0.7.0 (or later) over a database a newer release
+// wrote, and that binary's own copy of this function is the one doing the
+// refusing. 0.7.0 is the last release at which even that much could start,
+// because it is the last one built before any newer schema exists to roll
+// back from.
+//
+// A version of 0 -- every database through 0.6.x, since nothing ever stamped
+// one -- is never "newer" than currentSchemaVersion and is never refused
+// here; MigrateSchemaVersion is what brings it up to date.
+func refuseNewerSchema(sqldb *sql.DB) error {
+	var got int
+	if err := sqldb.QueryRow(`PRAGMA user_version`).Scan(&got); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if got > currentSchemaVersion {
+		return fmt.Errorf(
+			"database schema version %d is newer than this binary's schema version %d: "+
+				"this database was written by a newer release of polyemesis than the one "+
+				"you are running now. Reinstall that newer release, or restore a backup "+
+				"taken before the rollback -- an older binary can open this file but does "+
+				"not know what the columns a newer one added actually mean (see issue #498)",
+			got, currentSchemaVersion)
+	}
+	return nil
+}
+
+// MigrateSchemaVersion stamps PRAGMA user_version to currentSchemaVersion.
+//
+// LAST of every call in Open's migration sequence, after
+// backfillDestinationStreamKeys -- so the stamp only lands once the schema
+// currentSchemaVersion promises is actually, fully in place. A crash partway
+// through Open leaves user_version at whatever it already was, and the next
+// Open reruns every Migrate* above rather than trusting a half-applied
+// schema because the version number said 1.
+//
+// A database at user_version 0 -- every install through 0.6.x -- is not
+// "newer" than currentSchemaVersion (see refuseNewerSchema), so it reaches
+// here, migrates normally through the calls above, and is stamped like any
+// other. Nothing here or in refuseNewerSchema requires an operator to have
+// upgraded through this exact release to be treated as legitimate.
+//
+// IDEMPOTENT: PRAGMA user_version = 1 against a database already at 1 is
+// just another write of the same integer. Every Open calls this, so it must
+// be safe to call on every Open, including the vast majority where nothing
+// changed.
+func (d *DB) MigrateSchemaVersion() error {
+	if _, err := d.sql.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, currentSchemaVersion)); err != nil {
+		return fmt.Errorf("stamp schema version %d: %w", currentSchemaVersion, err)
+	}
+	return nil
 }
 
 // SQL exposes the underlying handle for the rare query that does not warrant

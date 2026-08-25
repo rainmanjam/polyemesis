@@ -9,7 +9,17 @@ its first tagged release.
 ## [Unreleased]
 
 
-## [0.7.0] — 2026-08-21
+## [0.7.0] — unreleased
+
+<!-- RB-5 (#499): this heading was dated 2026-08-21 in #487, while preparing
+the tag -- and the tag was then deliberately held. Nothing noticed, so this
+section described a shipped release for four days while every install path
+(git, GitHub Releases, Docker Hub) still ended at v0.6.0, lacking the
+seal-at-rest fix below. Dating it again is a release act, not a docs edit:
+`.github/workflows/release.yml`'s changelog-gate now refuses to publish any
+tag whose version does not match the top dated heading here, and
+changelog-freshness.yml alarms if a dated heading ever again sits this long
+with no matching tag. -->
 
 ### Security
 - **0.7.0's seal-at-rest migration left the plaintext stream keys it replaced

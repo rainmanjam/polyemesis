@@ -546,13 +546,34 @@ const redetectCeiling = 30 * time.Second
 // handleRestartRendition cycles one shared encode, and with it the destinations
 // reading from it. It mirrors the per-destination restart: the operator's
 // escape hatch for an encoder that has wedged without dying.
+//
+// THE OWNING ENGINE, NOT THE DEFAULT ONE, and this route needs no parameter to
+// find it: db.Rendition.SourceID names the programme, exactly as
+// db.Destination.SourceID does for handleRestartDestination. Asking s.eng() was
+// the #497 shape at its quietest -- the default engine has never heard of
+// another programme's rendition, so the restart did nothing at all and this
+// handler still answered 200 {"status":"restarting"}. The operator's wedged
+// encoder stayed wedged and the API said it was being fixed.
 func (s *Server) handleRestartRendition(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := s.eng().RestartRendition(id); err != nil {
+	row, err := s.store.GetRendition(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	eng := s.engineForSource(row.SourceID)
+	if eng == nil {
+		// The programme has no engine: deleted under this request, or the
+		// manager has not reconciled yet. Saying so beats reporting a restart
+		// that did not happen.
+		writeError(w, http.StatusConflict, "the source this rendition re-encodes is not running")
+		return
+	}
+	if err := eng.RestartRendition(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -262,9 +262,29 @@ export function RoutingPage() {
   //
   // Written straight through rather than gathered behind the Save button: they
   // describe the SOURCE, so they are not this destination's to hold hostage.
+
+  // WHICH PROGRAMME these labels describe, and the reason the autosave below is
+  // allowed to exist at all (#497).
+  //
+  // The editor is opened on a DESTINATION, and a destination carries exactly
+  // one programme, so the answer is never ambiguous from here. It used not to
+  // be sent: the PUT named no source, the server resolved its default engine,
+  // and typing a label while looking at programme 2 rewrote programme 1's
+  // ingest and restarted its live destinations — no click, no confirmation,
+  // just a 500 ms timer. Null only for a legacy row that predates sources, and
+  // the server refuses rather than guessing for those.
+  const editedSourceId = selected?.sourceId ?? null;
+
   const annotationsEdited = useRef(false);
+  // The programme the pending edit was made against. Compared before the
+  // autosave fires, so an edit typed while looking at programme 1 can never be
+  // saved onto programme 2 because the operator switched destination inside the
+  // debounce window (#497). Without it, adding the source id to the request
+  // would only have moved the mis-scoped write rather than prevented it.
+  const editedSourceRef = useRef<number | null>(null);
   const annotate = useCallback((track: number, next: Partial<TrackAnnotation>) => {
     annotationsEdited.current = true;
+    editedSourceRef.current = editedSourceId;
     setAnnotations((prev) => {
       const existing = prev.some((a) => a.track === track);
       const merged = existing
@@ -276,13 +296,18 @@ export function RoutingPage() {
         .filter((a) => a.role || a.label || a.language || a.denoise)
         .sort((a, b) => a.track - b.track);
     });
-  }, []);
+  }, [editedSourceId]);
 
   useEffect(() => {
     if (!annotationsEdited.current) return;
+    // The edit belongs to a programme that is no longer on screen: the operator
+    // switched destination inside the debounce window. Saving it now would
+    // write one programme's labels onto another's ingest, which is #497 with
+    // the source id present and simply wrong.
+    if (editedSourceRef.current !== editedSourceId) return;
     const timer = window.setTimeout(() => {
       api
-        .putAnnotations(annotations)
+        .putAnnotations(annotations, editedSourceId)
         .then(() => setAnnotationsStored(true))
         .catch((err) => {
           // A build without the route is not a failure worth a toast on every
@@ -294,8 +319,11 @@ export function RoutingPage() {
           toast.error(err instanceof Error ? err.message : t("route.couldNotSaveTrackRoles"));
         });
     }, 500);
+    // editedSourceId is a dependency, not just an argument: switching to a
+    // destination on a different programme cancels a save that was already
+    // pending for the old one, rather than letting it land under the new id.
     return () => window.clearTimeout(timer);
-  }, [annotations, t]);
+  }, [annotations, editedSourceId, t]);
 
   const save = async () => {
     if (!selected || !profile) return;
@@ -361,11 +389,9 @@ export function RoutingPage() {
       const destAtClick = selectedIdRef.current;
       const seq = (presetSeq.current[mix] += 1);
       try {
-        // #9: without this the server had nothing to apply the preset
-        // against but the shared default engine's source -- right for the
-        // destination on screen only on a single-source install. See
-        // api.applyPreset's note.
-        const res = await api.applyPreset(presetId, presetOpts, destAtClick ?? undefined);
+        // Against THIS destination's programme: a preset picks track indices,
+        // and the default programme's layout is a different ingest (#497).
+        const res = await api.applyPreset(presetId, presetOpts, editedSourceId);
         if (seq !== presetSeq.current[mix]) return null;
         if (selectedIdRef.current !== destAtClick) return null;
         if (mix === "vod" && !vodEnabledRef.current) return null;
@@ -379,7 +405,7 @@ export function RoutingPage() {
         return null;
       }
     },
-    [presetOpts, t],
+    [presetOpts, editedSourceId, t],
   );
 
   const applyPreset = useCallback(
@@ -427,6 +453,7 @@ export function RoutingPage() {
   // one change at each end instead of two per call site.
   const ctx: EditorContext = useMemo(
     () => ({
+      sourceId: editedSourceId,
       tracks,
       levels,
       probed: source?.probed ?? false,
@@ -450,6 +477,7 @@ export function RoutingPage() {
       musicTracks,
     }),
     [
+      editedSourceId,
       tracks,
       levels,
       source?.probed,
@@ -573,7 +601,6 @@ export function RoutingPage() {
               idPrefix="live"
               ctx={ctx}
               profile={profile}
-              destinationId={selected.id}
               onPatch={patch}
               onApplyPreset={applyPreset}
               onCompileError={setLiveError}
@@ -613,7 +640,6 @@ export function RoutingPage() {
                 idPrefix="vod"
                 ctx={ctx}
                 profile={vodProfile}
-                destinationId={selected.id}
                 onPatch={patchVod}
                 onApplyPreset={applyVodPreset}
                 onCompileError={setVodError}
@@ -713,6 +739,10 @@ export function RoutingPage() {
  *  presets and the platform's music policy are properties of the SOURCE and the
  *  DESTINATION, not of either mix. */
 interface EditorContext {
+  /** The programme this editor's destination carries, and what every request
+   *  it makes must name. Null for a destination row that predates sources; the
+   *  server refuses rather than compiling against the wrong ingest (#497). */
+  sourceId: number | null;
   tracks: SourceTrack[];
   levels: Levels | null;
   probed: boolean;
@@ -737,7 +767,6 @@ function ProfileEditor({
   idPrefix,
   ctx,
   profile,
-  destinationId,
   onPatch,
   onApplyPreset,
   onCompileError,
@@ -748,8 +777,6 @@ function ProfileEditor({
   idPrefix: string;
   ctx: EditorContext;
   profile: RoutingProfile;
-  /** #9: which destination's source to compile against. See api.compileRouting. */
-  destinationId: DestinationId;
   onPatch: (next: Partial<RoutingProfile>) => void;
   /** Applies the preset to THIS editor's profile and resolves with the routing
    *  the endpoint compiled for it, or null when the answer was discarded (a
@@ -785,7 +812,11 @@ function ProfileEditor({
     window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
       api
-        .compileRouting(profile, destinationId)
+        // Named, so the filter string under the editor is compiled against the
+        // ingest THIS destination reads. Unnamed it came off the server's
+        // default engine, and the panel's whole claim — that the graph shown is
+        // the graph that will run — was false on a multi-source install (#497).
+        .compileRouting(profile, ctx.sourceId)
         .then((res) => {
           if (cancelled) return;
           setCompiled(res.routing);
@@ -804,7 +835,7 @@ function ProfileEditor({
       cancelled = true;
       window.clearTimeout(debounceRef.current);
     };
-  }, [profile, destinationId, t, onCompileError]);
+  }, [profile, ctx.sourceId, t, onCompileError]);
 
   // An editor that unmounts — the second mix being switched off — must not
   // leave its last error behind, or the Save button stays disabled by a mix
