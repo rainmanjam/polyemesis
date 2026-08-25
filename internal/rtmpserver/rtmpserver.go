@@ -416,8 +416,36 @@ func (s *Server) handle(conn net.Conn) {
 		s.log.Debug("rtmp handshake failed", "component", "rtmp-ingest", "peer", peer, "err", err)
 		return
 	}
-	if err := sc.Accept(); err != nil {
+	// AcceptConn, NOT Accept. gortmplib v1.0.1 split what used to be one call:
+	// AcceptConn completes the connection and reads the play/publish command --
+	// which is what fills sc.URL and sc.Publish, read just below -- while
+	// AcceptAction sends the response that actually admits the session. Accept
+	// still exists and still compiles, but is now an alias for AcceptConn
+	// alone, so keeping it left every peer waiting for a reply that never came:
+	// subscribers got "Input/output error" and publishers a refused connect,
+	// with a HEALTHY relay on the other side. Nothing in the type system caught
+	// that; the end-to-end tests did.
+	if err := sc.AcceptConn(); err != nil {
 		s.log.Debug("rtmp accept failed", "component", "rtmp-ingest", "peer", peer, "err", err)
+		return
+	}
+	// Immediately, and NOT deferred until after the key is checked.
+	//
+	// Together these two calls are exactly what v1.0.0's Accept() did, which is
+	// what keeps this a dependency bump rather than a change of protocol
+	// behaviour. Holding AcceptAction back until admit() had ruled looks
+	// tempting -- why admit a publish you are about to refuse -- but it breaks
+	// the deliberate design that TestHandleRateLimitsPeerAfterRepeatedUnknownKeys
+	// pins: the handshake succeeds for everyone and refusal happens at the
+	// application layer. Deferring it made an unrecognised key fail as EOF
+	// mid-handshake instead, which is a different and less diagnosable failure.
+	//
+	// v1.0.1 also adds RejectAction, a typed rejection RTMP has not previously
+	// carried here -- see the refusal branches below, which currently can only
+	// close the socket. Adopting it would change what a peer holding a wrong
+	// key can observe, so it belongs in its own change.
+	if err := sc.AcceptAction(); err != nil {
+		s.log.Debug("rtmp accept action failed", "component", "rtmp-ingest", "peer", peer, "err", err)
 		return
 	}
 
@@ -510,6 +538,7 @@ func (s *Server) handle(conn net.Conn) {
 	// The handshake deadline must not survive into the session: a live stream
 	// is legitimately quiet between keyframes, and an unrenewed deadline would
 	// drop the encoder mid-broadcast.
+
 	_ = conn.SetDeadline(time.Time{})
 
 	s.admitSession(sc, target, peer, key)
