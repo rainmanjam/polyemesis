@@ -382,7 +382,19 @@ func (e *Engine) Status() Status {
 
 	// Every destination row appears, running or not, so the dashboard shows a
 	// disabled destination rather than silently omitting it.
-	rows, err := e.store.ListDestinations()
+	//
+	// SCOPED TO THIS ENGINE'S SOURCE, and that is the whole point. This read was
+	// ListDestinations() -- every row in the database -- while the compile below
+	// uses e.Source(), THIS engine's measured layout. On a multi-source install
+	// that pairs programme B's profile with programme A's track count, and where
+	// the counts differ the result is a "track N not present" warning on a
+	// destination that is correctly configured. The operator's natural response
+	// is to "fix" routing that was already right. row.SourceID was read and
+	// copied into the status but never used to filter, so nothing caught it.
+	//
+	// MigrateSources backfills source_id on open, so no row is orphaned out of
+	// this list by scoping it. See #515.
+	rows, err := e.store.ListDestinationsBySource(e.sourceID)
 	if err == nil {
 		for _, row := range rows {
 			ds := DestStatus{

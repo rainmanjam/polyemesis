@@ -3,25 +3,25 @@ module github.com/rainmanjam/polyemesis
 go 1.27.0
 
 require (
-	github.com/bluenviron/gortmplib v1.0.0
+	github.com/bluenviron/gortmplib v1.0.1
 	github.com/datarhei/gosrt v0.11.0
 	github.com/eclipse/paho.golang v0.23.0
-	github.com/go-chi/chi/v5 v5.3.1
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/shirou/gopsutil/v4 v4.26.7
 	golang.org/x/crypto v0.55.0
-	golang.org/x/net v0.57.0
+	golang.org/x/net v0.58.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.56.0
+	modernc.org/sqlite v1.57.0
 )
 
 require (
 	github.com/abema/go-mp4 v1.7.1 // indirect
 	github.com/benburkert/openpgp v0.0.0-20160410205803-c2471f86866c // indirect
-	github.com/bluenviron/mediacommon/v2 v2.9.2 // indirect
+	github.com/bluenviron/mediacommon/v2 v2.9.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
