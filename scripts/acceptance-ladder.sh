@@ -428,15 +428,39 @@ printf "  4 destinations, 3 tiers:  %s cores over %ss\n" "${RATE_TOTAL_A1:-?}" "
 # parseCPUTime to return 0 produces exactly this, and it must not be
 # indistinguishable from a real cost regression.
 if [[ -z "${RATE_TOTAL_A0:-}" || -z "${RATE_TOTAL_A1:-}" ]] \
-|| [[ -z "${RATE_CHEAPEST_TIER_A0:-}" || "${RATE_CHEAPEST_TIER_A0}" = "0.00" ]]; then
+|| [[ -z "${RATE_CHEAPEST_TIER_A0:-}" || "${RATE_CHEAPEST_TIER_A0}" = "0.00" ]] \
+|| [[ -z "${RATE_TIER_720_A0:-}" || -z "${RATE_TIER_720_A1:-}" ]] \
+|| [[ -z "${RATE_TIER_1080_A0:-}" || -z "${RATE_TIER_480_A0:-}" ]]; then
   bad "the CPU measurement produced no usable reading (A0='${RATE_TOTAL_A0:-}' A1='${RATE_TOTAL_A1:-}' cheapest='${RATE_CHEAPEST_TIER_A0:-}'); the measurement is broken, not the cost"
 else
-  VERDICT=$(awk -v a="$RATE_TOTAL_A0" -v b="$RATE_TOTAL_A1" -v c="$RATE_CHEAPEST_TIER_A0" \
-    'BEGIN{ printf "%s %.2f", ((b - a) < c ? "ok" : "bad"), b - a }')
-  DELTA=${VERDICT#* }
-  case "$VERDICT" in
-    ok*) ok "the fourth destination added ${DELTA} cores, below the ${RATE_CHEAPEST_TIER_A0} a fourth encode would have cost" ;;
-    *)   bad "the fourth destination added ${DELTA} cores against a cheapest tier of ${RATE_CHEAPEST_TIER_A0}; that is the price of another encode, so the tier was not shared" ;;
+  # AGAINST A CONTROL, not against an absolute number.
+  #
+  # Destination D joins the 720 rung; 1080 and 480 have nothing added to them,
+  # so whatever THEY do between the two windows is what this machine did on its
+  # own. Subtracting that leaves the part attributable to D.
+  #
+  # The total-vs-cheapest form this replaces failed on a loaded runner with
+  # 1080 0.27->0.33, 720 0.22->0.27, 480 0.16->0.22: every tier drifted up
+  # about 0.06, the total rose 0.17 against a 0.16 yardstick, and the suite
+  # said "the tier was not shared" while the process count, the encoder pid
+  # and the 2/1/1 consumer counts in the very same run said it was. The shared
+  # rung had risen the LEAST of the three. A threshold a busier machine can
+  # cross is measuring the machine, and it contradicted the primary evidence
+  # sitting four assertions above it.
+  VERDICT=$(awk \
+    -v s0="$RATE_TIER_720_A0"  -v s1="$RATE_TIER_720_A1" \
+    -v u0="$RATE_TIER_1080_A0" -v u1="$RATE_TIER_1080_A1" \
+    -v v0="$RATE_TIER_480_A0"  -v v1="$RATE_TIER_480_A1" \
+    -v c="$RATE_CHEAPEST_TIER_A0" \
+    'BEGIN{
+       drift = (((u1-u0) + (v1-v0)) / 2)        # what the untouched rungs did
+       excess = (s1-s0) - drift                 # what D actually cost the shared rung
+       printf "%s %.2f %.2f", (excess < c ? "ok" : "bad"), excess, drift
+     }')
+  read -r V EXCESS DRIFT <<<"$VERDICT"
+  case "$V" in
+    ok) ok "the fourth destination cost the shared rung ${EXCESS} cores above the ${DRIFT} the untouched rungs drifted, below the ${RATE_CHEAPEST_TIER_A0} a second encode would have cost" ;;
+    *)  bad "the fourth destination cost the shared rung ${EXCESS} cores above the ${DRIFT} the untouched rungs drifted, which is a second encode's worth (${RATE_CHEAPEST_TIER_A0}); the tier was not shared" ;;
   esac
 fi
 
