@@ -199,9 +199,20 @@ func (s *Server) clipSegmentView(p clipPart) clipSegmentView {
 // listing six tracks a recording does not have is a worse answer than listing
 // none. The measured count from the index is unaffected either way.
 func (s *Server) clipTracks(tl clipTimeline) []clipTrackView {
+	// THE CLIP'S OWN PROGRAMME, not the default one. The recording row carries
+	// source_id, and reading it is what stops a clip cut from Studio B being
+	// labelled with Main's track names -- an operator reading "Presenter mic"
+	// over somebody else's channel. Nil for a row written before sources
+	// existed, and the default is the honest answer there because there was
+	// only ever one programme to have recorded it.
+	eng := s.engineForSource(tl.anchor.SourceID)
+	if eng == nil {
+		eng = s.engOrNil()
+	}
+
 	n := tl.anchor.Tracks
 	if n <= 0 {
-		if src, known := s.engOrNil().SourceKnown(); known {
+		if src, known := eng.SourceKnown(); known {
 			n = len(src.Tracks)
 		}
 	}
@@ -209,8 +220,16 @@ func (s *Server) clipTracks(tl clipTimeline) []clipTrackView {
 		return []clipTrackView{}
 	}
 
+	// Annotations from the programme that recorded it, falling back to the
+	// settings mirror. handlePutAnnotations writes that mirror for the default
+	// programme only, so on a multi-source install it names Main's tracks
+	// whatever the clip actually holds.
 	byIndex := map[int]routing.TrackAnnotation{}
-	if settings, err := s.store.GetSettings(); err == nil {
+	if src, known := eng.SourceKnown(); known && len(src.Annotations) > 0 {
+		for _, a := range src.Annotations {
+			byIndex[a.Track] = a
+		}
+	} else if settings, err := s.store.GetSettings(); err == nil {
 		for _, a := range settings.Ingest.Annotations {
 			byIndex[a.Track] = a
 		}
