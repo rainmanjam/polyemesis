@@ -13,20 +13,22 @@ so they reflect what is actually vendored.
 
 ## Go — direct dependencies
 
-Ten, and the count is deliberate. Every one is either doing something genuinely
-hard or is the Go project's own code.
+Thirteen, and the count is deliberate. Every one is either doing something
+genuinely hard or is the Go project's own code.
 
 | Module | Version | Licence | What it does |
 |---|---|---|---|
-| `modernc.org/sqlite` | v1.54.0 | BSD-3-Clause | SQLite, transpiled to pure Go. The reason the binary needs no cgo |
-| `github.com/go-chi/chi/v5` | v5.3.1 | MIT | HTTP router. `net/http`-shaped, no framework |
+| `modernc.org/sqlite` | v1.57.0 | BSD-3-Clause | SQLite, transpiled to pure Go. The reason the binary needs no cgo |
+| `github.com/go-chi/chi/v5` | v5.3.2 | MIT | HTTP router. `net/http`-shaped, no framework |
 | `github.com/gorilla/websocket` | v1.5.3 | BSD-2-Clause | WebSocket for live status, levels, logs, chat |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | MIT | Session token signing |
-| `golang.org/x/crypto` | v0.54.0 | BSD-3-Clause | bcrypt, NaCl secretbox, ACME |
+| `golang.org/x/crypto` | v0.55.0 | BSD-3-Clause | bcrypt, NaCl secretbox, ACME |
 | `golang.org/x/sys` | v0.47.0 | BSD-3-Clause | Process groups, disk stats, Windows job objects |
-| `github.com/shirou/gopsutil/v4` | v4.26.6 | BSD-3-Clause | Host CPU, memory and disk for the monitoring page |
+| `golang.org/x/net` | v0.58.0 | BSD-3-Clause | IDNA for ACME hostnames, and `ipv4.PacketConn` control messages in the SRT listener. **Direct**, not pulled in by crypto |
+| `golang.org/x/term` | v0.45.0 | BSD-3-Clause | Reads the new password without echoing it, for `polyemesis -reset-admin` |
+| `github.com/shirou/gopsutil/v4` | v4.26.7 | BSD-3-Clause | Host CPU, memory and disk for the monitoring page |
 | `github.com/datarhei/gosrt` | v0.11.0 | MIT | Pure-Go SRT. Powers one-port token-addressed ingest |
-| `github.com/bluenviron/gortmplib` | v1.0.0 | MIT | Pure-Go RTMP. Powers one-port key-addressed ingest — message level only, never decoded media |
+| `github.com/bluenviron/gortmplib` | v1.0.1 | MIT | Pure-Go RTMP. Powers one-port key-addressed ingest — message level only, never decoded media |
 | `github.com/eclipse/paho.golang` | v0.23.0 | EPL-2.0 (dual EDL-1.0) | MQTT 5 client for retained telemetry |
 | `gopkg.in/yaml.v3` | v3.0.1 | Apache-2.0 (dual MIT) | Reads `config.yaml` |
 
@@ -50,8 +52,7 @@ the rest are build-time or test-only for their parent.
 | `github.com/benburkert/openpgp` | 20160410 | see note | gosrt (AES key-wrap) | ✅ |
 | `github.com/ebitengine/purego` | v0.10.2 | Apache-2.0 | gopsutil | ✅ |
 | `github.com/tklauser/go-sysconf` | v0.4.0 | BSD-3-Clause | gopsutil | ✅ |
-| `golang.org/x/net` | v0.57.0 | BSD-3-Clause | crypto | ✅ |
-| `golang.org/x/text` | v0.40.0 | BSD-3-Clause | net | ✅ |
+| `golang.org/x/text` | v0.41.0 | BSD-3-Clause | net | ✅ |
 | `github.com/go-ole/go-ole` | v1.3.0 | MIT | gopsutil (Windows) | platform |
 | `github.com/yusufpapurcu/wmi` | v1.2.4 | MIT | gopsutil (Windows) | platform |
 | `github.com/lufia/plan9stats` | 20260627 | BSD-3-Clause | gopsutil (Plan 9) | platform |
@@ -93,15 +94,16 @@ Ships in the bundle, which is embedded in the binary.
 
 | Package | Version | Licence | What it does |
 |---|---|---|---|
-| `react` / `react-dom` | 19.2.8 | MIT | The UI |
+| `react` / `react-dom` | 19.2.7 | MIT | The UI |
 | `react-router` | 8.3.0 | MIT | Routing |
 | `recharts` | 3.10.1 | MIT | Bitrate and loudness charts |
-| `hls.js` | 1.6.16 | Apache-2.0 | HLS playback in the built-in player |
-| `lucide-react` | 1.27.0 | ISC | Icons |
-| `sonner` | 2.0.7 | MIT | Toasts |
+| `hls.js` | 1.7.0 | Apache-2.0 | HLS playback in the built-in player |
+| `lucide-react` | 1.31.0 | ISC | Icons |
+| `sonner` | 2.0.8 | MIT | Toasts |
 | `clsx` | 2.1.1 | MIT | Conditional class names |
 | `tailwind-merge` | 3.6.0 | MIT | Resolves conflicting Tailwind classes |
 | `class-variance-authority` | 0.7.1 | Apache-2.0 | Typed component variants |
+| `driver.js` | 1.8.0 | MIT | The guided product tour |
 
 ### Radix UI primitives
 
@@ -118,6 +120,7 @@ rather than appearance.
 | `react-label` | 2.1.15 | | `react-switch` | 1.3.7 |
 | `react-progress` | 1.1.16 | | `react-tabs` | 1.1.21 |
 | `react-toast` | 1.2.23 | | `react-tooltip` | 1.2.16 |
+| `react-popover` | 1.1.23 | | | |
 
 ## Frontend — build and development
 
@@ -125,17 +128,21 @@ Not shipped. Present only to produce the bundle.
 
 | Package | Version | Licence | What it does |
 |---|---|---|---|
-| `vite` | 8.1.5 | MIT | Bundler and dev server |
+| `vite` | 8.2.1 | MIT | Bundler and dev server |
 | `typescript` | 7.0.2 | Apache-2.0 | Types |
 | `tailwindcss` | 4.3.3 | MIT | Styling |
 | `@tailwindcss/vite` | 4.3.3 | MIT | Tailwind 4's Vite integration |
-| `@vitejs/plugin-react` | 6.0.4 | MIT | React fast refresh |
-| `oxlint` | 1.76.0 | MIT | Linter (Rust; replaced ESLint) |
-| `@playwright/test` | 1.62.0 | Apache-2.0 | Browser end-to-end suite |
+| `@vitejs/plugin-react` | 6.0.5 | MIT | React fast refresh |
+| `oxlint` | 1.78.0 | MIT | Linter (Rust; replaced ESLint) |
+| `@playwright/test` | 1.62.1 | Apache-2.0 | Browser end-to-end suite |
 | `tw-animate-css` | 1.4.0 | MIT | Animation utilities |
-| `@types/node` | 24.13.3 | MIT | Node type definitions |
-| `@types/react` | 19.2.17 | MIT | React type definitions |
-| `@types/react-dom` | 19.2.3 | MIT | React DOM type definitions |
+| `@types/node` | 20.19.43 | MIT | Node type definitions |
+| `@types/react` | 19.2.18 | MIT | React type definitions |
+| `@types/react-dom` | 19.2.4 | MIT | React DOM type definitions |
+| `vitest` | 4.1.10 | MIT | Unit test runner |
+| `@vitest/coverage-v8` | 4.1.10 | MIT | Coverage for the above |
+| `jsdom` | 30.0.1 | MIT | DOM for the unit tests |
+| `@testing-library/react` | 16.3.2 | MIT | Component test helpers |
 
 ---
 
@@ -158,7 +165,7 @@ do not reach polyemesis's own MIT-licensed code.
 
 | | Version | Notes |
 |---|---|---|
-| **Go** | 1.26.5 (floor in `go.mod`) | `CGO_ENABLED=0` everywhere |
+| **Go** | 1.27.0 (floor in `go.mod`) | `CGO_ENABLED=0` everywhere |
 | **Node** | 24 in the images; 20.19+ / 22.12+ is Vite 8's floor | Build-time only |
 
 ## Container base images
@@ -200,12 +207,12 @@ plain `grep srt` matches `srtp` and would pass on every build.
 
 | Category | Count |
 |---|---|
-| Go direct | 9 |
+| Go direct | 13 |
 | Go indirect, linked into the binary | 13 |
 | Go indirect, platform-specific | 5 |
 | Go, build/test tooling only | 17 |
-| Frontend runtime (incl. 14 Radix) | 23 |
-| Frontend build/dev | 11 |
+| Frontend runtime (incl. 15 Radix) | 25 |
+| Frontend build/dev | 15 |
 | External tools | 3 (2 required, 1 optional) |
 | GitHub Actions | 9 |
 

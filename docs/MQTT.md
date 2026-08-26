@@ -49,7 +49,7 @@ number that was never true at the time it appeared.
 
 ## Setting it up
 
-`Settings → MQTT`. Off by default; an upgrade never starts publishing to a
+`Settings → MQTT telemetry`. Off by default; an upgrade never starts publishing to a
 broker nobody configured.
 
 | Field | Notes |

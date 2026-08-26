@@ -111,9 +111,9 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Thirteen routes are refused outright**, for three different reasons. Masking
+**Fifteen routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
-command shown is the command that runs) and pointless for the next three, which
+command shown is the command that runs) and pointless for the next five, which
 are `403` because of what they *do*. The last eight are `403` because of what
 `read` was decided to mean:
 
@@ -124,6 +124,7 @@ are `403` because of what they *do*. The last eight are `403` because of what
 | `GET /clipper/recordings/{id}/keyframes` | spawns `ffprobe`, once per timeline part |
 | `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
 | `GET /destinations/{id}/facebook/stream-health` | the same, for what Facebook sees arriving at its ingest |
+| `POST /destinations/{id}/facebook/end-broadcast` | the same, to end the broadcast. A `POST`, so the method rule already denies it — it is listed because this table is read against `readScopeDeniedPatterns`, and a row missing from one side tells the reader nothing about which side is right |
 | `GET /metadata/broadcast-window` | the same, once per connected account |
 | `GET /recordings/{id}/download` | the recording itself |
 | `GET /recordings/stems/{name}/download` | a separated audio stem |
@@ -630,6 +631,15 @@ and how to verify a signature.
 `POST /hooks` is the only call that ever returns the signing key, and it returns
 it once. The stored URL is masked everywhere it is read back, so an edit that
 submits the masked value unchanged keeps the real one.
+
+**`POST /hooks` and `PUT /hooks/{id}` answer `400` for a non-public URL.** A URL
+resolving to loopback, link-local (`169.254.169.254` included), RFC1918, RFC6598
+or IPv6 ULA is refused, naming the hook:
+`hook "x" targets a non-public address; set allowPrivateTarget to permit a
+self-hosted endpoint on purpose`. Send `"allowPrivateTarget": true` in the same
+body to mean it — it defaults to `false` and is read back with the hook. The
+same check runs again at dial time on every delivery, so a name that changes its
+answer later is refused then. See [HOOKS.md](HOOKS.md#private-and-lan-endpoints-allowprivatetarget).
 
 ### Alerts and schedules
 

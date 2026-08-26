@@ -147,7 +147,7 @@ The other four families were checked and need no such flag:
 
 | Setting | Default | Bounds |
 |---|---|---|
-| Video bitrate | 4500 kbps | 100 – 100 000 kbps |
+| Video bitrate | 6000 kbps | 100 – 100 000 kbps |
 | Ceiling (maxrate) | = bitrate | 0, or ≥ the bitrate, and ≤ 100 000 kbps |
 | Rate window (bufsize) | 2 × ceiling | 0, or ≥ half the ceiling, and ≤ 400 000 kbps |
 | Width, height | source dimension | 128 – 7680, and **even** — 4:2:0 chroma requires it |

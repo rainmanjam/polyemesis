@@ -31,10 +31,19 @@ the whole question.
 
 ```sh
 docker run -d --name polyemesis \
-  -p 8080:8080 -p 6000:6000/udp \
+  -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \
   -v polyemesis-data:/data \
   rainmanjam/polyemesis:latest
 ```
+
+> Note the `/udp` on port 6000. SRT is UDP, and omitting the suffix is the
+> classic reason an ingest silently receives nothing.
+
+> **Publish 1935 now even if you plan to use SRT.** Step 3 lets you choose RTMP
+> per source, and a container's port map is fixed when it is created — adding it
+> later means `docker rm` and re-creating the container. Left out, an RTMP
+> source fails silently: the card shows a publish URL, the container is healthy,
+> the UI reports no error, and the encoder simply never connects.
 
 **Binary:**
 
@@ -145,7 +154,7 @@ do.
 |---|---|
 | Two programmes at once (e.g. horizontal + vertical) | **Sources** — add a second one |
 | Different resolutions per destination | **Renditions** |
-| Keep a recording | **Settings → Recording** |
+| Keep a recording | **Recordings** — the *Recording* card on that page, not Settings |
 | Stay on air when the encoder drops | **Settings → Failover** — off by default |
 | Serve a player from polyemesis itself | **Playout** |
 | Something is wrong | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
@@ -165,5 +174,5 @@ selecting a track the source is not sending gives you silence. The Meters page
 measures what is actually going out.
 
 **A video-only source.** Every major platform refuses video with no audio.
-Turn on the silence tier (**Settings → Synthetic**) and polyemesis will
+Turn on the silence tier (**Settings → Synthetic audio**) and polyemesis will
 synthesise a silent stereo track so your destinations work.

@@ -80,8 +80,15 @@ const features = [
           <a href="#matrix" class="btn btn-ghost">See the routing →</a>
         </div>
 
+        {/* THE SAME COMMAND AS README.md AND /download, WORD FOR WORD, with
+            only the line breaks collapsed. It has been three different commands
+            before now, and the differences were never deliberate: the hero line
+            lost `-p 1935:1935`, so a visitor who copied it and then chose RTMP
+            on the Sources page got a container with nothing listening on 1935 —
+            no error anywhere, just an encoder that never connects, and a port
+            map that cannot be changed without recreating the container. */}
         <p class="mt-5 font-mono text-xs text-subtle">
-          docker run -d -v polyemesis-data:/data -p 8080:8080 -p 6000:6000/udp rainmanjam/polyemesis
+          docker run -d --name polyemesis -p 8080:8080 -p 6000:6000/udp -p 1935:1935 -v polyemesis-data:/data rainmanjam/polyemesis:latest
         </p>
       </div>
 

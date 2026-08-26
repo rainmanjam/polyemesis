@@ -27,7 +27,7 @@ below. The table is what each platform's **published API** allows today.
 The same matrix is rendered in `Settings → Platform credentials` and served from
 `GET /api/v1/platforms/capabilities`.
 
-| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers  Start / end |
+| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end |
 |---|---|---|---|---|---|---|---|---|
 | **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works |
 | **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible |
@@ -43,7 +43,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **TikTok LIVE** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Instagram Live** | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible |
-| *Everything else* | — | By hand | — | — | — | — | — |
+| *Everything else* | — | By hand | — | — | — | — | — | — |
 
 | Term | Means |
 |---|---|
@@ -53,8 +53,9 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **Not possible** | Somebody read the platform's published API and the thing is not in it. No amount of setup will produce it |
 
 *Everything else* is the other nineteen entries in the destination preset
-catalogue — PeerTube, Owncast, Cloudflare Stream, Mux, AWS IVS, LinkedIn, Trovo,
-Odysee, Vimeo, Dailymotion and the rest. They stream perfectly over RTMP, RTMPS
+catalogue — PeerTube, Owncast, Cloudflare Stream, Mux, AWS IVS and the rest.
+The platforms named in the table above are not among them, however faint their
+row reads. They stream perfectly over RTMP, RTMPS
 or SRT with a pasted URL and key; we simply have not researched their APIs, and
 "unverified" is the honest thing to say about an API nobody here has read.
 
@@ -124,7 +125,7 @@ scopes. Invisible twice over.
 
 **An account connected before this landed must be disconnected and reconnected
 once.** Granting a scope never upgrades a token that has already been issued —
-and Settings → Platforms flags exactly this, so it does not have to be
+and Settings → Platform credentials flags exactly this, so it does not have to be
 remembered from a page of documentation.
 
 **X (Twitter) — paste your key, there is no API.** X's developer platform covers
@@ -319,7 +320,7 @@ Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, disconnect and reconnect once.
 
 polyemesis now says so itself. Each platform carries a scope version that is
-stored with the account, and **Settings → Platforms marks an account
+stored with the account, and **Settings → Platform credentials marks an account
 "reconnect needed"** when the running build asks for more than that account was
 granted. Accounts connected before the version existed are judged on the scopes
 the platform actually returned, so an account that already holds everything is
@@ -448,7 +449,7 @@ destination editor for a while. **This is the first release that sends them
 anywhere.**
 
 They ride along on the same metadata push as title and description — the one
-the composer's "Push metadata" button already starts — rather than needing a
+the composer's "Push to platforms" button already starts — rather than needing a
 separate action. Any destination that has a privacy status, a COPPA
 declaration or a content label saved sends it on the very next push after
 upgrading, whether or not that push actually changes the title or description.

@@ -32,21 +32,23 @@ Go toolchain: **1.26.6**.
 
 ## Direct Go dependencies
 
-Ten, deliberately. Each one earns its place below.
+Thirteen, deliberately. Each one earns its place below.
 
 | Module | Version | Used by |
 | --- | --- | --- |
-| `github.com/bluenviron/gortmplib` | v1.0.0 | `internal/rtmpserver` |
+| `github.com/bluenviron/gortmplib` | v1.0.1 | `internal/rtmpserver` |
 | `github.com/datarhei/gosrt` | v0.11.0 | `internal/srtserver` |
 | `github.com/eclipse/paho.golang` | v0.23.0 | `internal/mqtt` |
-| `github.com/go-chi/chi/v5` | v5.3.1 | `internal/api` |
+| `github.com/go-chi/chi/v5` | v5.3.2 | `internal/api` |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | `internal/auth` |
 | `github.com/gorilla/websocket` | v1.5.3 | `internal/api` |
-| `github.com/shirou/gopsutil/v4` | v4.26.6 | `internal/stats` |
-| `golang.org/x/crypto` | v0.54.0 | `internal/secrets`, `internal/db`, `internal/tlsx` |
+| `github.com/shirou/gopsutil/v4` | v4.26.7 | `internal/stats` |
+| `golang.org/x/crypto` | v0.55.0 | `internal/secrets`, `internal/db`, `internal/tlsx` |
+| `golang.org/x/net` | v0.58.0 | `internal/tlsx` (IDNA), `internal/srtserver` |
 | `golang.org/x/sys` | v0.47.0 | `internal/recording`, `internal/supervisor`, service wrapper |
+| `golang.org/x/term` | v0.45.0 | `cmd/polyemesis` (`-reset-admin`, echo-free password entry) |
 | `gopkg.in/yaml.v3` | v3.0.1 | `internal/config` |
-| `modernc.org/sqlite` | v1.54.0 | `internal/db` |
+| `modernc.org/sqlite` | v1.57.0 | `internal/db` |
 
 ### `github.com/datarhei/gosrt` — and the test a protocol dependency must pass
 

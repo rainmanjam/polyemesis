@@ -22,13 +22,14 @@ stale; the table cannot.**
 | Class | What it means | Fields |
 |---|---|---|
 | `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 89 |
-| `respawn` | Baked into a child's argv. The named signature notices and the child is replaced | 49 |
+| `respawn` | Baked into a child's argv. The named signature notices and the child is replaced | 51 |
 | `rebind` | A bound socket. Stopped and rebound; every publisher on it reconnects | 1 |
-| `on_demand` | Read at the moment it is needed. Nothing holds a copy, so nothing has to be applied | 2 |
+| `on_demand` | Read at the moment it is needed. Nothing holds a copy, so nothing has to be applied | 8 |
 | `next_start` | Stored now, acted on at the next process start | **0** |
 
 Most of what an operator can change already applies without touching a process.
-The 49 are the ones that reach an FFmpeg argv.
+The 51 are the ones that reach an FFmpeg argv. The five classes hold 149 fields
+between them, and `reload.go` is the authority for every number on this page.
 
 ### Applied live — nothing is replaced
 
@@ -44,6 +45,22 @@ The 49 are the ones that reach an FFmpeg argv.
 | `playout.{maxDiskMb,sessionIdleSeconds,maxSessions}` | Pushed into the playout manager before any variant is touched |
 | `chat.*`, `automod.*`, `alerts.*`, `mqtt.*` | Applied out of band by the settings handler |
 | `postProd.*` | Pushed into the jobs governor by the jobs policy endpoint; retention is re-read by the purge sweep |
+
+### Read on demand — nothing holds a copy
+
+- **Playout:** `playout.public` is evaluated per request, because a route table
+  is built once at startup and this is a runtime setting.
+  `playout.allowCrossOrigin` is a response header, decided per request.
+- **Multitrack:** `multitrack.gpus.{model,vendorId,deviceId,dedicatedVideoMemory,sharedSystemMemory,driverVersion}`
+  — the declared GPU capabilities Twitch Enhanced Broadcasting negotiates on.
+  They are read out of settings **once per destination start**, in the go-live
+  request body. A destination that is already publishing negotiated at go-live
+  and holds a key minted for that negotiation: changing the declared hardware
+  underneath it cannot retroactively change what Twitch agreed to, and
+  restarting a live destination to re-ask would drop a platform connection to
+  deliver a setting that only matters next time. So editing these while a
+  destination is up costs nothing and changes nothing until its next start —
+  which is the honest answer, not a missing feature.
 
 ### Requires a respawn — the value is in an argv or a socket bind
 

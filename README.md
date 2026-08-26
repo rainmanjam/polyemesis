@@ -1,7 +1,7 @@
 # polyemesis
 
 [![ci](https://github.com/rainmanjam/polyemesis/actions/workflows/ci.yml/badge.svg)](https://github.com/rainmanjam/polyemesis/actions/workflows/ci.yml)
-[![Go 1.26](https://img.shields.io/badge/go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Go 1.27](https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Docker](https://img.shields.io/badge/docker-rainmanjam%2Fpolyemesis-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/rainmanjam/polyemesis)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
 
@@ -164,7 +164,7 @@ Open <http://localhost:8080> and set an admin password on the first-run screen.
 > Note the `/udp` on port 6000. SRT is UDP, and omitting the suffix is the
 > classic reason an ingest silently receives nothing.
 
-Or build from a clone — you need Go 1.26.5+, Node 20.19+/22.12+ and FFmpeg:
+Or build from a clone — you need Go 1.27.0+, Node 20.19+/22.12+ and FFmpeg:
 
 ```bash
 git clone https://github.com/rainmanjam/polyemesis

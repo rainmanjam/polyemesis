@@ -278,7 +278,7 @@ Everything past that floor is where they diverge:
 
 | Platform | Beyond the shared floor | Operationally |
 |---|---|---|
-| **Linux (server)** | The race detector, 11 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
+| **Linux (server)** | The race detector, 13 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
 | **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, bundling a pinned FFmpeg |
 | **macOS** | Nothing further | **Daily driver.** Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below |
 | **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and recording truncation on service stop is a known unresolved defect — see the note below |
@@ -522,7 +522,7 @@ path, since the FFmpeg problem stops being a host problem.
 
 ### Install the binary
 
-Prerequisites for building from source: **Go 1.26.5+** (the floor in `go.mod`;
+Prerequisites for building from source: **Go 1.27.0+** (the floor in `go.mod`;
 the official Go images set `GOTOOLCHAIN=local`, so an older toolchain fails
 rather than silently upgrading itself) and **Node 20.19+ or 22.12+** (Vite 8's
 requirement). Neither is needed to *run* the result.
@@ -610,7 +610,7 @@ server. Open those ports on the firewall so encoders reach polyemesis directly.
 Developed on daily, so it works — but read the SRT paragraph, because the
 default Homebrew install cannot do multitrack ingest.
 
-**Prerequisites.** Homebrew. Go 1.26.5+ and Node 20.19+/22.12+ if building from
+**Prerequisites.** Homebrew. Go 1.27.0+ and Node 20.19+/22.12+ if building from
 source. Apple Silicon and Intel both fine.
 
 ### FFmpeg on macOS: the version is fine, SRT is not
@@ -718,7 +718,7 @@ unresolved problem. The Service Control Manager wrapper, process-group teardown
 and installer scripts have never been exercised on a live host. If this needs to
 work today, use Linux or Docker.
 
-**Prerequisites.** Windows 10 / Server 2019 or newer, x86-64. Go 1.26.5+ and
+**Prerequisites.** Windows 10 / Server 2019 or newer, x86-64. Go 1.27.0+ and
 Node 20.19+/22.12+ if you are building the binary yourself.
 
 ### FFmpeg on Windows: this part is straightforward
@@ -836,7 +836,15 @@ tls mode=… hostname=…
 | 6000 | **UDP** | SRT ingest. The default; changeable in *Settings → Ingest*. |
 | 1935 | TCP | RTMP ingest, only if you use the fallback. One port however many RTMP sources you run. |
 | 80 | TCP | only for `tls.mode: acme` (HTTP-01 validation), plus the HTTP→HTTPS redirect whenever polyemesis terminates TLS |
-| 443 | TCP | only if you set `addr` to `:443` rather than serving TLS on 8080 |
+| 443 | TCP | whenever polyemesis terminates TLS for browsers. Serving TLS on 8080 works, but every visitor has to type the port and `http://` redirects carry it too — so the server **warns at startup** when TLS is on and `addr` is not `:443`. Keep another port only if something in front of this box terminates TLS on 443, or the port is deliberate. |
+
+> **The startup warning about `:443` is not an error.** `install.sh` asks about
+> this and grants `AmbientCapabilities=CAP_NET_BIND_SERVICE` in the unit it
+> writes, so an operator who used the installer never sees it. The one who does
+> is the operator with a hand-written unit, an Ansible role or a compose file:
+> they set `tls.mode`, get a working server on 8080, and nothing else would
+> ever tell them their visitors need a port. Set `addr: ":443"` — and grant
+> that capability if the service runs as a non-root user.
 
 The ingest listeners bind `0.0.0.0` regardless of `addr`, so restricting `addr`
 to loopback for a reverse-proxy deployment does not restrict ingest. Set an SRT

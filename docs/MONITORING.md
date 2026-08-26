@@ -151,7 +151,7 @@ the API, under `lifecycle`.
 
 ### Security and configuration events
 
-Seven of the subscribable types are not about the stream. They are about the
+Ten of the subscribable types are not about the stream. They are about the
 server itself, and they answer one question: *was that me?*
 
 | Event | Severity | Fires when |
@@ -162,12 +162,26 @@ server itself, and they answer one question: *was that me?*
 | `auth.token.created` | `critical` | an API token was minted |
 | `auth.token.revoked` | `warning` | an API token was destroyed; names the same token the created event named |
 | `settings.changed` | `warning` | a settings save altered the stored document, **or** the MQTT broker password or automod key was rotated |
+| `upgrade.staged` | `critical` | a new release was staged over **this server's own binary**. It takes effect at the next restart; a forced stage says so in a named field |
+| `upgrade.rolled_back` | `critical` | the previous binary was restored. Names no version — a rollback restores whatever this box ran before, and inventing a tag would be a guess printed as a fact |
+| `debug.exported` | `critical` | a debug bundle was downloaded, with how many log records and whether the capture was truncated |
 | `clip.captured` | `info` | a clip was cut from the replay buffer |
 
-The two `critical` ones are the pair worth putting on a phone. Changing the
-password evicts every existing session, and minting a token creates a
-credential that survives the password change — between them they are how
-somebody who has your password keeps your server.
+**The five `critical` ones are what belong on a phone**, and they are one story
+rather than five. Changing the password evicts every existing session; minting a
+token creates a credential that survives the password change; replacing the
+binary creates something that survives the password change, the token revocation
+**and** the restart — and the restart is what arms it. A rollback is a binary
+replacement in the other direction, and "somebody quietly returned this box to
+the version before the security fix" is exactly the sentence this trail exists to
+make findable. `debug.exported` is not a breakage at all: it is the moment a copy
+of this server's own logs leaves the operator's control, and since polyemesis
+keeps no copy of the bundle — a second place credentials could be read from — the
+event is the **only** durable record that it happened.
+
+All ten are in `AllTypes()`, so they appear in the rule picker and are delivered
+to any rule with an empty event list. A rule that subscribes to everything
+receives these whether or not it was written with them in mind.
 
 **Credential rotations raise `settings.changed` too.** The MQTT broker password
 and the automod key are sealed straight into the store by their own endpoints
