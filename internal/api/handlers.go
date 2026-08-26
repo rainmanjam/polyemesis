@@ -692,8 +692,25 @@ func compareSemver(a, b semver) int {
 	return strings.Compare(a.pre, b.pre)
 }
 
+// statusPayload is the status of the BOX, and the one place it is assembled.
+//
+// The destination list must not come from a single engine. s.eng() is
+// mgr.Default(), whose Status is scoped to its own programme (#515), so reading
+// it here gave a multi-source install the selected programme's destinations and
+// nothing for the others -- in the dashboard's grouped list and in the
+// WebSocket push, which is the same payload arriving by a different door.
+//
+// It exists as a function because those two doors drifted apart once already:
+// each built the payload itself, so fixing one left the other wrong and the UI
+// showed different things depending on whether it had polled or been pushed.
+func (s *Server) statusPayload() engine.Status {
+	st := s.eng().Status()
+	st.Destinations = s.mgr.DestinationStatuses()
+	return st
+}
+
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.eng().Status())
+	writeJSON(w, http.StatusOK, s.statusPayload())
 }
 
 func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
@@ -850,6 +867,11 @@ func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request) {
 // is already signed in can just open the URL.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	st := s.eng().Status()
+	// EVERY programme's destinations, not the default engine's. A scrape that
+	// silently covers one source is worse than one that fails: a missing series
+	// is indistinguishable from a destination nobody configured, so an alert
+	// that should fire on a dead destination simply never evaluates.
+	st.Destinations = s.mgr.DestinationStatuses()
 
 	snap := metrics.Snapshot{
 		Version:      s.version,
@@ -1958,11 +1980,7 @@ func (s *Server) applyDestinationEnabled(id int64, enabled bool) destControl {
 	// clean stop for one that left a process holding the port. The bug is
 	// invisible on a single-source install, which is every development box.
 	var eff destEffect
-	var statuses []engine.DestStatus
-	for _, e := range s.mgr.Engines() {
-		statuses = append(statuses, e.Status().Destinations...)
-	}
-	for _, d := range statuses {
+	for _, d := range s.mgr.DestinationStatuses() {
 		if d.ID != id {
 			continue
 		}
