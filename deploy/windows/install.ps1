@@ -9,7 +9,11 @@
 
     Run from an elevated PowerShell prompt:
 
-        .\install.ps1 -BinaryPath .\polyemesis.exe
+        .\install.ps1 -BinaryPath .\polyemesis.exe -Sha256SumsPath .\SHA256SUMS
+
+    The binary is verified against the release's SHA256SUMS before anything is
+    installed. Pass -AllowUnverified only if you have no checksum at all; it
+    does not get you past a mismatch.
 
     The service detects that the SCM started it and reports its state back, so
     a slow FFmpeg probe on first start is not mistaken for a hung service. On
@@ -20,6 +24,19 @@
 
 .PARAMETER BinaryPath
     Path to the polyemesis.exe you want installed.
+
+.PARAMETER Sha256
+    Expected SHA-256 of -BinaryPath, as published in the release's SHA256SUMS.
+    Give this or -Sha256SumsPath; a mismatch refuses to install.
+
+.PARAMETER Sha256SumsPath
+    Path to the SHA256SUMS file downloaded from the same release. The entry for
+    -BinaryPath's file name is looked up in it.
+
+.PARAMETER AllowUnverified
+    Install without checking the hash. This is the only way past the check, and
+    it is deliberately a flag you have to type: an unverified binary is about to
+    be registered as a service running as LocalSystem.
 
 .PARAMETER InstallDir
     Where the binary is copied to. Defaults to Program Files.
@@ -61,6 +78,10 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$BinaryPath,
+
+    [string]$Sha256,
+    [string]$Sha256SumsPath,
+    [switch]$AllowUnverified,
 
     [string]$InstallDir = (Join-Path $env:ProgramFiles 'polyemesis'),
     [string]$DataDir = (Join-Path $env:ProgramData 'polyemesis'),
@@ -106,9 +127,68 @@ function Invoke-Sc {
     }
 }
 
+# THE BINARY IS ABOUT TO BE REGISTERED AS A SERVICE RUNNING AS LocalSystem, so
+# "it came over HTTPS from GitHub" is the wrong standard. install.sh has refused
+# an unverified binary for releases -- a mismatch dies, and a missing SHA256SUMS
+# dies unless --allow-unverified is passed, because both end with an unverified
+# binary in place. The Windows path had neither half: it took an
+# already-downloaded .exe and never hashed it, while SHA256SUMS was published as
+# a release asset that nothing here consulted.
+#
+# Returns the expected hash, or $null when the caller has said -AllowUnverified.
+function Resolve-ExpectedHash {
+    param([string]$Exe, [string]$Expected, [string]$SumsPath, [bool]$Unverified)
+
+    if ($Expected) { return $Expected.Trim().ToUpperInvariant() }
+
+    if ($SumsPath) {
+        if (-not (Test-Path -LiteralPath $SumsPath)) {
+            throw "SHA256SUMS file '$SumsPath' does not exist. Refusing to install an unverified binary."
+        }
+        $name = [System.IO.Path]::GetFileName($Exe)
+        # `<hash>  <name>` — sha256sum's own format, which is what the release
+        # publishes. Matched on the file name alone so a path prefix in either
+        # column cannot make an entry silently unmatchable.
+        foreach ($line in Get-Content -LiteralPath $SumsPath) {
+            $parts = $line -split '\s+', 2
+            if ($parts.Count -eq 2 -and ([System.IO.Path]::GetFileName($parts[1].Trim())) -eq $name) {
+                return $parts[0].Trim().ToUpperInvariant()
+            }
+        }
+        throw "SHA256SUMS at '$SumsPath' has no entry for '$name'. Refusing to install an unverified binary."
+    }
+
+    if ($Unverified) {
+        Write-Warning "no -Sha256 and no -Sha256SumsPath — installing UNVERIFIED at your request (-AllowUnverified)"
+        return $null
+    }
+
+    throw @"
+Refusing to install an unverified binary.
+
+Download SHA256SUMS from the same release and pass one of:
+
+    -Sha256SumsPath .\SHA256SUMS
+    -Sha256 <the hash for this file>
+
+or -AllowUnverified if you accept the risk. This binary is about to be
+registered as a service.
+"@
+}
+
 Assert-Administrator
 
 $BinaryPath = (Resolve-Path -LiteralPath $BinaryPath).Path
+
+$expectedHash = Resolve-ExpectedHash -Exe $BinaryPath -Expected $Sha256 -SumsPath $Sha256SumsPath -Unverified ([bool]$AllowUnverified)
+if ($expectedHash) {
+    $actual = (Get-FileHash -LiteralPath $BinaryPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    if ($actual -ne $expectedHash) {
+        throw "SHA-256 mismatch for $BinaryPath`n  expected $expectedHash`n  got      $actual`nRefusing to install. Re-download it; do not pass -AllowUnverified to get past a MISMATCH — a mismatch is not a missing checksum."
+    }
+    Write-Host "  sha256   verified"
+}
+
 if (-not $ConfigPath) { $ConfigPath = Join-Path $DataDir 'config.yaml' }
 
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue

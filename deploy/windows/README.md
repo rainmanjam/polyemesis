@@ -21,9 +21,28 @@ scripts register polyemesis with the Service Control Manager so it starts at
 boot, restarts on failure, and logs somewhere you can read after the fact.
 
 ```powershell
-# from an elevated PowerShell prompt
-.\install.ps1 -BinaryPath .\polyemesis.exe
+# from an elevated PowerShell prompt. Download SHA256SUMS from the same
+# release page as the .exe -- install.ps1 refuses an unverified binary.
+.\install.ps1 -BinaryPath .\polyemesis.exe -Sha256SumsPath .\SHA256SUMS
 ```
+
+## Verifying the download
+
+The binary you are about to install is registered as a service running as
+`LocalSystem`, so "it came over HTTPS from GitHub" is not the standard. Every
+release publishes a `SHA256SUMS` asset beside the binaries, and `install.ps1`
+will not install without checking against it:
+
+```powershell
+.\install.ps1 -BinaryPath .\polyemesis.exe -Sha256SumsPath .\SHA256SUMS
+# or, if you would rather paste the one line:
+.\install.ps1 -BinaryPath .\polyemesis.exe -Sha256 <hash from SHA256SUMS>
+```
+
+A **mismatch** always refuses; `-AllowUnverified` cannot get you past one, and
+is not a workaround for it. It exists only for the case where you have no
+checksum at all — a locally built `polyemesis.exe`, say — and it warns loudly.
+This mirrors what `scripts/install.sh` has done on Linux for several releases.
 
 Defaults:
 
@@ -161,10 +180,18 @@ the event log.
 
 ```powershell
 .\uninstall.ps1                       # keeps C:\ProgramData\polyemesis
-.\install.ps1 -BinaryPath .\polyemesis.exe
+.\install.ps1 -BinaryPath .\polyemesis.exe -Sha256SumsPath .\SHA256SUMS
 ```
 
-`uninstall.ps1` never touches the data directory unless you pass `-RemoveData`.
+`uninstall.ps1` never touches the data directory unless you pass `-RemoveData`,
+and `-RemoveData` refuses a path that is a drive root, a top-level directory, or
+one that holds neither `polyemesis.db` nor `secret.key` — the data directory is
+whatever `-DataDir` says, so a typo or a tab-completed parent used to be a
+recursive delete of it.
+
+`-Force` skips both the on-air check and the typed confirmation.
+`-IgnoreLiveBroadcast` skips only the on-air check, so ending a live broadcast
+and skipping the confirmation are not the same keystroke.
 
 ## Running interactively
 

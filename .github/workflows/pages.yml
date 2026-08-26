@@ -49,6 +49,23 @@ on:
       - "web/**"
       - "docs/**"
       - ".github/workflows/pages.yml"
+  # A RELEASE REDEPLOYS THE SITE (#559). Tagging used to rebuild nothing:
+  # `branches` and `paths` are AND-ed, so a tag push matched no filter here at
+  # all, and Footer.astro's `git describe --tags` plus every "latest release"
+  # claim on the site stayed at whatever the last web/- or docs/-touching commit
+  # had produced. CHANGELOG.md is not in the paths list either, so the document
+  # the advisories point at could not reach the site. That is #499's "the
+  # correction cannot reach the site", one mechanism narrower.
+  #
+  # workflow_run RATHER THAN `tags:` ON THE PUSH ABOVE, because a second `push:`
+  # key is not a thing and `paths` would apply to the tag too -- the filter that
+  # is right for main is exactly the one that made a tag match nothing. This
+  # fires when release completes, runs on main (where the new tag now is, so
+  # `git describe` resolves to it), and rebuilds the published site with no
+  # paths filter in the way.
+  workflow_run:
+    workflows: [release]
+    types: [completed]
   # The escape hatch for the first deploy: after adding the secrets the
   # maintainer needs a run without waiting for a commit that touches web/.
   workflow_dispatch:
@@ -78,7 +95,16 @@ jobs:
         # web/dist. internal/testenv/pagesdeploy_test.go asserts that.
         working-directory: web
     steps:
+      # TAGS, because Footer.astro runs `git describe --tags --abbrev=0` at build
+      # time and OMITS the version line entirely when that fails -- which a
+      # shallow, tagless checkout guarantees. The footer has therefore been
+      # silently versionless on every deploy, which is the failure that
+      # component's own comment describes ("a shallow clone, a tarball, no
+      # tags") without anything ever making it not happen.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
