@@ -272,18 +272,29 @@ var defaultEngineSites = map[string]string{
 		"programme.",
 
 	// --- reads that still answer for the default programme ---
-	"handleStatus": "GET /status, the dashboard's whole picture of one programme. " +
-		"STILL UNSCOPED: on a multi-source install it describes programme 1 " +
-		"whichever the operator is looking at. It is a read, so nothing moves on " +
-		"air -- but it is the read the operator decides from.",
+	"statusPayload": "the assembler behind GET /status and the WebSocket status " +
+		"push. The DESTINATION LIST is no longer from the default engine -- it is " +
+		"mgr.DestinationStatuses(), every programme's, each compiled by the engine " +
+		"that owns it -- because a multi-source install was showing the selected " +
+		"programme's destinations and zero for the rest, and Prometheus was " +
+		"emitting series for one programme only. The remaining reach is the rest " +
+		"of the payload: relay counters, ingest and renditions. STILL UNSCOPED " +
+		"there, same consequence as before -- it describes programme 1 whichever " +
+		"the operator is looking at. It is a read, so nothing moves on air, but it " +
+		"is the read the operator decides from.",
 	"handleSource": "GET /source, the ingest layout. STILL UNSCOPED, same shape " +
 		"as handleStatus and the same consequence: track numbers from the wrong " +
 		"ingest.",
 	"handleLevels": "GET /levels, the meters. STILL UNSCOPED -- an operator " +
 		"reading silence on programme 2's meters is reading programme 1's.",
-	"handleMetrics": "GET /metrics, the Prometheus exposition. STILL UNSCOPED, " +
-		"and here it is arguably worse than a wrong screen: an alerting rule fires " +
-		"or fails to fire on numbers from a programme nobody asked about.",
+	"handleMetrics": "GET /metrics, the Prometheus exposition. Its DESTINATION " +
+		"series now cover every programme via mgr.DestinationStatuses(); a scrape " +
+		"that silently covered one source was worse than a failing one, because a " +
+		"missing series is indistinguishable from a destination nobody configured " +
+		"and the alert simply never evaluates. The remaining reach is the relay " +
+		"and uptime block. STILL UNSCOPED there, and arguably worse than a wrong " +
+		"screen: an alerting rule fires or fails to fire on numbers from a " +
+		"programme nobody asked about.",
 
 	// --- outside internal/api/handlers.go and renditions.go ---
 	"handleAlertsMeta": "internal/api/automation.go. Unscoped; not this " +

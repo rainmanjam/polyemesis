@@ -12,6 +12,17 @@ its first tagged release.
 ## [0.7.0] — unreleased
 
 ### Fixed
+- **The dashboard's grouped destination list and the Prometheus scrape lost
+  every programme but one.** Scoping `Engine.Status` to its own source was
+  right, and it removed a leak three callers were quietly relying on: the
+  status payload, the WebSocket push of the same payload, and `/metrics` all
+  read the DEFAULT engine, whose status had happened to carry every row on the
+  machine. A multi-source install then showed the selected programme's
+  destinations and zero for the others, and stopped emitting series for them.
+  The metrics half is the dangerous one — a missing series is indistinguishable
+  from a destination nobody configured, so an alert on a dead destination never
+  evaluates. The destination list now comes from `Manager.DestinationStatuses`,
+  every programme's, each still compiled by the engine that owns it.
 - **The RTMP relay stopped answering publish and play once gortmplib reached
   v1.0.1.** That release split `ServerConn.Accept` into `AcceptConn` (the
   connection, and reading the play/publish command) and `AcceptAction` (the
