@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "@/lib/api";
+import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/lib/currentProgramme";
 import { mergeStatusDestinations } from "@/lib/dashboardFacts";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
 import type {
@@ -41,6 +42,10 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
   const [frameError, setFrameError] = useState(false);
+  /* Which programme every request below names. Null until the source list has
+     landed, and null forever on an install with none -- see currentProgramme. */
+  const [programme, setProgramme] = useState<number | null>(null);
+  const [programmeKnown, setProgrammeKnown] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
@@ -56,7 +61,12 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       if (closedRef.current) return;
 
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(`${proto}//${location.host}/api/v1/ws`);
+      // The socket names a programme for the same reason every poll does: the
+      // server refuses an unnamed one on a multi-source install, and this is
+      // the connection every screen renders from -- an unnamed one takes the
+      // whole console down rather than one panel.
+      const q = programme == null ? "" : `?source=${encodeURIComponent(String(programme))}`;
+      const ws = new WebSocket(`${proto}//${location.host}/api/v1/ws${q}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -155,13 +165,50 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
+    // Re-opened when the programme resolves: the first render has none, and a
+    // socket opened without one would be answering for a programme the operator
+    // is not looking at for the life of the session.
+  }, [programmeKnown, programme]);
+
+  // WHICH PROGRAMME, before anything that needs one.
+  //
+  // The server refuses a programme-shaped route when an install has two or more
+  // sources and the request names none, so a poll issued before this resolves
+  // would 400 on exactly the installs this exists for. programmeKnown is what
+  // holds the polls until there is an answer -- including the answer "none",
+  // which is the setup wizard's state and is legitimate.
+  useEffect(() => {
+    let live = true;
+    api
+      .listSources()
+      .then((rows) => {
+        if (!live) return;
+        const ids = rows.map((r) => r.id);
+        const picked = resolveProgramme(ids, rememberedProgramme());
+        setProgramme(picked);
+        rememberProgramme(picked);
+      })
+      .catch(() => {
+        // A console that will not render because it could not list sources is
+        // worse than one showing the install's only programme. Null is what the
+        // routes accept on a single-source install, which is the overwhelming
+        // majority and the case where guessing cannot be wrong.
+        if (live) setProgramme(null);
+      })
+      .finally(() => {
+        if (live) setProgrammeKnown(true);
+      });
+    return () => {
+      live = false;
+    };
   }, []);
 
   // Seed from REST so the first paint is populated even if the socket is slow,
   // and so a browser that cannot open a WebSocket still shows something real.
   useEffect(() => {
-    api.status().then(setStatus).catch(() => {});
-    api.source().then(setSource).catch(() => {});
+    if (!programmeKnown) return;
+    api.status(programme).then(setStatus).catch(() => {});
+    api.source(programme).then(setSource).catch(() => {});
     api
       .stats()
       .then((s) => {
@@ -169,7 +216,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         setBitrate(s.bitrate ?? []);
       })
       .catch(() => {});
-  }, []);
+  }, [programmeKnown, programme]);
 
   const value = useMemo<LiveData>(
     () => ({

@@ -379,10 +379,23 @@ export const api = {
   completeTour: () => post<TourState>("/tour/complete"),
 
   // --- system & telemetry ---
-  system: () => get<SystemInfo>("/system"),
-  status: () => get<Status>("/status"),
-  source: () => get<SourceInfo>("/source"),
-  levels: () => get<{ levels: Levels; at: string }>("/levels"),
+  system: (sourceId?: number | null) => get<SystemInfo>("/system" + sourceQuery(sourceId)),
+  /* REQUIRED, not optional, and that is the whole point.
+   *
+   * These four describe ONE programme. The server refuses them with
+   * `source_required` when an install has two or more and the request names
+   * none -- because answering the default is what let five separate bugs report
+   * programme 1's figures on somebody else's screen.
+   *
+   * Optional here would move that refusal from compile time to a 400 at 4pm on
+   * a Friday. Required means a caller that has not decided which programme it
+   * is asking about does not build, and TypeScript names every site. `system`
+   * stays optional: most of what it returns describes the machine, and the
+   * setup wizard reads it before any source exists. */
+  status: (sourceId: number | null) => get<Status>("/status" + sourceQuery(sourceId)),
+  source: (sourceId: number | null) => get<SourceInfo>("/source" + sourceQuery(sourceId)),
+  levels: (sourceId: number | null) =>
+    get<{ levels: Levels; at: string }>("/levels" + sourceQuery(sourceId)),
   stats: () =>
     get<{ system: SystemStats; bitrate: BitrateSample[] | null }>("/stats"),
 

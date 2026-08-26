@@ -50,14 +50,14 @@ describe("the no-source refusal", () => {
       error: "this install has no source yet, so there is no programme to act on.",
       code: "no_source",
     });
-    await expect(api.status()).rejects.toSatisfy(
+    await expect(api.status(null)).rejects.toSatisfy(
       (e: unknown) => e instanceof ApiError && e.status === 503 && e.code === "no_source",
     );
   });
 
   it("leaves code empty for the errors that carry none", async () => {
     respondWith(400, { error: "invalid id" });
-    await expect(api.status()).rejects.toSatisfy(
+    await expect(api.status(null)).rejects.toSatisfy(
       (e: unknown) => e instanceof ApiError && e.code === "",
     );
   });
