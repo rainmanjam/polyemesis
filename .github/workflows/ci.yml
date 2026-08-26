@@ -1090,6 +1090,219 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      # THE WINDOWS UNINSTALLER HAD ZERO COVERAGE OF ANY KIND, #509. Unlike
+      # the systemd and Docker uninstallers -- ten assertions between them in
+      # scripts/acceptance-install.sh -- deploy/windows/uninstall.ps1's
+      # live-broadcast check and typed confirmation, added in #489 to match
+      # them, had never been parsed, linted or executed on any platform. A
+      # syntax error in a script whose job is to end live broadcasts would
+      # have shipped undetected. These three steps run on the windows-latest
+      # leg already in this job's matrix, so the marginal cost is
+      # milliseconds of pure PowerShell, not a new runner allocation. Each
+      # extracts the real code under test from the file's own AST rather
+      # than retyping it, so a rewrite that keeps the same names and
+      # behaviour keeps passing, and one that silently changes them fails
+      # here instead of on an operator's host.
+      - name: Parse deploy/windows/uninstall.ps1 (#509)
+        if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'deploy/windows/uninstall.ps1'
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$parseErrors)
+          if ($parseErrors) {
+            $parseErrors | ForEach-Object { Write-Host "PARSE ERROR: $_" }
+            exit 1
+          }
+          Write-Host "uninstall.ps1 parses cleanly"
+
+      # Get-PublishingFfmpeg is the function deciding whether the host is
+      # safe to touch. It is extracted from the file's AST and exercised
+      # against a mocked Get-CimInstance -- spinning up a real publishing
+      # ffmpeg on a CI runner just to prove a regex would be more fragile
+      # than the regex itself.
+      - name: "uninstall.ps1: Get-PublishingFfmpeg detection (#509)"
+        if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'deploy/windows/uninstall.ps1'
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
+          $funcAst = $ast.Find({
+            param($n)
+            $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-PublishingFfmpeg'
+          }, $true)
+          if (-not $funcAst) {
+            Write-Host "FAIL: Get-PublishingFfmpeg not found in $path -- has it been renamed or removed?"
+            exit 1
+          }
+          Invoke-Expression $funcAst.Extent.Text
+          $failures = [System.Collections.Generic.List[string]]::new()
+
+          # Case 1: the process table cannot be read at all -- must fail
+          # closed (the deliberate "cannot prove it is idle" path).
+          function Get-CimInstance { param($ClassName, $Filter, $ErrorAction); throw 'WMI unavailable (simulated)' }
+          $result = Get-PublishingFfmpeg
+          if ($result.Checked) {
+            $failures.Add("expected Checked=false when Get-CimInstance throws (fail-closed), got Checked=$($result.Checked)")
+          } else {
+            Write-Host "PASS: an unreadable process table reports Checked=false (fail-closed)"
+          }
+
+          # Case 2: a publishing ffmpeg is present and must be found.
+          function Get-CimInstance {
+            param($ClassName, $Filter, $ErrorAction)
+            [pscustomobject]@{ ProcessId = 4242; CommandLine = 'ffmpeg.exe -i in.mp4 -f flv rtmp://example.invalid/live' }
+          }
+          $result = Get-PublishingFfmpeg
+          if (-not $result.Checked -or $result.Procs.Count -ne 1) {
+            $failures.Add("expected Checked=true and 1 matching process, got Checked=$($result.Checked) Count=$($result.Procs.Count)")
+          } else {
+            Write-Host "PASS: a publishing ffmpeg (rtmp:) is detected"
+          }
+
+          # Case 3: ffmpeg is running but NOT publishing (e.g. a local
+          # transcode) -- must not match.
+          function Get-CimInstance {
+            param($ClassName, $Filter, $ErrorAction)
+            [pscustomobject]@{ ProcessId = 4343; CommandLine = 'ffmpeg.exe -i in.mp4 out.mp4' }
+          }
+          $result = Get-PublishingFfmpeg
+          if (-not $result.Checked -or $result.Procs.Count -ne 0) {
+            $failures.Add("expected Checked=true and 0 matches for a non-publishing ffmpeg, got Checked=$($result.Checked) Count=$($result.Procs.Count)")
+          } else {
+            Write-Host "PASS: a non-publishing ffmpeg process is correctly ignored"
+          }
+
+          # KNOWN GAP, surfaced here rather than gated: this workflow only
+          # owns .github/workflows/**, so it cannot fix deploy/windows/**.
+          # PowerShell assigns $null, not an empty array, to a variable
+          # captured from a pipeline that produced zero objects. Case 3
+          # above (and a fully idle host with no ffmpeg.exe at all) return
+          # $null from THIS function too, exactly like Case 1's real
+          # failure. uninstall.ps1's caller treats $null as "cannot
+          # determine" and throws, which reads as the typed confirmation
+          # prompt added in #489 being unreachable on an ordinary,
+          # nothing-is-live uninstall without -Force. Flagged loudly on
+          # every run rather than silently ignored; not failed here because
+          # fixing it means editing a file outside this workflow's ownership.
+          $rawResult = Get-PublishingFfmpeg
+          if ($null -eq $rawResult) {
+            Write-Warning "Get-PublishingFfmpeg returns `$null for 'no match', indistinguishable from 'could not check' -- the confirmation prompt looks unreachable without -Force on a normal idle host. See the #509 CI report."
+          }
+
+          if ($failures.Count -gt 0) {
+            Write-Host ''
+            Write-Host 'FAILURES:'
+            $failures | ForEach-Object { Write-Host "  - $_" }
+            exit 1
+          }
+          Write-Host ''
+          Write-Host 'Get-PublishingFfmpeg: fail-closed and filtering both verified'
+
+      # The -Force / live-check / typed-confirmation gate -- the single
+      # if-statement whose body calls both Get-PublishingFfmpeg and
+      # Read-Host -- is extracted the same way and run four times with both
+      # of those mocked out. This is the logic #489 added to match the
+      # systemd and Docker uninstallers; #509 is that nothing had ever run
+      # it.
+      - name: "uninstall.ps1: Force/live-check/confirmation gate (#509)"
+        if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'deploy/windows/uninstall.ps1'
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
+          $ifAst = $ast.Find({
+            param($n)
+            $n -is [System.Management.Automation.Language.IfStatementAst] -and
+              $n.Extent.Text -match 'Get-PublishingFfmpeg' -and
+              $n.Extent.Text -match 'Read-Host'
+          }, $true)
+          if (-not $ifAst) {
+            Write-Host "FAIL: could not locate the Force/live-check/confirmation if-block in $path -- its shape has changed"
+            exit 1
+          }
+          $ifBlockText = $ifAst.Extent.Text
+          $failures = [System.Collections.Generic.List[string]]::new()
+
+          function Invoke-Scenario($Text) {
+            # Invoke-Expression runs in the scope it is called from, which
+            # here is this helper's own scope -- a child of the script scope
+            # below, so it inherits read access to the $Force / $ServiceName
+            # / etc. variables and the Get-PublishingFfmpeg / Read-Host
+            # overrides defined there before each call.
+            Invoke-Expression $Text
+          }
+
+          # --- Scenario 1: -Force bypasses BOTH the live check and the confirmation ---
+          $Force = $true; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
+          $script:calls = 0
+          function Get-PublishingFfmpeg { $script:calls++; [pscustomobject]@{ Checked = $true; Procs = @() } }
+          function Read-Host { param($Prompt); $script:calls++; 'polyemesis' }
+          try {
+            Invoke-Scenario $ifBlockText
+            if ($script:calls -ne 0) {
+              $failures.Add("Force: expected neither check to run, but they were called $script:calls time(s)")
+            } else {
+              Write-Host "PASS: -Force skips both the live check and the confirmation prompt"
+            }
+          } catch {
+            $failures.Add("Force: expected no throw, got: $($_.Exception.Message)")
+          }
+
+          # --- Scenario 2: a stubbed process table shows a publishing ffmpeg -> throws ---
+          $Force = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
+          function Get-PublishingFfmpeg { [pscustomobject]@{ Checked = $true; Procs = @([pscustomobject]@{ ProcessId = 4242; CommandLine = 'ffmpeg.exe -i in -f flv rtmp://example.invalid/live' }) } }
+          function Read-Host { param($Prompt); throw 'Read-Host must not be reached while a broadcast is live' }
+          try {
+            Invoke-Scenario $ifBlockText
+            $failures.Add('Live ffmpeg: expected a throw, none happened')
+          } catch {
+            if ($_.Exception.Message -match 'REFUSING') {
+              Write-Host "PASS: a publishing ffmpeg process makes the script refuse"
+            } else {
+              $failures.Add("Live ffmpeg: wrong error: $($_.Exception.Message)")
+            }
+          }
+
+          # --- Scenario 3: the process table cannot be read -> throws (fail closed) ---
+          $Force = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
+          function Get-PublishingFfmpeg { [pscustomobject]@{ Checked = $false; Procs = @() } }
+          function Read-Host { param($Prompt); throw 'Read-Host must not be reached when the process table could not be read' }
+          try {
+            Invoke-Scenario $ifBlockText
+            $failures.Add('Unreadable process table: expected a throw, none happened')
+          } catch {
+            if ($_.Exception.Message -match 'Cannot determine') {
+              Write-Host "PASS: an unreadable process table fails closed (throws) rather than proceeding"
+            } else {
+              $failures.Add("Unreadable process table: wrong error: $($_.Exception.Message)")
+            }
+          }
+
+          # --- Scenario 4: a wrong confirmation answer is rejected ---
+          $Force = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
+          function Get-PublishingFfmpeg { [pscustomobject]@{ Checked = $true; Procs = @() } }
+          function Read-Host { param($Prompt); 'definitely-the-wrong-answer' }
+          try {
+            Invoke-Scenario $ifBlockText
+            $failures.Add('Wrong confirmation: expected a throw, none happened')
+          } catch {
+            if ($_.Exception.Message -match 'Not confirmed') {
+              Write-Host "PASS: a wrong confirmation answer is rejected"
+            } else {
+              $failures.Add("Wrong confirmation: wrong error: $($_.Exception.Message)")
+            }
+          }
+
+          if ($failures.Count -gt 0) {
+            Write-Host ''
+            Write-Host 'FAILURES:'
+            $failures | ForEach-Object { Write-Host "  - $_" }
+            exit 1
+          }
+          Write-Host ''
+          Write-Host 'uninstall.ps1 Force/live-check/confirmation logic: all scenarios passed'
+
   ui:
     name: ui typecheck, lint, build
     # The documentation gate, #378. On every STEP below, never on this job --
