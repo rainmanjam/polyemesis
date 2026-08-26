@@ -114,6 +114,7 @@ var settingsReload = map[string]ReloadRule{
 	// --------------------------------------------------------------- playout
 	"playout.enabled":              {ClassRespawn, "Reconcile", "starts or stops every variant"},
 	"playout.public":               {ClassOnDemand, "playoutHandler", "evaluated per request, because a route table is built once at startup and this is a runtime setting"},
+	"playout.sourceId":             {ClassOnDemand, "playoutManager", "which programme the public page serves, resolved per request -- no child restarts, the route simply asks a different engine"},
 	"playout.allowCrossOrigin":     {ClassOnDemand, "setCORS", "a response header, decided per request"},
 	"playout.format":               {ClassRespawn, "variantSig", "chooses the HLS or DASH muxer in the argv"},
 	"playout.segmentSeconds":       {ClassRespawn, "variantSig", "-hls_time / -seg_duration"},

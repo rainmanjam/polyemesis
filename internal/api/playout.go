@@ -259,6 +259,22 @@ func (s *Server) playoutManager() *playout.Manager {
 	// dereferenced: this function used to test one engine and dereference a
 	// second read of the set, which is a panic when the last source is deleted
 	// between the two. See Server.engOrNil.
+	// THE PROGRAMME THE OPERATOR PUBLISHED, not whichever engine is first.
+	//
+	// The public route has no session and no place to carry a ?source=, so the
+	// answer cannot come from the request -- it comes from the settings, where
+	// somebody stated it. Nil there means the default programme, which is every
+	// single-source install and is the behaviour this has always had.
+	//
+	// Falls back to the default when the named programme is not running: a
+	// public page that 404s because a source was renamed is worse for an
+	// audience than one showing the install's only other feed, and the operator
+	// can see which is on air from the console.
+	if set, err := s.store.GetSettings(); err == nil && set.Playout.SourceID != nil {
+		if e := s.engineForSource(set.Playout.SourceID); e != nil {
+			return e.Playout()
+		}
+	}
 	e := s.engOrNil()
 	if e == nil {
 		return nil
