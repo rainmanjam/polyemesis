@@ -153,8 +153,15 @@ func TestPresetPlatformsAreKnownIntegrations(t *testing.T) {
 		PlatformTwitch:   true,
 		PlatformKick:     true,
 		PlatformFacebook: true,
-		PlatformCustom:   true,
-		"":               true,
+		// Vimeo names a platform and still pastes its key, which is the first
+		// time those two have come apart in this catalogue. The platform is
+		// what carries sign-in and the live-API entitlement probe; the preset
+		// keeps SeparateKey because Vimeo issues the ingest per live event and
+		// creating one is Enterprise-only. A reader tempted to "finish" this by
+		// clearing SeparateKey should read internal/oauth/vimeo.go first.
+		PlatformVimeo:  true,
+		PlatformCustom: true,
+		"":             true,
 	}
 	for _, p := range DestinationPresets() {
 		if !known[p.Platform] {

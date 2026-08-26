@@ -39,6 +39,15 @@
     ]
   },
   {
+    "platform": "vimeo",
+    "scopeVersion": 1,
+    "scopes": [
+      "public",
+      "private"
+    ],
+    "manualKeyReason": "Vimeo's live API is Enterprise-only — in Vimeo's own words, \"our live API is available only to Vimeo Enterprise customers\" — so polyemesis cannot create an event or read a stream key for this account, and no scope or reconnection changes that. Signing in still works and is worth having: it is how polyemesis checks the gate for you instead of letting a refusal arrive mid-broadcast. Create the live event in Vimeo and paste the RTMPS server URL and stream key from its setup panel; streaming to it works exactly as well as to any other destination."
+  },
+  {
     "platform": "youtube",
     "scopeVersion": 1,
     "scopes": [

@@ -182,12 +182,29 @@ export function SettingsPage() {
   useEffect(() => {
     const ok = params.get("oauth_ok");
     const err = params.get("oauth_error");
+    /*  The third outcome: connected, and there is something the operator has to
+     *  know before they rely on it. Today that is a platform whose API is
+     *  reachable only on a paid tier — polyemesis asks at connect time so the
+     *  refusal does not arrive mid-broadcast instead.
+     *
+     *  Not folded into `ok`: a green tick with a paragraph after it is the
+     *  shape of message people stop reading. Not an error either — the
+     *  connection worked and there is nothing to retry, and red would send
+     *  somebody back round a flow that already succeeded.
+     *
+     *  Held open far longer than the default, and closeButton so it is
+     *  dismissed rather than missed. It is several sentences of platform
+     *  policy, and a toast that vanishes while it is still being read is the
+     *  same as no warning at all. */
+    const warn = params.get("oauth_warn");
     if (ok) toast.success(ok);
     if (err) toast.error(err);
-    if (ok || err) {
+    if (warn) toast.warning(warn, { duration: 60_000, closeButton: true });
+    if (ok || err || warn) {
       const next = new URLSearchParams(params);
       next.delete("oauth_ok");
       next.delete("oauth_error");
+      next.delete("oauth_warn");
       setParams(next, { replace: true });
     }
   }, [params, setParams]);

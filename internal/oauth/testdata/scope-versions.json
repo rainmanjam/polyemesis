@@ -38,6 +38,14 @@
     ]
   },
   {
+    "platform": "vimeo",
+    "scopeVersion": 1,
+    "scopes": [
+      "private",
+      "public"
+    ]
+  },
+  {
     "platform": "youtube",
     "scopeVersion": 1,
     "scopes": [

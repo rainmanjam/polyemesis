@@ -224,7 +224,18 @@ export interface SourceInfo {
 }
 
 export type DestKind = "rtmp" | "srt" | "file";
-export type Platform = "custom" | "youtube" | "twitch" | "kick" | "facebook";
+/*  "rumble" is absent on purpose: its Platform value exists in Go for CHAT and
+ *  its destination preset deliberately does not carry it, so no destination row
+ *  ever arrives with it. "vimeo" IS here because its preset does carry it —
+ *  Vimeo signs in, and a saved Vimeo destination is stamped with the platform
+ *  even though its key is still pasted by hand. */
+export type Platform =
+  | "custom"
+  | "youtube"
+  | "twitch"
+  | "kick"
+  | "facebook"
+  | "vimeo";
 
 export interface Destination {
   id: DestinationId;
@@ -2043,11 +2054,14 @@ export interface WsEvent {
 // internal/chat exactly; nothing here re-derives a fact the server already
 // stated, because two answers to "is YouTube connected" is one answer too many.
 
-/** The platforms the chat pane can show. Identical to `Platform` now that
- *  Facebook has a destination platform of its own, and kept as a separate name
- *  because chat and destinations gain platforms at different times — the next
- *  chat-only platform widens this without touching the destination picker. */
-export type ChatPlatform = Platform;
+/** The platforms the chat pane can show. Kept as a separate name because chat
+ *  and destinations gain platforms at different times, and Vimeo is the first
+ *  case where they came apart in the OTHER direction: it is a destination
+ *  platform with no chat adapter in internal/chat at all, so no chat message
+ *  can ever carry it and the accent map has nothing to say about it. Vimeo's
+ *  own live-event chat, if it exists, sits behind the same Enterprise gate as
+ *  the rest of its live API — see internal/oauth/vimeo.go. */
+export type ChatPlatform = Exclude<Platform, "vimeo">;
 
 /** A chat connection's condition, in the words the operator would use.
  *  `degraded` is running-but-limited and always arrives with a reason. */

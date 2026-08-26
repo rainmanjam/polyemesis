@@ -46,6 +46,7 @@ const PLATFORM_LABEL: Record<string, string> = {
   // fallback firing where a label belongs, exactly the failure the i18n drift
   // guard exists to catch one layer up.
   facebook: "Facebook",
+  vimeo: "Vimeo",
   custom: "Custom",
 };
 

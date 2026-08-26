@@ -84,7 +84,7 @@ func (e endpoints) authBase(production string) string {
 	return production
 }
 
-// NewYouTube, NewTwitch, NewFacebook and NewKick build a single provider. With
+// NewYouTube, NewTwitch, NewFacebook, NewKick and NewVimeo build a single provider. With
 // no options they are identical to the zero value, which is what production
 // uses; with WithBaseURL they are aimed at a stub.
 func NewYouTube(opts ...ProviderOption) *YouTube {
@@ -101,6 +101,12 @@ func NewFacebook(opts ...ProviderOption) *Facebook {
 
 func NewKick(opts ...ProviderOption) *Kick {
 	return &Kick{endpoints: newEndpoints(opts)}
+}
+
+// NewVimeo is in the set too, unlike NewX. Vimeo is registered in
+// ProvidersWith; X is not.
+func NewVimeo(opts ...ProviderOption) *Vimeo {
+	return &Vimeo{endpoints: newEndpoints(opts)}
 }
 
 // ---------------------------------------------------------------- the set

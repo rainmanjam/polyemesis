@@ -160,6 +160,13 @@ func ProvidersWith(opts ...ProviderOption) map[db.Platform]Provider {
 		db.PlatformTwitch:   NewTwitch(opts...),
 		db.PlatformFacebook: NewFacebook(opts...),
 		db.PlatformKick:     NewKick(opts...),
+		// Vimeo signs in on any plan and can do nothing live without an
+		// Enterprise contract. It is registered anyway, and the reason is the
+		// gate rather than in spite of it: a connected account is what lets
+		// polyemesis ASK Vimeo whether this operator reaches the live API, at
+		// connect time, instead of leaving them to discover it from a refusal
+		// mid-broadcast. See vimeo.go and entitlement.go.
+		db.PlatformVimeo: NewVimeo(opts...),
 	}
 }
 
@@ -789,6 +796,43 @@ func guides() []SetupGuide {
 				"Click Connect account. Kick uses OAuth 2.1, so polyemesis sends a PKCE challenge automatically.",
 				"Nothing to paste: polyemesis reads the ingest URL and stream key from the channels " +
 					"resource over the streamkey:read scope, the same way it does for the other platforms.",
+			},
+		},
+		{
+			Platform:     db.PlatformVimeo,
+			Name:         "Vimeo",
+			ConsoleURL:   "https://developer.vimeo.com/apps",
+			RedirectPath: "/api/v1/oauth/vimeo/callback",
+			Supported:    true,
+			Scopes:       (&Vimeo{}).Scopes(),
+			// FIRST, IN THE PLATFORM'S OWN WORDS, BECAUSE IT DECIDES WHETHER
+			// ANY OF THE STEPS BELOW ARE WORTH DOING. This is the same job
+			// Facebook's App Review note does -- an obstacle that costs the
+			// operator their evening if they meet it at step six instead of
+			// before step one -- except that this one has no process at the end
+			// of it, only a price.
+			Note: "Read this first: Vimeo's live API is available only to Vimeo Enterprise customers. " +
+				"That is Vimeo's own sentence, not polyemesis's reading of it, and it is a commercial " +
+				"gate rather than a permission — no scope, no reconnection and no app setting lifts it. " +
+				"Signing in works on any Vimeo plan and is still worth doing: polyemesis asks the live " +
+				"API whether your account reaches it the moment you connect, and tells you then rather " +
+				"than letting the refusal arrive during a broadcast. What sign-in does NOT do on any " +
+				"plan is fetch a stream key — Vimeo issues the ingest URL and key with a live event, so " +
+				"both must be pasted from the event's setup panel. Vimeo is also deprecating one-time " +
+				"live events and recommends avoiding them, so create a RECURRING event.",
+			Steps: []string{
+				"Open developer.vimeo.com → My Apps and click Create an app. Any name and description will do.",
+				"On the app's page, under OAuth redirect authentication, add exactly the redirect URI shown below. " +
+					"Leave implicit authentication switched off — polyemesis exchanges the code server-side.",
+				"Copy the Client Identifier and Client Secret into the fields on this page and save. Vimeo can " +
+					"verify this pair immediately, so a typo is caught here rather than at consent time.",
+				"Go to a destination and click Connect account. Vimeo asks you to approve the public and private " +
+					"scopes, which is what lets polyemesis read which member the token belongs to.",
+				"Watch the message that comes back from connecting. It says whether your account reaches Vimeo's " +
+					"live API. If it does not, everything below still works — you are just pasting the key.",
+				"In Vimeo, create a recurring live event and open its setup panel. Copy the RTMPS server URL and " +
+					"the stream key into this destination. Streaming to it then works exactly as well as to any " +
+					"other destination.",
 			},
 		},
 	}
