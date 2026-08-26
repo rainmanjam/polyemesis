@@ -257,10 +257,13 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	// And once more for the rendition aspect-conversion columns.
+	// platform_accounts.scope_ver, so a token minted before a scope was added is
+	// re-consented rather than silently used with the narrower grant it has.
 	if err := d.MigratePlatformAccountScopeVer(); err != nil {
-		return nil, err
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// And once more for the rendition aspect-conversion columns.
 	if err := d.MigrateRenditionAspect(); err != nil {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -284,14 +287,17 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// hooks.allow_private_target, so a hook aimed at a private address is
+	// refused at save time unless the operator opted in on that hook.
+	if err := d.MigrateHookAllowPrivateTarget(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// Last, because it reads settings and writes to destinations, renditions
 	// and recordings: every column those tables are going to have must already
 	// be there. It also creates the first source from the existing ingest
 	// configuration, which is what keeps an upgraded install reachable by the
 	// encoder that was already pointed at it.
-	if err := d.MigrateHookAllowPrivateTarget(); err != nil {
-		return nil, err
-	}
 	if err := d.MigrateSources(); err != nil {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
