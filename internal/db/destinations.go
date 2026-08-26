@@ -63,6 +63,16 @@ const (
 	// pretending otherwise is how a destination starts claiming a key fetch that
 	// does not exist.
 	PlatformRumble Platform = "rumble"
+	// PlatformTrovo is the sixth, and it is the first whose integration fetches
+	// the stream KEY without being able to fetch the ingest URL beside it.
+	//
+	// Trovo publishes the key on its channel resource behind
+	// channel_details_self and publishes the ingest hostname nowhere at all --
+	// it varies by region and lives only in the creator dashboard. So the
+	// preset below still carries an empty URL and still explains itself, while
+	// the connected account fills in the secret half. Recorded here because
+	// "integrated" has meant "both fields arrive" for every previous entry.
+	PlatformTrovo Platform = "trovo"
 )
 
 // ErrNotFound is returned by the typed getters.
@@ -605,7 +615,7 @@ func (d Destination) Validate() error {
 		add("unknown destination kind %q", d.Kind)
 	}
 	switch d.Platform {
-	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, PlatformRumble, "":
+	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, PlatformRumble, PlatformTrovo, "":
 	default:
 		add("unknown platform %q", d.Platform)
 	}

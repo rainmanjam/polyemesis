@@ -95,6 +95,11 @@ var unverifiableProviders = map[db.Platform]string{
 	db.PlatformYouTube: "Google offers no way to validate a client ID and secret " +
 		"without a user consent round-trip. The credentials are checked for shape " +
 		"only; the real verdict arrives the first time you connect an account.",
+	db.PlatformTrovo: "Trovo publishes no client-credentials grant. Its app-level " +
+		"authentication is a per-request HMAC signature rather than a token exchange, so " +
+		"there is no endpoint that answers \"is this pair valid\" — the credentials are " +
+		"checked for shape only, and the real verdict arrives the first time you connect " +
+		"an account.",
 }
 
 // CheckCredentialsFor dispatches to the provider, or reports honestly that no

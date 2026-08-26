@@ -84,9 +84,9 @@ func (e endpoints) authBase(production string) string {
 	return production
 }
 
-// NewYouTube, NewTwitch, NewFacebook and NewKick build a single provider. With
-// no options they are identical to the zero value, which is what production
-// uses; with WithBaseURL they are aimed at a stub.
+// NewYouTube, NewTwitch, NewFacebook, NewKick and NewTrovo build a single
+// provider. With no options they are identical to the zero value, which is what
+// production uses; with WithBaseURL they are aimed at a stub.
 func NewYouTube(opts ...ProviderOption) *YouTube {
 	return &YouTube{endpoints: newEndpoints(opts)}
 }
@@ -101,6 +101,15 @@ func NewFacebook(opts ...ProviderOption) *Facebook {
 
 func NewKick(opts ...ProviderOption) *Kick {
 	return &Kick{endpoints: newEndpoints(opts)}
+}
+
+// NewTrovo redirects BOTH of Trovo's hosts, which is the whole reason
+// WithBaseURL sets api and auth together: the consent page lives on
+// open.trovo.live and every API call on open-api.trovo.live, so a seam that
+// moved only one would leave the other reaching the real internet from a test
+// that believed everything was stubbed.
+func NewTrovo(opts ...ProviderOption) *Trovo {
+	return &Trovo{endpoints: newEndpoints(opts)}
 }
 
 // ---------------------------------------------------------------- the set

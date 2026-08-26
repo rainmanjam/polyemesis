@@ -160,6 +160,7 @@ func ProvidersWith(opts ...ProviderOption) map[db.Platform]Provider {
 		db.PlatformTwitch:   NewTwitch(opts...),
 		db.PlatformFacebook: NewFacebook(opts...),
 		db.PlatformKick:     NewKick(opts...),
+		db.PlatformTrovo:    NewTrovo(opts...),
 	}
 }
 
@@ -789,6 +790,33 @@ func guides() []SetupGuide {
 				"Click Connect account. Kick uses OAuth 2.1, so polyemesis sends a PKCE challenge automatically.",
 				"Nothing to paste: polyemesis reads the ingest URL and stream key from the channels " +
 					"resource over the streamkey:read scope, the same way it does for the other platforms.",
+			},
+		},
+		{
+			Platform:     db.PlatformTrovo,
+			Name:         "Trovo",
+			ConsoleURL:   "https://developer.trovo.live/",
+			RedirectPath: "/api/v1/oauth/trovo/callback",
+			Supported:    true,
+			Scopes:       (&Trovo{}).Scopes(),
+			Note: "Trovo issues the client secret BY EMAIL rather than from the developer portal — its own " +
+				"documentation says “If you don't have the Client Secret, please contact: developer@trovo.live”. " +
+				"Ask for it before you need it, the way you would budget for Meta's review, because the " +
+				"authorization-code flow cannot complete without one. Two other things worth knowing up front: " +
+				"the stream key arrives automatically but the server URL does not appear anywhere in Trovo's " +
+				"API — the ingest hostname is regional and lives only in the creator dashboard, so copy that " +
+				"one field across once — and Trovo has no start or end call at all, so going live is the " +
+				"encoder starting, exactly as on Twitch and Kick.",
+			Steps: []string{
+				"Open the Trovo developer portal and register an application.",
+				"Set the redirect URI to exactly the URI shown below. Trovo matches it exactly, so a trailing " +
+					"slash that differs is a refused sign-in.",
+				"Copy the Client ID into the field on this page. If the portal did not give you a Client Secret, " +
+					"email developer@trovo.live for one — the code flow needs it and there is no PKCE alternative.",
+				"Copy the server URL from your Trovo creator dashboard → Stream into the destination once. It " +
+					"is regional and Trovo's API never returns it, so this is the one field that stays yours.",
+				"Click Connect account. polyemesis reads the stream key from your channel over " +
+					"channel_details_self, and can then set your title and category at go-live.",
 			},
 		},
 	}

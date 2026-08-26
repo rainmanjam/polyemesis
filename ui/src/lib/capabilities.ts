@@ -333,6 +333,50 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     },
   },
   {
+    presetId: "trovo",
+    name: "Trovo",
+    connect: "trovo",
+    /* Integrated, not partial: the KEY is fetched over channel_details_self.
+       What Trovo publishes nowhere is the ingest HOSTNAME, which is regional
+       and lives only in the creator dashboard — a different field, and a
+       one-time copy rather than a per-broadcast chore. */
+    tier: "integrated",
+    summary:
+      "Sign in with Trovo and polyemesis fetches the stream key, sets the title and category at go-live, and reads the live viewer count. The server URL is the one field you copy across yourself, once.",
+    readFirst:
+      "Trovo does not hand out the client secret from its developer portal. Its documentation says, verbatim, “If you don't have the Client Secret, please contact: developer@trovo.live” — and the authorization-code flow cannot complete without one, because Trovo documents no PKCE. Ask for it before the day you need it. Nothing else here is gated: registration is open and every capability below is in the published reference.",
+    caps: {
+      sso: "yes",
+      streamKey: "yes",
+      metadata: "yes",
+      /* Documented and unbuilt. "unknown" renders as Unverified, which invites
+         the operator to try rather than refusing — the same reading the X row
+         records. These are NOT absent APIs; the reasons name each endpoint. */
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "yes",
+      broadcastLifecycle: "no",
+    },
+    reasons: {
+      sso: "OAuth 2.0 authorization code with a client_secret. Trovo documents no PKCE, so polyemesis does not send one — and the secret arrives by email from developer@trovo.live rather than from the portal.",
+      streamKey:
+        "Fetched from GET /openplatform/channel over the channel_details_self scope. THE SERVER URL IS NOT: Trovo issues the ingest hostname per region and publishes it nowhere in its API, so that one field is copied from the creator dashboard once and refreshing the key afterwards leaves it alone. An account connected before this integration existed has to be reconnected once.",
+      metadata:
+        "Title and category, over POST /openplatform/channels/update with channel_update_self. Trovo's channel update takes no description and has no tags, so those are reported as skipped rather than silently dropped.",
+      chatRead:
+        "Trovo delivers chat over a websocket rather than by poll or webhook. Real, documented, and not wired up here yet.",
+      chatSend:
+        "POST /openplatform/chat/send, over chat_send_self plus send_to_my_channel. Not wired up here yet, and the scopes are deliberately not requested until it is — asking for them early would put permissions on the consent screen that nothing uses.",
+      moderation:
+        "POST /openplatform/channels/command with manage_messages, which performs Trovo's own chat commands — “ban xxx”, “mod @xxx”, with no leading slash. Not wired up here yet; the scope is not requested until it is.",
+      viewerStats:
+        "Live state and viewer count from the same channel read the stream key comes from, so it costs no extra call and no extra scope. It reads current_viewers rather than Trovo's dedicated viewers endpoint on purpose: that endpoint's total is documented as the channel's “total login users”, which counts signed-in viewers only and would under-report an audience without saying so. Offline, polyemesis reports no count rather than zero.",
+      broadcastLifecycle:
+        "Trovo has no broadcast resource: nothing creates, starts or ends one, so the stream itself is the trigger and liveness can only be observed. Established by reading the whole APIs reference, not by failing to find a page.",
+    },
+  },
+  {
     presetId: "x",
     name: "X (Twitter) Live",
     tier: "manual",
@@ -386,12 +430,6 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     "DLive",
     "Paste your ingest URL and stream key from DLive → Dashboard → Stream settings. Streaming works; there is no integration to connect.",
     "DLive's developer portal at dev.dlive.tv no longer resolves in DNS, so its developer support appears to be inactive. Nothing about streaming to DLive depends on that — but do not go looking for an API key, because there is currently nowhere to get one.",
-  ),
-  manualUnverified(
-    "trovo",
-    "Trovo",
-    "Paste your ingest URL and stream key from the Trovo creator dashboard. Streaming works; there is no integration to connect.",
-    "Trovo publishes an open platform API and it is answering — a request to open-api.trovo.live/openplatform/chat/... returns a structured invalidHeader error rather than a 404, which is a live chat service refusing an unauthenticated caller. Nothing here has been built against it. Trovo has been reported elsewhere as shut down; that appears to be wrong, and this row says so rather than repeating it.",
   ),
   manualUnverified(
     "odysee",

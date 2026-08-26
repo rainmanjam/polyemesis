@@ -24,6 +24,17 @@
     ]
   },
   {
+    "platform": "trovo",
+    "note": "Trovo issues the client secret BY EMAIL rather than from the developer portal — its own documentation says “If you don't have the Client Secret, please contact: developer@trovo.live”. Ask for it before you need it, the way you would budget for Meta's review, because the authorization-code flow cannot complete without one. Two other things worth knowing up front: the stream key arrives automatically but the server URL does not appear anywhere in Trovo's API — the ingest hostname is regional and lives only in the creator dashboard, so copy that one field across once — and Trovo has no start or end call at all, so going live is the encoder starting, exactly as on Twitch and Kick.",
+    "steps": [
+      "Open the Trovo developer portal and register an application.",
+      "Set the redirect URI to exactly the URI shown below. Trovo matches it exactly, so a trailing slash that differs is a refused sign-in.",
+      "Copy the Client ID into the field on this page. If the portal did not give you a Client Secret, email developer@trovo.live for one — the code flow needs it and there is no PKCE alternative.",
+      "Copy the server URL from your Trovo creator dashboard → Stream into the destination once. It is regional and Trovo's API never returns it, so this is the one field that stays yours.",
+      "Click Connect account. polyemesis reads the stream key from your channel over channel_details_self, and can then set your title and category at go-live."
+    ]
+  },
+  {
     "platform": "twitch",
     "note": "",
     "steps": [

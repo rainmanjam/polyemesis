@@ -33,10 +33,10 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible |
 | **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works |
 | **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible |
+| **Trovo** | Works | Works | Works | Unverified | Unverified | Unverified | Works | Not possible |
 | **X (Twitter) Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Trovo** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Vimeo Livestream** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
@@ -53,8 +53,8 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **Not possible** | Somebody read the platform's published API and the thing is not in it. No amount of setup will produce it |
 
 *Everything else* is the other nineteen entries in the destination preset
-catalogue — PeerTube, Owncast, Cloudflare Stream, Mux, AWS IVS, LinkedIn, Trovo,
-Odysee, Vimeo, Dailymotion and the rest. They stream perfectly over RTMP, RTMPS
+catalogue — PeerTube, Owncast, Cloudflare Stream, Mux, AWS IVS, Odysee,
+Vimeo, Dailymotion and the rest. They stream perfectly over RTMP, RTMPS
 or SRT with a pasted URL and key; we simply have not researched their APIs, and
 "unverified" is the honest thing to say about an API nobody here has read.
 
@@ -126,6 +126,40 @@ scopes. Invisible twice over.
 once.** Granting a scope never upgrades a token that has already been issued —
 and Settings → Platforms flags exactly this, so it does not have to be
 remembered from a page of documentation.
+
+**Trovo — fully documented, and the ingest URL is the half it will not give
+you.** Trovo's open platform is the most completely specified API of any
+platform on this page: sign-in, stream key, title and category, chat both ways,
+moderation and viewer counts are all published with their scopes. polyemesis
+signs in, fetches the **stream key** over `channel_details_self`, pushes the
+title and category over `channel_update_self`, and reads the live viewer count
+off the same channel response the key comes from — no extra call and no extra
+scope.
+
+**The server URL is not fetchable and never will be.** Trovo issues the ingest
+hostname per region and publishes it nowhere in its API, so that one field is
+copied out of the creator dashboard once. Refreshing the stream key afterwards
+leaves it alone — polyemesis will not overwrite a URL it cannot supply.
+
+Two things to know before you start. **The client secret comes by email**: the
+developer portal does not hand one out, and Trovo's own documentation says "If
+you don't have the Client Secret, please contact: developer@trovo.live". The
+authorization-code flow cannot complete without it and Trovo documents no PKCE
+alternative, so ask early. And **Trovo has no start or end call at all** — no
+broadcast object exists in its reference, so going live is the encoder starting,
+exactly as on Twitch and Kick.
+
+Chat read, chat send and moderation are *unverified* here for a reason that is
+not "we did not look". All three are documented — a websocket for reading,
+`POST /openplatform/chat/send` for sending, `POST /openplatform/channels/command`
+for Trovo's own chat commands — and none of them is built yet. A cell may say
+*Works* only for something polyemesis does today, and none of the four words on
+this page means "published and unbuilt", so *Unverified* is the least wrong: it
+invites you to try rather than refusing. The scopes those need
+(`chat_send_self`, `send_to_my_channel`, `manage_messages`) are deliberately
+**not** requested until the features exist, so a Trovo account connected today
+will need reconnecting once when they land — Settings → Platforms flags that
+rather than leaving it to be remembered.
 
 **X (Twitter) — paste your key, there is no API.** X's developer platform covers
 posts, users, media and the post firehose. "Streaming" in its documentation
@@ -427,6 +461,32 @@ than grown as features land.
 Kick delivers chat over a webhook rather than a socket, so the chat pane needs a
 public HTTPS URL Kick can reach. Without one it says so rather than sitting
 silently.
+
+### Trovo
+
+1. <https://developer.trovo.live/> → register an application.
+2. Redirect URI: `https://YOUR_HOST/api/v1/oauth/trovo/callback` — Trovo matches
+   it exactly, so a trailing slash that differs is a refused sign-in.
+3. If the portal did not give you a **Client Secret**, email
+   <developer@trovo.live> for one. The code flow needs it; there is no PKCE
+   alternative documented.
+4. Copy the **server URL** from Trovo → creator dashboard → Stream into the
+   destination once. It is regional, Trovo's API never returns it, and it is the
+   only field that stays yours.
+5. Paste the client ID and secret into polyemesis, then **Connect account**. The
+   stream key is fetched for you.
+
+Scopes requested: `channel_details_self`, `channel_update_self` — and no others,
+which is a deliberate departure from the Kick paragraph above. Trovo's
+`manage_messages` is, in its own words, "Perform chat commands and delete chat
+messages", and asking a streamer's consent screen for the power to ban while
+nothing here moderates Trovo is asking for authority polyemesis does not use.
+The cost is one reconnect when chat lands, and Settings → Platforms is what
+surfaces it.
+
+Trovo's metadata surface is four fields on one channel update — `live_title`,
+the category, `language_code` and `audi_type`. There is no description and there
+are no tags, so the composer reports those as skipped rather than as failures.
 
 ## Multiple accounts
 
