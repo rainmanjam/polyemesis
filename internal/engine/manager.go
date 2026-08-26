@@ -898,6 +898,34 @@ func (m *Manager) Engine(id int64) *Engine {
 	return m.engines[id]
 }
 
+// DestinationStatuses is every programme's destinations, each compiled by the
+// engine that OWNS it.
+//
+// Engine.Status() is deliberately scoped to its own source: it reads
+// ListDestinationsBySource and compiles each row against that engine's measured
+// layout, so a destination is never described using another programme's track
+// count (#515). That is right for the engine and wrong for every caller that
+// wants the whole install -- the dashboard's grouped destination list, the
+// Prometheus scrape, and the status pushed over the WebSocket all describe the
+// BOX, not one programme.
+//
+// Before #515 those callers were served by accident: s.eng() is
+// mgr.Default(), and the default engine's status happened to carry every row on
+// the machine because the read was unscoped. Fixing the engine removed the
+// leak they were relying on, and a multi-source install lost destinations from
+// the dashboard and from metrics -- silently, since a missing series looks
+// exactly like a destination nobody configured.
+//
+// Concatenating per-engine results keeps both properties: every destination
+// appears, and each is still described by its own programme.
+func (m *Manager) DestinationStatuses() []DestStatus {
+	out := []DestStatus{}
+	for _, e := range m.Engines() {
+		out = append(out, e.Status().Destinations...)
+	}
+	return out
+}
+
 // Engines returns every running engine in source display order.
 func (m *Manager) Engines() []*Engine {
 	m.mu.RLock()
