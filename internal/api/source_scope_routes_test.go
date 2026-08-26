@@ -4,8 +4,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -118,6 +121,26 @@ var programmeScopedRoutes = []struct {
 		map[string]any{"profile": map[string]any{}}},
 	{http.MethodGet, "/api/v1/processes", "lists a programme's children", nil},
 	{http.MethodGet, "/api/v1/processes/ingest/logs", "serves one child's FFmpeg log", nil},
+
+	// --- the second sweep: the reads an operator decides from, and the writes
+	// that act on a programme's pipeline. Every one of these answered for
+	// s.mgr.Default() until now, and the register next door said so in as many
+	// words for each.
+	{http.MethodGet, "/api/v1/status", "is the payload the whole dashboard renders from", nil},
+	{http.MethodGet, "/api/v1/source", "is the track list the routing editor picks numbers off", nil},
+	{http.MethodGet, "/api/v1/levels", "is the meters, where silence on one programme reads as audio on another", nil},
+	{http.MethodGet, "/api/v1/loudness", "is a compliance verdict a broadcaster relies on", nil},
+	{http.MethodPut, "/api/v1/loudness", "starts or stops a real analyser child",
+		map[string]any{"enabled": true}},
+	{http.MethodGet, "/api/v1/clips", "reports a retention window a capturer is enforcing", nil},
+	{http.MethodPost, "/api/v1/clips", "writes a file off a rolling buffer that has already moved on",
+		map[string]any{"seconds": 5}},
+	{http.MethodPut, "/api/v1/clips/buffer", "spends disk and CPU for as long as it is on",
+		map[string]any{"enabled": true}},
+	// The socket, refused BEFORE the upgrade so that the refusal can still be
+	// an HTTP status. Its opening burst is the status payload and the track
+	// layout, which is the same question /status is asked.
+	{http.MethodGet, "/api/v1/ws", "opens the live socket every screen renders from", nil},
 }
 
 // AN INSTALL WITH SEVERAL PROGRAMMES MUST BE ASKED WHICH ONE, NOT GUESSED AT.
@@ -261,6 +284,7 @@ func TestRestartingARenditionIsNotReportedForAProgrammeThatCannotHaveDoneIt(t *t
 // ratchetDirection in route_ledger_test.go; see the note in the #497 fix report
 // for the exact shape.
 var defaultEngineSites = map[string]string{
+
 	"engOrNil": "the accessor itself -- s.eng() with the nil-manager case " +
 		"answered. Not a route.",
 	"scopedEngine": "the device. It answers the default ONLY when the install " +
@@ -271,55 +295,136 @@ var defaultEngineSites = map[string]string{
 		"be mirrored, and the singleton can only ever describe the default " +
 		"programme.",
 
-	// --- reads that still answer for the default programme ---
-	"statusPayload": "the assembler behind GET /status and the WebSocket status " +
-		"push. The DESTINATION LIST is no longer from the default engine -- it is " +
-		"mgr.DestinationStatuses(), every programme's, each compiled by the engine " +
-		"that owns it -- because a multi-source install was showing the selected " +
-		"programme's destinations and zero for the rest, and Prometheus was " +
-		"emitting series for one programme only. The remaining reach is the rest " +
-		"of the payload: relay counters, ingest and renditions. STILL UNSCOPED " +
-		"there, same consequence as before -- it describes programme 1 whichever " +
-		"the operator is looking at. It is a read, so nothing moves on air, but it " +
-		"is the read the operator decides from.",
-	"handleSource": "GET /source, the ingest layout. STILL UNSCOPED, same shape " +
-		"as handleStatus and the same consequence: track numbers from the wrong " +
-		"ingest.",
-	"handleLevels": "GET /levels, the meters. STILL UNSCOPED -- an operator " +
-		"reading silence on programme 2's meters is reading programme 1's.",
-	"handleMetrics": "GET /metrics, the Prometheus exposition. Its DESTINATION " +
-		"series now cover every programme via mgr.DestinationStatuses(); a scrape " +
-		"that silently covered one source was worse than a failing one, because a " +
-		"missing series is indistinguishable from a destination nobody configured " +
-		"and the alert simply never evaluates. The remaining reach is the relay " +
-		"and uptime block. STILL UNSCOPED there, and arguably worse than a wrong " +
-		"screen: an alerting rule fires or fails to fire on numbers from a " +
-		"programme nobody asked about.",
+	// --- install-wide questions asked of one engine, and why that is right ---
+	"defaultSourceID": "which source an UNSCOPED endpoint speaks for, and the " +
+		"reach is the point of the function rather than an accident: it prefers " +
+		"the source that actually BUILT an engine over the store's first row, so " +
+		"/system cannot advertise an ingest port with no listener behind it. Its " +
+		"one caller now accepts ?source= and labels which programme it answered " +
+		"for (#551).",
+	"handleTestAlertRule": "POST /alerts/rules/{id}/test. The reach chooses which " +
+		"NOTIFIER sends, and that is install-wide by construction: there is one " +
+		"alert_rules table, every engine's notifier reads it, and the rule under " +
+		"test is read from the store rather than from the body -- so the message " +
+		"goes to the operator's endpoint whichever notifier carries it. Same " +
+		"argument as publishAudit. It is engOrNil rather than eng because the " +
+		"route carries no requireSource and is reached on a build with no manager " +
+		"at all; the zero-source half is recorded in noSourceRefusalSites.",
+	"publishAudit": "the audit trail. ONE notifier on purpose, and audit.go " +
+		"argues it: every engine builds its own but they all read the same " +
+		"install-wide alert_rules table, so the default engine's notifier already " +
+		"reaches every rule, and publishing through each engine would deliver the " +
+		"same event once per source because the coalescer is per-notifier. The " +
+		"nil case no longer drops silently -- it logs which event went unpublished " +
+		"(#576), because the events that reach here with no engine are the " +
+		"security ones.",
+	"refuseIfSilent": "the create-time silence guard. The LAYOUT it compiles " +
+		"against is now the destination's own programme's, through " +
+		"sourceForDestination (#527). The reach that remains is the install-wide " +
+		"question that comes first -- is there any engine at all -- which is the " +
+		"zero-source refusal and is recorded in noSourceRefusalSites too. Keeping " +
+		"the two apart is deliberate: 'this install has no programme' and 'the " +
+		"programme you named is not running' are different answers.",
+	"handleScheduleRuns": "GET /schedules/runs. STILL UNSCOPED, and it is the " +
+		"observability half of the scheduler defect (#526/#549) rather than a " +
+		"defect of its own: every engine runs its own scheduler.Runner over one " +
+		"install-wide schedules table, so this endpoint shows one of the N " +
+		"runners' last sweep -- nothing at all if another runner won the tick. " +
+		"Left alone here on purpose: the scheduler is being made single-runner on " +
+		"another branch and scoping this reader to one of N runners first would " +
+		"have to be undone.",
 
-	// --- outside internal/api/handlers.go and renditions.go ---
-	"handleAlertsMeta": "internal/api/automation.go. Unscoped; not this " +
-		"change's file assignment.",
-	"handleTestAlertRule": "internal/api/automation.go. Unscoped; not this " +
-		"change's file assignment. Already recorded in noSourceRefusalSites for " +
-		"the zero-source half of the same reach.",
-	"handleScheduleRuns": "internal/api/automation.go. Unscoped; not this " +
-		"change's file assignment.",
-	"handleCaptureClip": "internal/api/automation.go. Unscoped, and it WRITES: " +
-		"a clip captured from the default programme's rolling buffer. Not this " +
-		"change's file assignment.",
-	"handleSetClipBuffer": "internal/api/automation.go. Unscoped, and it writes. " +
-		"Not this change's file assignment.",
-	"handleLoudness": "internal/api/automation.go. Unscoped; not this change's " +
-		"file assignment.",
-	"handleSetLoudnessMonitor": "internal/api/automation.go. Unscoped, and it " +
-		"writes. Not this change's file assignment.",
-	"handlePlayoutPoster": "internal/api/playout.go. Unscoped; not this change's " +
-		"file assignment.",
-	"handleWS": "internal/api/ws.go. The live socket every screen reads from, " +
-		"and the reason the routing editor shows the default programme's tracks " +
-		"even now. Unscoped; not this change's file assignment.",
-	"publishAudit": "internal/api/audit.go. The audit trail's engine reference. " +
-		"Unscoped; not this change's file assignment.",
+	// --- readers that legitimately answer for an absent programme ---
+	"ingestBitrate": "the arrival series the dashboard graphs, and the ONE " +
+		"unscoped graph left. Per-programme bitrate now goes to Prometheus " +
+		"through ingestSnapshots (#528); this feeds GET /stats and the WebSocket " +
+		"stats frame, which are box-shaped surfaces with no programme selector on " +
+		"them. STILL UNSCOPED, and the residual is a graph that draws programme " +
+		"1's arrival rate on an install running several.",
+	"relayStats": "GET /stats' relay block, same surface and same residual as " +
+		"ingestBitrate. The per-programme relay counters are in the scrape.",
+	"playoutManager": "the whole public playout surface -- player page, HLS, " +
+		"poster -- resolves through this one function. STILL UNSCOPED, and it is " +
+		"the surface with an EXTERNAL audience: a two-programme install serves " +
+		"programme 1's segments whatever it is running (#550). Not fixed here on " +
+		"purpose: scopedEngine is the wrong device for it in two ways -- its " +
+		"refusal lists the install's programme names, which is a disclosure to an " +
+		"unauthenticated viewer, and a public URL has nowhere to carry ?source= " +
+		"that an audience would ever type. Control means a per-programme public " +
+		"path (/playout/{source}/...), which is a route-table change: the ledger, " +
+		"the docs and the share links all move with it.",
+	"handleDeleteClip": "DELETE /clips/{name}. The engine is preferred only to " +
+		"SERIALISE the delete against a running capturer's eviction; the file is " +
+		"in one install-wide directory and the fallback removes it directly, so " +
+		"which capturer is asked changes nothing about what is deleted.",
+	"handleDownloadClip": "GET /clips/{name}. Same reasoning as handleDeleteClip: " +
+		"the engine supplies the confinement base so it cannot drift from the " +
+		"directory the capturer writes into, and every engine computes the same " +
+		"one from the same config.",
+	"clipTracks": "the clip editor's track picker. The engine reach is a FALLBACK " +
+		"for a recording whose track count was never measured, and it is dropped " +
+		"unless the layout is known. STILL UNSCOPED, together with the track " +
+		"LABELS beside it, which come from the settings singleton and so are the " +
+		"default programme's (#577). Not fixed here: db.Recording does not carry " +
+		"its source_id -- the column exists, the model does not expose it -- so " +
+		"the owning programme cannot be resolved from this layer at all. It needs " +
+		"internal/db first.",
+	"hlsHandler": "the /hls preview file server. The reach is PreviewRequested, " +
+		"which keeps an on-demand encoder alive, and the directory below it is " +
+		"already resolved per source off the same single read. STILL UNSCOPED: " +
+		"the preview poked is the default programme's, and /hls/{id}/ next door " +
+		"is the scoped spelling that does not have this problem.",
+	"destinationBaseArgv": "the expert argv preview. STILL UNSCOPED -- it searches " +
+		"the DEFAULT engine's process list for a destination that may belong to " +
+		"another programme, so the command line shown can carry the wrong " +
+		"ingest's tracks, and on a multi-source install the search simply finds " +
+		"nothing and falls back to a rebuild. It writes nothing, and its " +
+		"zero-source half is recorded in noSourceRefusalSites.",
+	"eng": "the accessor's own definition. Not a route, and the one place " +
+		"mgr.Default() is meant to be spelled.",
+	"requireSource": "the middleware. The reach is the EXISTENCE test -- is any " +
+		"engine running at all -- and not a choice of programme: it dereferences " +
+		"nothing and passes no engine on. Which programme a guarded route then " +
+		"acts on is scopedEngine's question, asked in the handler.",
+}
+
+// isDefaultEngineReach reports whether a call reaches the DEFAULT engine, by
+// any of the three spellings this package has for it.
+//
+// ALL THREE, and that is #539. The scan matched `eng` alone, so it saw the one
+// spelling a careless author uses and missed both spellings a careful one does:
+//
+//	s.eng()          -- matched
+//	s.engOrNil()     -- NOT matched, and it is the spelling api.go's own comment
+//	                    tells you to prefer ("Capture the return value and use
+//	                    THAT"), so writing the handler correctly was what made it
+//	                    invisible
+//	s.mgr.Default()  -- NOT matched, the accessor's own definition
+//
+// engOrNil appeared in the register only because ITS OWN BODY calls s.eng().
+// Its callers -- eleven of them on origin/main, including the create-time
+// silence guard that #527 is about -- did not. A register that records the
+// obvious spelling and not the recommended one is not a Warning device; it is a
+// device that agrees with whatever it happens to see.
+//
+// `Default` is matched only on a `mgr` receiver. Bare `.Default()` would catch
+// db.DefaultSettings-shaped helpers and turn this into noise, and noise is how
+// a register stops being read.
+func isDefaultEngineReach(sel *ast.SelectorExpr) bool {
+	switch sel.Sel.Name {
+	case "eng", "engOrNil":
+		return true
+	case "Default":
+		// s.mgr.Default() and mgr.Default() both, so the manager reached
+		// through a local variable is not a way around this.
+		switch recv := sel.X.(type) {
+		case *ast.SelectorExpr:
+			return recv.Sel.Name == "mgr"
+		case *ast.Ident:
+			return recv.Name == "mgr"
+		}
+	}
+	return false
 }
 
 // TestEveryDefaultEngineReachIsScopedOrIsRecorded reads the package's own
@@ -355,7 +460,7 @@ func TestEveryDefaultEngineReachIsScopedOrIsRecorded(t *testing.T) {
 				// The CALL, not the identifier: a comment or a doc reference to
 				// s.eng() is not a reach, and half the comments in this package
 				// mention it.
-				if sel, isSel := call.Fun.(*ast.SelectorExpr); isSel && sel.Sel.Name == "eng" {
+				if sel, isSel := call.Fun.(*ast.SelectorExpr); isSel && isDefaultEngineReach(sel) {
 					found[fn.Name.Name] = true
 				}
 				return true
@@ -366,6 +471,25 @@ func TestEveryDefaultEngineReachIsScopedOrIsRecorded(t *testing.T) {
 	if len(found) == 0 {
 		t.Fatal("the scan found no call to s.eng() in the package that defines it. The " +
 			"accessor was renamed and this test went vacuous rather than red.")
+	}
+	// AND EACH SPELLING SEPARATELY, because a scan that has gone blind to ONE of
+	// them is exactly the state #539 describes and is invisible to the total
+	// above: eleven engOrNil callers went unrecorded for as long as the pattern
+	// matched `eng` alone, while the count of found sites looked perfectly
+	// healthy. Renaming an accessor must break this test, not quietly shrink
+	// what it covers.
+	for _, spelling := range []struct{ selector, mustFind string }{
+		{"eng", "handlePutAnnotations"},
+		{"engOrNil", "refuseIfSilent"},
+		{"mgr.Default", "defaultSourceID"},
+	} {
+		if !found[spelling.mustFind] {
+			t.Errorf("the scan did not find %s, which reaches the default engine as "+
+				"%s(). Either that accessor was renamed -- in which case "+
+				"isDefaultEngineReach has to learn the new name -- or the site moved and "+
+				"this sentinel has to move with it. A scan that silently stops matching "+
+				"one spelling is the whole of #539.", spelling.mustFind, spelling.selector)
+		}
 	}
 
 	for name := range found {
@@ -386,5 +510,100 @@ func TestEveryDefaultEngineReachIsScopedOrIsRecorded(t *testing.T) {
 				"a site is accounted for that is gone -- or worse, being told a route is "+
 				"known-unscoped when it has since been fixed.", name)
 		}
+	}
+}
+
+// managerDefaultCall matches a reach for Manager.Default() through a variable
+// named for a manager. `slog.Default()` is the reason this is not a bare
+// `\.Default\(`: six packages call it and none of them mean an engine.
+var managerDefaultCall = regexp.MustCompile(`\b(mgr|Mgr|manager|Manager|m)\.Default\(\)`)
+
+// THE REGISTER STOPS AT ITS OWN PACKAGE, AND THAT IS THE SECOND BLIND SPOT
+// (#539).
+//
+// defaultEngineSites is derived from internal/api's source and from nothing
+// else, so it can only ever record reaches made here. Manager.Default is
+// EXPORTED: cmd/polyemesis, internal/engine and anything added later can reach
+// the first engine with no register anywhere noticing, and the failure mode is
+// the one this whole family has -- a plausible answer for programme 1 rather
+// than an error.
+//
+// The obligation this imposes is deliberately blunt: OUTSIDE internal/api,
+// nothing may call Manager.Default at all. There is no legitimate caller today
+// -- cmd/polyemesis/mqtt.go walks Engines() per source, which is the shape
+// every other consumer should copy -- and "there are none, keep it that way" is
+// a rule a test can hold where "each one needs a sentence" would need a second
+// register in every package.
+//
+// Textual rather than an AST walk, because the population is every .go file in
+// the repository and parsing all of them to catch a call that must not exist is
+// a great deal of machinery for a rule with no exceptions.
+func TestNothingOutsideTheAPIPackageReachesTheDefaultEngine(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("resolve the repository root: %v", err)
+	}
+	// The accessor's own definition, which is the one place the name may
+	// appear. Recorded as a path so that moving it is a decision somebody
+	// makes rather than a silent widening of the rule.
+	definition := filepath.Join(root, "internal", "engine", "manager.go")
+
+	scanned := 0
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "node_modules", "ui", "web", "dist":
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		// internal/api is the package the register above already covers, entry
+		// by entry. This test is about everywhere it cannot see.
+		if strings.HasPrefix(path, filepath.Join(root, "internal", "api")+string(filepath.Separator)) {
+			return nil
+		}
+		scanned++
+		b, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			// A comment naming the accessor is not a reach, and manager.go's
+			// own explanation of #515 names it twice.
+			if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			if !managerDefaultCall.MatchString(line) {
+				continue
+			}
+			if path == definition && strings.Contains(line, "func (m *Manager) Default()") {
+				continue
+			}
+			t.Errorf("%s reaches Manager.Default():\n\t%s\nDefault() is Engines()[0] -- "+
+				"the right programme only on an install with one source, and it always "+
+				"answers, so getting this wrong produces a plausible response rather than "+
+				"a failure (#497). internal/api records its reaches in defaultEngineSites "+
+				"and nothing outside it does, so outside this package the rule is simply "+
+				"no. Walk mgr.Engines() and answer for each programme, the way "+
+				"cmd/polyemesis/mqtt.go's snapshot does.",
+				strings.TrimPrefix(path, root+string(filepath.Separator)), strings.TrimSpace(line))
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk the repository: %v", walkErr)
+	}
+	// A walk that read nothing agrees with any rule at all -- and this one
+	// starts from a relative path, which is exactly the sort of thing that
+	// silently resolves to an empty directory.
+	if scanned < 50 {
+		t.Fatalf("the walk read %d Go files outside internal/api; the repository has far "+
+			"more, so this test passed having looked at almost nothing", scanned)
 	}
 }

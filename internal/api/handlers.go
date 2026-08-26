@@ -316,20 +316,35 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 // the same fallback the engine takes and for the same reason: describing the
 // stale thing beats failing the whole endpoint.
 func (s *Server) storeSettingsWithDefaultIngest() (db.Settings, error) {
+	settings, _, err := s.storeSettingsForSource(nil)
+	return settings, err
+}
+
+// storeSettingsForSource is storeSettingsWithDefaultIngest for a caller that
+// KNOWS which programme it means, and it returns the source it used.
+//
+// The returned row is not a convenience: /system renders an ingest URL and an
+// SRT passphrase out of that block, and an operator who copies it has no way to
+// tell which programme's encoder it configures. Handing the caller the source
+// back is what lets the answer say so (#551).
+func (s *Server) storeSettingsForSource(id *int64) (db.Settings, *db.Source, error) {
 	settings, err := s.store.GetSettings()
 	if err != nil {
-		return settings, err
+		return settings, nil, err
 	}
-	id, err := s.defaultSourceID()
-	if err != nil {
-		return settings, nil
+	if id == nil {
+		def, err := s.defaultSourceID()
+		if err != nil {
+			return settings, nil, nil
+		}
+		id = &def
 	}
-	src, err := s.store.GetSource(id)
+	src, err := s.store.GetSource(*id)
 	if err != nil {
-		return settings, nil
+		return settings, nil, nil
 	}
 	settings.Ingest = src.Ingest
-	return settings, nil
+	return settings, src, nil
 }
 
 // defaultSourceID is which source an unscoped endpoint speaks for: the one the
@@ -364,8 +379,33 @@ func (s *Server) defaultSourceID() (int64, error) {
 	return s.store.DefaultSourceID()
 }
 
+// handleSystem describes the BOX -- version, FFmpeg, GPUs -- plus one thing
+// that is not the box's at all: the ingest URL an encoder is pointed at.
+//
+// THE URL NAMES ITS PROGRAMME (#551). It is built from one source's ingest
+// block, passphrase included, and an operator who copied it to configure Studio
+// B's encoder was pointing that encoder at Main -- publishing a second feed
+// into programme 1, or being rejected by a passphrase, with nothing on the
+// response saying which programme the URL was for. `?source=<id>` now selects
+// the programme, and the answer carries `ingestSourceId` and
+// `ingestSourceName` either way, so the default is a stated choice rather than
+// a silent one.
+//
+// WHY NOT scopedEngine, which would REFUSE rather than label: this route is not
+// programme-shaped. Most of what it returns describes the machine, the setup
+// wizard reads it before any source exists, and the encoder list and GPU scan
+// have nothing to do with a programme -- so a source_required refusal here
+// would take down a page that is mostly right in order to scope one field of
+// it. Control would mean moving the ingest half onto a route of its own, which
+// is a route-table change (ledger, docs and the UI's setup flow) rather than a
+// scoping one. Warning is what is affordable here, and the label is the
+// warning.
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.storeSettingsWithDefaultIngest()
+	named, ok := s.namedSourceParam(w, r)
+	if !ok {
+		return
+	}
+	settings, ingestSource, err := s.storeSettingsForSource(named)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -411,7 +451,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	principalVaryingResponse(w)
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"version": s.version,
 		"ffmpeg":  s.tools(),
 		// What the machine has, as opposed to what the FFmpeg build lists. It
@@ -426,7 +466,47 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		"tlsEnabled": s.cfg.ServesTLS(),
 		"dataDir":    s.cfg.DataDir,
 		"uiBuilt":    UIBuilt(),
-	})
+	}
+	// Which programme ingestUrl and ingestMode are FOR. Absent only on an
+	// install with no source at all, where there is no programme to name and
+	// the URL describes the listener rather than a feed.
+	if ingestSource != nil {
+		out["ingestSourceId"] = ingestSource.ID
+		out["ingestSourceName"] = ingestSource.Name
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// namedSourceParam reads `?source=<id>` for a route that ACCEPTS a programme
+// without requiring one, and returns nil when the request named none.
+//
+// The spelling is scopedEngine's, deliberately -- one parameter name across
+// every programme-scoped route, so a client does not have to remember which of
+// two words this one takes. What differs is the answer to silence: scopedEngine
+// refuses on a multi-source install because everything it serves belongs to one
+// programme, and a route that is mostly about the box cannot refuse for the one
+// field of it that is not.
+//
+// A malformed or unknown id is still a 400. Naming a programme and being served
+// a different one is the whole defect; silently ignoring the parameter would be
+// that defect with the operator's own request as the evidence they were heard.
+func (s *Server) namedSourceParam(w http.ResponseWriter, r *http.Request) (*int64, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get(sourceParam))
+	if raw == "" {
+		return nil, true
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
+			`"`+sourceParam+`" must be a source id.`+s.availableSources())
+		return nil, false
+	}
+	if _, err := s.store.GetSource(id); err != nil {
+		writeErrorCode(w, http.StatusBadRequest, codeSourceRequired,
+			fmt.Sprintf("there is no source %d on this install.", id)+s.availableSources())
+		return nil, false
+	}
+	return &id, true
 }
 
 // ------------------------------------------------------------ version check
@@ -703,18 +783,41 @@ func compareSemver(a, b semver) int {
 // It exists as a function because those two doors drifted apart once already:
 // each built the payload itself, so fixing one left the other wrong and the UI
 // showed different things depending on whether it had polled or been pushed.
-func (s *Server) statusPayload() engine.Status {
-	st := s.eng().Status()
+//
+// THE ENGINE IS AN ARGUMENT, not a reach (#543). Everything in this payload
+// except the destination list -- the ingest state, the relay counters, the
+// renditions, the recorder, the failover tier, the track layout -- came off
+// s.eng(), so a multi-source install read Studio B's destinations grouped
+// under Main's ingest, Main's relay and Main's failover selector. An operator
+// reading "primary" was reading a programme they were not looking at. Passing
+// the engine in means the caller has had to resolve one, and the two callers
+// resolve it the same way: scopedEngine.
+func (s *Server) statusPayload(eng *engine.Engine) engine.Status {
+	st := eng.Status()
 	st.Destinations = s.mgr.DestinationStatuses()
 	return st
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.statusPayload())
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.statusPayload(eng))
 }
 
+// handleSource is the ingest layout the routing editor draws from, and it is
+// the read #527's write is validated against.
+//
+// Scoped for that reason as much as its own: unscoped, the editor showed
+// Main's track list and the create guard checked against Main's tracks, both
+// consistently wrong, which is exactly why nothing looked odd.
 func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.eng().SourceInfo())
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, eng.SourceInfo())
 }
 
 // handlePutAnnotations records what each incoming audio track is.
@@ -849,8 +952,15 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleLevels is the meters, and a meter that answers for the wrong programme
+// is worse than one that does not answer: silence on Studio B reads as audio,
+// and audio on Studio B reads as whatever Main happens to be doing.
 func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request) {
-	levels, at := s.eng().Levels()
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
+	levels, at := eng.Levels()
 	writeJSON(w, http.StatusOK, map[string]any{"levels": levels, "at": at})
 }
 
@@ -866,24 +976,28 @@ func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request) {
 // in the scrape config. A session cookie is accepted as well, so an admin who
 // is already signed in can just open the URL.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	st := s.eng().Status()
 	// EVERY programme's destinations, not the default engine's. A scrape that
 	// silently covers one source is worse than one that fails: a missing series
 	// is indistinguishable from a destination nobody configured, so an alert
 	// that should fire on a dead destination simply never evaluates.
-	st.Destinations = s.mgr.DestinationStatuses()
+	dests := s.mgr.DestinationStatuses()
 
 	snap := metrics.Snapshot{
 		Version:      s.version,
 		Uptime:       time.Since(s.startedAt),
-		Destinations: make([]metrics.Destination, 0, len(st.Destinations)),
-		Relay: metrics.Relay{
-			Subscribers: len(st.Relay.Subscribers),
-			RxPackets:   st.Relay.RxPackets,
-			RxBytes:     st.Relay.RxBytes,
-			TxPackets:   st.Relay.TxPackets,
-			Dropped:     st.Relay.Dropped,
-		},
+		Destinations: make([]metrics.Destination, 0, len(dests)),
+		// AND EVERY PROGRAMME'S INGEST AND RELAY, for the same reason and by
+		// the same argument (#528). The destination half was swept in #523 and
+		// this half was left on s.eng() -- so on a multi-source install the
+		// alert the Sources comment tells you to write, `ingest_up == 0 and
+		// on() sources > 0`, could not fire for programme 2 at all. The
+		// destination series went down, the ingest series that EXPLAINS why did
+		// not move, and the operator was left with an effect and no cause.
+		//
+		// cmd/polyemesis/mqtt.go's snapshot has iterated Engines() per source
+		// since it landed. This is the same walk; Prometheus was the one
+		// telemetry surface still speaking for programme 1 alone.
+		Ingests: s.ingestSnapshots(),
 	}
 
 	// A scrape says how many programmes exist, so an alert can tell a server
@@ -902,19 +1016,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("metrics: source count unavailable", "err", err)
 	}
 
-	// The relay's own rate, not the ingest process's -progress line: this is
-	// the series the dashboard graphs, so the metric cannot disagree with what
-	// an operator is looking at while they read it.
-	if b := s.ingestBitrate(); len(b) > 0 {
-		snap.Ingest.BitrateKbps = b[len(b)-1].Kbps
-	}
-	snap.Ingest.State = string(supervisor.StateStopped)
-	if st.Ingest != nil {
-		snap.Ingest.State = string(st.Ingest.State)
-		snap.Ingest.Restarts = st.Ingest.Restarts
-	}
-
-	for _, d := range st.Destinations {
+	for _, d := range dests {
 		md := metrics.Destination{
 			// A destination that is not running has no supervised process at
 			// all; reporting it as stopped keeps its state series meaningful
@@ -964,6 +1066,54 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", metrics.ContentType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = io.WriteString(w, metrics.Render(snap))
+}
+
+// ingestSnapshots is one ingest-and-relay reading per running programme.
+//
+// Walked off the manager rather than read off the default engine, which is the
+// whole of #528: the ingest is the upstream cause of every destination going
+// down, and it was the one telemetry surface that still described programme 1
+// only.
+//
+// The bitrate comes from the RELAY's own monitor, not the ingest child's
+// -progress line, for the reason ingestBitrate gives: it is the series the
+// dashboard graphs, so the metric cannot disagree with what an operator is
+// looking at while they read it. Per engine here, where ingestBitrate is the
+// default engine's and stays that way -- it feeds one unscoped graph.
+func (s *Server) ingestSnapshots() []metrics.Ingest {
+	if s.mgr == nil {
+		return nil
+	}
+	engines := s.mgr.Engines()
+	out := make([]metrics.Ingest, 0, len(engines))
+	for _, e := range engines {
+		st := e.Status()
+		in := metrics.Ingest{
+			// A programme with no ingest child is REPORTED AS STOPPED rather
+			// than omitted, the same rule the destination series follow: an
+			// absent series and a stopped one are indistinguishable to an
+			// alert, and only one of them is true.
+			Process: metrics.Process{State: string(supervisor.StateStopped)},
+			ID:      e.SourceID(),
+			Name:    e.SourceName(),
+			Relay: metrics.Relay{
+				Subscribers: len(st.Relay.Subscribers),
+				RxPackets:   st.Relay.RxPackets,
+				RxBytes:     st.Relay.RxBytes,
+				TxPackets:   st.Relay.TxPackets,
+				Dropped:     st.Relay.Dropped,
+			},
+		}
+		if st.Ingest != nil {
+			in.State = string(st.Ingest.State)
+			in.Restarts = st.Ingest.Restarts
+		}
+		if b := e.Monitor().Bitrate(); len(b) > 0 {
+			in.BitrateKbps = b[len(b)-1].Kbps
+		}
+		out = append(out, in)
+	}
+	return out
 }
 
 // ----------------------------------------------------------------- settings
@@ -1523,7 +1673,12 @@ func (s *Server) scopedEngine(w http.ResponseWriter, r *http.Request) (*engine.E
 				`for: add "?`+sourceParam+`=<id>".`+s.availableSources())
 		return nil, false
 	}
-	return s.eng(), true
+	// engOrNil rather than eng: this now serves routes that carry no
+	// requireSource and are reached on a build with no manager at all -- the
+	// clip listing, the loudness read -- where eng() panics inside
+	// Manager.Default before there is an engine to test. The answer is
+	// identical everywhere else.
+	return s.engOrNil(), true
 }
 
 // availableSources is the "Available: 1 (Main), 2 (Studio B)." tail both
@@ -1668,13 +1823,33 @@ func ingestEqual(a, b db.IngestSettings) bool {
 // for word, so a create that loses its programme between the two answers the
 // same thing it would have answered an instant earlier rather than storing a
 // destination and reporting a reconcile it never performed.
-func (s *Server) refuseIfSilent(w http.ResponseWriter, profile routing.Profile) bool {
-	e := s.engOrNil()
-	if e == nil {
+//
+// IT TAKES THE PROGRAMME, and that is the whole of #527. The layout came off
+// s.engOrNil() -- s.mgr.Default(), Engines()[0] -- so on a multi-source install
+// this measured the wrong feed in both directions. A profile selecting a track
+// that exists on programme 1 and not on programme 2 compiled to audio, passed,
+// and went live carrying nothing; a perfectly good destination on programme 2
+// was refused 400 naming a stream it does not read, with nothing the operator
+// could change to satisfy it. Streaming silence is the failure this guard
+// exists to prevent, so a guard pointed at another programme is worse than no
+// guard: it reports on a feed nobody asked about.
+//
+// sourceForDestination is the same resolver the three sibling destination
+// routes already use for exactly this question -- handleListDestinations,
+// handleGetDestination and handleUpdateDestination all compile against the
+// owning programme's layout. This is the fourth, and the only one of the four
+// that refuses a write.
+func (s *Server) refuseIfSilent(w http.ResponseWriter, sourceID *int64, profile routing.Profile) bool {
+	// The install-wide question first, and it is a different one: with no
+	// engine anywhere there is no programme to create anything on, which is the
+	// middleware's refusal arriving a moment later. Keeping it off the
+	// per-programme lookup below means "this install has no source" cannot be
+	// confused with "the source you named is not running".
+	if s.engOrNil() == nil {
 		writeNoSource(w)
 		return true
 	}
-	src := e.Source()
+	src, _ := s.sourceForDestination(sourceID)
 	// No tracks means nothing has been probed yet, so there is nothing to
 	// evaluate the profile against.
 	if len(src.Tracks) == 0 {
@@ -1755,7 +1930,9 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	// Expert mode is reachable only through its own routes. See
 	// clearExpertArgs.
 	clearExpertArgs(&row)
-	if s.refuseIfSilent(w, row.Profile) {
+	// row.SourceID, which requireNamedSource has just proved is present. The
+	// owner is known here and used to be thrown away one line later.
+	if s.refuseIfSilent(w, row.SourceID, row.Profile) {
 		return
 	}
 	// Before the write, so what is stored is what the response describes.

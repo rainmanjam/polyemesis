@@ -181,7 +181,11 @@ func (s *Server) handleTestAlertRule(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	n := s.eng().Alerts()
+	// engOrNil, not eng(): this route carries no requireSource, so it is reached
+	// on a build with no manager at all and eng() would panic inside
+	// Manager.Default before there is an engine to test. Read ONCE and use the
+	// answer.
+	n := s.engOrNil().Alerts()
 	if n == nil {
 		// IT IS THE NO-SOURCE REFUSAL WEARING A SUBSYSTEM'S NAME. Engine.New
 		// always builds an alerter, so Alerts() answers nil for exactly one
@@ -222,8 +226,48 @@ func (s *Server) handleAlertsMeta(w http.ResponseWriter, r *http.Request) {
 			"maxNameLen":         alerts.MaxRuleNameLen,
 			"maxUrlLen":          alerts.MaxURLLen,
 		},
-		"stats": s.eng().Alerts().Stats(),
+		"stats": s.alertStats(),
 	})
+}
+
+// alertStats is the delivery counters for the WHOLE INSTALL.
+//
+// EVERY notifier, not the default engine's. Alert rules are install-wide -- one
+// alert_rules table, read by every engine's notifier -- but the counters are
+// not: each notifier keeps its own. So the rule editor's "sent / failed /
+// coalesced" panel showed roughly one programme's share of the truth on a
+// two-programme install, with nothing saying it was a share. Summing is the
+// only reading that matches what the panel claims to describe, which is what
+// this install has delivered.
+//
+// The two non-counters are handled as what they are: LastSent is the most
+// recent across notifiers, and LastError the most recent non-empty one, because
+// "when did anything last get through" and "what went wrong last" are questions
+// about the install, not about a programme.
+func (s *Server) alertStats() alerts.Stats {
+	var out alerts.Stats
+	if s.mgr == nil {
+		return out
+	}
+	var errAt time.Time
+	for _, e := range s.mgr.Engines() {
+		st := e.Alerts().Stats()
+		out.Queued += st.Queued
+		out.Dropped += st.Dropped
+		out.Coalesced += st.Coalesced
+		out.Pending += st.Pending
+		out.Sent += st.Sent
+		out.Failed += st.Failed
+		out.Retries += st.Retries
+		out.Deferred += st.Deferred
+		if st.LastSent.After(out.LastSent) {
+			out.LastSent = st.LastSent
+		}
+		if st.LastError != "" && (errAt.IsZero() || st.LastSent.After(errAt)) {
+			out.LastError, errAt = st.LastError, st.LastSent
+		}
+	}
+	return out
 }
 
 // ---------------------------------------------------------------- schedules
@@ -456,8 +500,20 @@ func (s *Server) handleScheduleRuns(w http.ResponseWriter, r *http.Request) {
 // capturer, which knows its own retention, and only falls back to counting the
 // directory. With no engine there is nothing to ask, so the count comes off
 // disk against the same defaults engine.New would have configured.
+//
+// WHICH capturer is asked is not a detail, which is why the preference goes
+// through scopedEngine (#578). The file list is install-wide and complete
+// either way -- one clips directory -- but the retention window and the buffer
+// state come from a capturer, and on a two-programme install where only Studio
+// B's buffer is on, the default engine answered with a window nothing was
+// enforcing. scopedEngine keeps the zero- and one-source answer exactly as it
+// was, which is what lets this route go on serving an operator who has just
+// deleted their last source and is trying to get their material off the box.
 func (s *Server) handleListClips(w http.ResponseWriter, r *http.Request) {
-	e := s.engOrNil()
+	e, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
 
 	var (
 		list  []clips.Clip
@@ -496,7 +552,19 @@ func (s *Server) handleListClips(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleCaptureClip writes a file off one programme's rolling buffer.
+//
+// SCOPED BECAUSE IT WRITES, and because what it writes is unrecoverable: the
+// operator watching Studio B pressed the button, got a 201 and a .ts of MAIN's
+// output, under a filename that names no programme and an audit event that
+// names none either. The buffer is rolling, so by the time anybody notices, the
+// moment they wanted has aged out of Studio B's buffer and cannot be captured
+// again.
 func (s *Server) handleCaptureClip(w http.ResponseWriter, r *http.Request) {
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		// Seconds <= 0 means the whole window, which is what the big button
 		// sends; longer than the window is clamped by the capturer, not refused.
@@ -505,7 +573,7 @@ func (s *Server) handleCaptureClip(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	clip, err := s.eng().Clip(req.Seconds)
+	clip, err := eng.Clip(req.Seconds)
 	switch {
 	case errors.Is(err, clips.ErrEmpty):
 		// 409, not 500: nothing is wrong, there is simply no history yet. The
@@ -524,7 +592,18 @@ func (s *Server) handleCaptureClip(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"clip": clip})
 }
 
+// handleSetClipBuffer starts or stops one programme's rolling buffer, which
+// spends disk and CPU for as long as it is on.
+//
+// Unscoped, turning capture on for Studio B started MAIN's buffer, returned
+// Main's ClipBuffer() as the confirmation, and left Studio B's off -- so the
+// next press of the clip button answered 409 "the clip buffer is empty" for a
+// feature the operator had just switched on and been told was on.
 func (s *Server) handleSetClipBuffer(w http.ResponseWriter, r *http.Request) {
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		Enabled bool `json:"enabled"`
 		// 0 keeps the current window, so a page that only toggles the switch
@@ -534,11 +613,13 @@ func (s *Server) handleSetClipBuffer(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := s.eng().SetClipBuffer(req.Enabled, req.WindowSeconds); err != nil {
+	if err := eng.SetClipBuffer(req.Enabled, req.WindowSeconds); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.eng().ClipBuffer())
+	// The SAME engine that was just written to. Two reaches here would let the
+	// response confirm a programme other than the one that changed.
+	writeJSON(w, http.StatusOK, eng.ClipBuffer())
 }
 
 // handleDeleteClip removes a file from disk, so it answers with no source for
@@ -601,8 +682,15 @@ func (s *Server) handleDownloadClip(w http.ResponseWriter, r *http.Request) {
 
 // ----------------------------------------------------------------- loudness
 
+// handleLoudness is the compliance read, and a compliance figure attributed to
+// the wrong programme is the worst kind of wrong number: a broadcaster reads a
+// PASSING verdict for a programme nothing measured.
 func (s *Server) handleLoudness(w http.ResponseWriter, r *http.Request) {
-	reports := s.eng().Loudness()
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
+	reports := eng.Loudness()
 	if reports == nil {
 		reports = []meters.Report{}
 	}
@@ -611,7 +699,7 @@ func (s *Server) handleLoudness(w http.ResponseWriter, r *http.Request) {
 		// no way to seed its Monitor switch and seeded it `true`, so a remount
 		// drew the switch ON over a monitor that was off -- and then explained
 		// the empty list as "nothing to measure yet".
-		"enabled": s.eng().LoudnessMonitorEnabled(),
+		"enabled": eng.LoudnessMonitorEnabled(),
 		"reports": reports,
 		"bounds": map[string]float64{
 			"toleranceLu":           meters.ToleranceLU,
@@ -622,14 +710,23 @@ func (s *Server) handleLoudness(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleSetLoudnessMonitor starts or stops a real FFmpeg analyser child.
+//
+// Unscoped, turning monitoring on for Studio B started MAIN's analyser tier --
+// a process on a programme nobody asked about -- and answered {"enabled":true}.
+// Studio B was never measured, so its compliance verdict never existed at all.
 func (s *Server) handleSetLoudnessMonitor(w http.ResponseWriter, r *http.Request) {
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := s.eng().SetLoudnessMonitor(req.Enabled); err != nil {
+	if err := eng.SetLoudnessMonitor(req.Enabled); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

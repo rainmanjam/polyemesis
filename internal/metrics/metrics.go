@@ -48,15 +48,27 @@ type Snapshot struct {
 	// statements and the type has to be able to say so. Nil OMITS the series
 	// rather than publishing 0, and 0 is the value that means "nobody has
 	// configured this install": a collector that could not read the count and
-	// reported 0 anyway would silence `ingest_up == 0 and sources > 0` during
-	// a real outage and fire "nobody configured this server" at a box that is
-	// on air. Prometheus already has a word for the other case -- absent() --
-	// and one missing family is not a lost exposition.
+	// reported 0 anyway would silence `ingest_up == 0 and on() sources > 0`
+	// during a real outage and fire "nobody configured this server" at a box
+	// that is on air. Prometheus already has a word for the other case --
+	// absent() -- and one missing family is not a lost exposition.
 	Sources *int
 
-	Ingest       Process
+	// Ingests is ONE ENTRY PER PROGRAMME, and it is a slice for the same reason
+	// Destinations is (#528).
+	//
+	// It used to be a single unlabelled Process and a single unlabelled Relay,
+	// collected from the default engine. On a multi-source install that meant
+	// programme 2's encoder could stop for the whole show while
+	// polyemesis_ingest_up stayed at 1, ingest_state{state="running"} stayed at
+	// 1, and the relay counters went on climbing on programme 1's traffic. The
+	// destination series were fixed for exactly this in #523; the ingest, which
+	// is the UPSTREAM CAUSE of every one of those destinations going down, was
+	// not. An alert cannot fire on a series that does not distinguish the
+	// programmes, and there is nothing for an operator to notice: it is not a
+	// wrong number, it is an alert that never evaluates.
+	Ingests      []Ingest
 	Destinations []Destination
-	Relay        Relay
 	Recordings   Recordings
 	Host         Host
 }
@@ -69,6 +81,20 @@ type Process struct {
 	// converted to bits per second on the way out.
 	BitrateKbps float64
 	DropFrames  int64
+}
+
+// Ingest is one programme's inbound feed: the ingest child, plus the relay hub
+// that fans that same feed out. They travel together because they measure the
+// same stream at two points, and separating them would make it possible to
+// label one by programme and forget the other -- which is how this defect got
+// in.
+type Ingest struct {
+	Process
+	Relay Relay
+	// ID and Name are the SOURCE's, not a process's. Named the same way a
+	// Destination is, so a scrape can be read without a second convention.
+	ID   int64
+	Name string
 }
 
 // Destination is one output, plus the labels identifying it.
@@ -123,29 +149,72 @@ func Render(s Snapshot) string {
 			"Programmes configured on this install.", float64(*s.Sources))
 	}
 
-	renderIngest(&d, s.Ingest)
+	renderIngests(&d, s.Ingests)
 	renderDestinations(&d, s.Destinations)
-	renderRelay(&d, s.Relay)
+	renderRelay(&d, s.Ingests)
 	renderRecordings(&d, s.Recordings)
 	renderHost(&d, s.Host)
 
 	return d.b.String()
 }
 
-func renderIngest(d *doc, p Process) {
-	d.scalar("polyemesis_ingest_up", "gauge",
-		"1 when the ingest process is running.", boolValue(p.State == stateRunning))
+// ingestIdent is the label pair every per-programme series carries. One
+// function so ingest and relay cannot come to disagree about how a programme is
+// named, which is the drift that would put half the exposition back where it
+// started.
+func ingestIdent(in Ingest) []label {
+	return []label{
+		{"id", strconv.FormatInt(in.ID, 10)},
+		{"name", in.Name},
+	}
+}
+
+// sortedIngests orders by source id so consecutive scrapes of an unchanged
+// system are byte-identical, exactly as renderDestinations does.
+func sortedIngests(ins []Ingest) []Ingest {
+	out := make([]Ingest, len(ins))
+	copy(out, ins)
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// renderIngests emits one series per programme.
+//
+// THE FAMILY HEADERS ARE UNCONDITIONAL, including on an install with no
+// programme at all. A family that appears only once something exists is a
+// family an alert cannot be written against before the first outage, which is
+// the same "a missing series is indistinguishable from nothing configured"
+// failure the destination fix names. With no programmes the headers stand alone
+// and polyemesis_sources says why.
+func renderIngests(d *doc, ins []Ingest) {
+	sorted := sortedIngests(ins)
+
+	d.family("polyemesis_ingest_up", "gauge",
+		"1 when the programme's ingest process is running.")
+	for _, in := range sorted {
+		d.sample("polyemesis_ingest_up", boolValue(in.State == stateRunning), ingestIdent(in)...)
+	}
 
 	d.family("polyemesis_ingest_state", "gauge",
 		"Ingest process state; 1 for the state it is currently in.")
-	for _, st := range processStates {
-		d.sample("polyemesis_ingest_state", boolValue(p.State == st), label{"state", st})
+	for _, in := range sorted {
+		for _, st := range processStates {
+			d.sample("polyemesis_ingest_state", boolValue(in.State == st),
+				append(ingestIdent(in), label{"state", st})...)
+		}
 	}
 
-	d.scalar("polyemesis_ingest_bitrate_bits_per_second", "gauge",
-		"Bitrate currently arriving from the streamer.", p.BitrateKbps*1000)
-	d.scalar("polyemesis_ingest_restarts_total", "counter",
-		"Restarts of the ingest process since the server started.", float64(p.Restarts))
+	d.family("polyemesis_ingest_bitrate_bits_per_second", "gauge",
+		"Bitrate currently arriving from the streamer.")
+	for _, in := range sorted {
+		d.sample("polyemesis_ingest_bitrate_bits_per_second", in.BitrateKbps*1000, ingestIdent(in)...)
+	}
+
+	d.family("polyemesis_ingest_restarts_total", "counter",
+		"Restarts of the ingest process since the server started.")
+	for _, in := range sorted {
+		d.sample("polyemesis_ingest_restarts_total", float64(in.Restarts), ingestIdent(in)...)
+	}
 }
 
 func renderDestinations(d *doc, dests []Destination) {
@@ -212,17 +281,36 @@ func renderDestinations(d *doc, dests []Destination) {
 	}
 }
 
-func renderRelay(d *doc, r Relay) {
-	d.scalar("polyemesis_relay_subscribers", "gauge",
-		"Consumers currently attached to the relay hub.", float64(r.Subscribers))
-	d.scalar("polyemesis_relay_received_packets_total", "counter",
-		"Datagrams received from the ingest.", float64(r.RxPackets))
-	d.scalar("polyemesis_relay_received_bytes_total", "counter",
-		"Bytes received from the ingest.", float64(r.RxBytes))
-	d.scalar("polyemesis_relay_transmitted_packets_total", "counter",
-		"Datagrams replicated to subscribers.", float64(r.TxPackets))
-	d.scalar("polyemesis_relay_dropped_packets_total", "counter",
-		"Datagrams the relay failed to deliver to a subscriber.", float64(r.Dropped))
+// renderRelay emits one relay series set per programme, because there is one
+// hub per engine and the counters of two programmes are not addable.
+func renderRelay(d *doc, ins []Ingest) {
+	sorted := sortedIngests(ins)
+
+	for _, fam := range []struct {
+		name, typ, help string
+		value           func(Relay) float64
+	}{
+		{"polyemesis_relay_subscribers", "gauge",
+			"Consumers currently attached to the relay hub.",
+			func(r Relay) float64 { return float64(r.Subscribers) }},
+		{"polyemesis_relay_received_packets_total", "counter",
+			"Datagrams received from the ingest.",
+			func(r Relay) float64 { return float64(r.RxPackets) }},
+		{"polyemesis_relay_received_bytes_total", "counter",
+			"Bytes received from the ingest.",
+			func(r Relay) float64 { return float64(r.RxBytes) }},
+		{"polyemesis_relay_transmitted_packets_total", "counter",
+			"Datagrams replicated to subscribers.",
+			func(r Relay) float64 { return float64(r.TxPackets) }},
+		{"polyemesis_relay_dropped_packets_total", "counter",
+			"Datagrams the relay failed to deliver to a subscriber.",
+			func(r Relay) float64 { return float64(r.Dropped) }},
+	} {
+		d.family(fam.name, fam.typ, fam.help)
+		for _, in := range sorted {
+			d.sample(fam.name, fam.value(in.Relay), ingestIdent(in)...)
+		}
+	}
 }
 
 func renderRecordings(d *doc, r Recordings) {

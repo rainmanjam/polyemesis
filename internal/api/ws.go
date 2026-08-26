@@ -41,7 +41,28 @@ func sameHost(origin, host string) bool {
 }
 
 // handleWS streams live telemetry: status, audio levels, logs and stats.
+//
+// The OPENING BURST is programme-scoped and the stream is not, which is not an
+// inconsistency: every frame on the stream is published by the engine that
+// produced it and carries that engine's id and name, so a client can tell them
+// apart. The burst is the server assembling a snapshot on the client's behalf,
+// and assembling it for whichever programme happens to be first is the #497
+// mistake -- the register calls this socket "the reason the routing editor
+// shows the default programme's tracks even now".
+//
+// Scoped through the SAME device GET /status uses, and that matters more than
+// which device it is: the two are the same payload arriving by different doors
+// and have drifted apart once already. A socket that answered for programme 1
+// while /status refused to guess would be that drift again, in the direction
+// where the silent door wins.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	// BEFORE the upgrade, while a refusal can still be an HTTP status. After
+	// Upgrade there is no way to say 400 source_required at all.
+	eng, ok := s.scopedEngine(w, r)
+	if !ok {
+		return
+	}
+
 	// The principal, captured BEFORE the upgrade while there is still a request
 	// to read it from. Everything written to this socket goes through eventView
 	// with this flag; writeEvent used to be a bare json.Marshal with no
@@ -120,9 +141,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	// Send the current state immediately, so a freshly opened page is
 	// populated without waiting for the next tick.
+	st := s.statusPayload(eng)
 	initial := []events.Event{
-		{Type: events.TypeStatus, Time: time.Now(), Data: s.statusPayload()},
-		{Type: events.TypeSource, Time: time.Now(), Data: s.eng().SourceInfo()},
+		{Type: events.TypeStatus, Time: time.Now(), Data: st},
+		// DERIVED FROM THE STATUS FRAME, not resolved a second time. The two
+		// frames describe the same programme by construction now, where two
+		// independent reaches could -- and on a manager that loses a source
+		// between them, did -- put two different programmes' layouts into one
+		// burst that a page renders as though it were one machine.
+		{Type: events.TypeSource, Time: time.Now(), Data: st.Source},
 		{Type: events.TypeStats, Time: time.Now(), Data: map[string]any{
 			"system":  s.hostSystem(),
 			"bitrate": s.ingestBitrate(),

@@ -152,6 +152,18 @@ func (s *Server) publishAudit(ev alerts.Event) {
 	}
 	eng := s.eng()
 	if eng == nil {
+		// SAID OUT LOUD, because the events that reach here when no engine is
+		// running are the security ones -- auditLoginFailed above all -- and an
+		// install whose engines failed to build is exactly when an operator
+		// most needs to know that repeated failed sign-ins went unreported.
+		// Dropping them was correct; dropping them in silence was the defect
+		// (#576): the alert rule is configured, the endpoint is healthy, and
+		// nothing anywhere says why nothing arrived.
+		//
+		// Debug, not Warn: on a fresh install with no source yet this is the
+		// normal state and every login would log a warning nobody can act on.
+		s.log.Debug("audit event not published: this install has no running programme",
+			"type", ev.Type)
 		return
 	}
 	// Notifier.Publish is nil-receiver safe, so an engine that has one but has

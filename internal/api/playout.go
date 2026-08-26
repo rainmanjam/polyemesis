@@ -695,8 +695,14 @@ func (s *Server) handlePlayoutPoster(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// ONE reach, not three. playoutManager already answers nil for both "no
+	// manager" and "no engine" -- it goes through engOrNil for exactly that --
+	// so the two extra tests re-read the engine set after the answer was taken
+	// and could only ever disagree with it. They also made this handler a
+	// default-engine site that read like a nil guard, which is the spelling the
+	// scope register could not see (#539/#550).
 	m := s.playoutManager()
-	if m == nil || s.mgr == nil || s.eng() == nil {
+	if m == nil {
 		http.NotFound(w, r)
 		return
 	}
