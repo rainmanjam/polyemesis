@@ -16,6 +16,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/rtmpserver"
+	"github.com/rainmanjam/polyemesis/internal/scheduler"
 	"github.com/rainmanjam/polyemesis/internal/srtserver"
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
@@ -51,6 +52,22 @@ type Manager struct {
 	// internally synchronised.
 	host   *stats.Host
 	recman *recording.Manager
+	// ONE runner for the whole install, not one per engine.
+	//
+	// `schedules` has no source_id (schema.sql) -- a timetable is a property of
+	// the box, not of a programme. Running a Runner per engine put N of them on
+	// one table: whichever swept first wrote `enabled` on EVERY destination
+	// including other programmes', reconciled only ITS OWN engine, and marked
+	// the occurrence handled. The others then read it as handled and never
+	// reconciled, so those destinations were enabled in the database with no
+	// process publishing -- a scheduled broadcast that did not go on air while
+	// the log said `schedule fired`. MarkScheduleRun's `WHERE last_run_at < ?`
+	// is a ratchet on the row, not a lease over the work, and the Actuator
+	// cannot see whether it won it.
+	//
+	// One runner makes that unrepresentable rather than merely unlikely, and
+	// its Reconcile is Manager.Reconcile, which covers every engine. See #526.
+	sched *scheduler.Runner
 	// hostStop ends the sampler goroutine. Set by Start, called by Stop.
 	hostStop context.CancelFunc
 
@@ -118,7 +135,7 @@ type Manager struct {
 
 // NewManager builds the manager. No engines exist until Start.
 func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools, bus *events.Broker) *Manager {
-	return &Manager{
+	m := &Manager{
 		log:     log,
 		cfg:     cfg,
 		store:   store,
@@ -137,6 +154,11 @@ func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg
 			bus.Publish(events.TypeRecordings, nil)
 		}),
 	}
+	// Built here rather than in Start so a Manager that is never started still
+	// answers Scheduler() with a real runner: the runs page reads Last() and
+	// renders an empty report rather than nothing at all.
+	m.sched = scheduler.New(log, store, scheduleActuator{m}, scheduler.WithOnResult(m.onSchedule))
+	return m
 }
 
 // Tools is the FFmpeg this install detected.
@@ -149,6 +171,20 @@ func (m *Manager) Tools() *ffmpeg.Tools { return m.tools }
 
 // Host is the process-wide CPU/RAM sampler, running between Start and Stop.
 func (m *Manager) Host() *stats.Host { return m.host }
+
+// Scheduler is the install's one schedule runner.
+//
+// Nil-receiver safe on Runner.Last, so an API reading it before Start renders
+// an empty runs report rather than failing. It used to be reached as
+// s.eng().Scheduler() -- the DEFAULT engine's -- which reported one
+// programme's runs on a multi-source install and, worse, implied there were
+// several timetables. There is one. See #526.
+func (m *Manager) Scheduler() *scheduler.Runner {
+	if m == nil {
+		return nil
+	}
+	return m.sched
+}
 
 // Recordings is the shared, read-only view of the recordings directory.
 //
@@ -181,6 +217,14 @@ func (m *Manager) Start(ctx context.Context) error {
 	// one source came up -- that is exactly the install an operator is staring
 	// at the monitoring page of.
 	go m.host.Run(hostCtx)
+
+	// Beside the sampler, and for the same reason: a timetable describes the
+	// box. It runs even on an install where no engine came up, because a
+	// schedule that should have enabled a destination at 19:00 must still mark
+	// its occurrence -- otherwise the window is missed and fires late on the
+	// next sweep after the engine recovers, putting a programme on air an hour
+	// after the show ended.
+	go m.sched.Run(hostCtx)
 
 	// Listeners BEFORE engines. This used to be the other way round, with a
 	// comment about the token lookup needing to see the engines -- but the

@@ -12,6 +12,19 @@ its first tagged release.
 ## [0.7.0] — unreleased
 
 ### Fixed
+- **A scheduled broadcast could silently fail to go on air on a multi-programme
+  install.** `schedules` carries no `source_id` — a timetable is a property of
+  the box — but every engine ran its own `scheduler.Runner` over that one table.
+  Whichever swept first wrote `enabled` on every destination, including other
+  programmes', then reconciled ONLY ITS OWN engine and marked the occurrence
+  handled; the other engines read it as handled and never reconciled. Those
+  destinations sat enabled in the database with no process publishing, while the
+  log said `schedule fired`. `MarkScheduleRun`'s `WHERE last_run_at < ?` is a
+  ratchet on the row, not a lease over the work, and the actuator has no way to
+  learn whether it won it. There is now one runner, owned by the manager, whose
+  reconcile covers every engine — so the shape that caused this is no longer
+  representable rather than merely unlikely. The runs page also stops reporting
+  the default programme's scheduler as though it were the only one.
 - **The dashboard's grouped destination list and the Prometheus scrape lost
   every programme but one.** Scoping `Engine.Status` to its own source was
   right, and it removed a leak three callers were quietly relying on: the

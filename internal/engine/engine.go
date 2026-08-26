@@ -344,7 +344,6 @@ type Engine struct {
 	alertWatch *alerts.Watcher
 	// sched flips destinations' enabled flags on a timetable, through the same
 	// path a human uses.
-	sched *scheduler.Runner
 
 	// playProcs mirrors the manager's running variants so the monitoring page
 	// can list them beside every other child. The manager hands out its
@@ -680,7 +679,6 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 	// Named from the source row on the first sweep; SourceRef starts with the
 	// id alone so an event raised before that still identifies its programme.
 	e.hookWatch = hooks.NewWatcher(hooks.SourceRef{ID: sourceID}, hooks.WatchConfig{})
-	e.sched = scheduler.New(log, store, scheduleActuator{e}, scheduler.WithOnResult(e.onSchedule))
 	return e, nil
 }
 
@@ -854,10 +852,6 @@ func (e *Engine) Start(ctx context.Context) error {
 		e.wg.Add(2)
 		go func() { defer e.wg.Done(); e.alerter.Run(e.ctx) }()
 		go func() { defer e.wg.Done(); e.observeLoop(e.ctx) }()
-	}
-	if e.sched != nil {
-		e.wg.Add(1)
-		go func() { defer e.wg.Done(); e.sched.Run(e.ctx) }()
 	}
 
 	return e.Reconcile()
@@ -4323,25 +4317,15 @@ func (e *Engine) lifecycleObserver() LifecycleObserver {
 	return e.lifecycle
 }
 
-// Scheduler exposes the schedule runner for the same reason, and answers nil
-// for the same two reasons Alerts does. scheduler.Runner.Last is nil-receiver
-// safe, so the runs page renders an empty report. See Engine.Status.
-func (e *Engine) Scheduler() *scheduler.Runner {
-	if e == nil {
-		return nil
-	}
-	return e.sched
-}
-
 // scheduleActuator is how the scheduler reaches the enable/disable path.
 //
 // Deliberately hair-thin: a schedule writes exactly the intent a human writes
 // and then asks for a reconcile, so a scheduled start and a clicked one are the
 // same code and cannot drift apart.
-type scheduleActuator struct{ e *Engine }
+type scheduleActuator struct{ m *Manager }
 
 func (a scheduleActuator) SetDestinationEnabled(id int64, enabled bool) error {
-	return a.e.store.SetDestinationEnabled(id, enabled)
+	return a.m.store.SetDestinationEnabled(id, enabled)
 }
 
 // SetPlaylistEnabled flips the playlist's stored intent, exactly as the settings
@@ -4372,7 +4356,7 @@ func (a scheduleActuator) SetDestinationEnabled(id int64, enabled bool) error {
 // The error is returned rather than swallowed so the runner leaves the
 // occurrence unhandled and the run log carries the reason.
 func (a scheduleActuator) SetPlaylistEnabled(enabled bool) error {
-	_, err := a.e.store.UpdateSettings(func(s *db.Settings) error {
+	_, err := a.m.store.UpdateSettings(func(s *db.Settings) error {
 		if s.Failover.Playlist.Enabled == enabled {
 			// Already there, so there is nothing to write and nothing to
 			// validate. An overlapping schedule, or a restart inside a window,
@@ -4399,7 +4383,7 @@ func (a scheduleActuator) SetPlaylistEnabled(enabled bool) error {
 }
 
 func (a scheduleActuator) ListDestinationIDs() ([]int64, error) {
-	rows, err := a.e.store.ListDestinations()
+	rows, err := a.m.store.ListDestinations()
 	if err != nil {
 		return nil, err
 	}
@@ -4410,13 +4394,13 @@ func (a scheduleActuator) ListDestinationIDs() ([]int64, error) {
 	return ids, nil
 }
 
-func (a scheduleActuator) Reconcile() error { return a.e.Reconcile() }
+func (a scheduleActuator) Reconcile() error { return a.m.Reconcile() }
 
 // onSchedule publishes the fact that a timetable moved something. A dashboard
 // that shows a destination coming up with no explanation is how an operator
 // concludes the server has a mind of its own.
-func (e *Engine) onSchedule(r scheduler.Result) {
-	e.bus.Publish(eventSchedule, r)
+func (m *Manager) onSchedule(r scheduler.Result) {
+	m.bus.Publish(eventSchedule, r)
 }
 
 // observeWanted reports whether a sweep is worth building.

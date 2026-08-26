@@ -302,8 +302,6 @@ var defaultEngineSites = map[string]string{
 	"handleTestAlertRule": "internal/api/automation.go. Unscoped; not this " +
 		"change's file assignment. Already recorded in noSourceRefusalSites for " +
 		"the zero-source half of the same reach.",
-	"handleScheduleRuns": "internal/api/automation.go. Unscoped; not this " +
-		"change's file assignment.",
 	"handleCaptureClip": "internal/api/automation.go. Unscoped, and it WRITES: " +
 		"a clip captured from the default programme's rolling buffer. Not this " +
 		"change's file assignment.",
