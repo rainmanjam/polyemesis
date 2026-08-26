@@ -581,15 +581,336 @@ if [ -f "$U" ]; then
     fi
   done
 
-  mkdir -p "$WORK_UNINST/fake-data"; : > "$WORK_UNINST/fake-data/marker"
+  # AND IS IT OURS? The three checks above prove the path is safe to TYPE.
+  # DATA_DIR is frozen into the uninstaller at generation time and never
+  # re-read, so an operator who moved the data directory later and repointed
+  # config.yaml by hand has an uninstaller aimed at a stale path that passes all
+  # three -- deletes whatever now lives there, and reports "database, secret.key
+  # and recordings are gone" whether or not any of that was ever true.
+  mkdir -p "$WORK_UNINST/fake-data"; : > "$WORK_UNINST/fake-data/someone-elses-files"
   out="$(PATH="$WORK_UNINST/bin:$PATH" bash "$U" --remove-data --force 2>&1)"; rc=$?
-  if [ "$rc" = 0 ] && [ ! -e "$WORK_UNINST/fake-data" ]; then
-    ok "--remove-data deletes a legitimate data directory"
+  if [ "$rc" != 0 ] && [ -e "$WORK_UNINST/fake-data/someone-elses-files" ]; then
+    case "$out" in
+      *"neither polyemesis.db nor"*)
+        ok "--remove-data refuses a directory holding neither polyemesis.db nor secret.key" ;;
+      *) bad "--remove-data refused, but not for the right reason: $out" ;;
+    esac
   else
-    bad "--remove-data did not delete a legitimate data directory (rc=$rc)"
+    bad "--remove-data deleted a directory with no polyemesis.db and no secret.key (rc=$rc)"
   fi
+
+  # A guard that refuses everything passes every negative case and is useless.
+  # Either marker is enough: a database with no key file, and a key file with no
+  # database, are both this install's data directory.
+  for marker in polyemesis.db secret.key; do
+    rm -rf "$WORK_UNINST/fake-data"
+    mkdir -p "$WORK_UNINST/fake-data"; : > "$WORK_UNINST/fake-data/$marker"
+    out="$(PATH="$WORK_UNINST/bin:$PATH" bash "$U" --remove-data --force 2>&1)"; rc=$?
+    if [ "$rc" = 0 ] && [ ! -e "$WORK_UNINST/fake-data" ]; then
+      ok "--remove-data deletes a legitimate data directory (found by $marker)"
+    else
+      bad "--remove-data did not delete a data directory holding $marker (rc=$rc)"
+    fi
+  done
 else
   bad "no uninstaller was generated"
+fi
+
+# ------------------------------------------------- rollback blast radius (#532)
+#
+# THE WORST THING THIS SCRIPT CAN DO. A re-run over a healthy install -- to
+# change a port, add TLS, upgrade -- that fails at any later step (verify()
+# timing out after 60s is the reachable one) used to run `rm -rf "$INSTALL_DIR"`
+# on the operator's EXISTING install directory, because `mkdir -p` succeeds on a
+# directory that is already there and DIRS_CREATED was set unconditionally right
+# after it. That deleted docker-compose.yml, config.yaml, its just-written .bak-
+# snapshot, uninstall.sh and every backup-*.tar.gz update.sh had ever written
+# there. The docker volume survives; the compose file needed to bring it back
+# does not. And it printed `[info] removed /opt/polyemesis`.
+#
+# The CONFIG_DIR half of this had already been fixed, with the reasoning
+# recorded beside it. INSTALL_DIR never got the same treatment. These cases pin
+# both halves: that the flag is only set for a directory this run created, and
+# that the trap only deletes when the flag says so.
+
+step "13. Rollback deletes only what this run created"
+
+WORK_RB="$work/rollback"
+
+# (1) The flag itself, through a REAL install.sh function rather than a copy of
+#     the line. write_binary_update_script is one of the three sites that
+#     `mkdir -p "$INSTALL_DIR"`, and it needs nothing but a directory.
+rb_flag_for() { # rb_flag_for <install_dir>  -> prints the resulting flag
+  # These are read by install.sh's write_binary_update_script, which arrives
+  # through the eval in load_install_defs and is invisible to static analysis.
+  # shellcheck disable=SC2034
+  ( load_install_defs || exit 1
+    INSTALL_DIR="$1"
+    DATA_DIR="$1/data"
+    BIN_PATH="$1/polyemesis"
+    SERVICE_NAME="polyemesis-acceptance"
+    write_binary_update_script
+    printf '%s' "$INSTALL_DIR_CREATED" )
+}
+
+mkdir -p "$WORK_RB/pre-existing"
+: > "$WORK_RB/pre-existing/backup-2026-01-01.tar.gz"
+got="$(rb_flag_for "$WORK_RB/pre-existing")"
+if [ "$got" = false ]; then
+  ok "a pre-existing install directory does not set INSTALL_DIR_CREATED"
+else
+  bad "INSTALL_DIR_CREATED=$got for a directory that already existed — rollback would rm -rf the operator's backups"
+fi
+
+got="$(rb_flag_for "$WORK_RB/fresh")"
+if [ "$got" = true ]; then
+  ok "a directory this run created does set INSTALL_DIR_CREATED"
+else
+  bad "INSTALL_DIR_CREATED=$got for a directory this run created — a failed first install would leave its own mess behind"
+fi
+
+# (2) The trap, driven directly. cleanup_on_failure exits, so each case runs in
+#     its own subshell.
+rb_trap() { # rb_trap <install_dir> <install_dir_created>
+  # Read by install.sh's cleanup_on_failure, which arrives through the eval.
+  # shellcheck disable=SC2034
+  ( load_install_defs || exit 1
+    INSTALL_DIR="$1"
+    CONFIG_DIR="$WORK_RB/etc"
+    DATA_DIR="$WORK_RB/data"
+    COMPOSE_CMD=""
+    DIRS_CREATED=true
+    INSTALL_DIR_CREATED="$2"
+    # errexit OFF for the two lines below. install.sh sets -e, so a bare
+    # `( exit 1 )` would end this subshell right there and cleanup_on_failure
+    # would never run -- which is exactly how the first draft of this case
+    # "passed" while asserting nothing. In the real script the handler runs from
+    # a trap, after the shell has already decided to exit.
+    set +e
+    ( exit 1 )
+    cleanup_on_failure ) >/dev/null 2>&1
+}
+
+mkdir -p "$WORK_RB/keep"; : > "$WORK_RB/keep/backup-2026-01-01.tar.gz"
+rb_trap "$WORK_RB/keep" false
+if [ -e "$WORK_RB/keep/backup-2026-01-01.tar.gz" ]; then
+  ok "rollback leaves an install directory it did not create — backups survive"
+else
+  bad "rollback deleted a pre-existing install directory and the backups in it"
+fi
+
+mkdir -p "$WORK_RB/drop"; : > "$WORK_RB/drop/docker-compose.yml"
+rb_trap "$WORK_RB/drop" true
+if [ ! -d "$WORK_RB/drop" ]; then
+  ok "rollback still removes an install directory it did create"
+else
+  bad "rollback left behind an install directory this run created"
+fi
+
+# (3) The docker path takes the same guard. It cannot be driven here -- it pulls
+#     an image and starts a container -- so the shape is pinned instead, which
+#     is what stops the fix living on the binary path only.
+if grep -q '\[ -d "\$INSTALL_DIR" \] || INSTALL_DIR_CREATED=true' "$INSTALL"; then
+  # Anchored, so the prose that explains this at the top of install.sh is not
+  # counted as a call site.
+  n="$(grep -cE '^[[:space:]]*\[ -d "\$INSTALL_DIR" \] \|\| INSTALL_DIR_CREATED=true' "$INSTALL")"
+  m="$(grep -cE '^[[:space:]]*mkdir -p "\$INSTALL_DIR"' "$INSTALL")"
+  if [ "$n" = "$m" ]; then
+    ok "every one of the $m \`mkdir -p \$INSTALL_DIR\` sites is guarded ($n guards)"
+  else
+    bad "$m \`mkdir -p \$INSTALL_DIR\` sites but only $n guards — one of them still tells rollback it may delete an existing install"
+  fi
+else
+  bad "no INSTALL_DIR_CREATED guard in install.sh at all"
+fi
+
+# (4) And the container half: a container that was already up before this run is
+#     the operator's, and `compose down` on it takes a live broadcast off air.
+if grep -q 'CONTAINER_PREEXISTING" = true \] || CONTAINER_STARTED=true' "$INSTALL"; then
+  ok "CONTAINER_STARTED is not set for a container that was already running"
+else
+  bad "CONTAINER_STARTED is set unconditionally — a failed re-run would compose down the operator's live container"
+fi
+
+# (5) THE SAME MISTAKE ON THE OTHER MODE, found by sweeping for the shape rather
+#     than by another report. `install -m 0755` and `cat >` both succeed over an
+#     existing file, so a failed re-run over a WORKING systemd install used to
+#     disable the service, delete its unit and delete the binary -- a host with
+#     no polyemesis on it at all, recovering from a failure that had broken
+#     nothing.
+#
+#     UNIT_CREATED IS FORCED false IN BOTH CASES BELOW. cleanup_on_failure's
+#     unit branch spells /etc/systemd/system/<name>.service literally, with no
+#     variable to point somewhere harmless -- so driving it here would be a test
+#     that reaches into the real /etc, which is what the note above section 12
+#     says a suite must never do. Only the BIN_PATH half is exercised; the unit
+#     half is pinned by shape, below.
+rb_binary() { # rb_binary <root> <bin_preexisting>
+  # Read by install.sh's cleanup_on_failure, which arrives through the eval.
+  # shellcheck disable=SC2034
+  ( load_install_defs || exit 1
+    INSTALL_DIR="$1/opt"
+    CONFIG_DIR="$1/etc"
+    DATA_DIR="$1/data"
+    BIN_PATH="$1/bin/polyemesis"
+    COMPOSE_CMD=""
+    DIRS_CREATED=false
+    UNIT_CREATED=false
+    BINARY_INSTALLED=true
+    BIN_PREEXISTING="$2"
+    set +e
+    ( exit 1 )
+    cleanup_on_failure ) >/dev/null 2>&1
+}
+
+rbb="$work/rb-binary"; mkdir -p "$rbb/bin"; : > "$rbb/bin/polyemesis"
+rb_binary "$rbb" true
+if [ -e "$rbb/bin/polyemesis" ]; then
+  ok "rollback leaves a binary that predates this run — a re-run that fails does not uninstall the host"
+else
+  bad "rollback deleted the binary of an install it had only replaced"
+fi
+
+: > "$rbb/bin/polyemesis"
+rb_binary "$rbb" false
+if [ ! -e "$rbb/bin/polyemesis" ]; then
+  ok "and it still removes a binary this run installed for the first time"
+else
+  bad "rollback left behind a binary this run had installed"
+fi
+
+if grep -q 'UNIT_CREATED" = true \] && \[ "\$UNIT_PREEXISTING" != true \]' "$INSTALL" \
+   && grep -q 'UNIT_PREEXISTING=true' "$INSTALL"; then
+  ok "and the unit file is under the same guard, so a failed re-run cannot disable a running service"
+else
+  bad "the unit removal is unguarded — a failed re-run would disable and delete a working install's service"
+fi
+
+# --------------------------------------------------- the data directory default
+#
+# The prompt's default used to be the compiled-in constant rather than the
+# existing install's dataDir, and under --yes ask() takes the default WITHOUT
+# PRINTING A PROMPT. A re-run to change a port therefore created a new data
+# directory, minted a fresh secret.key in it, rewrote the unit's --data and
+# restarted the service onto an empty database -- every destination, source and
+# recording gone from the UI, with the summary printing "create your admin
+# password" as though this were a first install.
+
+step "14. A re-run defaults to the data directory the install is already using"
+
+WORK_DD="$work/datadir"; mkdir -p "$WORK_DD/etc"
+
+read_data_dir() { # read_data_dir <config_dir>
+  # Read by install.sh's existing_data_dir, which arrives through the eval.
+  # shellcheck disable=SC2034
+  ( load_install_defs || exit 1
+    CONFIG_DIR="$1"
+    existing_data_dir )
+}
+
+printf 'dataDir: "/srv/polyemesis-moved"\naddr: ":8080"\n' > "$WORK_DD/etc/config.yaml"
+got="$(read_data_dir "$WORK_DD/etc")"
+[ "$got" = "/srv/polyemesis-moved" ] \
+  && ok "a quoted dataDir is read back out of an existing config.yaml" \
+  || bad "expected /srv/polyemesis-moved, got '${got:-<empty>}'"
+
+printf 'dataDir: /srv/unquoted\n' > "$WORK_DD/etc/config.yaml"
+got="$(read_data_dir "$WORK_DD/etc")"
+[ "$got" = "/srv/unquoted" ] \
+  && ok "an unquoted dataDir is read too" \
+  || bad "expected /srv/unquoted, got '${got:-<empty>}'"
+
+# Anything it cannot parse must read as "no previous install", never as a guess.
+printf 'dataDir: relative/path\n' > "$WORK_DD/etc/config.yaml"
+got="$(read_data_dir "$WORK_DD/etc")"
+[ -z "$got" ] \
+  && ok "a non-absolute dataDir is reported as no previous install rather than guessed at" \
+  || bad "a relative dataDir was accepted as '$got'"
+
+got="$(read_data_dir "$WORK_DD/nothing-here")"
+[ -z "$got" ] \
+  && ok "no config.yaml means no previous install, and the constant default stands" \
+  || bad "invented a data directory from a config that does not exist: '$got'"
+
+if grep -q 'prior_data_dir="\$(existing_data_dir)"' "$INSTALL" \
+   && grep -q 'refusing under --yes' "$INSTALL"; then
+  ok "gather_configuration uses it as the default and refuses to move the data under --yes"
+else
+  bad "the Data directory prompt no longer consults existing_data_dir — the checks above test dead code"
+fi
+
+# ------------------------------------------------------------- port validation
+#
+# RTMP_PORT was the one port that skipped the numeric/range check, so
+# `--rtmp-port 70000` reached docker-compose.yml as a port mapping and failed at
+# `compose up` -- inside the install, which then ran the rollback above.
+
+step "15. Every port the installer accepts is validated, not just two of them"
+
+# THE MESSAGE, NOT JUST THE EXIT CODE. A non-zero exit proves nothing here:
+# install.sh refuses to run as a non-root user a few lines later, so every one
+# of these cases "failed" for that reason instead and the first draft of this
+# section passed with the validation removed entirely. The refusal has to name
+# the variable it refused.
+check_port_arg() { # check_port_arg <desc> <expected-substring> <args...>
+  local desc="$1" want="$2"; shift 2
+  local out
+  out="$(bash "$INSTALL" "$@" 2>&1)"
+  case "$out" in
+    *"$want"*) ok "$desc" ;;
+    *) bad "$desc: nothing said \"$want\". install.sh got as far as $(printf '%s' "$out" | head -1)" ;;
+  esac
+}
+
+check_port_arg "--http-port 70000 is refused" "HTTP_PORT must be between" --http-port 70000 --check
+check_port_arg "--srt-port 0 is refused"      "SRT_PORT must be between"  --srt-port 0 --check
+check_port_arg "--rtmp-port 70000 is refused" "RTMP_PORT must be between" --rtmp-port 70000 --check
+check_port_arg "--rtmp-port abc is refused"   "RTMP_PORT must be a number" --rtmp-port abc --check
+check_port_arg "--rtmp-port -1 is refused"    "RTMP_PORT must be a number" --rtmp-port -1 --check
+
+# 0 is not a port here, it is how you decline RTMP -- see the ENABLE_RTMP case,
+# which reads the port as the switch. It must survive the range check.
+out="$(bash "$INSTALL" --rtmp-port 0 --check 2>&1)"; rc=$?
+case "$out" in
+  *"RTMP_PORT must be"*) bad "--rtmp-port 0 was rejected by the range check, but 0 is how you decline RTMP" ;;
+  *) ok "--rtmp-port 0 still means 'decline RTMP' rather than failing the range check (rc=$rc)" ;;
+esac
+
+# ------------------------------------------- generated unit vs the shipped unit
+#
+# deploy/polyemesis.service is the hand-install this project documents; the unit
+# install.sh generates is what the RECOMMENDED path actually creates. They
+# drifted -- the generated one carried no UMask and none of the hardening from
+# ProtectKernelTunables down -- and neither file looks wrong on its own, which
+# is why it lasted. install.sh is fetched standalone with curl and has no
+# repository to read, so it cannot be generated from that file; this is the
+# guard instead.
+
+step "16. The generated systemd unit is not weaker than the one the docs ship"
+
+SHIPPED="$SCRIPTS/../deploy/polyemesis.service"
+if [ ! -f "$SHIPPED" ]; then
+  bad "deploy/polyemesis.service is missing — this check cannot run"
+else
+  missing=""
+  while read -r directive; do
+    [ -n "$directive" ] || continue
+    grep -q "^${directive}=" "$INSTALL" || missing="$missing $directive"
+  done <<EOF
+$(sed -n '/^\[Service\]/,/^\[Install\]/p' "$SHIPPED" \
+   | sed -n 's/^\([A-Za-z][A-Za-z0-9]*\)=.*/\1/p' \
+   | grep -vE '^(ExecStart|User|Group|ReadWritePaths)$' \
+   | sort -u)
+EOF
+  if [ -z "$missing" ]; then
+    ok "every [Service] directive in deploy/polyemesis.service appears in the generated unit"
+  else
+    bad "the generated unit is missing:$missing — add them to install.sh's heredoc, or the installer keeps producing a weaker service than the copy-paste instructions"
+  fi
+
+  grep -q 'chmod 0750 "\$DATA_DIR"' "$INSTALL" \
+    && ok "the installer chmods the data directory 0750, as the shipped unit's header calls for" \
+    || bad "the data directory is left at mkdir's 0755 — it holds secret.key and the recordings (#297)"
 fi
 
 printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"

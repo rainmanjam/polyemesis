@@ -491,6 +491,19 @@ jobs:
         run: ./scripts/test-sbom-guard.sh
         timeout-minutes: 5
 
+      # release.yml's gates, for exactly the reason above and one worse. They
+      # only ever run for real inside a release, and that is how changelog-gate
+      # came to exit 0 on a workflow_dispatch that publishes -- with a comment
+      # asserting "Nothing here would be published either way", pointing at the
+      # expression that makes it false. The fixtures drive the real step bodies,
+      # read out of release.yml rather than transcribed: a temporary git
+      # repository with an annotated and a lightweight tag, a CHANGELOG dated
+      # today and dated last week, and the jq selector against fixture run
+      # listings. Pure shell, jq and git; about a second.
+      - if: needs.changes.outputs.code == 'true'
+        run: ./scripts/test-release-gates.sh
+        timeout-minutes: 5
+
       # The termination guard, and its tests, alongside the SBOM pair above for
       # the same reason and one of its own. #210: after #179/#180 the class had
       # ONE gate and its jurisdiction was .github/workflows -- a fixture carrying
@@ -1173,21 +1186,24 @@ jobs:
             Write-Host "PASS: a non-publishing ffmpeg process is correctly ignored"
           }
 
-          # KNOWN GAP, surfaced here rather than gated: this workflow only
-          # owns .github/workflows/**, so it cannot fix deploy/windows/**.
-          # PowerShell assigns $null, not an empty array, to a variable
-          # captured from a pipeline that produced zero objects. Case 3
-          # above (and a fully idle host with no ffmpeg.exe at all) return
-          # $null from THIS function too, exactly like Case 1's real
-          # failure. uninstall.ps1's caller treats $null as "cannot
-          # determine" and throws, which reads as the typed confirmation
-          # prompt added in #489 being unreachable on an ordinary,
-          # nothing-is-live uninstall without -Force. Flagged loudly on
-          # every run rather than silently ignored; not failed here because
-          # fixing it means editing a file outside this workflow's ownership.
+          # THE GAP THIS USED TO WARN ABOUT IS CLOSED, so it is now an
+          # assertion instead of a Write-Warning. It used to say: PowerShell
+          # assigns $null, not an empty array, to a variable captured from a
+          # pipeline that produced zero objects, so "nothing is publishing"
+          # and "could not check" arrived identically and every uninstall on
+          # an idle host refused. uninstall.ps1 answers with a two-field
+          # object now (Checked / Procs) and cannot express that confusion.
+          #
+          # Kept as a case rather than deleted, because the shape it forbids
+          # is the one a rewrite reaches for first: a bare pipeline, or
+          # `return ,$found`, both of which look right and neither of which
+          # can carry two facts. Case 3 above -- ffmpeg running, publishing
+          # nothing -- is the input that used to produce $null.
           $rawResult = Get-PublishingFfmpeg
           if ($null -eq $rawResult) {
-            Write-Warning "Get-PublishingFfmpeg returns `$null for 'no match', indistinguishable from 'could not check' -- the confirmation prompt looks unreachable without -Force on a normal idle host. See the #509 CI report."
+            $failures.Add('Get-PublishingFfmpeg returned $null for "no match", which is indistinguishable from "could not check". Return an object with Checked and Procs; a bare pipeline or `return ,$found` cannot carry both facts.')
+          } else {
+            Write-Host "PASS: an idle host gets an object, never `$null"
           }
 
           if ($failures.Count -gt 0) {
@@ -1234,7 +1250,7 @@ jobs:
           }
 
           # --- Scenario 1: -Force bypasses BOTH the live check and the confirmation ---
-          $Force = $true; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
+          $Force = $true; $IgnoreLiveBroadcast = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
           $script:calls = 0
           function Get-PublishingFfmpeg { $script:calls++; [pscustomobject]@{ Checked = $true; Procs = @() } }
           function Read-Host { param($Prompt); $script:calls++; 'polyemesis' }
@@ -1250,7 +1266,7 @@ jobs:
           }
 
           # --- Scenario 2: a stubbed process table shows a publishing ffmpeg -> throws ---
-          $Force = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
+          $Force = $false; $IgnoreLiveBroadcast = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
           function Get-PublishingFfmpeg { [pscustomobject]@{ Checked = $true; Procs = @([pscustomobject]@{ ProcessId = 4242; CommandLine = 'ffmpeg.exe -i in -f flv rtmp://example.invalid/live' }) } }
           function Read-Host { param($Prompt); throw 'Read-Host must not be reached while a broadcast is live' }
           try {
@@ -1265,7 +1281,7 @@ jobs:
           }
 
           # --- Scenario 3: the process table cannot be read -> throws (fail closed) ---
-          $Force = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
+          $Force = $false; $IgnoreLiveBroadcast = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
           function Get-PublishingFfmpeg { [pscustomobject]@{ Checked = $false; Procs = @() } }
           function Read-Host { param($Prompt); throw 'Read-Host must not be reached when the process table could not be read' }
           try {
@@ -1280,7 +1296,7 @@ jobs:
           }
 
           # --- Scenario 4: a wrong confirmation answer is rejected ---
-          $Force = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
+          $Force = $false; $IgnoreLiveBroadcast = $false; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
           function Get-PublishingFfmpeg { [pscustomobject]@{ Checked = $true; Procs = @() } }
           function Read-Host { param($Prompt); 'definitely-the-wrong-answer' }
           try {
@@ -1294,6 +1310,28 @@ jobs:
             }
           }
 
+          # --- Scenario 5: -IgnoreLiveBroadcast skips the ON-AIR check ONLY ---
+          # Two bypasses that used to be one keystroke. -Force skips the on-air
+          # check AND the confirmation, so an operator who only meant "yes, I
+          # know it is live" also turned off the typed confirmation -- and the
+          # habit is the damage, because -RemoveData -Force then deletes an
+          # operator-supplied path with no prompt at all. This switch is the
+          # narrow one: the broadcast check is skipped, the confirmation is not.
+          $Force = $false; $IgnoreLiveBroadcast = $true; $RemoveData = $false; $InstallDir = 'C:\Fake\Install'; $DataDir = 'C:\Fake\Data'; $ServiceName = 'polyemesis'
+          $script:asked = 0
+          function Get-PublishingFfmpeg { throw 'the on-air check must not run under -IgnoreLiveBroadcast' }
+          function Read-Host { param($Prompt); $script:asked++; 'polyemesis' }
+          try {
+            Invoke-Scenario $ifBlockText
+            if ($script:asked -ne 1) {
+              $failures.Add("IgnoreLiveBroadcast: the confirmation must still be asked exactly once, was asked $script:asked time(s)")
+            } else {
+              Write-Host "PASS: -IgnoreLiveBroadcast skips the on-air check and still asks for confirmation"
+            }
+          } catch {
+            $failures.Add("IgnoreLiveBroadcast: expected no throw, got: $($_.Exception.Message)")
+          }
+
           if ($failures.Count -gt 0) {
             Write-Host ''
             Write-Host 'FAILURES:'
@@ -1302,6 +1340,196 @@ jobs:
           }
           Write-Host ''
           Write-Host 'uninstall.ps1 Force/live-check/confirmation logic: all scenarios passed'
+
+      # -RemoveData IS A RECURSIVE FORCE DELETE OF AN OPERATOR-SUPPLIED PATH,
+      # and until #552 it had no guard of any kind: `-RemoveData -DataDir
+      # C:\ProgramData` -- a typo, a tab-completed parent, or simply the
+      # non-default path the install was given -- printed a warning and then
+      # deleted it. The Linux uninstaller has had all of these for releases.
+      #
+      # Extracted from the AST like everything else in this block, so a rename
+      # fails here rather than on an operator's host. The last case is the one
+      # that matters: the first three prove the path is safe to TYPE, only the
+      # content check proves it is OURS, and DataDir is baked in at install time
+      # and never re-read.
+      - name: "uninstall.ps1: -RemoveData path guard (#552)"
+        if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'deploy/windows/uninstall.ps1'
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
+          $funcAst = $ast.Find({
+            param($n)
+            $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Assert-RemovableDataDir'
+          }, $true)
+          if (-not $funcAst) {
+            Write-Host "FAIL: Assert-RemovableDataDir not found in $path -- -RemoveData would be an unguarded recursive delete again"
+            exit 1
+          }
+          Invoke-Expression $funcAst.Extent.Text
+          $failures = [System.Collections.Generic.List[string]]::new()
+
+          $work = Join-Path $env:RUNNER_TEMP ("rmdata-" + [guid]::NewGuid())
+          $ours = Join-Path $work 'polyemesis'
+          New-Item -ItemType Directory -Force -Path $ours | Out-Null
+          Set-Content -LiteralPath (Join-Path $ours 'polyemesis.db') -Value 'x'
+
+          # Every one of these must be refused. $work itself is the "not ours"
+          # case: a real directory, safely nested, holding neither marker.
+          $mustRefuse = @{
+            'an empty path'          = ''
+            'a drive root'           = 'C:\'
+            'a top-level directory'  = 'C:\ProgramData'
+            'a directory that is not ours' = $work
+          }
+          foreach ($case in $mustRefuse.GetEnumerator()) {
+            try {
+              Assert-RemovableDataDir $case.Value
+              $failures.Add("$($case.Key) ('$($case.Value)') was ACCEPTED for a recursive force delete")
+            } catch {
+              Write-Host "PASS: refused $($case.Key)"
+            }
+          }
+
+          # And a guard that refuses everything is not a guard.
+          try {
+            Assert-RemovableDataDir $ours
+            Write-Host "PASS: a real data directory is still accepted"
+          } catch {
+            $failures.Add("a legitimate data directory was refused: $($_.Exception.Message)")
+          }
+          # Either marker is enough -- a key file with no database is still ours.
+          Remove-Item -LiteralPath (Join-Path $ours 'polyemesis.db')
+          Set-Content -LiteralPath (Join-Path $ours 'secret.key') -Value 'x'
+          try {
+            Assert-RemovableDataDir $ours
+            Write-Host "PASS: secret.key alone identifies it as ours"
+          } catch {
+            $failures.Add("a data directory holding only secret.key was refused: $($_.Exception.Message)")
+          }
+          Remove-Item -Recurse -Force $work
+
+          # And the guard has to be CALLED. A function nothing invokes passes
+          # every case above.
+          $src = Get-Content -Raw -LiteralPath $path
+          if ($src -notmatch 'Assert-RemovableDataDir \$DataDir') {
+            $failures.Add('Assert-RemovableDataDir is defined but never called before Remove-Item on $DataDir')
+          }
+
+          if ($failures.Count -gt 0) {
+            Write-Host ''
+            Write-Host 'FAILURES:'
+            $failures | ForEach-Object { Write-Host "  - $_" }
+            exit 1
+          }
+          Write-Host ''
+          Write-Host 'uninstall.ps1 -RemoveData guard: all cases passed'
+
+      # install.ps1 HAD NEVER BEEN PARSED BY ANYTHING. uninstall.ps1 got the
+      # three steps above in #509; the script that registers a service running
+      # as LocalSystem got none, and a syntax error in it would have shipped.
+      - name: Parse deploy/windows/install.ps1
+        if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'deploy/windows/install.ps1'
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$parseErrors)
+          if ($parseErrors) {
+            $parseErrors | ForEach-Object { Write-Host "PARSE ERROR: $_" }
+            exit 1
+          }
+          Write-Host "install.ps1 parses cleanly"
+
+      # THE BINARY IS ABOUT TO BE REGISTERED AS A SERVICE RUNNING AS LocalSystem
+      # (#583). The Windows path took an already-downloaded .exe and never
+      # hashed it, while SHA256SUMS was published as a release asset that
+      # nothing here consulted -- and it had neither half of install.sh's
+      # policy: refuse on mismatch, refuse on absence unless told otherwise.
+      - name: "install.ps1: checksum policy (#583)"
+        if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'deploy/windows/install.ps1'
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
+          $funcAst = $ast.Find({
+            param($n)
+            $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Resolve-ExpectedHash'
+          }, $true)
+          if (-not $funcAst) {
+            Write-Host "FAIL: Resolve-ExpectedHash not found in $path -- the install path would accept an unverified binary again"
+            exit 1
+          }
+          Invoke-Expression $funcAst.Extent.Text
+          $failures = [System.Collections.Generic.List[string]]::new()
+
+          $work = Join-Path $env:RUNNER_TEMP ("sha-" + [guid]::NewGuid())
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          $exe = Join-Path $work 'polyemesis.exe'
+          Set-Content -LiteralPath $exe -Value 'not a real binary' -NoNewline
+          $real = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToUpperInvariant()
+          $sums = Join-Path $work 'SHA256SUMS'
+          Set-Content -LiteralPath $sums -Value "$real  polyemesis.exe"
+
+          # THE DEFAULT REFUSES. This is the case an operator hits by following
+          # the README without reading it, and it is the one that used to
+          # install an unhashed binary.
+          try {
+            Resolve-ExpectedHash -Exe $exe -Expected '' -SumsPath '' -Unverified $false
+            $failures.Add('no checksum and no -AllowUnverified was ACCEPTED')
+          } catch {
+            Write-Host "PASS: with no checksum, installing is refused by default"
+          }
+
+          # -AllowUnverified is the only way past, and it is a flag you type.
+          try {
+            $r = Resolve-ExpectedHash -Exe $exe -Expected '' -SumsPath '' -Unverified $true
+            if ($null -ne $r) { $failures.Add("-AllowUnverified should yield no expected hash, got '$r'") }
+            else { Write-Host "PASS: -AllowUnverified installs without a hash, and warns" }
+          } catch {
+            $failures.Add("-AllowUnverified was refused: $($_.Exception.Message)")
+          }
+
+          # A SUMS file is looked up by file name.
+          try {
+            $r = Resolve-ExpectedHash -Exe $exe -Expected '' -SumsPath $sums -Unverified $false
+            if ($r -ne $real) { $failures.Add("SHA256SUMS lookup returned '$r', expected '$real'") }
+            else { Write-Host "PASS: the SHA256SUMS entry for this file is found" }
+          } catch {
+            $failures.Add("SHA256SUMS lookup threw: $($_.Exception.Message)")
+          }
+
+          # A SUMS file WITHOUT an entry for this file refuses even under
+          # -AllowUnverified: the operator supplied a checksum source and it did
+          # not vouch for this binary, which is a different thing from having
+          # none.
+          try {
+            Resolve-ExpectedHash -Exe (Join-Path $work 'absent.exe') -Expected '' -SumsPath $sums -Unverified $true
+            $failures.Add('a SHA256SUMS with no entry for the binary was ACCEPTED')
+          } catch {
+            Write-Host "PASS: a SHA256SUMS with no entry for this binary is refused"
+          }
+
+          # And the check has to run before the copy.
+          $src = Get-Content -Raw -LiteralPath $path
+          if ($src -notmatch 'Resolve-ExpectedHash') {
+            $failures.Add('Resolve-ExpectedHash is defined but never called')
+          }
+          $hashAt = $src.IndexOf('Get-FileHash')
+          $copyAt = $src.IndexOf('Copy-Item')
+          if ($hashAt -lt 0 -or $copyAt -lt 0 -or $hashAt -gt $copyAt) {
+            $failures.Add('the hash is not computed before the binary is copied into Program Files')
+          }
+          Remove-Item -Recurse -Force $work
+
+          if ($failures.Count -gt 0) {
+            Write-Host ''
+            Write-Host 'FAILURES:'
+            $failures | ForEach-Object { Write-Host "  - $_" }
+            exit 1
+          }
+          Write-Host ''
+          Write-Host 'install.ps1 checksum policy: all cases passed'
 
   ui:
     name: ui typecheck, lint, build

@@ -14,11 +14,23 @@
 
         .\uninstall.ps1
 
+.PARAMETER Force
+    Skip both the on-air check and the typed confirmation. If you only mean to
+    override the on-air check, use -IgnoreLiveBroadcast instead: it still makes
+    you type the service name.
+
+.PARAMETER IgnoreLiveBroadcast
+    Uninstall even though a broadcast is publishing. Ends it. The typed
+    confirmation is still asked for.
+
 .PARAMETER RemoveData
     Also delete the data directory. Destructive.
 
 .PARAMETER DataDir
-    Only consulted when -RemoveData is given.
+    Only consulted when -RemoveData is given. It is refused unless it is below a
+    drive's top level and actually holds a polyemesis.db or a secret.key — the
+    path is baked in at install time, so a data directory moved since then
+    leaves this pointed somewhere that is no longer ours.
 
 .PARAMETER InstallDir
     Directory the binary was installed into.
@@ -31,6 +43,7 @@
 [CmdletBinding()]
 param(
     [switch]$Force,
+    [switch]$IgnoreLiveBroadcast,
     [switch]$RemoveData,
     [string]$DataDir = (Join-Path $env:ProgramData 'polyemesis'),
     [string]$InstallDir = (Join-Path $env:ProgramFiles 'polyemesis'),
@@ -51,6 +64,45 @@ function Assert-Administrator {
 }
 
 Assert-Administrator
+
+# -RemoveData IS A RECURSIVE FORCE DELETE OF AN OPERATOR-SUPPLIED PATH. Before
+# this it had no guard of any kind: `.\uninstall.ps1 -RemoveData -DataDir
+# C:\ProgramData` -- a typo, a tab-completed parent, or simply matching whatever
+# non-default -DataDir the install was given -- printed a warning and then
+# deleted it. The Linux uninstaller has had all of these for releases
+# (scripts/install.sh, the --remove-data block), and this is the Windows half.
+#
+# FOUR CHECKS, and the last is the one that matters. The first three prove the
+# path is safe to TYPE; only the content check proves it is OURS. The path is
+# baked in at install time and never re-read, so a data directory moved since
+# then leaves this script pointed at a stale one that passes every structural
+# test.
+function Assert-RemovableDataDir {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw 'Refusing to delete an empty data directory path.'
+    }
+
+    $full = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $root = [System.IO.Path]::GetPathRoot($full).TrimEnd('\')
+
+    if ($full -eq $root) {
+        throw "Refusing to delete '$Path': that is the root of a drive."
+    }
+    # One level below a drive root -- C:\Users, C:\Windows, C:\ProgramData. The
+    # default DataDir is two levels down (C:\ProgramData\polyemesis), so nothing
+    # legitimate is refused here.
+    if ([System.IO.Path]::GetDirectoryName($full).TrimEnd('\') -eq $root) {
+        throw "Refusing to delete '$Path': that is a top-level directory on $root. The data directory lives below one, e.g. $root\ProgramData\polyemesis."
+    }
+    # AND IS IT OURS? Nothing above would notice C:\ProgramData\SomeoneElse.
+    $marks = @('polyemesis.db', 'secret.key')
+    $found = $marks | Where-Object { Test-Path -LiteralPath (Join-Path $Path $_) }
+    if (-not $found) {
+        throw "Refusing to delete '$Path': it holds neither polyemesis.db nor secret.key, so it is not this install's data directory. Pass the right -DataDir, or delete it yourself if you are sure."
+    }
+}
 
 # IS ANYTHING ON AIR? Stopping the service ends every live broadcast this host
 # is carrying, and a completed broadcast cannot be returned to. The Linux
@@ -85,13 +137,22 @@ function Get-PublishingFfmpeg {
 }
 
 if (-not $Force) {
-    $live = Get-PublishingFfmpeg
-    if (-not $live.Checked) {
-        throw 'Cannot determine whether a broadcast is live. Re-run with -Force if you mean to stop the service anyway.'
-    }
-    if ($live.Procs.Count -gt 0) {
-        foreach ($p in $live.Procs) { Write-Host ("    pid {0}: {1}" -f $p.ProcessId, ($p.CommandLine -replace '^.*?((rtmp|srt)://\S{0,40}).*$','$1')) }
-        throw "REFUSING: $ServiceName is publishing right now (listed above). Uninstalling stops it, and a live broadcast that ends cannot be resumed. Stop the destinations first, or pass -Force if you mean to end them."
+    # TWO BYPASSES, TWO SWITCHES. -Force still skips everything, which is what
+    # the docs and the Linux uninstaller's --force both mean. But ending a live
+    # broadcast and skipping a confirmation prompt are different decisions, and
+    # when the only way to say "yes, I know it is on air" was also the way to say
+    # "and do not ask me anything", operators learned to type the wider one.
+    # -IgnoreLiveBroadcast is the narrow keystroke: it skips the on-air check
+    # and still makes you type the service name.
+    if (-not $IgnoreLiveBroadcast) {
+        $live = Get-PublishingFfmpeg
+        if (-not $live.Checked) {
+            throw 'Cannot determine whether a broadcast is live. Re-run with -Force if you mean to stop the service anyway.'
+        }
+        if ($live.Procs.Count -gt 0) {
+            foreach ($p in $live.Procs) { Write-Host ("    pid {0}: {1}" -f $p.ProcessId, ($p.CommandLine -replace '^.*?((rtmp|srt)://\S{0,40}).*$','$1')) }
+            throw "REFUSING: $ServiceName is publishing right now (listed above). Uninstalling stops it, and a live broadcast that ends cannot be resumed. Stop the destinations first, or pass -IgnoreLiveBroadcast (or -Force) if you mean to end them."
+        }
     }
 
     $target = if ($RemoveData) { "$InstallDir and $DataDir" } else { $InstallDir }
@@ -154,6 +215,7 @@ if (Test-Path -LiteralPath $InstallDir) {
 
 if ($RemoveData) {
     if (Test-Path -LiteralPath $DataDir) {
+        Assert-RemovableDataDir $DataDir
         Write-Warning "Deleting $DataDir — database, recordings, secrets and TLS material."
         Remove-Item -LiteralPath $DataDir -Recurse -Force
         Write-Host "  $DataDir removed"
