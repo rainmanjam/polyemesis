@@ -962,10 +962,59 @@ func (m *Manager) Engine(id int64) *Engine {
 //
 // Concatenating per-engine results keeps both properties: every destination
 // appears, and each is still described by its own programme.
+//
+// AND THEN THE ROWS NO ENGINE SPEAKS FOR (#540). Sync logs and carries on when
+// engine.New or Engine.Start fails for one source, so that source's rows stay
+// in the database with nothing to report them: the concatenation above walks
+// REGISTERED engines only, and those destinations vanished from the dashboard,
+// from the WebSocket push and from the scrape while GET /destinations -- which
+// is store-backed -- went on listing them. Two screens disagreeing, and the
+// disappearance looks exactly like a destination nobody configured.
+//
+// That is a surface #515 opened rather than an old defect: before the scoping
+// fix, the default engine's unscoped ListDestinations carried every row on the
+// machine, so an engineless source's destinations WERE shown -- described with
+// another programme's track layout, but shown. Removing the leak removed the
+// only thing reporting them.
+//
+// They come back with the reason attached rather than as a silent zero, which
+// is the difference between "this destination is down" and "this destination is
+// not being looked at".
 func (m *Manager) DestinationStatuses() []DestStatus {
 	out := []DestStatus{}
+	seen := map[int64]bool{}
 	for _, e := range m.Engines() {
-		out = append(out, e.Status().Destinations...)
+		for _, ds := range e.Status().Destinations {
+			seen[ds.ID] = true
+			out = append(out, ds)
+		}
+	}
+
+	rows, err := m.store.ListDestinations()
+	if err != nil {
+		// The engines' answer is still worth returning. Losing it as well
+		// because the sweep for orphans could not read the table would turn a
+		// partial list into an empty one.
+		m.log.Warn("cannot list destinations to check for programmes with no engine", "err", err)
+		return out
+	}
+	for _, row := range rows {
+		if seen[row.ID] {
+			continue
+		}
+		out = append(out, DestStatus{
+			ID: row.ID, Name: row.Name, Kind: row.Kind,
+			Platform: row.Platform, Enabled: row.Enabled,
+			RenditionID: row.RenditionID,
+			SourceID:    row.SourceID,
+			// Error, not Warnings: nothing about this destination is running or
+			// can be made to run, and the card's amber triangle would read as
+			// "delivering with a caveat". The sentence names the cause, because
+			// the operator's own view of it -- GET /sources reporting
+			// Running:false -- is on a different page.
+			Error: "this destination's programme has no running engine, so nothing is " +
+				"publishing it and its routing has not been compiled. See the Sources page.",
+		})
 	}
 	return out
 }

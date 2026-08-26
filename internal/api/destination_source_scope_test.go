@@ -177,6 +177,106 @@ func TestACreateThatNamesNoSourceIsRefused(t *testing.T) {
 	})
 }
 
+// THE "WOULD CARRY NO AUDIO" REFUSAL IS COMPILED AGAINST THE DESTINATION'S OWN
+// PROGRAMME (#527).
+//
+// refuseIfSilent is the guard whose own error text calls streaming silence "the
+// one failure this product exists to prevent". It took a routing.Profile and
+// nothing else, so it compiled that profile against s.engOrNil().Source() --
+// the DEFAULT engine's measured layout -- while its three sibling destination
+// routes all resolve sourceForDestination(row.SourceID). The caller had the
+// owner in hand: handleCreateDestination proves row.SourceID is present with
+// requireNamedSource on the line above, and then threw it away.
+//
+// Both directions are silent. This test drives the FALSE ACCEPT, because that
+// is the one that reaches air: a profile that is fine against Main compiles to
+// audio, the guard passes, the row is stored, and the destination goes live
+// carrying nothing.
+//
+// THE DISCRIMINATOR IS TRACK ROLES, and it is not contrived -- it is the
+// mechanism #527 names. Annotations are stored per SOURCE (that is the whole of
+// #497's headline), routing.Compile resolves ExcludeRoles against the
+// annotations on the layout it is handed, and two programmes therefore give
+// different answers for the same profile. Ask the wrong programme and the
+// exclusion finds nothing to exclude.
+//
+// MEASURED WITH THE FALLBACK RESTORED: with `src := s.engOrNil().Source()` the
+// create below answers 201 and the destination is stored. That is the bug --
+// not an error anybody sees, a green response to a destination that will
+// publish silence.
+func TestASilentDestinationIsRefusedAgainstItsOwnProgrammesTracks(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	first := s.eng()
+	if first == nil {
+		t.Fatal("no default engine in the fixture, so there is no wrong programme to be " +
+			"asked and this test would pass having observed nothing")
+	}
+	second := secondProgramme(t, s)
+
+	// Studio B's track 0 is the music bus. Main's track 0 is annotated by
+	// nobody, which is what makes the two programmes answer differently.
+	send(t, h, sign, http.MethodPut,
+		"/api/v1/source/annotations?source="+itoa(second.ID),
+		map[string]any{"annotations": []map[string]any{
+			{"track": 0, "label": "music bus", "role": "music"},
+		}}, http.StatusOK)
+
+	// A destination on Studio B that selects track 0 and excludes the music
+	// role. Against Studio B's layout that leaves nothing: ErrNoAudio, and the
+	// operator has to be told before it is stored. Against MAIN's layout --
+	// where track 0 carries no role at all -- the exclusion drops nothing and
+	// the profile compiles to audio.
+	body := map[string]any{
+		"name": "studio b silence", "kind": "rtmp", "platform": "custom",
+		"url": "rtmp://example.invalid/live", "streamKey": "k",
+		"sourceId": second.ID,
+		"profile": map[string]any{
+			"mode": "simple", "normalize": "auto", "sampleRate": 48000,
+			"excludeRoles": []string{"music"},
+			"tracks": []map[string]any{
+				{"track": 0, "enabled": true, "gain": 1.0},
+			},
+		},
+	}
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/destinations", body)
+	sign(r)
+	w := do(t, h, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400. This destination carries nothing but a track "+
+			"Studio B's own role policy excludes, and it was accepted because the guard "+
+			"compiled it against programme %d's tracks instead. Measured with the "+
+			"fallback restored this is 201 and the row is stored: body %s",
+			w.Code, first.SourceID(), w.Body.String())
+	}
+	if b := w.Body.String(); !strings.Contains(b, "no audio") {
+		t.Errorf("the refusal does not name the cause, so it is a 400 for some other "+
+			"reason and this test is not observing the guard: %s", b)
+	}
+
+	// AND THE POSITIVE CONTROL, which is the false-refuse direction and is the
+	// reason this cannot be fixed by refusing everything. The SAME profile on
+	// the programme whose tracks carry no music role must be accepted: an
+	// operator refused here has nothing they can change, and the message would
+	// name a stream their destination does not read.
+	onMain := map[string]any{}
+	for k, v := range body {
+		onMain[k] = v
+	}
+	onMain["name"] = "main is fine"
+	onMain["sourceId"] = first.SourceID()
+
+	r2 := jsonRequest(t, http.MethodPost, "/api/v1/destinations", onMain)
+	sign(r2)
+	if w2 := do(t, h, r2); w2.Code != http.StatusCreated {
+		t.Errorf("status = %d, want 201: the identical profile on a programme whose "+
+			"tracks carry no music role selects real audio, and refusing it is the "+
+			"other half of the same defect -- a destination the operator cannot "+
+			"create and cannot fix (body %s)", w2.Code, w2.Body.String())
+	}
+}
+
 // THE STATUS PAYLOAD SAYS WHICH PROGRAMME EACH DESTINATION CARRIES.
 //
 // The dashboard draws every destination on the install in one grid, from this

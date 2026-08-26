@@ -18,6 +18,16 @@ type Recording struct {
 	// keeps every ingest track, so this is how the user confirms the archive
 	// really is the full multitrack master.
 	Tracks int `json:"tracks"`
+	// SourceID is the programme this segment was recorded from. The column has
+	// been on the table since sources existed; the model did not read it, so
+	// every consumer had to guess -- and clipTracks guessed the DEFAULT
+	// programme, labelling another programme's clip with Main's track names.
+	//
+	// A pointer, and nullable in the schema, because a row written before
+	// sources existed has no answer and inventing one is the bug this exists to
+	// end. ON DELETE SET NULL means a deleted programme leaves its recordings
+	// on disk and readable, which is the right trade for an archive.
+	SourceID *int64 `json:"sourceId,omitempty"`
 }
 
 // UpsertRecording indexes a segment file, keyed on filename so the filesystem
@@ -47,7 +57,7 @@ func (d *DB) UpsertRecording(r *Recording) error {
 
 // ListRecordings returns segments newest first.
 func (d *DB) ListRecordings() ([]Recording, error) {
-	rows, err := d.sql.Query(`SELECT id, filename, started_at, finished_at, bytes, duration_ms, tracks
+	rows, err := d.sql.Query(`SELECT id, filename, started_at, finished_at, bytes, duration_ms, tracks, source_id
 		FROM recordings ORDER BY started_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
@@ -60,7 +70,7 @@ func (d *DB) ListRecordings() ([]Recording, error) {
 			r                 Recording
 			started, finished int64
 		)
-		if err := rows.Scan(&r.ID, &r.Filename, &started, &finished, &r.Bytes, &r.DurationMS, &r.Tracks); err != nil {
+		if err := rows.Scan(&r.ID, &r.Filename, &started, &finished, &r.Bytes, &r.DurationMS, &r.Tracks, &r.SourceID); err != nil {
 			return nil, err
 		}
 		r.StartedAt = time.Unix(started, 0)
@@ -78,9 +88,9 @@ func (d *DB) GetRecording(id int64) (*Recording, error) {
 		r                 Recording
 		started, finished int64
 	)
-	err := d.sql.QueryRow(`SELECT id, filename, started_at, finished_at, bytes, duration_ms, tracks
+	err := d.sql.QueryRow(`SELECT id, filename, started_at, finished_at, bytes, duration_ms, tracks, source_id
 		FROM recordings WHERE id = ?`, id).
-		Scan(&r.ID, &r.Filename, &started, &finished, &r.Bytes, &r.DurationMS, &r.Tracks)
+		Scan(&r.ID, &r.Filename, &started, &finished, &r.Bytes, &r.DurationMS, &r.Tracks, &r.SourceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

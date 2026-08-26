@@ -329,6 +329,21 @@ type PlayoutVariant struct {
 // it is enabled and copies video from the rendition tier.
 type PlayoutSettings struct {
 	Enabled bool `json:"enabled"`
+	// SourceID is WHICH PROGRAMME the public page serves.
+	//
+	// These settings are a singleton -- one intent for the box -- while every
+	// engine runs its own playout manager. That asymmetry meant the public
+	// route served whichever engine happened to be first, so on a two-programme
+	// install the page shared with an audience showed programme 1 whatever the
+	// operator was broadcasting. A viewer has no session and a public URL has
+	// nowhere to carry a ?source=, so the answer cannot come from the request:
+	// it has to be a stated choice, and this is where it is stated.
+	//
+	// Nil means the default programme, which is what every single-source
+	// install is and what the behaviour has always been. Nothing changes for
+	// them; what changes is that on the installs where it was a coin toss it is
+	// now an answer somebody gave.
+	SourceID *int64 `json:"sourceId,omitempty"`
 	// Public serves the playlists and segments without a session cookie. Off by
 	// default: turning a box into a public origin is a decision, not a default.
 	Public bool `json:"public"`
