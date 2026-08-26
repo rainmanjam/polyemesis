@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "@/lib/api";
+import { mergeStatusDestinations } from "@/lib/dashboardFacts";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
 import type {
   BitrateSample,
@@ -80,7 +81,20 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         }
         switch (msg.type) {
           case "status":
-            setStatus(msg.data as Status);
+            // FOLDED, not replaced. The socket is install-wide and every engine
+            // publishes onto it, so a plain replace made the destination list --
+            // which is the whole install on one page -- flip to whichever
+            // programme spoke last. See mergeStatusDestinations.
+            setStatus((prev) => {
+              const incoming = msg.data as Status;
+              return {
+                ...incoming,
+                destinations: mergeStatusDestinations(
+                  prev,
+                  incoming,
+                ) as Status["destinations"],
+              };
+            });
             break;
           case "source":
             setSource(msg.data as SourceInfo);

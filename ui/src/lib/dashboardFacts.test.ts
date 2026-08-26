@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { audioTrackCount, ingestAttribution, processAbsence } from "./dashboardFacts";
+import { audioTrackCount, ingestAttribution, ingestBitrateKbps, mergeStatusDestinations, processAbsence } from "./dashboardFacts";
 import type { SourceInfo } from "./types";
 
 /* The three claims the dashboard used to make without evidence.
@@ -110,3 +110,89 @@ describe("Dashboard, wired to these decisions", () => {
     expect(dashboard()).toContain("<DestinationHoldNote hold={status?.destinationHold} />");
   });
 });
+
+describe("ingestBitrateKbps", () => {
+  it("prefers the ingest process where there is one", () => {
+    expect(ingestBitrateKbps("running", 4200, [{ kbps: 11 }], true)).toBe(4200);
+  });
+
+  it("falls back to the relay series for SRT, which has no ingest process", () => {
+    // The regression this exists for: reconcileIngest returns early for SRT, so
+    // ingest is null on a HEALTHY install and the card read "—" forever.
+    expect(ingestBitrateKbps(undefined, undefined, [{ kbps: 3 }, { kbps: 5200 }], true)).toBe(5200);
+  });
+
+  it("says nothing rather than zero when no bytes are arriving", () => {
+    // A printed 0 claims a running, empty stream. "—" claims nothing.
+    expect(ingestBitrateKbps(undefined, undefined, [{ kbps: 0 }], false)).toBeNull();
+    expect(ingestBitrateKbps(undefined, undefined, [], true)).toBeNull();
+  });
+
+  it("does not invent a number from a stale series once the stream has stopped", () => {
+    expect(ingestBitrateKbps(undefined, undefined, [{ kbps: 9000 }], false)).toBeNull();
+  });
+});
+
+describe("mergeStatusDestinations", () => {
+  const snap = (id: number, dests: { id: number; sourceId: number }[]) => ({
+    source: { id },
+    destinations: dests,
+  });
+
+  it("keeps other programmes' destinations when one programme reports", () => {
+    // The regression: three engines publish onto one socket in turn, and
+    // last-writer-wins rendered 9, then 2, then 2 every two seconds.
+    const a = snap(1, [{ id: 10, sourceId: 1 }, { id: 11, sourceId: 1 }]);
+    const withA = { ...a, destinations: mergeStatusDestinations(null, a) };
+    const b = snap(2, [{ id: 20, sourceId: 2 }]);
+    const merged = mergeStatusDestinations(withA, b);
+    expect(merged.map((d) => d.id).sort()).toEqual([10, 11, 20]);
+  });
+
+  it("replaces a programme's own list rather than appending to it", () => {
+    const a = snap(1, [{ id: 10, sourceId: 1 }, { id: 11, sourceId: 1 }]);
+    const withA = { ...a, destinations: mergeStatusDestinations(null, a) };
+    const again = snap(1, [{ id: 10, sourceId: 1 }]);
+    expect(mergeStatusDestinations(withA, again).map((d) => d.id)).toEqual([10]);
+  });
+
+  it("clears a programme that now reports none", () => {
+    // The reason the fold keys on source.id and not on the rows: an engine with
+    // no destinations sends an empty list, and there would be nothing in it to
+    // say whose stale rows to drop.
+    const a = snap(1, [{ id: 10, sourceId: 1 }]);
+    const withA = { ...a, destinations: mergeStatusDestinations(null, a) };
+    expect(mergeStatusDestinations(withA, snap(1, []))).toEqual([]);
+  });
+
+  it("falls back to the snapshot when it does not say whose it is", () => {
+    const prev = { source: { id: 1 }, destinations: [{ id: 10, sourceId: 1 }] };
+    const anon = { destinations: [{ id: 99, sourceId: 3 }] };
+    expect(mergeStatusDestinations(prev, anon).map((d) => d.id)).toEqual([99]);
+  });
+});
+
+describe("mergeStatusDestinations across the two snapshot shapes", () => {
+  it("does not duplicate when a snapshot carries more programmes than it names", () => {
+    // statusPayload sends the whole install labelled with ONE source.id, while
+    // publishStatus sends one programme with the same label shape. Folding on
+    // the label alone kept the other programmes' rows and re-added them: 13
+    // destinations rendered as 17, which is how this was found.
+    const scoped = {
+      source: { id: 1 },
+      destinations: [{ id: 1, sourceId: 1 }],
+    };
+    const withScoped = { ...scoped, destinations: mergeStatusDestinations(null, scoped) };
+    const other = { source: { id: 2 }, destinations: [{ id: 2, sourceId: 2 }] };
+    const both = { ...other, destinations: mergeStatusDestinations(withScoped, other) };
+    expect(both.destinations).toHaveLength(2);
+
+    const installWide = {
+      source: { id: 1 },
+      destinations: [{ id: 1, sourceId: 1 }, { id: 2, sourceId: 2 }],
+    };
+    const merged = mergeStatusDestinations(both, installWide);
+    expect(merged).toHaveLength(2);
+    expect(merged.map((d) => d.id).sort()).toEqual([1, 2]);
+  });
+})
