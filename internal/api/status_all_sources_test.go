@@ -1,6 +1,8 @@
 package api
 
 import (
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -67,5 +69,71 @@ func TestStatusPayloadCarriesEveryProgrammesDestinations(t *testing.T) {
 	// database regardless of engine would pass, and so would an empty one.
 	if !seen[mine.ID] {
 		t.Fatal("the default programme's own destination is missing, so the assertion above proves nothing")
+	}
+}
+
+// And the Prometheus exposition must carry them too, which is the half of this
+// that actually hurts.
+//
+// A wrong dashboard is visible: the operator sees a programme with no
+// destinations under it and asks why. A scrape that quietly covers one source
+// looks like nothing at all. The series for every destination on every other
+// programme simply stops existing, and a series that does not exist is
+// indistinguishable from a destination nobody ever configured -- so an alerting
+// rule written to fire when a destination dies never evaluates, and the silence
+// reads as health.
+//
+// Asserted through the real exposition rather than through the snapshot struct,
+// because the snapshot is built from st.Destinations and a test of the builder
+// would pass while /metrics went on scraping one programme.
+//
+// Mutation: return s.eng().Status() from statusPayload and drop the
+// st.Destinations assignment in handleMetrics. Observed to fail with
+// "the exposition names 1 of 2 destinations".
+func TestTheScrapeCarriesEveryProgrammesDestinations(t *testing.T) {
+	s, h, _, auth := managerServer(t, defaultTools())
+
+	if _, err := s.store.CreateDestination(&db.Destination{
+		Name: "default-programme-dest", Kind: db.DestFile, URL: "a.mkv",
+		Enabled: false, AudioBitrate: 160,
+	}); err != nil {
+		t.Fatalf("CreateDestination(default): %v", err)
+	}
+
+	other := &db.Source{Name: "second programme", Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	if err := s.store.CreateSource(other); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	if err := s.mgr.Sync(); err != nil {
+		t.Fatalf("sync after creating a second source: %v", err)
+	}
+	if got := len(s.mgr.Engines()); got < 2 {
+		t.Fatalf("the manager runs %d engine(s); this test needs two or it asserts nothing", got)
+	}
+	if _, err := s.store.CreateDestination(&db.Destination{
+		Name: "second-programme-dest", Kind: db.DestFile, URL: "b.mkv",
+		Enabled: false, AudioBitrate: 160, SourceID: &other.ID,
+	}); err != nil {
+		t.Fatalf("CreateDestination(second): %v", err)
+	}
+
+	r := jsonRequest(t, http.MethodGet, "/api/v1/metrics", nil)
+	auth(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/metrics: %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+
+	found := 0
+	for _, name := range []string{"default-programme-dest", "second-programme-dest"} {
+		if strings.Contains(body, name) {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("the exposition names %d of 2 destinations. A destination whose "+
+			"series is absent cannot be alerted on, and reads as one nobody "+
+			"configured rather than as a gap in the scrape", found)
 	}
 }
