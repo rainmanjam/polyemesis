@@ -1039,7 +1039,11 @@ const (
 const (
 	destUpdateKeyCols = `stream_key=?, stream_key_enc=?,
 		backup_stream_key=?, backup_stream_key_enc=?, `
-	destUpdateCols = `name=?, kind=?, platform=?, account_id=?, url=?,
+	// The two halves are re-sealed independently, because an operator who
+	// retypes one is not saying anything about the other. See keepsSealedKey.
+	destUpdatePrimaryKeyCols = `stream_key=?, stream_key_enc=?, `
+	destUpdateBackupKeyCols  = `backup_stream_key=?, backup_stream_key_enc=?, `
+	destUpdateCols           = `name=?, kind=?, platform=?, account_id=?, url=?,
 		backup_url=?, backup_ingest_wanted=?,
 		enabled=?, audio_bitrate=?, profile=?, rendition_id=?, source_id=?,
 		extra_input_args=?, extra_output_args=?, expert_ack_reencode=?,
@@ -1051,6 +1055,9 @@ const (
 		updated_at=? WHERE id=?`
 	destUpdateQuery        = `UPDATE destinations SET ` + destUpdateKeyCols + destUpdateCols
 	destUpdateKeepKeyQuery = `UPDATE destinations SET ` + destUpdateCols
+	// Keep one sealed column and re-seal the other.
+	destUpdateKeepBackupQuery  = `UPDATE destinations SET ` + destUpdatePrimaryKeyCols + destUpdateCols
+	destUpdateKeepPrimaryQuery = `UPDATE destinations SET ` + destUpdateBackupKeyCols + destUpdateCols
 )
 
 // keepsSealedKey reports whether a write must leave the stored key columns
@@ -1076,8 +1083,29 @@ const (
 // destinations that are actually in that state -- a client cannot use it to
 // pin a key it does not know, because with no key in the body there is no
 // value for the write to have carried anyway.
+// PER HALF, because the halves fail independently and an operator who retypes
+// one has said nothing about the other.
+//
+// Requiring BOTH to be empty meant that supplying the primary key on a
+// destination that also had a backup took the re-sealing branch for both
+// columns -- and sealStreamKey("") returns nil bytes, so backup_stream_key_enc
+// became NULL. The ciphertext that putting the right secret.key back would have
+// recovered was destroyed by the act of recovering the other half, and nothing
+// was said. The read path condemns both together, which is right: neither can
+// be shown to be readable. The write path inherited that coupling, where it is
+// wrong.
+func keepsSealedPrimaryKey(dst *Destination) bool {
+	return dst.KeyUnreadable != "" && dst.StreamKey == ""
+}
+
+func keepsSealedBackupKey(dst *Destination) bool {
+	return dst.KeyUnreadable != "" && dst.BackupStreamKey == ""
+}
+
+// keepsSealedKey is both halves: the ordinary case, where a rename carried no
+// key at all.
 func keepsSealedKey(dst *Destination) bool {
-	return dst.KeyUnreadable != "" && dst.StreamKey == "" && dst.BackupStreamKey == ""
+	return keepsSealedPrimaryKey(dst) && keepsSealedBackupKey(dst)
 }
 
 // checkRendition rejects a rendition_id that names no rendition. The foreign
@@ -1309,10 +1337,28 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Multitrack, vodProfile,
 		time.Now().Unix(), dst.ID,
 	}
-	query := destUpdateQuery
-	if keepsSealedKey(dst) {
+	// Four cases, because the two halves are decided separately.
+	keepPrimary, keepBackup := keepsSealedPrimaryKey(dst), keepsSealedBackupKey(dst)
+	var query string
+	switch {
+	case keepPrimary && keepBackup:
 		query = destUpdateKeepKeyQuery
-	} else {
+	case keepPrimary:
+		query = destUpdateKeepPrimaryQuery
+		backupEnc, backupPlain, err := d.sealStreamKey(dst.BackupStreamKey)
+		if err != nil {
+			return nil, fmt.Errorf("seal backup stream key: %w", err)
+		}
+		args = append([]any{backupPlain, backupEnc}, args...)
+	case keepBackup:
+		query = destUpdateKeepBackupQuery
+		keyEnc, keyPlain, err := d.sealStreamKey(dst.StreamKey)
+		if err != nil {
+			return nil, fmt.Errorf("seal stream key: %w", err)
+		}
+		args = append([]any{keyPlain, keyEnc}, args...)
+	default:
+		query = destUpdateQuery
 		keyEnc, keyPlain, err := d.sealStreamKey(dst.StreamKey)
 		if err != nil {
 			return nil, fmt.Errorf("seal stream key: %w", err)

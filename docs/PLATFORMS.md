@@ -27,7 +27,7 @@ below. The table is what each platform's **published API** allows today.
 The same matrix is rendered in `Settings → Platform credentials` and served from
 `GET /api/v1/platforms/capabilities`.
 
-| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers  Start / end |
+| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end |
 |---|---|---|---|---|---|---|---|---|
 | **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works |
 | **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible |

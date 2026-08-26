@@ -53,6 +53,32 @@ func TestPlatformsDocMatrixMatchesTheCapabilityMatrix(t *testing.T) {
 		CapBroadcastLifecycle,
 	}
 
+	// THE HEADER ROW, which nothing checked until a column went missing from it.
+	//
+	// The row regexp below matches DATA rows, and the count check tells the
+	// capability table apart from the others -- so a header that had lost a `|`
+	// still parsed, and every data row still had the right number of cells. The
+	// document rendered with "Viewers" and "Start / end" fused into one heading
+	// and every column after it labelled with its neighbour's name, while this
+	// test stayed green.
+	//
+	// Comparing the header's CELL COUNT to cols is the whole fix: it is the one
+	// thing that ties what the reader sees at the top of the table to what this
+	// test compares underneath it.
+	hdrRe := regexp.MustCompile(`(?m)^\| *Platform *\|.+\| *$`)
+	hdr := hdrRe.FindString(string(raw))
+	if hdr == "" {
+		t.Fatal("no `| Platform | ...` header row in PLATFORMS.md; the capability " +
+			"table has moved or been renamed, and this test is comparing nothing")
+	}
+	hdrCells := strings.Split(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(hdr), "|"), "|"), "|")
+	if got, want := len(hdrCells)-1, len(cols); got != want {
+		t.Errorf("the capability table's header has %d capability columns, want %d.\n  %s\n\n"+
+			"A header that has lost a `|` still parses and every data row still has the "+
+			"right cell count, so the page renders with two headings fused and every "+
+			"column after them labelled with its neighbour's name.", got, want, strings.TrimSpace(hdr))
+	}
+
 	rowRe := regexp.MustCompile(`(?m)^\|\s*\*\*([^*]+)\*\*\s*\|(.+)\|\s*$`)
 	rows := map[string][]string{}
 	for _, m := range rowRe.FindAllStringSubmatch(string(raw), -1) {

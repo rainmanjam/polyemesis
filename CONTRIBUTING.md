@@ -39,7 +39,7 @@ make build          # builds the UI, embeds it, produces ./polyemesis
 ./polyemesis
 ```
 
-You need Go 1.26.5+, Node 20.19+ or 22.12+ (Vite 8's floor; CI builds on 24),
+You need Go 1.27.0+, Node 20.19+ or 22.12+ (Vite 8's floor; CI builds on 24),
 and FFmpeg 6.0+ — 8.x recommended. See [docs/INSTALL.md](docs/INSTALL.md) for
 platform detail and [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) for what is
 pinned and why.

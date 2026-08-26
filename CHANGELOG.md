@@ -11,6 +11,12 @@ its first tagged release.
 
 ## [0.7.0] — unreleased
 
+### Upgrading
+- **TLS now serves on :443 rather than :8080 when a certificate is configured.**
+  An install reached at `https://host:8080` moves, and a firewall that only
+  opens 8080 makes the console unreachable after the upgrade with nothing on
+  screen to say why. Open 443, or set the listen address back explicitly.
+
 ### Fixed
 - **The dashboard's grouped destination list and the Prometheus scrape lost
   every programme but one.** Scoping `Engine.Status` to its own source was
