@@ -8,6 +8,21 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+- **Trovo signs in.** OAuth 2.0 authorization code (no PKCE — Trovo documents
+  none), the **stream key** over `channel_details_self`, title and category
+  push over `channel_update_self`, and the live viewer count off the same
+  channel response the key comes from. Trovo publishes no broadcast object at
+  all, so start/end is *Not possible* there exactly as on Twitch and Kick.
+  Chat and moderation are documented and deliberately not built yet; their
+  scopes are not requested until they are.
+- **A platform may now supply the stream key without an ingest URL.** Trovo
+  issues its ingest hostname per region and publishes it nowhere in its API, so
+  the server URL is copied out of the creator dashboard once. `Refresh stream
+  key` keeps whatever URL the destination already had rather than blanking it,
+  and says which field to go and fetch when there is none — previously it
+  overwrote unconditionally, which for a platform like this turned a working
+  destination into "an RTMP URL is required".
 
 ## [0.7.0] — unreleased
 

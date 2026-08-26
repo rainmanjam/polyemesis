@@ -26,6 +26,14 @@
     "manualKeyReason": "This Kick account was connected before polyemesis asked for the stream-key scope, and granting a scope never upgrades a token that has already been issued. Disconnect the account and connect it again — once, and the key is fetched automatically from then on. Until then, paste the stream URL and key from your Kick dashboard under Settings → Stream."
   },
   {
+    "platform": "trovo",
+    "scopeVersion": 1,
+    "scopes": [
+      "channel_details_self",
+      "channel_update_self"
+    ]
+  },
+  {
     "platform": "twitch",
     "scopeVersion": 4,
     "scopes": [

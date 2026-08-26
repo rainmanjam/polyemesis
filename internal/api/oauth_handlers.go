@@ -410,7 +410,29 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		s.setFacebookBroadcast(acct.AccountRef, b.ID)
 	}
 
-	dest.URL = b.Ingest.URL
+	// A PLATFORM MAY SUPPLY THE KEY AND NOT THE URL, and overwriting here would
+	// destroy the half the operator supplied.
+	//
+	// This was an unconditional assignment, which was right while every
+	// provider returned both fields. Trovo returns only the key: it publishes
+	// the stream key on its channel resource and publishes the ingest hostname
+	// nowhere at all -- the host is regional and lives only in the creator
+	// dashboard, so the operator copies it across once. Blanking it on every
+	// key refresh would take a working destination and make it unsavable,
+	// reported as "an RTMP URL is required" from a button labelled Refresh
+	// stream key.
+	//
+	// Behaviour for every other platform is unchanged: they always answer with
+	// a URL, so the branch is never taken for them.
+	if b.Ingest.URL != "" {
+		dest.URL = b.Ingest.URL
+	} else if strings.TrimSpace(dest.URL) == "" {
+		writeError(w, http.StatusBadRequest,
+			string(acct.Platform)+" supplies the stream key but does not publish an ingest URL, and this "+
+				"destination has none yet. Copy the server URL from the platform's own dashboard into "+
+				"this destination first, then fetch the key — refreshing it afterwards leaves the URL alone.")
+		return
+	}
 	dest.StreamKey = b.Ingest.Key
 	dest.Kind = db.DestRTMP
 	// Recorded even when empty: a destination that used to have a backup

@@ -224,7 +224,13 @@ export interface SourceInfo {
 }
 
 export type DestKind = "rtmp" | "srt" | "file";
-export type Platform = "custom" | "youtube" | "twitch" | "kick" | "facebook";
+export type Platform =
+  | "custom"
+  | "youtube"
+  | "twitch"
+  | "kick"
+  | "facebook"
+  | "trovo";
 
 export interface Destination {
   id: DestinationId;
@@ -2043,10 +2049,17 @@ export interface WsEvent {
 // internal/chat exactly; nothing here re-derives a fact the server already
 // stated, because two answers to "is YouTube connected" is one answer too many.
 
-/** The platforms the chat pane can show. Identical to `Platform` now that
- *  Facebook has a destination platform of its own, and kept as a separate name
- *  because chat and destinations gain platforms at different times — the next
- *  chat-only platform widens this without touching the destination picker. */
+/** The platforms the chat pane can show. An alias of `Platform`, kept as a
+ *  separate name because chat and destinations gain platforms at different
+ *  times — the next chat-only platform widens this without touching the
+ *  destination picker.
+ *
+ *  IT IS NOW WIDER THAN THE SET OF PLATFORMS WITH A CHAT ADAPTER, and the
+ *  alias is what makes that possible: "trovo" is a destination platform whose
+ *  chat is documented (a websocket) and unbuilt, so it is nameable here and no
+ *  message will ever arrive carrying it. Read this as the union a message
+ *  COULD be tagged with, not as a list of what works — the capability matrix
+ *  in lib/capabilities.ts is the answer to that, per platform and per column. */
 export type ChatPlatform = Platform;
 
 /** A chat connection's condition, in the words the operator would use.

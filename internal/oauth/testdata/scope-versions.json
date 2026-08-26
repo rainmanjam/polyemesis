@@ -25,6 +25,14 @@
     ]
   },
   {
+    "platform": "trovo",
+    "scopeVersion": 1,
+    "scopes": [
+      "channel_details_self",
+      "channel_update_self"
+    ]
+  },
+  {
     "platform": "twitch",
     "scopeVersion": 4,
     "scopes": [

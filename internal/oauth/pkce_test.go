@@ -2,6 +2,8 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -168,6 +170,10 @@ func TestProvidersOnlyClaimPKCEWhereItIsDocumented(t *testing.T) {
 		db.PlatformFacebook: false,
 		// Kick speaks OAuth 2.1, which folds RFC 7636 into the grant itself.
 		db.PlatformKick: true,
+		// Trovo's reference documents two grants -- implicit, and authorization
+		// code with a client_secret -- and mentions RFC 7636 nowhere at all.
+		// Read 2026-08-26; see docs/evidence/vimeo-trovo-oauth-2026-08-26.md.
+		db.PlatformTrovo: false,
 	}
 	for platform, p := range Providers() {
 		w, ok := want[platform]
@@ -186,7 +192,16 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // captureTokenForm runs a token request against a stub transport and returns
-// the form the provider posted.
+// the parameters the provider posted, whatever encoding it used.
+//
+// A JSON BODY IS NOT AN EXOTIC CASE ANY MORE. Four providers post
+// application/x-www-form-urlencoded through postForm; Trovo's token endpoints
+// take application/json with the client id in a header, and url.ParseQuery
+// happily returns a single meaningless key for `{"code":"the-code"}` rather
+// than an error -- so the tests above would have read every Trovo parameter as
+// absent and reported "code = ""` while the provider was sending it correctly.
+// Both shapes are flattened into one url.Values so the assertions stay about
+// WHAT was sent rather than about how it was encoded.
 func captureTokenForm(t *testing.T, do func() (*Token, error)) url.Values {
 	t.Helper()
 
@@ -199,7 +214,16 @@ func captureTokenForm(t *testing.T, do func() (*Token, error)) url.Values {
 		if err != nil {
 			return nil, err
 		}
-		if got, err = url.ParseQuery(string(body)); err != nil {
+		if strings.HasPrefix(strings.TrimSpace(string(body)), "{") {
+			var fields map[string]any
+			if err := json.Unmarshal(body, &fields); err != nil {
+				return nil, err
+			}
+			got = url.Values{}
+			for k, v := range fields {
+				got.Set(k, fmt.Sprint(v))
+			}
+		} else if got, err = url.ParseQuery(string(body)); err != nil {
 			return nil, err
 		}
 		return &http.Response{

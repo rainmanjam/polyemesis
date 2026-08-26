@@ -1,4 +1,4 @@
-import { Gamepad2, MonitorPlay, Radio, ThumbsUp, Zap } from "lucide-react";
+import { Gamepad2, MonitorPlay, Radio, ThumbsUp, Tv, Zap } from "lucide-react";
 import type { SignalTone } from "@/lib/signal";
 import type { ChatMessage, ChatPlatform, ChatStatus } from "@/lib/types";
 
@@ -58,6 +58,24 @@ const ACCENT: Record<
     rule: "border-l-armed",
     text: "text-armed",
     chipOn: "border-armed/40 bg-armed-dim text-armed",
+  },
+  /* TROVO HAS NO CHAT ADAPTER, so nothing is ever rendered with this entry.
+     It exists because ChatPlatform is an alias of Platform, and adding Trovo
+     as a destination platform widened the Record — TypeScript then requires
+     the key whether or not a message can carry it.
+
+     Neutral rather than a sixth accent, per the note above: the kit has five
+     saturated tones and they are all spoken for. Whoever wires Trovo's
+     websocket chat should choose a real one here. The label is filled in
+     regardless, because a row reading "trovo" in lowercase beside five
+     capitalised siblings is the fallback firing where a label belongs — the
+     exact defect DestinationCard's PLATFORM_LABEL comment records. */
+  trovo: {
+    label: "Trovo",
+    icon: Tv,
+    rule: "border-l-border-strong",
+    text: "text-muted-foreground",
+    chipOn: "border-border-strong bg-secondary text-secondary-foreground",
   },
   custom: {
     label: "Custom",

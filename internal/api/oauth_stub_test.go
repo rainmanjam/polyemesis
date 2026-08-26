@@ -168,6 +168,24 @@ func (p *platformStub) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, "/public/v1/"):
 		writeStubJSON(w, map[string]any{"data": []any{}})
 
+	// --------------------------------------------------------------- Trovo
+	//
+	// A KEY AND NO INGEST URL, which is Trovo's real shape and the one this
+	// package has to handle: Trovo publishes the stream key on the channel
+	// resource and publishes the ingest hostname nowhere, so handleRefreshKey
+	// must keep whatever the operator pasted rather than blanking it. Types
+	// copied from Trovo's own §5.6 sample -- channel_id is a quoted string
+	// beside an unquoted current_viewers.
+	case r.URL.Path == "/openplatform/channel":
+		writeStubJSON(w, map[string]any{
+			"channel_id": "100000021", "username": "leafinsummer",
+			"is_live": false, "current_viewers": 0,
+			"live_title": "Tonight's broadcast", "language_code": "EN",
+			"stream_key": "live/sk-from-trovo",
+		})
+	case strings.HasPrefix(r.URL.Path, "/openplatform/"):
+		writeStubJSON(w, map[string]any{"empty": ""})
+
 	// ------------------------------------------------------------ Facebook
 	case r.URL.Path == "/search":
 		// The ad-interest lookup resolveTags makes, one word at a time. The id

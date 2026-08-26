@@ -153,6 +153,7 @@ func TestPresetPlatformsAreKnownIntegrations(t *testing.T) {
 		PlatformTwitch:   true,
 		PlatformKick:     true,
 		PlatformFacebook: true,
+		PlatformTrovo:    true,
 		PlatformCustom:   true,
 		"":               true,
 	}

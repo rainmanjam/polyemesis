@@ -255,10 +255,11 @@ const PRESETS: DestPreset[] = [
     group: "video",
     transport: "rtmp",
     kind: "rtmp",
+    platform: "trovo",
     url: "",
     separateKey: true,
     notes:
-      "Copy the server URL and stream key from the Trovo creator dashboard → Stream. Trovo's ingest hostname varies by region, so nothing is prefilled here.",
+      "Connect a Trovo account in Settings → Platform credentials and polyemesis fetches the stream key itself, over the channel_details_self scope. The server URL is yours to supply either way: Trovo's ingest hostname varies by region and appears nowhere in its API, so copy it once from the Trovo creator dashboard → Stream. Refreshing the key afterwards leaves that URL alone.",
   },
   {
     id: "dlive",
