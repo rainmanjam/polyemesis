@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
-import { audioTrackCount, ingestAttribution, processAbsence } from "@/lib/dashboardFacts";
+import { audioTrackCount, ingestAttribution, ingestBitrateKbps, processAbsence } from "@/lib/dashboardFacts";
 import { laneLayout } from "@/lib/sourceLanes";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, RadioTower, Square } from "lucide-react";
@@ -781,7 +781,7 @@ function BulkDestinationControl({
 export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
-  const { status } = useLiveData();
+  const { status, bitrate } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
   // The recorder's and the meters' own settings, kept rather than discarded.
@@ -1214,7 +1214,20 @@ export function Dashboard() {
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Stat
                   label={t("dash.bitrate")}
-                  value={ingest?.state === "running" ? kbps(ingest.progress?.bitrateKbps ?? 0) : "—"}
+                  value={(() => {
+                    // See ingestBitrateKbps: for SRT there is no ingest
+                    // process, so this asked the wrong source and printed "—"
+                    // on a healthy install. null still renders "—", but now it
+                    // means "nothing is arriving" rather than "nobody asked
+                    // the relay".
+                    const v = ingestBitrateKbps(
+                      ingest?.state,
+                      ingest?.progress?.bitrateKbps,
+                      bitrate,
+                      ingestLive,
+                    );
+                    return v === null ? "—" : kbps(v);
+                  })()}
                 />
                 <Stat
                   label={t("dash.uptime")}
