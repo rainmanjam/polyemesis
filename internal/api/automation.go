@@ -433,7 +433,10 @@ func (s *Server) handleDeleteSchedule(w http.ResponseWriter, r *http.Request) {
 // A schedule that skipped because the server was down is the single most
 // confusing thing this feature can do, so it has to be visible.
 func (s *Server) handleScheduleRuns(w http.ResponseWriter, r *http.Request) {
-	last := s.eng().Scheduler().Last()
+	// The INSTALL's scheduler, not the default engine's. There is one timetable
+	// (schedules has no source_id); reading it off s.eng() reported programme
+	// 1's runs on a multi-source install. See #526.
+	last := s.mgr.Scheduler().Last()
 	if last == nil {
 		last = []scheduler.Result{}
 	}
