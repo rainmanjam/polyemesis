@@ -18,6 +18,15 @@
 set -uo pipefail
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 INSTALL="$SCRIPTS/install.sh"
+# This suite shells out to nothing and so has never needed the preflight
+# helpers; it is sourced for poly_verdict_trap alone.
+. "$SCRIPTS/lib-preflight.sh"
+# poka-yoke: the run's own verdict, armed before the first check so no exit
+# path can skip it. Held as a trap rather than printed at the foot of the
+# script, because the foot is one exit path out of many -- and the `exit 1` at
+# the end of this file is another. See the verdict section of lib-preflight.sh
+# for the failure -- a red run reported as exit 0 -- that is why.
+trap 'poly_verdict_trap $?' EXIT
 
 pass=0; fail=0
 ok()  { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
@@ -121,7 +130,14 @@ grep -q '\[ "\$TLS_MODE" = acme \]  && ufw allow 80/tcp' "$INSTALL" \
 # install.sh stopped writing the check.
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT INT TERM
+# Split from the EXIT case, which now has to carry the verdict as well: bash
+# keeps ONE EXIT handler, so a line that installs only the rm silently disarms
+# the verdict armed at the top of this file and a truncated log goes back to
+# reading a failed run as a pass. INT and TERM keep the plain rm they had --
+# they never exited this script, and this is not the change that should make
+# them start.
+trap 'rm -rf "$work"' INT TERM
+trap 'poly_verdict_trap $? rm -rf "$work"' EXIT
 
 # install.sh ends in `main "$@"`, so sourcing it as-is would attempt an install
 # on whoever ran this suite. Replace that one line, and PROVE the replacement

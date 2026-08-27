@@ -28,6 +28,13 @@ ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
 . "$SCRIPTS/lib-preflight.sh"
 
+# poka-yoke: the run's own verdict, armed BEFORE the preflight checks so a
+# suite that refuses to run still says so on its last line. The shared teardown
+# trap below replaces this one and emits the verdict itself; between them there
+# is no exit path that can report a pass this run did not earn. See the verdict
+# section of lib-preflight.sh for the reported-as-exit-0 failure that is why.
+trap 'poly_verdict_trap $?' EXIT
+
 pass=0; fail=0
 ok()   { printf "  \033[32mPASS\033[0m  %s\n" "$1"; pass=$((pass+1)); }
 bad()  { printf "  \033[31mFAIL\033[0m  %s\n" "$1"; fail=$((fail+1)); }

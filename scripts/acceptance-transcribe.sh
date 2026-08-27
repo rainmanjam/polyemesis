@@ -103,6 +103,13 @@ DRIVER="$ROOT/scripts/acceptance_transcribe_driver.go"
 # ordinary-looking 0 passed / N failed -- see lib-preflight.sh for the
 # incident that found this.
 . "$SCRIPTS/lib-preflight.sh"
+
+# poka-yoke: the run's own verdict, armed BEFORE the preflight checks so a
+# suite that refuses to run still says so on its last line. Held as a trap
+# rather than printed at the foot of the script, because the foot is one exit
+# path out of many. See the verdict section of lib-preflight.sh for the
+# failure -- a red run reported as exit 0 -- that is why.
+trap 'poly_verdict_trap $?' EXIT
 poly_require_cmd go "needed to run the acceptance driver via 'go run'"
 poly_require_cmd ffmpeg "needed to build the fixture recordings"
 

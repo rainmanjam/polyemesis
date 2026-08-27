@@ -48,6 +48,13 @@ ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
 . "$SCRIPTS/lib-preflight.sh"
 
+# poka-yoke: the run's own verdict, armed BEFORE the preflight checks so a
+# suite that refuses to run still says so on its last line. The shared teardown
+# trap below replaces this one and emits the verdict itself; between them there
+# is no exit path that can report a pass this run did not earn. See the verdict
+# section of lib-preflight.sh for the reported-as-exit-0 failure that is why.
+trap 'poly_verdict_trap $?' EXIT
+
 # BUILD IT. This suite used to run whatever binary happened to be sitting in the
 # repo root, which meant a local run could pass against code from hours earlier
 # while CI -- which always builds -- failed on the same commit. That is not a
