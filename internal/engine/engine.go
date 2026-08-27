@@ -233,6 +233,15 @@ type Engine struct {
 	// to a fresh goroutine rather than calling it inline.
 	reconcileMu sync.Mutex
 
+	// reconciles counts completed Reconcile calls, for tests that need to prove
+	// the work was ATTEMPTED rather than skipped.
+	//
+	// A field rather than a package var, for the reason passwordCost gives
+	// above: a package-level seam is order-dependent under -count=N and cannot
+	// run in parallel with anything else. Atomic because Reconcile is called
+	// from several goroutines and a test reads it from another.
+	reconciles atomic.Int64
+
 	mu       sync.RWMutex
 	ingest   *supervisor.Process
 	recorder *supervisor.Process
@@ -1177,6 +1186,7 @@ func (e *Engine) SourceName() string {
 func (e *Engine) Reconcile() error {
 	e.reconcileMu.Lock()
 	defer e.reconcileMu.Unlock()
+	e.reconciles.Add(1)
 
 	settings, err := e.effectiveSettings()
 	if err != nil {
@@ -3007,10 +3017,38 @@ func (e *Engine) probeLoop(ctx context.Context) {
 				//
 				// Taken HERE, not inside reconcileOutputs: Reconcile already
 				// holds it when it calls that, and the mutex is not reentrant.
+				// AND THE CONSUMERS OF WHAT reconcileOutputs JUST STARTED.
+				//
+				// This used to run three of Reconcile's steps and stop, which is
+				// the hazard the paragraph above describes arriving from the
+				// other direction: a hand-copied subset of a sequence drifts the
+				// moment the sequence grows. It had already drifted. The
+				// analyser tier is reconciled ONLY by reconcileLoudness, this is
+				// the path that starts destinations on every fresh install --
+				// they are held until a probe lands -- and Reconcile is
+				// event-driven with no ticker, so nothing ran it again.
+				//
+				// The result was #612: an install reporting the loudness monitor
+				// enabled with no analyser ever having run. GET /loudness said
+				// so, the Meters page drew the switch on, and nothing measured.
+				// Only toggling the switch off and on recovered it, because that
+				// was one of the few things that reached a real Reconcile.
+				//
+				// Preview, clips and captions are here for the same reason and
+				// were wrong in the same way: each reads a hub that
+				// reconcileOutputs may have just replaced. Their own comment in
+				// Reconcile says they must run "after the outputs, because these
+				// read the hub that the silence and selector tiers decide" --
+				// and this path settles exactly that and then skipped them.
+				settings := e.Settings()
 				e.reconcileMu.Lock()
-				e.reconcileMeters(e.Settings())
-				e.reconcileRecorder(e.Settings())
+				e.reconcileMeters(settings)
+				e.reconcileRecorder(settings)
 				_ = e.reconcileOutputs()
+				e.reconcilePreview(settings)
+				e.reconcileClips()
+				e.reconcileCaptions()
+				e.reconcileLoudness(settings)
 				e.reconcileMu.Unlock()
 				e.publishStatus()
 			}
@@ -3659,12 +3697,30 @@ func (e *Engine) Loudness() []meters.Report {
 // A stopgap until settings carry a switch of their own: the tier follows
 // Meters.Enabled today, and an operator who wants per-channel ingest levels but
 // not one analyser per destination has nowhere else to say so.
+// SetLoudnessMonitor turns the analyser tier on or off and RECONCILES EITHER
+// WAY, including when the flag already holds the value being set.
+//
+// It used to return early on a no-op change, which reads as an obvious
+// optimisation and was the whole of #612. `loudOff` is the zero value, so the
+// tier is "wanted" from the moment an engine is built -- but analysers are only
+// started by reconcileLoudness, and on a fresh install the one pass that runs
+// it happens while destinations are still HELD, waiting for the ingest probe.
+// It correctly finds nothing to measure. Nothing reconciles the tier again once
+// they start, and `SetLoudnessMonitor(true)` short-circuited because the flag
+// already said on.
+//
+// The result was an install reporting `enabled: true` with no analyser ever
+// having run: GET /loudness said so, the Meters page drew the switch on, and
+// nothing measured. Only toggling OFF and then ON fixed it, because the off
+// transition was the only one that reached a reconcile.
+//
+// So the early return goes. Setting a switch to the position it already claims
+// to be in must still make reality match the claim -- the optimisation assumed
+// the flag fully determines the state, and it does not. A reconcile that has
+// nothing to do is cheap; an operator with no loudness measurement and a
+// switch insisting otherwise is not.
 func (e *Engine) SetLoudnessMonitor(enabled bool) error {
 	e.mu.Lock()
-	if e.loudOff == !enabled {
-		e.mu.Unlock()
-		return nil
-	}
 	e.loudOff = !enabled
 	e.mu.Unlock()
 	return e.Reconcile()
@@ -4779,3 +4835,7 @@ func (e *Engine) vaapiDevice(r *db.Rendition) string {
 	})
 	return e.vaapiDev
 }
+
+// reconcileCount is how many times Reconcile has been entered. Test-only; see
+// the field's comment for why it is a field.
+func (e *Engine) reconcileCount() int64 { return e.reconciles.Load() }
