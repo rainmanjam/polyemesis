@@ -20,6 +20,13 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 . "$SCRIPTS/lib-preflight.sh"
 
+# poka-yoke: the run's own verdict, armed BEFORE the preflight checks so a
+# suite that refuses to run still says so on its last line. Held as a trap
+# rather than printed at the foot of the script, because the foot is one exit
+# path out of many. See the verdict section of lib-preflight.sh for the
+# failure -- a red run reported as exit 0 -- that is why.
+trap 'poly_verdict_trap $?' EXIT
+
 IMAGE=polyemesis:browser
 CTR=poly-browser
 VOL=poly-browser-data
@@ -29,7 +36,11 @@ cleanup() {
   docker rm -f "$CTR" >/dev/null 2>&1
   docker volume rm "$VOL" >/dev/null 2>&1
 }
-trap cleanup EXIT
+# Carries the verdict as well as the teardown, because bash keeps ONE EXIT
+# handler and this line replaces the arm above. A plain `trap cleanup EXIT`
+# here would silently disarm the verdict, and a truncated log would go back to
+# reading a failed run as a pass -- see lib-preflight.sh.
+trap 'poly_verdict_trap $? cleanup' EXIT
 cleanup
 
 # poka-yoke: this suite's own header says "Requires: docker, node" but node

@@ -29,6 +29,13 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
 . "$SCRIPTS/lib-preflight.sh"
+
+# poka-yoke: the run's own verdict, armed BEFORE the preflight checks so a
+# suite that refuses to run still says so on its last line. The shared teardown
+# trap below replaces this one and emits the verdict itself; between them there
+# is no exit path that can report a pass this run did not earn. See the verdict
+# section of lib-preflight.sh for the reported-as-exit-0 failure that is why.
+trap 'poly_verdict_trap $?' EXIT
 DRIVER="$ROOT/scripts/acceptance_playlist_driver.go"
 API="http://127.0.0.1:$PORT"
 
