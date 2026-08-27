@@ -42,10 +42,21 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
   const [frameError, setFrameError] = useState(false);
-  /* Which programme every request below names. Null until the source list has
-     landed, and null forever on an install with none -- see currentProgramme. */
+  /* Which programme every request below names.
+   *
+   * NULL UNTIL THE SOURCE LIST LANDS, AND NOTHING WAITS FOR IT. An earlier
+   * version held the polls and the socket until this resolved, which looked
+   * careful and was not: a /sources that is slow, refused or never answered
+   * left the console permanently blank -- no status, no socket, no error --
+   * and the e2e suite caught it as "the chrome reports a healthy SRT ingest as
+   * down".
+   *
+   * Null is also the RIGHT answer for a single-source install, which the
+   * server accepts and which is the overwhelming majority. So the first poll
+   * goes out immediately naming nothing, and the effects below re-run when the
+   * programme resolves -- one extra round trip on a multi-source install,
+   * against never rendering at all. */
   const [programme, setProgramme] = useState<number | null>(null);
-  const [programmeKnown, setProgrammeKnown] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
@@ -168,15 +179,16 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
     // Re-opened when the programme resolves: the first render has none, and a
     // socket opened without one would be answering for a programme the operator
     // is not looking at for the life of the session.
-  }, [programmeKnown, programme]);
+  }, [programme]);
 
-  // WHICH PROGRAMME, before anything that needs one.
+  // WHICH PROGRAMME, resolved alongside the first poll rather than before it.
   //
   // The server refuses a programme-shaped route when an install has two or more
-  // sources and the request names none, so a poll issued before this resolves
-  // would 400 on exactly the installs this exists for. programmeKnown is what
-  // holds the polls until there is an answer -- including the answer "none",
-  // which is the setup wizard's state and is legitimate.
+  // sources and the request names none, so on those installs the first poll is
+  // refused and the second -- issued when this resolves, one round trip later --
+  // is not. That is the trade, and it is the right way round: the alternative
+  // was holding every request until this answered, which turned a slow or
+  // unanswered /sources into a console that never rendered anything at all.
   useEffect(() => {
     let live = true;
     api
@@ -195,9 +207,6 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         // majority and the case where guessing cannot be wrong.
         if (live) setProgramme(null);
       })
-      .finally(() => {
-        if (live) setProgrammeKnown(true);
-      });
     return () => {
       live = false;
     };
@@ -206,7 +215,6 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   // Seed from REST so the first paint is populated even if the socket is slow,
   // and so a browser that cannot open a WebSocket still shows something real.
   useEffect(() => {
-    if (!programmeKnown) return;
     api.status(programme).then(setStatus).catch(() => {});
     api.source(programme).then(setSource).catch(() => {});
     api
@@ -216,7 +224,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         setBitrate(s.bitrate ?? []);
       })
       .catch(() => {});
-  }, [programmeKnown, programme]);
+  }, [programme]);
 
   const value = useMemo<LiveData>(
     () => ({

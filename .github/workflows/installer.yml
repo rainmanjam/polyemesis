@@ -481,7 +481,17 @@ jobs:
 
       - name: An interrupted install rolls back, once, and leaves nothing
         run: |
-          sudo rm -rf /var/lib/polyemesis
+          # STATE THE PRECONDITION rather than inherit it. This step asserts
+          # that a rollback leaves NOTHING, which is only a fair question of an
+          # install that created everything it is being asked to remove.
+          #
+          # Rollback no longer deletes an $INSTALL_DIR it merely opened -- that
+          # blanket delete destroyed operators' compose files and backups on a
+          # failed re-run. So a directory surviving from an earlier step in this
+          # job now makes the run under test a RE-run, the rollback correctly
+          # leaves the directory alone, and the assertion below fails for a
+          # reason that has nothing to do with the interrupt.
+          sudo rm -rf /var/lib/polyemesis /opt/polyemesis /etc/polyemesis
           set +e
           out="$(sudo timeout -s INT 3 bash scripts/install.sh --mode docker --yes --tls selfsigned --http-port 8080 2>&1)"
           set -e

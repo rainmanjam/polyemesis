@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"os"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
@@ -110,6 +111,17 @@ func TestAHaltedRecorderOnAnyProgrammeIsReported(t *testing.T) {
 	eng := s.engineForSource(&second.ID)
 	if eng == nil {
 		t.Fatalf("no engine for source %d, which is running", second.ID)
+	}
+	// THE DIRECTORY HAS TO EXIST FIRST, and this is why the test was flaky.
+	//
+	// CheckFreeSpace measures m.dir, and when that stat FAILS it logs a warning
+	// and returns WITHOUT halting -- a refusal shaped exactly like "there is
+	// plenty of room". A second programme's engine has not necessarily created
+	// its recordings directory by the time this runs, so the halt silently did
+	// not happen and the guard below reported the state as unreached. It passed
+	// on a re-run and in isolation, which is what kept it looking like noise.
+	if err := os.MkdirAll(eng.Recordings().Dir(), 0o755); err != nil {
+		t.Fatalf("create programme %d's recordings dir: %v", second.ID, err)
 	}
 	halt := db.RecordingSettings{Enabled: true, SegmentSeconds: 3600, MinFreeGB: 1e9}
 	eng.Recordings().CheckFreeSpace(halt)
