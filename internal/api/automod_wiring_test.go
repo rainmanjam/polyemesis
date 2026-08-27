@@ -43,7 +43,7 @@ func modelSettings() db.AutomodSettings {
 // ledger promised otherwise.
 func TestTheModelTimeoutForBanReachesTheEngine(t *testing.T) {
 	a := modelSettings()
-	cfg := modelConfigFrom(a)
+	cfg, _ := modelConfigFrom(a)
 
 	if got, want := cfg.TimeoutSeconds, a.Model.TimeoutForBan; got != want {
 		t.Errorf("model timeout = %ds, want the configured %ds. The operator set "+
@@ -61,7 +61,8 @@ func TestTheModelTimeoutForBanReachesTheEngine(t *testing.T) {
 func TestAZeroModelTimeoutDoesNotBecomeAPermanentBan(t *testing.T) {
 	a := modelSettings()
 	a.Model.TimeoutForBan = 0
-	if got := modelConfigFrom(a).TimeoutSeconds; got <= 0 {
+	cfg2, _ := modelConfigFrom(a)
+	if got := cfg2.TimeoutSeconds; got <= 0 {
 		t.Errorf("model timeout = %d with timeoutForBan unset; a non-positive "+
 			"duration is a permanent ban at every adapter", got)
 	}

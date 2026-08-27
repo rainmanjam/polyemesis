@@ -25,6 +25,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/auth"
+	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -360,6 +361,10 @@ type Server struct {
 	// above it: a build with no chat wired serves the pane read-only from the
 	// stored scrollback rather than hiding it.
 	chat *chat.Hub
+	// automodBudget is the install's hourly model spend, owned here rather
+	// than by the connector because ApplyAutomod rebuilds the connector on
+	// every settings save. See internal/automod/budget.go.
+	automodBudget *automod.Budget
 
 	// hooks is the shared lifecycle-webhook dispatcher. Optional like
 	// everything else in this block: a build with none wired still serves the
@@ -563,6 +568,10 @@ type Options struct {
 	// Chat is the chat Hub. Optional: without it the chat page reports that no
 	// platform is connected and still shows the stored history.
 	Chat *chat.Hub
+	// AutomodBudget is the install's hourly model spend counter. Created once
+	// where the process starts and handed to every model built afterwards, so
+	// a settings save rebuilds the connector without refilling its allowance.
+	AutomodBudget *automod.Budget
 
 	// Hooks is the lifecycle-webhook dispatcher. Optional.
 	Hooks *hooks.Dispatcher
@@ -581,26 +590,27 @@ type Options struct {
 // New creates the server.
 func New(o Options) *Server {
 	s := &Server{
-		log:       o.Log,
-		cfg:       o.Config,
-		providers: o.Providers,
-		store:     o.DB,
-		box:       o.Secrets,
-		mgr:       o.Engine,
-		bus:       o.Events,
-		tls:       o.TLS,
-		jobq:      o.Jobs,
-		gov:       o.Governor,
-		whisper:   o.Whisper,
-		chat:      o.Chat,
-		hooks:     o.Hooks,
-		version:   o.Version,
-		diag:      o.Diag,
-		diagLevel: o.DiagLevel,
-		startedAt: time.Now(),
-		logins:    auth.NewThrottle(),
-		kickKeys:  &chat.KickKeyFetcher{},
-		revoked:   map[int64]struct{}{},
+		log:           o.Log,
+		cfg:           o.Config,
+		providers:     o.Providers,
+		store:         o.DB,
+		box:           o.Secrets,
+		mgr:           o.Engine,
+		bus:           o.Events,
+		tls:           o.TLS,
+		jobq:          o.Jobs,
+		gov:           o.Governor,
+		whisper:       o.Whisper,
+		chat:          o.Chat,
+		automodBudget: o.AutomodBudget,
+		hooks:         o.Hooks,
+		version:       o.Version,
+		diag:          o.Diag,
+		diagLevel:     o.DiagLevel,
+		startedAt:     time.Now(),
+		logins:        auth.NewThrottle(),
+		kickKeys:      &chat.KickKeyFetcher{},
+		revoked:       map[int64]struct{}{},
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
 			// ServesTLS, not the legacy tls.enabled: an install that writes

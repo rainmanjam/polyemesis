@@ -72,8 +72,11 @@ type ModelConfig struct {
 	Action Action `json:"action"`
 	// TimeoutSeconds for ActionTimeout.
 	TimeoutSeconds int `json:"timeoutSeconds"`
-	// MinConfidence below which a verdict is ignored entirely.
-	MinConfidence float64 `json:"minConfidence"`
+	// MinConfidence below which a verdict is ignored entirely. A Confidence
+	// rather than a float64 so it cannot be assigned from an unchecked number;
+	// see confidence.go for the two values that used to destroy the feature in
+	// opposite directions.
+	MinConfidence Confidence `json:"minConfidence"`
 	// Instruction is the operator's description of what to catch. Their words,
 	// because "what counts as abuse here" is a property of a community and not
 	// something this product can decide for them.
@@ -108,23 +111,32 @@ type Model struct {
 	cfg    ModelConfig
 	client *http.Client
 
-	mu         sync.Mutex
-	windowFrom time.Time
-	calls      int
-	failures   int
-	lastErr    string
-	lastCall   time.Time
-	now        func() time.Time
+	// budget is SHARED and outlives this object; see budget.go. Everything
+	// below it is per-connector health, which may legitimately reset when the
+	// connector is rebuilt -- a spend ceiling may not.
+	budget *Budget
+
+	mu       sync.Mutex
+	failures int
+	lastErr  string
+	lastCall time.Time
+	now      func() time.Time
 }
 
 // NewModel returns a connector. A nil-safe zero value is deliberate: every
 // caller has to work with the model switched off, which is the default.
-func NewModel(cfg ModelConfig) *Model {
+// The budget is a REQUIRED parameter, not an option with a default. Defaulting
+// it would let a caller rebuild the model and silently get a fresh allowance,
+// which is the whole defect this signature exists to prevent. A nil one is
+// accepted only so the zero-value contract above still holds, and it means
+// "unbounded" rather than "a new ceiling every save".
+func NewModel(cfg ModelConfig, budget *Budget) *Model {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 4 * time.Second
 	}
 	return &Model{
 		cfg:    cfg,
+		budget: budget,
 		client: &http.Client{Timeout: cfg.Timeout},
 		now:    time.Now,
 	}
@@ -172,7 +184,7 @@ func (m *Model) Check(ctx context.Context, text string) ([]Finding, error) {
 	v, err := m.ask(ctx, text)
 
 	// Would this verdict act? Only then is the category load-bearing.
-	acting := err == nil && v.Abusive && v.Confidence >= m.cfg.MinConfidence
+	acting := err == nil && v.Abusive && v.Confidence >= m.cfg.MinConfidence.Float()
 
 	// THE REJECTING HALF. Listing the categories in the prompt asks the model
 	// to comply; this is what happens when it does not, and #495 is the reason
@@ -252,21 +264,10 @@ func modelNote(s string) string {
 
 // reserve takes one call from the hourly budget, or reports that it cannot.
 func (m *Model) reserve() bool {
-	if m.cfg.MaxCallsPerHour <= 0 {
+	if m.budget == nil {
 		return true
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	now := m.now()
-	if now.Sub(m.windowFrom) >= time.Hour {
-		m.windowFrom = now
-		m.calls = 0
-	}
-	if m.calls >= m.cfg.MaxCallsPerHour {
-		return false
-	}
-	m.calls++
-	return true
+	return m.budget.reserve(m.cfg.MaxCallsPerHour)
 }
 
 func (m *Model) record(err error) {
@@ -296,7 +297,10 @@ func (m *Model) Stats() ModelStats {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return ModelStats{
-		CallsThisHour: m.calls,
+		// From the shared budget, so the spend an operator reads is the spend
+		// that is actually bounded -- and so it does not drop to zero the
+		// moment they save an unrelated setting.
+		CallsThisHour: m.budget.Spent(),
 		Ceiling:       m.cfg.MaxCallsPerHour,
 		Failures:      m.failures,
 		LastError:     m.lastErr,

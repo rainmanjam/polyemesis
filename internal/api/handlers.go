@@ -1555,7 +1555,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// deciding on the old cells is the silent no-op this file already warns
 	// about twice. Rebuilding the engine here is also what recompiles a changed
 	// rule -- without it a new pattern would not apply until the next restart.
-	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod)
+	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget)
 	// And the same for alert delivery: a retry budget that stores, returns 200
 	// and keeps chasing on the old count is the third instance of the silent
 	// no-op this handler now guards against three times.

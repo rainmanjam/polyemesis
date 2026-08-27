@@ -2061,6 +2061,24 @@ func (s Settings) Validate() error {
 	if s.Recording.MinFreeGB < 0 {
 		add("recording free-space floor cannot be negative")
 	}
+	// THE SAVE IS REFUSED, not silently corrected. automod.ParseConfidence
+	// already stops a bad floor reaching the checker, but that fix alone would
+	// leave an operator looking at 80 in the settings form, a saved row that
+	// agrees with them, and a server quietly moderating on 0.8 -- three places
+	// telling three stories. Only this one can answer at the moment the value
+	// is typed, which is the moment it can still be corrected.
+	//
+	// Guarded on the model being ENABLED: an install that has never opened the
+	// automod page carries a zero here and is not misconfigured, it is
+	// unconfigured, and refusing every unrelated settings save over a field
+	// nobody has touched is its own defect.
+	if s.Automod.Model.Enabled {
+		if c := s.Automod.Model.MinConfidence; c < 0.01 || c > 1 {
+			add("automod confidence floor %v is outside 0.01-1 (the model reports "+
+				"certainty on a 0-1 scale, so 0 acts on every opinion it has and "+
+				"anything above 1 stops it acting at all)", c)
+		}
+	}
 	// Empty is deliberately accepted as "the default": a client that has never
 	// heard of stems must be able to save the rest of the recording settings.
 	if !ffmpeg.ValidStemCodec(s.Recording.StemCodec) {

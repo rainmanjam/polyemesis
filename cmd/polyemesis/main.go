@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/api"
+	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -288,12 +289,18 @@ func run(h *hooks) error {
 	// A failed read leaves the Hub on its own defaults rather than stopping the
 	// server: chat history is the most expendable data here, and refusing to
 	// boot over it would be a wildly disproportionate response.
+	// ONE SPEND COUNTER FOR THE PROCESS, created before anything that could
+	// rebuild a model connector. ApplyAutomod runs here at boot and again on
+	// every settings save; the connector is rebuilt each time and the hourly
+	// allowance must not be. See internal/automod/budget.go.
+	automodBudget := automod.NewBudget()
+
 	if s, err := store.GetSettings(); err == nil {
 		api.ApplyChatRetention(hub, s.Chat)
 		// Automod, for the same reason: a matrix armed in the UI that quietly
 		// reverts on restart is worse than one that never worked, because the
 		// operator has already stopped checking it.
-		api.ApplyAutomod(hub, store, box, log, s.Automod)
+		api.ApplyAutomod(hub, store, box, log, s.Automod, automodBudget)
 		// Alert delivery, for the third time and the same reason. Safe to call
 		// before the engines exist: the Manager remembers the budget and hands
 		// it to each engine as it is created, so this does not depend on
@@ -321,8 +328,9 @@ func run(h *hooks) error {
 		DiagLevel: diagSwitch,
 		Log:       log, Config: cfg,
 		DB: store, Secrets: box, Engine: eng, Events: bus, Version: version,
-		Chat:  hub,
-		Hooks: hookd,
+		Chat:          hub,
+		AutomodBudget: automodBudget,
+		Hooks:         hookd,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
 		// disk out from under the running listener.
