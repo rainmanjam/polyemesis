@@ -55,11 +55,9 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 *Everything else* is the other nineteen entries in the destination preset
 catalogue — PeerTube, Owncast, Cloudflare Stream, Mux, AWS IVS and the rest.
 The platforms named in the table above are not among them, however faint their
-row reads. They stream perfectly over RTMP, RTMPS
-catalogue — PeerTube, Owncast, Cloudflare Stream, Mux, AWS IVS, LinkedIn, Trovo,
-Odysee, Dailymotion and the rest. They stream perfectly over RTMP, RTMPS
-or SRT with a pasted URL and key; we simply have not researched their APIs, and
-"unverified" is the honest thing to say about an API nobody here has read.
+row reads. They stream perfectly over RTMP, RTMPS or SRT with a pasted URL and
+key; we simply have not researched their APIs, and "unverified" is the honest
+thing to say about an API nobody here has read.
 
 ## The platforms that need a sentence each
 

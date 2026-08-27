@@ -2168,6 +2168,9 @@ func (d *DB) backfillDestinationStreamKeys() error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit stream key backfill: %w", err)
 	}
+	// Recorded so the boot can warn. See DB.sealedOnOpen and #557: this is the
+	// exact moment polyemesis.db stops being a complete destination backup.
+	d.sealedOnOpen += len(todo)
 
 	// THE COMMIT IS NOT THE END OF THE PLAINTEXT. Committing wrote the sealed
 	// rows into the -wal; the pages the plaintext used to live in are still in

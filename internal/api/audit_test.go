@@ -47,7 +47,9 @@ func everyAuditEvent() []alerts.Event {
 		// fails this test, which is how that was established). Anything that
 		// ever makes this name caller-supplied must sanitise it at the source;
 		// the redactor will not.
-		auditClipCaptured("clip-20260806-143000.ts", dirty),
+		// The programme is server-derived like the clip name, so it is not a
+		// planting site either -- passed here to keep the call honest.
+		auditClipCaptured("clip-20260806-143000.ts", dirty, "Main"),
 		// The address is planted; the COUNTS are not, and cannot be. Both are
 		// integers this server computed from its own ring -- no caller-supplied
 		// string reaches this event at all, which is the same structural

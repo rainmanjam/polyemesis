@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -229,5 +230,57 @@ func TestNotesRaisedOutsideAReconcileAreDropped(t *testing.T) {
 	notes := rec.snapshot()
 	if len(notes) != 1 || notes[0].Name != "twitch" {
 		t.Fatalf("the reconcile's report = %+v, want only the note raised during it", notes)
+	}
+}
+
+// THE PAGE'S NUMBERS ARE THE MAP'S NUMBERS.
+//
+// docs/HOT-RELOAD.md prints a count per class and a total, and says in its own
+// words that "reload.go is the authority for every number on this page". It was
+// not: the page said 8 on_demand and 149 total while the map held 10 and 151.
+//
+// It had already been corrected once, and drifted again inside a day -- both
+// times because somebody added a settings field, which is exactly the change
+// that has no reason to send anyone to a markdown file. A number written in two
+// places where only one of them is checked is a number that is wrong on a
+// schedule.
+//
+// This is the cheap half of the fix. The expensive half would be generating the
+// page, and it is not worth it for five integers: what matters is that adding a
+// field cannot leave the page stale and silent.
+func TestHotReloadDocCountsMatchTheMap(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "HOT-RELOAD.md"))
+	if err != nil {
+		t.Fatalf("read HOT-RELOAD.md: %v", err)
+	}
+	doc := string(raw)
+
+	counts := map[ReloadClass]int{}
+	for _, rule := range settingsReload {
+		counts[rule.Class]++
+	}
+
+	for _, c := range []ReloadClass{ClassLive, ClassRespawn, ClassRebind, ClassOnDemand, ClassNextStart} {
+		n := counts[c]
+		// The row is "| `live` | ...prose... | 89 |". Matched on the class name
+		// and the trailing cell so the prose can be reworded freely.
+		re := regexp.MustCompile("(?m)^\\| `" + regexp.QuoteMeta(string(c)) + "` \\|.*\\| \\*{0,2}(\\d+)\\*{0,2} \\|$")
+		m := re.FindStringSubmatch(doc)
+		if m == nil {
+			t.Errorf("HOT-RELOAD.md has no counts row for %q; the table has been "+
+				"restructured and this guard is comparing nothing", c)
+			continue
+		}
+		if m[1] != strconv.Itoa(n) {
+			t.Errorf("HOT-RELOAD.md says %s holds %s fields; settingsReload holds %d. "+
+				"The page says reload.go is the authority for every number on it, so "+
+				"the page is what is wrong.", c, m[1], n)
+		}
+	}
+
+	total := len(settingsReload)
+	if !strings.Contains(doc, "hold "+strconv.Itoa(total)+" fields") {
+		t.Errorf("HOT-RELOAD.md does not say the five classes hold %d fields, which "+
+			"is what settingsReload holds", total)
 	}
 }

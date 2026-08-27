@@ -107,6 +107,9 @@ const features = [
             admin password on the first-run screen. Note the
             <span class="font-mono text-fg">/udp</span> on 6000 — SRT is UDP, and omitting the
             suffix is the classic reason an ingest silently receives nothing.
+            1935 is published even if you plan to use SRT: a container's port
+            map is frozen when it is created, so adding RTMP later means
+            recreating the container.
           </p>
         </div>
 

@@ -666,6 +666,33 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	if err != nil {
 		return err
 	}
+	// THE BACKUP THAT SILENTLY STOPPED BEING ONE (#557).
+	//
+	// If this boot sealed stream keys, it just upgraded an install whose
+	// polyemesis.db WAS a complete destination backup and no longer is: the
+	// keys live in secret.key from now on. An operator whose routine copies the
+	// database alone has, as of this second, a backup that restores their
+	// destinations with empty stream keys -- and restoring it is when they find
+	// out, which is the worst possible moment.
+	//
+	// Said HERE because here is the only place that can say it. The helper
+	// scripts that would have checked ship inside the version being upgraded
+	// TO, so a 0.6.0 install runs 0.6.0's update.sh: the guard arrives with the
+	// thing it was meant to guard. The first boot on the new code is the one
+	// moment the software is both new enough to know and early enough to matter.
+	//
+	// Error level, not warn, and once rather than every boot: this is a
+	// one-time transition and an operator who misses it loses credentials they
+	// cannot recover.
+	if n := store.SealedOnOpen(); n > 0 {
+		log.Error("your database is no longer a complete backup of your destinations",
+			"sealedStreamKeys", n,
+			"action", "back up secret.key alongside polyemesis.db from now on",
+			"why", "this upgrade moved stream keys out of the database into secret.key; "+
+				"a backup of polyemesis.db alone will restore these destinations with empty keys",
+			"issue", "https://github.com/rainmanjam/polyemesis/issues/557")
+	}
+
 	settings, err := store.GetSettings()
 	if err != nil {
 		return err

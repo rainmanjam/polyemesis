@@ -74,8 +74,13 @@ const (
 	fieldTokenScope   = "Scope"
 	fieldSections     = "Sections"
 	fieldClipName     = "Clip"
-	fieldVersion      = "Version"
-	fieldForced       = "Forced past a live broadcast"
+	// The programme a clip was cut from. On a one-programme install it says
+	// what everyone already knows; on a multi-programme one it is the only
+	// thing in the event that distinguishes two clips cut a second apart from
+	// different shows.
+	fieldProgramme = "Programme"
+	fieldVersion   = "Version"
+	fieldForced    = "Forced past a live broadcast"
 )
 
 // clientIP is the address the request came from, resolved the same way the
@@ -253,7 +258,17 @@ func auditAPITokenRevoked(name, address string) alerts.Event {
 
 // auditClipCaptured names the clip, which is a server-generated filename rather
 // than anything a viewer or an operator typed, so it is safe to carry whole.
-func auditClipCaptured(name, address string) alerts.Event {
+// THE CLIP'S OWN PROGRAMME, and the capture itself is already scoped.
+//
+// handleCaptureClip resolves the engine through scopedEngine, so the damaging
+// half of #545 -- Studio B being handed Main's rolling buffer -- is closed at
+// Control. What was left is traceability: the audit event named the clip and
+// the operator's address and not the show, so an install running two
+// programmes produced a stream of "Clip captured" events that could not be told
+// apart. Delivery through the install-wide notifier is deliberate and argued
+// (alert rules are install-wide, one table); naming the source is the fix, not
+// routing.
+func auditClipCaptured(name, address, programme string) alerts.Event {
 	return alerts.Event{
 		Type:     alerts.TypeClipCaptured,
 		Severity: alerts.SeverityInfo,
@@ -261,6 +276,9 @@ func auditClipCaptured(name, address string) alerts.Event {
 		Text:     "A clip was cut from the replay buffer and is available to download.",
 	}.
 		WithField(fieldClipName, name).
+		// WithField already drops an empty value, so a zero-source install adds
+		// no field rather than an empty one.
+		WithField(fieldProgramme, programme).
 		WithField(fieldAddress, address)
 }
 
