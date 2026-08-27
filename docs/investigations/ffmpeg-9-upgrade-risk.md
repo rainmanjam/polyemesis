@@ -2,7 +2,25 @@
 
 Measured on 2026-08-27, against the actual binaries, not reasoned about.
 
-**Recommendation: not yet, and the blocker is packaging rather than behaviour.**
+## Decision: staying on 8.1.2 (2026-08-27)
+
+Taken deliberately, not deferred. The behaviour of 9.0.1 is fine — the
+version-sensitive suites pass against it — but Alpine has not packaged any 9.x,
+and the route around that costs VAAPI. Waiting keeps hardware encoding for
+Intel and AMD hosts, keeps apk's signing and Alpine's CVE tracking, and costs
+only time.
+
+**Revisit when Alpine packages 9.x**, at which point most of this file stops
+applying: the packaging problem disappears, `apk add ffmpeg=9.x` keeps VAAPI,
+and what remains is the behavioural check, which has already been done once
+here and can be repeated with the same commands.
+
+The rest of this file is the evidence behind that, kept so the next person —
+or the dependabot PR that eventually offers this — starts from the answer
+rather than rediscovering it.
+
+**Recommendation, as measured: not yet, and the blocker is packaging rather
+than behaviour.**
 
 ## The blocker
 
