@@ -71,6 +71,12 @@ async function autoRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
   return body as T;
 }
 
+/** Same shape as lib/api.ts's, and deliberately a copy rather than an import:
+ *  see the note at the top of this file about the two clients. */
+function sourceQuery(sourceId: number | null): string {
+  return sourceId == null ? "" : `?source=${encodeURIComponent(String(sourceId))}`;
+}
+
 export const autoApi = {
   get: <T,>(p: string) => autoRequest<T>(p),
   post: <T,>(p: string, body?: unknown) =>
@@ -78,4 +84,52 @@ export const autoApi = {
   put: <T,>(p: string, body: unknown) =>
     autoRequest<T>(p, { method: "PUT", body: JSON.stringify(body) }),
   del: <T,>(p: string) => autoRequest<T>(p, { method: "DELETE" }),
+
+  /* THE THREE ROUTES THIS CLIENT REACHES THAT ARE PROGRAMME-SCOPED, and
+     `sourceId` is REQUIRED on every one of them.
+  
+     They were called through the generic post/put above with no programme
+     named. That is fine on the single-source install every developer has, and
+     on an install with two it is refused outright with 400 `source_required` --
+     so capturing a clip, arming the clip buffer and switching the loudness
+     monitor were all simply broken, and the operator was shown the API's own
+     sentence: "add \"?source=<id>\"", which is an instruction nobody clicking
+     a button can act on.
+  
+     Required rather than optional for exactly the reason lib/api.ts made
+     status, source and levels required: an optional programme is one a caller
+     forgets, silently, and the forgetting only shows up on somebody else's
+     multi-programme install. This way it does not compile. */
+  /* THE READS ARE SCOPED TOO, and that is the half I missed first time.
+  
+     handleListClips and handleLoudness call scopedEngine INSIDE the handler
+     rather than carrying requireSource at the router, so a survey of the
+     router's middleware -- which is how I looked -- does not find them. Both
+     refuse a two-programme install with 400, so the clip list was empty and
+     the loudness analyser never reported: the meters page showed
+     "NOT UPDATING" and "Waiting for the analyser's state" forever, and the
+     front page's proof section had no figures to quote. */
+  listClips: <T,>(sourceId: number | null) =>
+    autoRequest<T>("/clips" + sourceQuery(sourceId)),
+  loudness: <T,>(sourceId: number | null) =>
+    autoRequest<T>("/loudness" + sourceQuery(sourceId)),
+
+  captureClip: <T,>(seconds: number, sourceId: number | null) =>
+    autoRequest<T>("/clips" + sourceQuery(sourceId), {
+      method: "POST",
+      body: JSON.stringify({ seconds }),
+    }),
+  setClipBuffer: <T,>(
+    body: { enabled: boolean; windowSeconds: number },
+    sourceId: number | null,
+  ) =>
+    autoRequest<T>("/clips/buffer" + sourceQuery(sourceId), {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  setLoudnessMonitor: <T,>(enabled: boolean, sourceId: number | null) =>
+    autoRequest<T>("/loudness" + sourceQuery(sourceId), {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }),
 };

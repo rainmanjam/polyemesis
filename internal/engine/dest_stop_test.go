@@ -22,12 +22,11 @@ func TestStopTakesTheBackupDownWithTheDestination(t *testing.T) {
 	// Span of two, so "was the port given back" is answerable by asking for it
 	// again rather than by reaching inside the allocator.
 	base, held := testenv.FreeUDPWindow(t, 2)
-	// Released together, immediately before the allocator is built: the window
-	// has to be free for Allocate to hand it out, and holding it until this line
-	// is what stopped anything else from taking it.
-	for _, r := range held {
-		r.Release()
-	}
+	// Released together AND WAITED FOR: closing a socket does not make its
+	// port bindable again in the same instant, and on Windows the allocator's
+	// own `udp4` probe refuses a port whose socket closed microseconds earlier.
+	// With a two-port window that is the entire pool. See ReleaseAndSettle.
+	testenv.ReleaseAndSettle(t, held...)
 	e.alloc = relay.NewPortAllocator(base, 2)
 
 	row := backupRow()

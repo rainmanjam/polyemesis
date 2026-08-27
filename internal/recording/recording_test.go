@@ -352,6 +352,99 @@ func TestSweepNeverDeletesTheLiveSegmentByAge(t *testing.T) {
 	}
 }
 
+// TestSweepProtectsEverySegmentARecorderCouldStillBeWritingNotJustTheNewest is
+// the count #504 got wrong.
+//
+// config.RecordingsDir() is install-wide and every programme runs its own
+// recorder into it, so an install with two programmes was measured holding
+// EIGHT .mkv files open at once. The protection named one -- the latest start
+// time -- and the size branch was then free to unlink the other seven while
+// ffmpeg was writing them, which costs the tail of a live archive and leaves
+// the bytes charged to a volume that Usage() no longer counts them against.
+//
+// Each case carries its own control: a closed segment that must still be swept.
+// A guard that protected everything would pass the first half of both cases and
+// fail the second, and a retention policy that deletes nothing is how the disk
+// fills -- the failure Sweep exists to prevent.
+func TestSweepProtectsEverySegmentARecorderCouldStillBeWritingNotJustTheNewest(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings db.RecordingSettings
+		ages     []time.Duration
+		sizes    []int
+		wantKept []time.Duration
+	}{
+		{
+			// Three recorders rolling over every minute, their open segments
+			// scattered across the last hundred seconds, and two segments from
+			// hours ago that nothing holds.
+			name:     "the size cap spares every open segment and still takes the closed ones",
+			settings: db.RecordingSettings{SegmentSeconds: 60, MaxGB: maxGBFor(1)},
+			ages:     []time.Duration{0, 30 * time.Second, 100 * time.Second, 4 * time.Hour, 9 * time.Hour},
+			sizes:    []int{500, 500, 500, 500, 500},
+			wantKept: []time.Duration{0, 30 * time.Second, 100 * time.Second},
+		},
+		{
+			// A max-age shorter than a segment's own length, which is the
+			// operator mistake #504 was written for -- except that here it is
+			// two open segments past the cutoff, not one.
+			name:     "the age cutoff spares every open segment and still takes the closed ones",
+			settings: db.RecordingSettings{SegmentSeconds: 7200, MaxAgeHours: 1},
+			ages:     []time.Duration{0, 90 * time.Minute, 2 * time.Hour, 9 * time.Hour},
+			wantKept: []time.Duration{0, 90 * time.Minute, 2 * time.Hour},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, dir, store := newManager(t)
+			now := time.Now()
+			writeSegments(t, dir, now, tc.ages, tc.sizes)
+			if _, err := m.Scan(); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+
+			if _, err := m.Sweep(tc.settings); err != nil {
+				t.Fatalf("sweep: %v", err)
+			}
+
+			want := namesFor(now, tc.wantKept)
+			if got := filesOnDisk(t, dir); !slices.Equal(got, want) {
+				t.Errorf("files on disk %v, want %v: the sweep either unlinked a segment a recorder "+
+					"is still writing into, or stopped deleting segments nothing holds", got, want)
+			}
+			if got := indexedFilenames(t, store); !slices.Equal(got, want) {
+				t.Errorf("indexed %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestAnUnsetSegmentLengthLeavesTheLiveWindowAWholeSegmentWide covers the one
+// input to the live-segment guard that no deletion test can reach: a caller
+// that hands Sweep a db.RecordingSettings it built itself, with the segment
+// length left at zero.
+//
+// Nothing in production does that today, and the whole guard collapses to the
+// two-minute slack if one ever starts -- which is a sweep that unlinks open
+// segments again, silently, on an install nobody changed. Zero means "this did
+// not come through the store" (Validate refuses anything outside 10s-24h), and
+// the safe reading of that is the length the install ships with.
+//
+// The second assertion is the control: a guard that answered the default to
+// every question would satisfy the first and make the setting decorative.
+func TestAnUnsetSegmentLengthLeavesTheLiveWindowAWholeSegmentWide(t *testing.T) {
+	shipped := time.Duration(db.DefaultSettings().Recording.SegmentSeconds) * time.Second
+	if got := liveWindow(0); got < shipped {
+		t.Errorf("an unset segment length gives a live window of %s, shorter than the %s segment "+
+			"this install ships with: a sweep would delete files a recorder is still writing", got, shipped)
+	}
+	if got, want := liveWindow(60), 60*time.Second+liveSegmentSlack; got != want {
+		t.Errorf("a configured 60s segment gives a live window of %s, want %s: the operator's "+
+			"segment length is not reaching the guard", got, want)
+	}
+}
+
 func TestSweepDeletesOldestFirstUntilUnderMaxGB(t *testing.T) {
 	ages := []time.Duration{2 * time.Hour, 4 * time.Hour, 6 * time.Hour}
 	sizes := []int{100, 100, 100}

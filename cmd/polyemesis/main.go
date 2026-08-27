@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/api"
+	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -24,6 +25,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/logtz"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
@@ -287,12 +289,18 @@ func run(h *hooks) error {
 	// A failed read leaves the Hub on its own defaults rather than stopping the
 	// server: chat history is the most expendable data here, and refusing to
 	// boot over it would be a wildly disproportionate response.
+	// ONE SPEND COUNTER FOR THE PROCESS, created before anything that could
+	// rebuild a model connector. ApplyAutomod runs here at boot and again on
+	// every settings save; the connector is rebuilt each time and the hourly
+	// allowance must not be. See internal/automod/budget.go.
+	automodBudget := automod.NewBudget()
+
 	if s, err := store.GetSettings(); err == nil {
 		api.ApplyChatRetention(hub, s.Chat)
 		// Automod, for the same reason: a matrix armed in the UI that quietly
 		// reverts on restart is worse than one that never worked, because the
 		// operator has already stopped checking it.
-		api.ApplyAutomod(hub, store, box, log, s.Automod)
+		api.ApplyAutomod(hub, store, box, log, s.Automod, automodBudget)
 		// Alert delivery, for the third time and the same reason. Safe to call
 		// before the engines exist: the Manager remembers the budget and hands
 		// it to each engine as it is created, so this does not depend on
@@ -320,8 +328,9 @@ func run(h *hooks) error {
 		DiagLevel: diagSwitch,
 		Log:       log, Config: cfg,
 		DB: store, Secrets: box, Engine: eng, Events: bus, Version: version,
-		Chat:  hub,
-		Hooks: hookd,
+		Chat:          hub,
+		AutomodBudget: automodBudget,
+		Hooks:         hookd,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
 		// disk out from under the running listener.
@@ -665,9 +674,47 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	if err != nil {
 		return err
 	}
+	// THE BACKUP THAT SILENTLY STOPPED BEING ONE (#557).
+	//
+	// If this boot sealed stream keys, it just upgraded an install whose
+	// polyemesis.db WAS a complete destination backup and no longer is: the
+	// keys live in secret.key from now on. An operator whose routine copies the
+	// database alone has, as of this second, a backup that restores their
+	// destinations with empty stream keys -- and restoring it is when they find
+	// out, which is the worst possible moment.
+	//
+	// Said HERE because here is the only place that can say it. The helper
+	// scripts that would have checked ship inside the version being upgraded
+	// TO, so a 0.6.0 install runs 0.6.0's update.sh: the guard arrives with the
+	// thing it was meant to guard. The first boot on the new code is the one
+	// moment the software is both new enough to know and early enough to matter.
+	//
+	// Error level, not warn, and once rather than every boot: this is a
+	// one-time transition and an operator who misses it loses credentials they
+	// cannot recover.
+	if n := store.SealedOnOpen(); n > 0 {
+		log.Error("your database is no longer a complete backup of your destinations",
+			"sealedStreamKeys", n,
+			"action", "back up secret.key alongside polyemesis.db from now on",
+			"why", "this upgrade moved stream keys out of the database into secret.key; "+
+				"a backup of polyemesis.db alone will restore these destinations with empty keys",
+			"issue", "https://github.com/rainmanjam/polyemesis/issues/557")
+	}
+
 	settings, err := store.GetSettings()
 	if err != nil {
 		return err
+	}
+	// The log's zone, as early as the store can answer for it. Lines written
+	// before this -- the ones about opening the database -- are UTC, which is
+	// what every line was before this setting existed.
+	if tz := strings.TrimSpace(settings.Display.TimeZone); tz != "" {
+		if loc, lerr := time.LoadLocation(tz); lerr == nil {
+			logtz.Set(loc)
+		} else {
+			log.Warn("display time zone does not resolve; logging in UTC",
+				"zone", tz, "err", lerr)
+		}
 	}
 	// How many programmes this install has, which is a different question from
 	// what settings.ingest says. Nothing reads settings.ingest any more -- the
@@ -875,12 +922,21 @@ func (h *hooks) debugLogger(level string, sw *diag.Switch, rec *diag.Recorder) *
 	if h != nil && h.NewHandler != nil {
 		return h.logger(level)
 	}
-	base := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: sw.Leveler()})
+	base := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: sw.Leveler(),
+		// Times in the install's display zone -- see internal/logtz. Read per
+		// line, so a save takes effect on the next line rather than the next
+		// restart.
+		ReplaceAttr: logtz.ReplaceAttr,
+	})
 	return slog.New(diag.NewHandler(base, rec))
 }
 
 func newLogger(level string) *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: parseLevel(level)}))
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level:       parseLevel(level),
+		ReplaceAttr: logtz.ReplaceAttr,
+	}))
 }
 
 func parseLevel(level string) slog.Level {

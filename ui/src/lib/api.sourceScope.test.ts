@@ -67,12 +67,17 @@ const calls: { name: string; scoped: () => Promise<unknown>; unscoped: () => Pro
   {
     name: "listProcesses — every engine names its children identically",
     scoped: () => api.listProcesses(7),
-    unscoped: () => api.listProcesses(),
+    // NULL RATHER THAN OMITTED, and that is the change being recorded: these
+    // two used to take an optional source and MonitoringPage never passed one,
+    // so every process read on a two-programme install was refused with 400
+    // and the page was dead. Required now, so "no programme" has to be said
+    // out loud -- which is exactly what the zero-source install means.
+    unscoped: () => api.listProcesses(null),
   },
   {
     name: "processLogs — one child's FFmpeg log",
     scoped: () => api.processLogs("ingest", 7),
-    unscoped: () => api.processLogs("ingest"),
+    unscoped: () => api.processLogs("ingest", null),
   },
 ];
 

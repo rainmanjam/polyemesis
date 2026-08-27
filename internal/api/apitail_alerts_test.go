@@ -83,6 +83,11 @@ func TestTestingAnAlertRuleDeliversToTheStoredURLNotTheOneInTheBody(t *testing.T
 
 	created := createRule(t, h, sign, map[string]any{
 		"name": "ops", "url": stored.URL + apitailStoredPath, "format": "slack",
+		// httptest binds 127.0.0.1 and the SSRF guard refuses loopback without
+		// this (#607). Set on the fixture rather than weakened in the guard:
+		// the opt-in is what a real operator with a self-hosted endpoint uses,
+		// so the route under test is still the shipped one.
+		"allowPrivateTarget": true,
 	})
 	id := int64(created["id"].(float64))
 	route := "/api/v1/alerts/rules/" + strconv.FormatInt(id, 10) + "/test"
@@ -146,6 +151,7 @@ func TestAnAlertEndpointThatFailsIsABadGatewayNotAServerError(t *testing.T) {
 
 	created := createRule(t, h, sign, map[string]any{
 		"name": "broken", "url": broken.URL + apitailStoredPath, "format": "slack",
+		"allowPrivateTarget": true, // loopback endpoint; see the note above.
 	})
 	id := int64(created["id"].(float64))
 	route := "/api/v1/alerts/rules/" + strconv.FormatInt(id, 10) + "/test"

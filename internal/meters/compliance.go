@@ -231,11 +231,74 @@ func Failed(id int64, name string, t Target, err string, at time.Time) Report {
 	}
 }
 
+// StaleAfter is how long a report may go without a new frame before its verdict
+// stops being asserted.
+//
+// THE MISTAKE: a publisher was killed mid-broadcast and two destinations held
+// byte-identical LUFS values -- same seconds, same -12.601 -- for 65 seconds
+// while a third kept measuring and walked to -21.3. The fallback feed lacked
+// the tracks those two filter graphs map, so their analysers emitted no frames
+// and the last reading simply stayed put. All three rendered identically, and
+// with a target configured that meant a green pass on screen indefinitely for a
+// destination being fed something else. The number was true once; it was being
+// presented as true now. (#609)
+//
+// The headroom, so this never fires on a working meter: the analyser prints
+// about ten frames a second (see Args), so a healthy report's At advances every
+// ~100 ms. Ten seconds is a hundred missed frames, ten of the engine's
+// once-a-second WebSocket pushes, and five of the meters page's two-second
+// polls. It is also well past one supervisor restart cycle -- a one-second
+// minimum backoff plus an FFmpeg start and a relay connect -- so an analyser
+// that dies and comes back does not blink the verdict out on its way. A guard
+// that cries wolf during normal operation gets ignored, which is worse than no
+// guard at all.
+const StaleAfter = 10 * time.Second
+
+// Aged withdraws a verdict that nothing has re-measured.
+//
+// Only the verdict and the reason move. The numbers stay exactly as they were
+// last measured, because the last known reading with an honest "as of" beside
+// it is worth something to an operator -- and because zeroing DeviationLU would
+// paint a perfect +0.0 LU, which is a worse lie than the one being fixed.
+func (r Report) Aged(now time.Time) Report {
+	// A report with no timestamp is not an old report. Anything built without
+	// an At -- a hand-assembled fixture, a payload decoded from a peer that
+	// omitted the field -- would otherwise be aged against year 1, which
+	// overflows a Duration: removing this guard prints "nothing has been
+	// measured for 9223372037 seconds" at an operator who has done nothing
+	// wrong, and takes a working verdict off their screen to do it.
+	if r.At.IsZero() {
+		return r
+	}
+	// An unknown verdict already declines to judge, and it says why in prose an
+	// operator can act on: the analyser is starting, it could not run at all,
+	// or the integration window is still filling. Overwriting those with this
+	// message would trade a specific answer for a vaguer one.
+	if r.Verdict == VerdictUnknown {
+		return r
+	}
+	age := now.Sub(r.At)
+	if age < StaleAfter {
+		return r
+	}
+	r.Verdict = VerdictUnknown
+	r.Reason = fmt.Sprintf(
+		"nothing has been measured for %.0f seconds: this destination's analyser has stopped producing frames, so the numbers below are the last ones it took and not the audio going out now",
+		age.Seconds())
+	return r
+}
+
 // Store holds the latest report per destination.
 //
 // Reports are published as they arrive, but a browser that connects mid-stream
 // has to be given the current state from somewhere, and re-deriving it would
 // mean waiting for the next frame.
+//
+// Reads age what they hand out (see Aged). Aging on the way out rather than at
+// the call sites is deliberate: Report.At sat in this struct read by nobody --
+// not this Store, not Engine.Loudness, not the UI -- and a stale reading was
+// available to every one of them. There is now no way to take a report out of
+// here without the clock having been applied to it.
 type Store struct {
 	mu      sync.RWMutex
 	reports map[int64]Report
@@ -270,21 +333,22 @@ func (s *Store) Keep(ids map[int64]bool) {
 	}
 }
 
-// Get returns one report.
+// Get returns one report, aged against the clock.
 func (s *Store) Get(id int64) (Report, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	r, ok := s.reports[id]
-	return r, ok
+	return r.Aged(time.Now()), ok
 }
 
-// All returns every report, ordered by destination id so the dashboard does not
-// reshuffle itself on every push.
+// All returns every report, aged against the clock and ordered by destination
+// id so the dashboard does not reshuffle itself on every push.
 func (s *Store) All() []Report {
+	now := time.Now()
 	s.mu.RLock()
 	out := make([]Report, 0, len(s.reports))
 	for _, r := range s.reports {
-		out = append(out, r)
+		out = append(out, r.Aged(now))
 	}
 	s.mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].DestinationID < out[j].DestinationID })

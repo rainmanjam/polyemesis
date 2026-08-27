@@ -281,7 +281,7 @@ Everything past that floor is where they diverge:
 | **Linux (server)** | The race detector, 13 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
 | **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, bundling a pinned FFmpeg |
 | **macOS** | Nothing further | **Daily driver.** Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below |
-| **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and recording truncation on service stop is a known unresolved defect — see the note below |
+| **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and two known unresolved defects — recording truncation on service stop, and an intermittent Go runtime abort (#440) — see the notes below |
 
 **On the recording truncation.** This table filed it as Windows-only, and that
 was wrong: it happened on Linux too, and had since the shared SRT listener was
@@ -784,7 +784,14 @@ it — particularly the service-account section, because an account that lacks
 *Modify* on the data directory produces a service that starts cleanly and then
 fails the first time it writes a recording.
 
-Three Windows-specific things worth knowing up front:
+Four Windows-specific things worth knowing up front:
+
+- **An intermittent Go runtime abort on this platform (#440).** The process has
+  ended with `fatal error: found pointer to free object` on windows-latest,
+  during the test suite rather than in a broadcast, and it has not been
+  root-caused. It does not reproduce reliably and has not been observed on Linux
+  or macOS. Recorded here because a defect an operator can hit is one they are
+  entitled to know about before choosing this platform, not after.
 
 - **A service stop truncates an in-progress recording.** The graceful stop is a
   `CTRL_BREAK_EVENT`, and Windows delivers those only through a console, which a

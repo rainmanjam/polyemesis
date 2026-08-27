@@ -125,7 +125,10 @@ func modelFor(tweak func(*automod.ModelConfig)) *automod.Model {
 	if tweak != nil {
 		tweak(&cfg)
 	}
-	return automod.NewModel(cfg)
+	// A budget per model here, deliberately: each check in this suite is its own
+	// scenario and must not inherit spend from the one before it. The install
+	// shares one (see cmd/polyemesis/main.go); a test harness wants isolation.
+	return automod.NewModel(cfg, automod.NewBudget())
 }
 
 // ------------------------------------------------------------------ reach
@@ -435,7 +438,7 @@ func leak() {
 		c.Endpoint = configured
 		c.Timeout = 6 * time.Second
 		return c
-	}())
+	}(), automod.NewBudget())
 
 	findings, cerr := m.Check(context.Background(), synthBenign)
 	emit("findings", len(findings))
@@ -579,7 +582,7 @@ func hub() {
 	cfg.Endpoint = u.String()
 	cfg.Timeout = 6 * time.Second
 	cfg.Action = automod.ActionDelete
-	model := automod.NewModel(cfg)
+	model := automod.NewModel(cfg, automod.NewBudget())
 
 	matrix := permissiveMatrix()
 	caps := automod.PlatformCaps{}

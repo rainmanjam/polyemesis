@@ -3,7 +3,9 @@ package engine
 import (
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
@@ -338,5 +340,62 @@ func TestALateStartRejectsADestinationReplacedUnderTheSameID(t *testing.T) {
 		t.Errorf("a monitor from a stale plan was published against a destination that had "+
 			"been replaced under the same id (port %d): it would measure a graph that is no "+
 			"longer running", m.port)
+	}
+}
+
+// TestLoudnessWithdrawsAVerdictWhoseAnalyserWentQuiet is #609.
+//
+// THE OBSERVED FAILURE. A publisher was killed mid-broadcast. `publishing` and
+// `link` went false within 5 seconds -- honest -- but two destinations then
+// held byte-identical LUFS readings (`seconds: 235.9`, -12.601) for the next 65
+// seconds while a third kept measuring and walked to -21.3. The fallback feed
+// lacked the tracks those two filter graphs map, so their analysers emitted no
+// frames and nothing aged the last reading out. All three sat in the same
+// reports array and rendered identically: with a target configured, a green
+// pass stayed on screen indefinitely for a destination being fed something
+// else.
+//
+// This is the read path all of it came out of -- GET /loudness and
+// Engine.Status both land here -- so it is where the clock is applied.
+func TestLoudnessWithdrawsAVerdictWhoseAnalyserWentQuiet(t *testing.T) {
+	e := &Engine{loudStore: meters.NewStore()}
+	// A target the reading below passes against, which is the whole sting of
+	// #609: what stayed on screen was green.
+	target := meters.Target{
+		LUFS: -12.6, TruePeakDBTP: -1, ToleranceLU: meters.ToleranceLU,
+		Source: meters.TargetProfile,
+	}
+	frame := meters.Frame{
+		Seconds: 235.9, IntegratedLUFS: -12.601, MomentaryLUFS: -12.4,
+		ShortTermLUFS: -12.5, TruePeakDBTP: -2.0, Integrated: true,
+	}
+	now := time.Now()
+	// Two analysers stopped 65 seconds ago; the third is still printing.
+	e.loudStore.Put(meters.Observe(1, "youtube", target, frame, now.Add(-65*time.Second)))
+	e.loudStore.Put(meters.Observe(2, "twitch", target, frame, now.Add(-65*time.Second)))
+	e.loudStore.Put(meters.Observe(3, "kick", target, frame, now))
+
+	got := e.Loudness()
+	if len(got) != 3 {
+		t.Fatalf("want 3 reports, got %d", len(got))
+	}
+
+	for _, r := range got[:2] {
+		if r.Verdict != meters.VerdictUnknown {
+			t.Fatalf("%s last measured 65s ago and still reports %q: a stale pass reads exactly "+
+				"like a live one, which is the whole of #609", r.Destination, r.Verdict)
+		}
+		if !strings.Contains(r.Reason, "65 seconds") {
+			t.Fatalf("%s must say how long it has been since a measurement, got %q",
+				r.Destination, r.Reason)
+		}
+	}
+
+	// THE CONTROL. The destination that kept measuring keeps its verdict. A
+	// guard that blanks everything passes the assertions above and deletes the
+	// feature they are protecting.
+	if got[2].Verdict != meters.VerdictPass {
+		t.Fatalf("the destination that is still being measured reports %q (%s), want pass",
+			got[2].Verdict, got[2].Reason)
 	}
 }

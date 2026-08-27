@@ -8,10 +8,32 @@ import (
 
 // Recording is one MKV segment produced by the recorder.
 type Recording struct {
-	ID         int64     `json:"id"`
-	Filename   string    `json:"filename"`
-	StartedAt  time.Time `json:"startedAt"`
-	FinishedAt time.Time `json:"finishedAt"`
+	ID        int64     `json:"id"`
+	Filename  string    `json:"filename"`
+	StartedAt time.Time `json:"startedAt"`
+	// FinishedAt is `omitzero` because NOTHING HAS EVER SET IT.
+	//
+	// The scanner that indexes segments builds db.Recording{Filename,
+	// StartedAt, Bytes} (internal/recording/recording.go) and UpsertRecording
+	// only writes finished_at when it is non-zero, so the column is 0 on every
+	// row on every install -- and the reads below leave the field at its zero.
+	//
+	// It carried NO json tag option at all, so it marshalled as
+	// "0001-01-01T00:00:00Z": a non-empty string that parses cleanly, so the
+	// library page's truthiness guard passed and rendered it through a
+	// local-time offset as 12/31/1, 16:07:02. Twenty-seven live recordings, one
+	// bogus first-century date each.
+	//
+	// `omitzero` (Go 1.24) drops the key instead, so the wire cannot carry an
+	// instant the server does not know. It is NOT assigned here on purpose:
+	// only the recorder knows when a segment stopped, and inventing one from a
+	// file mtime would replace a visibly wrong answer with an invisibly wrong
+	// one. If a real finish time is ever recorded, the field already stores and
+	// serves it.
+	//
+	// ui/src/lib/types.ts declares `finishedAt: string` NON-optional and must
+	// become `finishedAt?: string`.
+	FinishedAt time.Time `json:"finishedAt,omitzero"`
 	Bytes      int64     `json:"bytes"`
 	DurationMS int64     `json:"durationMs"`
 	// Tracks is the audio track count preserved in the file. The recorder
@@ -44,14 +66,29 @@ func (d *DB) UpsertRecording(r *Recording) error {
 	if !r.FinishedAt.IsZero() {
 		finished = r.FinishedAt.Unix()
 	}
-	_, err := d.sql.Exec(`INSERT INTO recordings (filename, started_at, finished_at, bytes, duration_ms, tracks)
-		VALUES (?,?,?,?,?,?)
+	// source_id IS WRITTEN HERE, AND UNTIL NOW IT WAS WRITTEN NOWHERE.
+	//
+	// Two SELECTs read it and no statement in this package ever set it, so
+	// every row on every install carried NULL -- for ever, not just for rows
+	// predating sources. That made a defence elsewhere inert while reading as
+	// solid: clipTracks (internal/api/clips.go) resolves the recording's own
+	// programme so a clip cut from Studio B is not labelled with Main's track
+	// names, and its comment calls nil "a row written before sources existed".
+	// Nil was every row, so it fell back to the default programme every time
+	// and the mislabelling it prevents was happening on every clip.
+	//
+	// Guarded like duration_ms and tracks beside it, and for the same reason:
+	// a later sweep that re-indexes a file it cannot attribute must not wipe an
+	// attribution an earlier one made.
+	_, err := d.sql.Exec(`INSERT INTO recordings (filename, started_at, finished_at, bytes, duration_ms, tracks, source_id)
+		VALUES (?,?,?,?,?,?,?)
 		ON CONFLICT(filename) DO UPDATE SET
 			finished_at=excluded.finished_at,
 			bytes=excluded.bytes,
 			duration_ms=CASE WHEN excluded.duration_ms > 0 THEN excluded.duration_ms ELSE recordings.duration_ms END,
-			tracks=CASE WHEN excluded.tracks > 0 THEN excluded.tracks ELSE recordings.tracks END`,
-		r.Filename, started, finished, r.Bytes, r.DurationMS, r.Tracks)
+			tracks=CASE WHEN excluded.tracks > 0 THEN excluded.tracks ELSE recordings.tracks END,
+			source_id=CASE WHEN excluded.source_id IS NOT NULL THEN excluded.source_id ELSE recordings.source_id END`,
+		r.Filename, started, finished, r.Bytes, r.DurationMS, r.Tracks, r.SourceID)
 	return err
 }
 

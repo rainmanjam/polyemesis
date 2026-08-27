@@ -222,12 +222,33 @@ type Job struct {
 	Error string `json:"error,omitempty"`
 
 	CreatedAt time.Time `json:"createdAt"`
+
+	// THESE THREE ARE `omitzero`, NOT `omitempty`, AND THE DIFFERENCE IS THE
+	// WHOLE POINT.
+	//
+	// `omitempty` DOES NOTHING ON A time.Time. encoding/json has no empty case
+	// for a struct, so an unset instant marshalled as "0001-01-01T00:00:00Z" --
+	// a NON-EMPTY string that parses cleanly, so every client guard of the form
+	// `job.startedAt && ...` passed and rendered it. Through a local-time
+	// offset that is 12/31/1, 16:07:02. A QUEUED job served three of them at
+	// once: it has not been deferred, has not started and has not finished, so
+	// availableAt, startedAt and finishedAt were all year 1 on the same row.
+	//
+	// Go 1.24's `omitzero` calls IsZero and drops the key, so the zero cannot
+	// reach the wire at all -- the shape refuses to serialise it rather than
+	// the reader coping with it. Pointers would fix it too and would break the
+	// store: internal/db/jobs.go assigns and compares these as values, and
+	// Reset (jobs.go there) clears FinishedAt with `time.Time{}`.
+	//
+	// ui/src/lib/types.ts already declares all three optional, so the key going
+	// missing is what the client was always typed for.
+	//
 	// AvailableAt is the earliest this job may be claimed. It carries both
 	// retry backoff and resource-policy deferral, so there is one mechanism
 	// holding work back rather than two.
-	AvailableAt time.Time `json:"availableAt,omitempty"`
-	StartedAt   time.Time `json:"startedAt,omitempty"`
-	FinishedAt  time.Time `json:"finishedAt,omitempty"`
+	AvailableAt time.Time `json:"availableAt,omitzero"`
+	StartedAt   time.Time `json:"startedAt,omitzero"`
+	FinishedAt  time.Time `json:"finishedAt,omitzero"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 

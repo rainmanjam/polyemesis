@@ -45,6 +45,19 @@ type DB struct {
 	// reasoning. A field on the thing being configured has neither problem.
 	passwordCost int
 
+	// sealedOnOpen is how many destination rows this Open moved from a
+	// plaintext stream key to a sealed one -- i.e. how many rows stopped being
+	// recoverable from polyemesis.db alone.
+	//
+	// It exists so the boot can SAY SO. In 0.6.0 the database was a complete
+	// destination backup; from the moment these rows seal it is not, and the
+	// operator who has been backing up polyemesis.db and nothing else has a
+	// backup that silently stopped containing their stream keys. Nothing told
+	// them, because the change is invisible from outside and the helper scripts
+	// that would have checked ship INSIDE the version being upgraded to -- a
+	// 0.6.0 install runs 0.6.0's update.sh. See #557.
+	sealedOnOpen int
+
 	// box seals and opens the destination stream keys. nil is a supported
 	// configuration and means "store them in plaintext, exactly as before".
 	//
@@ -293,12 +306,29 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// alert_rules.allow_private_target, the same guard one table over: an alert
+	// rule aimed at a private address is refused at save time, and at dial
+	// time, unless the operator opted in on that rule.
+	if err := d.MigrateAlertRuleAllowPrivateTarget(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// Last, because it reads settings and writes to destinations, renditions
 	// and recordings: every column those tables are going to have must already
 	// be there. It also creates the first source from the existing ingest
 	// configuration, which is what keeps an upgraded install reachable by the
 	// encoder that was already pointed at it.
 	if err := d.MigrateSources(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	// BEFORE the backfill below, because a key this clears is a key that does
+	// not then need sealing, and because both of them end in the same
+	// checkpoint. Also before anything can READ a destination: Validate now
+	// refuses a stream key on a kind that cannot carry one, so a row upgraded
+	// into this release carrying one would be unsaveable -- and unfixable, since
+	// no screen shows a key field for those kinds. See MigrateStrandedStreamKeys.
+	if err := d.MigrateStrandedStreamKeys(); err != nil {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -422,3 +452,20 @@ func (d *DB) SQL() *sql.DB { return d.sql }
 
 // Close closes the database.
 func (d *DB) Close() error { return d.sql.Close() }
+
+// SealedOnOpen is how many destination stream keys this Open moved out of the
+// database and into the sealed column.
+//
+// Non-zero means exactly one thing, and it is the thing #557 is about: this
+// boot upgraded an install whose `polyemesis.db` USED TO BE a complete
+// destination backup and no longer is. The keys now need `secret.key` beside
+// them, and an operator whose backup routine copies the database alone has, as
+// of this moment, a backup that will restore their destinations with empty
+// stream keys.
+//
+// Nobody could have told them earlier. The helper scripts that would check ship
+// INSIDE the version being upgraded to, so a 0.6.0 install runs 0.6.0's
+// update.sh -- the upgrade guard arrives with the thing it was supposed to
+// guard. The one place that can say it is the first boot on the new code, which
+// is here.
+func (d *DB) SealedOnOpen() int { return d.sealedOnOpen }

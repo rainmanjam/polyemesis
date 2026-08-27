@@ -26,6 +26,29 @@ import type {
    =========================================================================== */
 
 export interface LiveData {
+  /** WHICH PROGRAMME the console is looking at, resolved once by
+   *  LiveDataProvider from what the operator last looked at, else the server's
+   *  first source. Null on an install with no sources, which the routes accept
+   *  because with no sources there is no ambiguity to refuse.
+   *
+   *  Exposed because it is not only the live feed that needs it: every write to
+   *  a programme-scoped route has to name one, and lib/autoApi.ts's callers had
+   *  no way to reach this answer at all. Clips and the loudness monitor were
+   *  refused outright on any install with two programmes as a result. There is
+   *  one resolution rule and this is it -- a second one computed elsewhere is
+   *  how two screens come to disagree about which show they are describing. */
+  programme: number | null;
+  /** Whether the programme question has been ANSWERED -- including the answer
+   *  "there is none", which is legitimate on a fresh install.
+   *
+   *  Distinct from `programme != null` and the distinction is the whole point:
+   *  null means EITHER "no sources exist" (a scoped route accepts that, there
+   *  is no ambiguity to refuse) OR "not resolved yet" (a scoped route refuses
+   *  it with 400 source_required). A control that fires during the second
+   *  reads to the operator as a broken button -- it is how #606 kept
+   *  reappearing after the client was fixed. Gate the control on this, not on
+   *  the id. */
+  programmeKnown: boolean;
   connected: boolean;
   status: Status | null;
   source: SourceInfo | null;

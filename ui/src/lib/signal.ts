@@ -77,19 +77,33 @@ export const toneBadge: Record<SignalTone, "live" | "warn" | "down" | "armed" | 
  *  `hollow` is a flag rather than a border width in the class string: the ring
  *  has to be thinner at 6px than at 40px or it closes up into a solid dot, and
  *  that is a decision for the component that knows the size. */
-export const toneMark: Record<SignalTone, { shape: string; hollow: boolean }> = {
+/* WHAT EACH MARK MEANS, IN WORDS, beside the shape that means it.
+ *
+ * The dot carries two channels already -- hue and silhouette -- and neither is
+ * readable by someone who does not already know the vocabulary, or by a screen
+ * reader. Most dots sit next to text that says the state, which is why this
+ * went unnoticed; the ones that do not are the renditions list, where the dot
+ * is the only thing on the row saying whether that tier is encoding.
+ *
+ * Here rather than in the component so `Record<SignalTone, ...>` does the
+ * checking: a sixth tone cannot be added without a word for it, the same way
+ * it cannot be added without a shape. */
+export const toneMark: Record<
+  SignalTone,
+  { shape: string; hollow: boolean; title: string }
+> = {
   // Solid disc. The only tone that fills its box completely, which is what
   // makes "on air" the heaviest mark on the screen at a glance.
-  live: { shape: "rounded-full bg-live", hollow: false },
+  live: { shape: "rounded-full bg-live", hollow: false , title: "On air and carrying data" },
   // Diamond. scale-90 trims it back toward the optical weight of the disc
   // beside it: a square turned 45° has a 1.41x diagonal, so at full size a
   // reconnecting dot reads as a bigger mark than a live one — which is a
   // hierarchy nobody meant to state. Transform only, so nothing here can move
   // the label beside it whatever the scale.
-  warn: { shape: "rotate-45 scale-90 rounded-[1px] bg-warn", hollow: false },
-  down: { shape: "rounded-[1px] bg-down", hollow: false },
+  warn: { shape: "rotate-45 scale-90 rounded-[1px] bg-warn", hollow: false , title: "Reconnecting after a drop" },
+  down: { shape: "rounded-[1px] bg-down", hollow: false , title: "Failed" },
   // Hollow: nothing is flowing through it yet. Reads as "loaded, not firing"
   // without needing its hue.
-  armed: { shape: "rounded-full border-armed", hollow: true },
-  idle: { shape: "rounded-[1px] border-subtle-foreground", hollow: true },
+  armed: { shape: "rounded-full border-armed", hollow: true , title: "Configured and ready, but not running" },
+  idle: { shape: "rounded-[1px] border-subtle-foreground", hollow: true , title: "Not running" },
 };

@@ -1128,6 +1128,10 @@ export interface SourceView extends Source {
 }
 
 export interface Settings {
+  /** How times are PRESENTED, install-wide, and nothing else -- see
+   *  db.DisplaySettings. Optional so a client older than the field can still
+   *  PUT the rest of the document. */
+  display?: { timeZone: string };
   ingest: {
     mode: IngestMode;
     srt: { passphrase: string; latencyMs: number };
@@ -1535,7 +1539,13 @@ export interface Recording {
   id: number;
   filename: string;
   startedAt: string;
-  finishedAt: string;
+  /** ABSENT until the segment is finished, and absent is the honest answer.
+   *
+   *  It used to be declared required while the server sent Go's zero time --
+   *  "0001-01-01T00:00:00Z", a non-empty string that parses -- so every live
+   *  recording carried a finish date in the year 1. The server now omits it
+   *  (omitzero), which makes this optional and makes the declaration true. */
+  finishedAt?: string;
   bytes: number;
   durationMs: number;
   tracks: number;

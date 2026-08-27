@@ -123,6 +123,58 @@ func (s *Server) handleCreateRendition(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"rendition": created})
 }
 
+// renditionKeepsItsSource refuses an update that would move a rendition from
+// one programme to another.
+//
+// A CREATE HAS HAD TO NAME ITS PROGRAMME SINCE requireNamedSource; AN UPDATE
+// COULD QUIETLY CHANGE IT. handleUpdateRendition decodes the body over the row
+// it just read, so `{"sourceId": 2}` was a complete, successful relocation: the
+// rendition vanished from programme 1's reconciler, which tore its encode down,
+// while every destination in programme 1 still selected it by id and got no
+// process and the sentence "rendition N is no longer available" — for a
+// rendition that had merely been moved, by a one-field PUT nobody would think
+// of as destructive. Nothing in the response said a programme had changed.
+//
+// It also stands in front of the foreign key. `{"sourceId": 999}` used to reach
+// SQLite and come back as "FOREIGN KEY constraint failed (787)", which names
+// neither the field nor the fix; every other source refusal on this server ends
+// with the list of programmes to choose from, and now so does this one.
+//
+// Moving a rendition is not blocked so much as unspellable: there is no request
+// that performs it. Make the new one where it belongs and point its
+// destinations at that.
+func (s *Server) renditionKeepsItsSource(w http.ResponseWriter, id int64, owner, want *int64) bool {
+	if owner == nil && want == nil {
+		return true
+	}
+	if owner != nil && want != nil && *owner == *want {
+		return true
+	}
+	msg := fmt.Sprintf("rendition %d cannot be moved between programmes: it belongs to %s "+
+		"and this request asked for %s. Its destinations select it by id and would be "+
+		"left with no encode and no explanation. Create a rendition on the other source "+
+		"instead.", id, sourceRef(owner), sourceRef(want)) + s.availableSources()
+	writeError(w, http.StatusBadRequest, msg)
+	return false
+}
+
+// copyID detaches a nullable id from the struct it was read out of.
+func copyID(id *int64) *int64 {
+	if id == nil {
+		return nil
+	}
+	v := *id
+	return &v
+}
+
+// sourceRef renders a nullable source id for a refusal a person has to act on.
+func sourceRef(id *int64) string {
+	if id == nil {
+		return "no source"
+	}
+	return fmt.Sprintf("source %d", *id)
+}
+
 func (s *Server) handleUpdateRendition(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
@@ -134,12 +186,23 @@ func (s *Server) handleUpdateRendition(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// Read BEFORE the decode, because the decode is what can overwrite it -- and
+	// COPIED, not aliased. SourceID is a *int64 and encoding/json decodes into
+	// the value an already-non-nil pointer points AT, so keeping the pointer
+	// keeps a view of the field being overwritten rather than a record of what
+	// it was. The first draft of this guard did exactly that and compared the
+	// new source against itself, which passes every time and is the failure mode
+	// a "before" snapshot exists to prevent.
+	owner := copyID(existing.SourceID)
 	// Decode over the existing row so a client sending only a bitrate does not
 	// blank the name, exactly as the destination editor does.
 	if !decodeJSON(w, r, existing) {
 		return
 	}
 	existing.ID = id
+	if !s.renditionKeepsItsSource(w, id, owner, existing.SourceID) {
+		return
+	}
 
 	updated, err := s.store.UpdateRendition(existing)
 	if err != nil {

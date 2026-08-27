@@ -111,7 +111,7 @@ func (s *Server) handlePutAutomodKey(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("automod key stored, but settings could not be re-read to "+
 			"rebuild the model checker; it will pick the key up on restart", "err", err)
 	} else {
-		ApplyAutomod(s.chat, s.store, s.box, s.log, set.Automod)
+		ApplyAutomod(s.chat, s.store, s.box, s.log, set.Automod, s.automodBudget)
 	}
 
 	s.publishAudit(auditSettingsChanged([]string{"automod"}, s.clientIP(r)))
@@ -237,13 +237,26 @@ func historyFromSettings(a db.AutomodSettings) automod.HistoryLimits {
 // while internal/engine/reload.go:301 classified timeoutForBan as ClassLive
 // through this function, which is a written promise that saving it takes
 // effect.
-func modelConfigFrom(a db.AutomodSettings) automod.ModelConfig {
+func modelConfigFrom(a db.AutomodSettings) (automod.ModelConfig, error) {
+	var confidenceProblem error
 	cfg := automod.DefaultModelConfig()
 	cfg.Enabled = true
 	cfg.Endpoint = a.Model.Endpoint
 	cfg.Model = a.Model.Model
 	cfg.MaxCallsPerHour = a.Model.MaxCallsPerHour
-	cfg.MinConfidence = a.Model.MinConfidence
+	// PARSED, NOT COPIED, and the compiler now insists. This line used to be a
+	// bare assignment sitting directly above a neighbour that DID carry a
+	// `> 0` guard -- the hazard understood on one line and not the one above
+	// it. A stored 0 removed the confidence floor entirely and every model
+	// opinion acted; a stored 80, from reading the scale as a percentage, sat
+	// above every verdict the model can return and silently retired the
+	// checker. Out of range keeps DefaultModelConfig's 0.8, which is a floor
+	// that works, rather than either failure.
+	if c, err := automod.ParseConfidence(a.Model.MinConfidence); err == nil {
+		cfg.MinConfidence = c
+	} else {
+		confidenceProblem = err
+	}
 	cfg.Instruction = a.Model.Instruction
 	if a.Model.TimeoutSeconds > 0 {
 		cfg.Timeout = time.Duration(a.Model.TimeoutSeconds) * time.Second
@@ -257,10 +270,10 @@ func modelConfigFrom(a db.AutomodSettings) automod.ModelConfig {
 	if automod.KnownActions(automod.Action(a.Model.Action)) {
 		cfg.Action = automod.Action(a.Model.Action)
 	}
-	return cfg
+	return cfg, confidenceProblem
 }
 
-func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logger, a db.AutomodSettings) {
+func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logger, a db.AutomodSettings, budget *automod.Budget) {
 	if hub == nil {
 		return
 	}
@@ -281,7 +294,14 @@ func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logge
 
 	var model *automod.Model
 	if a.Model.Enabled {
-		cfg := modelConfigFrom(a)
+		cfg, err := modelConfigFrom(a)
+		if err != nil {
+			// Named loudly rather than swallowed, for the same reason a rule
+			// that does not compile is: a confidence floor an operator set and
+			// this server ignored is a moderation posture they believe they
+			// have. The checker runs on the default rather than not at all.
+			log.Error("automod model confidence floor rejected; using the default", "err", err)
+		}
 		if key, err := store.GetAutomodKey(box); err == nil {
 			cfg.APIKey = key
 		} else {
@@ -290,7 +310,9 @@ func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logge
 			// stops.
 			log.Warn("automod model key unreadable; the model checker will fail open", "err", err)
 		}
-		model = automod.NewModel(cfg)
+		// The SAME budget every time this runs. Rebuilding the connector on a
+		// settings save is correct; refilling its hourly allowance was not.
+		model = automod.NewModel(cfg, budget)
 	}
 
 	engine := automod.New(

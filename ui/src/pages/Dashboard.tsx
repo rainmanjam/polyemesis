@@ -1,12 +1,18 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
 import { audioTrackCount, ingestAttribution, ingestBitrateKbps, processAbsence } from "@/lib/dashboardFacts";
 import { laneLayout } from "@/lib/sourceLanes";
+import { cn } from "@/lib/utils";
+import { topRowLayout } from "@/lib/dashboardLayout";
+import { failoverNotice, type FailoverNotice } from "@/lib/failoverNotice";
+import { trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
-import { Copy, Megaphone, Play, Plus, Radio, RadioTower, Square } from "lucide-react";
+import { Copy, Megaphone, Play, Plus, Radio, RadioTower, ShieldAlert, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +39,7 @@ import type {
   Destination,
   DestinationId,
   DestStatus,
+  FailoverSettings,
   MetaField,
   SourceView,
   SystemInfo,
@@ -778,12 +785,60 @@ function BulkDestinationControl({
   );
 }
 
+/** The failover exposure line. Renders nothing when there is nothing to say,
+ *  which is the common case on a correctly configured install. */
+function FailoverExposure({ notice }: { notice: FailoverNotice }) {
+  if (notice.kind === "none") return null;
+
+  return (
+    <div
+      className="mb-2 flex items-start gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-[11px]"
+      // Not role="alert". Nothing has gone wrong yet, and announcing a standing
+      // configuration fact as an alert on every page load is how a screen-reader
+      // user learns to tune the region out.
+    >
+      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
+      <p className="text-muted-foreground">
+        <span className="text-foreground">
+          If the encoder disconnects, this broadcast ends.
+        </span>{" "}
+        Without failover the destination restarts and takes the platform
+        connection with it, and a completed YouTube broadcast cannot return to
+        live. Turning it on in{" "}
+        <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
+          Settings → Failover
+        </Link>{" "}
+        holds the connection up with a standby ingest, a looping file or a
+        slate. It costs a remux hop.
+      </p>
+    </div>
+  );
+}
+
+/** The dashboard's right-hand cards: a stack in one grid cell, or two cells.
+ *
+ *  A COMPONENT RATHER THAN A TERNARY AROUND THE CHILDREN, because the children
+ *  are a couple of hundred lines of JSX and the alternative was writing them
+ *  twice. Duplicated markup is how the two arrangements would drift -- a row
+ *  added to the pipeline card in one branch and not the other, on a page where
+ *  which branch you see depends on how many programmes the install has, and so
+ *  is not something the person editing it is likely to be toggling.
+ */
+function SideColumn({ stacked, children }: { stacked: boolean; children: ReactNode }) {
+  if (stacked) return <div className="flex flex-col gap-3">{children}</div>;
+  return <>{children}</>;
+}
+
 export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
   const { status, bitrate } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
+  /* The failover settings, for the exposure line above the destinations. Null
+   * until the read lands, and failoverNotice() treats that as "say nothing"
+   * rather than "unprotected" -- see lib/failoverNotice.ts. */
+  const [failover, setFailover] = useState<FailoverSettings | null>(null);
   // The recorder's and the meters' own settings, kept rather than discarded.
   //
   // This page already fetched the whole settings object and threw all but one
@@ -855,8 +910,14 @@ export function Dashboard() {
       .then((s) => {
         setSettingsPreview(s.preview.enabled);
         setFeatureEnabled({ recording: s.recording.enabled, meters: s.meters.enabled });
+        setFailover(s.failover ?? null);
       })
-      .catch(() => setFeatureEnabled(null));
+      .catch(() => {
+        setFeatureEnabled(null);
+        // Left null on a failed read, so the notice stays silent rather than
+        // claiming an exposure it could not verify.
+        setFailover(null);
+      });
     readSourceCount();
     // AND KEEP READING IT. The count used to be read once per refreshKey, and
     // every control that bumps refreshKey is inside the pipeline this page
@@ -979,6 +1040,10 @@ export function Dashboard() {
     [tiles, destinations, sources],
   );
 
+  /* The top row's shape, from one call so its two halves cannot disagree.
+   * See lib/dashboardLayout.ts and #614. */
+  const topRow = topRowLayout(lanes.laned);
+
   /* ONE CARD, rendered from the GLOBAL index rather than a per-group one.
    *
    * The move arrows reorder the whole list and the order is persisted whole, so
@@ -995,6 +1060,12 @@ export function Dashboard() {
                  * lane, grid or orphan section — because the summary has no way
                  * to know which one a given destination landed in. */
                 domId={`dest-${d.id}`}
+                /* Names for the audio chips' tooltips, and null whenever the
+                 * live source snapshot is of a DIFFERENT programme than this
+                 * card's -- which on a lanes install is most of them. See
+                 * lib/trackLabels.ts for why a wrong name is worse here than
+                 * no name. */
+                trackLabels={trackLabels(source, d.sourceId)}
                 busy={busyId === d.id}
                 canMoveEarlier={i > 0}
                 canMoveLater={i < destinations.length - 1}
@@ -1148,7 +1219,23 @@ export function Dashboard() {
           than a flat inventory of the install. See components/OnAirBar.tsx. */}
       <OnAirBar status={status} />
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      {/* TWO COLUMNS WITH A PREVIEW, THREE WITHOUT.
+       *
+       * The left column's tallest element is the preview, and lanes suppress it
+       * (see the Suspense block below) because each lane carries its own. That
+       * left the column holding nothing but the Ingest card while the right one
+       * still stacked chat above the pipeline -- a grid row as tall as the
+       * taller side, and roughly four hundred pixels of empty page directly
+       * under the card an operator looks at first. It read as a component that
+       * had failed to render. See #614.
+       *
+       * Unstacking the side column is the fix rather than filling the hole:
+       * chat and the pipeline are both short, so side by side they make a row
+       * about half the height the stack did. The dead space goes away AND the
+       * destination area -- the thing lanes exist to organise -- moves up the
+       * page instead of further down it.
+       */}
+      <div className={cn("grid gap-3", topRow.gridClass)}>
         {/* ---------- preview + ingest ---------- */}
         <div className="flex flex-col gap-3">
           <Suspense
@@ -1213,7 +1300,7 @@ export function Dashboard() {
               )}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Stat
-                  label={t("dash.bitrate")}
+                  labelKey="dash.bitrate"
                   value={(() => {
                     // See ingestBitrateKbps: for SRT there is no ingest
                     // process, so this asked the wrong source and printed "—"
@@ -1230,13 +1317,13 @@ export function Dashboard() {
                   })()}
                 />
                 <Stat
-                  label={t("dash.uptime")}
+                  labelKey="dash.uptime"
                   value={ingest?.state === "running" ? duration(ingest.uptimeSec) : "—"}
                 />
                 {/* "—" until the probe answers, not "0". See audioTrackCount(). */}
-                <Stat label={t("dash.audioTracks")} value={audioTrackCount(source)} />
+                <Stat labelKey="dash.audioTracks" value={audioTrackCount(source)} />
                 <Stat
-                  label={t("dash.reconnects")}
+                  labelKey="dash.reconnects"
                   value={ingest?.restarts ?? 0}
                   tone={(ingest?.restarts ?? 0) > 0 ? "warn" : "muted"}
                 />
@@ -1277,11 +1364,13 @@ export function Dashboard() {
         </div>
 
         {/* ---------- side stats ---------- */}
-        <div className="flex flex-col gap-3">
-          {/* Chat sits above the pipeline because it is the only thing on this
-              column an operator reads mid-broadcast. It renders honestly when
-              nothing is connected — "no platforms connected", not an error —
-              so it costs an install with no accounts nothing but a heading. */}
+        {/* A FRAGMENT WHEN LANED, so the two cards become grid children in
+            their own columns rather than a stack in one. Chat still comes
+            first: reading order is unchanged, and it is the only thing on this
+            side an operator reads mid-broadcast. It renders honestly when
+            nothing is connected — "no platforms connected", not an error — so
+            it costs an install with no accounts nothing but a heading. */}
+        <SideColumn stacked={topRow.sideStacked}>
           <ChatPanel className="h-80" />
 
           <Card>
@@ -1357,7 +1446,7 @@ export function Dashboard() {
               </div>
             </CardContent>
           </Card>
-        </div>
+        </SideColumn>
       </div>
 
       <GoLiveComposer />
@@ -1372,6 +1461,27 @@ export function Dashboard() {
             </span>
           </h2>
         </div>
+
+        {/* THE ONE UNRECOVERABLE FAILURE, said where the destinations it would
+            cost are listed. See lib/failoverNotice.ts and #512.
+
+            Here rather than in the attention panel: that panel lists what is
+            wrong NOW, and its own comment explains that padding it with states
+            somebody chose is how it becomes something an operator scrolls past.
+            A permanent row on every install that has not enabled failover is
+            exactly that.
+
+            No dismiss button. A banner with an X depends on the operator
+            remembering, later, something they closed while busy -- rung zero.
+            This clears itself when the setting changes and returns if it
+            changes back, so what is on screen is the current exposure rather
+            than a record of who clicked what. */}
+        <FailoverExposure
+          notice={failoverNotice(
+            destinations.filter((d) => d.enabled).length,
+            failover,
+          )}
+        />
 
         {/* Beside the list it acts on, not in the header row: the outcome list
             below the buttons needs the full width to put a destination name and

@@ -549,6 +549,16 @@ func TestNothingOutsideTheAPIPackageReachesTheDefaultEngine(t *testing.T) {
 			switch d.Name() {
 			case ".git", "node_modules", "ui", "web", "dist":
 				return fs.SkipDir
+			// A NESTED CHECKOUT IS NOT THIS PROJECT'S SOURCE.
+			//
+			// Agent worktrees live under .claude/worktrees/, and each is a
+			// whole second copy of the repository -- internal/api included. The
+			// walk found their api.go and reported `s.mgr.Default()` in files
+			// nobody had edited, naming paths that do not exist in the tree the
+			// developer is looking at. The rule is real and the finding was
+			// noise, which is the combination that gets a guard disabled.
+			case ".claude", "vendor", "testdata":
+				return fs.SkipDir
 			}
 			return nil
 		}

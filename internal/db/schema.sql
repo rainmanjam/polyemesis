@@ -262,6 +262,10 @@ CREATE TABLE IF NOT EXISTS alert_rules (
     min_severity         TEXT    NOT NULL DEFAULT 'info',
     debounce_seconds     INTEGER NOT NULL DEFAULT 10,
     min_interval_seconds INTEGER NOT NULL DEFAULT 30,
+    -- DEFAULT 0: a rule may only reach loopback, a LAN range or the cloud
+    -- metadata address when an operator ticked the box for that rule. See
+    -- MigrateAlertRuleAllowPrivateTarget for what an upgraded install does.
+    allow_private_target INTEGER NOT NULL DEFAULT 0,
     created_at           INTEGER NOT NULL,
     updated_at           INTEGER NOT NULL
 );

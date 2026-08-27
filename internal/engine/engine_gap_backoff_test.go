@@ -177,12 +177,15 @@ func TestAFailedStartArmsTheBackoffFromItsOwnAttempt(t *testing.T) {
 	// Named window rather than held: this test already uses held for the ports
 	// it drains from the allocator further down.
 	base, window := testenv.FreeUDPWindow(t, 2)
-	// Released together, immediately before the allocator is built: the window
-	// has to be free for Allocate to hand it out, and holding it until this line
-	// is what stopped anything else from taking it.
-	for _, r := range window {
-		r.Release()
-	}
+	// Released together AND WAITED FOR, immediately before the allocator is
+	// built. The window has to be free for Allocate to hand it out, and holding
+	// it until this line is what stopped anything else from taking it -- but
+	// closing a socket does not make its port bindable again in the same
+	// instant. On windows-latest both ports of this two-port window were still
+	// refusing an `udp4` bind when the allocator probed them, the pool read as
+	// exhausted, startFeed returned before it could subscribe, and this test
+	// failed twenty lines below on an empty hub. See ReleaseAndSettle.
+	testenv.ReleaseAndSettle(t, window...)
 	e.alloc = relay.NewPortAllocator(base, 2)
 	s := failoverOnSettings()
 	setSettings(e, s)
@@ -198,8 +201,15 @@ func TestAFailedStartArmsTheBackoffFromItsOwnAttempt(t *testing.T) {
 			"is no successful start whose timestamp could be cleared", act)
 	}
 	if !feedSubscribed(e.sourceHub()) {
-		t.Fatalf("the primary is on air but nothing is subscribed to its hub (%v)",
-			e.sourceHub().Subscribers())
+		// THE ENGINE'S OWN REASON, not just the symptom. ensureFeed sets
+		// active = want whether or not startFeed returned a feed, and records
+		// why in sel.err -- so "on air with an empty hub" is a state the engine
+		// can explain and this assertion used to throw away. Without it a
+		// windows-only failure says only that the hub is empty, which sends the
+		// reader to the selector when the answer was a port allocator.
+		t.Fatalf("the primary is on air but nothing is subscribed to its hub (%v); "+
+			"the selector's own error is %q",
+			e.sourceHub().Subscribers(), e.Failover().Error)
 	}
 
 	// A deliberate teardown, which zeroes feedAt. From here the ONLY thing that

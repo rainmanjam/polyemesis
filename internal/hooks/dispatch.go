@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -71,8 +72,12 @@ type Stats struct {
 	Failed  int64 `json:"failed"`
 	Retries int64 `json:"retries"`
 	// Endpoints is how many workers are running, i.e. enabled hooks.
-	Endpoints int       `json:"endpoints"`
-	LastSent  time.Time `json:"lastSent,omitempty"`
+	Endpoints int `json:"endpoints"`
+	// LastSent is the zero time until something has been delivered, and that
+	// zero MUST NOT reach the browser. See MarshalJSON below: the `omitempty`
+	// this used to carry does nothing on a time.Time, and the tag saying
+	// otherwise is why nobody looked again.
+	LastSent time.Time `json:"lastSent,omitempty"`
 	// LastError is a copy of the last DeliveryRecord.Error and carries the same
 	// three passes; see deliver. It is SERVED to a read-scoped token at GET
 	// /api/v1/hooks/meta, so "has already been through alerts.Redact" -- which
@@ -80,6 +85,36 @@ type Stats struct {
 	// wrong standard: Redact cannot see an https path secret, which is the only
 	// credential this field has ever plausibly carried.
 	LastError string `json:"lastError,omitempty"`
+}
+
+// OMITEMPTY DOES NOTHING ON A time.Time, and the tag above has always said it
+// did.
+//
+// encoding/json treats a struct as empty never -- there is no "zero struct"
+// case in its emptiness test -- so `lastSent,omitempty` marshalled the zero
+// time on every install that had delivered nothing. The browser received
+// "0001-01-01T00:00:00Z", which is a non-empty string, so the automation page's
+// `stats?.lastSent && ...` guard passed and it rendered the zero through a
+// local-time offset: LAST DELIVERY 12/31/1, 16:07:02, on a card whose other
+// six figures all read 0. A date from the first century is not a subtle wrong
+// answer, but it survived because the field's own tag claimed to prevent it.
+//
+// A pointer would fix the wire and break every caller: automation.go compares
+// these with .After() to fold per-hook stats into one. So the Go type keeps
+// its zero and the JSON does not carry it.
+func (s Stats) MarshalJSON() ([]byte, error) {
+	// An alias with no methods, or this recurses into itself forever.
+	type raw Stats
+	out := struct {
+		raw
+		// Shadows the embedded field: encoding/json prefers the shallower of
+		// two fields with the same name, so this one is what gets written.
+		LastSent *time.Time `json:"lastSent,omitempty"`
+	}{raw: raw(s)}
+	if !s.LastSent.IsZero() {
+		out.LastSent = &s.LastSent
+	}
+	return json.Marshal(out)
 }
 
 // DeliveryRecord is one attempt's outcome, kept in memory so an operator can

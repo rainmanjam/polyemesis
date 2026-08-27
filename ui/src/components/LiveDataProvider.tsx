@@ -270,6 +270,8 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<LiveData>(
     () => ({
+      programme,
+      programmeKnown,
       connected,
       status,
       source,
@@ -282,6 +284,8 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       clearLogs,
     }),
     [
+      programme,
+      programmeKnown,
       connected,
       status,
       source,

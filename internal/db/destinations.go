@@ -608,10 +608,22 @@ func (d Destination) ExpertArgsSet() bool {
 		strings.TrimSpace(d.ExtraOutputArgs) != ""
 }
 
+// CarriesStreamKey reports whether this kind's publish URL has a stream key
+// joined onto it.
+//
+// ONE FUNCTION BECAUSE TWO COPIES DRIFTED, AND THE DRIFT WAS THE BUG (#610).
+// Target() knew that only RTMP appends a key; Validate() did not, so a key on
+// an SRT, file or audio destination was accepted, stored, and then silently
+// dropped on the way to the wire. Both callers now ask the same question, so
+// "which kinds carry a key" cannot be answered two different ways again.
+func (k DestKind) CarriesStreamKey() bool {
+	return k == DestRTMP
+}
+
 // Target returns the full URL FFmpeg should publish to, i.e. URL with the
 // stream key joined on for RTMP.
 func (d Destination) Target() string {
-	if d.Kind != DestRTMP || d.StreamKey == "" {
+	if !d.Kind.CarriesStreamKey() || d.StreamKey == "" {
 		return d.URL
 	}
 	return strings.TrimRight(d.URL, "/") + "/" + d.StreamKey
@@ -685,6 +697,44 @@ func (d Destination) Validate() error {
 		case strings.Contains(target, ".."), strings.HasPrefix(target, "/"):
 			add("audio file destination must be a relative name inside the recordings directory")
 		}
+	}
+
+	// A STREAM KEY ON A KIND THAT CANNOT CARRY ONE IS REFUSED (#610).
+	//
+	// Retyping an existing RTMP destination to srt, file or audio left the key
+	// on the row. Target() joins a key on for RTMP and only for RTMP, so the
+	// destination went on publishing to the bare URL WITH NO CREDENTIAL, and
+	// nothing said so -- not Validate, not Warnings, not the dialog, which
+	// renders the key field only for RTMP and so had no screen left to show it
+	// on.
+	//
+	// The second half is worse than the misconfiguration. The key is still a
+	// live credential, still returned in full by GET /destinations, and now
+	// unreachable from every screen that edits the destination -- so it cannot
+	// be rotated, because it cannot be seen. GHSA-7jqx-76vq-hvfc was five paths
+	// a key could escape by; this is a sixth that also nobody could close.
+	//
+	// Refused rather than dropped, for the reason spelled out below about
+	// control characters: this function refuses, it does not repair. A silent
+	// clear here would destroy a credential the operator may still need and say
+	// nothing, and it would leave the divergence -- stored value, sent value --
+	// that every downstream defence assumes cannot happen.
+	//
+	// The rows that ALREADY carry a stranded key are not left unsaveable by
+	// this: MigrateStrandedStreamKeys clears them at Open, before anything can
+	// read one back and hand it to this function. Without that sweep an
+	// operator could not so much as rename such a destination, because the API
+	// decodes an update body over the row it just read and the key would come
+	// back round with it.
+	//
+	// The message never echoes the key, for the same reason the control-
+	// character one does not: a validation error is rendered into a 400 body
+	// and into the server log.
+	if !d.Kind.CarriesStreamKey() && d.StreamKey != "" {
+		add("a %s destination cannot carry a stream key, because only RTMP joins one onto "+
+			"the publish URL. Stored here the key would never be sent and no screen would "+
+			"show it again, so it could not be rotated either. Clear the stream key, or set "+
+			"the transport back to RTMP", d.Kind)
 	}
 
 	// A STREAM KEY CARRYING A CONTROL CHARACTER IS REFUSED, NOT REPAIRED.
@@ -1134,19 +1184,85 @@ func keepsSealedKey(dst *Destination) bool {
 	return keepsSealedPrimaryKey(dst) && keepsSealedBackupKey(dst)
 }
 
-// checkRendition rejects a rendition_id that names no rendition. The foreign
-// key would catch it anyway, but only as "FOREIGN KEY constraint failed",
-// which tells the user nothing about which field is wrong. A nil id is
-// passthrough and always valid.
-func (d *DB) checkRendition(id *int64) error {
+// checkRendition rejects a rendition_id that names no rendition, and one that
+// names a rendition belonging to a different programme.
+//
+// The foreign key would catch the first anyway, but only as "FOREIGN KEY
+// constraint failed", which tells the user nothing about which field is wrong.
+// A nil id is passthrough and always valid.
+//
+// THE CROSS-PROGRAMME HALF IS THE ONE THAT COST SOMETHING. PUT /destinations/4
+// on source 2 with renditionId 1 (source 1's) was accepted with a 200 and no
+// warning, and nothing downstream could recover: reconcileOutputs lists only
+// its own programme's renditions, so source 2's engine found no rendition 1,
+// gave that destination no process at all, and the card explained itself with
+// "rendition 1 is no longer available". That sentence is false -- rendition 1
+// exists and is encoding, under the other programme -- so an operator watching
+// a live output stop publishing was sent looking for a deleted rendition that
+// was never deleted. Refusing the write is the only point at which the truth
+// is still known.
+//
+// sourceID nil means the destination names no programme, so there is no
+// pairing to check; that is the pre-sources row shape CreateDestination fills
+// in before it gets here.
+func (d *DB) checkRendition(id *int64, sourceID *int64) error {
 	if id == nil {
 		return nil
 	}
-	_, err := d.GetRendition(*id)
+	rend, err := d.GetRendition(*id)
 	if errors.Is(err, ErrNotFound) {
 		return fmt.Errorf("invalid destination: rendition %d does not exist", *id)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if sourceID == nil || rend.SourceID == nil || *rend.SourceID == *sourceID {
+		return nil
+	}
+	return fmt.Errorf("invalid destination: rendition %d (%q) belongs to source %d, "+
+		"but this destination belongs to source %d. A destination can only select a "+
+		"rendition from its own programme, because only that programme's engine runs "+
+		"it. Pick one of source %d's renditions, or leave this destination on "+
+		"passthrough.", *id, rend.Name, *rend.SourceID, *sourceID, *sourceID)
+}
+
+// destinationKeepsItsRendition reports whether a pending update leaves both
+// halves of the pairing exactly as the stored row has them.
+//
+// WHY AN UPDATE IS NOT SIMPLY HELD TO THE SAME RULE AS A CREATE. Rows wired
+// across programmes before checkRendition looked at source_id are already in
+// the field, and the API's update handler decodes the request body OVER the
+// row it just read -- so a client renaming such a destination sends the
+// foreign renditionId straight back. Enforcing the rule unconditionally would
+// turn every one of those rows unsaveable: the operator could not rename it,
+// could not disable it, could not correct its URL, and the refusal would name
+// a field they had not touched. That is #607's trap, refused at the dial
+// rather than at load, and it is why the check is on the CHANGE and not on the
+// state. Anything that touches either half is held to the full rule, so a bad
+// pairing can be cleared but never made or moved, and no migration has to
+// silently drop a live destination to passthrough behind the operator's back.
+func (d *DB) destinationKeepsItsRendition(dst *Destination) (bool, error) {
+	var rend, src sql.NullInt64
+	err := d.sql.QueryRow(
+		`SELECT rendition_id, source_id FROM destinations WHERE id = ?`, dst.ID,
+	).Scan(&rend, &src)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No stored row to have inherited anything from, so there is nothing to
+		// grandfather. The UPDATE below reports the missing row as ErrNotFound.
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return sameOptionalID(rend, dst.RenditionID) && sameOptionalID(src, dst.SourceID), nil
+}
+
+// sameOptionalID compares a stored nullable id with the one a write carries.
+func sameOptionalID(stored sql.NullInt64, want *int64) bool {
+	if !stored.Valid || want == nil {
+		return !stored.Valid && want == nil
+	}
+	return stored.Int64 == *want
 }
 
 // ListDestinations returns every destination in display order.
@@ -1223,9 +1339,6 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if err := dst.Validate(); err != nil {
 		return nil, err
 	}
-	if err := d.checkRendition(dst.RenditionID); err != nil {
-		return nil, err
-	}
 	// A caller that names no source gets the default one.
 	//
 	// THIS IS NO LONGER A PUBLIC BEHAVIOUR. It used to be justified by API
@@ -1251,6 +1364,13 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 			return nil, fmt.Errorf("resolve default source: %w", err)
 		}
 		dst.SourceID = &id
+	}
+	// AFTER the source is settled, never before. checkRendition holds the
+	// rendition against the destination's programme, and a check that ran while
+	// SourceID was still nil would have nothing to hold it against and would
+	// wave through exactly the cross-programme pairing it exists to refuse.
+	if err := d.checkRendition(dst.RenditionID, dst.SourceID); err != nil {
+		return nil, err
 	}
 
 	profile, err := json.Marshal(dst.Profile)
@@ -1329,7 +1449,18 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	if err := dst.Validate(); err != nil {
 		return nil, err
 	}
-	if err := d.checkRendition(dst.RenditionID); err != nil {
+	// The programme the rendition is held against, or nil for a pairing this
+	// write is not touching. See destinationKeepsItsRendition for why an
+	// inherited mismatch must not make the whole row unsaveable.
+	scope := dst.SourceID
+	kept, err := d.destinationKeepsItsRendition(dst)
+	if err != nil {
+		return nil, err
+	}
+	if kept {
+		scope = nil
+	}
+	if err := d.checkRendition(dst.RenditionID, scope); err != nil {
 		return nil, err
 	}
 	profile, err := json.Marshal(dst.Profile)
@@ -1872,6 +2003,60 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 	return nil
 }
 
+// MigrateStrandedStreamKeys clears the stream key of every destination whose
+// kind cannot carry one, in either column it may be sitting in.
+//
+// WHY THIS RUNS AT ALL, given Validate now refuses the combination (#610).
+// Because Validate refusing it is exactly what would strand the operator. An
+// install upgrading into this release can already have such rows -- retyping an
+// RTMP destination to srt, file or audio never cleared the key -- and
+// UpdateDestination validates before it writes, over a struct the API built by
+// decoding the request body ON TOP OF the row it just read. So the stranded key
+// comes back round with every save, and the dialog renders no key field for
+// those kinds, so there is nothing on screen to clear. Without this sweep the
+// new refusal would make those destinations unrenameable, undisableable and
+// unfixable, and the error would name a field the operator cannot see.
+//
+// CLEARED RATHER THAN REPORTED, and that is the one silent rewrite in this
+// area. It is defensible only because of what the value is: a key this kind
+// never sent, that no screen has shown since the kind changed, and that GET
+// /destinations still returns in full. There is nothing to preserve and a live
+// credential to remove. Everything the operator can act on -- a key they meant
+// to keep -- is still reachable the moment they set the transport back to RTMP
+// and type it in, which is the only route that ever worked for these rows.
+//
+// IDEMPOTENT BY ITS GUARD, like backfillDestinationStreamKeys beside it: the
+// WHERE clause asks about the data in front of it rather than about a marker,
+// so it is correct on the second open, correct after a crash halfway through
+// the first, and correct against a row stranded later by some path nobody has
+// thought of yet.
+//
+// THE BACKUP KEY IS DELIBERATELY NOT TOUCHED. engine.backupTarget joins the
+// backup key onto the backup URL for every kind, so a backup key is SENT
+// whatever the transport is. It is not stranded, and clearing it would be
+// destroying a credential that works.
+func (d *DB) MigrateStrandedStreamKeys() error {
+	res, err := d.sql.Exec(`UPDATE destinations
+		SET stream_key = '', stream_key_enc = NULL
+		WHERE kind <> ? AND (stream_key <> '' OR stream_key_enc IS NOT NULL)`, string(DestRTMP))
+	if err != nil {
+		return fmt.Errorf("clear stranded stream keys: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("clear stranded stream keys: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	// THE COMMIT IS NOT THE END OF THE PLAINTEXT -- the full argument is at the
+	// bottom of backfillDestinationStreamKeys. The short version: the UPDATE
+	// wrote new pages into the -wal and the old pages still hold the key until a
+	// checkpoint copies over them, so a function whose entire purpose is to
+	// remove a credential from the database has not done it until this runs.
+	return checkpointTruncate(d)
+}
+
 // backfillDestinationStreamKeys seals every stream key still sitting in a
 // plaintext column and blanks the column it came out of.
 //
@@ -1983,6 +2168,9 @@ func (d *DB) backfillDestinationStreamKeys() error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit stream key backfill: %w", err)
 	}
+	// Recorded so the boot can warn. See DB.sealedOnOpen and #557: this is the
+	// exact moment polyemesis.db stops being a complete destination backup.
+	d.sealedOnOpen += len(todo)
 
 	// THE COMMIT IS NOT THE END OF THE PLAINTEXT. Committing wrote the sealed
 	// rows into the -wal; the pages the plaintext used to live in are still in

@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -105,8 +106,7 @@ func TestHookValidate(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Validate runs on the normalized value everywhere it is called,
-			// because Normalized is what drops the unknown triggers a stored
-			// row might carry from an older release.
+			// so that is the order driven here.
 			err := tc.hook.Normalized().Validate()
 			switch {
 			case tc.want == "" && err != nil:
@@ -135,37 +135,122 @@ func TestValidateNeverQuotesTheURL(t *testing.T) {
 	}
 }
 
-// An unknown trigger has two correct behaviours depending on the path, and
-// conflating them hides one of them.
+// A hook saved with a mistyped trigger stored an empty Triggers list, and an
+// empty list means EVERY trigger. The script got the whole firehose while its
+// author believed it was subscribed to one transition, because Normalized had
+// deleted the mistyped name before Validate could name it back.
 //
-// Through Normalized -- which is how every caller reaches Validate -- it is
-// DROPPED rather than rejected. That is what lets a row written by a newer
-// release load on an older binary instead of making the hook unopenable: it
-// loses the trigger it cannot honour and keeps working for the rest.
-//
-// Called directly, Validate still rejects it. That branch is unreachable via
-// the normal path and exists for a caller that skips normalisation, so it is
-// driven directly here rather than through a Normalized that would have thrown
-// the input away first.
-func TestAnUnknownTriggerIsDroppedByNormalizeAndRejectedByValidate(t *testing.T) {
+// Normalized-then-Validate is the order every write path in the tree uses, so
+// that is the order driven here; driving Validate on the raw value would prove
+// nothing about the path an operator reaches.
+func TestATypoedTriggerIsRefusedByNameRatherThanWidenedToEverything(t *testing.T) {
 	raw := Hook{
 		Name: "deploy", URL: "https://example.com/h",
 		Triggers: []Trigger{TriggerDestinationUp, "ingest.exploded"},
 	}
 
 	norm := raw.Normalized()
-	if err := norm.Validate(); err != nil {
-		t.Fatalf("a hook carrying an unknown trigger failed to normalize into a "+
-			"valid one: %v -- a row from a newer release must degrade, not break", err)
+	if len(norm.Triggers) != 2 {
+		t.Fatalf("triggers = %v, want the mistyped name kept -- dropping it is how "+
+			"a narrow subscription silently became every trigger", norm.Triggers)
 	}
-	if len(norm.Triggers) != 1 || norm.Triggers[0] != TriggerDestinationUp {
-		t.Fatalf("triggers = %v, want only the known one kept", norm.Triggers)
+	err := norm.Validate()
+	if err == nil {
+		t.Fatal("Validate accepted a subscription to a trigger that does not exist")
+	}
+	if !strings.Contains(err.Error(), "ingest.exploded") {
+		t.Fatalf("error = %q, want it to name the trigger the operator mistyped", err)
 	}
 
-	if err := raw.Validate(); err == nil {
-		t.Fatal("Validate accepted an unknown trigger when called directly; the " +
-			"branch exists for callers that skip Normalized and must still bite")
-	} else if !strings.Contains(err.Error(), "unknown trigger") {
-		t.Fatalf("error = %q, want it to name the unknown trigger", err)
+	// The control. A validator that refuses every trigger name would satisfy the
+	// assertions above while making the settings page unusable, so every name
+	// AllTriggers offers has to be accepted.
+	for _, tr := range AllTriggers() {
+		ok := Hook{Name: "deploy", URL: "https://example.com/h", Triggers: []Trigger{tr}}
+		if err := ok.Normalized().Validate(); err != nil {
+			t.Errorf("Validate refused %q, which AllTriggers offers in the picker: %v", tr, err)
+		}
+	}
+}
+
+// The upgrade case, and the reason the refusal is at save and not at load.
+// db.scanHook runs Normalized and never Validate, so a row written by a newer
+// release still loads on this binary -- and it must stay NARROW while it does.
+// Under the old code the unknown name was deleted on read, the list went empty,
+// and a hook nobody had touched started delivering every transition to a script
+// that had asked for one.
+func TestAHookStoredAgainstARetiredTriggerStillLoadsAndStaysNarrow(t *testing.T) {
+	stored := Hook{
+		Name: "deploy", URL: "https://example.com/h",
+		Triggers: []Trigger{TriggerDestinationUp, "destination.retired.in.a.later.version"},
+	}.Normalized()
+
+	if len(stored.Triggers) != 2 {
+		t.Fatalf("triggers = %v, want the retired name kept so the list cannot go "+
+			"empty and mean every trigger", stored.Triggers)
+	}
+	if !stored.Wants(TriggerDestinationUp) {
+		t.Error("the hook stopped delivering the trigger it does name; a retired " +
+			"name must cost that one subscription, not the whole hook")
+	}
+	if stored.Wants(TriggerIngestPublished) {
+		t.Error("the hook now wants a trigger it never subscribed to; this is the " +
+			"silent widening the retired name was supposed to cost nothing for")
+	}
+}
+
+func TestCheckNameUniqueRefusesANameAlreadyInUse(t *testing.T) {
+	existing := []Hook{
+		{ID: 1, Name: "deploy"},
+		{ID: 2, Name: "Archive"},
+	}
+	tests := []struct {
+		name      string
+		candidate Hook
+		wantDup   bool
+	}{
+		// The controls. A checker that refuses every name would pass every
+		// wantDup case below and lock the operator out of creating anything.
+		{name: "a new name is free", candidate: Hook{Name: "mirror"}},
+		{
+			name:      "an existing hook keeping its own name is not its own duplicate",
+			candidate: Hook{ID: 1, Name: "deploy"},
+		},
+		{name: "an exact duplicate", candidate: Hook{Name: "deploy"}, wantDup: true},
+		{
+			// "Deploy " and "deploy" render identically in a settings list, so
+			// treating them as distinct hands the operator exactly the ambiguity
+			// the check exists to remove.
+			name:      "a duplicate in different case, which the list cannot show apart",
+			candidate: Hook{Name: " Deploy "},
+			wantDup:   true,
+		},
+		{
+			name:      "renaming one hook onto another hook's name",
+			candidate: Hook{ID: 2, Name: "deploy"},
+			wantDup:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := CheckNameUnique(tt.candidate, existing)
+			if !tt.wantDup {
+				if err != nil {
+					t.Fatalf("CheckNameUnique = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("CheckNameUnique accepted a name another hook already " +
+					"answers to; the operator cannot tell the two apart in the list")
+			}
+			if !errors.Is(err, ErrDuplicateHookName) {
+				t.Errorf("error = %v, want it to wrap ErrDuplicateHookName so the "+
+					"HTTP layer can answer 409 rather than 400", err)
+			}
+			if !strings.Contains(err.Error(), "deploy") {
+				t.Errorf("error = %q, want it to name the hook already using it", err)
+			}
+		})
 	}
 }

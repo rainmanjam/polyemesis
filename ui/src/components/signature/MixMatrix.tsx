@@ -171,7 +171,14 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
                           col={col}
                           onChange={(v) => setGain(t.index, ch, out, v)}
                           onNavigate={focusCell}
-                          label={`Track ${t.index + 1} channel ${ch + 1} to ${out === 0 ? "left" : "right"}`}
+                          // NAMED WHEN THE INGEST NAMES IT. A matrix of "Track 3
+                          // channel 1" cells asks an operator to remember which
+                          // track the commentary was on while they read a grid
+                          // whose whole job is deciding what each output hears.
+                          label={
+                            `Track ${t.index + 1}${t.title ? ` (${t.title})` : ""}` +
+                            ` channel ${ch + 1} to ${out === 0 ? "left" : "right"}`
+                          }
                         />
                       </td>
                     );
@@ -241,6 +248,11 @@ function MatrixCellInput({
         step={0.05}
         value={active ? Number(value.toFixed(4)) : 0}
         aria-label={label}
+        // THE SAME SENTENCE, ON HOVER. It was already written for a screen
+        // reader and reached nobody using a mouse -- the same asymmetry the
+        // icon buttons had, in a grid where every cell is an unlabelled box of
+        // digits and the row and column headers scroll out of view.
+        title={label}
         data-cell={`${out}-${col}`}
         onKeyDown={onKeyDown}
         onChange={(e) => {

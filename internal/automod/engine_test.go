@@ -52,7 +52,7 @@ func testModel(t *testing.T, srv *httptest.Server, tweak func(*ModelConfig)) *Mo
 	if tweak != nil {
 		tweak(&cfg)
 	}
-	return NewModel(cfg)
+	return NewModel(cfg, NewBudget())
 }
 
 // ------------------------------------------------------------- fail open
@@ -176,7 +176,7 @@ func TestATransportFailureDoesNotCarryTheEndpointsCredential(t *testing.T) {
 	cfg := DefaultModelConfig()
 	cfg.Enabled = true
 	cfg.Endpoint = endpoint
-	m := NewModel(cfg)
+	m := NewModel(cfg, NewBudget())
 
 	findings, err := m.Check(context.Background(), "synthetic text, never a real message")
 	if err == nil {
@@ -280,6 +280,11 @@ func TestTheCeilingResetsAfterAnHour(t *testing.T) {
 	m := testModel(t, srv, func(c *ModelConfig) { c.MaxCallsPerHour = 1 })
 	clk := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
 	m.now = func() time.Time { return clk }
+	// AND THE BUDGET'S CLOCK, which is the one the window is measured on now
+	// that the counter lives outside the connector (#502). Setting only m.now
+	// left this test driving a clock the ceiling no longer consults -- it
+	// failed the moment the budget moved, which is the test doing its job.
+	m.budget.now = func() time.Time { return clk }
 
 	if _, err := m.Check(context.Background(), "x"); err != nil {
 		t.Fatalf("first call: %v", err)

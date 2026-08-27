@@ -271,7 +271,7 @@ func TestTheModelIsOfferedFewerCategoriesThanExist(t *testing.T) {
 // The prompt and the parser must describe the same set, or the feature is
 // either permanently rejecting or quietly accepting something nobody offered.
 func TestThePromptListsExactlyWhatTheParserAccepts(t *testing.T) {
-	m := NewModel(DefaultModelConfig())
+	m := NewModel(DefaultModelConfig(), NewBudget())
 	prompt := m.systemPrompt()
 	for _, c := range ModelCategories() {
 		if !strings.Contains(prompt, string(c)) {

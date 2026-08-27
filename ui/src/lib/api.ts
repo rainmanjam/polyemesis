@@ -1,3 +1,4 @@
+import { setDisplayTimeZone } from "@/lib/format";
 import type {
   AccountStats,
   AcmePreflight,
@@ -400,7 +401,21 @@ export const api = {
     get<{ system: SystemStats; bitrate: BitrateSample[] | null }>("/stats"),
 
   // --- settings ---
-  getSettings: () => get<Settings>("/settings"),
+  /* THE CLOCKS FOLLOW THE SETTINGS, and this is the only place they can.
+   *
+   * Five pages fetch settings independently. Wiring the display zone into any
+   * one of them would leave the console reading in a different zone depending
+   * on which page you happened to land on first -- which is a more confusing
+   * version of the problem the setting exists to solve. Doing it in the client
+   * means no caller can forget, including one written later.
+   *
+   * On the write path too, so a save takes effect on the screen that made it
+   * rather than at the next reload. */
+  getSettings: async (): Promise<Settings> => {
+    const s = await get<Settings>("/settings");
+    setDisplayTimeZone(s.display?.timeZone);
+    return s;
+  },
   /** Saves the settings and returns THE SETTINGS, not the whole response.
    *
    *  PUT /settings answers with api.settingsResponse, which embeds db.Settings
@@ -422,6 +437,9 @@ export const api = {
       "/settings",
       s,
     );
+    // The screen that made the change reads in the new zone immediately,
+    // rather than at the next reload -- see getSettings above.
+    setDisplayTimeZone((saved as Settings).display?.timeZone);
     return saved as Settings;
   },
   /** The MQTT broker password, on its own route.
@@ -758,9 +776,13 @@ export const api = {
    *  does it for — so without `sourceId` a multi-source install served
    *  programme 1's FFmpeg log for a question about programme 2 (#497). The
    *  server now refuses instead of answering for the wrong one. */
-  listProcesses: (sourceId?: number | null) =>
+  /* REQUIRED, for the same reason status/source/levels are: handleListProcesses
+     and handleProcessLogs both call scopedEngine, which refuses with 400
+     source_required on any install with two programmes. Optional meant
+     MonitoringPage simply never passed one and the whole page was dead there. */
+  listProcesses: (sourceId: number | null) =>
     get<ProcessInfo[]>("/processes" + sourceQuery(sourceId)),
-  processLogs: (name: string, sourceId?: number | null) =>
+  processLogs: (name: string, sourceId: number | null) =>
     get<{ name: string; command: string; lines: LogLine[] | null }>(
       `/processes/${encodeURIComponent(name)}/logs` + sourceQuery(sourceId),
     ),

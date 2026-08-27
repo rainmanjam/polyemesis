@@ -12,6 +12,7 @@ import {
   Play,
   RefreshCw,
   Square,
+  Undo2,
   Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +31,8 @@ import { ExperimentalBadge } from "@/components/Experimental";
 import { FacebookStreamHealthPanel } from "@/components/FacebookStreamHealth";
 import { useFacebookStreamHealth } from "@/hooks/useFacebookStreamHealth";
 import { TrackSummary } from "@/components/signature/TrackRows";
+import { useHeldStop, useSettledAction } from "@/hooks/useHeldStop";
+import { undoSecondsLeft } from "@/lib/destinationAction";
 import { Stat } from "@/components/signature/Stat";
 import { duration, kbps } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
@@ -74,6 +77,7 @@ export function DestinationCard({
   canMoveLater,
   busy,
   domId,
+  trackLabels,
 }: {
   dest: DestStatus;
   onStart: () => void;
@@ -98,8 +102,25 @@ export function DestinationCard({
    *  every card unconditionally would put a stop with no controls on it between
    *  each pair of real ones. */
   domId?: string;
+  /** What the operator calls each ingest track, indexed by track index, for
+   *  the tooltips on the audio chips.
+   *
+   *  Passed in rather than read from a hook here, and that is not ceremony:
+   *  useLiveData THROWS outside its provider, and this component is rendered
+   *  directly in its own tests. A hook would have made naming a track cost a
+   *  provider in every test that touches a destination card.
+   *
+   *  Optional, and null is a meaningful value: it means "no names are known
+   *  for THIS destination's programme", which is the honest answer on a
+   *  multi-programme install where the source snapshot describes a different
+   *  one. See lib/trackLabels.ts. */
+  trackLabels?: (string | undefined)[] | null;
 }) {
   const t = useT();
+  // The two halves of #506: a stop that can be taken back, and a refusal to
+  // honour a click on a button whose action changed a moment ago.
+  const held = useHeldStop(onStop);
+  const { unsettled } = useSettledAction(dest.enabled);
   const stateLabel = useStateLabel();
   const state = dest.process?.state;
   const tone = dest.enabled ? toneForState(state) : "idle";
@@ -264,7 +285,7 @@ export function DestinationCard({
               <span className="font-mono text-[10px] uppercase tracking-wide text-subtle-foreground">
                 audio
               </span>
-              <TrackSummary tracks={dest.tracks} />
+              <TrackSummary tracks={dest.tracks} labels={trackLabels} />
             </div>
             <span className="truncate font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
               {dest.summary || "not configured"}
@@ -275,12 +296,12 @@ export function DestinationCard({
         {/* --- performance --- */}
         <div className="grid grid-cols-5 gap-2">
           <Stat
-            label="Bitrate"
+            labelKey="dest.bitrate"
             value={running ? kbps(progress?.bitrateKbps ?? 0) : "—"}
             tone={running ? "default" : "muted"}
           />
           <Stat
-            label="Uptime"
+            labelKey="dest.uptime"
             value={running ? duration(dest.process?.uptimeSec ?? 0) : "—"}
             tone={running ? "default" : "muted"}
           />
@@ -301,12 +322,12 @@ export function DestinationCard({
               `running` like Bitrate, Uptime and Speed beside it, so every cell
               in the row now answers the same question the same way. */}
           <Stat
-            label="Restarts"
+            labelKey="dest.restarts"
             value={dest.process ? (dest.process.restarts ?? 0) : "—"}
             tone={dest.process && (dest.process.restarts ?? 0) > 0 ? "warn" : "muted"}
           />
           <Stat
-            label="Dropped"
+            labelKey="dest.dropped"
             value={running && progress ? (progress.dropFrames ?? 0) : "—"}
             tone={running && (progress?.dropFrames ?? 0) > 0 ? "warn" : "muted"}
           />
@@ -316,7 +337,7 @@ export function DestinationCard({
               yet" rather than stopped, which is why it renders as a dash and
               not as a failure. */}
           <Stat
-            label="Speed"
+            labelKey="dest.speed"
             value={running && (progress?.speed ?? 0) > 0 ? `${(progress?.speed ?? 0).toFixed(2)}x` : "—"}
             tone={
               !running || (progress?.speed ?? 0) === 0
@@ -482,12 +503,60 @@ export function DestinationCard({
 
         {/* --- the one action that matters, plus display order --- */}
         <div className="flex gap-1.5">
-          {dest.enabled ? (
-            <Button variant="outline" size="sm" className="flex-1" onClick={onStop} disabled={busy}>
+          {/* THE HELD STOP, and the guard against the button inverting under a
+              cursor. See lib/destinationAction.ts and #506.
+
+              Undo rather than a dialog: stopping one destination is something
+              an operator does often and deliberately, and a confirmation in
+              front of a frequent deliberate action is trained away within a
+              day -- after which it costs a click and protects nothing.
+
+              The asymmetry that made this worth fixing at all: bulk stop-all
+              already requires a server-side {"confirm": true}, and delete goes
+              through ConfirmDestructive with a typed subject. The dangerous
+              SPECIFIC action was the least protected one on the page. */}
+          {held.pending ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="flex-1"
+              onClick={held.cancel}
+              aria-label={`Undo stopping ${dest.name}`}
+            >
+              <Undo2 /> Undo ({undoSecondsLeft(held.remaining)})
+            </Button>
+          ) : dest.enabled ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={held.hold}
+              disabled={busy || unsettled}
+              // Says WHY it is refusing. A control that greys out for under a
+              // second with no explanation reads as a glitch, and the operator
+              // clicks again rather than pausing -- which is the behaviour the
+              // guard exists to interrupt.
+              title={
+                unsettled
+                  ? "This button just changed to Stop. Wait a moment, so a repaint cannot turn a Start you meant into a Stop you did not."
+                  : `Stop ${dest.name}`
+              }
+            >
               <Square /> Stop
             </Button>
           ) : (
-            <Button variant="live" size="sm" className="flex-1" onClick={onStart} disabled={busy}>
+            <Button
+              variant="live"
+              size="sm"
+              className="flex-1"
+              onClick={onStart}
+              disabled={busy || unsettled}
+              title={
+                unsettled
+                  ? "This button just changed to Start. Wait a moment, so a repaint cannot turn a Stop you meant into a Start you did not."
+                  : `Start ${dest.name}`
+              }
+            >
               <Play /> Start
             </Button>
           )}

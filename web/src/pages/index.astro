@@ -107,6 +107,9 @@ const features = [
             admin password on the first-run screen. Note the
             <span class="font-mono text-fg">/udp</span> on 6000 — SRT is UDP, and omitting the
             suffix is the classic reason an ingest silently receives nothing.
+            1935 is published even if you plan to use SRT: a container's port
+            map is frozen when it is created, so adding RTMP later means
+            recreating the container.
           </p>
         </div>
 
@@ -198,9 +201,9 @@ const features = [
         </h2>
         <p class="mt-4 text-pretty leading-relaxed text-muted">
           One three-track source feeds all three destinations. The meters read
-          <span class="font-mono text-fg">−15.6</span>,
-          <span class="font-mono text-fg">−17.0</span> and
-          <span class="font-mono text-fg">−21.9&nbsp;LUFS</span> because each
+          <span class="font-mono text-fg">−12.6</span>,
+          <span class="font-mono text-fg">−14.0</span> and
+          <span class="font-mono text-fg">−18.9&nbsp;LUFS</span> because each
           was sent a different set of tracks — loudness is measured per
           destination, after routing, on the programme that destination
           actually receives.
@@ -226,7 +229,7 @@ const features = [
             fallbackFormat="webp"
             widths={[420, 690, 960, 1440]}
             sizes="(min-width: 1024px) 690px, calc(100vw - 2.5rem)"
-            alt="polyemesis audio meters: three destinations showing −15.6, −17.0 and −21.9 LUFS from one ingest, with three source tracks metering live"
+            alt="polyemesis audio meters: three destinations showing −12.6, −14.0 and −18.9 LUFS from one ingest, each measured after its own routing"
             loading="lazy"
             decoding="async"
             class="w-full rounded-token border border-line"

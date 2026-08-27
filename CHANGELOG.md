@@ -24,9 +24,14 @@ its first tagged release.
   overwrote unconditionally, which for a platform like this turned a working
   destination into "an RTMP URL is required".
 
-## [0.7.0] — 2026-08-26
+## [0.7.0] — 2026-08-27
 
 ### Upgrading
+- **Building from source now needs Go 1.27.** `go.mod` declares `go 1.27.0`, so
+  a 1.26.x toolchain refuses the build outright rather than degrading — a hard
+  stop with no release note was the only thing wrong with it. Nothing changes
+  for anyone installing a binary or running the container; both ship their own
+  toolchain.
 - **TLS now serves on :443 rather than :8080 when a certificate is configured.**
   An install reached at `https://host:8080` moves, and a firewall that only
   opens 8080 makes the console unreachable after the upgrade with nothing on

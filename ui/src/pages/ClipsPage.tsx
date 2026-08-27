@@ -23,6 +23,7 @@ import { autoApi } from "@/lib/autoApi";
 import { keyframeVerdict, windowOnBufferToggle } from "@/lib/clipBufferFacts";
 import { bytes, timestamp } from "@/lib/format";
 import { useT } from "@/lib/i18n";
+import { useLiveData } from "@/hooks/useLiveData";
 
 interface Clip {
   name: string;
@@ -84,6 +85,9 @@ const clipDownloadUrl = (name: string) =>
  *  recording somebody has to have started in advance. */
 export function ClipsPage() {
   const t = useT();
+  // Which programme a captured clip belongs to. POST /clips and PUT
+  // /clips/buffer are refused without it on any install with two.
+  const { programme, programmeKnown } = useLiveData();
   const [view, setView] = useState<ClipsView | null>(null);
   const [loading, setLoading] = useState(true);
   const [capturing, setCapturing] = useState(false);
@@ -93,7 +97,7 @@ export function ClipsPage() {
   const load = useCallback(
     (quiet = false) =>
       autoApi
-        .get<ClipsView>("/clips")
+        .listClips<ClipsView>(programme)
         .then((v) => {
           setView(v);
           if (v.buffer.buffer) setWindow(Math.round(v.buffer.buffer.windowSeconds));
@@ -102,12 +106,17 @@ export function ClipsPage() {
           if (!quiet) toast.error(errText(err, t("clips.couldNotLoadClips")));
         })
         .finally(() => setLoading(false)),
-    [t],
+    // programme, because listClips is scoped and this callback closes over it.
+    // Omitted, it froze at the mount value -- null -- and every poll went out
+    // unscoped and took a 400 on any install with two programmes. See the same
+    // mistake, and the same fix, in MetersPage and MonitoringPage.
+    [t, programme],
   );
 
   useEffect(() => {
+    if (!programmeKnown) return;
     void load();
-  }, [load, t]);
+  }, [load, t, programmeKnown]);
 
   // The buffer fills in real time and its depth is the only thing that says
   // whether a clip taken right now would be the full length asked for.
@@ -125,7 +134,7 @@ export function ClipsPage() {
   const capture = async (seconds: number) => {
     setCapturing(true);
     try {
-      const res = await autoApi.post<{ clip: Clip }>("/clips", { seconds });
+      const res = await autoApi.captureClip<{ clip: Clip }>(seconds, programme);
       toast.success(
         `Captured ${res.clip.seconds.toFixed(1)}s${res.clip.keyframeAligned ? "" : " (not keyframe-aligned — may start with a glitch)"}.`,
       );
@@ -139,7 +148,10 @@ export function ClipsPage() {
 
   const setBuffer = async (enabled: boolean, windowSeconds: number) => {
     try {
-      const st = await autoApi.put<BufferStatus>("/clips/buffer", { enabled, windowSeconds });
+      const st = await autoApi.setClipBuffer<BufferStatus>(
+        { enabled, windowSeconds },
+        programme,
+      );
       setView((v) => (v ? { ...v, buffer: st } : v));
       await load(true);
     } catch (err) {
@@ -187,7 +199,7 @@ export function ClipsPage() {
                     key={s}
                     size="sm"
                     variant={s === 30 ? "default" : "secondary"}
-                    disabled={capturing || !buffer?.running}
+                    disabled={!programmeKnown || capturing || !buffer?.running}
                     onClick={() => capture(s)}
                   >
                     {capturing && <Loader2 className="animate-spin" />}
@@ -197,7 +209,7 @@ export function ClipsPage() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={capturing || !buffer?.running}
+                  disabled={!programmeKnown || capturing || !buffer?.running}
                   onClick={() => capture(0)}
                   title={t("clips.everythingHeld")}
                 >
@@ -216,7 +228,7 @@ export function ClipsPage() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={capturing || !buffer?.running || custom < 1}
+                  disabled={!programmeKnown || capturing || !buffer?.running || custom < 1}
                   onClick={() => capture(custom)}
                 >
                   Capture
@@ -341,28 +353,28 @@ export function ClipsPage() {
                 "none". */}
             <CardContent className="grid grid-cols-2 gap-2">
               <Stat
-                label={t("clips.held")}
+                labelKey="clips.held"
                 value={stats ? `${held.toFixed(0)}s` : "—"}
                 tone={held > 0 ? "live" : "muted"}
               />
-              <Stat label={t("clips.window")} value={`${stats?.windowSeconds.toFixed(0) ?? "—"}s`} />
+              <Stat labelKey="clips.window" value={`${stats?.windowSeconds.toFixed(0) ?? "—"}s`} />
               <Stat
-                label={t("clips.inMemory")}
+                labelKey="clips.inMemory"
                 value={stats ? bytes(stats.bytes) : "—"}
                 tone="muted"
               />
               <Stat
-                label={t("clips.ceiling")}
+                labelKey="clips.ceiling"
                 value={stats ? bytes(stats.maxBytes) : "—"}
                 tone="muted"
               />
               <Stat
-                label={t("clips.bitrate")}
+                labelKey="clips.bitrate"
                 value={stats ? `${stats.bitrateKbps} kbps` : "—"}
                 tone="muted"
               />
               <Stat
-                label={t("clips.keyframes")}
+                labelKey="clips.keyframes"
                 value={
                   keyframes.verdict === "unknown"
                     ? "—"
@@ -409,7 +421,7 @@ export function ClipsPage() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    disabled={!buffer?.enabled}
+                    disabled={!programmeKnown || !buffer?.enabled}
                     onClick={() => setBuffer(true, windowSec)}
                   >
                     Apply
@@ -429,8 +441,8 @@ export function ClipsPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <Stat label={t("clips.clipsKept")} value={view?.usage.count ?? 0} />
-                <Stat label={t("clips.onDisk")} value={bytes(view?.usage.usedBytes ?? 0)} tone="muted" />
+                <Stat labelKey="clips.clipsKept" value={view?.usage.count ?? 0} />
+                <Stat labelKey="clips.onDisk" value={bytes(view?.usage.usedBytes ?? 0)} tone="muted" />
               </div>
               <p className="text-[10px] text-muted-foreground">
                 Retention keeps at most {view?.usage.maxClips ?? 0} clips and{" "}

@@ -241,7 +241,40 @@ func (s *Server) handleStopAllDestinations(w http.ResponseWriter, r *http.Reques
 // driving the rest of the list at a browser nobody is reading.
 func (s *Server) bulkSetDestinationsEnabled(w http.ResponseWriter, r *http.Request, action bulkAction) {
 	enabled := action.enabled()
-	rows, err := s.store.ListDestinations()
+
+	// THE PROGRAMME THIS BUTTON WAS PRESSED ON, and until now this file did not
+	// have the word in it.
+	//
+	// Both routes carry requireSource, so on an install with two programmes the
+	// request cannot arrive without naming one -- and then the handler listed
+	// EVERY destination on the box and acted on all of them. That combination is
+	// the worst available: the middleware makes the operator name a programme,
+	// which is precisely what convinces them the action is confined to it, and
+	// the answer they get back is the full list as evidence they were heard.
+	//
+	// Stop All on Studio B ended Studio A's live broadcasts. On YouTube that is
+	// not recoverable: a broadcast that has been completed cannot return to
+	// live (see lifecycle.go), so the operator has not lost a process, they
+	// have lost the show.
+	//
+	// Unnamed still means the whole store, and that is not laziness. A
+	// single-source install reaches here with no parameter, and
+	// ListDestinationsBySource matches on `source_id = ?`, which a legacy row
+	// carrying NULL never satisfies -- scoping unconditionally would quietly
+	// drop exactly the destinations nobody has migrated yet.
+	sourceID, ok := s.namedSourceParam(w, r)
+	if !ok {
+		return
+	}
+	var (
+		rows []*db.Destination
+		err  error
+	)
+	if sourceID != nil {
+		rows, err = s.store.ListDestinationsBySource(*sourceID)
+	} else {
+		rows, err = s.store.ListDestinations()
+	}
 	if err != nil {
 		writeStoreError(w, err)
 		return

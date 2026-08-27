@@ -182,9 +182,28 @@ func TestAnUnknownStoredCellIsIgnored(t *testing.T) {
 // A rule that does not compile must DEGRADE automod, not stop chat. Refusing to
 // moderate at all because one regex is malformed is the wrong trade in both
 // directions: the operator loses the working rules AND the history detectors.
-func TestABadRuleDoesNotStopAutomod(t *testing.T) {
+func TestABadRuleIsRefusedRatherThanSilentlyDisarmingTheRest(t *testing.T) {
 	h, _, sign := sourceServer(t)
 
+	// THIS TEST USED TO ASSERT THE OPPOSITE, and the reversal is the point.
+	//
+	// It was TestABadRuleDoesNotStopAutomod, and it required the save to
+	// SUCCEED: "the setting is stored, and the engine is rebuilt without the
+	// rules rather than the request failing". Both halves of that were true and
+	// together they were the defect. NewRuleSet is all-or-nothing on purpose --
+	// its comment says dropping the one rule that failed to compile "leaves an
+	// operator believing a protection is in place when it is not" -- so storing
+	// a bad rule took EVERY pattern rule down, not just the broken one.
+	//
+	// And nothing said so. GET /settings listed the rules enabled, GET
+	// /automod/matrix reported the checker available, the UI drew them, and the
+	// only signal was one log.Error. The old test even checked matrix.enabled
+	// and read it as proof automod was "still running" -- it was running with
+	// no pattern rules at all. An operator who typo'd a pattern had no
+	// moderation and four screens telling them they did.
+	//
+	// So the save is refused at the boundary instead, which makes the
+	// all-or-nothing rebuild unreachable rather than merely survivable.
 	var before map[string]any
 	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/settings", nil, http.StatusOK), &before)
 	am := before["automod"].(map[string]any)
@@ -193,16 +212,19 @@ func TestABadRuleDoesNotStopAutomod(t *testing.T) {
 		{"id": 1, "name": "fine", "enabled": true, "pattern": "spam", "action": "delete"},
 		{"id": 2, "name": "broken", "enabled": true, "pattern": "([unclosed", "action": "delete"},
 	}
-	// The save must still succeed: the setting is stored, and the engine is
-	// rebuilt without the rules rather than the request failing.
-	send(t, h, sign, http.MethodPut, "/api/v1/settings", before, http.StatusOK)
+	body := send(t, h, sign, http.MethodPut, "/api/v1/settings", before, http.StatusBadRequest)
+	if !strings.Contains(string(body), "broken") {
+		t.Errorf("the refusal does not name the rule that caused it, so an operator "+
+			"with twenty rules is told only that one of them is wrong:\n  %s", body)
+	}
 
-	// And the matrix still answers, which is the proof automod is still running.
+	// AND AUTOMOD IS STILL RUNNING on what it had. A refusal that also switched
+	// the checker off would trade a silent failure for a loud outage.
 	var got struct {
 		Enabled bool `json:"enabled"`
 	}
 	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/automod/matrix", nil, http.StatusOK), &got)
 	if !got.Enabled {
-		t.Fatal("automod switched itself off because one rule would not compile")
+		t.Fatal("automod switched itself off because a save was refused")
 	}
 }

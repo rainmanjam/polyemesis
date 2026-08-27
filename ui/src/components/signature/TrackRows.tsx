@@ -16,6 +16,7 @@ import { channelLabels } from "@/lib/channels";
 import { trackSignal, TRACK_SIGNAL_TEXT, type TrackSignal } from "@/lib/trackSignal";
 import { gainPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { trackChipTitle } from "@/lib/trackLabels";
 import {
   MAX_LABEL_LEN,
   MAX_LANG_TAG_LEN,
@@ -332,12 +333,23 @@ export function TrackRows({
 
 /** Compact read-only rendering of which tracks a destination mixes.
  *  Used on destination cards, where space is tight but the answer to
- *  "what is this platform hearing?" must still be immediate. */
+ *  "what is this platform hearing?" must still be immediate.
+ *
+ *  `labels` NAMES THE NUMBERS. Six identical chips reading 1..6 say which
+ *  tracks a platform gets and nothing about what those tracks ARE, so an
+ *  operator checking that the podcast feed carries the mic and not the music
+ *  had to hold the routing editor's ordering in their head while reading the
+ *  dashboard. The names are the ones the editor shows, resolved by
+ *  lib/trackLabels.ts, and they are OPTIONAL: absent, every chip keeps the
+ *  wording it had, which is what a caller with no source snapshot -- or one
+ *  describing a different programme -- must fall back to. */
 export function TrackSummary({
   tracks,
+  labels,
   className,
 }: {
   tracks: number[] | null;
+  labels?: (string | undefined)[] | null;
   className?: string;
 }) {
   const list = tracks ?? [];
@@ -348,7 +360,7 @@ export function TrackSummary({
         return (
           <span
             key={i}
-            title={on ? `Track ${i + 1} is included` : `Track ${i + 1} is excluded`}
+            title={trackChipTitle(i, on, labels?.[i])}
             className={cn(
               "tnum flex h-4 w-4 items-center justify-center rounded-[3px] font-mono text-[9px] font-bold",
               on

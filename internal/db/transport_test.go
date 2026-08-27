@@ -111,6 +111,10 @@ func TestAudioEncodingValidation(t *testing.T) {
 	d := validDest()
 	d.Kind = DestSRT
 	d.URL = "srt://a.example:9000"
+	// validDest is an RTMP destination and carries a key. SRT has nowhere to
+	// put one, so leaving it on would make this measure #610's refusal instead
+	// of the codec rule it is here for.
+	d.StreamKey = ""
 	d.Audio = AudioEncoding{Codec: DestAudioOpus, Mono: true}
 	if err := d.Validate(); err != nil {
 		t.Fatalf("opus on an SRT destination was refused: %v", err)

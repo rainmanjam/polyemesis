@@ -207,11 +207,15 @@ var leafSensitivity = map[string]sensitivity{
 	"settings.automod.rules.name":            sPublic,
 	"settings.automod.rules.pattern":         sPublic,
 	"settings.automod.rules.timeoutSeconds":  sPublic,
-	"settings.chat.historyMessages":          sPublic,
-	"settings.chat.keepMessages":             sPublic,
-	"settings.chat.purgeMinutes":             sPublic,
-	"settings.chat.retentionHours":           sPublic,
-	"settings.destinations.staggerMs":        sPublic,
+	// An IANA zone name. It says how times are WRITTEN DOWN and reveals
+	// nothing about the install beyond roughly where its operator sits, which
+	// the destinations already say louder.
+	"settings.display.timeZone":       sPublic,
+	"settings.chat.historyMessages":   sPublic,
+	"settings.chat.keepMessages":      sPublic,
+	"settings.chat.purgeMinutes":      sPublic,
+	"settings.chat.retentionHours":    sPublic,
+	"settings.destinations.staggerMs": sPublic,
 	// The declared GPU inventory. PUBLIC, every field, and deliberately: it is
 	// a description of the machine's hardware, which is the same class of fact
 	// as ffmpeg.GPUInfo -- already served in full by GET

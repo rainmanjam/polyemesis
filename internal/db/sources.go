@@ -39,8 +39,16 @@ type Source struct {
 	// PrevTokenUntil. Rotation that instantly kills a live stream is rotation
 	// nobody performs, so the encoder already connected on the old token keeps
 	// running while the new one takes effect.
-	PrevToken      string    `json:"-"`
-	PrevTokenUntil time.Time `json:"prevTokenUntil,omitempty"`
+	PrevToken string `json:"-"`
+	// `omitzero`, not `omitempty`: a source whose token has never been rotated
+	// has the zero instant here, and `omitempty` DOES NOT SUPPRESS IT --
+	// encoding/json has no empty case for a struct, so the tag was decoration.
+	// Every un-rotated source therefore served "0001-01-01T00:00:00Z", a
+	// non-empty string that parses, which a client truthiness guard reads as a
+	// real grace window and renders as 12/31/1, 16:07:02. `omitzero` (Go 1.24)
+	// drops the key, so "no rotation in flight" is an absent field rather than
+	// a date from the first century.
+	PrevTokenUntil time.Time `json:"prevTokenUntil,omitzero"`
 	Position       int       `json:"position"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`

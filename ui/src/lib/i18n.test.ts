@@ -209,6 +209,23 @@ describe("translation catalogues", () => {
         "locale, or lower this floor on purpose — but do not let it happen silently.",
     ).toEqual([]);
   });
+
+  /* HINTS ARE IN THE RULE ABOVE, and they were not always.
+   *
+   * The 70 `.hint` tooltips behind Stat arrived as one change, untranslated,
+   * and holding them to the full-translation rule immediately left one option
+   * that fits in a sitting: lower the whole floor. That floor is the only
+   * thing between the labels an operator READS and fourteen locales silently
+   * rendering English, so it was split rather than weakened -- labels kept at
+   * full strength, hints ratcheted on a pinned floor of their own.
+   *
+   * The split is gone because the backlog is (#615): all fourteen catalogues
+   * now carry every hint, so there is nothing left for a second, weaker rule
+   * to hold. Keeping it would have been worse than pointless -- pinned at 70
+   * with all 70 translated, a NEW untranslated hint would have left the
+   * minimum at 70 and passed, which is precisely the silence the rule exists
+   * to break.
+   */
 });
 
 /* The Facebook block's copy has to keep SAYING what it has to say.

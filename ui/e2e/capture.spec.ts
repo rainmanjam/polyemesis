@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { mkdirSync } from "node:fs";
 
 /* Screenshots and video for the README and the website.
  *
@@ -13,119 +12,16 @@ import { mkdirSync } from "node:fs";
  * indistinguishable from a broken one.
  */
 
-/* docs/media is where these have always gone and where docs/media/README.md
- * says they live. Overridable because a change to the capture harness has to be
- * verifiable without overwriting the committed artefacts to prove it worked --
- * a run that fails halfway then leaves the repository holding a mixture of old
- * and new shots, and nothing says which is which. scripts/demo-seed.sh passes
- * this through. */
-const OUT = process.env.SHOT_DIR ?? "../docs/media";
-mkdirSync(OUT, { recursive: true });
-
-/* WAITING FOR REAL STATE, EXPRESSED AS THE ABSENCE OF THE EMPTY STATE.
- *
- * The dashboard shot below already works this way and the comment there says
- * why: asserting the PRESENCE of something live matches the first element that
- * happens to say "live", which on this product is a header counter that reads
- * "3 LIVE" while every card underneath is still dark. The empty state has the
- * opposite property -- there is exactly one of it, it is the whole page, and it
- * cannot coexist with content.
- *
- * These are the empty-state sentences from ui/src/lib/i18n/en.json, quoted
- * exactly and labelled with the key they came from. THAT LABEL IS THE WHOLE
- * SAFETY: a reworded sentence makes the guard match nothing, which passes
- * instantly and photographs the empty page it was meant to prevent. The key is
- * what makes the connection findable from the other end, when someone edits the
- * translation and wonders what else says this. */
-const EMPTY = {
-  /** empty.sourcesTitle */
-  sources: "No sources yet",
-  /** rend.empty */
-  renditions: "No renditions.",
-  /** rec.empty */
-  recordings: "No recordings yet.",
-  /** lib.nothingRecorded */
-  library: "Nothing recorded yet.",
-  /** meters.nothingToMeasure */
-  meters: "Nothing to measure yet.",
-  /** dash.noDestinations */
-  destinations: "No destinations yet.",
-  /** RoutingPage.tsx, not a translation key: the page renders this literal. */
-  routing: "Add a destination first",
-} as const;
-
-/** Blocks until a page is showing content rather than its empty state.
- *
- *  A screenshot of an empty state is not a screenshot of a broken product, and
- *  that is exactly the problem: it looks deliberate. Every shot in this file
- *  used to be taken as soon as the route rendered, which against the only
- *  installs available -- one source, no destinations, no recordings -- produced
- *  a set of images advertising a product with nothing in it. */
-async function populated(page: import("@playwright/test").Page, empty: string) {
-  await expect(page.getByText(empty, { exact: false })).toHaveCount(0, {
-    timeout: 60_000,
-  });
-}
-
-/** Scrolls a locator to the TOP of the viewport, so the shot is framed on it.
- *
- *  scrollIntoViewIfNeeded is the obvious call and is the wrong one here: it
- *  scrolls the minimum distance that makes the element visible, so an element
- *  already at the bottom edge stays at the bottom edge and the frame is
- *  unchanged. These are photographs; what is at the top of the frame is the
- *  subject. */
-async function topOfFrame(
-  page: import("@playwright/test").Page,
-  target: import("@playwright/test").Locator,
-) {
-  await expect(target).toBeVisible({ timeout: 30_000 });
-  await target.evaluate((el) => el.scrollIntoView({ block: "start", behavior: "instant" }));
-  await page.waitForTimeout(300);
-}
-
-/** Settles layout before a shot: fonts loaded, no animation mid-flight.
- *
- *  Without the font wait, the first screenshot of a run catches Inter still
- *  swapping and every glyph shifts a pixel between runs — which turns a diff of
- *  two captures into noise. */
-async function settle(page: import("@playwright/test").Page, ms = 900) {
-  await dismissBanners(page);
-  await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(ms);
-}
-
-/** Closes the dismissible chrome that spans the top of every page.
- *
- *  The update banner reads "Development build dev. Updates are not offered for
- *  builds from source", which is TRUE of what this photographs and is a
- *  sentence about the build rather than about the product. Left alone it takes
- *  the top of all eighteen frames and says nothing about any of them.
- *
- *  Clicked rather than suppressed with CSS, and clicked in every shot rather
- *  than once: `dismissed` is component state, and Playwright gives each test a
- *  fresh page, so it comes back on every navigation. The first-run tour banner
- *  underneath it is handled server-side instead -- scripts/demo_seed_driver.go
- *  marks the tour complete, because that one IS persisted. */
-async function dismissBanners(page: import("@playwright/test").Page) {
-  const close = page.getByRole("button", { name: "Dismiss" });
-  for (let i = await close.count(); i > 0; i--) {
-    await close.first().click({ timeout: 2000 }).catch(() => {});
-  }
-}
-
-/** Hides anything that changes between runs but says nothing about the product,
- *  so re-capturing produces a comparable image rather than a different one. */
-async function calm(page: import("@playwright/test").Page) {
-  await page.addStyleTag({
-    content: `
-      *, *::before, *::after {
-        animation-duration: 0s !important;
-        animation-delay: 0s !important;
-        transition-duration: 0s !important;
-      }
-    `,
-  });
-}
+import {
+  EMPTY,
+  OUT,
+  calm,
+  dismissBanners,
+  populated,
+  settle,
+  shoot,
+  topOfFrame,
+} from "./captureKit";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -149,19 +45,21 @@ test("dashboard — the hero shot", async ({ page }) => {
   await expect(page.getByText("Offline", { exact: true })).toHaveCount(0, {
     timeout: 120_000,
   });
+  // BEFORE the placeholder guard below, not after it. Waiting for the
+  // destinations to populate took up to a minute, and it used to sit between
+  // that guard and the shutter -- which is most of how the preview had time to
+  // idle out and put its placeholder back.
+  await populated(page, EMPTY.destinations);
   // And the preview has to be showing frames, not its placeholder. BOTH
   // placeholder texts: the player says "Ingest offline" when nothing is on air
   // and "Waiting for a stream…" only while it buffers, so asserting the second
   // alone would pass on a blank tile showing the first.
-  for (const placeholder of ["Waiting for a stream…", "Ingest offline"]) {
-    await expect(page.getByText(placeholder)).toHaveCount(0, { timeout: 120_000 });
-  }
-  // And it has to have somewhere to send it. The multi-destination fan-out is
-  // the argument this image makes, and an ingest reading live above an empty
-  // destination column makes the opposite one.
-  await populated(page, EMPTY.destinations);
-  await settle(page);
-  await page.screenshot({ path: `${OUT}/01-dashboard.png` });
+  await shoot(page, `${OUT}/01-dashboard.png`, [
+    "Waiting for a stream…",
+    "Ingest offline",
+    // Exact: the standalone ingest badge, not every string containing the word.
+    { text: "Offline", exact: true },
+  ]);
 
   // The fan-out, framed on its own.
   //
@@ -190,11 +88,45 @@ test("dashboard — the hero shot", async ({ page }) => {
   // idle-stops after thirty seconds with no viewer
   // (settings.preview.idleTimeoutSeconds), which makes "it was playing
   // earlier" a claim about a different second.
-  for (const placeholder of ["Waiting for a stream…", "Ingest offline"]) {
-    await expect(page.getByText(placeholder)).toHaveCount(0, { timeout: 60_000 });
-  }
-  await settle(page, 600);
-  await page.screenshot({ path: `${OUT}/18-destinations.png` });
+  await shoot(page, `${OUT}/18-destinations.png`, ["Waiting for a stream…", "Ingest offline"], {
+    settleMs: 600,
+  });
+});
+
+/* TWO PROGRAMMES, WHICH IS A DIFFERENT PAGE.
+ *
+ * Dashboard.tsx divides the destination area into per-programme lanes and
+ * badges each card with the programme it carries -- and does NEITHER with one
+ * source, which its own comment calls "the shape this page had before
+ * per-source anything". Every shot this harness took before now was of that
+ * degenerate case, so the scoping work that most of #497/#515/#540 exists for
+ * was invisible in every image on the site.
+ *
+ * Both lanes are genuinely live: seed_demo.go creates the second programme
+ * with its own destinations and capture-media.sh publishes a second stream to
+ * it, on the SAME SRT port with a different streamid -- the one-port design
+ * demonstrated rather than described. A second lane reading "Offline" beside a
+ * live one would argue that multi-source does not work.
+ */
+test("dashboard — two programmes, and the lanes that divide them", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("nav")).toBeVisible();
+
+  // The lane headings are the subject. If only one programme exists they are
+  // not rendered at all, so their absence means the seed did not take -- and a
+  // shot of a single-programme dashboard filed as the multi-programme one is
+  // worse than no shot.
+  const laneHeading = page.getByText("Studio B — panel show").first();
+  await expect(
+    laneHeading,
+    "no lane heading for the second programme, so this is a single-programme " +
+      "dashboard being photographed under a multi-programme name",
+  ).toBeVisible({ timeout: 120_000 });
+
+  await topOfFrame(page, page.getByRole("heading", { name: /^Destinations/ }));
+  await shoot(page, `${OUT}/19-lanes.png`, ["Waiting for a stream…", "Ingest offline"], {
+    settleMs: 700,
+  });
 });
 
 test("routing — the thing nothing else does", async ({ page }) => {
@@ -228,6 +160,40 @@ test("meters — loudness measured after routing", async ({ page }) => {
   // photographing a zeroed scale. Six seconds is one full EBU R128 short-term
   // window plus the analyser's own start-up.
   await settle(page, 6000);
+
+  // AND THE COMPLIANCE BLOCK HAS TO HAVE ANSWERED, which six seconds does not
+  // buy: integrated loudness needs about twenty seconds of programme before it
+  // means anything, and the page says so in its own words while showing
+  // "NOT UPDATING". A shot taken before then has no per-destination figures in
+  // it at all -- and web/src/pages/index.astro quotes three of them in body
+  // copy and alt text as the whole of its proof section. Waiting on the badge
+  // rather than on another sleep, because the analyser's start-up is not a
+  // fixed cost.
+  await expect(
+    page.getByText("NOT UPDATING"),
+    "the loudness analyser never reported, so this shot has no per-destination " +
+      "figures and the front page's proof section quotes numbers that are not in it",
+  ).toHaveCount(0, { timeout: 90_000 });
+  // AND EVERY TRACK IS METERING.
+  //
+  // The guards above cover the compliance block and nothing else, so a shot
+  // could be -- and was, twice -- taken with a track reading "no signal on this
+  // track" while the other two drew bars. On a page whose subtitle is "every
+  // channel of every ingest track" that is the one thing the image must not
+  // show, and it is what the front page's alt text used to claim was happening.
+  //
+  // Refusing is the point. If a track genuinely has no audio the capture stops
+  // rather than publishing a picture of a half-working meter, which is the same
+  // bargain the ingest-live guard makes at the top of this file.
+  await expect(
+    page.getByText("no signal on this track"),
+    "a track is not metering, so this shot shows the meters page half working. " +
+      "Either the ingest is not carrying that track or the level feed is not " +
+      "reporting it -- see #613. Photographing it either way tells a reader the " +
+      "product does not measure what it says it measures",
+  ).toHaveCount(0, { timeout: 60_000 });
+
+  await settle(page, 800);
   await page.screenshot({ path: `${OUT}/04-meters.png` });
 });
 
@@ -444,7 +410,79 @@ test("routing mix matrix — channel-level control", async ({ page }) => {
   await page.screenshot({ path: `${OUT}/08-mix-matrix.png` });
 });
 
+/* THE ONE STUBBED SHOT, AND IT IS DECLARED RATHER THAN QUIET.
+ *
+ * Everything else in this file photographs a real polyemesis doing real work:
+ * a real ingest, real destinations, real bytes. Chat cannot be. A message
+ * arrives only from a platform account attached to the install, which needs
+ * live OAuth credentials for somebody's real channel -- and a screenshot of
+ * real viewers' messages is neither reproducible nor theirs to publish.
+ *
+ * So the timeline below is fixture data served to the REAL page. What is being
+ * photographed is genuine: the merge into one timeline, the per-platform
+ * attribution, the send box that knows which platforms can currently accept a
+ * message. What is fabricated is only who said it.
+ *
+ * Without this the shot was a photograph of the empty state -- "Chat is
+ * running but no platform account is attached yet" -- under a test named "four
+ * platforms in one hub". The picture argued the opposite of its own title.
+ *
+ * Recorded in docs/media/README.md as the single exception to "generated, not
+ * hand-made", because an undeclared exception is how a policy stops meaning
+ * anything.
+ */
+const CHAT_PLATFORMS = ["youtube", "twitch", "facebook", "kick"] as const;
+
+const DEMO_CHAT = [
+  ["twitch", "hexcode", "wait, one ingest and it fans out to all four?"],
+  ["youtube", "mira_dev", "the per-destination audio thing is the bit I want"],
+  ["kick", "nightowl_", "so the VOD track drops the music bed automatically"],
+  ["facebook", "Dana Whitfield", "audio is noticeably cleaner this week"],
+  ["youtube", "sam_tk", "how many destinations can it drive at once?"],
+  ["twitch", "brb_afk", "5.5 Mbps and zero dropped frames, that's the whole point"],
+  ["kick", "vexcarter", "does moderation reach back to the platform or just hide it here"],
+  ["facebook", "Ana Ruiz", "one timeline for four chats is genuinely the feature"],
+] as const;
+
 test("chat — four platforms in one hub", async ({ page }) => {
+  // Matched on the PATH: the overview is requested as `/chat?limit=300`, and a
+  // `**/chat` glob does not match a URL carrying a query string -- which fails
+  // as "no messages rendered", several steps from the cause.
+  await page.route(
+    (url) => url.pathname === "/api/v1/chat",
+    (route) =>
+      route.fulfill({
+        json: {
+          configured: true,
+          statuses: CHAT_PLATFORMS.map((platform, i) => ({
+            platform,
+            account: { youtube: "polyemesis", twitch: "polyemesis", facebook: "Polyemesis", kick: "polyemesis" }[platform],
+            state: "live",
+            channel: { youtube: "polyemesis", twitch: "polyemesis", facebook: "Polyemesis Live", kick: "polyemesis" }[platform],
+            canSend: true,
+            received: DEMO_CHAT.filter((m) => m[0] === platform).length,
+            sent: i === 0 ? 1 : 0,
+            restarts: 0,
+          })),
+          // Newest last, seconds apart, so the timeline reads as a conversation
+          // rather than as a burst that all arrived at once.
+          messages: DEMO_CHAT.map(([platform, name, text], i) => ({
+            id: `demo-${i}`,
+            platform,
+            account: platform === "facebook" ? "Polyemesis" : "polyemesis",
+            channel: platform === "facebook" ? "Polyemesis Live" : "polyemesis",
+            author: { id: `u-${name}`, name },
+            text,
+            at: new Date(Date.now() - (DEMO_CHAT.length - i) * 17_000).toISOString(),
+          })),
+          limits: CHAT_PLATFORMS.map((platform) => ({
+            platform,
+            maxChars: platform === "youtube" ? 200 : 500,
+          })),
+        },
+      }),
+  );
+
   await page.goto("/chat");
   await settle(page, 1500);
   await page.screenshot({ path: `${OUT}/09-chat.png` });
@@ -467,7 +505,14 @@ test("library — the recorded catalogue", async ({ page }) => {
   // install that has not uploaded anything -- so the default framing gives half
   // the image to an empty state and pushes the sessions below the fold, which
   // is the exact complaint this whole change exists to answer.
-  await topOfFrame(page, page.getByText("sessions").first());
+  // The count label is PLURALISED, so "sessions" is not a literal that always
+  // exists: LibraryPage renders `{n} session{n === 1 ? "" : "s"}`, and a seed
+  // that happens to produce exactly one recorded session prints "1 session".
+  // This locator was written when the seed made two, and it started timing out
+  // the moment the second programme changed how the recorder carves them up --
+  // a capture failure that says "element not found" and reads like a broken
+  // page rather than a missing letter.
+  await topOfFrame(page, page.getByText(/\d+ sessions?\b/).first());
   await settle(page, 1500);
   await page.screenshot({ path: `${OUT}/11-library.png` });
 });

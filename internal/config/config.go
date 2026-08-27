@@ -418,6 +418,28 @@ func ListenPort(addr string) string {
 	return ""
 }
 
+// ListenPortNumber is the TCP port this process serves HTTP on, or 0 when the
+// configured addr names no port that can be read as one.
+//
+// It exists so the settings API can refuse an ingest listener that asked for
+// the port the web UI is already answering on. That save used to return 200:
+// the port was stored, the settings page drew it green, and the RTMP listener
+// then failed to bind on the next reconcile with nothing but one log line to
+// say so. Ingest was dead and every screen said it was fine, so the operator
+// spent the outage debugging their encoder.
+//
+// A ZERO IS "DO NOT KNOW", NOT "PORT ZERO". Callers must treat it as "nothing
+// is reserved" and let the save through -- refusing on an unreadable addr would
+// lock an operator out of their own settings page over a string this function
+// merely failed to parse.
+func (c Config) ListenPortNumber() int {
+	n, err := strconv.Atoi(ListenPort(c.Addr))
+	if err != nil || n < 1 || n > 65535 {
+		return 0
+	}
+	return n
+}
+
 // Paths derived from DataDir.
 
 func (c Config) DBPath() string        { return filepath.Join(c.DataDir, "polyemesis.db") }

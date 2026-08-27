@@ -420,7 +420,7 @@ function ExpertPanel() {
 export function MonitoringPage() {
   const stateLabel = useStateLabel();
   const t = useT();
-  const { system, bitrate, logs, status, clearLogs } = useLiveData();
+  const { system, bitrate, logs, status, clearLogs, programme, programmeKnown } = useLiveData();
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [history, setHistory] = useState<LogLine[]>([]);
   const [filter, setFilter] = useState("all");
@@ -440,9 +440,10 @@ export function MonitoringPage() {
   // and reads as current.
   const procFreshness = useStaleTracker();
   useEffect(() => {
+    if (!programmeKnown) return;
     const load = () =>
       api
-        .listProcesses()
+        .listProcesses(programme)
         .then((p) => {
           setProcesses(p);
           procFreshness.ok();
@@ -451,8 +452,13 @@ export function MonitoringPage() {
     load();
     const t = window.setInterval(load, 5000);
     return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // programme, because listProcesses is scoped. An empty array froze it at
+    // the mount value -- null -- so every poll went out unscoped and this whole
+    // page was dead on any install with two programmes. Gated on
+    // programmeKnown rather than on `programme != null`: null means either "no
+    // sources", which the route accepts, or "not resolved yet", which it
+    // refuses, and only the second is a bug.
+  }, [programme, programmeKnown]);
 
   // The socket only carries lines produced after it connected, so a page opened
   // mid-session would start blank. Drain each process's ring buffer once to
@@ -460,14 +466,15 @@ export function MonitoringPage() {
   // its own listProcesses rather than waiting on the poll above, so it stays a
   // genuine one-shot instead of re-firing on every poll result.
   useEffect(() => {
+    if (!programmeKnown) return;
     let cancelled = false;
     void api
-      .listProcesses()
+      .listProcesses(programme)
       .then((procs) =>
         Promise.all(
           Array.from(new Set(procs.map((p) => p.status.name))).map((n) =>
             api
-              .processLogs(n)
+              .processLogs(n, programme)
               .then((r) => r.lines ?? [])
               .catch(() => [] as LogLine[]),
           ),
@@ -484,7 +491,10 @@ export function MonitoringPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // programme, for the reason the poll above gives. This is a one-shot
+    // drain, so a frozen null meant the backlog was fetched unscoped once
+    // and the panel opened empty with nothing saying why.
+  }, [programme, programmeKnown]);
 
   const merged = useMemo(
     () => (history.length === 0 ? logs : [...history, ...logs]),
@@ -536,7 +546,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label={t("mon.hostCpu")}
+              labelKey="mon.hostCpu"
               value={pct(system?.cpuPercent ?? 0)}
               tone={(system?.cpuPercent ?? 0) > 85 ? "warn" : "default"}
             />
@@ -548,7 +558,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label={t("mon.memory")}
+              labelKey="mon.memory"
               value={pct(system?.memPercent ?? 0)}
               tone={(system?.memPercent ?? 0) > 90 ? "warn" : "default"}
             />
@@ -560,7 +570,7 @@ export function MonitoringPage() {
         </Card>
         <Card>
           <CardContent className="pt-3">
-            <Stat label={t("mon.relayIn")} value={bytes(status?.relay.rxBytes ?? 0)} />
+            <Stat labelKey="mon.relayIn" value={bytes(status?.relay.rxBytes ?? 0)} />
             <div className="mt-1 text-[10px] text-muted-foreground">
               {status?.relay.subscribers?.length ?? 0} subscribers · port {status?.relay.port ?? "—"}
             </div>
@@ -569,7 +579,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label={t("mon.relayDrops")}
+              labelKey="mon.relayDrops"
               value={status?.relay.dropped ?? 0}
               tone={(status?.relay.dropped ?? 0) > 0 ? "warn" : "muted"}
             />
@@ -581,7 +591,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label={t("mon.ingestLoss")}
+              labelKey="mon.ingestLoss"
               value={`${(status?.relay.lossPercent ?? 0).toFixed(2)}%`}
               tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
             />
@@ -687,14 +697,14 @@ export function MonitoringPage() {
                     <Badge variant={toneBadge[tone]}>{stateLabel(p.state)}</Badge>
                   </div>
                   <div className="mt-1 grid grid-cols-3 gap-1">
-                    <Stat label={t("mon.pid")} value={p.pid || "—"} tone="muted" />
+                    <Stat labelKey="mon.pid" value={p.pid || "—"} tone="muted" />
                     <Stat
-                      label={t("mon.uptime")}
+                      labelKey="mon.uptime"
                       value={p.state === "running" ? duration(p.uptimeSec) : "—"}
                       tone="muted"
                     />
                     <Stat
-                      label={t("mon.restarts")}
+                      labelKey="mon.restarts"
                       value={p.restarts}
                       tone={p.restarts > 0 ? "warn" : "muted"}
                     />

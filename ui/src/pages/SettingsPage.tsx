@@ -978,7 +978,11 @@ function PipelineSettings({
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("set.failover")}</CardTitle>
+          {/* The anchor the dashboard's exposure line points at. The tab is
+              selected by ?tab=pipeline; this scrolls to the card within it, so
+              a link from the dashboard lands on the switch rather than at the
+              top of a long page. */}
+          <CardTitle id="failover">{t("set.failover")}</CardTitle>
           <CardDescription>{t("set.failoverDesc")}          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">

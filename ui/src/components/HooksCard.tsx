@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Stat } from "@/components/signature/Stat";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2, Pencil, Plus, Send, Trash2, Webhook } from "lucide-react";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
@@ -396,20 +397,20 @@ export function HooksCard() {
             <p className="col-span-2 text-[11px] text-warn">{t("hooks.deliveryUnread")}</p>
           ) : (
             <>
-              <Stat label={t("hooks.statSent")} value={stats?.sent ?? 0} />
+              <Stat labelKey="hooks.statSent" value={stats?.sent ?? 0} />
               <Stat
-                label={t("hooks.statFailed")}
+                labelKey="hooks.statFailed"
                 value={stats?.failed ?? 0}
                 tone={stats?.failed ? "down" : "muted"}
               />
-              <Stat label={t("hooks.statEndpoints")} value={stats?.endpoints ?? 0} tone="muted" />
-              <Stat label={t("hooks.statQueued")} value={stats?.queued ?? 0} tone="muted" />
+              <Stat labelKey="hooks.statEndpoints" value={stats?.endpoints ?? 0} tone="muted" />
+              <Stat labelKey="hooks.statQueued" value={stats?.queued ?? 0} tone="muted" />
               <Stat
-                label={t("hooks.statDropped")}
+                labelKey="hooks.statDropped"
                 value={stats?.dropped ?? 0}
                 tone={stats?.dropped ? "warn" : "muted"}
               />
-              <Stat label={t("hooks.statRetries")} value={stats?.retries ?? 0} tone="muted" />
+              <Stat labelKey="hooks.statRetries" value={stats?.retries ?? 0} tone="muted" />
               {stats?.lastError && (
                 <p className="col-span-2 flex items-start gap-1.5 rounded border border-down/50 bg-down/5 p-2 text-[10px] text-down">
                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -456,32 +457,6 @@ export function HooksCard() {
   );
 }
 
-function Stat({
-  label,
-  value,
-  tone = "default",
-  className,
-}: {
-  label: string;
-  value: number | string;
-  tone?: "default" | "muted" | "down" | "warn";
-  className?: string;
-}) {
-  const toneClass =
-    tone === "down"
-      ? "text-down"
-      : tone === "warn"
-        ? "text-warn"
-        : tone === "muted"
-          ? "text-muted-foreground"
-          : "";
-  return (
-    <div className={className}>
-      <div className="text-[10px] text-muted-foreground">{label}</div>
-      <div className={`text-[13px] tabular-nums ${toneClass}`}>{value}</div>
-    </div>
-  );
-}
 
 function HookDialog({
   draft,

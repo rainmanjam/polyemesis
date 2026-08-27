@@ -1,6 +1,7 @@
 package alerts
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func TestRuleValidateRefusesWhatCannotBeDelivered(t *testing.T) {
 		{
 			name:    "a subscription to an event that does not exist",
 			mut:     func(r *Rule) { r.Events = []Type{"destination.exploded"} },
-			wantErr: "unknown event",
+			wantErr: "destination.exploded",
 		},
 		{
 			name:    "a name longer than the column",
@@ -106,7 +107,11 @@ func TestRuleNormalizedClampsRatherThanRefuses(t *testing.T) {
 			wantMinSeverity: SeverityInfo,
 		},
 		{
-			name: "duplicate and unknown subscriptions are dropped",
+			// Three kept, not two: the duplicate goes and the unknown name
+			// STAYS, so Validate can refuse it by name at save. Dropping it
+			// here is what turned events:["nope.notreal"] into an empty list,
+			// and an empty list means every event.
+			name: "a duplicate subscription is dropped and an unknown one is kept",
 			in: Rule{Name: "ops", Events: []Type{
 				TypeDiskLow, TypeDiskLow, "destination.exploded", TypeClipping,
 			}},
@@ -114,7 +119,7 @@ func TestRuleNormalizedClampsRatherThanRefuses(t *testing.T) {
 			wantMinInterval:  DefaultIntervalSeconds,
 			wantFormat:       FormatJSON,
 			wantMinSeverity:  SeverityInfo,
-			wantEventsLength: 2,
+			wantEventsLength: 3,
 		},
 	}
 	for _, tt := range tests {
@@ -137,6 +142,125 @@ func TestRuleNormalizedClampsRatherThanRefuses(t *testing.T) {
 			}
 			if strings.TrimSpace(got.Name) != got.Name {
 				t.Errorf("Name = %q, want it trimmed", got.Name)
+			}
+		})
+	}
+}
+
+// POST /alerts/rules with events:["nope.notreal"] returned 201 and stored an
+// empty list, and an empty list means every type. The narrowest rule an
+// operator could write became the loudest thing on the install while they
+// believed they had subscribed to one event. Normalized had deleted the name
+// before Validate could look at it, so Validate's unknown-event branch was
+// dead code and nothing anywhere said the word "notreal".
+func TestATypoedEventNameIsRefusedByNameRatherThanWidenedToEverything(t *testing.T) {
+	raw := Rule{Name: "disk", URL: "https://example.test/hook", Events: []Type{"nope.notreal"}}
+
+	// Every write path in the tree is Normalized-then-Validate, so that is the
+	// order driven here. Calling Validate on the raw value would prove nothing
+	// about the path an operator actually reaches.
+	norm := raw.Normalized()
+	if len(norm.Events) == 0 {
+		t.Fatal("Normalized emptied the subscription list; an empty list means " +
+			"EVERY event, so the rule the operator wrote as one event is now all of them")
+	}
+	err := norm.Validate()
+	if err == nil {
+		t.Fatal("Validate accepted a subscription to an event that does not exist")
+	}
+	if !strings.Contains(err.Error(), "nope.notreal") {
+		t.Errorf("error = %q, want it to name the event the operator mistyped", err)
+	}
+
+	// The control. A validator that refuses every event name would pass the
+	// assertions above and quietly make the settings page unusable, so every
+	// name the picker offers has to be accepted here.
+	for _, ty := range AllTypes() {
+		ok := Rule{Name: "disk", URL: "https://example.test/hook", Events: []Type{ty}}
+		if err := ok.Normalized().Validate(); err != nil {
+			t.Errorf("Validate refused %q, which AllTypes offers in the picker: %v", ty, err)
+		}
+	}
+}
+
+// The upgrade case, and the reason the refusal is at save and not at load. An
+// install may already store a rule naming an event a later version removed.
+// db.scanAlertRule runs Normalized and never Validate, so that rule must still
+// load -- and it must stay NARROW while it does. Under the old code Normalized
+// deleted the stale name on read, the list went empty, and a rule nobody had
+// touched started firing on everything.
+func TestARuleStoredAgainstARetiredEventStillLoadsAndStaysNarrow(t *testing.T) {
+	stored := Rule{
+		Name: "disk", URL: "https://example.test/hook",
+		Events: []Type{TypeDiskLow, "disk.retired.in.a.later.version"},
+	}.Normalized()
+
+	if len(stored.Events) != 2 {
+		t.Fatalf("Events = %v, want the retired name kept so the list cannot go "+
+			"empty and mean everything", stored.Events)
+	}
+	if !stored.Wants(Event{Type: TypeDiskLow, Severity: SeverityWarning}) {
+		t.Error("the rule stopped alerting on the event it does name; a retired " +
+			"name must cost that one subscription, not the whole rule")
+	}
+	if stored.Wants(Event{Type: TypeLoginFailed, Severity: SeverityWarning}) {
+		t.Error("the rule now wants an event it never subscribed to; this is the " +
+			"silent widening the retired name was supposed to cost nothing for")
+	}
+}
+
+func TestCheckNameUniqueRefusesANameAlreadyInUse(t *testing.T) {
+	existing := []Rule{
+		{ID: 1, Name: "disk"},
+		{ID: 2, Name: "Ingest"},
+	}
+	tests := []struct {
+		name      string
+		candidate Rule
+		wantDup   bool
+	}{
+		// The controls. A checker that refuses every name would pass every
+		// wantDup case below and lock the operator out of creating anything.
+		{name: "a new name is free", candidate: Rule{Name: "loudness"}},
+		{
+			name:      "an existing rule keeping its own name is not its own duplicate",
+			candidate: Rule{ID: 1, Name: "disk"},
+		},
+		{name: "an exact duplicate", candidate: Rule{Name: "disk"}, wantDup: true},
+		{
+			name: "a duplicate in different case, which the list cannot show apart",
+			// Deliberately case-folded and space-padded: "Disk " and "disk"
+			// render identically in a settings list, so treating them as
+			// distinct hands the operator exactly the ambiguity the check exists
+			// to remove.
+			candidate: Rule{Name: " Disk "},
+			wantDup:   true,
+		},
+		{
+			name:      "renaming one rule onto another rule's name",
+			candidate: Rule{ID: 2, Name: "disk"},
+			wantDup:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := CheckNameUnique(tt.candidate, existing)
+			if !tt.wantDup {
+				if err != nil {
+					t.Fatalf("CheckNameUnique = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("CheckNameUnique accepted a name another rule already " +
+					"answers to; the operator cannot tell the two apart in the list")
+			}
+			if !errors.Is(err, ErrDuplicateRuleName) {
+				t.Errorf("error = %v, want it to wrap ErrDuplicateRuleName so the "+
+					"HTTP layer can answer 409 rather than 400", err)
+			}
+			if !strings.Contains(err.Error(), "disk") {
+				t.Errorf("error = %q, want it to name the rule already using it", err)
 			}
 		})
 	}

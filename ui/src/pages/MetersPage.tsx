@@ -101,7 +101,7 @@ function signed(v: number): string {
  *  way to be certain before going live, so it gets the whole width. */
 export function MetersPage() {
   const t = useT();
-  const { levels, source, status } = useLiveData();
+  const { levels, source, status, programme, programmeKnown } = useLiveData();
   const tracks = useSourceTracks();
   const probed = source?.probed ?? false;
   const metersRunning = status?.meters?.state === "running";
@@ -123,15 +123,26 @@ export function MetersPage() {
   /* A failing poll is silent while it might recover and explicit once it has
      not -- the same tracker MonitoringPage uses on its process list. Without
      it the last verdicts sat on screen for ever with no clock and no "as of",
-     and a stale pass reads exactly like a live one. */
+     and a stale pass reads exactly like a live one.
+
+     THAT IS HALF THE DANGER, and this device only ever covered this half. It
+     counts HTTP failures, and #609 produced none: the publisher was killed, two
+     analysers stopped emitting frames, and the server went on answering 200
+     with byte-identical LUFS for 65 seconds. The other half is now closed
+     server-side -- meters.StaleAfter, applied in Engine.Loudness -- which
+     arrives here as `verdict: "unknown"` and a reason saying how long it has
+     been, rendered by ComplianceRow with no special case. Deliberately NOT
+     re-checked against Date.now() here: `at` is the server's clock, and a
+     browser an hour out of step would blank every verdict on the page. */
   const freshness = useStaleTracker();
 
   // Polled rather than pushed: the analyser publishes once a second, and a
   // second socket subscription for one card is not worth the wiring.
   useEffect(() => {
+    if (!programmeKnown) return;
     const read = () =>
       autoApi
-        .get<LoudnessView>("/loudness")
+        .loudness<LoudnessView>(programme)
         .then((v) => {
           setLoudness(v);
           if (!toggling.current) setMonitorOn(v.enabled ?? null);
@@ -141,8 +152,22 @@ export function MetersPage() {
     void read();
     const t = window.setInterval(read, 2000);
     return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // RE-RUN WHEN THE PROGRAMME RESOLVES, and wait until it has.
+    //
+    // The dependency array was empty, which was right while this call took no
+    // arguments. The moment `programme` was threaded in (#606) the poll closed
+    // over it AT MOUNT, when it is still null -- so on a two-programme install
+    // every request went out unscoped, took a 400, and the staleness counter
+    // climbed for ever. The page then showed NOT UPDATING beside a perfectly
+    // healthy analyser, which is how #612 stayed hidden: the badge counts
+    // failed polls, and the polls were failing for a reason that had nothing
+    // to do with what was being measured.
+    //
+    // Gated on programmeKnown, not on `programme != null`: null means EITHER
+    // "no sources exist", which the route accepts, OR "not resolved yet",
+    // which it refuses. Only the second is a bug, and only this tells them
+    // apart.
+  }, [programme, programmeKnown]);
 
   const reports = loudness?.reports ?? [];
 
@@ -150,7 +175,7 @@ export function MetersPage() {
     toggling.current = true;
     setMonitorOn(on);
     try {
-      const res = await autoApi.put<{ enabled: boolean }>("/loudness", { enabled: on });
+      const res = await autoApi.setLoudnessMonitor<{ enabled: boolean }>(on, programme);
       setMonitorOn(res?.enabled ?? on);
     } catch {
       setMonitorOn(!on);
@@ -165,7 +190,10 @@ export function MetersPage() {
         title={t("meters.title")}
         subtitle={t("meters.subtitle")}
         actions={
-          <Badge variant={metersRunning ? "live" : "outline"}>
+          <Badge
+            variant={metersRunning ? "live" : "outline"}
+            title={t("meters.metering.hint")}
+          >
             {metersRunning ? t("meters.metering") : t("dash.idle")}
           </Badge>
         }
@@ -207,7 +235,10 @@ export function MetersPage() {
             <Switch
               id="loud-monitor"
               checked={monitorOn ?? false}
-              disabled={monitorOn === null}
+              // Also while the programme is unresolved: PUT /loudness is scoped, and
+              // firing it unnamed on a multi-programme install is a 400 the operator
+              // reads as a broken switch. See #606.
+              disabled={monitorOn === null || !programmeKnown}
               onCheckedChange={toggleMonitor}
             />
           </div>
@@ -262,7 +293,16 @@ export function MetersPage() {
                   )}
                 </CardTitle>
                 <div className="flex items-center gap-1.5">
-                  {clipping && <Badge variant="down">clip</Badge>}
+                  {/* CLIPPING IS NOT "LOUD", and the badge said neither. A bare
+                      three-letter word in a red pill tells an operator that
+                      something is wrong and nothing about what to do, on the
+                      one reading here that is already unrecoverable by the
+                      time they see it. */}
+                  {clipping && (
+                    <Badge variant="down" title={t("meters.clip.hint")}>
+                      {t("meters.clip")}
+                    </Badge>
+                  )}
                   <span
                     className={cn(
                       "tnum font-mono text-[11px]",
@@ -333,7 +373,6 @@ export function ComplianceRow({
   report: LoudnessReport;
   truePeakFailOverDb: number;
 }) {
-  const t = useT();
   const tone = VERDICT_TONE[report.verdict] ?? "idle";
   const targeted = report.target.source !== "none";
   /* Nothing has gone through the analyser yet: every float is still at its
@@ -373,37 +412,37 @@ export function ComplianceRow({
             {/* Every one of these is a dash until something has been measured,
                 not just the two that happened to be guarded. */}
             <Stat
-              label={t("meters.momentary")}
+              labelKey="meters.momentary"
               value={measured ? lufs(report.momentaryLufs) : "—"}
               unit="LUFS"
             />
             <Stat
-              label={t("meters.shortTerm")}
+              labelKey="meters.shortTerm"
               value={measured ? lufs(report.shortTermLufs) : "—"}
               unit="LUFS"
             />
             {/* The only figure a platform normalizes against, so it carries the
                 verdict's colour and the others stay neutral. */}
             <Stat
-              label={t("meters.integrated")}
+              labelKey="meters.integrated"
               value={measured && report.integrated ? lufs(report.integratedLufs) : "—"}
               unit="LUFS"
               tone={VERDICT_STAT[report.verdict] ?? "muted"}
             />
             <Stat
-              label={t("meters.deviation")}
+              labelKey="meters.deviation"
               value={measured && targeted && report.integrated ? signed(report.deviationLu) : "—"}
               unit="LU"
               tone="muted"
             />
             <Stat
-              label={t("meters.range")}
+              labelKey="meters.range"
               value={measured ? lufs(report.rangeLu) : "—"}
               unit="LU"
               tone="muted"
             />
             <Stat
-              label={t("meters.truePeak")}
+              labelKey="meters.truePeak"
               value={measured ? dbtp(report.truePeakDbtp) : "—"}
               unit="dBTP"
               tone={peakOver ? "down" : "default"}

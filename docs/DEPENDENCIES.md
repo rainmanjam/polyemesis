@@ -28,7 +28,13 @@ candidate library conflicts with one of them, the library loses.
    library. See [FFmpeg](#ffmpeg-a-subprocess-not-a-library) below — this one is
    a licensing decision as much as an architectural one.
 
-Go toolchain: **1.26.6**.
+Go toolchain: whatever `go.mod` says — currently **1.27**.
+
+Deliberately not pinned to a patch version here. This line said `1.26.6` while
+`go.mod` said `1.27.0` and the Dockerfile built on `golang:1.27-alpine`, which
+is the ordinary fate of a number written down in two places: one of them moves
+and the other is not part of anybody's change. `go.mod` is the one the
+toolchain actually reads.
 
 ## Direct Go dependencies
 

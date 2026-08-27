@@ -59,8 +59,20 @@ type expertArgs struct {
 	// edit which keeps the same override does not silently lose the record of
 	// who agreed to it.
 	AckReencode bool `json:"ackReencode"`
-	// UpdatedAt is zero when nothing has ever been saved for this destination.
-	UpdatedAt time.Time `json:"updatedAt,omitempty"`
+	// UpdatedAt is zero when nothing has ever been saved for this destination,
+	// which is the COMMON case: expert mode is off on almost every destination.
+	//
+	// `omitzero`, not `omitempty`, because `omitempty` DOES NOTHING ON A
+	// time.Time -- encoding/json has no empty case for a struct. So the tag
+	// read as a guard and was decoration, and every destination that had never
+	// been given expert arguments served "0001-01-01T00:00:00Z". A non-empty
+	// string that parses cleanly, so a client truthiness guard passed and the
+	// expert panel showed "last edited 12/31/1, 16:07:02" for a destination
+	// nobody had ever edited.
+	//
+	// `omitzero` (Go 1.24) drops the key: the shape cannot put an instant on
+	// the wire that never happened.
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 }
 
 // set reports whether this destination has any expert arguments at all. A row

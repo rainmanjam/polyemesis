@@ -719,14 +719,14 @@ export function RenditionCard({
 
       <CardContent className="flex flex-col gap-2.5">
         <div className="grid grid-cols-3 gap-2">
-          <Stat label={t("rend.target")} value={kbps(r.videoBitrate)} />
+          <Stat labelKey="rend.target" value={kbps(r.videoBitrate)} />
           <Stat
-            label={t("rend.live")}
+            labelKey="rend.live"
             value={proc?.state === "running" ? kbps(proc.progress?.bitrateKbps ?? 0) : "—"}
             tone={proc?.state === "running" ? "live" : "muted"}
           />
           <Stat
-            label={t("rend.speed")}
+            labelKey="rend.speed"
             value={proc?.state === "running" ? `${(proc.progress?.speed ?? 0).toFixed(2)}×` : "—"}
             // Below real time the encode is losing the race, and every
             // destination under it inherits the stutter.
@@ -734,10 +734,10 @@ export function RenditionCard({
               proc?.state === "running" && (proc.progress?.speed ?? 0) < 0.98 ? "warn" : "muted"
             }
           />
-          <Stat label={t("rend.gop")} value={`${r.gopSeconds}s`} tone="muted" />
-          <Stat label={t("rend.preset")} value={r.preset} tone="muted" />
+          <Stat labelKey="rend.gop" value={`${r.gopSeconds}s`} tone="muted" />
+          <Stat labelKey="rend.preset" value={r.preset} tone="muted" />
           <Stat
-            label={t("rend.uptime")}
+            labelKey="rend.uptime"
             value={proc?.state === "running" ? duration(proc.uptimeSec) : "—"}
             tone="muted"
           />

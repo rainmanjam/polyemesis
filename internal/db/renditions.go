@@ -951,9 +951,58 @@ func (d *DB) DeleteRendition(id int64) error {
 //
 // Passthrough destinations (rendition_id NULL) are deliberately not counted —
 // they have no process to ref-count.
+//
+// INSTALL-WIDE ON PURPOSE, and only correct for a caller that is asking an
+// install-wide question. A per-programme caller wants the ...ForSource sibling
+// below; reaching for this one instead is what put another programme's
+// destination into a card's "consumers" figure.
 func (d *DB) CountEnabledDestinationsByRendition() (map[int64]int, error) {
-	rows, err := d.sql.Query(`SELECT rendition_id, COUNT(*) FROM destinations
-		WHERE enabled = 1 AND rendition_id IS NOT NULL GROUP BY rendition_id`)
+	return d.countEnabledDestinations(countDestsByRenditionQuery, nil)
+}
+
+// CountEnabledDestinationsByRenditionForSource is that ref count narrowed to
+// one programme, which is what a per-source engine reconciles and reports
+// against.
+//
+// The unscoped count read as a per-programme one, and both readings were
+// wrong at once: a destination on programme 2 that had been wired to
+// programme 1's rendition (see checkRendition, which now makes that
+// impossible) was added to programme 1's consumer figure, so programme 1's
+// card claimed a consumer it does not serve while programme 2's engine refused
+// that destination a process altogether.
+func (d *DB) CountEnabledDestinationsByRenditionForSource(sourceID int64) (map[int64]int, error) {
+	return d.countEnabledDestinations(countDestsByRenditionForSourceQuery, []any{sourceID})
+}
+
+// The two queries, WHOLE, rather than one with a fragment concatenated in.
+//
+// The previous form built the WHERE clause by appending a constant, which was
+// safe -- the fragment came from this file and the id was bound through args --
+// and was still the wrong shape twice over. It contradicted the pattern its own
+// comment pointed at: destBySourceQuery and destListQuery in destinations.go
+// are whole constants folded at compile time, precisely so there is no seam a
+// value could ever be routed into. And it read to a scanner as a dynamically
+// assembled query (Sonar go:S2077), which is a reviewer's afternoon spent
+// re-deriving that a constant is a constant.
+//
+// Two constants cost two lines and end both arguments.
+const (
+	countDestsByRenditionQuery = `SELECT rendition_id, COUNT(*) FROM destinations
+		WHERE enabled = 1 AND rendition_id IS NOT NULL
+		GROUP BY rendition_id`
+	countDestsByRenditionForSourceQuery = `SELECT rendition_id, COUNT(*) FROM destinations
+		WHERE enabled = 1 AND rendition_id IS NOT NULL AND source_id = ?
+		GROUP BY rendition_id`
+)
+
+// countEnabledDestinations is the one body both counts share, so the scoped
+// and unscoped answers cannot drift into disagreeing about what "enabled" or
+// "passthrough" mean.
+//
+// query is one of the two constants above and nothing else; the caller picks
+// which, and the programme id travels in args where a value belongs.
+func (d *DB) countEnabledDestinations(query string, args []any) (map[int64]int, error) {
+	rows, err := d.sql.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

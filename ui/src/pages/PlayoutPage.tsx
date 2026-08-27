@@ -232,10 +232,10 @@ export function PlayoutPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Stat label={t("play.watchingNow")} value={String(analytics.viewers)} />
-              <Stat label={t("play.peak")} value={String(analytics.peak)} />
-              <Stat label={t("play.sessions")} value={String(analytics.sessions)} />
-              <Stat label={t("play.onDisk")} value={fmtBytes(usage.bytes)} />
+              <Stat labelKey="play.watchingNow" value={String(analytics.viewers)} />
+              <Stat labelKey="play.peak" value={String(analytics.peak)} />
+              <Stat labelKey="play.sessions" value={String(analytics.sessions)} />
+              <Stat labelKey="play.onDisk" value={fmtBytes(usage.bytes)} />
             </div>
             {analytics.uncounted > 0 && (
               <p className="mt-3 text-[11px] text-muted-foreground">

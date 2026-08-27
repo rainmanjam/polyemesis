@@ -42,6 +42,9 @@ type Manager struct {
 	// freeSpace is diskFree in production; tests substitute a volume they can
 	// fill on demand, which no real temp directory lets them do.
 	freeSpace func(string) (uint64, uint64, error)
+	// sourceID is the programme these segments came from, stamped onto every
+	// row this manager indexes. Nil on a manager with no programme.
+	sourceID *int64
 
 	storageMu sync.Mutex
 	storage   StorageState
@@ -65,6 +68,21 @@ func WithFFprobe(bin string) Option {
 
 // WithStorageGuard registers the callback fired when the free-space floor
 // halts recording, and again when recovered space lets it resume.
+// WithSourceID names the programme whose segments this manager indexes.
+//
+// Without it every recording row was written with a NULL source_id, and the
+// clip editor then labelled every clip with the DEFAULT programme's track
+// names -- including clips cut from somebody else's show. Unset stays nil,
+// which is the honest answer for a manager that is not attached to a
+// programme at all (see engine.New's storeless construction in tests).
+func WithSourceID(id int64) Option {
+	return func(m *Manager) {
+		if id > 0 {
+			m.sourceID = &id
+		}
+	}
+}
+
 func WithStorageGuard(fn func(StorageState)) Option {
 	return func(m *Manager) { m.onStorage = fn }
 }
@@ -279,6 +297,12 @@ func (m *Manager) Scan() (bool, error) {
 				m.log.Warn("probe recording", "file", rec.Filename, "err", err)
 			}
 		}
+		// The programme this manager belongs to, stamped at index time. It is
+		// the only moment anything knows it: the filename does not carry it and
+		// a later reader cannot work it out.
+		if rec.SourceID == nil {
+			rec.SourceID = m.sourceID
+		}
 		if err := m.store.UpsertRecording(rec); err != nil {
 			m.log.Warn("index recording", "file", rec.Filename, "err", err)
 			continue
@@ -397,13 +421,24 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 	// both now derive the same identity from the index (latest start time)
 	// through one shared helper, instead of one branch remembering a rule the
 	// other never got.
-	live := liveSegment(recs)
+	//
+	// Plural since: one programme's recorder is not the only one writing into
+	// this directory. See liveSegments.
+	live := liveSegments(recs, liveWindow(s.SegmentSeconds), time.Now())
+	// And #504's own floor on top of the window, kept because this is the
+	// UNATTENDED path: it runs every 30 seconds with nobody watching, so a
+	// recorder that has stalled without rolling over, or a clock that has just
+	// been stepped, must not be able to age the open file out of the window and
+	// have it silently unlinked. The delete button does not carry this floor --
+	// a human naming one file that started days ago is owed the deletion, and
+	// refusing it for ever is how an archive stops being manageable.
+	live[newestSegmentName(recs)] = true
 
 	if s.MaxAgeHours > 0 {
 		cutoff := time.Now().Add(-time.Duration(s.MaxAgeHours) * time.Hour)
 		remaining := recs[:0]
 		for _, r := range recs {
-			if r.Filename != live && r.StartedAt.Before(cutoff) {
+			if !live[r.Filename] && r.StartedAt.Before(cutoff) {
 				if m.delete(r, fmt.Sprintf("older than %dh", s.MaxAgeHours)) {
 					deleted = true
 					continue
@@ -432,9 +467,9 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 		for _, st := range stems {
 			total += st.bytes
 		}
-		// Never delete the live segment: see the #504 note above liveSegment.
+		// Never delete a live segment: see the #504 note above liveSegments.
 		for i := 0; total > limit && i < len(recs); i++ {
-			if recs[i].Filename == live {
+			if live[recs[i].Filename] {
 				continue
 			}
 			if !m.delete(recs[i], fmt.Sprintf("size cap %.1f GB exceeded", s.MaxGB)) {
@@ -454,23 +489,112 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 	return deleted, nil
 }
 
-// liveSegment names the one recording retention must never delete: the
-// segment with the latest start time, which is the one the recorder is
-// presumably still appending to. This is the same heuristic Scan uses (see
-// newestSegment) -- start time, not file position -- applied here so the age
-// and size branches of Sweep share one notion of "the open file" instead of
-// each keeping (or forgetting) their own. It is still an inference from the
-// index, not a query of the recorder's actual open file handle: the recorder
-// process belongs to another package and this one has no channel to ask it.
-func liveSegment(recs []db.Recording) string {
-	live := ""
-	var at time.Time
+// liveSegmentSlack widens the live window past one nominal segment length.
+//
+// ffmpeg only cuts a segment on a keyframe, so a segment routinely outruns the
+// segment_time it was asked for, and the start time this package works from is
+// recovered from a filename with one-second resolution. A window of exactly one
+// segment length would therefore expose a genuinely open file every time either
+// of those slipped. Fixed rather than proportional because both causes are
+// measured in seconds whatever the segment length is.
+const liveSegmentSlack = 2 * time.Minute
+
+// liveWindow is how long ago a segment can have started and still be one a
+// recorder is holding open.
+//
+// A recorder rolls over every segmentSeconds, so every file open anywhere on
+// this install started within one segment length of now, whatever the index
+// says and however many recorders there are.
+//
+// A zero length is not a licence to protect nothing: it means the caller passed
+// a settings struct that never went through the store (Validate refuses
+// anything outside 10s-24h), and the safe reading of "unknown" is the length
+// this install ships with.
+func liveWindow(segmentSeconds int) time.Duration {
+	if segmentSeconds <= 0 {
+		segmentSeconds = db.DefaultSettings().Recording.SegmentSeconds
+	}
+	return time.Duration(segmentSeconds)*time.Second + liveSegmentSlack
+}
+
+// segmentSeconds is the configured segment length, for the deletion paths that
+// are not handed a settings struct.
+//
+// Sweep receives one; Delete is an HTTP handler and does not, and reading the
+// store here rather than widening Manager's constructor keeps the guard's
+// input identical on both paths. An unreadable settings row falls through to
+// liveWindow's default, which protects MORE rather than less -- the direction
+// where the cost is a delete the operator has to retry after a rollover
+// instead of footage that no longer exists.
+func (m *Manager) segmentSeconds() int {
+	s, err := m.store.GetSettings()
+	if err != nil {
+		m.log.Warn("recording settings unreadable; live-segment guard assumes the default segment length", "err", err)
+		return 0
+	}
+	return s.Recording.SegmentSeconds
+}
+
+// liveSegments names every recording no deletion path may touch: the ones a
+// recorder is still appending to.
+//
+// The predecessor of this function returned ONE filename, the latest start
+// time, and one was the wrong count. Every programme runs its own recorder and
+// they all write into the same recordings directory (config.RecordingsDir is
+// install-wide), so an install with two programmes was measured holding eight
+// .mkv files open at once while this named a single one of them -- leaving the
+// size branch of Sweep free to unlink the other seven out from under the
+// processes writing them. An unlinked open file keeps consuming the disk while
+// vanishing from Usage(), which is index-derived, so the operator loses the
+// tail of a live archive and the space it was costing does not come back.
+//
+// Keyed on the window rather than on Manager.sourceID even though a sourceID is
+// now to hand: the segments share one directory and Scan stamps its OWN
+// manager's programme on any row that has none yet, so a row's source_id says
+// which manager indexed the file first, not which recorder wrote it. Grouping
+// by it would protect one segment per programme -- the same undercount in a
+// costume. It also assumes one recorder per programme, which nothing enforces.
+// Start time is the property the recorder actually determines.
+//
+// Measured against NOW rather than against the newest row in the index. The
+// index-relative version reads as the more conservative of the two and is
+// really a trap: on an install that stopped recording last week, the newest row
+// is always inside a window measured from itself, so the last segment of every
+// finished session becomes permanently undeletable and the operator has no way
+// to reclaim the space. The clock is also simply the more accurate question --
+// whether a recorder is writing right now has nothing to do with when the rows
+// beside it were written.
+//
+// This remains an inference from the index rather than a query of the
+// recorder's open file handles: that process belongs to another package and
+// this one has no channel to ask it. The window is what makes the inference
+// safe in the direction that matters -- it can protect a segment that has just
+// been closed, which costs one segment of retention headroom, and it cannot
+// miss one that is open.
+func liveSegments(recs []db.Recording, window time.Duration, now time.Time) map[string]bool {
+	cutoff := now.Add(-window)
+	live := map[string]bool{}
 	for _, r := range recs {
-		if live == "" || r.StartedAt.After(at) || (r.StartedAt.Equal(at) && r.Filename > live) {
-			live, at = r.Filename, r.StartedAt
+		if !r.StartedAt.Before(cutoff) {
+			live[r.Filename] = true
 		}
 	}
 	return live
+}
+
+// newestSegmentName is the last segment by start time, which Sweep protects
+// unconditionally.
+func newestSegmentName(recs []db.Recording) string {
+	name := ""
+	var at time.Time
+	for _, r := range recs {
+		// Equal start times broken by name, so the choice is stable across
+		// sweeps rather than following slice order.
+		if name == "" || r.StartedAt.After(at) || (r.StartedAt.Equal(at) && r.Filename > name) {
+			name, at = r.Filename, r.StartedAt
+		}
+	}
+	return name
 }
 
 // stemSize is one stem file as the size cap sees it: when its master started,
@@ -542,12 +666,50 @@ func (m *Manager) delete(r db.Recording, reason string) bool {
 	return true
 }
 
+// ErrSegmentLive refuses a delete of a segment a recorder is still writing.
+//
+// It unwraps to db.ErrStateConflict so the HTTP surface answers 409 without
+// having to learn about this package: writeStoreError already maps that
+// sentinel, and passes the sentence below through to the operator unchanged.
+var ErrSegmentLive error = liveSegmentError{}
+
+type liveSegmentError struct{}
+
+func (liveSegmentError) Error() string {
+	return "the recorder is still writing this segment; stop the recording, or wait for it to roll " +
+		"over into the next file, and then delete it"
+}
+
+func (liveSegmentError) Unwrap() error { return db.ErrStateConflict }
+
 // Delete removes one recording by id, for the UI's delete button.
 func (m *Manager) Delete(id int64) error {
 	r, err := m.store.GetRecording(id)
 	if err != nil {
 		return err
 	}
+
+	// THE DELETE BUTTON COULD UNLINK THE FILE FFMPEG WAS WRITING INTO.
+	//
+	// Sweep has refused this since #504 and Delete never learned it, so the one
+	// deletion path a human drives was the one with no guard: DELETE
+	// /recordings/427 on a segment the recorder held open answered
+	// {"status":"deleted"}, the file was unlinked, and the recorder went on
+	// appending to a dead inode. The operator lost the tail of a live archive
+	// they cannot re-shoot, the bytes stayed charged to the volume until the
+	// process exited, and Usage() -- which reads the index, not the disk --
+	// stopped counting them, so nothing on the page said a word.
+	//
+	// Refusing costs at most a segment: the recorder rolls over on its own and
+	// the file becomes deletable, which is what the message tells the operator.
+	recs, err := m.store.ListRecordings()
+	if err != nil {
+		return err
+	}
+	if liveSegments(recs, liveWindow(m.segmentSeconds()), time.Now())[r.Filename] {
+		return fmt.Errorf("cannot delete %s: %w", r.Filename, ErrSegmentLive)
+	}
+
 	path, err := m.Resolve(r.Filename)
 	if err != nil {
 		return err
