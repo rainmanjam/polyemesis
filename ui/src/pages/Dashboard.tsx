@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
@@ -8,9 +9,10 @@ import { audioTrackCount, ingestAttribution, ingestBitrateKbps, processAbsence }
 import { laneLayout } from "@/lib/sourceLanes";
 import { cn } from "@/lib/utils";
 import { topRowLayout } from "@/lib/dashboardLayout";
+import { failoverNotice, type FailoverNotice } from "@/lib/failoverNotice";
 import { trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
-import { Copy, Megaphone, Play, Plus, Radio, RadioTower, Square } from "lucide-react";
+import { Copy, Megaphone, Play, Plus, Radio, RadioTower, ShieldAlert, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +39,7 @@ import type {
   Destination,
   DestinationId,
   DestStatus,
+  FailoverSettings,
   MetaField,
   SourceView,
   SystemInfo,
@@ -782,6 +785,54 @@ function BulkDestinationControl({
   );
 }
 
+/** The failover exposure line. Renders nothing when there is nothing to say,
+ *  which is the common case on a correctly configured install. */
+function FailoverExposure({ notice }: { notice: FailoverNotice }) {
+  if (notice.kind === "none") return null;
+
+  // TWO DIFFERENT SENTENCES, because they are two different mistakes and the
+  // fix is not the same. Collapsing them into "check your failover settings"
+  // would send someone who is most of the way there back to the beginning.
+  const unprotected = notice.kind === "unprotected";
+  return (
+    <div
+      className="mb-2 flex items-start gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-[11px]"
+      // Not role="alert". Nothing has gone wrong yet, and announcing a standing
+      // configuration fact as an alert on every page load is how a screen-reader
+      // user learns to tune the region out.
+    >
+      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
+      <p className="text-muted-foreground">
+        {unprotected ? (
+          <>
+            <span className="text-foreground">
+              If the encoder disconnects, this broadcast ends.
+            </span>{" "}
+            Without failover the destination restarts and takes the platform
+            connection with it, and a completed YouTube broadcast cannot return
+            to live. Turning it on in{" "}
+            <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
+              Settings → Failover
+            </Link>{" "}
+            holds the connection up with a standby ingest, a looping file or a
+            slate. It costs a remux hop.
+          </>
+        ) : (
+          <>
+            <span className="text-foreground">Failover is on, with nothing to play.</span>{" "}
+            The connection will be held up by a black slate. Adding a file in{" "}
+            <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
+              Settings → Failover
+            </Link>{" "}
+            loops your own video instead, which ranks above the slate and below
+            both ingests.
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
+
 /** The dashboard's right-hand cards: a stack in one grid cell, or two cells.
  *
  *  A COMPONENT RATHER THAN A TERNARY AROUND THE CHILDREN, because the children
@@ -802,6 +853,10 @@ export function Dashboard() {
   const { status, bitrate } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
+  /* The failover settings, for the exposure line above the destinations. Null
+   * until the read lands, and failoverNotice() treats that as "say nothing"
+   * rather than "unprotected" -- see lib/failoverNotice.ts. */
+  const [failover, setFailover] = useState<FailoverSettings | null>(null);
   // The recorder's and the meters' own settings, kept rather than discarded.
   //
   // This page already fetched the whole settings object and threw all but one
@@ -873,8 +928,14 @@ export function Dashboard() {
       .then((s) => {
         setSettingsPreview(s.preview.enabled);
         setFeatureEnabled({ recording: s.recording.enabled, meters: s.meters.enabled });
+        setFailover(s.failover ?? null);
       })
-      .catch(() => setFeatureEnabled(null));
+      .catch(() => {
+        setFeatureEnabled(null);
+        // Left null on a failed read, so the notice stays silent rather than
+        // claiming an exposure it could not verify.
+        setFailover(null);
+      });
     readSourceCount();
     // AND KEEP READING IT. The count used to be read once per refreshKey, and
     // every control that bumps refreshKey is inside the pipeline this page
@@ -1418,6 +1479,27 @@ export function Dashboard() {
             </span>
           </h2>
         </div>
+
+        {/* THE ONE UNRECOVERABLE FAILURE, said where the destinations it would
+            cost are listed. See lib/failoverNotice.ts and #512.
+
+            Here rather than in the attention panel: that panel lists what is
+            wrong NOW, and its own comment explains that padding it with states
+            somebody chose is how it becomes something an operator scrolls past.
+            A permanent row on every install that has not enabled failover is
+            exactly that.
+
+            No dismiss button. A banner with an X depends on the operator
+            remembering, later, something they closed while busy -- rung zero.
+            This clears itself when the setting changes and returns if it
+            changes back, so what is on screen is the current exposure rather
+            than a record of who clicked what. */}
+        <FailoverExposure
+          notice={failoverNotice(
+            destinations.filter((d) => d.enabled).length,
+            failover,
+          )}
+        />
 
         {/* Beside the list it acts on, not in the header row: the outcome list
             below the buttons needs the full width to put a destination name and
