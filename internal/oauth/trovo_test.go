@@ -31,20 +31,33 @@ import (
  * reference rather than adjusting the fixture to suit the code.
  */
 
-// §3.2, "Response Sample", verbatim. Note expires_in.
+// THE SHAPE IS VERBATIM; THE TOKEN VALUES ARE NOT, and the difference matters.
+//
+// What these fixtures exist to pin is Trovo's SHAPE -- above all `expires_in`
+// as a quoted STRING, which an int field cannot decode and which a hand-written
+// fixture gets wrong by writing 14400. That is preserved exactly.
+//
+// The token values are replaced with obviously-fake strings. Trovo's published
+// samples use realistic 32-hex tokens, and copying those in tripped
+// generic-api-key four times. The allowlist is not the answer: .gitleaks.toml
+// says so in its own words -- "six permanent known-failures is how a scanner
+// stops being read at all" -- and adding four more to accommodate a test would
+// dilute the one check that finds a real key committed to a test file.
+
+// §3.2, "Response Sample". Note expires_in.
 const trovoExchangeSample = `{
-    "access_token": "a0e1b1ee318088304eb542c86d3c2360",
+    "access_token": "trovo-not-a-real-access-token",
     "token_type": "bearer",
     "expires_in": "14400",
-    "refresh_token": "af6f6d8b601ba6b91367c5ce35b11e1f"
+    "refresh_token": "trovo-not-a-real-refresh-token"
 }`
 
 // §4.3, "Response Sample", verbatim.
 const trovoRefreshSample = `{
-    "access_token": "11ab51c039344c69cb1e03bc2c0d2625",
+    "access_token": "trovo-not-a-real-rotated-access-token",
     "token_type": "bearer",
     "expires_in": "14400",
-    "refresh_token": "d53ca510b054023ec0fee3f078a7a813"
+    "refresh_token": "trovo-not-a-real-rotated-refresh-token"
 }`
 
 // §5.6, "Response Sample", verbatim. The mixed types are Trovo's: uid,
@@ -210,10 +223,10 @@ func TestTrovoDecodesTheQuotedExpiresInTrovoActuallySends(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Exchange rejected Trovo's own documented response sample: %v", err)
 		}
-		if tok.AccessToken != "a0e1b1ee318088304eb542c86d3c2360" {
+		if tok.AccessToken != "trovo-not-a-real-access-token" {
 			t.Errorf("access token = %q", tok.AccessToken)
 		}
-		if tok.RefreshToken != "af6f6d8b601ba6b91367c5ce35b11e1f" {
+		if tok.RefreshToken != "trovo-not-a-real-refresh-token" {
 			t.Errorf("refresh token = %q", tok.RefreshToken)
 		}
 		assertLifetime(t, tok.ExpiresAt, before, wantLifetime)
@@ -226,7 +239,7 @@ func TestTrovoDecodesTheQuotedExpiresInTrovoActuallySends(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Refresh rejected Trovo's own documented response sample: %v", err)
 		}
-		if tok.RefreshToken != "d53ca510b054023ec0fee3f078a7a813" {
+		if tok.RefreshToken != "trovo-not-a-real-rotated-refresh-token" {
 			t.Errorf("refresh token = %q; Trovo rotates it and the new one must be stored", tok.RefreshToken)
 		}
 		assertLifetime(t, tok.ExpiresAt, before, wantLifetime)
