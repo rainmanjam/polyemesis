@@ -1207,7 +1207,10 @@ func proveHookDeliveries(t *testing.T) proofResult {
 	// Slack-shaped webhook, because that URL carries its secret in the PATH and
 	// is the case RedactWebhookURL exists for.
 	created := send(t, h, sign, http.MethodPost, "/api/v1/hooks", map[string]any{
-		"name":     "ledger",
+		// Distinct from the hook plantedServer already seeds as "ledger":
+		// duplicate names are refused with a 409 now, because two hooks with the
+		// same name cannot be told apart in the list.
+		"name":     "ledger-deliveries",
 		"url":      "https://hooks.example.com/services/T0/B1/" + sentinelDestKey,
 		"triggers": []string{string(hooks.TriggerIngestPublished)},
 		"enabled":  true,

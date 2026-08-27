@@ -244,16 +244,25 @@ func procStatus(p *supervisor.Process) *supervisor.Status {
 	return &s
 }
 
-// Renditions returns the live state of every shared encode.
+// Renditions returns the live state of every shared encode THIS ENGINE RUNS.
 //
-// Every rendition row appears, running or not: one with no enabled destination
-// is idle on purpose and must not read as broken.
+// Every rendition row of this programme appears, running or not: one with no
+// enabled destination is idle on purpose and must not read as broken.
+//
+// SCOPED TO e.sourceID, and the unscoped read it replaces is the reason #543
+// did not close this. Passing the engine into statusPayload made the caller
+// resolve the right programme, but the engine then answered ListRenditions()
+// -- every rendition on the box -- so GET /status?source=1 listed a rendition
+// belonging to source 2 while GET /sources correctly reported source 1 had
+// none. Two screens on the same install disagreed about which programme owns
+// an encode, and the one an operator acts on is whichever they opened.
+// reconcileOutputs has always used the scoped sibling ten lines from here.
 func (e *Engine) Renditions() []RenditionStatus {
-	rows, err := e.store.ListRenditions()
+	rows, err := e.store.ListRenditionsBySource(e.sourceID)
 	if err != nil {
 		return []RenditionStatus{}
 	}
-	counts, cerr := e.store.CountEnabledDestinationsByRendition()
+	counts, cerr := e.store.CountEnabledDestinationsByRenditionForSource(e.sourceID)
 	if cerr != nil {
 		counts = map[int64]int{}
 	}

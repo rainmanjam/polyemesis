@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
@@ -73,19 +74,36 @@ func TestAlertRuleValidationRunsOnWrite(t *testing.T) {
 	}
 }
 
-func TestAlertRuleNormalizationDropsUnknownSubscriptionsRatherThanFailing(t *testing.T) {
+// This test used to assert the opposite, and the opposite was the defect. The
+// unknown name was stripped before Validate saw it, so a rule written as
+// events:["nope.notreal"] saved with an EMPTY list -- and empty means every
+// type. The narrowest rule an operator could write became the loudest thing on
+// the install, with a 201 telling them it had worked.
+//
+// The write path now refuses it and names it. The read path still degrades
+// rather than failing: scanAlertRule runs Normalized and never Validate, so a
+// row naming an event a later version removed keeps loading and keeps alerting
+// on the events it does name. See internal/alerts/rule_test.go for that half.
+func TestCreateAlertRuleRefusesAnUnknownSubscriptionByName(t *testing.T) {
 	d := testDB(t)
 	r := validRule()
-	// Normalized strips the duplicate and the unknown one before Validate sees
-	// them, so a rule carrying an event name this build has never heard of
-	// still saves rather than becoming unopenable.
-	r.Events = []alerts.Type{alerts.TypeDiskLow, alerts.TypeDiskLow, "destination.exploded"}
-	got, err := d.CreateAlertRule(r)
+	r.Events = []alerts.Type{alerts.TypeDiskLow, "destination.exploded"}
+	if _, err := d.CreateAlertRule(r); err == nil {
+		t.Fatal("CreateAlertRule accepted an event name this build never raises")
+	} else if !strings.Contains(err.Error(), "destination.exploded") {
+		t.Fatalf("error = %q, want it to name the event the operator mistyped", err)
+	}
+
+	// The control: the same path must still accept real names, or the fix has
+	// simply broken subscriptions instead of narrowing them.
+	ok := validRule()
+	ok.Events = []alerts.Type{alerts.TypeDiskLow, alerts.TypeDiskLow}
+	got, err := d.CreateAlertRule(ok)
 	if err != nil {
-		t.Fatalf("CreateAlertRule: %v", err)
+		t.Fatalf("CreateAlertRule refused a real subscription: %v", err)
 	}
 	if len(got.Events) != 1 || got.Events[0] != alerts.TypeDiskLow {
-		t.Errorf("Events = %v, want just the one known subscription", got.Events)
+		t.Errorf("Events = %v, want the duplicate collapsed to one", got.Events)
 	}
 }
 

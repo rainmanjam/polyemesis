@@ -74,8 +74,21 @@ type Stats struct {
 	Failed    int64 `json:"failed"`
 	Retries   int64 `json:"retries"`
 	// Deferred counts deliveries handed back because the sender was saturated.
-	Deferred  int64     `json:"deferred"`
-	LastSent  time.Time `json:"lastSent,omitempty"`
+	Deferred int64 `json:"deferred"`
+	// `omitzero`, not `omitempty`: this is the zero instant until an alert has
+	// actually been delivered, and `omitempty` DOES NOTHING ON A time.Time --
+	// encoding/json has no empty case for a struct, so the tag claimed a guard
+	// it never provided. An install that has never fired an alert served
+	// "0001-01-01T00:00:00Z", a non-empty string that parses cleanly, so the
+	// automation page's `stats?.lastSent && ...` guard passed and rendered
+	// LAST DELIVERY 12/31/1, 16:07:02 beside six counters all reading 0. This
+	// is the same defect hooks.Stats.LastSent carried; that one needed a
+	// hand-written MarshalJSON, this one only needs the correct tag.
+	//
+	// `omitzero` (Go 1.24) drops the key. The Go field stays a value so the
+	// callers that fold per-endpoint stats with .After() are unaffected.
+	// ui/src/lib/types.ts already declares `lastSent?: string`.
+	LastSent  time.Time `json:"lastSent,omitzero"`
 	LastError string    `json:"lastError,omitempty"`
 }
 

@@ -123,6 +123,24 @@ func (d *DB) CreateHook(box *secrets.Box, h *hooks.Hook) (*hooks.Hook, string, e
 	if err := norm.Validate(); err != nil {
 		return nil, "", err
 	}
+	// A NAME THAT ALREADY EXISTS IS REFUSED. The list is the only thing telling
+	// two hooks apart, and the one an operator disables may not be the one that
+	// has been firing.
+	//
+	// Here rather than a UNIQUE index: the comparison is case- and space-folded,
+	// because "Disk " and "disk" are indistinguishable on screen and that is the
+	// whole harm, while SQLite's NOCASE collation is ASCII-only.
+	//
+	// ListHooks needs the box to decrypt secrets it does not use here; a row
+	// whose secret will not decrypt still carries a readable name, which is what
+	// this compares.
+	existingHooks, err := d.ListHooks(box)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := hooks.CheckNameUnique(norm, existingHooks); err != nil {
+		return nil, "", err
+	}
 	// Generated when the operator did not supply one, because an unsigned
 	// webhook is one that anybody who learns the URL can forge, and a URL leaks
 	// through proxy logs, browser history and screenshots.
@@ -164,6 +182,24 @@ func (d *DB) CreateHook(box *secrets.Box, h *hooks.Hook) (*hooks.Hook, string, e
 func (d *DB) UpdateHook(box *secrets.Box, h *hooks.Hook) (*hooks.Hook, error) {
 	norm := h.Normalized()
 	if err := norm.Validate(); err != nil {
+		return nil, err
+	}
+	// A NAME THAT ALREADY EXISTS IS REFUSED. The list is the only thing telling
+	// two hooks apart, and the one an operator disables may not be the one that
+	// has been firing.
+	//
+	// Here rather than a UNIQUE index: the comparison is case- and space-folded,
+	// because "Disk " and "disk" are indistinguishable on screen and that is the
+	// whole harm, while SQLite's NOCASE collation is ASCII-only.
+	//
+	// ListHooks needs the box to decrypt secrets it does not use here; a row
+	// whose secret will not decrypt still carries a readable name, which is what
+	// this compares.
+	existingHooks, err := d.ListHooks(box)
+	if err != nil {
+		return nil, err
+	}
+	if err := hooks.CheckNameUnique(norm, existingHooks); err != nil {
 		return nil, err
 	}
 	// KEPT IN SQL, NOT READ BACK AND RE-SEALED. An empty Secret means "leave the

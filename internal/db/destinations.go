@@ -1184,19 +1184,85 @@ func keepsSealedKey(dst *Destination) bool {
 	return keepsSealedPrimaryKey(dst) && keepsSealedBackupKey(dst)
 }
 
-// checkRendition rejects a rendition_id that names no rendition. The foreign
-// key would catch it anyway, but only as "FOREIGN KEY constraint failed",
-// which tells the user nothing about which field is wrong. A nil id is
-// passthrough and always valid.
-func (d *DB) checkRendition(id *int64) error {
+// checkRendition rejects a rendition_id that names no rendition, and one that
+// names a rendition belonging to a different programme.
+//
+// The foreign key would catch the first anyway, but only as "FOREIGN KEY
+// constraint failed", which tells the user nothing about which field is wrong.
+// A nil id is passthrough and always valid.
+//
+// THE CROSS-PROGRAMME HALF IS THE ONE THAT COST SOMETHING. PUT /destinations/4
+// on source 2 with renditionId 1 (source 1's) was accepted with a 200 and no
+// warning, and nothing downstream could recover: reconcileOutputs lists only
+// its own programme's renditions, so source 2's engine found no rendition 1,
+// gave that destination no process at all, and the card explained itself with
+// "rendition 1 is no longer available". That sentence is false -- rendition 1
+// exists and is encoding, under the other programme -- so an operator watching
+// a live output stop publishing was sent looking for a deleted rendition that
+// was never deleted. Refusing the write is the only point at which the truth
+// is still known.
+//
+// sourceID nil means the destination names no programme, so there is no
+// pairing to check; that is the pre-sources row shape CreateDestination fills
+// in before it gets here.
+func (d *DB) checkRendition(id *int64, sourceID *int64) error {
 	if id == nil {
 		return nil
 	}
-	_, err := d.GetRendition(*id)
+	rend, err := d.GetRendition(*id)
 	if errors.Is(err, ErrNotFound) {
 		return fmt.Errorf("invalid destination: rendition %d does not exist", *id)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if sourceID == nil || rend.SourceID == nil || *rend.SourceID == *sourceID {
+		return nil
+	}
+	return fmt.Errorf("invalid destination: rendition %d (%q) belongs to source %d, "+
+		"but this destination belongs to source %d. A destination can only select a "+
+		"rendition from its own programme, because only that programme's engine runs "+
+		"it. Pick one of source %d's renditions, or leave this destination on "+
+		"passthrough.", *id, rend.Name, *rend.SourceID, *sourceID, *sourceID)
+}
+
+// destinationKeepsItsRendition reports whether a pending update leaves both
+// halves of the pairing exactly as the stored row has them.
+//
+// WHY AN UPDATE IS NOT SIMPLY HELD TO THE SAME RULE AS A CREATE. Rows wired
+// across programmes before checkRendition looked at source_id are already in
+// the field, and the API's update handler decodes the request body OVER the
+// row it just read -- so a client renaming such a destination sends the
+// foreign renditionId straight back. Enforcing the rule unconditionally would
+// turn every one of those rows unsaveable: the operator could not rename it,
+// could not disable it, could not correct its URL, and the refusal would name
+// a field they had not touched. That is #607's trap, refused at the dial
+// rather than at load, and it is why the check is on the CHANGE and not on the
+// state. Anything that touches either half is held to the full rule, so a bad
+// pairing can be cleared but never made or moved, and no migration has to
+// silently drop a live destination to passthrough behind the operator's back.
+func (d *DB) destinationKeepsItsRendition(dst *Destination) (bool, error) {
+	var rend, src sql.NullInt64
+	err := d.sql.QueryRow(
+		`SELECT rendition_id, source_id FROM destinations WHERE id = ?`, dst.ID,
+	).Scan(&rend, &src)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No stored row to have inherited anything from, so there is nothing to
+		// grandfather. The UPDATE below reports the missing row as ErrNotFound.
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return sameOptionalID(rend, dst.RenditionID) && sameOptionalID(src, dst.SourceID), nil
+}
+
+// sameOptionalID compares a stored nullable id with the one a write carries.
+func sameOptionalID(stored sql.NullInt64, want *int64) bool {
+	if !stored.Valid || want == nil {
+		return !stored.Valid && want == nil
+	}
+	return stored.Int64 == *want
 }
 
 // ListDestinations returns every destination in display order.
@@ -1273,9 +1339,6 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if err := dst.Validate(); err != nil {
 		return nil, err
 	}
-	if err := d.checkRendition(dst.RenditionID); err != nil {
-		return nil, err
-	}
 	// A caller that names no source gets the default one.
 	//
 	// THIS IS NO LONGER A PUBLIC BEHAVIOUR. It used to be justified by API
@@ -1301,6 +1364,13 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 			return nil, fmt.Errorf("resolve default source: %w", err)
 		}
 		dst.SourceID = &id
+	}
+	// AFTER the source is settled, never before. checkRendition holds the
+	// rendition against the destination's programme, and a check that ran while
+	// SourceID was still nil would have nothing to hold it against and would
+	// wave through exactly the cross-programme pairing it exists to refuse.
+	if err := d.checkRendition(dst.RenditionID, dst.SourceID); err != nil {
+		return nil, err
 	}
 
 	profile, err := json.Marshal(dst.Profile)
@@ -1379,7 +1449,18 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	if err := dst.Validate(); err != nil {
 		return nil, err
 	}
-	if err := d.checkRendition(dst.RenditionID); err != nil {
+	// The programme the rendition is held against, or nil for a pairing this
+	// write is not touching. See destinationKeepsItsRendition for why an
+	// inherited mismatch must not make the whole row unsaveable.
+	scope := dst.SourceID
+	kept, err := d.destinationKeepsItsRendition(dst)
+	if err != nil {
+		return nil, err
+	}
+	if kept {
+		scope = nil
+	}
+	if err := d.checkRendition(dst.RenditionID, scope); err != nil {
 		return nil, err
 	}
 	profile, err := json.Marshal(dst.Profile)

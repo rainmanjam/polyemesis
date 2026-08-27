@@ -54,8 +54,18 @@ type AnnouncementSet struct {
 	// They mirror the soonest announced occurrence. Nothing may write them
 	// directly: Announce keeps them in step.
 	//
-	// Zero means nothing has been announced.
-	ScheduledFor time.Time `json:"scheduledFor,omitempty"`
+	// Zero means nothing has been announced -- and until now the wire could not
+	// say so. `omitempty` DOES NOTHING ON A time.Time: encoding/json has no
+	// empty case for a struct, so a destination that had never announced
+	// anything still served "0001-01-01T00:00:00Z". That is a non-empty string
+	// that parses cleanly, so the destination card's `scheduledFor && ...`
+	// guard passed and it advertised a show scheduled for 12/31/1, 16:07:02.
+	//
+	// `omitzero` (Go 1.24) drops the key, so "nothing announced" is the ABSENT
+	// field the comment above always claimed it was. ui/src/lib/types.ts
+	// already declares `scheduledFor?: string`, so the client was typed for
+	// this all along -- it was only ever the server that lied.
+	ScheduledFor time.Time `json:"scheduledFor,omitzero"`
 	BroadcastID  string    `json:"broadcastId,omitempty"`
 }
 

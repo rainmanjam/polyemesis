@@ -23,6 +23,7 @@ package hooks
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -259,10 +260,23 @@ func (h Hook) Normalized() Hook {
 	}
 	h.MaxAttempts = clampInt(h.MaxAttempts, MinAttempts, MaxAttempts)
 
+	// Duplicates go; UNKNOWN NAMES STAY, for the reason spelled out in
+	// alerts.Rule.Normalized. Dropping them here meant a hook saved with a
+	// mistyped trigger stored an empty Triggers list, and an empty list means
+	// EVERY trigger -- the script got the whole firehose while its author
+	// believed it was subscribed to one transition, and Validate's unknown
+	// trigger error below could never fire because the name was already gone.
+	//
+	// Keeping the name also fixes the load path rather than breaking it.
+	// db.scanHook runs Normalized and never Validate, so a row written by a
+	// newer release survives: the trigger this build cannot honour simply never
+	// matches in Wants, and the hook keeps delivering the ones it can. Under the
+	// old code that row lost its only subscription on read and started
+	// delivering everything.
 	seen := map[Trigger]bool{}
 	kept := h.Triggers[:0:0]
 	for _, tr := range h.Triggers {
-		if !KnownTrigger(tr) || seen[tr] {
+		if seen[tr] {
 			continue
 		}
 		seen[tr] = true
@@ -321,9 +335,51 @@ func (h Hook) Validate() error {
 				h.Name)
 		}
 	}
+	// Reached at SAVE only. Every write path runs Normalized then Validate; the
+	// read path runs Normalized alone. A typo is refused by name while the
+	// operator is still looking at the form, and a hook already stored against a
+	// trigger a later version removed still loads and still delivers. Refusing
+	// at load would stop every hook on the install to punish one stale name.
 	for _, tr := range h.Triggers {
 		if !KnownTrigger(tr) {
-			return fmt.Errorf("hook %q subscribes to unknown trigger %q", h.Name, tr)
+			return fmt.Errorf("hook %q subscribes to %q, which is not a trigger this "+
+				"build fires; check the spelling against the trigger list, because a "+
+				"hook that keeps no valid subscription at all means every trigger",
+				h.Name, tr)
+		}
+	}
+	return nil
+}
+
+// ErrDuplicateHookName is what CheckNameUnique wraps, so an HTTP layer can
+// answer 409 for this and 400 for everything else Validate refuses.
+var ErrDuplicateHookName = errors.New("a hook with that name already exists")
+
+// CheckNameUnique refuses a name another hook already answers to.
+//
+// Two hooks called "deploy" are indistinguishable in the list, so the one an
+// operator disables may not be the one that is firing, and nothing tells them
+// they disabled the wrong one. Comparison folds case and surrounding space
+// because "Deploy" and "deploy " are just as indistinguishable on screen.
+//
+// existing is the current set INCLUDING candidate itself when this is an
+// update; candidate.ID is how its own row is excluded, so re-saving a hook
+// without renaming it is not a conflict with itself.
+//
+// MUST BE CALLED FROM THE WRITE PATH. A name check that only the tests reach
+// prevents nothing; see the report accompanying this change for the two call
+// sites (db.CreateHook and db.UpdateHook) it belongs in.
+func CheckNameUnique(candidate Hook, existing []Hook) error {
+	name := strings.TrimSpace(candidate.Name)
+	for _, other := range existing {
+		if other.ID == candidate.ID && candidate.ID != 0 {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(other.Name), name) {
+			return fmt.Errorf("%w: hook %d is already called %q, and two hooks with "+
+				"the same name cannot be told apart in the list -- the one you disable "+
+				"may not be the one that is firing",
+				ErrDuplicateHookName, other.ID, other.Name)
 		}
 	}
 	return nil

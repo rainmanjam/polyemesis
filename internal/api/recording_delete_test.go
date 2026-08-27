@@ -38,7 +38,11 @@ func TestDeletingARecordingRemovesItAndSparesItsNeighbour(t *testing.T) {
 			t.Fatalf("seed %s: %v", name, err)
 		}
 		if err := store.UpsertRecording(&db.Recording{
-			Filename: name, StartedAt: time.Now(), Bytes: 6,
+			// BACK-DATED, because a segment started just now is one the recorder
+			// is presumed to be still writing, and Delete refuses those with a
+			// 409 -- see recording.liveSegments. These fixtures are about
+			// deleting FINISHED recordings, so they have to look finished.
+			Filename: name, StartedAt: time.Now().Add(-6 * time.Hour), Bytes: 6,
 		}); err != nil {
 			t.Fatalf("index %s: %v", name, err)
 		}
@@ -114,7 +118,8 @@ func TestRecordingReadsAndDeletesSurviveWithNoEngineRunning(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := store.UpsertRecording(&db.Recording{
-		Filename: name, StartedAt: time.Now(), Bytes: 6,
+		// Back-dated for the reason above: a just-started segment reads as live.
+		Filename: name, StartedAt: time.Now().Add(-6 * time.Hour), Bytes: 6,
 	}); err != nil {
 		t.Fatalf("index: %v", err)
 	}

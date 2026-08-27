@@ -8,10 +8,32 @@ import (
 
 // Recording is one MKV segment produced by the recorder.
 type Recording struct {
-	ID         int64     `json:"id"`
-	Filename   string    `json:"filename"`
-	StartedAt  time.Time `json:"startedAt"`
-	FinishedAt time.Time `json:"finishedAt"`
+	ID        int64     `json:"id"`
+	Filename  string    `json:"filename"`
+	StartedAt time.Time `json:"startedAt"`
+	// FinishedAt is `omitzero` because NOTHING HAS EVER SET IT.
+	//
+	// The scanner that indexes segments builds db.Recording{Filename,
+	// StartedAt, Bytes} (internal/recording/recording.go) and UpsertRecording
+	// only writes finished_at when it is non-zero, so the column is 0 on every
+	// row on every install -- and the reads below leave the field at its zero.
+	//
+	// It carried NO json tag option at all, so it marshalled as
+	// "0001-01-01T00:00:00Z": a non-empty string that parses cleanly, so the
+	// library page's truthiness guard passed and rendered it through a
+	// local-time offset as 12/31/1, 16:07:02. Twenty-seven live recordings, one
+	// bogus first-century date each.
+	//
+	// `omitzero` (Go 1.24) drops the key instead, so the wire cannot carry an
+	// instant the server does not know. It is NOT assigned here on purpose:
+	// only the recorder knows when a segment stopped, and inventing one from a
+	// file mtime would replace a visibly wrong answer with an invisibly wrong
+	// one. If a real finish time is ever recorded, the field already stores and
+	// serves it.
+	//
+	// ui/src/lib/types.ts declares `finishedAt: string` NON-optional and must
+	// become `finishedAt?: string`.
+	FinishedAt time.Time `json:"finishedAt,omitzero"`
 	Bytes      int64     `json:"bytes"`
 	DurationMS int64     `json:"durationMs"`
 	// Tracks is the audio track count preserved in the file. The recorder

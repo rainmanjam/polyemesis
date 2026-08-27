@@ -2136,7 +2136,14 @@ func (e *Engine) reconcileOutputs() error {
 	}
 	// The ref count, straight from the database: a rendition nothing enabled
 	// selects is absent, and absent means "must not be burning CPU".
-	counts, err := e.store.CountEnabledDestinationsByRendition()
+	//
+	// SCOPED, like the listing on the line above it. Counting every programme's
+	// destinations meant a destination on ANOTHER programme kept this engine's
+	// encode alive -- a tier nothing here consumes, burning a core for the life
+	// of the broadcast, while the status card (correctly scoped) reported zero
+	// consumers on a process that was plainly running. Two screens disagreeing
+	// about the same rendition, and the one telling the truth looked wrong.
+	counts, err := e.store.CountEnabledDestinationsByRenditionForSource(e.sourceID)
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -158,10 +159,25 @@ func (r Rule) Normalized() Rule {
 	}
 	r.MinIntervalSeconds = clampInt(r.MinIntervalSeconds, MinIntervalSeconds, MaxIntervalSeconds)
 
+	// Duplicates go; UNKNOWN NAMES STAY. Dropping them here is what made
+	// POST /alerts/rules with events:["nope.notreal"] return 201 and store an
+	// empty list -- and an empty list means "every type". The narrowest rule an
+	// operator could write became the loudest thing on the install, while they
+	// believed they had subscribed to one event, because Normalized had already
+	// deleted the evidence by the time Validate looked for it. Keeping the name
+	// is what lets Validate refuse it BY NAME at save.
+	//
+	// This is also why the load path is safe. db.scanAlertRule runs Normalized
+	// and never Validate, so a rule stored by a newer release, naming an event
+	// this build has never heard of, still loads: the unknown name simply never
+	// matches anything in Wants, and the rule keeps alerting on the events it
+	// does name. Under the old code that same rule lost its only subscription
+	// on read and started firing on everything -- the widening happened to an
+	// install that had touched nothing.
 	seen := map[Type]bool{}
 	kept := r.Events[:0:0]
 	for _, t := range r.Events {
-		if !KnownType(t) || seen[t] {
+		if seen[t] {
 			continue
 		}
 		seen[t] = true
@@ -227,9 +243,54 @@ func (r Rule) Validate() error {
 	default:
 		return fmt.Errorf("alert rule %q has an unknown severity %q", r.Name, r.MinSeverity)
 	}
+	// Reached at SAVE only, and that placement is the whole point. Every write
+	// path runs Normalized then Validate; the read path runs Normalized alone.
+	// So a typo is refused by name at the moment the operator makes it, and a
+	// rule already in the database naming an event a later version removed still
+	// loads and still alerts. Refusing at load would take alerting down across
+	// an upgrade to fix a typo -- the same trade #607 settled by guarding at the
+	// dial rather than at the load.
 	for _, t := range r.Events {
 		if !KnownType(t) {
-			return fmt.Errorf("alert rule %q subscribes to unknown event %q", r.Name, t)
+			return fmt.Errorf("alert rule %q subscribes to %q, which is not an event "+
+				"this build raises; check the spelling against the event list, because "+
+				"a rule that keeps no valid subscription at all means every event",
+				r.Name, t)
+		}
+	}
+	return nil
+}
+
+// ErrDuplicateRuleName is what CheckNameUnique wraps, so an HTTP layer can
+// answer 409 for this and 400 for everything else Validate refuses.
+var ErrDuplicateRuleName = errors.New("an alert rule with that name already exists")
+
+// CheckNameUnique refuses a name another rule already answers to.
+//
+// Two rules called "disk" are indistinguishable in the list, so the one the
+// operator disables during an incident may not be the one that is firing -- and
+// nothing tells them they disabled the wrong one. Comparison folds case and
+// surrounding space because "Disk" and "disk " are just as indistinguishable on
+// screen as an exact match is.
+//
+// existing is the current set INCLUDING candidate itself when this is an
+// update; candidate.ID is how its own row is excluded, so re-saving a rule
+// without renaming it is not a conflict with itself.
+//
+// MUST BE CALLED FROM THE WRITE PATH. A name check that only the tests reach
+// prevents nothing; see the report accompanying this change for the two call
+// sites (db.CreateAlertRule and db.UpdateAlertRule) it belongs in.
+func CheckNameUnique(candidate Rule, existing []Rule) error {
+	name := strings.TrimSpace(candidate.Name)
+	for _, other := range existing {
+		if other.ID == candidate.ID && candidate.ID != 0 {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(other.Name), name) {
+			return fmt.Errorf("%w: rule %d is already called %q, and two rules with "+
+				"the same name cannot be told apart in the list -- the one you disable "+
+				"may not be the one that is firing",
+				ErrDuplicateRuleName, other.ID, other.Name)
 		}
 	}
 	return nil

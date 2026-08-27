@@ -1539,7 +1539,13 @@ export interface Recording {
   id: number;
   filename: string;
   startedAt: string;
-  finishedAt: string;
+  /** ABSENT until the segment is finished, and absent is the honest answer.
+   *
+   *  It used to be declared required while the server sent Go's zero time --
+   *  "0001-01-01T00:00:00Z", a non-empty string that parses -- so every live
+   *  recording carried a finish date in the year 1. The server now omits it
+   *  (omitzero), which makes this optional and makes the declaration true. */
+  finishedAt?: string;
   bytes: number;
   durationMs: number;
   tracks: number;

@@ -127,6 +127,21 @@ func (d *DB) CreateAlertRule(r *alerts.Rule) (*alerts.Rule, error) {
 	if err := norm.Validate(); err != nil {
 		return nil, err
 	}
+	// A NAME THAT ALREADY EXISTS IS REFUSED, because the list is the only thing
+	// telling two rules apart. An operator with two rules called "disk" cannot
+	// see which is which, and the one they switch off may not be the one that
+	// has been firing.
+	//
+	// Checked here rather than with a UNIQUE index: the comparison is case- and
+	// space-folded ("Disk " and "disk" are indistinguishable on screen, which
+	// is the whole harm) and SQLite's NOCASE collation is ASCII-only.
+	existing, err := d.ListAlertRules()
+	if err != nil {
+		return nil, err
+	}
+	if err := alerts.CheckNameUnique(norm, existing); err != nil {
+		return nil, err
+	}
 	events, err := marshalTypes(norm.Events)
 	if err != nil {
 		return nil, err
@@ -155,6 +170,23 @@ func (d *DB) UpdateAlertRule(r *alerts.Rule) (*alerts.Rule, error) {
 		return nil, err
 	}
 	events, err := marshalTypes(norm.Events)
+	// Same refusal on the way through an edit; CheckNameUnique excludes the
+	// rule's own id, so re-saving one unchanged is not a conflict with itself.
+	// A NAME THAT ALREADY EXISTS IS REFUSED, because the list is the only thing
+	// telling two rules apart. An operator with two rules called "disk" cannot
+	// see which is which, and the one they switch off may not be the one that
+	// has been firing.
+	//
+	// Checked here rather than with a UNIQUE index: the comparison is case- and
+	// space-folded ("Disk " and "disk" are indistinguishable on screen, which
+	// is the whole harm) and SQLite's NOCASE collation is ASCII-only.
+	existing, err := d.ListAlertRules()
+	if err != nil {
+		return nil, err
+	}
+	if err := alerts.CheckNameUnique(norm, existing); err != nil {
+		return nil, err
+	}
 	if err != nil {
 		return nil, err
 	}

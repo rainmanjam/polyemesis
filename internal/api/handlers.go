@@ -1187,6 +1187,28 @@ func (s *Server) handlePutMQTTPassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"hasPassword": req.Password != ""})
 }
 
+// reservedTCPPorts is every TCP port this process already binds for something
+// that is not ingest, in a form db.Settings can be validated against.
+//
+// One entry today: the HTTP listener the web UI and the API answer on. It is a
+// LIST rather than a single port so adding the next one -- an ACME challenge
+// listener, a metrics port -- is one line here and no change to the rule that
+// consumes it.
+//
+// A zero from ListenPortNumber is dropped rather than passed on. Zero means the
+// configured addr named no readable port, not port zero, and reserving it would
+// refuse every save on an install whose addr this code merely failed to parse.
+func (s *Server) reservedTCPPorts() []db.ReservedTCPPort {
+	port := s.cfg.ListenPortNumber()
+	if port == 0 {
+		return nil
+	}
+	return []db.ReservedTCPPort{{
+		Port: port,
+		Why:  "this server already serves the web UI and API on it",
+	}}
+}
+
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// Buffered before EITHER lock, and the order of these two statements is
 	// the whole point. The decode has to happen inside the store's settings
@@ -1277,6 +1299,27 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// validation failures, whichever of the two found it.
 		if err := settings.Validate(); err != nil {
 			return db.InvalidSettingsError{Err: err}
+		}
+		// AND THE INGEST LISTENER MAY NOT ASK FOR A PORT THIS PROCESS ALREADY
+		// HOLDS.
+		//
+		// Saving rtmpPort as the server's own HTTP port returned 200. The
+		// listener then could not bind on the next reconcile, which logged one
+		// ERROR and returned -- and its comment concedes that the log is the
+		// only way anybody finds out. Ingest was dead, the settings page showed
+		// the port saved and green, and the operator spent the outage debugging
+		// their encoder.
+		//
+		// Here rather than in Settings.Validate for the same reason the rule
+		// compile below is here: db does not import config and must not, so a
+		// db type structurally cannot see the HTTP port. This handler is the
+		// only place both are visible, and it is the only settings writer a
+		// person can reach. See db.Settings.TCPPortConflicts for why SRT is not
+		// checked -- it is UDP, and sharing a number with HTTP is legal.
+		if probs := settings.TCPPortConflicts(s.reservedTCPPorts()); len(probs) > 0 {
+			return db.InvalidSettingsError{
+				Err: fmt.Errorf("invalid settings: %v", probs),
+			}
 		}
 		// AND THE AUTOMOD RULES HAVE TO COMPILE -- THE ONES BEING CHANGED.
 		//

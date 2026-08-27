@@ -1907,6 +1907,16 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not found")
+	// A DUPLICATE NAME IS A CONFLICT, NOT A MALFORMED REQUEST. The body was
+	// perfectly well formed; what it asked for collides with something that
+	// already exists, and 409 is the answer that says so -- a client can offer
+	// "rename the other one" for a conflict and cannot for a 400.
+	//
+	// Both alert rules and hooks reach here, which is why the mapping is at
+	// this one point rather than in each handler: the next writer that grows a
+	// name check inherits it instead of being remembered.
+	case errors.Is(err, alerts.ErrDuplicateRuleName), errors.Is(err, hooks.ErrDuplicateHookName):
+		writeError(w, http.StatusConflict, err.Error())
 	// A 404 ABOUT THE ROW, and it is deliberately NOT the install-wide refusal.
 	//
 	// db.ErrSourceNotFound serves two meanings -- "no row with this id", from

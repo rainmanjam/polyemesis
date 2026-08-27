@@ -1475,6 +1475,63 @@ func (l ListenerSettings) problems() []string {
 	return probs
 }
 
+// ReservedTCPPort is a TCP port this process already binds for something that
+// is not ingest -- today only the HTTP listener the web UI and the API answer
+// on.
+//
+// TCP IS IN THE NAME BECAUSE THE TRANSPORT IS THE WHOLE ANSWER. The RTMP
+// listener is TCP and the SRT listener is UDP, so the two ingest ports collide
+// with a reserved port on completely different terms, and a caller who handed
+// this a UDP port would get an SRT listener refused for a clash that does not
+// exist at the kernel.
+//
+// Why travels with the port so the refusal can name what is holding it. "port
+// 8099 is unavailable" sends an operator to netstat; "the web UI and API are
+// served on it" sends them to the one line of config.yaml they can change.
+type ReservedTCPPort struct {
+	Port int
+	Why  string
+}
+
+// TCPPortConflicts reports ingest listeners that this process could not bind
+// because it already holds the port for something else.
+//
+// SEPARATE FROM Validate BECAUSE OF WHO KNOWS WHAT. Settings is a db type and
+// the HTTP port lives in internal/config, which db does not import and must not
+// -- so the validator structurally could not see the collision, and PUT
+// /settings answered 200 to a listener port that was the server's own. The
+// reconcile then logged one ERROR and gave up, and its own comment concedes
+// that saying so in the log is the only way anybody finds out. The settings
+// page showed the port saved and green while nothing could publish to this
+// install at all. internal/api is where both values are visible and is the only
+// settings writer a person can reach, so it is where the answer is assembled;
+// the RULE lives here, next to the other listener rules, so the two cannot
+// drift apart.
+//
+// ONLY RTMP IS CHECKED, and that is deliberate rather than an omission. RTMP is
+// TCP and so is the HTTP listener, so sharing a number is a hard bind failure.
+// SRT is UDP: an SRT listener on the same number as the HTTP port binds
+// perfectly well, and refusing it would refuse a configuration that works -- SRT
+// on 443 alongside HTTPS on 443 is how installs get through a firewall that
+// allows nothing else.
+//
+// An empty reserved list, or a zero port in it, means "nothing is known to be
+// held" and refuses nothing. See config.ListenPortNumber for why a zero must
+// never be read as port zero.
+func (s Settings) TCPPortConflicts(reserved []ReservedTCPPort) []string {
+	var probs []string
+	for _, r := range reserved {
+		if r.Port < 1 || r.Port > 65535 {
+			continue
+		}
+		if s.Listeners.RTMPPort == r.Port {
+			probs = append(probs, fmt.Sprintf(
+				"rtmp listener cannot use port %d: %s", r.Port, r.Why))
+		}
+	}
+	return probs
+}
+
 // DisplaySettings is how times are PRESENTED -- in the console and in the
 // server log -- and nothing else.
 //
@@ -1548,15 +1605,69 @@ type AutomodSettings struct {
 	// PlatformEnabled is the per-platform kill switch. An absent platform means
 	// enabled, so adding a platform does not silently disable it -- the global
 	// switch above is the one that fails closed.
-	PlatformEnabled map[Platform]bool `json:"platformEnabled,omitempty"`
+	PlatformEnabled map[Platform]bool `json:"platformEnabled"`
 	// On holds the cells switched on, keyed "platform/action/checker".
-	On map[string]bool `json:"on,omitempty"`
+	//
+	// NOT omitempty, and neither is the switch map above, because UnmarshalJSON
+	// reads an absent object as "the client is not touching the matrix". With
+	// omitempty a client that round-trips this struct could not express turning
+	// the LAST cell off: the empty map marshalled to nothing, nothing decoded as
+	// unchanged, and the final untick was the one save that silently did not
+	// take. An explicit null says empty out loud.
+	On map[string]bool `json:"on"`
 	// Rules are the operator's patterns.
 	Rules []AutomodRule `json:"rules,omitempty"`
 	// History bounds the sequence detectors.
 	History AutomodHistory `json:"history"`
 	// Model configures the optional external checker.
 	Model AutomodModel `json:"model"`
+}
+
+// UnmarshalJSON makes a sent matrix REPLACE the stored one instead of merging
+// into it.
+//
+// THIS IS WHAT MAKES UNTICKING A CELL WORK. Both maps above are sparse, and
+// absence is the whole point of them: an absent cell is off, an absent platform
+// is enabled. json.Unmarshal decoding an object into an existing map does the
+// opposite -- it MERGES, so a key the client left out keeps whatever was
+// already stored. Two meanings of "absent" pointed straight at each other, and
+// the settings save is a decode over the stored document by design, so the
+// collision landed on every save.
+//
+// What it cost: unticking "auto-ban on Twitch" and saving returned 200, the UI
+// redrew the cell empty, and GET /automod/matrix still reported auto: true. The
+// ban kept firing until somebody restarted the server, and nothing anywhere
+// said the save had not taken. The operator had turned a moderation action off
+// and been told they had.
+//
+// Fixed HERE rather than in the settings handler because the handler is not the
+// only decoder and a future one would inherit the trap silently. Anything that
+// decodes an automod block over an existing one -- a restore, an import, a
+// second endpoint, a test fixture -- now gets replacement without knowing to
+// ask for it.
+//
+// A SENT object is authoritative; an ABSENT one changes nothing. That keeps a
+// partial payload safe, which is the property the whole settings decode rests
+// on: a client that has never heard of the matrix can still save the rest of
+// the document. Explicit null counts as sent and clears, because a client that
+// wrote null meant empty.
+func (a *AutomodSettings) UnmarshalJSON(b []byte) error {
+	// plain drops the methods, so the decode below cannot re-enter this one.
+	type plain AutomodSettings
+	var sent struct {
+		PlatformEnabled json.RawMessage `json:"platformEnabled"`
+		On              json.RawMessage `json:"on"`
+	}
+	if err := json.Unmarshal(b, &sent); err != nil {
+		return err
+	}
+	if len(sent.PlatformEnabled) > 0 {
+		a.PlatformEnabled = nil
+	}
+	if len(sent.On) > 0 {
+		a.On = nil
+	}
+	return json.Unmarshal(b, (*plain)(a))
 }
 
 // AutomodRule is one stored pattern. Mirrors automod.Rule, which is where it is
