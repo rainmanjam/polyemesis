@@ -844,8 +844,23 @@ jobs:
       # a goroutine dump naming the running test; the job timeout just kills the
       # runner and tells you nothing. Whichever fires first decides how much you
       # learn, so Go's has to.
+      # THROUGH scripts/cmd/gotest, which changes no verdict and adds one
+      # distinction: a Go RUNTIME abort is annotated as one rather than read as
+      # a flaky test.
+      #
+      # #440 has fired three times here in many hundreds of runs, with three
+      # different runtime messages, and has never reproduced. Each time the only
+      # thing separating it from an ordinary failure was somebody noticing that
+      # the line said `fatal error:` and not `--- FAIL:`. Two were nearly waved
+      # through. The issue's own conclusion is that the SAMPLE SIZE is the
+      # instrument -- and an instrument that depends on a human reading three
+      # thousand lines of log is not one.
+      #
+      # All three runners, not just Windows. The crash has only ever been seen
+      # on Windows, and "only ever been seen" is exactly the claim that needs
+      # something watching the other two to stay true.
       - if: needs.changes.outputs.code == 'true'
-        run: go test -timeout 15m ./...
+        run: go run ./scripts/cmd/gotest -timeout 15m ./...
 
       # THE RACE DETECTOR, ON WINDOWS ONLY, ON THE ONE PACKAGE THAT CRASHES.
       #
