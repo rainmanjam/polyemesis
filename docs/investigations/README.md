@@ -66,3 +66,16 @@ switching between two live encoders, which is not the same thing.
 The muxer is not the cause: it accepts the change on 8.1.2 at every fidelity
 tried. That leaves the stop path and the selector's own output, and both need
 the failover suite standing up a real server rather than two containers.
+
+## FFmpeg 9.0.1 — is the upgrade from 8.1.2 safe?
+
+[`ffmpeg-9-upgrade-risk.md`](ffmpeg-9-upgrade-risk.md). Short answer: **not
+yet, and the blocker is packaging rather than behaviour** — Alpine has not
+packaged any 9.x, `edge` included, so `apk add ffmpeg=9.0.1` has nothing to
+install and the upgrade means changing where FFmpeg comes from.
+
+Behaviour measured rather than assumed: every Go package that shells out to
+FFmpeg passes against 9.0.1, including `internal/ffmpeg`, which is where the
+version-sensitive knowledge lives. The one failure is an artefact of the
+container harness and fails identically on 8.1.2 — the control is what proved
+that, and it is why the control was run.
