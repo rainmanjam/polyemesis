@@ -64,8 +64,27 @@ switching between two live encoders, which is not the same thing.
 ### What is still open
 
 The muxer is not the cause: it accepts the change on 8.1.2 at every fidelity
-tried. That leaves the stop path and the selector's own output, and both need
-the failover suite standing up a real server rather than two containers.
+tried.
+
+**This is corroboration, not a discovery.** `scripts/acceptance-failover.sh`
+already says the same thing, and says it more precisely, in the comment above
+its `#398 watch` block:
+
+> Measured since: FFmpeg 8.1.2 does NOT refuse a mid-stream resolution change
+> [...] So the empty file is not the muxer refusing the change; it is the file
+> a destination had already stopped writing to when it **respawned**.
+
+The scripts here were written without noticing that, and reached the same
+conclusion by a different route on two FFmpeg versions rather than one. That
+is worth keeping — an independent confirmation of a conclusion nobody had
+tested against 6.1.1 — but the credit for the conclusion belongs to that
+comment, and the open question is the one it names:
+
+**why does the destination respawn at all?**
+
+Not the muxer, not the stop signal, not the probe window. The suite already
+reports a header-only sibling when it sees one, so the next recurrence should
+arrive with its restart count attached.
 
 ## FFmpeg 9.0.1 — is the upgrade from 8.1.2 safe?
 
