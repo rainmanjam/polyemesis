@@ -1,11 +1,17 @@
 ---
 import Base from "../layouts/Base.astro";
+import CodeBlock from "../components/CodeBlock.astro";
 import MixMatrix from "../components/MixMatrix.astro";
 import SpecStrip from "../components/SpecStrip.astro";
 import LoudnessBars from "../components/LoudnessBars.astro";
 import HeroRouting from "../components/HeroRouting.astro";
 import { Picture } from "astro:assets";
 import meters from "../assets/shots/04-meters.png";
+/* Counted, never typed. A literal "23 documents" in the CTA below is a claim
+ * that goes stale the first time somebody publishes a document, and nothing
+ * would fail — the page would simply be wrong about the thing it is inviting
+ * you to read. docs.mjs is the allowlist, so it is also the count. */
+import { PUBLISHED } from "../data/docs.mjs";
 
 const features = [
   {
@@ -75,20 +81,53 @@ const features = [
           summed into the feed it receives.
         </p>
 
-        <div class="rise rise-4 mt-8 flex flex-wrap gap-3">
-          <a href="/download" class="btn btn-primary">Install it</a>
-          <a href="#matrix" class="btn btn-ghost">See the routing →</a>
+        {/* THE FIRST THING THE HERO OFFERS IS THE COMMAND, because that is
+            literally what the visitor is about to do: this ships as one static
+            binary or one container and is installed from a shell. A hero whose
+            primary control is a signup-shaped button describes a product that
+            does not exist here, and the strip that used to sit under the buttons
+            said the same thing in 12px grey — unreadable, uncopyable, and
+            already drifted from README.md (no `--name`, no `:latest`, no 1935).
+
+            COPIED VERBATIM FROM README.md's "Try it". An invented invocation is
+            the fastest way to be caught by the one audience guaranteed to paste
+            it into a terminal, and a command that half-works is worse than none:
+            the container it creates has fixed port mappings and has to be
+            destroyed to fix them. */}
+        <div class="rise rise-4 mt-8">
+          <CodeBlock
+            label="docker"
+            code={`docker run -d --name polyemesis \\
+  -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
+  -v polyemesis-data:/data \\
+  rainmanjam/polyemesis:latest`}
+          />
+          <p class="mt-3 text-sm leading-relaxed text-subtle">
+            Then open <span class="font-mono text-fg">http://localhost:8080</span> and set an
+            admin password on the first-run screen. Note the
+            <span class="font-mono text-fg">/udp</span> on 6000 — SRT is UDP, and omitting the
+            suffix is the classic reason an ingest silently receives nothing.
+          </p>
         </div>
 
-        {/* THE SAME COMMAND AS README.md AND /download, WORD FOR WORD, with
-            only the line breaks collapsed. It has been three different commands
-            before now, and the differences were never deliberate: the hero line
-            lost `-p 1935:1935`, so a visitor who copied it and then chose RTMP
-            on the Sources page got a container with nothing listening on 1935 —
-            no error anywhere, just an encoder that never connects, and a port
-            map that cannot be changed without recreating the container. */}
-        <p class="mt-5 font-mono text-xs text-subtle">
-          docker run -d --name polyemesis -p 8080:8080 -p 6000:6000/udp -p 1935:1935 -v polyemesis-data:/data rainmanjam/polyemesis:latest
+        {/* THE DOCS ARE THE CALL TO ACTION, not a footer link. Nobody signs up
+            for a self-hosted binary; they decide whether they can operate it,
+            and the only thing that answers that is the documentation. So the
+            primary control is the quickstart and the secondary is the install
+            guide — both rendered from the repository's own files, so neither can
+            promise something the software does not do. */}
+        <div class="mt-7 flex flex-wrap items-center gap-3">
+          <a href="/docs/quickstart" class="btn btn-primary">Read the quickstart</a>
+          <a href="/docs/install" class="btn btn-ghost">Install guide</a>
+          <a href="#matrix" class="inline-block py-2 text-sm text-primary-bright hover:underline">
+            See the routing →
+          </a>
+        </div>
+        <p class="mt-3 text-sm text-subtle">
+          First stream in about five minutes. Pre-release, one maintainer, MIT —
+          <a href="/comparison" class="underline decoration-line underline-offset-4 hover:text-fg"
+            >where it loses is written down too</a
+          >.
         </p>
       </div>
 
@@ -306,12 +345,41 @@ const features = [
           No account, nothing phoning home, no hosted tier to graduate to. Pull the
           image or download the binary and point OBS at it.
         </p>
-        <div class="mt-8 flex flex-wrap justify-center gap-3">
-          <a href="/download" class="btn btn-primary">Install polyemesis</a>
+
+        {/* THREE DOCUMENTS, NOT A BUTTON. The decision a reader is making here
+            is "can I run and operate this on my own box", and a button labelled
+            "Install polyemesis" answers a question nobody asked — the install
+            page is one click further on, and it is still here.
+
+            Each card is a real file in docs/, rendered at build time from the
+            same commit as the code, so none of these can describe a version of
+            the product that does not exist. The blurbs are README.md's own
+            words for the same three documents. */}
+        <div class="mt-9 grid gap-px overflow-hidden rounded-token border border-line bg-line text-left sm:grid-cols-3">
+          {
+            [
+              ["/docs/quickstart", "Quickstart", "QUICKSTART.md", "First stream in about five minutes."],
+              ["/docs/install", "Install", "INSTALL.md", "Per-platform, including a too-old FFmpeg."],
+              ["/comparison", "Comparison", "COMPARISON.md", "An honest comparison, including the parts where polyemesis loses."],
+            ].map(([href, title, file, blurb]) => (
+              <a href={href} class="group block bg-surface p-5 transition-colors hover:bg-raised">
+                <p class="flex flex-wrap items-baseline gap-x-2.5">
+                  <span class="text-[15px] font-medium text-fg group-hover:text-primary-bright">{title}</span>
+                  <span class="font-mono text-[11px] text-subtle">{file}</span>
+                </p>
+                <p class="mt-2 text-sm leading-relaxed text-muted">{blurb}</p>
+              </a>
+            ))
+          }
+        </div>
+
+        <div class="mt-7 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm">
+          <a href="/download" class="text-primary-bright hover:underline">Install options →</a>
+          <a href="/docs" class="text-primary-bright hover:underline">All {PUBLISHED.length} documents →</a>
           <a
             href="https://github.com/rainmanjam/polyemesis"
             rel="noopener"
-            class="btn btn-ghost">Read the source</a
+            class="text-primary-bright hover:underline">Read the source →</a
           >
         </div>
       </div>

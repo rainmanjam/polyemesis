@@ -14,6 +14,17 @@ import { cn } from "@/lib/utils";
    - Peak as a held tick that falls back slowly (what clips you).
    - The classic green -> yellow -> amber -> red gradient, with the colour
      breaks at broadcast-meaningful levels rather than at even intervals.
+
+   THE GRADIENT IS NOT ALLOWED TO BE THE ONLY CHANNEL. "Am I too hot?" was
+   answerable here only by reading a hue, which is the one question on this
+   screen a deuteranopic operator, or anybody on a washed-out laptop panel in
+   daylight, could not answer at all. Three redundant channels now carry the
+   same reading, and each works with the colour removed entirely:
+     - POSITION: the zone boundaries are drawn ON TOP of the bar, so "past the
+       second mark" is a fact about geometry rather than about amber.
+     - TEXTURE: everything above -6 dBFS is hatched, so the hot part of the bar
+       is a different surface, not a different colour.
+     - TEXT: a clip raises a literal "CLIP" flag over the meter.
    =========================================================================== */
 
 /** Meters span -60 dBFS to 0. Below -60 is inaudible in any practical mix. */
@@ -68,16 +79,58 @@ function readPalette(): Palette {
   };
 }
 
+/** The dB levels where the gradient changes meaning. Declared once and used
+ *  twice — by buildGradient below and by the boundary marks drawn over the
+ *  bar — so the mark an operator reads position against can never drift away
+ *  from the colour break it is standing in for. */
+const ZONE_BREAKS = [-18, -12, -6, -2];
+
+/** Where the bar starts being hot enough to hatch. Same level as the amber
+ *  break, for the same reason: below it a broadcast is fine. */
+const HOT_DB = -6;
+
 /** Colour breaks at levels a mixer cares about, not at even fractions. */
 function buildGradient(ctx: CanvasRenderingContext2D, w: number, p: Palette) {
+  const [quiet, mid, hot, clip] = ZONE_BREAKS;
   const g = ctx.createLinearGradient(0, 0, w, 0);
   g.addColorStop(0, p.low);
-  g.addColorStop(dbToFraction(-18), p.low);
-  g.addColorStop(dbToFraction(-12), p.mid);
-  g.addColorStop(dbToFraction(-6), p.high);
-  g.addColorStop(dbToFraction(-2), p.peak);
+  g.addColorStop(dbToFraction(quiet), p.low);
+  g.addColorStop(dbToFraction(mid), p.mid);
+  g.addColorStop(dbToFraction(hot), p.high);
+  g.addColorStop(dbToFraction(clip), p.peak);
   g.addColorStop(1, p.peak);
   return g;
+}
+
+/** Diagonal hatch over the hot end of a bar, clipped to the part of it that is
+ *  actually lit. Drawn in the trough colour rather than in a new one: this is
+ *  the bar being cut away, not a fifth signal hue, and the 10/SIGNAL cap in
+ *  index.css is a cap on hues rather than on ways of drawing. */
+function hatchHot(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  p: Palette,
+) {
+  if (w <= 0) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.strokeStyle = p.bg;
+  ctx.globalAlpha = 0.65;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  // Step by 4px and start a bar-height back, so the leading edge of the hatch
+  // does not depend on where the hot zone happens to begin.
+  for (let sx = x - h; sx < x + w; sx += 4) {
+    ctx.moveTo(sx, y + h);
+    ctx.lineTo(sx + h, y);
+  }
+  ctx.stroke();
+  ctx.restore();
 }
 
 export interface AudioMeterProps {
@@ -109,6 +162,7 @@ export function AudioMeter({
   className,
 }: AudioMeterProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const clipRef = useRef<HTMLSpanElement>(null);
   // Latest values live in a ref so the animation loop never re-subscribes and
   // React re-renders do not restart the decay.
   const dataRef = useRef({ rms, peak });
@@ -131,6 +185,7 @@ export function AudioMeter({
       last = now;
 
       const p = paletteRef.current!;
+      let clipping = false;
       const channels = dataRef.current.rms.length;
       const dpr = window.devicePixelRatio || 1;
 
@@ -183,21 +238,60 @@ export function AudioMeter({
         if (w > 0) {
           ctx.fillStyle = gradient;
           ctx.fillRect(0, y, w, barHeight);
+          // TEXTURE, above the amber break. The hot end of the bar is now a
+          // different surface as well as a different hue, so "too hot" reads
+          // in greyscale.
+          const hotX = dbToFraction(HOT_DB) * cssWidth;
+          if (w > hotX) hatchHot(ctx, hotX, y, w - hotX, barHeight, p);
         }
 
-        // peak-hold tick
+        // POSITION, and it is drawn OVER the bar on purpose. The scale ticks
+        // above sit under it, which is right for a ruler and useless for a
+        // threshold: the moment a signal reaches the amber zone it covers the
+        // mark that says where amber starts. These four are the gradient's own
+        // break points, so an operator reads level against geometry instead of
+        // against hue.
+        ctx.fillStyle = p.hold;
+        for (const mark of ZONE_BREAKS) {
+          const x = Math.round(dbToFraction(mark) * cssWidth);
+          // Faint over the empty trough, firm over the lit bar. A mark that is
+          // equally loud everywhere is four permanent white lines across a
+          // meter that is usually quiet, which is the sort of decoration an eye
+          // learns to filter out — and it would be filtering out the thing this
+          // is here to say.
+          ctx.globalAlpha = x < w ? 0.6 : 0.22;
+          ctx.fillRect(x, y, 1, barHeight);
+        }
+        ctx.globalAlpha = 1;
+
+        // peak-hold tick. Wider once it is at or past clip: at that point the
+        // tick is the thing being read, and thickness says so without relying
+        // on it having gone red.
         if (st.holdDb > MIN_DB) {
-          const px = Math.min(cssWidth - 2, dbToFraction(st.holdDb) * cssWidth);
-          ctx.fillStyle = st.holdDb >= CLIP_DB ? p.peak : p.hold;
-          ctx.fillRect(px, y, 2, barHeight);
+          const clipped = st.holdDb >= CLIP_DB;
+          const tickW = clipped ? 3 : 2;
+          const px = Math.min(cssWidth - tickW, dbToFraction(st.holdDb) * cssWidth);
+          ctx.fillStyle = clipped ? p.peak : p.hold;
+          ctx.fillRect(px, y, tickW, barHeight);
         }
 
         // clip latch: a bright block at full scale that lingers, because a
         // clip you did not see is a clip you cannot fix.
         if (now - st.clipAt < CLIP_LATCH_MS) {
+          clipping = true;
           ctx.fillStyle = p.peak;
           ctx.fillRect(cssWidth - 3, y, 3, barHeight);
         }
+      }
+
+      // TEXT, the third channel, and the only one that survives the meter being
+      // too small to read. Toggled imperatively rather than through state: this
+      // runs at animation frame rate across up to 36 channels, and a setState
+      // here would re-render the page every time a peak brushed 0 dBFS.
+      const flag = clipRef.current;
+      if (flag && flag.dataset.on !== String(clipping)) {
+        flag.dataset.on = String(clipping);
+        flag.style.visibility = clipping ? "visible" : "hidden";
       }
 
       raf = requestAnimationFrame(draw);
@@ -224,28 +318,50 @@ export function AudioMeter({
           ))}
         </div>
       )}
-      <canvas
-        ref={canvasRef}
-        className="w-full rounded-[2px]"
-        style={{ height: cssHeight }}
-        aria-label="audio level meter"
-      />
+      <div className="relative min-w-0 flex-1">
+        <canvas
+          ref={canvasRef}
+          className="w-full rounded-[2px]"
+          style={{ height: cssHeight }}
+          aria-label="audio level meter"
+        />
+        {/* Mounted always and hidden by style, never conditionally rendered:
+            the draw loop owns its visibility and has no way to mount a node.
+            aria-hidden because the loop toggles it without React knowing, so an
+            assertive live region here would be a promise this cannot keep. */}
+        <span
+          ref={clipRef}
+          aria-hidden
+          style={{ visibility: "hidden" }}
+          className="pointer-events-none absolute right-0 top-0 rounded-bl-[2px] bg-down px-1 font-mono text-[9px] font-semibold leading-[1.4] tracking-wider text-background"
+        >
+          CLIP
+        </span>
+      </div>
     </div>
   );
 }
 
 /** The dB ruler drawn above a column of meters. Kept separate so a stack of
- *  meters shares one scale instead of repeating it per track. */
+ *  meters shares one scale instead of repeating it per track.
+ *
+ *  A zone break gets a brighter number and a tick, because the marks the bar
+ *  itself now carries are useless if nothing overhead says what level they
+ *  stand at — position is only a channel once it has a legend. */
 export function MeterScale({ className }: { className?: string }) {
   const marks = [-60, -50, -40, -30, -20, -12, -6, 0];
+  const isBreak = (m: number) => ZONE_BREAKS.includes(m);
   return (
-    <div className={cn("relative h-3 w-full select-none", className)}>
+    <div className={cn("relative h-4 w-full select-none", className)}>
       {marks.map((m) => {
         const left = dbToFraction(m) * 100;
         return (
           <div
             key={m}
-            className="absolute top-0 text-[9px] font-mono leading-none text-subtle-foreground"
+            className={cn(
+              "absolute top-0 font-mono text-[9px] leading-none",
+              isBreak(m) ? "text-muted-foreground" : "text-subtle-foreground",
+            )}
             style={{
               left: `${left}%`,
               transform:
@@ -256,6 +372,19 @@ export function MeterScale({ className }: { className?: string }) {
           </div>
         );
       })}
+      {/* One tick per zone break, INCLUDING the two the number row has no room
+          to label. The bar draws a mark at each of these; without the ticks the
+          operator sees four lines across every meter and nothing overhead
+          saying what level they stand at, which is a pattern rather than a
+          legend. */}
+      {ZONE_BREAKS.map((m) => (
+        <span
+          key={`break${m}`}
+          aria-hidden
+          className="absolute bottom-0 h-1.5 w-px bg-border-strong"
+          style={{ left: `${dbToFraction(m) * 100}%` }}
+        />
+      ))}
     </div>
   );
 }

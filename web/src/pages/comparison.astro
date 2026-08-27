@@ -112,6 +112,72 @@ const wins = [
   ["Runs on hardware you control, no per-destination pricing", "Yes", "Yes", "No"],
 ];
 
+/* THE LOSING ROWS, and they are the reason this page can be believed at all.
+ *
+ * docs/COMPARISON.md carries four "what X has that polyemesis does not" tables
+ * and the site carried none of them, which left /comparison as the half of that
+ * document that flatters the product. A comparison page that only wins is read
+ * as marketing even when every row of it is true — and this one has the unusual
+ * advantage of a source document that already did the honest work.
+ *
+ * Every line below is the same claim as its row in docs/COMPARISON.md, reworded
+ * only where a table cell had to become a sentence. Nothing is softened: the
+ * maturity row, the "you run a server or there is nothing to run" row and the
+ * teams-and-roles row are the three most likely to lose a reader, and they are
+ * the three that most need to be here rather than discovered after an evening.
+ *
+ * NOT a fifth `.cmp` table. Four two-column tables of prose is four horizontal
+ * scrollers on a phone for content that is really a list of concessions, and the
+ * `capability`-headed parity check in scripts/check-build.mjs is scoped to the
+ * win table by design — a second table shape here would either trip it or
+ * quietly opt out of it. Cards carry the same rows without either problem.
+ *
+ * @type {{who: string, what: string, rows: [string, string][], tail?: string}[]} */
+const losses = [
+  {
+    who: "The OBS plugins",
+    what: "obs-multi-rtmp and Aitum Multistream — free, GPL-2.0, installed in two minutes and already on the machine.",
+    rows: [
+      ["No server at all", "A plugin in OBS: no host to provision, no port to open. Here you run a server, or there is nothing to run."],
+      ["Nothing new to learn", "The destinations sit in OBS beside the ones already there. Here it is a second UI and a second set of concepts."],
+      ["No extra hop", "OBS talks to the platform directly, so nothing in the middle can fail. Here the server is one more thing between you and air."],
+      ["Per-target video encoder settings, decided in OBS", "Here that is a shared rendition, decided on the server."],
+    ],
+    tail: "What they cost you is upload: N destinations is N uploads off one connection, and N video encodes on the machine also running the show. If your upload is comfortable, that is not a reason to put a server in the path.",
+  },
+  {
+    who: "Restreamer",
+    what: "Ranked by how often each was asked for on their own tracker, which is the honest ordering.",
+    rows: [
+      ["WebRTC / WHIP output", "Missing. Sizeable subsystem; the real use case is sub-second self-monitoring."],
+      ["Decklink / SDI capture, in and out", "Missing. Needs an FFmpeg built with decklink, so a third image variant."],
+      ["Multi-input compositing / video grid", "Missing. Natural once multi-source is settled."],
+      ["HDR 10-bit HEVC", "Partial. libx265 and hevc_nvenc exist; there is no HDR tone-map path."],
+      ["LL-HLS", "Declined, not built. FFmpeg cannot emit LL-HLS partial segments at all, so the protocol would need a Go-side packager. Tuning instead took preview latency from 4.2–6.2 s to 2.2–3.2 s, measured."],
+      ["Maturity", "Restreamer is established. polyemesis is pre-release with one maintainer."],
+    ],
+  },
+  {
+    who: "MistServer",
+    what: "The one tool here that is a peer rather than a different shape, at a scale and protocol breadth this project does not approach.",
+    rows: [
+      ["Protocol breadth", "A directory of muxers, including WebRTC and its own SRT output. Here: SRT and RTMP in, RTMP/SRT out, HLS for preview."],
+      ["Years of production deployment, and a commercial vendor behind it", "Here: pre-release, one maintainer."],
+      ["Selection without decoding", "A push target that only selects tracks is a pure copy end to end. Every polyemesis destination decodes and re-encodes its audio, always, because that is what mixing is."],
+    ],
+  },
+  {
+    who: "restream.io",
+    what: "SaaS, so self-hosting beats it on cost, privacy and limits by construction — and loses everywhere that being somebody else's problem is the feature.",
+    rows: [
+      ["Studio — browser production, remote guests", "Missing. Multi-source plus compositing is the closest path."],
+      ["Teams, roles, multiple workspaces", "Missing. Exactly one admin identity."],
+      ["No server to run", "By design, no."],
+    ],
+    tail: "Teams and roles is the one to take seriously. Access to the UI is full control of the server's streaming, so any multi-operator deployment — a church A/V team, an agency running several clients — hits that immediately.",
+  },
+];
+
 /* The tools a reader is most likely to already have installed, and the one
  * distinction that holds against all of them.
  *
@@ -199,6 +265,32 @@ const selectors = [
         matrix, the per-destination loudness targets, the multitrack archive and
         the stems all exist because the audio is the hard part — and because
         everywhere else it is a track you pick rather than a mix you build.
+      </p>
+    </div>
+
+    {/* THE PAGE SAYS "USE SOMETHING ELSE" BEFORE IT SAYS ANYTHING ELSE, and it
+        is deliberately the second thing a reader meets rather than a footnote at
+        the bottom. README.md and docs/COMPARISON.md both open on this sentence;
+        a comparison page that carries the argument and drops the concession is
+        not the same document with better styling, it is a less honest one.
+
+        NOT the primary border the box above uses. Primary is this site's "act
+        here" accent, and this block exists to tell a particular reader not to.
+        Line-strong is as loud as it needs to be without borrowing the colour
+        that means the opposite thing. */}
+    <div class="mt-5 max-w-3xl rounded-token border-l-2 border-line-strong bg-surface/40 py-4 pl-5 pr-4">
+      <p class="eyebrow">The short version</p>
+      <p class="mt-2.5 text-pretty leading-relaxed text-fg">
+        If you do not need different audio per platform, Restreamer is a more
+        mature product and you should probably use it.
+      </p>
+      <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
+        Multistreaming from the stream PC: obs-multi-rtmp is free, mature and
+        enough. A server instead: Restreamer is more mature and far more widely
+        deployed than this. No server at all: restream.io. An industrial-strength
+        media server with real track selection: MistServer. polyemesis exists for
+        the one case none of them serve — and if that is not your problem, the
+        rest of this page is academic.
       </p>
     </div>
   </section>
@@ -349,6 +441,53 @@ const selectors = [
     </p>
   </section>
 
+  {/* ------------------------------------------- where polyemesis loses ---- */}
+  {/* IMMEDIATELY AFTER THE WIN TABLE, which is the whole point of the placement.
+      Put the concessions at the bottom and they read as small print somebody was
+      forced to include; put them next to the wins and they read as the same
+      person writing with the same care, which is the only thing that makes the
+      wins worth anything. */}
+  <section class="border-y border-line bg-surface/30 py-16" data-reveal>
+    <div class="wrap">
+      <h2 class="text-2xl font-medium">Where polyemesis loses</h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+        Every one of these is something another tool does and this one does not.
+        They are worth reading before you spend an evening on an install: these
+        are design decisions and a project's age, not a roadmap, so none of them
+        is about to change because you waited.
+      </p>
+      <div class="mt-8 grid gap-4 lg:grid-cols-2">
+        {
+          losses.map((l) => (
+            <div class="card p-5">
+              <p class="font-medium text-fg">{l.who} has, and polyemesis does not</p>
+              <p class="mt-2 text-sm leading-relaxed text-subtle">{l.what}</p>
+              <dl class="mt-4 divide-y divide-line border-y border-line">
+                {l.rows.map(([has, here]) => (
+                  <div class="py-3">
+                    <dt class="text-sm font-medium text-fg">{has}</dt>
+                    <dd class="mt-1 text-sm leading-relaxed text-muted">{here}</dd>
+                  </div>
+                ))}
+              </dl>
+              {l.tail && <p class="mt-4 text-sm leading-relaxed text-subtle">{l.tail}</p>}
+            </div>
+          ))
+        }
+      </div>
+      <p class="mt-6 max-w-3xl text-sm leading-relaxed text-subtle">
+        These come from
+        <a href="/docs/comparison" class="underline underline-offset-2 hover:text-fg"
+          >docs/COMPARISON.md</a
+        >, which carries the same rows with their evidence, their issue numbers
+        and the date each was checked — including the footnotes recording the
+        rows that were wrong and were corrected, in both directions: some had
+        gone stale understating this product, and twice a cell asserted a
+        competitor lacked something they ship.
+      </p>
+    </div>
+  </section>
+
   {/* --------------------------------------------- select versus mix ------ */}
   <section class="wrap pb-16" data-reveal>
     <h2 class="text-2xl font-medium">They select a track. polyemesis mixes.</h2>
@@ -468,9 +607,27 @@ const selectors = [
 
   <section class="wrap py-20 text-center" data-reveal>
     <h2 class="text-balance text-3xl font-medium">Still the right problem?</h2>
+    {/* The quickstart rather than the install page, for the same reason the home
+        page leads with it: a reader who has just weighed five products against
+        each other is deciding whether they can OPERATE this one, and that is a
+        question only the documentation answers. The install page is still one
+        click away and is not what anyone needs first. */}
+    <p class="mx-auto mt-4 max-w-xl text-pretty leading-relaxed text-muted">
+      Then the next thing to read is the one that tells you what running it is
+      actually like — not the download page.
+    </p>
     <div class="mt-7 flex flex-wrap justify-center gap-3">
-      <a href="/download" class="btn btn-primary">Install it</a>
-      <a href="/#matrix" class="btn btn-ghost">Try the routing matrix</a>
+      <a href="/docs/quickstart" class="btn btn-primary">Read the quickstart</a>
+      <a href="/docs/comparison" class="btn btn-ghost">This page, with its sources</a>
     </div>
+    <p class="mt-5 text-sm text-subtle">
+      <a href="/#matrix" class="underline decoration-line underline-offset-4 hover:text-fg"
+        >Try the routing matrix</a
+      >
+      ·
+      <a href="/download" class="underline decoration-line underline-offset-4 hover:text-fg"
+        >Install options</a
+      >
+    </p>
   </section>
 </Base>

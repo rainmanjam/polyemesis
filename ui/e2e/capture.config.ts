@@ -9,9 +9,12 @@ import { defineConfig, devices } from "@playwright/test";
  * generous timeout because it waits for real audio to move a real meter, and
  * no place in CI at all.
  *
- * Run it through scripts/capture-media.sh, which brings up a seeded server
- * first. Pointed at an empty install it produces empty screenshots, which is
- * worse than none.
+ * Run it through scripts/demo-seed.sh, which brings up a server seeded with
+ * three programmes, a rendition ladder, destinations across every supported
+ * platform and a recording library, and pushes live multitrack audio through
+ * it. Pointed at an empty install it produces empty screenshots, which is worse
+ * than none. scripts/capture-media.sh remains for the narrower single-source
+ * arrangement it was written for.
  */
 export default defineConfig({
   testDir: ".",
@@ -24,7 +27,11 @@ export default defineConfig({
   timeout: 180_000,
   expect: { timeout: 20_000 },
   reporter: [["list"]],
-  outputDir: "../../docs/media/.playwright",
+  // Beside the stills, wherever those are going. Playwright drops the tour
+  // video in here and the caller collects it from the same place it collects
+  // the PNGs; a fixed path would leave the video of one run sitting next to the
+  // screenshots of another.
+  outputDir: `${process.env.SHOT_DIR ?? "../../docs/media"}/.playwright`,
   use: {
     baseURL: process.env.BASE_URL ?? "http://127.0.0.1:8099",
     ignoreHTTPSErrors: true,
