@@ -653,6 +653,12 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		bus.Publish(events.TypeRecordings, nil)
 	},
 		recording.WithFFprobe(tools.FFprobe),
+		// The programme, so every row this manager indexes carries it. Nothing
+		// else ever knows: the filename does not encode it and a later reader
+		// cannot work it out, which is why source_id was NULL on every
+		// recording ever written and the clip editor labelled every clip with
+		// the default programme's track names.
+		recording.WithSourceID(sourceID),
 		recording.WithStorageGuard(e.onStorage),
 	)
 	e.play = playout.New(playout.Deps{

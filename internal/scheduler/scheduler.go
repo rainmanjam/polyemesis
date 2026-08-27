@@ -16,6 +16,24 @@
 package scheduler
 
 import (
+	// THE TIME ZONE DATABASE, COMPILED IN, AND IT BELONGS HERE.
+	//
+	// A schedule carries an IANA zone -- "Europe/London" -- and LoadLocation
+	// resolves it against /usr/share/zoneinfo. The shipped image is Alpine with
+	// ffmpeg and nothing else: that directory does not exist. Every zone but UTC
+	// was refused at save time there, which is merely annoying. What is not
+	// annoying is a schedule saved where the database DOES exist and then run
+	// here: Previous() returns (zero, false) when Location() errors, which is
+	// the identical answer it gives for "nothing is due". The broadcast that
+	// should have gone on air at 19:00 does not, the runs page shows no
+	// failure because there was no run, and nothing anywhere says why.
+	//
+	// In THIS package rather than in cmd/, so the guarantee travels with the
+	// code that depends on it: any binary that links the scheduler gets the
+	// database, and the test beside this is testing the real thing rather than
+	// whatever the developer's laptop happens to have in /usr/share.
+	_ "time/tzdata"
+
 	"fmt"
 	"slices"
 	"sort"

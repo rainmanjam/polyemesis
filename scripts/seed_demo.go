@@ -184,6 +184,14 @@ func main() {
 		post("/destinations", d.body(secondID))
 	}
 
+	// THE AUTOMATION PAGE, which photographs as three empty panels otherwise.
+	//
+	// Last, and after both programmes: a schedule names the destinations it
+	// acts on, so seeding it before they exist would store an empty target list
+	// -- which does not fail, it means "every destination", the opposite of the
+	// narrow targeting the shot is there to show.
+	seedAutomation()
+
 	// Three lines on stdout: the relay port, the first programme's publish
 	// token, then the second's.
 	//
@@ -196,8 +204,10 @@ func main() {
 	fmt.Println(relay)
 	fmt.Println(sourceToken())
 	fmt.Println(tokenForSource(secondID))
-	fmt.Fprintf(os.Stderr, "seeded: %d + %d destinations over 2 programmes, relay on udp/%d\n",
-		len(demoDestinations), len(second.destinations), relay)
+	fmt.Fprintf(os.Stderr, "seeded: %d + %d destinations over 2 programmes, "+
+		"%d alert rules, %d hooks, %d schedules, relay on udp/%d\n",
+		len(demoDestinations), len(second.destinations),
+		len(demoAlertRules), len(demoHooks), len(demoSchedules), relay)
 }
 
 // The arrangement itself. Three destinations over three tracks, chosen so no
@@ -247,6 +257,355 @@ func (d demoDest) body(sourceID int64) map[string]any {
 			"mode": "simple", "tracks": rows, "normalize": "auto", "sampleRate": 48000,
 		},
 	}
+}
+
+// -------------------------------------------------------------- automation
+
+// The three panels of /automation, seeded together because they are one shot.
+//
+// VARIETY IS THE SUBJECT, not decoration. 13-automation.png is a single frame
+// of three lists, and five rows that differ only in their name argue that the
+// feature has one knob. So no two alert rules here share a format, a severity
+// floor and a subscription; the hooks subscribe to different halves of the
+// lifecycle; the schedules span two recurrence kinds and three actions. One row
+// in each panel is switched OFF, because disabled is a state the page draws
+// differently and a screenshot of nothing but enabled rows never shows it.
+//
+// EVERY ENDPOINT IS example.com AND HAS TO BE. A seeder carrying a
+// plausible-looking discord.com/api/webhooks/... is a string somebody pastes
+// into their own install, and the very first thing this software does with an
+// alert rule is POST to it -- a "demo" that fires real traffic at a stranger's
+// channel. An obviously fake host is the only honest choice, and it is also
+// what keeps the screenshot from advertising a URL that will 404 by the time
+// anybody reads it.
+func seedAutomation() {
+	// Nothing below is refused for being a duplicate. POST /alerts/rules and
+	// POST /hooks both accept a name that already exists and mint a second row,
+	// so a second capture run -- which is the normal way you work, adjusting a
+	// shot and re-running -- would photograph ten alert rules, five of them the
+	// same five. Skipping by name is what makes re-seeding a no-op.
+	//
+	// By NAME rather than by id: send() does not hand back a response body, and
+	// the id exists only inside the create it discards.
+	for _, r := range demoAlertRules {
+		if hasNamed("/alerts/rules", r.name) {
+			continue
+		}
+		post("/alerts/rules", r.body())
+	}
+	for _, h := range demoHooks {
+		if hasNamed("/hooks", h.name) {
+			continue
+		}
+		post("/hooks", h.body())
+	}
+	for _, sc := range demoSchedules {
+		if hasNamed("/schedules", sc.name) {
+			continue
+		}
+		post("/schedules", sc.body(destinationIDsNamed(sc.targets)))
+	}
+
+	// READ BACK, because send() only PRINTS a refusal and carries on -- which it
+	// has to, since a re-run re-POSTs everything the install already has. The
+	// cost is that a whole panel can fail and the run still exits 0 with a
+	// summary counting what it MEANT to create. All four schedules were once
+	// rejected for a time zone the image could not resolve, and the only trace
+	// was four lines of stderr scrolling past a capture that then photographed
+	// the empty panel it was written to fill.
+	//
+	// Named individually rather than counted: a count matches when a stale
+	// install carries four schedules that are not these four.
+	var ruleNames, hookNames, schedNames []string
+	for _, r := range demoAlertRules {
+		ruleNames = append(ruleNames, r.name)
+	}
+	for _, h := range demoHooks {
+		hookNames = append(hookNames, h.name)
+	}
+	for _, sc := range demoSchedules {
+		schedNames = append(schedNames, sc.name)
+	}
+	missingAll("/alerts/rules", ruleNames)
+	missingAll("/hooks", hookNames)
+	missingAll("/schedules", schedNames)
+}
+
+// missingAll dies naming whatever did not land. Dying rather than warning: the
+// caller's next step is a screenshot, and a shot of a panel that is empty for a
+// reason nobody read is worse than no shot at all.
+func missingAll(path string, want []string) {
+	var missing []string
+	for _, name := range want {
+		if !hasNamed(path, name) {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		die("%s is missing %d of %d seeded rows (%s) -- the create was refused "+
+			"and the panel above it would photograph empty; the refusal is in "+
+			"the POST lines above", path, len(missing), len(want),
+			strings.Join(missing, ", "))
+	}
+}
+
+type demoRule struct {
+	name     string
+	url      string
+	format   string
+	severity string
+	events   []string
+	debounce int
+	interval int
+	disabled bool
+}
+
+func (r demoRule) body() map[string]any {
+	// events is sent even when empty, and the empty case means EVERY type --
+	// which is a real subscription an operator chooses, not an omission. Sent
+	// explicitly so the row that means "everything" says so rather than
+	// arriving as a missing field the server fills in.
+	ev := r.events
+	if ev == nil {
+		ev = []string{}
+	}
+	return map[string]any{
+		"name": r.name, "url": r.url, "format": r.format,
+		"minSeverity": r.severity, "events": ev,
+		"debounceSeconds": r.debounce, "minIntervalSeconds": r.interval,
+		"enabled": !r.disabled,
+	}
+}
+
+// The alert set. Read down the format, severity and events columns rather than
+// down the names: that is the axis the shot exists to show.
+var demoAlertRules = []demoRule{
+	// The one an operator makes first: a channel, everything that matters to a
+	// human, nothing quieter than a warning.
+	{
+		name: "Ops — #broadcast-alerts", url: "https://example.com/webhooks/slack/broadcast-alerts",
+		format: "slack", severity: "warning",
+		events: []string{"destination.down", "destination.recovered",
+			"destination.falling_behind", "ingest.lost", "ingest.recovered"},
+		debounce: 30, interval: 60,
+	},
+	// The pager. An EMPTY events list on purpose -- it subscribes to every
+	// type and lets the severity floor do the filtering, which is the other way
+	// round from the rule above and the reason both are here.
+	{
+		name: "On-call pager — critical only", url: "https://example.com/webhooks/discord/oncall",
+		format: "discord", severity: "critical",
+		debounce: 15, interval: 30,
+	},
+	// The one nobody would guess the product had. Long debounce because a mix
+	// that drifts out of compliance drifts back, and a channel that says so
+	// every ten seconds is a channel that gets muted before the first real one.
+	{
+		name: "Audio desk — clipping and loudness", url: "https://example.com/hooks/audio-desk",
+		format: "json", severity: "info",
+		events: []string{"audio.clipping", "loudness.out_of_compliance",
+			"loudness.recovered"},
+		debounce: 120, interval: 300,
+	},
+	// The security set, which is a different argument from the streaming ones
+	// and the reason it gets its own row: an install has exactly one account,
+	// and this is the only signal that somebody else is holding the password.
+	{
+		name: "Security log — sign-ins and tokens", url: "https://example.com/collector/polyemesis/security",
+		format: "json", severity: "info",
+		events: []string{"auth.login.failed", "auth.login.succeeded",
+			"auth.password.changed", "auth.token.created", "auth.token.revoked",
+			"settings.changed"},
+		debounce: 5, interval: 15,
+	},
+	// OFF, and the panel has to contain one. A rule an operator has muted for
+	// the season is the commonest thing in a real install and the page renders
+	// it differently; a shot of five live rows claims the switch does nothing.
+	{
+		name: "Recording volume — disk watch", url: "https://example.com/webhooks/slack/facilities",
+		format: "slack", severity: "warning",
+		events:   []string{"disk.low", "disk.recovered"},
+		debounce: 60, interval: 600, disabled: true,
+	},
+}
+
+type demoHook struct {
+	name     string
+	url      string
+	triggers []string
+	timeout  int
+	attempts int
+	disabled bool
+}
+
+func (h demoHook) body() map[string]any {
+	tr := h.triggers
+	if tr == nil {
+		tr = []string{}
+	}
+	// No "secret": the server mints one with crypto/rand and returns the
+	// plaintext exactly once. Supplying a literal here would put a signing key
+	// in a public repository AND make every install that ran the seeder share
+	// it, which is the failure mode of a shipped default key.
+	return map[string]any{
+		"name": h.name, "url": h.url, "triggers": tr,
+		"timeoutSeconds": h.timeout, "maxAttempts": h.attempts,
+		"enabled": !h.disabled,
+	}
+}
+
+// The hook set. Split by what a SCRIPT would do with it -- ingest edges,
+// destination edges, faults -- because that is the distinction between this
+// panel and the alert panel above, and a screenshot where both lists say
+// "destination.down" in the same words argues they are the same feature.
+var demoHooks = []demoHook{
+	{
+		name: "Show automation — go-live mirror", url: "https://example.com/hooks/showrunner/live",
+		triggers: []string{"ingest.published", "ingest.disconnected"},
+		timeout:  10, attempts: 3,
+	},
+	{
+		name: "Status page — destination edges", url: "https://example.com/hooks/statuspage/destinations",
+		triggers: []string{"destination.up", "destination.down"},
+		timeout:  5, attempts: 5,
+	},
+	// OFF, for the same reason the disk rule is.
+	{
+		name: "Incident bot — faults and rollovers", url: "https://example.com/hooks/incident-bot",
+		triggers: []string{"broadcast.fault", "destination.rolledover"},
+		timeout:  15, attempts: 2, disabled: true,
+	},
+}
+
+type demoSchedule struct {
+	name     string
+	action   string
+	kind     string
+	tz       string
+	at       int      // minutes past local midnight
+	days     []int    // weekdays, Sunday = 0
+	targets  []string // destination names; empty means every destination
+	grace    int
+	disabled bool
+}
+
+func (s demoSchedule) body(destIDs []int64) map[string]any {
+	days := s.days
+	if days == nil {
+		days = []int{}
+	}
+	if destIDs == nil {
+		destIDs = []int64{}
+	}
+	return map[string]any{
+		"name": s.name, "enabled": !s.disabled,
+		"action": s.action, "kind": s.kind,
+		"tz": s.tz, "atMinutes": s.at, "days": days,
+		"destinationIds": destIDs, "graceSeconds": s.grace,
+	}
+}
+
+// The timetable. Two kinds and three actions across four rows, so the panel
+// reads as a scheduler rather than as a list of alarms.
+//
+// AN ENABLED SCHEDULE ON A DEMO INSTALL REALLY FIRES, which is the one way this
+// seeder can wreck the shots it exists to take: a `stop` that comes round
+// mid-capture disables destinations and the dashboard photographs as an outage.
+// So the only enabled stop here names ONE destination, and the rest either
+// enable things or feed the failover playlist, which ranks below a live ingest
+// and cannot pre-empt it. The times are evening on purpose too -- inside the
+// grace window is the only moment any of this matters.
+//
+// EVERY ROW SAYS "UTC" AND IT IS NOT A STYLE CHOICE. Schedule.Location() resolves
+// an IANA name through time.LoadLocation, which reads the operating system's
+// zoneinfo database, and the capture image has none -- nothing in this repo
+// imports time/tzdata, so the zone table is whatever the base image shipped.
+// "America/New_York" here made all four POSTs 400 with `unknown time zone` and
+// the automation page kept its empty third panel, which is the exact failure
+// the whole file exists to prevent, arriving through a route nobody would look
+// down. UTC is the one zone the standard library carries in the binary.
+var demoSchedules = []demoSchedule{
+	{
+		name: "Weeknight show — on air 19:00", action: "start", kind: "weekly",
+		tz: "UTC", at: 19 * 60,
+		days:  []int{1, 2, 3, 4, 5},
+		grace: 300,
+	},
+	// The narrow one. Naming its destination is the whole point of the column:
+	// an empty target list means EVERY destination, so a schedule that looks
+	// specific because its name says "archive" and is not would stop the show.
+	{
+		name: "Archive — stop recording 21:30", action: "stop", kind: "weekly",
+		tz: "UTC", at: 21*60 + 30,
+		days:    []int{1, 2, 3, 4, 5},
+		targets: []string{"Archive — hosts only"},
+		grace:   300,
+	},
+	{
+		name: "Overnight filler — playlist from 02:00", action: "playlist.start", kind: "daily",
+		tz: "UTC", at: 2 * 60,
+		grace: 900,
+	},
+	// OFF, third panel, same reason as the other two.
+	{
+		name: "Saturday rehearsal — on air 11:00", action: "start", kind: "weekly",
+		tz: "UTC", at: 11 * 60,
+		days:  []int{6},
+		grace: 1800, disabled: true,
+	},
+}
+
+// hasNamed reports whether path already lists a row called name. Every
+// automation collection answers a flat array whose rows carry "name" at the top
+// level, schedules included -- their view type embeds the schedule rather than
+// nesting it.
+func hasNamed(path, name string) bool {
+	for _, row := range getList(path) {
+		if n, _ := row["name"].(string); n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// destinationIDsNamed resolves destination names to ids, skipping any it cannot
+// find. GET /destinations wraps each row as {"destination":…,"routing":…} and is
+// install-wide -- it carries every programme's destinations and ignores a
+// ?source= filter -- which is what lets one schedule name a destination
+// belonging to either show.
+//
+// A name that resolves to nothing is DROPPED rather than defaulted, and the
+// difference matters: the empty target list means "every destination", so a
+// renamed destination would silently widen a schedule that says "archive" into
+// one that stops the broadcast. Dropping it leaves the schedule aimed at
+// whatever it could still find, and an all-misses list is refused below.
+func destinationIDsNamed(names []string) []int64 {
+	if len(names) == 0 {
+		return nil
+	}
+	byName := map[string]int64{}
+	for _, row := range getList("/destinations") {
+		d, ok := row["destination"].(map[string]any)
+		if !ok {
+			continue
+		}
+		n, _ := d["name"].(string)
+		if id, ok := d["id"].(float64); ok && n != "" {
+			byName[n] = int64(id)
+		}
+	}
+	out := make([]int64, 0, len(names))
+	for _, n := range names {
+		if id, ok := byName[n]; ok {
+			out = append(out, id)
+		}
+	}
+	if len(out) == 0 {
+		die("no destination named %v, and a schedule with an empty target list "+
+			"acts on EVERY destination -- refusing rather than seeding a stop "+
+			"that would take the whole demo off air", names)
+	}
+	return out
 }
 
 // annotate names the incoming tracks on the source, retrying while the engine
@@ -395,8 +754,14 @@ func tokenForSource(id int64) string {
 	return ""
 }
 
-func listSources() []map[string]any {
-	r, err := client.Get(base + "/sources")
+func listSources() []map[string]any { return getList("/sources") }
+
+// getList is get() for the routes that answer a JSON ARRAY. get() decodes into
+// a map and hands back an empty one for every one of them, which reads as "the
+// install has none" -- the answer that makes a seeder create a second copy of
+// everything it already made.
+func getList(path string) []map[string]any {
+	r, err := client.Get(base + path)
 	if err != nil {
 		return nil
 	}

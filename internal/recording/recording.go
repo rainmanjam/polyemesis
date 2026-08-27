@@ -42,6 +42,9 @@ type Manager struct {
 	// freeSpace is diskFree in production; tests substitute a volume they can
 	// fill on demand, which no real temp directory lets them do.
 	freeSpace func(string) (uint64, uint64, error)
+	// sourceID is the programme these segments came from, stamped onto every
+	// row this manager indexes. Nil on a manager with no programme.
+	sourceID *int64
 
 	storageMu sync.Mutex
 	storage   StorageState
@@ -65,6 +68,21 @@ func WithFFprobe(bin string) Option {
 
 // WithStorageGuard registers the callback fired when the free-space floor
 // halts recording, and again when recovered space lets it resume.
+// WithSourceID names the programme whose segments this manager indexes.
+//
+// Without it every recording row was written with a NULL source_id, and the
+// clip editor then labelled every clip with the DEFAULT programme's track
+// names -- including clips cut from somebody else's show. Unset stays nil,
+// which is the honest answer for a manager that is not attached to a
+// programme at all (see engine.New's storeless construction in tests).
+func WithSourceID(id int64) Option {
+	return func(m *Manager) {
+		if id > 0 {
+			m.sourceID = &id
+		}
+	}
+}
+
 func WithStorageGuard(fn func(StorageState)) Option {
 	return func(m *Manager) { m.onStorage = fn }
 }
@@ -278,6 +296,12 @@ func (m *Manager) Scan() (bool, error) {
 			if err := m.measure(rec); err != nil {
 				m.log.Warn("probe recording", "file", rec.Filename, "err", err)
 			}
+		}
+		// The programme this manager belongs to, stamped at index time. It is
+		// the only moment anything knows it: the filename does not carry it and
+		// a later reader cannot work it out.
+		if rec.SourceID == nil {
+			rec.SourceID = m.sourceID
 		}
 		if err := m.store.UpsertRecording(rec); err != nil {
 			m.log.Warn("index recording", "file", rec.Filename, "err", err)

@@ -44,14 +44,29 @@ func (d *DB) UpsertRecording(r *Recording) error {
 	if !r.FinishedAt.IsZero() {
 		finished = r.FinishedAt.Unix()
 	}
-	_, err := d.sql.Exec(`INSERT INTO recordings (filename, started_at, finished_at, bytes, duration_ms, tracks)
-		VALUES (?,?,?,?,?,?)
+	// source_id IS WRITTEN HERE, AND UNTIL NOW IT WAS WRITTEN NOWHERE.
+	//
+	// Two SELECTs read it and no statement in this package ever set it, so
+	// every row on every install carried NULL -- for ever, not just for rows
+	// predating sources. That made a defence elsewhere inert while reading as
+	// solid: clipTracks (internal/api/clips.go) resolves the recording's own
+	// programme so a clip cut from Studio B is not labelled with Main's track
+	// names, and its comment calls nil "a row written before sources existed".
+	// Nil was every row, so it fell back to the default programme every time
+	// and the mislabelling it prevents was happening on every clip.
+	//
+	// Guarded like duration_ms and tracks beside it, and for the same reason:
+	// a later sweep that re-indexes a file it cannot attribute must not wipe an
+	// attribution an earlier one made.
+	_, err := d.sql.Exec(`INSERT INTO recordings (filename, started_at, finished_at, bytes, duration_ms, tracks, source_id)
+		VALUES (?,?,?,?,?,?,?)
 		ON CONFLICT(filename) DO UPDATE SET
 			finished_at=excluded.finished_at,
 			bytes=excluded.bytes,
 			duration_ms=CASE WHEN excluded.duration_ms > 0 THEN excluded.duration_ms ELSE recordings.duration_ms END,
-			tracks=CASE WHEN excluded.tracks > 0 THEN excluded.tracks ELSE recordings.tracks END`,
-		r.Filename, started, finished, r.Bytes, r.DurationMS, r.Tracks)
+			tracks=CASE WHEN excluded.tracks > 0 THEN excluded.tracks ELSE recordings.tracks END,
+			source_id=CASE WHEN excluded.source_id IS NOT NULL THEN excluded.source_id ELSE recordings.source_id END`,
+		r.Filename, started, finished, r.Bytes, r.DurationMS, r.Tracks, r.SourceID)
 	return err
 }
 
