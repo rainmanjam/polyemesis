@@ -1685,6 +1685,25 @@ jobs:
           # never shipping an unexercised one again.
           if [ "$EVENT" = "pull_request" ]; then
             CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+
+            # AND A SUITE'S OWN SCRIPT COUNTS, which is the same lesson as the
+            # ci.yml clause above, learned a second time one directory over. A
+            # PR that rewrote the EXIT traps in all three of these scripts --
+            # and in the two libraries every one of them sources -- matched
+            # nothing here and got "skipping". A broken trap would have gone
+            # green on its own PR and surfaced on the next ui/ change instead,
+            # pointing at whoever touched the UI and not at the change that
+            # actually did it.
+            #
+            # The full set rather than the one script that changed: lib-*.sh is
+            # sourced by all three, and working out which suite a shared
+            # library can break is exactly the reasoning that produced the gap.
+            if grep -qE '^scripts/(acceptance-(docker|multisource|browser)\.sh|lib-[a-z-]+\.sh)$' <<<"$CHANGED"; then
+              echo "suites=$ALL" >> "$GITHUB_OUTPUT"
+              echo "full set: this PR changes a container suite's own script or a library it sources"
+              exit 0
+            fi
+
             if grep -qE '^(ui/|\.github/workflows/ci\.yml$)' <<<"$CHANGED"; then
               echo 'suites=["acceptance-browser"]' >> "$GITHUB_OUTPUT"
               echo "browser: this PR touches ui/ or this workflow"
@@ -1693,7 +1712,7 @@ jobs:
           fi
 
           echo 'suites=[]' >> "$GITHUB_OUTPUT"
-          echo "none: this PR touches neither ui/ nor this workflow"
+          echo "none: this PR touches neither ui/ nor this workflow nor a container suite's script"
 
   # The suites that need the shipped IMAGE rather than a host binary: SRT ingest
   # (Ubuntu's FFmpeg may lack libsrt, the image never does), the one-port
