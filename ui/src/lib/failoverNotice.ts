@@ -27,13 +27,26 @@ import type { FailoverSettings } from "@/lib/types";
  *  changed, and comes back if it is changed away -- so what is on screen is
  *  always the current exposure rather than a record of who clicked what.
  */
+/* ONE STATE, NOT TWO, and cutting the second one is the point.
+ *
+ * This carried a "slate-only" case as well: failover on, but no playlist file,
+ * so the fallback is a black slate rather than the operator's own video. It
+ * was wrong, and photographing the demo install showed it -- a permanent line
+ * across the dashboard of a correctly configured install.
+ *
+ * The test is whether the broadcast survives, and with a slate it does. The
+ * connection is held, the platform stays up, and nothing unrecoverable
+ * happens; what viewers see during the gap is a quality preference. Making an
+ * un-dismissible line out of a preference is precisely how this becomes
+ * something an operator scrolls past -- and it would then be scrolled past on
+ * the day it says the thing that actually matters.
+ *
+ * The playlist is worth mentioning where it is set, not on the dashboard for
+ * ever. */
 export type FailoverNotice =
   | { kind: "none" }
   /** Failover is off and there is a live broadcast to lose. */
-  | { kind: "unprotected" }
-  /** Failover is on, but the fallback is a slate rather than the operator's own
-   *  video, because no playlist file has been configured. */
-  | { kind: "slate-only" };
+  | { kind: "unprotected" };
 
 /**
  * @param enabledDestinations How many destinations the operator has switched
@@ -57,12 +70,6 @@ export function failoverNotice(
   if (!failover) return { kind: "none" };
 
   if (!failover.enabled) return { kind: "unprotected" };
-
-  // Failover on, but the fallback is a black slate. The machinery to loop an
-  // uploaded file is fully built and ranks correctly -- below both ingests and
-  // above the slate -- so this is a step someone got most of the way through.
-  const items = failover.playlist?.enabled ? (failover.playlist.items?.length ?? 0) : 0;
-  if (items === 0) return { kind: "slate-only" };
 
   return { kind: "none" };
 }

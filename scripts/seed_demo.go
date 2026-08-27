@@ -154,6 +154,26 @@ func main() {
 	if prev, ok := settings["preview"].(map[string]any); ok {
 		prev["enabled"] = true
 	}
+	// FAILOVER ON, because this seeds a WELL-CONFIGURED install and that is the
+	// install the screenshots are of.
+	//
+	// It is off by default in the product and should stay that way -- the tier
+	// costs a remux hop and not every box needs it (#512). But the dashboard
+	// now says so where the destinations are listed, so a demo left at the
+	// default puts a warning box across the middle of the hero image: a reader
+	// meets "if the encoder disconnects, this broadcast ends" as the first
+	// thing the product has to say about itself, which describes the demo's
+	// configuration rather than the product.
+	//
+	// Turning it on is not hiding the notice. The notice is tested in
+	// lib/failoverNotice.test.ts, where its behaviour belongs; a screenshot is
+	// not the place to prove a warning renders, and an install that has taken
+	// the advice is the honest thing to photograph.
+	if fo, ok := settings["failover"].(map[string]any); ok {
+		fo["enabled"] = true
+	} else {
+		settings["failover"] = map[string]any{"enabled": true}
+	}
 	put("/settings", settings)
 
 	// Label the incoming tracks. This is the step that makes every later screen

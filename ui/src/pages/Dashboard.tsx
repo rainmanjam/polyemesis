@@ -790,10 +790,6 @@ function BulkDestinationControl({
 function FailoverExposure({ notice }: { notice: FailoverNotice }) {
   if (notice.kind === "none") return null;
 
-  // TWO DIFFERENT SENTENCES, because they are two different mistakes and the
-  // fix is not the same. Collapsing them into "check your failover settings"
-  // would send someone who is most of the way there back to the beginning.
-  const unprotected = notice.kind === "unprotected";
   return (
     <div
       className="mb-2 flex items-start gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-[11px]"
@@ -803,31 +799,17 @@ function FailoverExposure({ notice }: { notice: FailoverNotice }) {
     >
       <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
       <p className="text-muted-foreground">
-        {unprotected ? (
-          <>
-            <span className="text-foreground">
-              If the encoder disconnects, this broadcast ends.
-            </span>{" "}
-            Without failover the destination restarts and takes the platform
-            connection with it, and a completed YouTube broadcast cannot return
-            to live. Turning it on in{" "}
-            <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
-              Settings → Failover
-            </Link>{" "}
-            holds the connection up with a standby ingest, a looping file or a
-            slate. It costs a remux hop.
-          </>
-        ) : (
-          <>
-            <span className="text-foreground">Failover is on, with nothing to play.</span>{" "}
-            The connection will be held up by a black slate. Adding a file in{" "}
-            <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
-              Settings → Failover
-            </Link>{" "}
-            loops your own video instead, which ranks above the slate and below
-            both ingests.
-          </>
-        )}
+        <span className="text-foreground">
+          If the encoder disconnects, this broadcast ends.
+        </span>{" "}
+        Without failover the destination restarts and takes the platform
+        connection with it, and a completed YouTube broadcast cannot return to
+        live. Turning it on in{" "}
+        <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
+          Settings → Failover
+        </Link>{" "}
+        holds the connection up with a standby ingest, a looping file or a
+        slate. It costs a remux hop.
       </p>
     </div>
   );

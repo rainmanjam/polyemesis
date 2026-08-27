@@ -32,20 +32,27 @@ describe("failoverNotice", () => {
     expect(failoverNotice(3, undefined)).toEqual({ kind: "none" });
   });
 
-  it("points at the empty playlist once failover itself is on", () => {
-    // The machinery to loop an operator's own file is fully built; leaving it
-    // empty means the fallback is a black slate.
-    expect(failoverNotice(2, on)).toEqual({ kind: "slate-only" });
+  /* A SLATE IS NOT AN EXPOSURE. This used to warn when failover was on but no
+   * playlist file was configured, on the grounds that the fallback would be a
+   * black slate rather than the operator's own video. Photographing the demo
+   * install showed why that was wrong: a permanent, un-dismissible line across
+   * the dashboard of a correctly configured install.
+   *
+   * The test is whether the broadcast survives, and with a slate it does --
+   * the connection is held and nothing unrecoverable happens. What viewers see
+   * during the gap is a preference, and making a standing warning out of a
+   * preference is how this line becomes one an operator scrolls past, on the
+   * day it says the thing that matters. */
+  it("says nothing once failover is on, slate or not", () => {
+    expect(failoverNotice(2, on)).toEqual({ kind: "none" });
     expect(failoverNotice(2, { enabled: true, playlist: { enabled: false, items: [] } }))
-      .toEqual({ kind: "slate-only" });
-    expect(failoverNotice(2, { enabled: true, playlist: { enabled: true, items: [] } }))
-      .toEqual({ kind: "slate-only" });
+      .toEqual({ kind: "none" });
   });
 
-  /* THE CONTROL CASE. Every branch above returns a notice, so a function that
-   * always warned would pass all of them. A fully configured install must go
-   * quiet, or the line becomes one an operator learns to ignore -- which is the
-   * failure mode this notice was designed around in the first place. */
+  /* THE CONTROL CASE. A function that always warned would pass the first test,
+   * so a protected install has to be shown to go quiet -- otherwise the line
+   * becomes one an operator learns to ignore, which is the failure mode this
+   * notice was designed around in the first place. */
   it("goes quiet on an install that is actually protected", () => {
     expect(failoverNotice(4, withFile)).toEqual({ kind: "none" });
   });
