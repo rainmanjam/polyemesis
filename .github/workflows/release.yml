@@ -595,7 +595,15 @@ jobs:
           body=$(awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md \
                  | sed '/^[[:space:]]*$/d')
           # "Nothing yet." is the deliberate empty state, not an entry.
-          real=$(printf '%s\n' "$body" | sed '/^Nothing yet\.$/d' | sed '/^[[:space:]]*$/d')
+          #
+          # THE EMPHASISED SPELLING COUNTS TOO, and it costs a release to learn
+          # that it did not. v0.7.0's first tag failed this gate on
+          # `_Nothing yet._` -- markdown emphasis around the exact sentinel this
+          # line names, written by someone who had just read the section and was
+          # making it look deliberate. The gate was right to stop the tag and
+          # wrong about why, which is the most expensive way to be right.
+          real=$(printf '%s\n' "$body" \
+            | sed -E '/^_?Nothing yet\._?$/d' | sed '/^[[:space:]]*$/d')
           if [ -n "$real" ]; then
             echo "::error::CHANGELOG.md still has entries under [Unreleased]. Fold them"
             echo "::error::into the version being tagged before releasing -- they sit ABOVE"
