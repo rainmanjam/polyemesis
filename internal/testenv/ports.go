@@ -71,6 +71,53 @@ func (r *Reservation) Release() {
 	r.once.Do(func() { _ = r.c.Close() })
 }
 
+// ReleaseAndSettle releases the reservations and blocks until every port can
+// actually be bound again, THE WAY THE ALLOCATOR BINDS IT.
+//
+// CLOSING A SOCKET DOES NOT MAKE ITS PORT IMMEDIATELY REUSABLE, and Windows is
+// where that stops being a technicality. A test that reserves a window, closes
+// it, and hands the numbers straight to relay.NewPortAllocator is asserting
+// something the operating system has not agreed to yet: the allocator's own
+// probe binds `udp4` on 127.0.0.1, sees WSAEADDRINUSE on a port whose socket
+// closed microseconds earlier, and reports the pool exhausted. With a
+// two-port window that is the whole pool, so the feed never starts, nothing
+// subscribes, and the failure surfaces hundreds of lines away as a broadcast
+// that is "on air" with an empty hub.
+//
+// It binds the same way relay.portFree does rather than the way ReserveUDP
+// does -- `udp4` against 127.0.0.1, not `udp` against a host string. Those are
+// different questions on a dual-stack host, and the only one that matters here
+// is the one the allocator is going to ask.
+//
+// A poll rather than a sleep: the wait is over when the port answers, which on
+// Linux and macOS is the first attempt and costs nothing.
+func ReleaseAndSettle(t *testing.T, rs ...*Reservation) {
+	t.Helper()
+	for _, r := range rs {
+		r.Release()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for _, r := range rs {
+		port := r.Port()
+		for {
+			c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
+			if err == nil {
+				_ = c.Close()
+				break
+			}
+			if time.Now().After(deadline) {
+				// Fatal rather than "carry on and hope". Proceeding hands the
+				// allocator a port it will refuse, and the test then fails for a
+				// reason that has nothing to do with what it is testing.
+				t.Fatalf("udp/%d did not become bindable within 5s of being released, "+
+					"so the allocator this window feeds would report the pool exhausted: %v",
+					port, err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 // ReserveUDP takes a UDP port on the loopback and keeps it.
 func ReserveUDP(t *testing.T) *Reservation {
 	t.Helper()
