@@ -37,6 +37,9 @@ IMAGE="${IMAGE:-polyemesis-capture:local}"
 NET="polyemesis-capture-net"
 SRV_NAME="polyemesis-capture-server"
 SRC_NAME="polyemesis-capture-source"
+# The second programme's publisher. Its own container, because one ffmpeg
+# cannot hold two SRT sessions with different streamids.
+SRC2_NAME="polyemesis-capture-source-2"
 
 # One password for the seeder and for Playwright's auth setup. They each used
 # to carry their own literal, so the seeder created the admin account and the
@@ -69,7 +72,7 @@ cleanup() {
   # does not take them with it -- the same trap the troubleshooting page warns
   # operators about, and it strands the ingest port for the next run.
   pkill -f "capture-source" 2>/dev/null || true
-  docker rm -f "$SRC_NAME" "$SRV_NAME" >/dev/null 2>&1 || true
+  docker rm -f "$SRC_NAME" "$SRC2_NAME" "$SRV_NAME" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
@@ -129,6 +132,7 @@ echo "==> seeding"
 SEEDED="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT")"
 RELAY="$(printf '%s\n' "$SEEDED" | sed -n 1p)"
 TOKEN="$(printf '%s\n' "$SEEDED" | sed -n 2p)"
+TOKEN2="$(printf '%s\n' "$SEEDED" | sed -n 3p)"
 # A relay port is a number. Anything else means the seeder failed partway and
 # printed a diagnostic, which would otherwise be handed to ffmpeg as a port.
 case "$RELAY" in
@@ -171,6 +175,31 @@ if [ -n "$TOKEN" ] && docker info >/dev/null 2>&1; then
   docker run -d --rm --name "$SRC_NAME" --network "$NET" --entrypoint ffmpeg \
     "$IMAGE" "${ENC_ARGS[@]}" \
     "srt://${SRV_NAME}:${SRT_PORT}?streamid=${TOKEN}&mode=caller&transtype=live&latency=200000" >/dev/null
+
+  # THE SECOND PROGRAMME'S STREAM, on the same listener with a different
+  # streamid -- which is the one-port design being demonstrated rather than
+  # described.
+  #
+  # A visibly different picture and different tones, because two lanes showing
+  # the identical frame look like one lane rendered twice, which is the reading
+  # this shot exists to prevent. smptebars against the first programme's
+  # testsrc2, and a different set of frequencies so the meters differ too.
+  if [ -n "$TOKEN2" ] && [ "$TOKEN2" != "$TOKEN" ]; then
+    echo "==> publishing the second programme, same port, different streamid"
+    docker run -d --rm --name "$SRC2_NAME" --network "$NET" --entrypoint ffmpeg \
+      "$IMAGE" -hide_banner -loglevel error -re \
+      -f lavfi -i "smptebars=size=1280x720:rate=30" \
+      -f lavfi -i "sine=frequency=440:sample_rate=48000" \
+      -f lavfi -i "sine=frequency=1200:sample_rate=48000" \
+      -map 0:v -map 1:a -map 2:a \
+      -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -b:v 2000k \
+      -c:a aac -b:a 128k \
+      -metadata comment=capture-source-2 \
+      -map 0 -f mpegts -flush_packets 1 \
+      "srt://${SRV_NAME}:${SRT_PORT}?streamid=${TOKEN2}&mode=caller&transtype=live&latency=200000" >/dev/null
+  else
+    echo "    no second token; the lanes shot will photograph one live programme and one idle"
+  fi
 else
   echo "==> no token; falling back to relay injection (the ingest will read offline)"
   docker run -d --rm --name "$SRC_NAME" --network "$NET" --entrypoint ffmpeg \

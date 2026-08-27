@@ -1,4 +1,10 @@
-import { Gamepad2, MonitorPlay, Radio, ThumbsUp, Tv, Zap } from "lucide-react";
+import { Radio, Tv } from "lucide-react";
+import {
+  FacebookGlyph,
+  KickGlyph,
+  TwitchGlyph,
+  YouTubeGlyph,
+} from "@/components/platformGlyphs";
 import type { SignalTone } from "@/lib/signal";
 import type { ChatMessage, ChatPlatform, ChatStatus } from "@/lib/types";
 
@@ -19,7 +25,15 @@ import type { ChatMessage, ChatPlatform, ChatStatus } from "@/lib/types";
 /** Platforms get an accent from the theme's signal palette rather than from
  *  their own brand colours: the kit has five saturated colours and adding four
  *  more hex values for logos would break the one rule the design language has.
- *  The mapping is still mnemonic — YouTube red, Kick green, Facebook blue. */
+ *  The mapping is still mnemonic — YouTube red, Kick green, Facebook blue.
+ *
+ *  THE ICONS ARE THE PLATFORMS' OWN, and that is not a contradiction. The rule
+ *  above is about adding saturated COLOURS to a palette that has five; it never
+ *  required the marks to be invented. They were lucide approximations, and
+ *  three of the four read as something else entirely -- a thumbs-up is a
+ *  reaction, a gamepad is a games category, a bolt is a status. Drawn in
+ *  currentColor, so the shape says which platform and the accent stays the
+ *  kit's. See components/platformGlyphs.tsx. */
 const ACCENT: Record<
   ChatPlatform,
   {
@@ -33,28 +47,28 @@ const ACCENT: Record<
 > = {
   youtube: {
     label: "YouTube",
-    icon: MonitorPlay,
+    icon: YouTubeGlyph,
     rule: "border-l-down",
     text: "text-down",
     chipOn: "border-down/40 bg-down-dim text-down",
   },
   twitch: {
     label: "Twitch",
-    icon: Gamepad2,
+    icon: TwitchGlyph,
     rule: "border-l-primary",
     text: "text-primary",
     chipOn: "border-primary/50 bg-primary-dim text-foreground",
   },
   kick: {
     label: "Kick",
-    icon: Zap,
+    icon: KickGlyph,
     rule: "border-l-live",
     text: "text-live",
     chipOn: "border-live/40 bg-live-dim text-live",
   },
   facebook: {
     label: "Facebook",
-    icon: ThumbsUp,
+    icon: FacebookGlyph,
     rule: "border-l-armed",
     text: "text-armed",
     chipOn: "border-armed/40 bg-armed-dim text-armed",

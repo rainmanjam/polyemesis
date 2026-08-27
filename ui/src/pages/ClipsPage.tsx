@@ -23,6 +23,7 @@ import { autoApi } from "@/lib/autoApi";
 import { keyframeVerdict, windowOnBufferToggle } from "@/lib/clipBufferFacts";
 import { bytes, timestamp } from "@/lib/format";
 import { useT } from "@/lib/i18n";
+import { useLiveData } from "@/hooks/useLiveData";
 
 interface Clip {
   name: string;
@@ -84,6 +85,9 @@ const clipDownloadUrl = (name: string) =>
  *  recording somebody has to have started in advance. */
 export function ClipsPage() {
   const t = useT();
+  // Which programme a captured clip belongs to. POST /clips and PUT
+  // /clips/buffer are refused without it on any install with two.
+  const { programme, programmeKnown } = useLiveData();
   const [view, setView] = useState<ClipsView | null>(null);
   const [loading, setLoading] = useState(true);
   const [capturing, setCapturing] = useState(false);
@@ -93,7 +97,7 @@ export function ClipsPage() {
   const load = useCallback(
     (quiet = false) =>
       autoApi
-        .get<ClipsView>("/clips")
+        .listClips<ClipsView>(programme)
         .then((v) => {
           setView(v);
           if (v.buffer.buffer) setWindow(Math.round(v.buffer.buffer.windowSeconds));
@@ -125,7 +129,7 @@ export function ClipsPage() {
   const capture = async (seconds: number) => {
     setCapturing(true);
     try {
-      const res = await autoApi.post<{ clip: Clip }>("/clips", { seconds });
+      const res = await autoApi.captureClip<{ clip: Clip }>(seconds, programme);
       toast.success(
         `Captured ${res.clip.seconds.toFixed(1)}s${res.clip.keyframeAligned ? "" : " (not keyframe-aligned — may start with a glitch)"}.`,
       );
@@ -139,7 +143,10 @@ export function ClipsPage() {
 
   const setBuffer = async (enabled: boolean, windowSeconds: number) => {
     try {
-      const st = await autoApi.put<BufferStatus>("/clips/buffer", { enabled, windowSeconds });
+      const st = await autoApi.setClipBuffer<BufferStatus>(
+        { enabled, windowSeconds },
+        programme,
+      );
       setView((v) => (v ? { ...v, buffer: st } : v));
       await load(true);
     } catch (err) {
@@ -187,7 +194,7 @@ export function ClipsPage() {
                     key={s}
                     size="sm"
                     variant={s === 30 ? "default" : "secondary"}
-                    disabled={capturing || !buffer?.running}
+                    disabled={!programmeKnown || capturing || !buffer?.running}
                     onClick={() => capture(s)}
                   >
                     {capturing && <Loader2 className="animate-spin" />}
@@ -197,7 +204,7 @@ export function ClipsPage() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={capturing || !buffer?.running}
+                  disabled={!programmeKnown || capturing || !buffer?.running}
                   onClick={() => capture(0)}
                   title={t("clips.everythingHeld")}
                 >
@@ -216,7 +223,7 @@ export function ClipsPage() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={capturing || !buffer?.running || custom < 1}
+                  disabled={!programmeKnown || capturing || !buffer?.running || custom < 1}
                   onClick={() => capture(custom)}
                 >
                   Capture
@@ -409,7 +416,7 @@ export function ClipsPage() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    disabled={!buffer?.enabled}
+                    disabled={!programmeKnown || !buffer?.enabled}
                     onClick={() => setBuffer(true, windowSec)}
                   >
                     Apply

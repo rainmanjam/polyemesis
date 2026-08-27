@@ -758,9 +758,13 @@ export const api = {
    *  does it for — so without `sourceId` a multi-source install served
    *  programme 1's FFmpeg log for a question about programme 2 (#497). The
    *  server now refuses instead of answering for the wrong one. */
-  listProcesses: (sourceId?: number | null) =>
+  /* REQUIRED, for the same reason status/source/levels are: handleListProcesses
+     and handleProcessLogs both call scopedEngine, which refuses with 400
+     source_required on any install with two programmes. Optional meant
+     MonitoringPage simply never passed one and the whole page was dead there. */
+  listProcesses: (sourceId: number | null) =>
     get<ProcessInfo[]>("/processes" + sourceQuery(sourceId)),
-  processLogs: (name: string, sourceId?: number | null) =>
+  processLogs: (name: string, sourceId: number | null) =>
     get<{ name: string; command: string; lines: LogLine[] | null }>(
       `/processes/${encodeURIComponent(name)}/logs` + sourceQuery(sourceId),
     ),

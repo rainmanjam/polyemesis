@@ -95,6 +95,26 @@ func main() {
 	}
 	grabCSRF()
 
+	// A FRESH INSTALL HAS NO PROGRAMME, AND /setup DOES NOT MAKE ONE.
+	//
+	// Zero-source installs boot on purpose -- an install that refused to start
+	// without a source was unrecoverable -- and every programme-scoped write is
+	// refused with `no_source` until one exists. The PUT below is one of those,
+	// and so is annotate(), so the whole seed died on its first request with
+	// "this install has no source yet" and then again on onlySourceID().
+	//
+	// This seeder predates that: it was written when a source arrived with the
+	// install and it could simply read the one that was there. It now makes its
+	// own. Named rather than defaulted, because the name is on screen in every
+	// shot this script exists to take.
+	if !hasSource() {
+		post("/sources", map[string]any{"name": "Studio A"})
+	}
+	if !hasSource() {
+		die("could not create the demo programme, so every scoped write below " +
+			"would be refused and the shots would be of an empty install")
+	}
+
 	// Recording off, preview ON. The recorder only writes to disk for the whole
 	// run and appears nowhere; the preview player is the LARGEST element on the
 	// dashboard, and with it disabled the hero shot is most of a black
@@ -120,7 +140,52 @@ func main() {
 		post("/destinations", d.body(sid))
 	}
 
-	// Two lines on stdout: the relay port, then the source's publish token.
+	// THE LOUDNESS MONITOR, ON, because the front page's whole proof section
+	// rests on it.
+	//
+	// web/src/pages/index.astro quotes three per-destination LUFS figures in
+	// body copy and in the alt text, and says they differ because each
+	// destination was sent a different set of tracks. None of that renders
+	// unless the analyser is running: the meters page otherwise shows
+	// "Loudness compliance -- NOT UPDATING" and three near-identical ingest
+	// tracks, which argues nothing at all. The committed screenshot had the
+	// readings and no step here produced them, so it was a one-off nobody
+	// could regenerate.
+	//
+	// Scoped, and it has to be: PUT /loudness is one of the three routes that
+	// were refused outright on a multi-programme install until #606.
+	put("/loudness"+fmt.Sprintf("?source=%d", sid), map[string]any{"enabled": true})
+
+	// A SECOND PROGRAMME, because the dashboard is a different page with two.
+	//
+	// Dashboard.tsx divides the destination area into per-programme lanes and
+	// badges each card with the programme it carries -- and does neither with
+	// one source, which its own comment calls "the shape this page had before
+	// per-source anything". Every screenshot this harness had ever taken was
+	// therefore of the degenerate case, and the multi-programme behaviour that
+	// most of the scoping work exists for appeared nowhere.
+	//
+	// It gets its OWN destinations rather than sharing: a lane with nothing in
+	// it photographs as a programme that is not working, which is the opposite
+	// of the claim. It also gets its own stream -- see capture-media.sh, which
+	// reads the third line below -- because a second lane reading "Offline"
+	// beside a live one argues that multi-source is broken.
+	second := &secondProgramme
+	if !hasSourceNamed(second.name) {
+		post("/sources", map[string]any{"name": second.name})
+	}
+	secondID := sourceIDNamed(second.name)
+	if secondID == 0 {
+		die("could not create the second programme %q, so the lanes shot would "+
+			"photograph a single-programme dashboard under a multi-programme name",
+			second.name)
+	}
+	for _, d := range second.destinations {
+		post("/destinations", d.body(secondID))
+	}
+
+	// Three lines on stdout: the relay port, the first programme's publish
+	// token, then the second's.
 	//
 	// The token is what lets the caller push through the REAL SRT ingest rather
 	// than injecting into the relay hub. That distinction is invisible in a
@@ -130,7 +195,9 @@ func main() {
 	relay := int(get("/stats")["relay"].(map[string]any)["port"].(float64))
 	fmt.Println(relay)
 	fmt.Println(sourceToken())
-	fmt.Fprintf(os.Stderr, "seeded: %d destinations, relay on udp/%d\n", len(demoDestinations), relay)
+	fmt.Println(tokenForSource(secondID))
+	fmt.Fprintf(os.Stderr, "seeded: %d + %d destinations over 2 programmes, relay on udp/%d\n",
+		len(demoDestinations), len(second.destinations), relay)
 }
 
 // The arrangement itself. Three destinations over three tracks, chosen so no
@@ -140,6 +207,21 @@ var demoDestinations = []demoDest{
 	{"YouTube — full mix", "youtube.mkv", []int{0, 1, 2}},
 	{"Twitch — no music", "twitch.mkv", []int{0, 2}},
 	{"Podcast — mic only", "podcast.mkv", []int{0}},
+}
+
+// THE SECOND PROGRAMME. A different shape from the first on purpose: two
+// destinations rather than three, and a track selection the first does not
+// use, so the lanes read as two different shows rather than as one list that
+// happened to be cut in half.
+var secondProgramme = struct {
+	name         string
+	destinations []demoDest
+}{
+	name: "Studio B — panel show",
+	destinations: []demoDest{
+		{"YouTube — panel", "panel-youtube.mkv", []int{0, 1}},
+		{"Archive — hosts only", "panel-archive.mkv", []int{1}},
+	},
 }
 
 type demoDest struct {
@@ -212,22 +294,51 @@ func login() {
 //
 // source.probed as well, because bytes alone are not enough for a screenshot:
 // until the layout is probed the routing editor has no tracks to draw.
+// EVERY PROGRAMME, EACH ONE NAMED.
+//
+// This polled `/status` with no programme, which was fine while an install had
+// exactly one. The moment a second exists the server refuses the unscoped route
+// with 400 `source_required` -- correctly, since "the status" is not a question
+// with one answer any more -- and this loop read the refusal as "not live yet",
+// waited out its ninety seconds and reported a perfectly healthy pair of
+// streams as dead. The capture then refused to photograph them, which is the
+// guard doing its job on a lie.
+//
+// Every programme rather than the first: the second one has its own publisher,
+// and a lanes screenshot whose second lane is still black is the exact image
+// that argues multi-source does not work.
 func waitLive() bool {
-	deadline := time.Now().Add(90 * time.Second)
+	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
-		st := get("/status")
-		var bytesIn float64
-		if rl, ok := st["relay"].(map[string]any); ok {
-			bytesIn, _ = rl["rxBytes"].(float64)
+		sources := listSources()
+		if len(sources) == 0 {
+			time.Sleep(2 * time.Second)
+			continue
 		}
-		probed := false
-		if src, ok := st["source"].(map[string]any); ok {
-			probed, _ = src["probed"].(bool)
+		live := 0
+		for _, row := range sources {
+			id, ok := row["id"].(float64)
+			if !ok {
+				continue
+			}
+			st := get(fmt.Sprintf("/status?source=%d", int64(id)))
+			var bytesIn float64
+			if rl, ok := st["relay"].(map[string]any); ok {
+				bytesIn, _ = rl["rxBytes"].(float64)
+			}
+			probed := false
+			if src, ok := st["source"].(map[string]any); ok {
+				probed, _ = src["probed"].(bool)
+			}
+			if bytesIn > 0 && probed {
+				live++
+			}
 		}
-		if bytesIn > 0 && probed {
-			fmt.Fprintf(os.Stderr, "  relay rxBytes=%.0f probed=true\n", bytesIn)
+		if live == len(sources) {
+			fmt.Fprintf(os.Stderr, "  %d of %d programmes live\n", live, len(sources))
 			return true
 		}
+		fmt.Fprintf(os.Stderr, "  %d of %d programmes live, waiting\n", live, len(sources))
 		time.Sleep(2 * time.Second)
 	}
 	return false
@@ -240,6 +351,63 @@ func waitLive() bool {
 // Unlike sourceToken this cannot degrade to "" and carry on: a create with no
 // source is refused outright, so a seed that could not find one has nothing to
 // seed and should say so rather than emit a wall of 400s.
+// Whether the install has a programme at all. Distinct from onlySourceID,
+// which DIES when there is none -- that is the right behaviour at the point
+// destinations are attached and the wrong one here, where the answer "none"
+// is actionable.
+func hasSource() bool {
+	r, err := client.Get(base + "/sources")
+	if err != nil {
+		return false
+	}
+	defer r.Body.Close()
+	var list []struct {
+		ID int64 `json:"id"`
+	}
+	if json.NewDecoder(r.Body).Decode(&list) != nil {
+		return false
+	}
+	return len(list) > 0
+}
+
+// A source by NAME. onlySourceID takes the first row, which stops being the
+// right answer the moment there are two.
+func sourceIDNamed(name string) int64 {
+	for _, row := range listSources() {
+		if n, _ := row["name"].(string); n == name {
+			if id, ok := row["id"].(float64); ok {
+				return int64(id)
+			}
+		}
+	}
+	return 0
+}
+
+func hasSourceNamed(name string) bool { return sourceIDNamed(name) != 0 }
+
+func tokenForSource(id int64) string {
+	for _, row := range listSources() {
+		if rid, ok := row["id"].(float64); ok && int64(rid) == id {
+			tok, _ := row["token"].(string)
+			return tok
+		}
+	}
+	return ""
+}
+
+func listSources() []map[string]any {
+	r, err := client.Get(base + "/sources")
+	if err != nil {
+		return nil
+	}
+	defer r.Body.Close()
+	var list []map[string]any
+	if json.NewDecoder(r.Body).Decode(&list) != nil {
+		return nil
+	}
+	return list
+}
+
 func onlySourceID() int64 {
 	r, err := client.Get(base + "/sources")
 	if err != nil {

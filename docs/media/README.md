@@ -26,6 +26,27 @@ screenshots said the product was broken.
 The script **refuses to capture** if the ingest never goes live, rather than
 producing a plausible-looking set that quietly claims failure.
 
+### The one exception: `09-chat.png`
+
+Every other shot photographs a real polyemesis doing real work. The chat
+timeline cannot be one of them: a message arrives only from a platform account
+attached to the install, which needs live OAuth credentials for a real channel
+— and real viewers' messages are neither reproducible nor ours to publish.
+
+So that one capture serves fixture messages to the real page. **The interface
+is genuine and the messages are not.** What the shot demonstrates — four
+platforms merged into one timeline, per-platform attribution, a send box that
+knows which platforms can currently accept a message — is real behaviour of the
+real component, rendered from data the harness supplies.
+
+Before this it photographed the empty state, *"Chat is running but no platform
+account is attached yet"*, under a test named "four platforms in one hub". The
+picture argued the opposite of its own title, which is its own kind of
+dishonesty.
+
+It is written down here because an undeclared exception is how a policy stops
+meaning anything.
+
 Server and publisher run as two containers on one Docker network, dialling each
 other by name. That sidesteps [#28](https://github.com/rainmanjam/polyemesis/issues/28),
 where an SRT publisher on the host could not reach a listener bound IPv6-only.

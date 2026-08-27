@@ -37,6 +37,17 @@ export function timestamp(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
+  // A ZERO TIME IS NOT A TIME. Go marshals an unset time.Time as
+  // "0001-01-01T00:00:00Z", which parses perfectly and is a non-empty string,
+  // so a caller guarding on truthiness sees a value and renders it -- through
+  // a local-time offset, which is how the automation page came to report
+  // LAST DELIVERY 12/31/1, 16:07:02 beside six counters all reading 0.
+  //
+  // Fixed at the source too (hooks.Stats.MarshalJSON now omits it), and this
+  // stays because that is one field of many: every Go timestamp in this API
+  // has the same zero and this function is the single place they all pass
+  // through. Returning "" lets callers treat it exactly like a missing value.
+  if (d.getUTCFullYear() <= 1) return "";
   return d.toLocaleString(undefined, {
     year: "numeric",
     month: "2-digit",

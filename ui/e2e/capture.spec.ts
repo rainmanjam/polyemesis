@@ -94,6 +94,82 @@ async function settle(page: import("@playwright/test").Page, ms = 900) {
   await page.waitForTimeout(ms);
 }
 
+/** Photograph a page ONLY IF the frame is still true AT THE SHUTTER.
+ *
+ *  The hero shot waited for "Waiting for a stream…" to disappear, then ran
+ *  populated() and settle() -- up to a minute of further waiting -- and only
+ *  then fired. The preview idle-stops after thirty seconds with no viewer, so
+ *  the placeholder came back in the gap and the shot shipped a black rectangle
+ *  reading "Waiting for a stream…": the exact image the guard above it exists
+ *  to prevent, and the second time this harness has produced one.
+ *
+ *  The guard was never wrong. It was checking a different second from the one
+ *  it photographed, which is a check-then-act gap and not a weak assertion --
+ *  no timeout on the assertion could have closed it.
+ *
+ *  So the check moves to the shutter and REPEATS AFTER IT. A frame that went
+ *  wrong while the file was being written is thrown away and retried rather
+ *  than kept, and a page that cannot hold the frame fails the capture instead
+ *  of quietly writing a picture of the product looking broken.
+ */
+type Forbidden = string | { text: string; exact: boolean };
+
+async function shoot(
+  page: import("@playwright/test").Page,
+  path: string,
+  forbid: Forbidden[],
+  opts: { fullPage?: boolean; settleMs?: number } = {},
+) {
+  const { settleMs = 900, ...shotOpts } = opts;
+  // EXACTNESS IS PER ENTRY, and getting it wrong costs a two-minute timeout.
+  //
+  // Playwright's getByText matches a case-insensitive SUBSTRING by default, so
+  // "Offline" also matches "Ingest offline" and anything else containing it.
+  // The hero's original guard passed { exact: true } for that reason and I
+  // dropped it when folding the check in here -- on a two-programme install
+  // there is simply more text on the page, the locator started matching
+  // something that is always present, and the shot failed after four attempts
+  // at a page that was perfectly fine. The placeholders stay substring matches,
+  // which is how they were written.
+  const locate = (f: Forbidden) =>
+    typeof f === "string"
+      ? page.getByText(f)
+      : page.getByText(f.text, { exact: f.exact });
+  const label = (f: Forbidden) => (typeof f === "string" ? f : f.text);
+
+  const present = async () => {
+    for (const f of forbid) {
+      if ((await locate(f).count()) > 0) return label(f);
+    }
+    return null;
+  };
+
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    for (const f of forbid) {
+      await expect(locate(f)).toHaveCount(0, { timeout: 120_000 });
+    }
+    await settle(page, settleMs);
+
+    // Still true now, after the settle? Counted rather than awaited: this is a
+    // question about THIS instant, and waiting for it would reopen the gap.
+    if (await present()) continue;
+
+    await page.screenshot({ path, ...shotOpts });
+
+    // And still true after the shutter. A screenshot is not instantaneous, and
+    // the frame that matters is the one on disk.
+    const broke = await present();
+    if (!broke) return;
+    console.warn(`re-shooting ${path}: "${broke}" reappeared during the capture`);
+  }
+  throw new Error(
+    `${path}: could not hold a live frame across the shutter after 4 attempts. ` +
+      `Refusing to write a screenshot showing ${forbid.map((f) => JSON.stringify(label(f))).join(" or ")} ` +
+      `-- that is a picture of the product looking broken, which is what this ` +
+      `harness exists not to produce.`,
+  );
+}
+
 /** Closes the dismissible chrome that spans the top of every page.
  *
  *  The update banner reads "Development build dev. Updates are not offered for
@@ -149,19 +225,21 @@ test("dashboard — the hero shot", async ({ page }) => {
   await expect(page.getByText("Offline", { exact: true })).toHaveCount(0, {
     timeout: 120_000,
   });
+  // BEFORE the placeholder guard below, not after it. Waiting for the
+  // destinations to populate took up to a minute, and it used to sit between
+  // that guard and the shutter -- which is most of how the preview had time to
+  // idle out and put its placeholder back.
+  await populated(page, EMPTY.destinations);
   // And the preview has to be showing frames, not its placeholder. BOTH
   // placeholder texts: the player says "Ingest offline" when nothing is on air
   // and "Waiting for a stream…" only while it buffers, so asserting the second
   // alone would pass on a blank tile showing the first.
-  for (const placeholder of ["Waiting for a stream…", "Ingest offline"]) {
-    await expect(page.getByText(placeholder)).toHaveCount(0, { timeout: 120_000 });
-  }
-  // And it has to have somewhere to send it. The multi-destination fan-out is
-  // the argument this image makes, and an ingest reading live above an empty
-  // destination column makes the opposite one.
-  await populated(page, EMPTY.destinations);
-  await settle(page);
-  await page.screenshot({ path: `${OUT}/01-dashboard.png` });
+  await shoot(page, `${OUT}/01-dashboard.png`, [
+    "Waiting for a stream…",
+    "Ingest offline",
+    // Exact: the standalone ingest badge, not every string containing the word.
+    { text: "Offline", exact: true },
+  ]);
 
   // The fan-out, framed on its own.
   //
@@ -190,11 +268,45 @@ test("dashboard — the hero shot", async ({ page }) => {
   // idle-stops after thirty seconds with no viewer
   // (settings.preview.idleTimeoutSeconds), which makes "it was playing
   // earlier" a claim about a different second.
-  for (const placeholder of ["Waiting for a stream…", "Ingest offline"]) {
-    await expect(page.getByText(placeholder)).toHaveCount(0, { timeout: 60_000 });
-  }
-  await settle(page, 600);
-  await page.screenshot({ path: `${OUT}/18-destinations.png` });
+  await shoot(page, `${OUT}/18-destinations.png`, ["Waiting for a stream…", "Ingest offline"], {
+    settleMs: 600,
+  });
+});
+
+/* TWO PROGRAMMES, WHICH IS A DIFFERENT PAGE.
+ *
+ * Dashboard.tsx divides the destination area into per-programme lanes and
+ * badges each card with the programme it carries -- and does NEITHER with one
+ * source, which its own comment calls "the shape this page had before
+ * per-source anything". Every shot this harness took before now was of that
+ * degenerate case, so the scoping work that most of #497/#515/#540 exists for
+ * was invisible in every image on the site.
+ *
+ * Both lanes are genuinely live: seed_demo.go creates the second programme
+ * with its own destinations and capture-media.sh publishes a second stream to
+ * it, on the SAME SRT port with a different streamid -- the one-port design
+ * demonstrated rather than described. A second lane reading "Offline" beside a
+ * live one would argue that multi-source does not work.
+ */
+test("dashboard — two programmes, and the lanes that divide them", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("nav")).toBeVisible();
+
+  // The lane headings are the subject. If only one programme exists they are
+  // not rendered at all, so their absence means the seed did not take -- and a
+  // shot of a single-programme dashboard filed as the multi-programme one is
+  // worse than no shot.
+  const laneHeading = page.getByText("Studio B — panel show").first();
+  await expect(
+    laneHeading,
+    "no lane heading for the second programme, so this is a single-programme " +
+      "dashboard being photographed under a multi-programme name",
+  ).toBeVisible({ timeout: 120_000 });
+
+  await topOfFrame(page, page.getByRole("heading", { name: /^Destinations/ }));
+  await shoot(page, `${OUT}/19-lanes.png`, ["Waiting for a stream…", "Ingest offline"], {
+    settleMs: 700,
+  });
 });
 
 test("routing — the thing nothing else does", async ({ page }) => {
@@ -228,6 +340,21 @@ test("meters — loudness measured after routing", async ({ page }) => {
   // photographing a zeroed scale. Six seconds is one full EBU R128 short-term
   // window plus the analyser's own start-up.
   await settle(page, 6000);
+
+  // AND THE COMPLIANCE BLOCK HAS TO HAVE ANSWERED, which six seconds does not
+  // buy: integrated loudness needs about twenty seconds of programme before it
+  // means anything, and the page says so in its own words while showing
+  // "NOT UPDATING". A shot taken before then has no per-destination figures in
+  // it at all -- and web/src/pages/index.astro quotes three of them in body
+  // copy and alt text as the whole of its proof section. Waiting on the badge
+  // rather than on another sleep, because the analyser's start-up is not a
+  // fixed cost.
+  await expect(
+    page.getByText("NOT UPDATING"),
+    "the loudness analyser never reported, so this shot has no per-destination " +
+      "figures and the front page's proof section quotes numbers that are not in it",
+  ).toHaveCount(0, { timeout: 90_000 });
+  await settle(page, 800);
   await page.screenshot({ path: `${OUT}/04-meters.png` });
 });
 
@@ -444,7 +571,79 @@ test("routing mix matrix — channel-level control", async ({ page }) => {
   await page.screenshot({ path: `${OUT}/08-mix-matrix.png` });
 });
 
+/* THE ONE STUBBED SHOT, AND IT IS DECLARED RATHER THAN QUIET.
+ *
+ * Everything else in this file photographs a real polyemesis doing real work:
+ * a real ingest, real destinations, real bytes. Chat cannot be. A message
+ * arrives only from a platform account attached to the install, which needs
+ * live OAuth credentials for somebody's real channel -- and a screenshot of
+ * real viewers' messages is neither reproducible nor theirs to publish.
+ *
+ * So the timeline below is fixture data served to the REAL page. What is being
+ * photographed is genuine: the merge into one timeline, the per-platform
+ * attribution, the send box that knows which platforms can currently accept a
+ * message. What is fabricated is only who said it.
+ *
+ * Without this the shot was a photograph of the empty state -- "Chat is
+ * running but no platform account is attached yet" -- under a test named "four
+ * platforms in one hub". The picture argued the opposite of its own title.
+ *
+ * Recorded in docs/media/README.md as the single exception to "generated, not
+ * hand-made", because an undeclared exception is how a policy stops meaning
+ * anything.
+ */
+const CHAT_PLATFORMS = ["youtube", "twitch", "facebook", "kick"] as const;
+
+const DEMO_CHAT = [
+  ["twitch", "hexcode", "wait, one ingest and it fans out to all four?"],
+  ["youtube", "mira_dev", "the per-destination audio thing is the bit I want"],
+  ["kick", "nightowl_", "so the VOD track drops the music bed automatically"],
+  ["facebook", "Dana Whitfield", "audio is noticeably cleaner this week"],
+  ["youtube", "sam_tk", "how many destinations can it drive at once?"],
+  ["twitch", "brb_afk", "5.5 Mbps and zero dropped frames, that's the whole point"],
+  ["kick", "vexcarter", "does moderation reach back to the platform or just hide it here"],
+  ["facebook", "Ana Ruiz", "one timeline for four chats is genuinely the feature"],
+] as const;
+
 test("chat — four platforms in one hub", async ({ page }) => {
+  // Matched on the PATH: the overview is requested as `/chat?limit=300`, and a
+  // `**/chat` glob does not match a URL carrying a query string -- which fails
+  // as "no messages rendered", several steps from the cause.
+  await page.route(
+    (url) => url.pathname === "/api/v1/chat",
+    (route) =>
+      route.fulfill({
+        json: {
+          configured: true,
+          statuses: CHAT_PLATFORMS.map((platform, i) => ({
+            platform,
+            account: { youtube: "polyemesis", twitch: "polyemesis", facebook: "Polyemesis", kick: "polyemesis" }[platform],
+            state: "live",
+            channel: { youtube: "polyemesis", twitch: "polyemesis", facebook: "Polyemesis Live", kick: "polyemesis" }[platform],
+            canSend: true,
+            received: DEMO_CHAT.filter((m) => m[0] === platform).length,
+            sent: i === 0 ? 1 : 0,
+            restarts: 0,
+          })),
+          // Newest last, seconds apart, so the timeline reads as a conversation
+          // rather than as a burst that all arrived at once.
+          messages: DEMO_CHAT.map(([platform, name, text], i) => ({
+            id: `demo-${i}`,
+            platform,
+            account: platform === "facebook" ? "Polyemesis" : "polyemesis",
+            channel: platform === "facebook" ? "Polyemesis Live" : "polyemesis",
+            author: { id: `u-${name}`, name },
+            text,
+            at: new Date(Date.now() - (DEMO_CHAT.length - i) * 17_000).toISOString(),
+          })),
+          limits: CHAT_PLATFORMS.map((platform) => ({
+            platform,
+            maxChars: platform === "youtube" ? 200 : 500,
+          })),
+        },
+      }),
+  );
+
   await page.goto("/chat");
   await settle(page, 1500);
   await page.screenshot({ path: `${OUT}/09-chat.png` });

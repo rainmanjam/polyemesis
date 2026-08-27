@@ -49,7 +49,13 @@ describe("MetersPage, wired to what it has been told", () => {
     expect(src).toContain("useState<boolean | null>(null)");
     expect(src).toContain("setMonitorOn(v.enabled ?? null)");
     // Indeterminate rather than guessed until the first read answers.
-    expect(src).toContain("disabled={monitorOn === null}");
+    // The CLAIM, not the exact expression: the switch consults `monitorOn ===
+    // null` when deciding whether to disable itself. Pinned as the whole prop
+    // it broke the moment a second, correct condition was added beside it --
+    // `|| !programmeKnown`, which stops a scoped PUT firing before the
+    // programme resolves (#606) -- and a guard that fails on a change that
+    // strengthens the thing it guards teaches people to edit the guard.
+    expect(src).toMatch(/disabled=\{[^}]*monitorOn === null/);
     expect(src).toContain('t("meters.monitorUnknown")');
   });
 

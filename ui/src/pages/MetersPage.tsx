@@ -101,7 +101,7 @@ function signed(v: number): string {
  *  way to be certain before going live, so it gets the whole width. */
 export function MetersPage() {
   const t = useT();
-  const { levels, source, status } = useLiveData();
+  const { levels, source, status, programme, programmeKnown } = useLiveData();
   const tracks = useSourceTracks();
   const probed = source?.probed ?? false;
   const metersRunning = status?.meters?.state === "running";
@@ -131,7 +131,7 @@ export function MetersPage() {
   useEffect(() => {
     const read = () =>
       autoApi
-        .get<LoudnessView>("/loudness")
+        .loudness<LoudnessView>(programme)
         .then((v) => {
           setLoudness(v);
           if (!toggling.current) setMonitorOn(v.enabled ?? null);
@@ -150,7 +150,7 @@ export function MetersPage() {
     toggling.current = true;
     setMonitorOn(on);
     try {
-      const res = await autoApi.put<{ enabled: boolean }>("/loudness", { enabled: on });
+      const res = await autoApi.setLoudnessMonitor<{ enabled: boolean }>(on, programme);
       setMonitorOn(res?.enabled ?? on);
     } catch {
       setMonitorOn(!on);
@@ -207,7 +207,10 @@ export function MetersPage() {
             <Switch
               id="loud-monitor"
               checked={monitorOn ?? false}
-              disabled={monitorOn === null}
+              // Also while the programme is unresolved: PUT /loudness is scoped, and
+              // firing it unnamed on a multi-programme install is a 400 the operator
+              // reads as a broken switch. See #606.
+              disabled={monitorOn === null || !programmeKnown}
               onCheckedChange={toggleMonitor}
             />
           </div>

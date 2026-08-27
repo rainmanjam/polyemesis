@@ -420,7 +420,7 @@ function ExpertPanel() {
 export function MonitoringPage() {
   const stateLabel = useStateLabel();
   const t = useT();
-  const { system, bitrate, logs, status, clearLogs } = useLiveData();
+  const { system, bitrate, logs, status, clearLogs, programme } = useLiveData();
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [history, setHistory] = useState<LogLine[]>([]);
   const [filter, setFilter] = useState("all");
@@ -442,7 +442,7 @@ export function MonitoringPage() {
   useEffect(() => {
     const load = () =>
       api
-        .listProcesses()
+        .listProcesses(programme)
         .then((p) => {
           setProcesses(p);
           procFreshness.ok();
@@ -462,12 +462,12 @@ export function MonitoringPage() {
   useEffect(() => {
     let cancelled = false;
     void api
-      .listProcesses()
+      .listProcesses(programme)
       .then((procs) =>
         Promise.all(
           Array.from(new Set(procs.map((p) => p.status.name))).map((n) =>
             api
-              .processLogs(n)
+              .processLogs(n, programme)
               .then((r) => r.lines ?? [])
               .catch(() => [] as LogLine[]),
           ),
