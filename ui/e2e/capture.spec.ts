@@ -354,6 +354,25 @@ test("meters — loudness measured after routing", async ({ page }) => {
     "the loudness analyser never reported, so this shot has no per-destination " +
       "figures and the front page's proof section quotes numbers that are not in it",
   ).toHaveCount(0, { timeout: 90_000 });
+  // AND EVERY TRACK IS METERING.
+  //
+  // The guards above cover the compliance block and nothing else, so a shot
+  // could be -- and was, twice -- taken with a track reading "no signal on this
+  // track" while the other two drew bars. On a page whose subtitle is "every
+  // channel of every ingest track" that is the one thing the image must not
+  // show, and it is what the front page's alt text used to claim was happening.
+  //
+  // Refusing is the point. If a track genuinely has no audio the capture stops
+  // rather than publishing a picture of a half-working meter, which is the same
+  // bargain the ingest-live guard makes at the top of this file.
+  await expect(
+    page.getByText("no signal on this track"),
+    "a track is not metering, so this shot shows the meters page half working. " +
+      "Either the ingest is not carrying that track or the level feed is not " +
+      "reporting it -- see #613. Photographing it either way tells a reader the " +
+      "product does not measure what it says it measures",
+  ).toHaveCount(0, { timeout: 60_000 });
+
   await settle(page, 800);
   await page.screenshot({ path: `${OUT}/04-meters.png` });
 });
@@ -666,7 +685,14 @@ test("library — the recorded catalogue", async ({ page }) => {
   // install that has not uploaded anything -- so the default framing gives half
   // the image to an empty state and pushes the sessions below the fold, which
   // is the exact complaint this whole change exists to answer.
-  await topOfFrame(page, page.getByText("sessions").first());
+  // The count label is PLURALISED, so "sessions" is not a literal that always
+  // exists: LibraryPage renders `{n} session{n === 1 ? "" : "s"}`, and a seed
+  // that happens to produce exactly one recorded session prints "1 session".
+  // This locator was written when the seed made two, and it started timing out
+  // the moment the second programme changed how the recorder carves them up --
+  // a capture failure that says "element not found" and reads like a broken
+  // page rather than a missing letter.
+  await topOfFrame(page, page.getByText(/\d+ sessions?\b/).first());
   await settle(page, 1500);
   await page.screenshot({ path: `${OUT}/11-library.png` });
 });
