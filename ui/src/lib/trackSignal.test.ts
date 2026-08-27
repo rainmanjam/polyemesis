@@ -58,9 +58,14 @@ describe("LiveDataProvider", () => {
   const src = () => read("ui/src/components/LiveDataProvider.tsx");
 
   it("clears the levels when the socket closes, so no frozen frame survives", () => {
-    const close = src().slice(src().indexOf("ws.onclose = () => {"));
+    // Bounded by the END OF THE HANDLER, not by a character count. A fixed
+    // window made this assertion a hostage of the comments above it: adding
+    // one pushed `setLevels(null)` out of range and the test reported a
+    // regression that had not happened.
+    const from = src().slice(src().indexOf("ws.onclose = () => {"));
+    const close = from.slice(0, from.indexOf("\n      };"));
     expect(
-      close.slice(0, 900),
+      close,
       "levels is a measurement of NOW; holding the last frame through a " +
         "reconnect draws stale audio as live",
     ).toContain("setLevels(null);");
