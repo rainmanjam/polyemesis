@@ -57,6 +57,10 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
    * programme resolves -- one extra round trip on a multi-source install,
    * against never rendering at all. */
   const [programme, setProgramme] = useState<number | null>(null);
+  /* Whether the programme question has been ANSWERED -- including the answer
+     "there is none", which is legitimate. See the effect below for why this is
+     a gate WITH A DEADLINE rather than either extreme. */
+  const [programmeKnown, setProgrammeKnown] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
@@ -179,18 +183,27 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
     // Re-opened when the programme resolves: the first render has none, and a
     // socket opened without one would be answering for a programme the operator
     // is not looking at for the life of the session.
-  }, [programme]);
+  }, [programmeKnown, programme]);
 
-  // WHICH PROGRAMME, resolved alongside the first poll rather than before it.
+  // WHICH PROGRAMME, and BOTH extremes were tried and were wrong.
   //
-  // The server refuses a programme-shaped route when an install has two or more
-  // sources and the request names none, so on those installs the first poll is
-  // refused and the second -- issued when this resolves, one round trip later --
-  // is not. That is the trade, and it is the right way round: the alternative
-  // was holding every request until this answered, which turned a slow or
-  // unanswered /sources into a console that never rendered anything at all.
+  // Holding every request until this resolved turned a slow or unanswered
+  // /sources into a console that rendered nothing at all -- no status, no
+  // socket, no error. Issuing them immediately with no programme named went the
+  // other way: the server refuses an unnamed programme-shaped route on a
+  // multi-source install, so every load logged 400s for /status, /source and
+  // /ws before the second attempt succeeded. The browser suite caught each in
+  // turn.
+  //
+  // So: a gate WITH A DEADLINE. Normally this resolves in one round trip and
+  // nothing is ever sent unnamed. If it does not resolve at all, the deadline
+  // releases the polls with the answer null -- which the server accepts on a
+  // single-source install, and which on a multi-source one produces the same
+  // 400 as before but only in the case where the alternative was a blank
+  // console forever.
   useEffect(() => {
     let live = true;
+    let cleanupTimer: number | undefined;
     api
       .listSources()
       .then((rows) => {
@@ -202,19 +215,30 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         // A console that will not render because it could not list sources is
-        // worse than one showing the install's only programme. Null is what the
-        // routes accept on a single-source install, which is the overwhelming
-        // majority and the case where guessing cannot be wrong.
+        // worse than one showing the install's only programme.
         if (live) setProgramme(null);
       })
+      .finally(() => {
+        if (live) setProgrammeKnown(true);
+      });
+
+    // THE DEADLINE. Two seconds is longer than any healthy /sources and shorter
+    // than an operator's patience with a blank screen. Without it a request
+    // that never settles holds every poll and the socket forever.
+    cleanupTimer = window.setTimeout(() => {
+      if (live) setProgrammeKnown(true);
+    }, 2000);
+
     return () => {
       live = false;
+      if (cleanupTimer !== undefined) window.clearTimeout(cleanupTimer);
     };
   }, []);
 
   // Seed from REST so the first paint is populated even if the socket is slow,
   // and so a browser that cannot open a WebSocket still shows something real.
   useEffect(() => {
+    if (!programmeKnown) return;
     api.status(programme).then(setStatus).catch(() => {});
     api.source(programme).then(setSource).catch(() => {});
     api
@@ -224,7 +248,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         setBitrate(s.bitrate ?? []);
       })
       .catch(() => {});
-  }, [programme]);
+  }, [programmeKnown, programme]);
 
   const value = useMemo<LiveData>(
     () => ({
