@@ -74,6 +74,7 @@ export function DestinationCard({
   canMoveLater,
   busy,
   domId,
+  trackLabels,
 }: {
   dest: DestStatus;
   onStart: () => void;
@@ -98,6 +99,19 @@ export function DestinationCard({
    *  every card unconditionally would put a stop with no controls on it between
    *  each pair of real ones. */
   domId?: string;
+  /** What the operator calls each ingest track, indexed by track index, for
+   *  the tooltips on the audio chips.
+   *
+   *  Passed in rather than read from a hook here, and that is not ceremony:
+   *  useLiveData THROWS outside its provider, and this component is rendered
+   *  directly in its own tests. A hook would have made naming a track cost a
+   *  provider in every test that touches a destination card.
+   *
+   *  Optional, and null is a meaningful value: it means "no names are known
+   *  for THIS destination's programme", which is the honest answer on a
+   *  multi-programme install where the source snapshot describes a different
+   *  one. See lib/trackLabels.ts. */
+  trackLabels?: (string | undefined)[] | null;
 }) {
   const t = useT();
   const stateLabel = useStateLabel();
@@ -264,7 +278,7 @@ export function DestinationCard({
               <span className="font-mono text-[10px] uppercase tracking-wide text-subtle-foreground">
                 audio
               </span>
-              <TrackSummary tracks={dest.tracks} />
+              <TrackSummary tracks={dest.tracks} labels={trackLabels} />
             </div>
             <span className="truncate font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
               {dest.summary || "not configured"}

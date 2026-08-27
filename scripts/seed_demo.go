@@ -76,7 +76,12 @@ func main() {
 	// /api/v1/status requires a session -- an unauthenticated curl gets 401,
 	// which a caller polling for '"live":true' cannot distinguish from a dead
 	// stream. That mistake reported a working ingest as dead.
-	if len(os.Args) > 2 && os.Args[2] == "waitlive" {
+	mode := ""
+	if len(os.Args) > 2 {
+		mode = os.Args[2]
+	}
+
+	if mode == "waitlive" {
 		login()
 		if waitLive() {
 			fmt.Fprintln(os.Stderr, "ingest is live")
@@ -94,6 +99,29 @@ func main() {
 		post("/auth/login", map[string]any{"username": "admin", "password": password})
 	}
 	grabCSRF()
+
+	// `add <key>` MODE: bolt one more programme onto an install that is already
+	// seeded, and print its publish token so the caller can start a stream for
+	// it. This is what lets the dashboard be photographed at one, then two,
+	// then three programmes WITHOUT tearing the install down between shots --
+	// so the three images differ only in the thing being demonstrated, rather
+	// than in every timestamp, port and generated id on the page.
+	if mode == "add" {
+		if len(os.Args) < 4 {
+			die("add needs a programme key; one of the keys in extraProgrammes")
+		}
+		key := os.Args[3]
+		p, ok := extraProgrammes[key]
+		if !ok {
+			die("no demo programme keyed %q", key)
+		}
+		id := seedProgramme(p)
+		// The token on stdout and nothing else, because the shell captures it.
+		fmt.Println(tokenForSource(id))
+		fmt.Fprintf(os.Stderr, "seeded %q with %d destination(s)\n",
+			p.name, len(p.destinations))
+		return
+	}
 
 	// A FRESH INSTALL HAS NO PROGRAMME, AND /setup DOES NOT MAKE ONE.
 	//
@@ -170,18 +198,19 @@ func main() {
 	// of the claim. It also gets its own stream -- see capture-media.sh, which
 	// reads the third line below -- because a second lane reading "Offline"
 	// beside a live one argues that multi-source is broken.
-	second := &secondProgramme
-	if !hasSourceNamed(second.name) {
-		post("/sources", map[string]any{"name": second.name})
-	}
-	secondID := sourceIDNamed(second.name)
-	if secondID == 0 {
-		die("could not create the second programme %q, so the lanes shot would "+
-			"photograph a single-programme dashboard under a multi-programme name",
-			second.name)
-	}
-	for _, d := range second.destinations {
-		post("/destinations", d.body(secondID))
+	// `solo` STOPS HERE, at one programme.
+	//
+	// Not a convenience: it is the only way to photograph the single-programme
+	// dashboard, which is a genuinely different page -- no lanes, no per-card
+	// programme badge, one full-width preview instead of a captured grid. The
+	// alternative, seeding all three and deleting two, leaves their
+	// destinations behind as orphans, and Dashboard.tsx draws those in a
+	// flagged group by design. The shot would then show a one-programme
+	// install carrying a paragraph about destinations whose programme is
+	// missing, which is a fault state, not the shape being demonstrated.
+	var secondID int64
+	if mode != "solo" {
+		secondID = seedProgramme(secondProgramme)
 	}
 
 	// THE AUTOMATION PAGE, which photographs as three empty panels otherwise.
@@ -190,7 +219,17 @@ func main() {
 	// acts on, so seeding it before they exist would store an empty target list
 	// -- which does not fail, it means "every destination", the opposite of the
 	// narrow targeting the shot is there to show.
-	seedAutomation()
+	//
+	// AND NOT AT ALL UNDER `solo`, for that same reason read the other way.
+	// demoSchedules target "Archive — hosts only", which belongs to the second
+	// programme, so on a one-programme install the target list would resolve
+	// empty. missingAll() catches it and refuses -- correctly, and it caught
+	// this the first time capture-lanes.sh ran -- but the honest fix is not to
+	// ask: a one-programme install genuinely has no such destination, and the
+	// dashboard shots `solo` exists for do not show the automation page.
+	if mode != "solo" {
+		seedAutomation()
+	}
 
 	// Three lines on stdout: the relay port, the first programme's publish
 	// token, then the second's.
@@ -203,10 +242,22 @@ func main() {
 	relay := int(get("/stats")["relay"].(map[string]any)["port"].(float64))
 	fmt.Println(relay)
 	fmt.Println(sourceToken())
-	fmt.Println(tokenForSource(secondID))
-	fmt.Fprintf(os.Stderr, "seeded: %d + %d destinations over 2 programmes, "+
+	// Empty third line under `solo`: capture-media.sh already treats a missing
+	// second token as "one live programme", so the contract holds.
+	if secondID == 0 {
+		fmt.Println()
+	} else {
+		fmt.Println(tokenForSource(secondID))
+	}
+	programmes := 1
+	extra := 0
+	if secondID != 0 {
+		programmes = 2
+		extra = len(secondProgramme.destinations)
+	}
+	fmt.Fprintf(os.Stderr, "seeded: %d + %d destinations over %d programme(s), "+
 		"%d alert rules, %d hooks, %d schedules, relay on udp/%d\n",
-		len(demoDestinations), len(second.destinations),
+		len(demoDestinations), extra, programmes,
 		len(demoAlertRules), len(demoHooks), len(demoSchedules), relay)
 }
 
@@ -219,19 +270,60 @@ var demoDestinations = []demoDest{
 	{"Podcast — mic only", "podcast.mkv", []int{0}},
 }
 
-// THE SECOND PROGRAMME. A different shape from the first on purpose: two
-// destinations rather than three, and a track selection the first does not
-// use, so the lanes read as two different shows rather than as one list that
-// happened to be cut in half.
-var secondProgramme = struct {
+// THE PROGRAMMES AFTER THE FIRST. Each a different shape on purpose: a
+// different destination count and a track selection its neighbours do not use,
+// so the lanes read as separate shows rather than as one list cut into pieces.
+//
+// SHAPE IS THE SUBJECT of the dashboard shots these feed. Dashboard.tsx draws
+// nothing per-programme with one source, and everything per-programme with two
+// or more -- so three lanes of identical size would photograph the feature
+// while arguing that every programme must look alike, which is the opposite of
+// what per-source scoping is for.
+type demoProgramme struct {
 	name         string
 	destinations []demoDest
-}{
+}
+
+var secondProgramme = demoProgramme{
 	name: "Studio B — panel show",
 	destinations: []demoDest{
 		{"YouTube — panel", "panel-youtube.mkv", []int{0, 1}},
 		{"Archive — hosts only", "panel-archive.mkv", []int{1}},
 	},
+}
+
+// THE THIRD, one destination rather than two or three. Its stream carries two
+// audio tracks (see capture-lanes.sh), so a selection naming track 2 would be
+// a mix of a track that does not arrive -- which renders as a destination
+// running with a silent channel and photographs as a fault.
+var thirdProgramme = demoProgramme{
+	name: "Studio C — outside broadcast",
+	destinations: []demoDest{
+		{"Facebook — match feed", "obc-facebook.mkv", []int{0, 1}},
+	},
+}
+
+// The programmes `add` can seed, by the short key the shell passes.
+var extraProgrammes = map[string]demoProgramme{
+	"b": secondProgramme,
+	"c": thirdProgramme,
+}
+
+// seedProgramme creates one programme and its destinations, and returns its id.
+// Idempotent on the name, because capturing is something you do repeatedly.
+func seedProgramme(p demoProgramme) int64 {
+	if !hasSourceNamed(p.name) {
+		post("/sources", map[string]any{"name": p.name})
+	}
+	id := sourceIDNamed(p.name)
+	if id == 0 {
+		die("could not create the programme %q, so a shot meant to show its "+
+			"lane would photograph a dashboard one programme short", p.name)
+	}
+	for _, d := range p.destinations {
+		post("/destinations", d.body(id))
+	}
+	return id
 }
 
 type demoDest struct {

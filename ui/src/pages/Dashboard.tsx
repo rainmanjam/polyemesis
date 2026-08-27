@@ -5,6 +5,7 @@ import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
 import { audioTrackCount, ingestAttribution, ingestBitrateKbps, processAbsence } from "@/lib/dashboardFacts";
 import { laneLayout } from "@/lib/sourceLanes";
+import { trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, RadioTower, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -995,6 +996,12 @@ export function Dashboard() {
                  * lane, grid or orphan section — because the summary has no way
                  * to know which one a given destination landed in. */
                 domId={`dest-${d.id}`}
+                /* Names for the audio chips' tooltips, and null whenever the
+                 * live source snapshot is of a DIFFERENT programme than this
+                 * card's -- which on a lanes install is most of them. See
+                 * lib/trackLabels.ts for why a wrong name is worse here than
+                 * no name. */
+                trackLabels={trackLabels(source, d.sourceId)}
                 busy={busyId === d.id}
                 canMoveEarlier={i > 0}
                 canMoveLater={i < destinations.length - 1}
