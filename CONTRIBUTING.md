@@ -51,13 +51,22 @@ build` per change works and is much slower.
 ## Tests
 
 ```sh
-make check                      # everything CI gates on: fmtcheck, vet, test, typecheck, lint
+make check                      # gofmt, vet, go test, tsc, oxlint, vitest, UI build — no Docker
+make check-full                 # the above plus the Playwright suite (needs Docker, ~4 min)
 go test ./... -race             # the race detector finds real bugs here
 ./scripts/acceptance.sh         # end-to-end against a real binary and real FFmpeg
 ```
 
-`make check` is the one to run before pushing — it is the local equivalent of
-the jobs that will gate your pull request.
+`make check` is the one to run before pushing. It deliberately needs nothing but
+Go and Node — the moment the pre-commit gate needs a daemon running, it becomes
+the gate you skip. `make check-browser` is the Playwright suite on its own, and
+`make check-full` is both; run one of those when you have touched the UI, because
+that suite has caught defects that everything in `check` passed.
+
+If you work in git worktrees, `make check` prints the worktree, branch and
+whether the tree is dirty before it does anything, and `make check BRANCH=my-branch`
+*refuses* to run unless that is the branch you are actually on. A green run on
+the wrong branch looks exactly like a green run on the right one.
 
 [docs/TESTING.md](docs/TESTING.md) lists every suite and what it covers.
 [docs/TEST-STRATEGY.md](docs/TEST-STRATEGY.md) explains what is deliberately

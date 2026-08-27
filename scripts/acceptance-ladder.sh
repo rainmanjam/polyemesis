@@ -53,6 +53,13 @@ ROOT="$(cd "$SCRIPTS/.." && pwd)"
 BIN="$ROOT/polyemesis"
 . "$SCRIPTS/lib-preflight.sh"
 
+# poka-yoke: the run's own verdict, armed BEFORE the preflight checks so a
+# suite that refuses to run still says so on its last line. The shared teardown
+# trap below replaces this one and emits the verdict itself; between them there
+# is no exit path that can report a pass this run did not earn. See the verdict
+# section of lib-preflight.sh for the reported-as-exit-0 failure that is why.
+trap 'poly_verdict_trap $?' EXIT
+
 # THE SOURCE HAS TO BE BIG ENOUGH TO STEP DOWN FROM. The other suites use small
 # fixtures deliberately, for speed; a ladder cannot, because 720p and 480p are
 # only real reductions if the ingest is above them.

@@ -49,6 +49,15 @@
 # a fixed port that is not the server's own, because that is the one the work-dir
 # sweep cannot see.
 
+# poly_teardown_trap ends by printing the run's verdict, and poly_verdict lives
+# next door. Sourced here rather than left to the caller so the two cannot come
+# apart: every suite that uses this library already sources lib-preflight too,
+# and the day one forgets, the missing function would be a "command not found"
+# on the last line of a teardown -- i.e. discovered during a failure, by
+# someone already debugging something else. The library defines functions and
+# one constant and has no side effects, so sourcing it twice costs nothing.
+. "$(dirname "${BASH_SOURCE[0]}")/lib-preflight.sh"
+
 # poly_stop_server signals one server and WAITS for it to go.
 #
 # The wait is the part that matters. A graceful shutdown finalises recordings
@@ -588,5 +597,16 @@ poly_teardown_trap() {
   fi
 
   "$fn" "$rc"
-  exit $?
+  # CAPTURED ON ITS OWN LINE, and this is the same hazard the header above is
+  # about one function earlier: poly_verdict is a command, so it clobbers $?.
+  # Written as `poly_verdict $?; exit $?` this would report the teardown's
+  # verdict and then exit with echo's status -- 0 -- for every red suite.
+  rc=$?
+  # LAST, deliberately: the verdict has to be the final line of the run's
+  # output, because the check that reads it is `tail -N | grep -q PASS` and
+  # anything printed after it can push it out of the window. It is also the
+  # promoted rc rather than the body's, so a suite that passed and then failed
+  # to tear down says FAIL -- the same answer its exit status gives.
+  poly_verdict "$rc"
+  exit "$rc"
 }

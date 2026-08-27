@@ -46,6 +46,15 @@ ui: $(UI_DIR)/node_modules ## Build the web UI into internal/web/dist
 ui-dev: $(UI_DIR)/node_modules ## Run the Vite dev server against a local backend on :8080
 	cd $(UI_DIR) && npm run dev
 
+# 657 vitest tests that no local target ran. They cover the pure logic the
+# browser suite cannot enumerate -- platform link construction is five
+# platforms times several missing-field cases -- and they are the cheapest
+# thing in CI, so the only reason they were not in `check` was that nobody
+# noticed they were not in `check`.
+.PHONY: ui-test
+ui-test: $(UI_DIR)/node_modules ## Run the frontend unit tests (vitest)
+	cd $(UI_DIR) && npm test
+
 # ------------------------------------------------------------------- build
 
 .PHONY: build
@@ -160,13 +169,96 @@ fmtcheck: ## Fail if any Go source needs formatting (what CI actually gates on)
 lint: $(UI_DIR)/node_modules ## Lint the frontend
 	cd $(UI_DIR) && npm run lint
 
+# ------------------------------------------------------------------- gate
+
+# WHICH WORKTREE AM I IN. This repository has seventeen git worktrees, and a
+# green `go test ./...` in the wrong one is BYTE-IDENTICAL to a green run in
+# the right one -- there is nothing in the output to notice. That is how a full
+# suite got run in the primary checkout today and its result reported for a
+# branch that lived in a temp worktree and had never been tested at all.
+#
+# Two rungs, because the cheap one has to be free or it gets skipped:
+#
+#   WARNING  the banner below, always on, three git calls, tells you after the
+#            fact what you actually just tested.
+#   CONTROL  `make check BRANCH=some-branch` refuses to run unless the branch
+#            matches, and names both. Use it the moment you are about to type a
+#            branch name into a report or a PR comment.
+#
+# BRANCH is deliberately NOT mandatory: most people have one worktree and would
+# come to resent typing it, and a device people resent is a device people
+# route around.
+WORKTREE   := $(shell git rev-parse --show-toplevel 2>/dev/null || pwd)
+ON_BRANCH  := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '(not a git checkout)')
+TREE_STATE := $(shell test -n "$$(git status --porcelain 2>/dev/null)" && echo dirty || echo clean)
+
+# Printed while the makefile is being READ, not from a recipe, so it is the
+# first thing on the terminal no matter what `check` ends up building and no
+# matter what -j does to the order of the prerequisites below.
+ifneq ($(filter check check-browser check-full,$(MAKECMDGOALS)),)
+$(info )
+$(info   worktree   $(WORKTREE))
+$(info   branch     $(ON_BRANCH) ($(TREE_STATE)))
+$(info )
+endif
+
+# Also parse-time, so a mismatch costs nothing: make stops before it has run a
+# single recipe, rather than after twelve minutes of tests on the wrong tree.
+#
+# COMMAND LINE ONLY, and that is not fussiness. make imports the environment as
+# make variables, and BRANCH is a common enough name that a shell prompt or a
+# CI runner exporting it would make EVERY target here fail on a tree that is
+# perfectly fine -- a device whose own false alarms teach people to work around
+# it. `make check BRANCH=x` is a statement of intent; `export BRANCH=x` in some
+# other tool's dotfile is not.
+ifeq ($(origin BRANCH),command line)
+ifneq ($(BRANCH),)
+ifneq ($(BRANCH),$(ON_BRANCH))
+$(error you asked for BRANCH=$(BRANCH), but $(WORKTREE) is on $(ON_BRANCH) -- refusing to run. `git worktree list` will show you where $(BRANCH) is checked out)
+endif
+endif
+endif
+
 # CONTRIBUTING.md and the PR template both told contributors to run `make lint`,
 # which did not exist -- and `check` claimed to be "everything CI would run"
 # while omitting both the lint and the gofmt gate that CI fails on. Adding the
 # two targets was the honest fix: the instruction was reasonable, the Makefile
 # was the thing that was wrong.
+#
+# AND THEN IT LIED AGAIN, about different targets. CI's "ui typecheck, lint,
+# build" job runs five commands; `check` ran two of them, so 657 vitest tests
+# and the production build -- the step that catches a type error tsc --noEmit
+# does not, because `npm run build` runs `tsc -b` for real and then bundles --
+# were gated in CI and nowhere local. A NAME IS NOT A DEVICE: "everything CI
+# would run" was true for about as long as it took someone to add a CI step.
+# The description below therefore lists what runs instead of claiming a
+# property, so that it goes stale visibly.
+#
+# Still deliberately absent: `npm audit --audit-level=high`, which CI runs and
+# which fails on an advisory published overnight against code you did not
+# touch. That belongs on a gate you can rerun, not between you and a commit.
+#
+# `ui` rebuilds internal/web/dist, so `check` leaves build output in the tree.
+# That is what CI gates on and `make clean` puts it back.
 .PHONY: check
-check: fmtcheck vet test typecheck lint ## Everything CI would run
+check: fmtcheck vet test typecheck lint ui-test ui ## gofmt, vet, go test, tsc, oxlint, vitest, ui build -- no Docker
+
+# NOT IN `check`, ON PURPOSE. Everything above runs on a bare checkout with Go
+# and Node and nothing else, and that property is worth keeping: the moment the
+# gate you run before every commit needs a daemon installed, it becomes the
+# gate you stop running. This one builds an image and drives Playwright against
+# it, ~4 minutes.
+#
+# It earns a target anyway because it caught a real defect three times in one
+# day and every one of those catches happened in CI, hours after the push --
+# the suite was in no local gate at all, so the first person to hear about the
+# break was always a red check.
+.PHONY: check-browser
+check-browser: ## Playwright against the real container image (~4 min, needs Docker)
+	./scripts/acceptance-browser.sh
+
+.PHONY: check-full
+check-full: check check-browser ## check plus the browser suite (needs Docker)
 
 # ----------------------------------------------------------------- release
 
