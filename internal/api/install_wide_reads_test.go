@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -124,10 +125,39 @@ func TestAHaltedRecorderOnAnyProgrammeIsReported(t *testing.T) {
 		t.Fatalf("create programme %d's recordings dir: %v", second.ID, err)
 	}
 	halt := db.RecordingSettings{Enabled: true, SegmentSeconds: 3600, MinFreeGB: 1e9}
-	eng.Recordings().CheckFreeSpace(halt)
-	if !eng.Recordings().Storage().Halted {
-		t.Fatalf("source %d's recording manager did not halt on a %.0f GB floor, so the "+
-			"state under test was never reached", second.ID, halt.MinFreeGB)
+
+	// SET IT UNTIL IT HOLDS, and the reason is a sweep this test is racing.
+	//
+	// The engine's recording manager runs ScanAndSweep once the moment it
+	// starts, and every 30s after. That sweep ends in CheckFreeSpace with the
+	// SOURCE's own settings -- a 5 GB floor, so a 6.25 GB resume threshold --
+	// sees a runner with far more than that, declares "free space recovered"
+	// and clears the halt this test just set. Whether that happens depends
+	// entirely on which side of the engine's startup sweep the line above
+	// falls on: locally it lands after and the halt sticks, on a loaded runner
+	// it lands before and the state under test is gone by the assertion.
+	//
+	// Giving the second programme a floor of its own would remove the race at
+	// the source, and settings are install-wide, so it would halt the default
+	// engine too -- destroying the discriminator below. Re-applying until the
+	// halt survives a second look is the honest alternative: it converges as
+	// soon as the startup sweep is behind us, and the guard still fails loudly
+	// if the state genuinely cannot be reached.
+	haltHolds := func() bool {
+		eng.Recordings().CheckFreeSpace(halt)
+		if !eng.Recordings().Storage().Halted {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+		return eng.Recordings().Storage().Halted
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for !haltHolds() {
+		if time.Now().After(deadline) {
+			t.Fatalf("source %d's recording manager would not stay halted on a %.0f GB "+
+				"floor, so the state under test was never reached", second.ID, halt.MinFreeGB)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	// THE DISCRIMINATOR. With the default engine unhalted, an endpoint that
 	// asks it answers "fine" while a recorder is stopped.
