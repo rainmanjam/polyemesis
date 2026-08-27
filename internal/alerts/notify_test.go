@@ -301,9 +301,14 @@ func TestPublishReachesTheEndpointCoalescedAndRedacted(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// AllowPrivateTarget, because httptest binds 127.0.0.1 and the notifier's
+	// dial-time SSRF guard refuses loopback without it. Setting the opt-in is
+	// what an operator with a self-hosted endpoint does, so this still runs the
+	// shipped transport rather than a test-only one -- and if the opt-in ever
+	// stopped reaching the dialer, this test would be the thing that hangs.
 	rule := Rule{
 		ID: 1, Name: "ops", Enabled: true, Format: FormatJSON, URL: srv.URL,
-		DebounceSeconds: 1, MinIntervalSeconds: 1,
+		DebounceSeconds: 1, MinIntervalSeconds: 1, AllowPrivateTarget: true,
 	}.Normalized()
 
 	n := New(quietLog(), RuleFunc(func() ([]Rule, error) { return []Rule{rule}, nil }),

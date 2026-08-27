@@ -1475,9 +1475,39 @@ func (l ListenerSettings) problems() []string {
 	return probs
 }
 
+// DisplaySettings is how times are PRESENTED -- in the console and in the
+// server log -- and nothing else.
+//
+// It deliberately does NOT reach the scheduler. Schedule.Location() treats an
+// empty zone as UTC, and its comment gives the reason: "the machine happens to
+// be in Denver is not a scheduling decision anybody made". Quietly redefining
+// that empty to mean this setting would move when every existing schedule
+// fires, on an install where somebody changed a display preference. A schedule
+// says its own zone out loud or it means UTC; this says how the answer is
+// WRITTEN DOWN.
+//
+// Empty means UTC, which is what the product did before this existed. That
+// keeps an install that never touches this setting reading exactly as it
+// always has -- and UTC remains the honest default for a box whose operator
+// may be anywhere.
+type DisplaySettings struct {
+	// TimeZone is an IANA name: "Europe/London", "America/New_York". Validated
+	// on save, so a zone that cannot be resolved is refused at the moment it is
+	// typed rather than rendering as UTC for ever with nothing saying why.
+	//
+	// internal/scheduler compiles the zone database into the binary; without
+	// that this would resolve on a developer's laptop and fail in the shipped
+	// container, which is the shape of bug that setting is there to stop.
+	TimeZone string `json:"timeZone"`
+}
+
 // Settings is everything the user can change from the web UI.
 type Settings struct {
 	Ingest IngestSettings `json:"ingest"`
+	// Display is presentation only -- see the type. It is listed first among
+	// the install-wide blocks because it is the one that changes what every
+	// other screen LOOKS like without changing what any of them DO.
+	Display DisplaySettings `json:"display"`
 	// Listeners is install-wide rather than per-source: it is one socket
 	// for every programme, so it cannot live on a source row.
 	Listeners ListenerSettings  `json:"listeners"`
@@ -1924,6 +1954,17 @@ func (s Settings) Validate() error {
 	// heard of stems must be able to save the rest of the recording settings.
 	if !ffmpeg.ValidStemCodec(s.Recording.StemCodec) {
 		add("unknown stem codec %q (flac, wav)", s.Recording.StemCodec)
+	}
+	// THE ZONE HAS TO RESOLVE, and the refusal belongs here rather than at the
+	// point a timestamp is rendered. A zone that cannot be loaded silently
+	// falls back to UTC everywhere, which reads as "the setting does not work"
+	// on a screen that gives no reason -- and reads as a correct time to
+	// somebody who does not notice the offset.
+	if tz := strings.TrimSpace(s.Display.TimeZone); tz != "" {
+		if _, err := time.LoadLocation(tz); err != nil {
+			add("unknown display time zone %q -- use an IANA name such as "+
+				"\"Europe/London\" or \"America/New_York\", or leave it empty for UTC", tz)
+		}
 	}
 	if s.Logging.MaxFileMB < 1 || s.Logging.MaxFileMB > 1024 {
 		add("log file size %dMB out of range (1-1024)", s.Logging.MaxFileMB)

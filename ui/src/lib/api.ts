@@ -1,3 +1,4 @@
+import { setDisplayTimeZone } from "@/lib/format";
 import type {
   AccountStats,
   AcmePreflight,
@@ -400,7 +401,21 @@ export const api = {
     get<{ system: SystemStats; bitrate: BitrateSample[] | null }>("/stats"),
 
   // --- settings ---
-  getSettings: () => get<Settings>("/settings"),
+  /* THE CLOCKS FOLLOW THE SETTINGS, and this is the only place they can.
+   *
+   * Five pages fetch settings independently. Wiring the display zone into any
+   * one of them would leave the console reading in a different zone depending
+   * on which page you happened to land on first -- which is a more confusing
+   * version of the problem the setting exists to solve. Doing it in the client
+   * means no caller can forget, including one written later.
+   *
+   * On the write path too, so a save takes effect on the screen that made it
+   * rather than at the next reload. */
+  getSettings: async (): Promise<Settings> => {
+    const s = await get<Settings>("/settings");
+    setDisplayTimeZone(s.display?.timeZone);
+    return s;
+  },
   /** Saves the settings and returns THE SETTINGS, not the whole response.
    *
    *  PUT /settings answers with api.settingsResponse, which embeds db.Settings
@@ -422,6 +437,9 @@ export const api = {
       "/settings",
       s,
     );
+    // The screen that made the change reads in the new zone immediately,
+    // rather than at the next reload -- see getSettings above.
+    setDisplayTimeZone((saved as Settings).display?.timeZone);
     return saved as Settings;
   },
   /** The MQTT broker password, on its own route.

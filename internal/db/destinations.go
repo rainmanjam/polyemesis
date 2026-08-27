@@ -608,10 +608,22 @@ func (d Destination) ExpertArgsSet() bool {
 		strings.TrimSpace(d.ExtraOutputArgs) != ""
 }
 
+// CarriesStreamKey reports whether this kind's publish URL has a stream key
+// joined onto it.
+//
+// ONE FUNCTION BECAUSE TWO COPIES DRIFTED, AND THE DRIFT WAS THE BUG (#610).
+// Target() knew that only RTMP appends a key; Validate() did not, so a key on
+// an SRT, file or audio destination was accepted, stored, and then silently
+// dropped on the way to the wire. Both callers now ask the same question, so
+// "which kinds carry a key" cannot be answered two different ways again.
+func (k DestKind) CarriesStreamKey() bool {
+	return k == DestRTMP
+}
+
 // Target returns the full URL FFmpeg should publish to, i.e. URL with the
 // stream key joined on for RTMP.
 func (d Destination) Target() string {
-	if d.Kind != DestRTMP || d.StreamKey == "" {
+	if !d.Kind.CarriesStreamKey() || d.StreamKey == "" {
 		return d.URL
 	}
 	return strings.TrimRight(d.URL, "/") + "/" + d.StreamKey
@@ -685,6 +697,44 @@ func (d Destination) Validate() error {
 		case strings.Contains(target, ".."), strings.HasPrefix(target, "/"):
 			add("audio file destination must be a relative name inside the recordings directory")
 		}
+	}
+
+	// A STREAM KEY ON A KIND THAT CANNOT CARRY ONE IS REFUSED (#610).
+	//
+	// Retyping an existing RTMP destination to srt, file or audio left the key
+	// on the row. Target() joins a key on for RTMP and only for RTMP, so the
+	// destination went on publishing to the bare URL WITH NO CREDENTIAL, and
+	// nothing said so -- not Validate, not Warnings, not the dialog, which
+	// renders the key field only for RTMP and so had no screen left to show it
+	// on.
+	//
+	// The second half is worse than the misconfiguration. The key is still a
+	// live credential, still returned in full by GET /destinations, and now
+	// unreachable from every screen that edits the destination -- so it cannot
+	// be rotated, because it cannot be seen. GHSA-7jqx-76vq-hvfc was five paths
+	// a key could escape by; this is a sixth that also nobody could close.
+	//
+	// Refused rather than dropped, for the reason spelled out below about
+	// control characters: this function refuses, it does not repair. A silent
+	// clear here would destroy a credential the operator may still need and say
+	// nothing, and it would leave the divergence -- stored value, sent value --
+	// that every downstream defence assumes cannot happen.
+	//
+	// The rows that ALREADY carry a stranded key are not left unsaveable by
+	// this: MigrateStrandedStreamKeys clears them at Open, before anything can
+	// read one back and hand it to this function. Without that sweep an
+	// operator could not so much as rename such a destination, because the API
+	// decodes an update body over the row it just read and the key would come
+	// back round with it.
+	//
+	// The message never echoes the key, for the same reason the control-
+	// character one does not: a validation error is rendered into a 400 body
+	// and into the server log.
+	if !d.Kind.CarriesStreamKey() && d.StreamKey != "" {
+		add("a %s destination cannot carry a stream key, because only RTMP joins one onto "+
+			"the publish URL. Stored here the key would never be sent and no screen would "+
+			"show it again, so it could not be rotated either. Clear the stream key, or set "+
+			"the transport back to RTMP", d.Kind)
 	}
 
 	// A STREAM KEY CARRYING A CONTROL CHARACTER IS REFUSED, NOT REPAIRED.
@@ -1870,6 +1920,60 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		return fmt.Errorf("drop destination_expert_args: %w", err)
 	}
 	return nil
+}
+
+// MigrateStrandedStreamKeys clears the stream key of every destination whose
+// kind cannot carry one, in either column it may be sitting in.
+//
+// WHY THIS RUNS AT ALL, given Validate now refuses the combination (#610).
+// Because Validate refusing it is exactly what would strand the operator. An
+// install upgrading into this release can already have such rows -- retyping an
+// RTMP destination to srt, file or audio never cleared the key -- and
+// UpdateDestination validates before it writes, over a struct the API built by
+// decoding the request body ON TOP OF the row it just read. So the stranded key
+// comes back round with every save, and the dialog renders no key field for
+// those kinds, so there is nothing on screen to clear. Without this sweep the
+// new refusal would make those destinations unrenameable, undisableable and
+// unfixable, and the error would name a field the operator cannot see.
+//
+// CLEARED RATHER THAN REPORTED, and that is the one silent rewrite in this
+// area. It is defensible only because of what the value is: a key this kind
+// never sent, that no screen has shown since the kind changed, and that GET
+// /destinations still returns in full. There is nothing to preserve and a live
+// credential to remove. Everything the operator can act on -- a key they meant
+// to keep -- is still reachable the moment they set the transport back to RTMP
+// and type it in, which is the only route that ever worked for these rows.
+//
+// IDEMPOTENT BY ITS GUARD, like backfillDestinationStreamKeys beside it: the
+// WHERE clause asks about the data in front of it rather than about a marker,
+// so it is correct on the second open, correct after a crash halfway through
+// the first, and correct against a row stranded later by some path nobody has
+// thought of yet.
+//
+// THE BACKUP KEY IS DELIBERATELY NOT TOUCHED. engine.backupTarget joins the
+// backup key onto the backup URL for every kind, so a backup key is SENT
+// whatever the transport is. It is not stranded, and clearing it would be
+// destroying a credential that works.
+func (d *DB) MigrateStrandedStreamKeys() error {
+	res, err := d.sql.Exec(`UPDATE destinations
+		SET stream_key = '', stream_key_enc = NULL
+		WHERE kind <> ? AND (stream_key <> '' OR stream_key_enc IS NOT NULL)`, string(DestRTMP))
+	if err != nil {
+		return fmt.Errorf("clear stranded stream keys: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("clear stranded stream keys: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	// THE COMMIT IS NOT THE END OF THE PLAINTEXT -- the full argument is at the
+	// bottom of backfillDestinationStreamKeys. The short version: the UPDATE
+	// wrote new pages into the -wal and the old pages still hold the key until a
+	// checkpoint copies over them, so a function whose entire purpose is to
+	// remove a credential from the database has not done it until this runs.
+	return checkpointTruncate(d)
 }
 
 // backfillDestinationStreamKeys seals every stream key still sitting in a

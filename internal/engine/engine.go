@@ -3617,6 +3617,17 @@ func (e *Engine) teardownLoudness(m *loudnessMon) {
 // Loudness returns the latest compliance report for every monitored
 // destination, for the REST snapshot a browser needs before the first push.
 //
+// The reports come back AGED: a verdict nothing has re-measured for
+// meters.StaleAfter is returned as unknown with a reason saying so, rather than
+// as the pass it was when the analyser last spoke. This is the only read path
+// a stale report can reach -- the WebSocket publishes each frame as it is
+// parsed, so what it carries is fresh by construction -- and it is shared by
+// GET /loudness and Engine.Status, so aging it here covers the UI, the API and
+// anything else that ever asks. The clock comparison stays on the server on
+// purpose: Report.At is a server timestamp, and a browser judging it against
+// its own clock would call every reading stale on any machine whose time is a
+// minute out. See meters.StaleAfter for what #609 cost.
+//
 // The nil guard is for an Engine assembled field by field rather than through
 // New — which is how the tests build one, and how a status snapshot could
 // otherwise panic on a code path that has nothing to do with loudness.

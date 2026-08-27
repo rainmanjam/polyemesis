@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/netguard"
 )
 
 // Trigger names a lifecycle transition. These strings are stored configuration
@@ -338,59 +339,10 @@ func clampInt(v, lo, hi int) int {
 	return v
 }
 
-// isPublicAddr reports whether ip is safe to let a webhook actually reach:
-// not loopback, not link-local (which covers 169.254.169.254, the cloud
-// metadata address, and IPv6 fe80::/10 alike), not a private range (RFC1918,
-// and IPv6 ULA fc00::/7 -- both covered by net.IP.IsPrivate), not the
-// unspecified address, and not multicast. Used at two points that must agree:
-// Validate's literal-IP check above and Dispatcher's dial-time guard.
-func isPublicAddr(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	switch {
-	case ip.IsLoopback(),
-		ip.IsLinkLocalUnicast(),
-		ip.IsLinkLocalMulticast(),
-		ip.IsPrivate(),
-		ip.IsUnspecified(),
-		ip.IsMulticast():
-		return false
-	}
-	// net.IP.IsPrivate is RFC1918 and IPv6 ULA and NOTHING ELSE, which leaves
-	// ranges that are unroutable on the public internet but very much reachable
-	// from the host. 100.64.0.0/10 is the practical one: carrier NAT, and the
-	// range Tailscale hands out -- so without this a hook to http://100.64.0.1
-	// was accepted and dialed, which is the overlay network the guard most
-	// needs to keep a webhook out of.
-	for _, cidr := range nonPublicRanges {
-		if cidr.Contains(ip) {
-			return false
-		}
-	}
-	return true
-}
-
-// nonPublicRanges are reachable-but-not-globally-routable networks that
-// net.IP.IsPrivate does not know about. Parsed once; a bad constant here would
-// panic at init rather than silently letting a range through.
-var nonPublicRanges = func() []*net.IPNet {
-	out := make([]*net.IPNet, 0, 8)
-	for _, s := range []string{
-		"100.64.0.0/10",   // RFC6598 shared address space (CGNAT, Tailscale)
-		"192.0.0.0/24",    // RFC6890 IETF protocol assignments
-		"198.18.0.0/15",   // RFC2544 benchmarking
-		"192.0.2.0/24",    // RFC5737 TEST-NET-1
-		"198.51.100.0/24", // TEST-NET-2
-		"203.0.113.0/24",  // TEST-NET-3
-		"240.0.0.0/4",     // RFC1112 reserved
-		"64:ff9b::/96",    // RFC6052 IPv4/IPv6 translation -- an embedded v4 target
-	} {
-		_, n, err := net.ParseCIDR(s)
-		if err != nil {
-			panic("hooks: bad non-public CIDR " + s + ": " + err.Error())
-		}
-		out = append(out, n)
-	}
-	return out
-}()
+// isPublicAddr answers, for this package, whether ip may be dialed. It is a
+// one-line delegation on purpose: the real list lives in internal/netguard so
+// that internal/alerts checks the SAME ranges rather than a copy of them that
+// stops matching the first time somebody remembers a range here and not there
+// (#607). Keep it delegating -- a range added below and not in netguard is a
+// range alerts would still let a webhook reach.
+func isPublicAddr(ip net.IP) bool { return netguard.IsPublicAddr(ip) }

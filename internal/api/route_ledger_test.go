@@ -2279,6 +2279,9 @@ func inspectOutboundAlertBody(t *testing.T, rig shapeRig) shapeObservation {
 	endpoint, rec := egressEndpoint(t)
 	createRule(t, rig.h, rig.sign, map[string]any{
 		"name": "ledger-shape-egress", "url": endpoint.URL + "/receiver/ledger-shape",
+		// httptest binds 127.0.0.1, which the SSRF guard refuses without the
+		// per-rule opt-in (#607).
+		"allowPrivateTarget": true,
 	})
 
 	n := alerts.New(

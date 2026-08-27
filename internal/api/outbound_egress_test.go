@@ -296,6 +296,9 @@ func TestOutboundAlertPayloadCarriesNoStoredCredential(t *testing.T) {
 		// observe a property that has nothing to do with the window is a cost
 		// this test should not impose.
 		"debounceSeconds": 1,
+		// httptest binds 127.0.0.1, which the SSRF guard refuses without the
+		// per-rule opt-in (#607).
+		"allowPrivateTarget": true,
 	})
 	id := int64(created["id"].(float64))
 	send(t, h, sign, http.MethodPost,

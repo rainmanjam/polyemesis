@@ -24,6 +24,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/logtz"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
@@ -669,6 +670,17 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	if err != nil {
 		return err
 	}
+	// The log's zone, as early as the store can answer for it. Lines written
+	// before this -- the ones about opening the database -- are UTC, which is
+	// what every line was before this setting existed.
+	if tz := strings.TrimSpace(settings.Display.TimeZone); tz != "" {
+		if loc, lerr := time.LoadLocation(tz); lerr == nil {
+			logtz.Set(loc)
+		} else {
+			log.Warn("display time zone does not resolve; logging in UTC",
+				"zone", tz, "err", lerr)
+		}
+	}
 	// How many programmes this install has, which is a different question from
 	// what settings.ingest says. Nothing reads settings.ingest any more -- the
 	// engine takes its ingest from the source row -- so on an install with no
@@ -875,12 +887,21 @@ func (h *hooks) debugLogger(level string, sw *diag.Switch, rec *diag.Recorder) *
 	if h != nil && h.NewHandler != nil {
 		return h.logger(level)
 	}
-	base := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: sw.Leveler()})
+	base := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: sw.Leveler(),
+		// Times in the install's display zone -- see internal/logtz. Read per
+		// line, so a save takes effect on the next line rather than the next
+		// restart.
+		ReplaceAttr: logtz.ReplaceAttr,
+	})
 	return slog.New(diag.NewHandler(base, rec))
 }
 
 func newLogger(level string) *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: parseLevel(level)}))
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level:       parseLevel(level),
+		ReplaceAttr: logtz.ReplaceAttr,
+	}))
 }
 
 func parseLevel(level string) slog.Level {

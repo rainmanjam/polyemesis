@@ -42,6 +42,12 @@ type alertRuleRequest struct {
 	MinSeverity        *alerts.Severity `json:"minSeverity"`
 	DebounceSeconds    *int             `json:"debounceSeconds"`
 	MinIntervalSeconds *int             `json:"minIntervalSeconds"`
+	// AllowPrivateTarget is the SSRF opt-in. A pointer like every field here,
+	// so PATCHing one unrelated field does not silently clear a guard the
+	// operator turned off on purpose -- or, worse, turn one off they never
+	// touched. Absent means "leave it alone"; on create the zero value is
+	// false, which is the direction that fails closed.
+	AllowPrivateTarget *bool `json:"allowPrivateTarget"`
 }
 
 // applyTo folds the request onto an existing rule.
@@ -77,6 +83,9 @@ func (q alertRuleRequest) applyTo(r alerts.Rule) alerts.Rule {
 	}
 	if q.MinIntervalSeconds != nil {
 		r.MinIntervalSeconds = *q.MinIntervalSeconds
+	}
+	if q.AllowPrivateTarget != nil {
+		r.AllowPrivateTarget = *q.AllowPrivateTarget
 	}
 	return r
 }

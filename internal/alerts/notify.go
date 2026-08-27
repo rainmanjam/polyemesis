@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/netguard"
 )
 
 // Notifier delivery defaults. The queue is generous and the sender is not:
@@ -160,7 +162,7 @@ func New(log *slog.Logger, rules RuleSource, opts ...Option) *Notifier {
 	n := &Notifier{
 		log:        log,
 		rules:      rules,
-		doer:       &http.Client{Timeout: defaultHTTPTimeout},
+		doer:       &http.Client{Timeout: defaultHTTPTimeout, Transport: &http.Transport{DialContext: netguard.DialContext}},
 		now:        time.Now,
 		timeout:    defaultHTTPTimeout,
 		attempts:   DefaultAttempts,
@@ -495,7 +497,19 @@ func (n *Notifier) post(ctx context.Context, d Delivery) error {
 // attempt performs one POST. The returned duration is how long to wait before
 // the next try: zero means "use the backoff", negative means "do not retry".
 func (n *Notifier) attempt(ctx context.Context, r Rule, body []byte, contentType string) (time.Duration, error) {
-	reqCtx, cancel := context.WithTimeout(ctx, n.timeout)
+	// SSRF guard, part two of two, and the controlling half. Validate refuses a
+	// literal private IP at save time but never resolves a hostname, so a name
+	// that resolves to 169.254.169.254 -- or that only starts to after the rule
+	// was saved, i.e. DNS rebinding -- gets past it. netguard.DialContext, wired
+	// into the default client's transport in New, catches that at the moment of
+	// the dial. The opt-in has to ride in on the context because a transport's
+	// DialContext is handed an address and nothing else; this is the ONE place
+	// it is attached, so every path through the notifier is covered by
+	// construction -- the queued delivery, the retry, and POST
+	// /alerts/rules/{id}/test, which was the port-scan oracle in #607 and calls
+	// post like everything else.
+	reqCtx, cancel := context.WithTimeout(
+		netguard.WithAllowPrivateTarget(ctx, r.AllowPrivateTarget), n.timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, r.URL, bytes.NewReader(body))

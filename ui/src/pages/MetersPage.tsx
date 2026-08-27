@@ -123,7 +123,17 @@ export function MetersPage() {
   /* A failing poll is silent while it might recover and explicit once it has
      not -- the same tracker MonitoringPage uses on its process list. Without
      it the last verdicts sat on screen for ever with no clock and no "as of",
-     and a stale pass reads exactly like a live one. */
+     and a stale pass reads exactly like a live one.
+
+     THAT IS HALF THE DANGER, and this device only ever covered this half. It
+     counts HTTP failures, and #609 produced none: the publisher was killed, two
+     analysers stopped emitting frames, and the server went on answering 200
+     with byte-identical LUFS for 65 seconds. The other half is now closed
+     server-side -- meters.StaleAfter, applied in Engine.Loudness -- which
+     arrives here as `verdict: "unknown"` and a reason saying how long it has
+     been, rendered by ComplianceRow with no special case. Deliberately NOT
+     re-checked against Date.now() here: `at` is the server's clock, and a
+     browser an hour out of step would blank every verdict on the page. */
   const freshness = useStaleTracker();
 
   // Polled rather than pushed: the analyser publishes once a second, and a

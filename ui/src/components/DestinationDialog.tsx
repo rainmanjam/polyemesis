@@ -559,6 +559,36 @@ function renditionSpec(r: Rendition): string {
   return `${size} · ${fps} · ${r.videoBitrate} kbps · ${r.encoder}`;
 }
 
+/** kindCarriesStreamKey mirrors db.DestKind.CarriesStreamKey: only RTMP joins a
+ *  stream key onto the publish URL. */
+const kindCarriesStreamKey = (k: DestKind) => k === "rtmp";
+
+/**
+ * keyAfterKindChange is what the stream key becomes when the transport changes.
+ *
+ * THE FIELD IS CLEARED ON THE WAY OUT OF RTMP, AND THAT IS THE POINT OF #610.
+ * Retyping a destination to srt, file or audio used to leave the key on the row:
+ * the field renders only for RTMP, so there was no screen left to clear it on,
+ * and save omits an untouched key, so nothing sent a clear either. The result
+ * was a destination publishing to the bare URL WITH NO CREDENTIAL, and a live
+ * key sealed where nobody could see it — so it could not be rotated, and
+ * GET /destinations went on returning it in full.
+ *
+ * The server now REFUSES that combination. Clearing here is what keeps the
+ * refusal off the operator's screen: they cannot reach the state the validator
+ * rejects, so they never meet an error about a field the form does not show.
+ *
+ * ONLY ON AN ACTUAL CHANGE. Re-picking the kind that is already selected must
+ * not wipe the key of an RTMP destination that is simply being edited, and it
+ * is the preset picker that makes this more than theory — choosing an RTMP
+ * preset calls this with the kind unchanged, halfway through configuring a
+ * destination whose key is already typed.
+ */
+export function keyAfterKindChange(from: DestKind, to: DestKind, key: string): string {
+  if (to === from) return key;
+  return kindCarriesStreamKey(to) ? key : "";
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -589,6 +619,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // able to send one. A ref rather than state: nothing renders from it, and a
   // re-render must not reset it.
   const loadedStreamKey = useRef("");
+  const changeKind = (next: DestKind) => {
+    setStreamKey((k) => keyAfterKindChange(kind, next, k));
+    setKind(next);
+  };
   const [bitrate, setBitrate] = useState(160);
   // Muxer and socket tuning. An empty object is "no opt-in", which is what
   // every destination that predates this carries, and what the server turns
@@ -862,7 +896,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     // an Instagram destination look one field away from working, which is
     // precisely the impression that generates the support request.
     if (capabilityFor(p.id, p.name).tier === "unsupported") return;
-    setKind(p.kind);
+    // Through changeKind, not setKind: picking an SRT or file preset is a
+    // transport change like any other, and a key left over from the RTMP one
+    // the operator was configuring a moment ago would be stranded exactly the
+    // same way. See keyAfterKindChange.
+    changeKind(p.kind);
     // Only the presets with integration code behind them carry a platform;
     // every other one is an ordinary custom endpoint. That is what keeps this
     // catalogue additive — it never widens what the API will accept.
@@ -1192,7 +1230,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
           <div className="flex flex-col gap-1">
             <Label>{t("dest.transport")}</Label>
-            <Select value={kind} onValueChange={(v) => setKind(v as DestKind)}>
+            <Select value={kind} onValueChange={(v) => changeKind(v as DestKind)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>

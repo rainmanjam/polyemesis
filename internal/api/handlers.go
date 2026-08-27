@@ -25,6 +25,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/logtz"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -1262,6 +1263,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		storedIngest = settings.Ingest
 		storedIngest.Annotations = append(
 			[]routing.TrackAnnotation(nil), settings.Ingest.Annotations...)
+		// The stored automod rules, copied for the same reason as the ingest
+		// block above: the decode rewrites the slice in place, so a comparison
+		// made afterwards would be a slice against itself.
+		storedRules := append([]db.AutomodRule(nil), settings.Automod.Rules...)
 		if err := decodeJSONInto(body, settings); err != nil {
 			return err
 		}
@@ -1272,6 +1277,40 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// validation failures, whichever of the two found it.
 		if err := settings.Validate(); err != nil {
 			return db.InvalidSettingsError{Err: err}
+		}
+		// AND THE AUTOMOD RULES HAVE TO COMPILE -- THE ONES BEING CHANGED.
+		//
+		// Rule.Compile refuses a bad regex, an empty pattern, an unknown action
+		// and a zero-duration timeout -- and nothing called it from here, so a
+		// pattern like "(unclosed[" saved with a 200. At apply time NewRuleSet
+		// is all-or-nothing, so ApplyAutomod sets rules = nil and EVERY pattern
+		// rule stops running, not only the broken one. The narrowest possible
+		// typo disarmed the whole checker.
+		//
+		// Silently, and against three screens saying otherwise: GET /settings
+		// listed the rules enabled, GET /automod/matrix reported the checker
+		// available, and the UI drew them. The only signal was one log.Error on
+		// a server nobody was tailing. An operator who typo'd a pattern last
+		// week has had no moderation since and every screen has told them they
+		// do.
+		//
+		// Scoped to a CHANGE, and that is not softness. An install upgrading
+		// from a version that accepted a bad pattern already has one stored;
+		// refusing every save would leave that operator unable to change
+		// anything at all -- their listener port, their recording retention --
+		// until they fixed a rule the UI may not even show them. The same trap
+		// the alert-rule SSRF guard avoids by refusing at the dial rather than
+		// at load. Touch the rules and they must compile; leave them alone and
+		// the existing breakage is not made your problem.
+		//
+		// Here rather than in Settings.Validate because internal/automod
+		// imports internal/db, so db cannot import the compiler that knows what
+		// a valid rule is. This handler is the only place both are visible, and
+		// it is the only writer a person can reach.
+		if !sameAutomodRules(storedRules, settings.Automod.Rules) {
+			if _, err := rulesFromSettings(settings.Automod); err != nil {
+				return db.InvalidSettingsError{Err: err}
+			}
 		}
 		// A save that touches the ingest section may not leave the mode unset.
 		//
@@ -1461,6 +1500,13 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// it has to be applied HERE rather than at the next restart. A retention
 	// setting that stores, returns 200 and keeps sweeping on the old numbers is
 	// the same silent no-op the ingest block above documents.
+	// The LOG follows the display zone from the next line, not the next
+	// restart. Same argument as the two below: a setting that stores, returns
+	// 200 and changes nothing until somebody reboots the box is the silent
+	// no-op this file warns about twice already -- and here it is the operator
+	// still doing timezone arithmetic in their head while reading the log they
+	// just reconfigured.
+	logtz.Set(displayLocation(settings.Display.TimeZone))
 	ApplyChatRetention(s.chat, settings.Chat)
 	// Same argument for automod: a matrix that stores, returns 200 and keeps
 	// deciding on the old cells is the silent no-op this file already warns
@@ -2658,4 +2704,40 @@ func (s *Server) requireNamedSource(w http.ResponseWriter, id *int64) bool {
 	msg := "this create must say which source it belongs to: set \"sourceId\"." + s.availableSources()
 	writeErrorCode(w, http.StatusBadRequest, codeSourceRequired, msg)
 	return false
+}
+
+// displayLocation resolves the configured display zone, falling back to UTC.
+//
+// Settings.Validate has already refused a zone that cannot be loaded, so the
+// error path here is only reachable if the two disagree -- and UTC is the
+// honest answer then, rather than a log with no timestamps at all.
+func displayLocation(tz string) *time.Location {
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
+// sameAutomodRules reports whether two rule lists are identical.
+//
+// Field by field rather than reflect.DeepEqual: AutomodRule is a flat struct of
+// comparable fields, and a DeepEqual here would start silently returning false
+// the day somebody adds a slice to it -- turning "the operator did not touch
+// the rules" into "refuse the save", which is the exact brick this comparison
+// exists to prevent.
+func sameAutomodRules(a, b []db.AutomodRule) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

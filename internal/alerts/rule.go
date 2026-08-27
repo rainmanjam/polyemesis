@@ -3,9 +3,12 @@ package alerts
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/netguard"
 )
 
 // Format is the JSON shape a webhook endpoint expects. Discord and Slack are
@@ -71,6 +74,16 @@ type Rule struct {
 	MinIntervalSeconds int       `json:"minIntervalSeconds"`
 	CreatedAt          time.Time `json:"createdAt"`
 	UpdatedAt          time.Time `json:"updatedAt"`
+	// AllowPrivateTarget is the deliberate opt-in past the SSRF guard in
+	// Validate and the notifier's dial-time check. Default false, because
+	// before it existed POST /alerts/rules accepted http://169.254.169.254/
+	// and POST /alerts/rules/{id}/test then reported back whether the port
+	// answered -- an internal port scanner and a reach into instance metadata,
+	// driven from a form, with nothing in the log saying it happened (#607).
+	// An operator who genuinely wants an alert delivered to something on their
+	// own LAN sets this explicitly; a refusal with no escape hatch would just
+	// get the whole guard disabled instead.
+	AllowPrivateTarget bool `json:"allowPrivateTarget"`
 }
 
 // RedactedURL is what an API response or a log line may show.
@@ -185,6 +198,26 @@ func (r Rule) Validate() error {
 	}
 	if u.Host == "" {
 		return fmt.Errorf("alert rule %q has a webhook URL with no host", r.Name)
+	}
+	// SSRF guard, part one of two. If the operator wrote a literal IP -- the
+	// cloud metadata address, a loopback, a LAN range -- catch it here with no
+	// network call, at the moment they save it. A HOSTNAME is deliberately NOT
+	// resolved in this path: DNS from inside a save request is slow, flaky in
+	// an offline test or sandbox, and its answer can legitimately change by the
+	// time the alert is delivered anyway. The notifier's dial-time guard (see
+	// notify.go) is what actually enforces this for a hostname, because it runs
+	// at the one point that cannot be lied to by a DNS answer that changed
+	// after Validate ran -- otherwise known as DNS rebinding. This literal-IP
+	// check exists in addition because refusing an obviously bad rule at save
+	// time, rather than letting the operator find out from a "send test" that
+	// quietly told them which internal ports are open, is worth the
+	// duplication. Same two points, same reason, as internal/hooks.
+	if !r.AllowPrivateTarget {
+		if ip := net.ParseIP(u.Hostname()); ip != nil && !netguard.IsPublicAddr(ip) {
+			return fmt.Errorf("alert rule %q targets a non-public address; set "+
+				"allowPrivateTarget to permit a self-hosted endpoint on purpose",
+				r.Name)
+		}
 	}
 	if !KnownFormat(r.Format) {
 		return fmt.Errorf("alert rule %q has an unknown format %q", r.Name, r.Format)

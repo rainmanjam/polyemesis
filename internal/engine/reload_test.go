@@ -70,6 +70,10 @@ func TestEveryReloadRuleNamesAFunctionThatExists(t *testing.T) {
 		filepath.Join("..", "mqtt"),
 		filepath.Join("..", "jobs"),
 		filepath.Join("..", "chat"),
+		// The display time zone is delivered by logtz.Set -- from the settings
+		// handler on a save, and from main at boot. It is a delivery package
+		// like the others here, so a rule naming it has to be checkable.
+		filepath.Join("..", "logtz"),
 		filepath.Join("..", "..", "cmd", "polyemesis"),
 	}
 	src := readGoSources(t, dirs)

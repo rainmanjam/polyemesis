@@ -1128,6 +1128,10 @@ export interface SourceView extends Source {
 }
 
 export interface Settings {
+  /** How times are PRESENTED, install-wide, and nothing else -- see
+   *  db.DisplaySettings. Optional so a client older than the field can still
+   *  PUT the rest of the document. */
+  display?: { timeZone: string };
   ingest: {
     mode: IngestMode;
     srt: { passphrase: string; latencyMs: number };

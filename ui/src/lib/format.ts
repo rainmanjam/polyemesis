@@ -33,6 +33,51 @@ export function shortDuration(ms: number): string {
   return duration(ms / 1000);
 }
 
+/* THE INSTALL'S DISPLAY TIME ZONE.
+ *
+ * Every time in this console was rendered in whatever zone the BROWSER happens
+ * to be in, and the server logged in UTC. So an operator in Los Angeles reading
+ * a log line beside the screen that produced it was comparing 05:51Z with
+ * 22:51, in their head, at the moment something was going wrong -- and two
+ * people on the same production, in different places, could not read each
+ * other's screenshots at all.
+ *
+ * Settings.Display.TimeZone names one zone for the whole install. Held in a
+ * module variable rather than threaded through every caller because it is a
+ * property of the install, not of any component, and it changes about once in
+ * the life of a deployment.
+ *
+ * Empty is UTC, deliberately -- NOT the browser's zone, which is what this
+ * replaces. A console whose times move depending on who is looking at it is
+ * the thing being fixed; falling back to the browser would leave the default
+ * install with exactly the behaviour that made this necessary.
+ */
+let displayZone = "UTC";
+
+/** Called once when settings load, and again when they are saved. */
+export function setDisplayTimeZone(tz: string | null | undefined): void {
+  const want = (tz ?? "").trim();
+  if (!want) {
+    displayZone = "UTC";
+    return;
+  }
+  // A zone the browser cannot resolve must not take the console's clocks with
+  // it. The server validates on save, so this only fires when the two disagree
+  // -- an old browser against a zone database the server has -- and UTC is the
+  // honest answer there rather than a thrown error on every timestamp.
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: want });
+    displayZone = want;
+  } catch {
+    displayZone = "UTC";
+  }
+}
+
+/** The zone every clock in the console is currently drawn in. */
+export function displayTimeZone(): string {
+  return displayZone;
+}
+
 export function timestamp(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -49,6 +94,7 @@ export function timestamp(iso: string): string {
   // through. Returning "" lets callers treat it exactly like a missing value.
   if (d.getUTCFullYear() <= 1) return "";
   return d.toLocaleString(undefined, {
+    timeZone: displayZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -63,7 +109,7 @@ export function clockTime(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString(undefined, { hour12: false });
+  return d.toLocaleTimeString(undefined, { timeZone: displayZone, hour12: false });
 }
 
 /** Percent as an integer with a trailing sign. */

@@ -167,6 +167,20 @@ var settingsReload = map[string]ReloadRule{
 	"meters.intervalMs": {ClassLive, "applyMeterInterval", "a throttle in the Go stdout parser; it has never reached an argv, and capturing it at spawn made editing it a silent no-op"},
 
 	// --------------------------------------------------------------- logging
+	// PRESENTATION ONLY, and nothing running reads it. The browser picks it up
+	// from the next GET /settings -- which lib/api.ts does on every settings
+	// read, so the screen that saved it is already redrawn -- and the server
+	// log formatter reads it per line. No child process carries a time zone in
+	// its argv, and none has to be told: the change is in how an answer is
+	// WRITTEN DOWN, never in what any of them does.
+	//
+	// Deliberately NOT reaching the scheduler. Schedule.Location() treats an
+	// empty zone as UTC on purpose, and redefining that here would move when
+	// every existing schedule fires because somebody changed a display
+	// preference.
+	"display.timeZone": {ClassOnDemand, "Set",
+		"logtz.ReplaceAttr reads it per log line; the console reads it from the next GET /settings. No process holds it and nothing restarts"},
+
 	"logging.persistProcessLogs": {ClassLive, "applyLogging", "swaps the FileSink behind logSink, so children already running start filling the new file"},
 	"logging.maxFileMb":          {ClassLive, "applyLogging", "re-opens the sink; no child is touched"},
 	"logging.maxFiles":           {ClassLive, "applyLogging", "re-opens the sink; no child is touched"},

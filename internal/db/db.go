@@ -293,12 +293,29 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// alert_rules.allow_private_target, the same guard one table over: an alert
+	// rule aimed at a private address is refused at save time, and at dial
+	// time, unless the operator opted in on that rule.
+	if err := d.MigrateAlertRuleAllowPrivateTarget(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// Last, because it reads settings and writes to destinations, renditions
 	// and recordings: every column those tables are going to have must already
 	// be there. It also creates the first source from the existing ingest
 	// configuration, which is what keeps an upgraded install reachable by the
 	// encoder that was already pointed at it.
 	if err := d.MigrateSources(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	// BEFORE the backfill below, because a key this clears is a key that does
+	// not then need sealing, and because both of them end in the same
+	// checkpoint. Also before anything can READ a destination: Validate now
+	// refuses a stream key on a kind that cannot carry one, so a row upgraded
+	// into this release carrying one would be unsaveable -- and unfixable, since
+	// no screen shows a key field for those kinds. See MigrateStrandedStreamKeys.
+	if err := d.MigrateStrandedStreamKeys(); err != nil {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
