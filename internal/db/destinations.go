@@ -73,6 +73,22 @@ const (
 	// the connected account fills in the secret half. Recorded here because
 	// "integrated" has meant "both fields arrive" for every previous entry.
 	PlatformTrovo Platform = "trovo"
+	// PlatformVimeo exists for SIGN-IN, and sign-in is the only thing it can
+	// promise every operator.
+	//
+	// Vimeo's OAuth is open to any registered app, so connecting an account
+	// works on any plan. Its LIVE API is not: "Please note that our live API is
+	// available only to Vimeo Enterprise customers"
+	// (https://developer.vimeo.com/api/reference/live, read 2026-08-26). So the
+	// ingest URL and stream key stay pasted by hand from a Vimeo live event,
+	// exactly as before this platform existed, and the destination preset keeps
+	// SeparateKey.
+	//
+	// The asymmetry is the reason the constant is here at all. A connected
+	// account is what lets polyemesis ASK Vimeo whether this operator can reach
+	// the live API, and say so at connect time rather than letting a refusal
+	// arrive mid-broadcast. See internal/oauth/vimeo.go.
+	PlatformVimeo Platform = "vimeo"
 )
 
 // ErrNotFound is returned by the typed getters.
@@ -615,7 +631,7 @@ func (d Destination) Validate() error {
 		add("unknown destination kind %q", d.Kind)
 	}
 	switch d.Platform {
-	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, PlatformRumble, PlatformTrovo, "":
+	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, PlatformRumble, PlatformTrovo, PlatformVimeo, "":
 	default:
 		add("unknown platform %q", d.Platform)
 	}

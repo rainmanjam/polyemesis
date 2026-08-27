@@ -706,8 +706,17 @@ var destinationPresets = []DestinationPreset{
 		ID: "vimeo", Name: "Vimeo Livestream", Group: GroupVideo,
 		Transport: PresetRTMPS, Kind: DestRTMP,
 		SeparateKey: true,
+		// KEEP THIS IN STEP WITH oauth.PlatformCapabilities()'s vimeo row, the
+		// same way the kick preset above asks to be. The key really is still
+		// pasted -- Platform being set here does NOT mean polyemesis fetches
+		// one, and that is the misreading this note exists to head off.
+		Platform: PlatformVimeo,
 		Notes: "Vimeo issues an RTMPS URL and key per live event. Open the event in Vimeo and copy the server URL " +
-			"and stream key from its setup panel.",
+			"and stream key from its setup panel — connecting a Vimeo account does not change that, because " +
+			"Vimeo's live API is available only to Vimeo Enterprise customers and a key belongs to an event. " +
+			"Connect one anyway if you have an account: polyemesis asks the live API whether YOURS reaches it " +
+			"and tells you at connect time, rather than letting the refusal turn up mid-broadcast. Create a " +
+			"RECURRING event — Vimeo is deprecating one-time live events and recommends avoiding them.",
 	},
 	{
 		ID: "dailymotion", Name: "Dailymotion", Group: GroupVideo,

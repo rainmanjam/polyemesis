@@ -325,14 +325,6 @@ var defaultEngineSites = map[string]string{
 		"zero-source refusal and is recorded in noSourceRefusalSites too. Keeping " +
 		"the two apart is deliberate: 'this install has no programme' and 'the " +
 		"programme you named is not running' are different answers.",
-	"handleScheduleRuns": "GET /schedules/runs. STILL UNSCOPED, and it is the " +
-		"observability half of the scheduler defect (#526/#549) rather than a " +
-		"defect of its own: every engine runs its own scheduler.Runner over one " +
-		"install-wide schedules table, so this endpoint shows one of the N " +
-		"runners' last sweep -- nothing at all if another runner won the tick. " +
-		"Left alone here on purpose: the scheduler is being made single-runner on " +
-		"another branch and scoping this reader to one of N runners first would " +
-		"have to be undone.",
 
 	// --- readers that legitimately answer for an absent programme ---
 	"ingestBitrate": "the arrival series the dashboard graphs, and the ONE " +

@@ -47,6 +47,7 @@ const PLATFORM_LABEL: Record<string, string> = {
   // guard exists to catch one layer up.
   facebook: "Facebook",
   trovo: "Trovo",
+  vimeo: "Vimeo",
   custom: "Custom",
 };
 

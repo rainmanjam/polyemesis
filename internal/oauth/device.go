@@ -12,9 +12,9 @@ package oauth
 // the operator types that code into the platform's own site on a phone, and the
 // box polls for the token.
 //
-// THIS IS ONE PLATFORM'S CAPABILITY AND IT IS DELIBERATELY NOT FOUR. Issue #442
-// read each vendor's own reference page, and only Twitch's answer survives
-// contact with what polyemesis needs:
+// THIS IS ONE PLATFORM'S CAPABILITY AND IT IS DELIBERATELY NOT ALL OF THEM.
+// Issue #442 read each vendor's own reference page, and only Twitch's answer
+// survives contact with what polyemesis needs:
 //
 //	TWITCH   supported, and the vendor's own device-flow example requests
 //	         channel:manage:broadcast -- the scope this package already asks
@@ -40,9 +40,35 @@ package oauth
 //	         nothing else; there is no device authorization endpoint and no
 //	         urn:ietf:params:oauth:grant-type:device_code.
 //
+//	VIMEO    DOCUMENTED AND NOT IMPLEMENTED, which is a third answer and the
+//	         most interesting one on this list. Vimeo publishes the whole flow
+//	         -- POST /oauth/device for the code, POST /oauth/device/authorize to
+//	         poll -- and it is the one grant type here that would suit a box
+//	         with no reachable redirect URI. It is not built because of what the
+//	         POLL's error table does NOT contain. Vimeo's Table 17 lists exactly
+//	         two answers for that endpoint: 400 invalid_token ("The code is
+//	         invalid, the code has expired, or the code doesn't match the
+//	         device") and 400 user_rejected_connection. THERE IS NO DOCUMENTED
+//	         RESPONSE FOR "the operator has not typed the code yet" -- the
+//	         ordinary answer to nearly every poll, and the one this interface
+//	         requires a caller to tell apart from a dead code.
+//
+//	         Neither mapping is safe. Read invalid_token as pending and a code
+//	         that will never work is polled until it expires; read it as spent
+//	         and the flow aborts on the first poll, before the operator has
+//	         finished typing. Both are guesses about an authorization server,
+//	         which is the class of guess this package refuses to make -- see
+//	         Provider.PKCE for the same argument on the same platform.
+//
+//	         What would settle it: one run against a real Vimeo app, recording
+//	         verbatim what the poll answers between the device call and the
+//	         operator entering the code. That is a measurement, not a reading,
+//	         and it is the whole remaining cost.
+//
 // So DeviceFlower is discovered, never assumed. Resolve it with DeviceFor (or
-// Set.DeviceFor); "this platform has no device flow" is the answer for three of
-// the four and has to be handled once, exactly like TargetsFor and StatsFor.
+// Set.DeviceFor); "this platform has no device flow polyemesis can use" is the
+// answer for four of the five and has to be handled once, exactly like
+// TargetsFor and StatsFor.
 //
 // ON THE CLIENT STAYING CONFIDENTIAL. Twitch, verbatim, on public clients:
 // they "are only limited to the usage of device authorization grant flow to

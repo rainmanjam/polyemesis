@@ -377,6 +377,49 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     },
   },
   {
+    presetId: "vimeo",
+    name: "Vimeo Livestream",
+    connect: "vimeo",
+    /*  The first row in this tier since Kick left it, and the tier's own note
+     *  predicted the shape: a provider can ship SSO long before it exposes a
+     *  key endpoint. Vimeo signs in on any plan and hands over no key on any
+     *  plan, so "partial" is the accurate description rather than a
+     *  compromise. */
+    tier: "partial",
+    summary:
+      "Sign in with Vimeo and polyemesis reads which member the token belongs to and checks, at the moment you connect, whether your account can reach Vimeo's live API. The ingest URL and stream key are pasted from the live event: Vimeo issues them per event, and creating one is Enterprise-only.",
+    readFirst:
+      'Read this first: "our live API is available only to Vimeo Enterprise customers" — Vimeo\'s own words on its live API reference, read 2026-08-26. That is a commercial gate, not a permission: no scope, no reconnection and no app setting lifts it, and it applies to every live method Vimeo publishes (create an event, activate it, end it, read its ingest, its M3U8 playback and its thumbnails). Sign-in itself is open to any Vimeo plan, and polyemesis asks the live API whether YOUR account reaches it the moment you connect, so you find out then rather than mid-broadcast. Streaming to Vimeo works regardless — you paste the RTMPS URL and key from the event\'s setup panel, exactly as before. Vimeo is also deprecating one-time live events and recommends avoiding them, so create a recurring event.',
+    caps: {
+      sso: "yes",
+      streamKey: "manual",
+      /*  Every cell below renders as "Unverified" and not one of them means
+       *  what the legend says. Metadata and start/end were CONFIRMED, from
+       *  Vimeo's own live reference — they are unbuilt, not unchecked. None of
+       *  the four support values says "documented and unbuilt"; the X row above
+       *  records the same gap. Unknown is the least wrong because it is the
+       *  fail-open one: "no" would be a refusal Vimeo's reference contradicts,
+       *  and "yes" would be a promise no code keeps. */
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+      broadcastLifecycle: "unknown",
+    },
+    reasons: {
+      sso: "OAuth 2.0 authorization code against api.vimeo.com, over the public and private scopes. Vimeo can also verify your client ID and secret before you connect anything, so a typo is caught on the credentials page. PKCE is not documented for Vimeo and is therefore not sent — an authorization server that validates its query string strictly refuses an unknown parameter outright.",
+      streamKey:
+        "Vimeo has no permanent stream key: the ingest URL and key belong to a live event, and creating one is behind the Enterprise gate. So this is a paste, from the event's setup panel. polyemesis asks the live API which reason applies to your account and says so rather than assuming.",
+      metadata:
+        'Vimeo publishes "Update an event", and it is one of the methods the Enterprise gate covers. Nothing here calls it, so this is not built — but it is not unknown either, and the Unverified label overstates the doubt.',
+      broadcastLifecycle:
+        'Vimeo publishes "Activate an event" and "End an event", so the lifecycle polyemesis models maps cleanly onto it. Both are Enterprise-only and neither is wired up, so nothing here starts or ends a Vimeo broadcast today. Note also that Vimeo is deprecating one-time live events and recommends avoiding them; anything built here should target recurring events.',
+      viewerStats:
+        "Vimeo publishes a VPaaS viewer analytics EXPORT on live events, which is not the same thing as a live concurrent count, and it sits behind the same Enterprise gate. Whether a live count is readable at all is genuinely unchecked, so this cell means what the legend says.",
+    },
+  },
+  {
     presetId: "x",
     name: "X (Twitter) Live",
     tier: "manual",
@@ -436,12 +479,6 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     "Odysee",
     "Paste your ingest URL and stream key from Odysee. Streaming works; there is no integration to connect.",
     "Odysee's chat is the LBRY comment server, and both comments.odysee.com and comments.lbry.com answered 502 when last checked. A 502 is an outage rather than a removal, so this is unverified rather than unsupported -- but there is nothing to build against while it stays that way.",
-  ),
-  manualUnverified(
-    "vimeo",
-    "Vimeo Livestream",
-    "Paste your ingest URL and stream key from Vimeo. Streaming works; there is no integration to connect.",
-    "api.vimeo.com is live and answering. Vimeo's live event chat exists on paid plans, so what is reachable depends on the account's tier rather than on registration alone -- which is why this is unverified rather than a yes or a no.",
   ),
   manualUnverified(
     "dailymotion",
