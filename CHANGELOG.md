@@ -24,7 +24,7 @@ its first tagged release.
   overwrote unconditionally, which for a platform like this turned a working
   destination into "an RTMP URL is required".
 
-## [0.7.0] — unreleased
+## [0.7.0] — 2026-08-26
 
 ### Upgrading
 - **TLS now serves on :443 rather than :8080 when a certificate is configured.**
