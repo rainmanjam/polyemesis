@@ -8,21 +8,7 @@ its first tagged release.
 
 ## [Unreleased]
 
-### Added
-- **Trovo signs in.** OAuth 2.0 authorization code (no PKCE — Trovo documents
-  none), the **stream key** over `channel_details_self`, title and category
-  push over `channel_update_self`, and the live viewer count off the same
-  channel response the key comes from. Trovo publishes no broadcast object at
-  all, so start/end is *Not possible* there exactly as on Twitch and Kick.
-  Chat and moderation are documented and deliberately not built yet; their
-  scopes are not requested until they are.
-- **A platform may now supply the stream key without an ingest URL.** Trovo
-  issues its ingest hostname per region and publishes it nowhere in its API, so
-  the server URL is copied out of the creator dashboard once. `Refresh stream
-  key` keeps whatever URL the destination already had rather than blanking it,
-  and says which field to go and fetch when there is none — previously it
-  overwrote unconditionally, which for a platform like this turned a working
-  destination into "an RTMP URL is required".
+_Nothing yet._
 
 ## [0.7.0] — 2026-08-27
 
@@ -38,6 +24,53 @@ its first tagged release.
   screen to say why. Open 443, or set the listen address back explicitly.
 
 ### Fixed
+- **Stopping one destination had no confirmation, and the button could invert
+  under the cursor.** It ends a live broadcast that cannot be resumed, and it
+  had less protection than either neighbour: bulk stop-all requires a
+  server-side confirmation and delete requires typing the name. Stop is now
+  held briefly with a visible Undo — a confirmation dialog in front of a
+  frequent deliberate action is trained away within a day, after which it costs
+  a click and protects nothing. Separately, the button swaps between Start and
+  Stop in place on a status repaint that arrives every two seconds, so a click
+  aimed at Start could land on Stop; a click is refused for a moment after the
+  action changes, and says why. (#506)
+- **Clips and the loudness monitor were broken on any multi-programme install.**
+  Four routes scoped inside the handler rather than at the router, which a
+  survey of the router's middleware could not see. The meters page's "NOT
+  UPDATING" was a staleness counter reporting refused reads, not an analyser
+  that would not start. (#606)
+- **A model spend ceiling was refilled every time settings were saved.** The
+  hourly counter lived on an object that `ApplyAutomod` rebuilds on every
+  settings save and on the API-key write, so the only bound on model spend was
+  reset by the reflex of tweaking a setting mid-incident — which is when
+  somebody is least likely to be watching the bill. `CallsThisHour` reset with
+  it, so the evidence went at the same moment as the limit. The budget now
+  outlives the configuration. (#502)
+- **The automod confidence floor was copied without a guard.** A stored `0` —
+  which is also what an unset field arrives as — removed the floor so every
+  model opinion acted; a stored `80`, from reading the 0..1 scale as a
+  percentage, sat above every verdict the model can return and silently retired
+  the checker. Neither said which. Values outside the usable range are now
+  refused at save time and cannot reach the checker. (#503)
+- **One bad automod regex silently disarmed every pattern rule.** (#608)
+- **Loudness readings outlived the audio they measured.** (#609)
+- **A stream key on a non-RTMP destination was stored, never sent, and
+  unreachable.** (#610)
+- **A destination could publish while nothing downstream of it was running.**
+  The path taken when the ingest probe lands started the destinations and
+  reconciled none of the things that consume them — the meters, the recorder,
+  the preview, the clip buffer, the captions and the loudness analyser all
+  stayed on the layout from before the probe. (#612)
+- **Per-programme lanes left a large empty column.** Lanes carry their own
+  preview, so the page correctly stops drawing the one at the top — but nothing
+  replaced it, leaving roughly four hundred pixels of empty page directly under
+  the card an operator looks at first. The side cards now sit beside the ingest
+  card instead of stacked, which removes the gap and moves the destination list
+  up the page. (#614)
+- **Five figures on the destination card were never translatable.** Bitrate,
+  Uptime, Restarts, Dropped and Speed were hardcoded English. They now have
+  keys, translated in all fourteen locales. (#615)
+
 - **A scheduled broadcast could silently fail to go on air on a multi-programme
   install.** `schedules` carries no `source_id` — a timetable is a property of
   the box — but every engine ran its own `scheduler.Runner` over that one table.
@@ -84,6 +117,18 @@ changelog-freshness.yml alarms if a dated heading ever again sits this long
 with no matching tag. -->
 
 ### Security
+- **Alert rules had no SSRF guard, and the test button was a port-scan oracle.**
+  A rule's webhook URL was fetched without restriction, so an operator-supplied
+  endpoint could reach link-local metadata services and private ranges from
+  inside the network the server runs in, and the test button's timing and error
+  text distinguished an open port from a closed one. (#607)
+- **`golang.org/x/crypto/openpgp` is now pinned out of the build.** The package
+  is unmaintained with no upstream fix (GO-2026-5932). It is not reachable from
+  this code and the module edge is not removable — `x/crypto/acme` and
+  `nacl/secretbox` are both genuinely used — so the package boundary is held
+  deliberately by a test rather than left as a property of today's imports.
+  (#508)
+
 - **Two sources could share a publish token, and an encoder would land in
   whichever one the lookup happened to return.** `sources.token` had no unique
   constraint and RTMP's target map is last-writer-wins, so a duplicate admitted a
@@ -589,6 +634,52 @@ with no matching tag. -->
   works.
 
 ### Added
+- **Trovo signs in.** OAuth 2.0 authorization code (no PKCE — Trovo documents
+  none), the **stream key** over `channel_details_self`, title and category
+  push over `channel_update_self`, and the live viewer count off the same
+  channel response the key comes from. Trovo publishes no broadcast object at
+  all, so start/end is *Not possible* there exactly as on Twitch and Kick.
+  Chat and moderation are documented and deliberately not built yet; their
+  scopes are not requested until they are.
+- **A platform may now supply the stream key without an ingest URL.** Trovo
+  issues its ingest hostname per region and publishes it nowhere in its API, so
+  the server URL is copied out of the creator dashboard once. `Refresh stream
+  key` keeps whatever URL the destination already had rather than blanking it,
+  and says which field to go and fetch when there is none — previously it
+  overwrote unconditionally, which for a platform like this turned a working
+  destination into "an RTMP URL is required".
+- **Every figure on every screen now says what it means.** Sixty-eight readings
+  across twelve pages named a quantity and nothing else: `Speed 2.17x`,
+  `Deviation — LU`, `Relay drops`, `PID`. Each now carries an explanation on
+  hover — what it measures, and what a bad value would look like. It is not a
+  convention that could be forgotten next time: a figure without an
+  explanation no longer compiles.
+- **The audio chips on a destination card name their tracks.** Six identical
+  numbered squares said which tracks a platform receives and nothing about what
+  those tracks are, so checking that the podcast feed carries the mic and not
+  the music meant holding the routing editor's ordering in your head. They now
+  read `Track 3 (Commentary) is included`, using the editor's own names.
+  Excluded chips are named too — the question is usually "why is the music
+  missing?". On a multi-programme install a card whose programme is not the
+  selected one keeps the plain wording rather than borrowing another show's
+  names.
+- **Icon-only buttons and status dots answer on hover.** Every icon button
+  already told a screen reader what it does and told a mouse user nothing;
+  sixty-two of them now say the same sentence to both. The status dot carried
+  its meaning in colour and shape alone — readable only if you already knew the
+  vocabulary, and invisible to a screen reader — and now names its state.
+- **The mix matrix says which track and which output each cell is.** The grid
+  described every cell for a screen reader and showed everyone else an
+  unlabelled box of digits, in a table whose row and column headers scroll out
+  of view. Cells name the track by name where the ingest provides one.
+- **The dashboard says when a disconnect would end the broadcast.** Failover is
+  the device that prevents the one unrecoverable failure here — a completed
+  YouTube broadcast cannot return to live — and it is off by default for good
+  reasons that do not include "nobody should find out it exists". Once a
+  programme has an enabled destination and failover is off, the destination
+  list says so, and links to the setting. It clears itself when the setting
+  changes rather than offering a dismiss button, so what is on screen is always
+  the current exposure. (#512)
 - **A lane per programme, so position says which is which.** Headings put a
   programme's name above its destinations but left its preview elsewhere on the
   page, so answering "is THIS one on air, and where is it going?" meant reading
