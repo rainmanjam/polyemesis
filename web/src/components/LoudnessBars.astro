@@ -27,9 +27,9 @@ const FLOOR = -40; // dBFS at which a bar reads empty
  * than a two-track destination, which is impossible for a superset and is
  * exactly the arithmetic a broadcast engineer checks first. */
 const DESTS = [
-  { name: "YouTube", lufs: -15.6, tracks: "01 + 02 + 03", tone: "live" },
-  { name: "Twitch", lufs: -17.0, tracks: "01 + 03", tone: "live" },
-  { name: "Podcast", lufs: -21.9, tracks: "01", tone: "meter" },
+  { name: "YouTube", lufs: -12.6, tracks: "01 + 02 + 03", tone: "live" },
+  { name: "Twitch", lufs: -14.0, tracks: "01 + 03", tone: "live" },
+  { name: "Podcast", lufs: -18.9, tracks: "01", tone: "meter" },
 ] as const;
 
 const pct = (l: number) => Math.max(0, Math.min(100, ((l - FLOOR) / -FLOOR) * 100));

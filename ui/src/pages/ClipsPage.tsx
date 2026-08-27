@@ -106,12 +106,17 @@ export function ClipsPage() {
           if (!quiet) toast.error(errText(err, t("clips.couldNotLoadClips")));
         })
         .finally(() => setLoading(false)),
-    [t],
+    // programme, because listClips is scoped and this callback closes over it.
+    // Omitted, it froze at the mount value -- null -- and every poll went out
+    // unscoped and took a 400 on any install with two programmes. See the same
+    // mistake, and the same fix, in MetersPage and MonitoringPage.
+    [t, programme],
   );
 
   useEffect(() => {
+    if (!programmeKnown) return;
     void load();
-  }, [load, t]);
+  }, [load, t, programmeKnown]);
 
   // The buffer fills in real time and its depth is the only thing that says
   // whether a clip taken right now would be the full length asked for.

@@ -420,7 +420,7 @@ function ExpertPanel() {
 export function MonitoringPage() {
   const stateLabel = useStateLabel();
   const t = useT();
-  const { system, bitrate, logs, status, clearLogs, programme } = useLiveData();
+  const { system, bitrate, logs, status, clearLogs, programme, programmeKnown } = useLiveData();
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [history, setHistory] = useState<LogLine[]>([]);
   const [filter, setFilter] = useState("all");
@@ -440,6 +440,7 @@ export function MonitoringPage() {
   // and reads as current.
   const procFreshness = useStaleTracker();
   useEffect(() => {
+    if (!programmeKnown) return;
     const load = () =>
       api
         .listProcesses(programme)
@@ -451,8 +452,13 @@ export function MonitoringPage() {
     load();
     const t = window.setInterval(load, 5000);
     return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // programme, because listProcesses is scoped. An empty array froze it at
+    // the mount value -- null -- so every poll went out unscoped and this whole
+    // page was dead on any install with two programmes. Gated on
+    // programmeKnown rather than on `programme != null`: null means either "no
+    // sources", which the route accepts, or "not resolved yet", which it
+    // refuses, and only the second is a bug.
+  }, [programme, programmeKnown]);
 
   // The socket only carries lines produced after it connected, so a page opened
   // mid-session would start blank. Drain each process's ring buffer once to
@@ -460,6 +466,7 @@ export function MonitoringPage() {
   // its own listProcesses rather than waiting on the poll above, so it stays a
   // genuine one-shot instead of re-firing on every poll result.
   useEffect(() => {
+    if (!programmeKnown) return;
     let cancelled = false;
     void api
       .listProcesses(programme)
@@ -484,7 +491,10 @@ export function MonitoringPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // programme, for the reason the poll above gives. This is a one-shot
+    // drain, so a frozen null meant the backlog was fetched unscoped once
+    // and the panel opened empty with nothing saying why.
+  }, [programme, programmeKnown]);
 
   const merged = useMemo(
     () => (history.length === 0 ? logs : [...history, ...logs]),

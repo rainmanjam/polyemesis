@@ -139,6 +139,7 @@ export function MetersPage() {
   // Polled rather than pushed: the analyser publishes once a second, and a
   // second socket subscription for one card is not worth the wiring.
   useEffect(() => {
+    if (!programmeKnown) return;
     const read = () =>
       autoApi
         .loudness<LoudnessView>(programme)
@@ -151,8 +152,22 @@ export function MetersPage() {
     void read();
     const t = window.setInterval(read, 2000);
     return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // RE-RUN WHEN THE PROGRAMME RESOLVES, and wait until it has.
+    //
+    // The dependency array was empty, which was right while this call took no
+    // arguments. The moment `programme` was threaded in (#606) the poll closed
+    // over it AT MOUNT, when it is still null -- so on a two-programme install
+    // every request went out unscoped, took a 400, and the staleness counter
+    // climbed for ever. The page then showed NOT UPDATING beside a perfectly
+    // healthy analyser, which is how #612 stayed hidden: the badge counts
+    // failed polls, and the polls were failing for a reason that had nothing
+    // to do with what was being measured.
+    //
+    // Gated on programmeKnown, not on `programme != null`: null means EITHER
+    // "no sources exist", which the route accepts, OR "not resolved yet",
+    // which it refuses. Only the second is a bug, and only this tells them
+    // apart.
+  }, [programme, programmeKnown]);
 
   const reports = loudness?.reports ?? [];
 
