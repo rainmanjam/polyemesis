@@ -315,22 +315,34 @@ So the state is **recorded**, not merely logged:
   before it transcodes anything, so an item that reaches it by any other route
   is caught there instead.
 
-The remedy is to upload the file again on a connection that stays up. There is
-no way to mark a stored file as checked without re-uploading it, deliberately:
-the server would be recording a pass it did not perform. A job that re-runs the
-check against a file already on disk is issue #202.
+**The remedy is the "Check again" button** on the row, in the Library's media
+list. It queues a `media.verify` job that re-runs the same inspection against
+the copy already on disk — nothing is uploaded, and no bytes have to be found
+again. The request returns as soon as the job is queued, so the row does not
+change on the press; the verdict appears on the next refresh, and the job is
+listed on the Jobs page like any other. Re-uploading works too, but it is not
+required, and for a file that is the operator's only copy it may not be
+possible.
 
-**Nothing writes `refused` yet.** The upload handler still answers `400` and
-discards the staged bytes, which is right — nothing references a file that was
-never published. The state exists because anything that inspects an upload
-*later* cannot do that: the file is published by then, `DELETE` answers `409`
-while a playlist item names it, so the refusal has to be recorded — and until
-this state existed the only way to record it was as `unverified`, which every
-consumer answers by telling you to upload the same bytes again. The re-verify
-job of #202 is the first writer.
+A verdict is never invented: the button re-reads the file, so what it records is
+a check that was actually performed. The button is offered only where a re-check
+can change the answer — a file already `refused` has had a verdict, and a second
+identical read is not a remedy.
 
-One thing this does **not** cover: an unchecked file's pull URL still works, so
-pasting it into a pull source bypasses all of the above. That is issue #201.
+**Both outcomes are written.** The re-verify job writes `verified` when the file
+passes and `refused` when it does not, so `refused` is a state you will see on a
+stored file rather than a shape only the upload handler could produce. The
+upload handler still answers `400` and discards the staged bytes for a file that
+never landed, which is right — nothing references a file that was never
+published.
+
+One thing to know about pull sources: an unchecked file's pull URL is **gated**.
+Introducing a pull source that names an upload carrying "nobody read this" is
+refused by the settings API itself, not merely warned about in the UI — which
+matters because a pull source configured by automation from a listing never sees
+a row. What remains open under issue #201 is the bigger fix: pushing the format
+allowlist into the engine's own file-input path, so there is one gate instead of
+a per-consumer list.
 
 **Every one of them also writes a WARN line naming the upload:**
 
@@ -368,7 +380,7 @@ was never there. Check the source's probed layout on the **Sources** page agains
 the destination's selection.
 
 For a **video-only source**, this is expected until you turn on the silence tier
-(**Settings → Synthetic**), which synthesises a silent stereo track so
+(**Settings → Synthetic audio**), which synthesises a silent stereo track so
 destinations have something to select.
 
 ### It writes a file once and then never again

@@ -23,6 +23,19 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
       transcription is the one optional extra that wants a second binary,
       whisper.cpp.
     </p>
+    {/* THE TWO DOCUMENTS THE README SENDS PEOPLE TO, at the top of the page
+        rather than buried under four install cards. Choosing an install method
+        is the smallest decision on this page; whether you can operate the thing
+        afterwards is the real one, and these are what answer it. Both render
+        from docs/ at build time, so neither can drift from the software. */}
+    <p class="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+      <a href="/docs/quickstart" class="text-primary-bright hover:underline"
+        >Quickstart — first stream in about five minutes →</a
+      >
+      <a href="/docs/install" class="text-primary-bright hover:underline"
+        >Install guide — per-platform, service files, GPU images →</a
+      >
+    </p>
   </section>
 
   {/* md: as well as lg:, because the tablet band had nothing.
@@ -47,20 +60,20 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
       </p>
       <CodeBlock
         label="docker"
-        code={`docker run -d \\
-  --name polyemesis \\
-  -p 8080:8080 \\
-  -p 6000:6000/udp \\
+        code={`docker run -d --name polyemesis \\
+  -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
   -v polyemesis-data:/data \\
-  rainmanjam/polyemesis`}
+  rainmanjam/polyemesis:latest`}
       />
       <p class="mt-3 font-mono text-[11px] text-subtle">
-        UI on :8080 · SRT ingest on :6000/udp
+        UI on :8080 · SRT ingest on :6000/udp · RTMP ingest on :1935
       </p>
       <p class="mt-2 text-[11px] leading-relaxed text-subtle">
-        Add <span class="font-mono">-p 1935:1935</span> if you will use the RTMP
-        fallback. A container's port mappings are fixed when it is created, so
-        adding it now is cheaper than recreating the container later.
+        Note the <span class="font-mono">/udp</span> on port 6000. SRT is UDP,
+        and omitting the suffix is the classic reason an ingest silently
+        receives nothing. 1935 is published up front because a container's port
+        mappings are fixed when it is created — an RTMP source added later has
+        nothing listening for it, and says so nowhere.
       </p>
     </div>
 
@@ -115,6 +128,37 @@ rainmanjam/polyemesis/main/scripts/install.sh \\
         service operation: the service wrapper is unexercised and recording can
         truncate on service stop. Run it on Linux for production, and on Windows
         or macOS to build and evaluate.
+      </p>
+    </div>
+
+    {/* BUILD FROM A CLONE, which the site did not offer at all — the static
+        binary card sent a reader to the releases page and stopped. This is a
+        single static Go binary with `make build` as its own README's second
+        install path, and the audience that self-hosts a broadcast server is the
+        audience most likely to want to read the source it is running first.
+
+        The block is README.md's "Try it" verbatim, comment included. A build
+        recipe that is nearly right is worse than none: `make build` is what
+        embeds the UI, and a reader who runs `go build` instead gets a binary
+        that starts and serves nothing. */}
+    <div class="card p-6" data-reveal>
+      <h2 class="text-lg font-medium">Build from a clone</h2>
+      <p class="mt-2 text-sm leading-relaxed text-muted">
+        Go 1.26.5+, Node 20.19+/22.12+ and FFmpeg. The UI is built and embedded
+        by the same target, so there is one artefact at the end of it.
+      </p>
+      <CodeBlock
+        label="make"
+        code={`git clone https://github.com/rainmanjam/polyemesis
+cd polyemesis
+make build            # builds the UI, embeds it, produces ./polyemesis
+./polyemesis -data ./data`}
+      />
+      <p class="mt-3 text-[11px] leading-relaxed text-subtle">
+        <span class="font-mono">make check</span> runs go vet, the Go test suite
+        and the UI typecheck; <span class="font-mono">make help</span> lists
+        every target. The contributing guide states the constraints that are not
+        negotiable, so you find out before writing rather than after.
       </p>
     </div>
 
@@ -175,7 +219,11 @@ rainmanjam/polyemesis/main/scripts/install.sh \\
       ],
     })} />
 
-    <div class="card p-6" data-reveal>
+    {/* SPANS BOTH COLUMNS, and not only to avoid the orphan a fifth card would
+        leave on the last row. The four above are alternatives — pick one — and
+        this one is what everybody does next whichever they picked, so the card
+        that reads differently is the one that IS different. */}
+    <div class="card p-6 md:col-span-2" data-reveal>
       <h2 class="text-lg font-medium">Then point OBS at it</h2>
       <ol class="mt-3 space-y-2.5 text-sm leading-relaxed text-muted">
         <li>

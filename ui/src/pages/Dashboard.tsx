@@ -18,6 +18,7 @@ import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { DestinationCard } from "@/components/DestinationCard";
 import { DestinationHoldNote } from "@/components/DestinationHoldNote";
 import { DestinationDialog } from "@/components/DestinationDialog";
+import { OnAirBar } from "@/components/OnAirBar";
 import { ChatPanel } from "@/components/ChatPanel";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
@@ -989,6 +990,11 @@ export function Dashboard() {
               <DestinationCard
                 key={d.id}
                 dest={d}
+                /* The anchor the attention list at the top of the page sends the
+                 * operator to. Same id whichever branch below draws the card —
+                 * lane, grid or orphan section — because the summary has no way
+                 * to know which one a given destination landed in. */
+                domId={`dest-${d.id}`}
                 busy={busyId === d.id}
                 canMoveEarlier={i > 0}
                 canMoveLater={i < destinations.length - 1}
@@ -1135,6 +1141,12 @@ export function Dashboard() {
           </Button>
         }
       />
+
+      {/* TIER ONE, above everything this page used to open with. What is on
+          air, then what is wrong; the preview, the ingest card and the
+          destination grid below are the detail behind those two answers rather
+          than a flat inventory of the install. See components/OnAirBar.tsx. */}
+      <OnAirBar status={status} />
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
         {/* ---------- preview + ingest ---------- */}
@@ -1451,7 +1463,7 @@ export function Dashboard() {
                 </section>
               ))
             ) : (
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="dense-grid grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {destinations.map((d, i) => renderDestination(d, i))}
               </div>
             )}
@@ -1462,7 +1474,7 @@ export function Dashboard() {
                  still be running, and this is the only screen that lists it. */
               <section className="flex flex-col gap-2">
                 <p className="text-[11px] text-warn">{t("dash.destOrphaned")}</p>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="dense-grid grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {lanes.orphans.map((d) => renderDestination(d, destinations.indexOf(d)))}
                 </div>
               </section>

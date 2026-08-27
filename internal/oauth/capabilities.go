@@ -90,9 +90,11 @@ const (
 	TierIntegrated Tier = "integrated"
 	// TierPartial: sign in for everything except the key, which is pasted.
 	// Kick was the reason this tier existed; it fetches its key now and moved to
-	// integrated. No platform is partial today. The tier is kept because the
-	// shape recurs -- a provider can ship SSO long before it exposes a key
-	// endpoint, which is exactly the state Kick was in.
+	// integrated. The tier was kept empty on the argument that the shape recurs
+	// -- "a provider can ship SSO long before it exposes a key endpoint, which
+	// is exactly the state Kick was in" -- and Vimeo is the recurrence. Vimeo
+	// signs in on every plan and hands over a key on none of them, because its
+	// key belongs to a live event and every live method is Enterprise-only.
 	TierPartial Tier = "partial"
 	// TierManual: paste a URL and a key; there is no integration to connect.
 	TierManual Tier = "manual"
@@ -353,6 +355,119 @@ var platformCapabilities = []PlatformCapability{
 		},
 	},
 	{
+		PresetID: "trovo", Name: "Trovo", Platform: db.PlatformTrovo,
+		// INTEGRATED even though one field of the ingest is still typed. The
+		// partial tier means the KEY is pasted, and it is not: it is fetched
+		// over channel_details_self like YouTube's and Twitch's. What Trovo
+		// does not publish is the ingest HOSTNAME, which is a different field
+		// and a one-time copy rather than a per-broadcast chore.
+		Tier:    TierIntegrated,
+		Summary: "Sign in with Trovo and polyemesis fetches the stream key, sets the title and category at go-live, and reads the live viewer count. The server URL is the one field you copy across yourself, once.",
+		// This row was eight cells of Unverified with a note saying the API was
+		// answering and nothing had been built against it. It has been built
+		// against now, from Trovo's own reference read 2026-08-26 and recorded
+		// in docs/evidence/vimeo-trovo-oauth-2026-08-26.md.
+		ReadFirst: "Trovo does not hand out the client secret from its developer portal. Its documentation says, verbatim, “If you don't have the Client Secret, please contact: developer@trovo.live” — and the authorization-code flow cannot complete without one, because Trovo documents no PKCE. Ask for it before the day you need it. Nothing else here is gated: registration is open and every capability below is in the published reference.",
+		HelpURL:   "https://developer.trovo.live/docs/APIs.html",
+		Caps: map[Capability]Support{
+			CapSSO:       SupportYes,
+			CapStreamKey: SupportYes,
+			CapMetadata:  SupportYes,
+			// DOCUMENTED AND UNBUILT, which is the same expressive gap the X row
+			// records: none of the four Support values says "the platform
+			// publishes this and polyemesis has not written it yet". Unverified
+			// is the least wrong — it renders as an invitation to try rather
+			// than as a refusal — and the Reasons below name the endpoint and
+			// the scope so the next person starts from evidence rather than
+			// from a search. Do NOT read these three as absent APIs.
+			CapChatRead:    SupportUnknown,
+			CapChatSend:    SupportUnknown,
+			CapModeration:  SupportUnknown,
+			CapViewerStats: SupportYes,
+			// Checked, not assumed: the whole APIs reference was read end to end
+			// and there is no broadcast object and no transition call anywhere
+			// in it. Same answer as Twitch and Kick, reached the same way.
+			CapBroadcastLifecycle: SupportNo,
+		},
+		Reasons: map[Capability]string{
+			CapSSO: "OAuth 2.0 authorization code with a client_secret. Trovo documents no PKCE, so polyemesis does not send one — and the secret arrives by email from developer@trovo.live rather than from the portal.",
+			CapStreamKey: "Fetched from GET /openplatform/channel over the channel_details_self scope. " +
+				"THE SERVER URL IS NOT: Trovo issues the ingest hostname per region and publishes it " +
+				"nowhere in its API, so that one field is copied from the creator dashboard once and " +
+				"refreshing the key afterwards leaves it alone. An account connected before this " +
+				"integration existed has to be reconnected once.",
+			CapMetadata: "Title and category, over POST /openplatform/channels/update with channel_update_self. " +
+				"Trovo's channel update takes no description and has no tags, so those are reported as " +
+				"skipped rather than silently dropped.",
+			CapChatRead:           "Trovo delivers chat over a websocket (developer.trovo.live's Chat Service doc) rather than by poll or webhook. Real, documented, and not wired up here yet.",
+			CapChatSend:           "POST /openplatform/chat/send, over chat_send_self plus send_to_my_channel. Not wired up here yet, and the scopes are deliberately not requested until it is — asking for them early would put permissions on the consent screen that nothing uses.",
+			CapModeration:         "POST /openplatform/channels/command with manage_messages, which performs Trovo's own chat commands — “ban xxx”, “mod @xxx”, with no leading slash. Not wired up here yet; the scope is not requested until it is.",
+			CapViewerStats:        "Live state and viewer count from the same channel read the stream key comes from, so it costs no extra call and no extra scope. It reads current_viewers rather than Trovo's dedicated viewers endpoint on purpose: that endpoint's total is documented as the channel's “total login users”, which counts signed-in viewers only and would under-report an audience without saying so. Offline, polyemesis reports no count rather than zero.",
+			CapBroadcastLifecycle: "Trovo has no broadcast resource: nothing creates, starts or ends one, so the stream itself is the trigger and liveness can only be observed. Established by reading the whole APIs reference, not by failing to find a page.",
+		},
+	},
+	{
+		PresetID: "vimeo", Name: "Vimeo Livestream", Platform: db.PlatformVimeo,
+		// THE FIRST ROW IN THIS TIER SINCE KICK LEFT IT, and the tier's own
+		// comment predicted exactly this shape: "a provider can ship SSO long
+		// before it exposes a key endpoint". Vimeo signs in on any plan and
+		// hands over no key on any plan, so partial is not a compromise between
+		// integrated and manual -- it is the accurate description.
+		Tier:    TierPartial,
+		Summary: "Sign in with Vimeo and polyemesis reads which member the token belongs to and checks, at the moment you connect, whether your account can reach Vimeo's live API. The ingest URL and stream key are pasted from the live event: Vimeo issues them per event, and creating one is Enterprise-only.",
+		// THE WHOLE ROW HANGS OFF ONE SENTENCE OF VIMEO'S, so it is quoted
+		// first and quoted exactly. An operator who reads this before setting
+		// anything up has been told the only thing that decides whether the
+		// rest is worth their evening -- which is what ReadFirst is for, and
+		// why Facebook's App Review note lives in the same field.
+		ReadFirst: "Read this first: \"our live API is available only to Vimeo Enterprise customers\" — Vimeo's own words on its live API reference, read 2026-08-26. That is a commercial gate, not a permission: no scope, no reconnection and no app setting lifts it, and it applies to every live method Vimeo publishes (create an event, activate it, end it, read its ingest, its M3U8 playback and its thumbnails). Sign-in itself is open to any Vimeo plan, and polyemesis asks the live API whether YOUR account reaches it the moment you connect, so you find out then rather than mid-broadcast. Streaming to Vimeo works regardless — you paste the RTMPS URL and key from the event's setup panel, exactly as before. Vimeo is also deprecating one-time live events and recommends avoiding them, so create a recurring event.",
+		HelpURL:   "https://developer.vimeo.com/api/reference/live",
+		Caps: map[Capability]Support{
+			CapSSO: SupportYes,
+			// By hand, and it stays by hand even for an Enterprise account
+			// today: polyemesis does not create Vimeo events, and a key belongs
+			// to an event. Ingest says which of those two reasons applies to
+			// the account in front of it rather than assuming the common one.
+			CapStreamKey: SupportManual,
+			// EVERY CELL BELOW IS "Unverified" AND NOT ONE OF THEM MEANS WHAT
+			// THE LEGEND SAYS IT MEANS, which is a finding about the vocabulary
+			// rather than about Vimeo.
+			//
+			// SupportUnknown renders as "Unverified": "Not built yet, and the
+			// platform's API was not confirmed either way." The first half is
+			// true. The second is FALSE for metadata and for start/end -- both
+			// were confirmed, from Vimeo's own live reference, and the Reasons
+			// entries below name the methods. The X row above records the same
+			// gap in its own words ("None of the four Support values says 'the
+			// platform documents it and we have not built it'"); Vimeo adds a
+			// second axis to it, because even a built lifecycle would be
+			// unreachable for the median reader of this table.
+			//
+			// SupportUnknown is still the least wrong of the four. "Works"
+			// would be a promise no code keeps; "By hand" describes a step the
+			// operator can take, and there is none; "Not possible" would be a
+			// refusal contradicted by Vimeo's own published reference, and
+			// this file's sourcing rule makes a wrong SupportNo the most
+			// expensive mistake available here. Unknown is the fail-open one
+			// and it invites the operator to try. The accompanying report
+			// proposes the fifth value rather than forcing one of the four to
+			// stretch.
+			CapMetadata:           SupportUnknown,
+			CapChatRead:           SupportUnknown,
+			CapChatSend:           SupportUnknown,
+			CapModeration:         SupportUnknown,
+			CapViewerStats:        SupportUnknown,
+			CapBroadcastLifecycle: SupportUnknown,
+		},
+		Reasons: map[Capability]string{
+			CapSSO:                "OAuth 2.0 authorization code against api.vimeo.com, over the public and private scopes. Vimeo can also verify your client ID and secret before you connect anything, so a typo is caught on the credentials page. PKCE is not documented for Vimeo and is therefore not sent — an authorization server that validates its query string strictly refuses an unknown parameter outright.",
+			CapStreamKey:          "Vimeo has no permanent stream key: the ingest URL and key belong to a live event, and creating one is behind the Enterprise gate. So this is a paste, from the event's setup panel. polyemesis asks the live API which reason applies to your account and says so rather than assuming.",
+			CapMetadata:           "Vimeo publishes \"Update an event\", and it is one of the methods the Enterprise gate covers. Nothing here calls it, so this is not built — but it is not unknown either, and the Unverified label overstates the doubt.",
+			CapBroadcastLifecycle: "Vimeo publishes \"Activate an event\" and \"End an event\", so the lifecycle polyemesis models maps cleanly onto it. Both are Enterprise-only and neither is wired up, so nothing here starts or ends a Vimeo broadcast today. Note also that Vimeo is deprecating one-time live events and recommends avoiding them; anything built here should target recurring events.",
+			CapViewerStats:        "Vimeo publishes a VPaaS viewer analytics EXPORT on live events, which is not the same thing as a live concurrent count, and it sits behind the same Enterprise gate. Whether a live count is readable at all is genuinely unchecked, so this cell means what the legend says.",
+		},
+	},
+	{
 		PresetID: "x", Name: "X (Twitter) Live", Tier: TierManual,
 		Summary:   "Paste your ingest URL and stream key. X does publish a live-video API \u2014 broadcasts, chat and moderation \u2014 and polyemesis has not wired it up yet, so for now this is a paste-the-key destination that streams exactly as well as any other.",
 		ReadFirst: "X's live-video API is real but its access tier is not published. Every endpoint below is in X's own served OpenAPI spec, and no pricing or tier page names the Broadcasts family -- so whether your account can call them at all is a question only a live request answers. Get the stream key from X's producer tooling and paste it; everything else is automatic once you connect.",
@@ -478,19 +593,9 @@ var platformCapabilities = []PlatformCapability{
 		"DLive's developer portal at dev.dlive.tv no longer resolves in DNS, so its developer support appears to be inactive. Nothing about streaming to DLive depends on that — but do not go looking for an API key, because there is currently nowhere to get one.",
 	),
 	manualUnverified(
-		"trovo", "Trovo",
-		"Paste your ingest URL and stream key from the Trovo creator dashboard. Streaming works; there is no integration to connect.",
-		"Trovo publishes an open platform API and it is answering — a request to open-api.trovo.live/openplatform/chat/... returns a structured invalidHeader error rather than a 404, which is a live chat service refusing an unauthenticated caller. Nothing here has been built against it. Trovo has been reported elsewhere as shut down; that appears to be wrong, and this row says so rather than repeating it.",
-	),
-	manualUnverified(
 		"odysee", "Odysee",
 		"Paste your ingest URL and stream key from Odysee. Streaming works; there is no integration to connect.",
 		"Odysee's chat is the LBRY comment server, and both comments.odysee.com and comments.lbry.com answered 502 when last checked. A 502 is an outage rather than a removal, so this is unverified rather than unsupported -- but there is nothing to build against while it stays that way.",
-	),
-	manualUnverified(
-		"vimeo", "Vimeo Livestream",
-		"Paste your ingest URL and stream key from Vimeo. Streaming works; there is no integration to connect.",
-		"api.vimeo.com is live and answering. Vimeo's live event chat exists on paid plans, so what is reachable depends on the account's tier rather than on registration alone -- which is why this is unverified rather than a yes or a no.",
 	),
 	manualUnverified(
 		"dailymotion", "Dailymotion",

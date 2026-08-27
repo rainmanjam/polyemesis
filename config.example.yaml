@@ -112,3 +112,11 @@ ffmpeg:
 # that unknown keys are ignored, so it had been offering a switch that did
 # nothing. A config file that still carries it keeps loading. For multitrack
 # ingest today, use SRT.
+
+# The optional whisper.cpp CLI, used by the transcription jobs. Every field is
+# optional: leave the whole block out and polyemesis searches $PATH for
+# `whisper-cli` (or the older `main`), which is what a package-manager install
+# puts there. Set it only when the binary lives somewhere $PATH does not reach
+# -- a build in /opt, or a container that mounts it late.
+transcription:
+  binary: ""

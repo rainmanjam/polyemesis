@@ -615,7 +615,7 @@ internal/
                is the destination seam — planning, the restart signatures, and
                the primary/backup pair
   api/         chi router, REST handlers, WebSocket hub
-  web/         go:embed ui/dist + SPA fallback
+  web/         go:embed internal/web/dist + SPA fallback
 
   -- ingest and viewer-facing edges
   srtserver/   the one-port SRT ingest: one listener serving every source,

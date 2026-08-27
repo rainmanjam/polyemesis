@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "@/lib/api";
+import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/lib/currentProgramme";
 import { mergeStatusDestinations } from "@/lib/dashboardFacts";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
 import type {
@@ -41,22 +42,60 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
   const [frameError, setFrameError] = useState(false);
+  /* Which programme every request below names.
+   *
+   * NULL UNTIL THE SOURCE LIST LANDS, AND NOTHING WAITS FOR IT. An earlier
+   * version held the polls and the socket until this resolved, which looked
+   * careful and was not: a /sources that is slow, refused or never answered
+   * left the console permanently blank -- no status, no socket, no error --
+   * and the e2e suite caught it as "the chrome reports a healthy SRT ingest as
+   * down".
+   *
+   * Null is also the RIGHT answer for a single-source install, which the
+   * server accepts and which is the overwhelming majority. So the first poll
+   * goes out immediately naming nothing, and the effects below re-run when the
+   * programme resolves -- one extra round trip on a multi-source install,
+   * against never rendering at all. */
+  const [programme, setProgramme] = useState<number | null>(null);
+  /* Whether the programme question has been ANSWERED -- including the answer
+     "there is none", which is legitimate. See the effect below for why this is
+     a gate WITH A DEADLINE rather than either extreme. */
+  const [programmeKnown, setProgrammeKnown] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef(0);
-  const closedRef = useRef(false);
 
   const clearLogs = useCallback(() => setLogs([]), []);
 
   useEffect(() => {
-    closedRef.current = false;
+    // NOTHING UNNAMED GOES OUT. The REST polls below wait for the programme to
+    // resolve; so does this, for the same reason and one sharper. An unnamed
+    // socket is refused with a 400 on a multi-source install, and this socket
+    // is where every live value on every page comes from -- so the refusal is
+    // not one panel going quiet, it is the whole console. The deadline on the
+    // resolving effect is what keeps this from being a wait without end.
+    if (!programmeKnown) return;
+
+    // TORN DOWN IS A PROPERTY OF *THIS RUN*, NOT OF THE COMPONENT, and it was
+    // a ref reset to false at the top of every run -- which cleared the very
+    // flag the PREVIOUS run's still-pending `onclose` was about to read. That
+    // handler then nulled `wsRef` out from under the socket that had just
+    // replaced it and rescheduled `connect` from a closure still holding the
+    // old programme, backing off 1s, 2s, 4s, for the life of the page. A local
+    // binding is a CONTROL: a later run cannot reach it to clear it.
+    let cancelled = false;
     let reconnectTimer: number | undefined;
 
     const connect = () => {
-      if (closedRef.current) return;
+      if (cancelled) return;
 
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(`${proto}//${location.host}/api/v1/ws`);
+      // The socket names a programme for the same reason every poll does: the
+      // server refuses an unnamed one on a multi-source install, and this is
+      // the connection every screen renders from -- an unnamed one takes the
+      // whole console down rather than one panel.
+      const q = programme == null ? "" : `?source=${encodeURIComponent(String(programme))}`;
+      const ws = new WebSocket(`${proto}//${location.host}/api/v1/ws${q}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -126,6 +165,11 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       };
 
       ws.onclose = () => {
+        // A RUN THAT HAS BEEN TORN DOWN SAYS NOTHING. Its socket closing is
+        // expected and carries no news about the one that replaced it. Marking
+        // the console disconnected here, or clearing `wsRef`, describes the
+        // live socket using the fate of a dead one.
+        if (cancelled) return;
         setConnected(false);
         // THE FROZEN METERS. Every other value here is a description of
         // configuration or of a process, and holding the last one through a
@@ -137,7 +181,6 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         // sound. A CONTROL: there is no stale frame left to render as current.
         setLevels(null);
         wsRef.current = null;
-        if (closedRef.current) return;
         // Back off the same way the server's supervisor does, so a restarting
         // server does not get hammered by every open tab.
         const delay = Math.min(1000 * 2 ** retryRef.current, 15000);
@@ -151,17 +194,71 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
     connect();
 
     return () => {
-      closedRef.current = true;
+      cancelled = true;
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
       wsRef.current?.close();
+    };
+    // Re-opened when the programme resolves: the first render has none, and a
+    // socket opened without one would be answering for a programme the operator
+    // is not looking at for the life of the session.
+  }, [programmeKnown, programme]);
+
+  // WHICH PROGRAMME, and BOTH extremes were tried and were wrong.
+  //
+  // Holding every request until this resolved turned a slow or unanswered
+  // /sources into a console that rendered nothing at all -- no status, no
+  // socket, no error. Issuing them immediately with no programme named went the
+  // other way: the server refuses an unnamed programme-shaped route on a
+  // multi-source install, so every load logged 400s for /status, /source and
+  // /ws before the second attempt succeeded. The browser suite caught each in
+  // turn.
+  //
+  // So: a gate WITH A DEADLINE. Normally this resolves in one round trip and
+  // nothing is ever sent unnamed. If it does not resolve at all, the deadline
+  // releases the polls with the answer null -- which the server accepts on a
+  // single-source install, and which on a multi-source one produces the same
+  // 400 as before but only in the case where the alternative was a blank
+  // console forever.
+  useEffect(() => {
+    let live = true;
+    let cleanupTimer: number | undefined;
+    api
+      .listSources()
+      .then((rows) => {
+        if (!live) return;
+        const ids = rows.map((r) => r.id);
+        const picked = resolveProgramme(ids, rememberedProgramme());
+        setProgramme(picked);
+        rememberProgramme(picked);
+      })
+      .catch(() => {
+        // A console that will not render because it could not list sources is
+        // worse than one showing the install's only programme.
+        if (live) setProgramme(null);
+      })
+      .finally(() => {
+        if (live) setProgrammeKnown(true);
+      });
+
+    // THE DEADLINE. Two seconds is longer than any healthy /sources and shorter
+    // than an operator's patience with a blank screen. Without it a request
+    // that never settles holds every poll and the socket forever.
+    cleanupTimer = window.setTimeout(() => {
+      if (live) setProgrammeKnown(true);
+    }, 2000);
+
+    return () => {
+      live = false;
+      if (cleanupTimer !== undefined) window.clearTimeout(cleanupTimer);
     };
   }, []);
 
   // Seed from REST so the first paint is populated even if the socket is slow,
   // and so a browser that cannot open a WebSocket still shows something real.
   useEffect(() => {
-    api.status().then(setStatus).catch(() => {});
-    api.source().then(setSource).catch(() => {});
+    if (!programmeKnown) return;
+    api.status(programme).then(setStatus).catch(() => {});
+    api.source(programme).then(setSource).catch(() => {});
     api
       .stats()
       .then((s) => {
@@ -169,7 +266,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
         setBitrate(s.bitrate ?? []);
       })
       .catch(() => {});
-  }, []);
+  }, [programmeKnown, programme]);
 
   const value = useMemo<LiveData>(
     () => ({

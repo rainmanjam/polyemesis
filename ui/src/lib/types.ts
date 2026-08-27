@@ -224,7 +224,19 @@ export interface SourceInfo {
 }
 
 export type DestKind = "rtmp" | "srt" | "file";
-export type Platform = "custom" | "youtube" | "twitch" | "kick" | "facebook";
+/*  "rumble" is absent on purpose: its Platform value exists in Go for CHAT and
+ *  its destination preset deliberately does not carry it, so no destination row
+ *  ever arrives with it. "vimeo" IS here because its preset does carry it —
+ *  Vimeo signs in, and a saved Vimeo destination is stamped with the platform
+ *  even though its key is still pasted by hand. */
+export type Platform =
+  | "custom"
+  | "youtube"
+  | "twitch"
+  | "kick"
+  | "facebook"
+  | "trovo"
+  | "vimeo";
 
 export interface Destination {
   id: DestinationId;
@@ -2043,11 +2055,31 @@ export interface WsEvent {
 // internal/chat exactly; nothing here re-derives a fact the server already
 // stated, because two answers to "is YouTube connected" is one answer too many.
 
-/** The platforms the chat pane can show. Identical to `Platform` now that
- *  Facebook has a destination platform of its own, and kept as a separate name
- *  because chat and destinations gain platforms at different times — the next
- *  chat-only platform widens this without touching the destination picker. */
-export type ChatPlatform = Platform;
+/** The platforms the chat pane can show. An alias of `Platform`, kept as a
+ *  separate name because chat and destinations gain platforms at different
+ *  times — the next chat-only platform widens this without touching the
+ *  destination picker.
+ *
+ *  IT IS NOW WIDER THAN THE SET OF PLATFORMS WITH A CHAT ADAPTER, and the
+ *  alias is what makes that possible: "trovo" is a destination platform whose
+ *  chat is documented (a websocket) and unbuilt, so it is nameable here and no
+ *  message will ever arrive carrying it. Read this as the union a message
+ *  COULD be tagged with, not as a list of what works — the capability matrix
+ *  in lib/capabilities.ts is the answer to that, per platform and per column. */
+/** The platforms the chat pane can show. Kept as a separate name because chat
+ *  and destinations gain platforms at different times, and the two newest
+ *  platforms came apart in OPPOSITE directions.
+ *
+ *  "trovo" IS here: its chat is documented (a websocket) and unbuilt, so it is
+ *  nameable and no message will ever arrive carrying it yet. "vimeo" is NOT:
+ *  it has no chat adapter in internal/chat at all, so no message can ever carry
+ *  it and the accent map has nothing to say about it. Vimeo's own live-event
+ *  chat, if it exists, sits behind the same Enterprise gate as the rest of its
+ *  live API — see internal/oauth/vimeo.go.
+ *
+ *  Read this as the union a message COULD be tagged with, not as a list of what
+ *  works — lib/capabilities.ts answers that, per platform and per column. */
+export type ChatPlatform = Exclude<Platform, "vimeo">;
 
 /** A chat connection's condition, in the words the operator would use.
  *  `degraded` is running-but-limited and always arrives with a reason. */

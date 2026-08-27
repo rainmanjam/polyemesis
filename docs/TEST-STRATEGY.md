@@ -1,12 +1,15 @@
 # Test coverage: what exists, and what is missing
 
-Measured 2026-07-28 against a running Docker instance on FFmpeg 8.1.2.
+Per-suite check counts were measured 2026-07-28 against a running Docker
+instance on FFmpeg 8.1.2. The Go totals and the suite list were re-counted from
+the tree and from `.github/workflows/ci.yml` on 2026-08-26 — **a date at the top
+of a page is not a guard**, and these numbers had drifted a long way past it.
 
 ## What runs today
 
 | Layer | Suite | Checks | Status |
 |---|---|---|---|
-| Unit + integration | `go test ./...` | **4,451** across 141 files, 28 packages | green |
+| Unit + integration | `go test ./...` | **3,591** top-level `func Test…` across 541 files, 45 packages | green |
 | Integration (host binary + real FFmpeg) | `acceptance.sh` | 13 | green |
 | | `acceptance-audio.sh` | 35 | green |
 | | `acceptance-encoders.sh` | 32 | green |
@@ -14,13 +17,28 @@ Measured 2026-07-28 against a running Docker instance on FFmpeg 8.1.2.
 | | `acceptance-ladder.sh` | 45 | green |
 | | `acceptance-tls.sh` | 35 | green |
 | | `acceptance-postprod.sh` | 12 | green |
-| E2E (shipped container) | `acceptance-docker.sh` | 28 | green |
+| | `acceptance-pull.sh` | not counted | green |
+| | `acceptance-playlist-phase0.sh` | not counted | green |
+| | `acceptance-synth.sh` | not counted | green |
+| | `acceptance-failover.sh` | not counted | green |
+| | `acceptance-recording-stop.sh` | not counted | green |
+| | `acceptance-mqtt.sh` | not counted | green |
+| E2E (shipped container) | `acceptance-docker.sh` | 29 | green |
 | | `acceptance-multisource.sh` | 18 | green |
+| **E2E (browser)** | `acceptance-browser.sh` | **30** | green |
 | Cross-platform broadcast | `scripts/smoketest.go` | 8 | Linux, macOS, Windows |
-| **E2E (browser)** | — | **0** | **absent** |
 
-Total: **4,451 Go tests + 202 acceptance checks**, plus the broadcast smoke test
-on all three platforms.
+Total: **3,591 Go tests**, 201 counted checks across seven of the **thirteen**
+host acceptance suites CI runs, 77 container checks, and the broadcast smoke
+test on all three platforms. The six suites marked *not counted* run in CI on
+every commit; nobody has re-totalled their assertions since they were added, and
+inventing a number for them here is what produced the row above this paragraph.
+
+Browser E2E is **not** a gap. `acceptance-browser.sh` drives Playwright against
+the shipped image, `ui/e2e/` holds fifteen spec files, and it is one of the three
+container suites required by CI. This page said "absent, 0 checks" long after
+that shipped; [TESTING.md](TESTING.md) has always documented the same suite
+correctly.
 
 `smoketest.go` is the only suite that runs anywhere but Linux. It injects into
 the relay hub rather than publishing over SRT, so it needs nothing of a runner's
@@ -42,13 +60,16 @@ The audio core — the part the product exists for — is the best covered, whic
 the right shape. The weak band is where behaviour is hardest to reach from a
 unit test, which is also where the acceptance suites do their work.
 
-## The gap that matters most: no browser tests at all
+## The gap that mattered most: browser tests — now closed
 
-Zero. Every UI verification in this project has been a human driving a browser
-once and moving on.
+For a long time this was the headline gap, and the sections below are kept in
+that order because the argument is what justified the suite. **It has since been
+built and it runs in CI**; read "no browser tests at all" as history, not as the
+current state.
 
-That is not a theoretical risk. Four real bugs were found in the UI this
-session, by hand, each of which a browser test would have caught and pinned:
+Every UI verification in this project used to be a human driving a browser once
+and moving on. That was not a theoretical risk. Four real bugs were found in the
+UI by hand, each of which a browser test would have caught and pinned:
 
 | Bug | How it presented |
 |---|---|
@@ -58,13 +79,14 @@ session, by hand, each of which a browser test would have caught and pinned:
 | Port fields committed on **blur** | Tabbing out of a field restarted the ingest and dropped the stream |
 
 None of those are visible to `tsc`, and all four are trivially assertable in a
-browser. Until this exists, every UI change is verified once and never again.
+browser. That was the argument for building the suite described below.
 
 ### What was built
 
 `ui/e2e/` with Playwright, run against the shipped container so it exercises the
-same artefact users get. It runs in CI as the `acceptance-browser` suite, 24
-checks, and covers the four bugs above plus the guards added for them:
+same artefact users get. It runs in CI as the `acceptance-browser` suite, 30
+checks across fifteen spec files, and covers the four bugs above plus the guards
+added for them:
 
 1. First-run setup, login, and that setup cannot be replayed.
 2. Every nav route renders without a console error.
@@ -82,14 +104,13 @@ click-through has never run.
 
 ## Integration gaps
 
-Ranked by what a failure would cost.
+Ranked by what a failure would cost. Pull ingest, synthetic sources and failover
+have since left this table: `acceptance-pull.sh`, `acceptance-synth.sh` and
+`acceptance-failover.sh` are all in CI's acceptance matrix now.
 
 | Gap | Why it matters | Cost to build |
 |---|---|---|
-| **Pull ingest** (`acceptance-pull.sh`) | A whole ingest mode with unit tests but no end-to-end proof. Cameras and file loops go through it. | low — mirror `acceptance.sh` with a `file://` loop |
-| **Failover** | primary → backup → slate switching is the feature that runs *while everything else is going wrong*, and it is only unit-tested | medium — needs two publishers and a kill |
-| **Synthetic sources** (`acceptance-synth.sh`) | Silence-on-video-only and slate; a video-only ingest is refused by every platform, so this is a real-world path | low |
-| **Recording lifecycle** | Record → segment → index → retention sweep → session grouping, as one arc. Pieces are covered; the arc is not | medium |
+| **Recording lifecycle** | Record → segment → index → retention sweep → session grouping, as one arc. `acceptance-recording-stop.sh` covers the stop; the rest of the arc is not | medium |
 | **Alerts delivery** | Rule → event → webhook POST, against a local sink | low |
 | **Scheduler** | A schedule firing and starting the thing it names | low |
 | **Chat** | Four adapters, unit-tested with fakes, never against a real IRC/webhook server | medium — a local IRCd is feasible; the rest need mocks |
@@ -121,12 +142,13 @@ suites should get one too.
 
 ## Recommended order
 
-1. **Browser E2E**, the seven cases above. Largest gap, cheapest per bug caught,
-   and it protects work that is currently verified by memory.
-2. **`acceptance-pull.sh` and `acceptance-synth.sh`** — both are near-copies of
-   an existing suite, and both cover ingest modes that ship untested end to end.
-3. **Failover integration** — it is the safety net, and a safety net nobody has
-   pulled on is a decoration.
-4. **Fixed-value guards** on the two container suites, matching the postprod fix.
-5. `internal/api` unit coverage, which is the largest single package gap and
+The first three items of this list have been done: browser E2E, the pull and
+synthetic ingest suites, and failover integration all run in CI. What is left:
+
+1. **Fixed-value guards** on the container suites, matching the postprod fix — a
+   suite that can run fewer assertions than it contains and still report PASSED
+   is the defect that guard exists for.
+2. `internal/api` unit coverage, which is the largest single package gap and
    mostly needs handler-level table tests.
+3. **Alerts delivery, scheduler, chat and OAuth** integration, per the table
+   above.

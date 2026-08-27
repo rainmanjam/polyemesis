@@ -40,6 +40,7 @@ The keys, in brief:
 | `tls.hsts` | `false` | Opt-in on purpose — see below |
 | `trustProxyHeaders` | `false` | Set **only** behind a reverse proxy you control |
 | `ffmpeg.binary` / `ffmpeg.probe` | `""` | Pin specific binaries instead of searching `$PATH` |
+| `transcription.binary` | `""` | Pin the whisper.cpp CLI (`whisper-cli`, or the older `main`) instead of searching `$PATH`. Deliberately not validated — an unusable path degrades transcription and never stops the server serving a live stream |
 
 ### Flags
 
@@ -384,8 +385,46 @@ won, so a variable has to earn its place.
 Both are read at startup by `internal/api/chat_wiring.go`. See
 [PLATFORMS.md](PLATFORMS.md) for the Rumble setup.
 
-For containers, pass flags in `command:`, or mount a `config.yaml`. The
-[`docker-compose.yml`](../docker-compose.yml) in the repo shows both.
+## Configuring a container
+
+The image is not flagless. Its `CMD` is
+`["-addr", ":8080", "-data", "/data"]`, and both `command:` in Compose and
+trailing arguments to `docker run` **replace** that `CMD` rather than adding to
+it. So the two ways of configuring a container are not equivalent, and only one
+of them is safe to reach for first.
+
+**Mount a `config.yaml`** — the recommended way. It changes nothing about how
+the container starts, so nothing the image already sets can be lost.
+[`docker-compose.yml`](../docker-compose.yml) carries the mount, commented out:
+
+```yaml
+volumes:
+  - polyemesis-data:/data
+  - ./config.yaml:/data/config.yaml:ro
+```
+
+**Or pass flags** — in which case you must repeat every flag the image's `CMD`
+already sets, `-data /data` included:
+
+```yaml
+# Correct: the image's own flags are repeated, not dropped.
+command: ["-addr", ":8080", "-data", "/data", "-log", "debug"]
+```
+
+> **Dropping `-data /data` looks exactly like total data loss, and is not.**
+> With no `-data`, `dataDir` falls back to its built-in default of `./data`, and
+> the image's `WORKDIR` is `/data` — so the server opens `/data/data`, an empty
+> directory. It finds no database and no `secret.key`, and shows the **first-run
+> admin-password screen**. Every destination, sealed stream key and OAuth token
+> appears to be gone. None of it is: the real data is one directory up, on the
+> same volume, untouched. Put `-data /data` back into `command:`, restart, and
+> it is all there.
+>
+> This is why flag-over-file precedence matters here: a flag wins wherever both
+> are set, so a `config.yaml` with the right `dataDir` cannot rescue a
+> `command:` that sets the wrong one — but a `command:` with no `-data` at all
+> leaves the file's `dataDir` in charge, which is the other reason mounting the
+> file is the safer of the two.
 
 ## See also
 

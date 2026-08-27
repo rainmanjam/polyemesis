@@ -38,16 +38,78 @@ import { createFacebookDestination, removeDestination } from "./destinations";
    boundary -- or one that says "Live" unconditionally -- fails.
    =========================================================================== */
 
+/* AN INTERCEPTOR THAT NEVER MATCHES FAILS OPEN, AND THAT IS THE HAZARD.
+   These stubs were pinned with globs ending at the path -- a double-star,
+   then `/api/v1/status` -- which match a URL with no query string and nothing
+   else. When the client began NAMING A
+   PROGRAMME (`/status?source=3`), every one of them silently stopped matching:
+   the stubs vanished, the muted socket reconnected for real and republished
+   live status over the seed, and these tests began asserting against whatever
+   the server happened to say.
+
+   Three of them went red, which is survivable. One went GREEN -- "no bytes
+   arriving reads Offline", passing because an unstubbed console also reads
+   Offline -- and a test that passes for the wrong reason is the exact thing
+   this file was written to prevent.
+
+   So: match the path with OR WITHOUT a query, and keep a registry that fails
+   the test when an interceptor was never hit. Silence is no longer one of the
+   available outcomes. */
+const scoped = (path: string) => new RegExp(`/api/v1/${path}(\\?|$)`);
+
+type Interceptor = { what: string; hits: number };
+const registered: Interceptor[] = [];
+
+function track(what: string): Interceptor {
+  const seen = { what, hits: 0 };
+  registered.push(seen);
+  return seen;
+}
+
+/** Waits until every interceptor this test registered has actually served a
+ *  request.
+ *
+ *  Needed because several of these assertions EXPECT THE SAME VALUE THE FIRST
+ *  PAINT ALREADY SHOWS -- the chrome reads "Offline" before any data arrives,
+ *  which is also the correct answer when no bytes are flowing. Asserting it
+ *  straight after `goto` therefore passes in milliseconds, before the stubs
+ *  have been read, and would go on passing if they were never read at all.
+ *  That is not a slow test, it is an empty one. */
+async function seeded() {
+  await expect
+    .poll(() => registered.filter((i) => i.hits === 0).map((i) => i.what), {
+      timeout: 15_000,
+      message: "the page never fetched what this test stubbed",
+    })
+    .toEqual([]);
+}
+
+test.afterEach(() => {
+  const missed = registered.filter((i) => i.hits === 0).map((i) => i.what);
+  registered.length = 0;
+  expect(
+    missed,
+    "an interceptor this test registered never matched a request, so the page " +
+      "was reading the real server and the assertions above were made against " +
+      "data the test did not control",
+  ).toEqual([]);
+});
+
 /** Silences the live socket so the REST seed below is the only thing the page
  *  is told. The handler deliberately never calls connectToServer(). */
 async function muteSocket(page: Page) {
-  await page.routeWebSocket("**/api/v1/ws", () => {});
+  const seen = track("the live WebSocket");
+  await page.routeWebSocket(scoped("ws"), () => {
+    seen.hits++;
+  });
 }
 
 /** Rewrites GET /status through the real handler, so everything not named here
  *  is the server's own answer. */
 async function patchStatus(page: Page, patch: (status: Record<string, unknown>) => void) {
-  await page.route("**/api/v1/status", async (route) => {
+  const seen = track("GET /status");
+  await page.route(scoped("status"), async (route) => {
+    seen.hits++;
     const res = await route.fetch();
     const body = (await res.json()) as Record<string, unknown>;
     patch(body);
@@ -59,7 +121,9 @@ async function patchStatus(page: Page, patch: (status: Record<string, unknown>) 
  *  useIngestLive reads the last five samples only, so a series shorter than
  *  that is entirely recent. */
 async function patchBitrate(page: Page, kbps: number) {
-  await page.route("**/api/v1/stats", async (route) => {
+  const seen = track("GET /stats");
+  await page.route(scoped("stats"), async (route) => {
+    seen.hits++;
     const res = await route.fetch();
     const body = (await res.json()) as Record<string, unknown>;
     body.bitrate = [1, 2, 3].map((i) => ({ t: new Date(Date.now() - i * 1000).toISOString(), kbps }));
@@ -68,7 +132,9 @@ async function patchBitrate(page: Page, kbps: number) {
 }
 
 async function patchSource(page: Page, probed: boolean) {
-  await page.route("**/api/v1/source", async (route) => {
+  const seen = track("GET /source");
+  await page.route(scoped("source"), async (route) => {
+    seen.hits++;
     const res = await route.fetch();
     const body = (await res.json()) as Record<string, unknown>;
     body.probed = probed;
@@ -105,6 +171,7 @@ test.describe("the chrome answers 'am I on air' from arriving bytes", () => {
 
     await page.goto("/");
     await expect(page.locator("nav")).toBeVisible();
+    await seeded();
 
     await expect(
       ingestStatus(page),
@@ -131,6 +198,7 @@ test.describe("the chrome answers 'am I on air' from arriving bytes", () => {
 
     await page.goto("/");
     await expect(page.locator("nav")).toBeVisible();
+    await seeded();
 
     await expect(
       ingestStatus(page),
@@ -156,6 +224,7 @@ test.describe("the chrome answers 'am I on air' from arriving bytes", () => {
 
     await page.goto("/");
     await expect(page.locator("nav")).toBeVisible();
+    await seeded();
 
     await expect(
       ingestStatus(page),
@@ -178,6 +247,7 @@ test.describe("the destination card reports the backup feed and the broadcast", 
     const console_ = watchConsole(page);
     await page.goto("/");
     await expect(page.locator("nav")).toBeVisible();
+    await seeded();
     const created = await createFacebookDestination(page, "e2e backup card");
 
     try {
@@ -227,6 +297,7 @@ test.describe("the destination card reports the backup feed and the broadcast", 
     const console_ = watchConsole(page);
     await page.goto("/");
     await expect(page.locator("nav")).toBeVisible();
+    await seeded();
     const created = await createFacebookDestination(page, "e2e backup error card");
 
     const why = "Facebook returned no backup ingest URL for this broadcast.";
@@ -268,6 +339,7 @@ test.describe("the destination card reports the backup feed and the broadcast", 
     const console_ = watchConsole(page);
     await page.goto("/");
     await expect(page.locator("nav")).toBeVisible();
+    await seeded();
     const created = await createFacebookDestination(page, "e2e broadcast link card");
 
     try {

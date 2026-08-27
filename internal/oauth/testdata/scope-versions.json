@@ -25,6 +25,14 @@
     ]
   },
   {
+    "platform": "trovo",
+    "scopeVersion": 1,
+    "scopes": [
+      "channel_details_self",
+      "channel_update_self"
+    ]
+  },
+  {
     "platform": "twitch",
     "scopeVersion": 4,
     "scopes": [
@@ -35,6 +43,14 @@
       "moderator:manage:banned_users",
       "moderator:manage:chat_messages",
       "moderator:manage:chat_settings"
+    ]
+  },
+  {
+    "platform": "vimeo",
+    "scopeVersion": 1,
+    "scopes": [
+      "private",
+      "public"
     ]
   },
   {

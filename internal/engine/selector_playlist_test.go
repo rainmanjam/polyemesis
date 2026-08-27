@@ -1058,8 +1058,8 @@ func TestDisablingAPlaylistThatIsOnAirHandsTheSlateTheStreamImmediately(t *testi
 // where SetPlaylistEnabled's validation now lives -- and this fails, both
 // halves, because the flip then both returns nil and writes.
 func TestAScheduledPlaylistStartWillNotStoreInvalidSettings(t *testing.T) {
-	e := failoverEngine(t)
-	act := scheduleActuator{e: e}
+	m, store := managerFixture(t)
+	act := scheduleActuator{m: m}
 
 	// The shipped default: failover playlist off, no items. Enabling it is
 	// precisely what Settings.Validate refuses.
@@ -1070,7 +1070,7 @@ func TestAScheduledPlaylistStartWillNotStoreInvalidSettings(t *testing.T) {
 
 	// And nothing was written. An error that still stored the document would be
 	// the same lockout with a log line attached.
-	got, err := e.store.GetSettings()
+	got, err := store.GetSettings()
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
@@ -1087,23 +1087,23 @@ func TestAScheduledPlaylistStartWillNotStoreInvalidSettings(t *testing.T) {
 //
 // The mutation: make SetPlaylistEnabled always return an error and this fails.
 func TestAScheduledPlaylistStartEnablesAValidPlaylist(t *testing.T) {
-	e := failoverEngine(t)
-	act := scheduleActuator{e: e}
+	m, store := managerFixture(t)
+	act := scheduleActuator{m: m}
 
-	s, err := e.store.GetSettings()
+	s, err := store.GetSettings()
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
 	s.Failover.Enabled = true
 	s.Failover.Playlist.Items = []db.PlaylistItem{{Upload: "loop.mp4"}}
-	if err := e.store.PutSettings(s); err != nil {
+	if err := store.PutSettings(s); err != nil {
 		t.Fatalf("PutSettings: %v", err)
 	}
 
 	if err := act.SetPlaylistEnabled(true); err != nil {
 		t.Fatalf("SetPlaylistEnabled on a playlist with items: %v", err)
 	}
-	got, err := e.store.GetSettings()
+	got, err := store.GetSettings()
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
@@ -1136,17 +1136,17 @@ func TestAScheduledPlaylistStartEnablesAValidPlaylist(t *testing.T) {
 // The mutation: delete the three-line `if s.Failover.Playlist.Enabled ==
 // enabled` branch in scheduleActuator.SetPlaylistEnabled.
 func TestAScheduledPlaylistStartOnAnAlreadyEnabledPlaylistIsANoOp(t *testing.T) {
-	e := failoverEngine(t)
-	act := scheduleActuator{e: e}
+	m, store := managerFixture(t)
+	act := scheduleActuator{m: m}
 
-	s, err := e.store.GetSettings()
+	s, err := store.GetSettings()
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
 	s.Failover.Playlist.Enabled = true
 	// PutSettings, not UpdateSettings: this is the raw door precisely because
 	// the fixture has to store a document the validating door would refuse.
-	if err := e.store.PutSettings(s); err != nil {
+	if err := store.PutSettings(s); err != nil {
 		t.Fatalf("PutSettings: %v", err)
 	}
 
@@ -1157,7 +1157,7 @@ func TestAScheduledPlaylistStartOnAnAlreadyEnabledPlaylistIsANoOp(t *testing.T) 
 
 	// And the document is untouched -- neither repaired nor damaged by a flip
 	// that had nothing to do.
-	got, err := e.store.GetSettings()
+	got, err := store.GetSettings()
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}

@@ -69,8 +69,22 @@ DIRS_CREATED=false
 USER_CREATED=false
 UNIT_CREATED=false
 CONTAINER_STARTED=false
+# Whether a polyemesis container was already running when this run began. Read
+# only by the rollback, to tell "we started it" from "it was already serving".
+CONTAINER_PREEXISTING=false
+# The same question for the binary mode's two artefacts. `install -m 0755` and
+# `cat >` both succeed over an existing file, so without these the rollback
+# could not tell a first install from a re-run and deleted the binary and the
+# unit of a working install it had merely replaced.
+BIN_PREEXISTING=false
+UNIT_PREEXISTING=false
 BINARY_INSTALLED=false
 CONFIG_DIR_CREATED=false
+# Same reasoning as CONFIG_DIR_CREATED, and the reason it needed its own flag is
+# recorded beside every `mkdir -p "$INSTALL_DIR"`: rollback used to delete an
+# install directory this run had merely opened, taking docker-compose.yml,
+# uninstall.sh and every backup-*.tar.gz update.sh had written there with it.
+INSTALL_DIR_CREATED=false
 INSTALL_COMPLETE=false
 # Set by cleanup_on_failure so the EXIT trap cannot re-run it after INT/TERM.
 ROLLBACK_DONE=false
@@ -181,24 +195,60 @@ cleanup_on_failure() {
   echo
   warn "install failed (exit $code) — undoing what it had already done"
 
+  # Only a container THIS RUN brought up. A re-run over a healthy install -- to
+  # change a port, add TLS, upgrade -- used to `compose down` the operator's
+  # already-running production container on any later failure, so a 60s verify()
+  # timeout took a live broadcast off air. A container that was already up is
+  # the operator's; the worst this run did to it was recreate it, and leaving it
+  # serving is strictly better than stopping it.
   if [ "$CONTAINER_STARTED" = true ] && [ -n "$COMPOSE_CMD" ]; then
     (cd "$INSTALL_DIR" && $COMPOSE_CMD down --remove-orphans) >/dev/null 2>&1 || true
     info "stopped and removed the container"
+  elif [ "$CONTAINER_PREEXISTING" = true ]; then
+    warn "left the container running — it predates this run."
+    echo "     It may now be running the configuration this run wrote. Your previous"
+    echo "     config.yaml is beside it as a .bak- snapshot in $INSTALL_DIR."
   fi
-  if [ "$UNIT_CREATED" = true ]; then
+  # THE SAME QUESTION AS THE CONTAINER ABOVE, asked of the other install mode.
+  # `cat >` and `install -m 0755` both succeed over an existing file, so a
+  # failed re-run over a WORKING systemd install used to disable the operator's
+  # service, delete its unit file and delete the binary -- leaving a host with
+  # no polyemesis on it at all, recovering from a failure that had broken
+  # nothing. The new binary and the new unit are already on disk by then and the
+  # service is serving from them; that is imperfect and it is not "nothing
+  # installed", which is what deleting them produces.
+  if [ "$UNIT_CREATED" = true ] && [ "$UNIT_PREEXISTING" != true ]; then
     systemctl disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
     rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
     systemctl daemon-reload >/dev/null 2>&1 || true
     info "removed the systemd unit"
+  elif [ "$UNIT_PREEXISTING" = true ]; then
+    warn "left the ${SERVICE_NAME} unit in place — it predates this run."
+    echo "     It now holds what this run wrote. Your previous copy is beside it as a"
+    echo "     .bak- snapshot in /etc/systemd/system/."
   fi
-  [ "$BINARY_INSTALLED" = true ] && rm -f "$BIN_PATH" && info "removed $BIN_PATH"
+  if [ "$BINARY_INSTALLED" = true ] && [ "$BIN_PREEXISTING" != true ]; then
+    rm -f "$BIN_PATH" && info "removed $BIN_PATH"
+  elif [ "$BIN_PREEXISTING" = true ]; then
+    warn "left $BIN_PATH in place — a binary was already there and this run replaced it."
+  fi
   if [ "$DIRS_CREATED" = true ]; then
-    rm -rf "$INSTALL_DIR"
     # NOT $DATA_DIR. It holds the database, secret.key and any recording made
     # between the failing step and now. An installer that deletes a data
     # directory on the way out is a worse problem than the one it is recovering
     # from, so it is left in place and named.
-    info "removed $INSTALL_DIR"
+    #
+    # And only if THIS run created $INSTALL_DIR. See the note beside the mkdir:
+    # a blanket delete here destroyed the operator's docker-compose.yml, their
+    # uninstall.sh and EVERY backup-*.tar.gz update.sh had written into it --
+    # announced as `[info] removed /opt/polyemesis`, which is the quietest
+    # possible line for the most damaging action in this file.
+    if [ "$INSTALL_DIR_CREATED" = true ]; then
+      rm -rf "$INSTALL_DIR"
+      info "removed $INSTALL_DIR"
+    elif [ -d "$INSTALL_DIR" ]; then
+      info "left $INSTALL_DIR alone — it predates this run (it holds your compose file and any backups)"
+    fi
     # Config is not data: it is regenerated from the answers given, and leaving
     # a stale one behind makes a re-run behave differently from a first run for
     # reasons the operator cannot see.
@@ -921,6 +971,32 @@ validate_data_dir() {
   printf -v "$varname" '%s' "$resolved"
 }
 
+# existing_data_dir prints the dataDir an already-installed binary mode is using,
+# or nothing when there is no previous install to read.
+#
+# The point is that a RE-RUN must default to where the data actually is, not to
+# the compiled-in constant. See the note at the "Data directory" prompt for what
+# that cost. Deliberately conservative: only a quoted or bare `dataDir:` at the
+# start of a line, which is what this installer itself writes, and anything it
+# cannot parse is reported as "no previous install" rather than guessed at.
+existing_data_dir() {
+  local f="$CONFIG_DIR/config.yaml" line val
+  [ -r "$f" ] || return 0
+  line="$(grep -m1 -E '^[[:space:]]*dataDir:' "$f" 2>/dev/null || true)"
+  [ -n "$line" ] || return 0
+  val="${line#*:}"
+  # strip leading/trailing whitespace, then one layer of quotes
+  val="${val#"${val%%[![:space:]]*}"}"
+  val="${val%"${val##*[![:space:]]}"}"
+  case "$val" in
+    \"*\") val="${val#\"}"; val="${val%\"}" ;;
+    \'*\') val="${val#\'}"; val="${val%\'}" ;;
+  esac
+  case "$val" in
+    /*) printf '%s' "$val" ;;
+  esac
+}
+
 # preserve_existing snapshots a file this run is about to overwrite, so
 # re-running the installer over an existing install cannot silently destroy
 # operator edits. Both config.yaml files this installer writes say "Edit and
@@ -1084,8 +1160,38 @@ gather_configuration() {
   header "=== Data ==="
   echo "  Holds the database, secret.key (which decrypts your stored platform"
   echo "  tokens), recordings and TLS material. Back it up; treat it as secret."
-  [ "$MODE" = "binary" ] && ask "Data directory" "$DATA_DIR" DATA_DIR
-  [ "$MODE" = "binary" ] && validate_data_dir "$DATA_DIR" DATA_DIR
+  if [ "$MODE" = "binary" ]; then
+    # THE DEFAULT IS THE EXISTING INSTALL'S, NOT THE CONSTANT. A re-run to
+    # change a port or turn TLS on offered /var/lib/polyemesis regardless of
+    # where the first install had actually been pointed -- and under --yes,
+    # ask() takes the default WITHOUT PRINTING A PROMPT. The new directory was
+    # created, secret.key minted fresh in it, the unit's --data rewritten, and
+    # the service restarted onto an empty database: every destination, source
+    # and recording gone from the UI, with the summary printing "create your
+    # admin password" as though this were a first install. The old data was
+    # intact on disk the whole time and nothing said so.
+    local prior_data_dir
+    prior_data_dir="$(existing_data_dir)"
+    if [ -n "$prior_data_dir" ]; then
+      info "an existing install points at $prior_data_dir — offering that, not the default"
+      DATA_DIR="$prior_data_dir"
+    fi
+    ask "Data directory" "$DATA_DIR" DATA_DIR
+    validate_data_dir "$DATA_DIR" DATA_DIR
+    # And if something still moved it, refuse rather than silently start a
+    # fresh install beside the old one. Interactive runs get to say yes.
+    if [ -n "$prior_data_dir" ] && [ "$DATA_DIR" != "$prior_data_dir" ]; then
+      warn "this would repoint the service from $prior_data_dir to $DATA_DIR."
+      echo "     The existing database, secret.key and recordings stay where they are;"
+      echo "     the service would start on an EMPTY directory and look like a first install."
+      if [ "${ASSUME_YES:-false}" = true ]; then
+        die "refusing under --yes. Re-run interactively, or move the data yourself first."
+      fi
+      local move_ok
+      ask_yn "Start with an empty data directory at $DATA_DIR anyway?" "n" move_ok
+      [ "$move_ok" = yes ] || die "stopped. Nothing was changed."
+    fi
+  fi
 
   header "=== Firewall ==="
   if command -v ufw >/dev/null 2>&1 || command -v firewall-cmd >/dev/null 2>&1; then
@@ -1153,8 +1259,21 @@ tls_yaml() {
 # --------------------------------------------------------------- docker mode
 
 install_docker_mode() {
+  # Record what was actually created. `mkdir -p` succeeds on a directory that
+  # already exists, so a blanket DIRS_CREATED=true made rollback `rm -rf` an
+  # EXISTING install directory on a failed re-run -- destroying the compose
+  # file, the config, the uninstaller and every backup-*.tar.gz that update.sh
+  # had ever written there. The volume survives; the compose file needed to
+  # bring it back does not.
+  [ -d "$INSTALL_DIR" ] || INSTALL_DIR_CREATED=true
   mkdir -p "$INSTALL_DIR"
   DIRS_CREATED=true
+
+  # Asked BEFORE anything is written, because after `compose up -d` there is no
+  # way to tell a container this run started from one it recreated.
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'polyemesis'; then
+    CONTAINER_PREEXISTING=true
+  fi
 
   preserve_existing "$INSTALL_DIR/config.yaml"
   {
@@ -1232,7 +1351,10 @@ install_docker_mode() {
 
   info "starting"
   (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d) || die "could not start the container"
-  CONTAINER_STARTED=true
+  # Not for a container that was already up. Rollback reads this flag to decide
+  # whether it may `compose down`, and downing the operator's live container is
+  # the failure this whole re-run path exists to avoid.
+  [ "$CONTAINER_PREEXISTING" = true ] || CONTAINER_STARTED=true
 
   DATA_DIR="docker volume: polyemesis-data"
 }
@@ -1296,6 +1418,13 @@ install_binary_mode() {
     warn "no SHA256SUMS published for $tag — installing UNVERIFIED at your request (--allow-unverified)"
   fi
 
+  # Snapshot before replacing, and record that there WAS something to replace.
+  # See the rollback: without this, a failed re-run deleted the binary of a
+  # working install.
+  if [ -e "$BIN_PATH" ]; then
+    BIN_PREEXISTING=true
+    preserve_existing "$BIN_PATH"
+  fi
   install -m 0755 "$tmp/$asset" "$BIN_PATH"
   BINARY_INSTALLED=true
   rm -rf "$tmp"
@@ -1315,6 +1444,12 @@ install_binary_mode() {
   mkdir -p "$DATA_DIR" "$CONFIG_DIR"
   DIRS_CREATED=true
   chown -R "$RUN_USER:$RUN_USER" "$DATA_DIR"
+  # `mkdir -p` leaves 0755 under the default umask, so every local account could
+  # list the directory holding secret.key and the recordings. The hand-install
+  # in deploy/polyemesis.service's header has always said
+  # `chmod 0750 /var/lib/polyemesis  # holds stream keys -- see #297`; the
+  # installer, which is the recommended path, never did it.
+  chmod 0750 "$DATA_DIR"
 
   preserve_existing "$CONFIG_DIR/config.yaml"
   {
@@ -1344,6 +1479,21 @@ install_binary_mode() {
       ;;
   esac
 
+  # TWO FILES THAT ARE ONE FILE. deploy/polyemesis.service is the hand-install
+  # this project documents; the unit below is what the recommended path actually
+  # creates. They drifted: the generated one carried none of the [Service]
+  # hardening from `ProtectKernelTunables` down, and no UMask, so the installer
+  # produced a weaker service than the copy-paste instructions did. Neither file
+  # looks wrong on its own, which is why the drift lasted.
+  #
+  # install.sh is fetched standalone with curl and has no repository to read, so
+  # it cannot be generated from that file. scripts/acceptance-install.sh instead
+  # asserts that every [Service] directive in deploy/polyemesis.service appears
+  # here -- add a directive there and this fails until it is added here too.
+  if [ -e "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
+    UNIT_PREEXISTING=true
+    preserve_existing "/etc/systemd/system/${SERVICE_NAME}.service"
+  fi
   cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
 Description=polyemesis restreaming server
@@ -1357,6 +1507,13 @@ User=${RUN_USER}
 Group=${RUN_USER}
 ExecStart=${BIN_PATH} --config ${CONFIG_DIR}/config.yaml --data ${DATA_DIR} --addr :${HTTP_PORT}
 ${caps}
+
+# 0077, so anything this service creates under ${DATA_DIR} is private to it.
+# internal/db chmods the database, WAL and shm itself on open and secrets.go
+# does the same for secret.key, so the crown jewels were always covered -- this
+# covers everything else the service ever writes there, including files added
+# later by someone who does not know to secure them. Issue #297.
+UMask=0077
 
 # polyemesis tears its FFmpeg children down in order on SIGTERM so a recording
 # is finalised rather than truncated. Give it room, and signal only the main
@@ -1381,6 +1538,21 @@ ProtectSystem=strict
 ProtectProc=invisible
 ProtectHome=true
 ReadWritePaths=${DATA_DIR}
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# AF_INET/AF_INET6 for HTTP, RTMP and SRT; AF_UNIX for local sockets.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Several FFmpeg processes each hold a handful of descriptors; the default
+# soft limit is fine but headroom costs nothing.
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
@@ -1440,6 +1612,9 @@ configure_firewall() {
 # key that will not open disables its destination rather than failing open. That
 # restore looks completely successful until the moment someone goes live.
 write_binary_update_script() {
+  # See the note in install_docker_mode: rollback may only delete an install
+  # directory THIS run created.
+  [ -d "$INSTALL_DIR" ] || INSTALL_DIR_CREATED=true
   mkdir -p "$INSTALL_DIR"
   cat > "$INSTALL_DIR/update.sh" <<EOF
 #!/usr/bin/env bash
@@ -1526,6 +1701,9 @@ EOF
 # out is a worse problem than the one it is solving. It is named, with the
 # command to remove it, so the choice is the operator's and is visible.
 write_binary_uninstall_script() {
+	# See the note in install_docker_mode: rollback may only delete an install
+	# directory THIS run created.
+	[ -d "$INSTALL_DIR" ] || INSTALL_DIR_CREATED=true
 	mkdir -p "$INSTALL_DIR"
 	cat > "$INSTALL_DIR/uninstall.sh" <<EOF
 #!/usr/bin/env bash
@@ -1634,6 +1812,22 @@ if [ "\$REMOVE_DATA" = true ]; then
 		/bin|/boot|/dev|/etc|/home|/lib|/lib32|/lib64|/media|/mnt|/opt|/proc|/root|/run|/sbin|/srv|/sys|/tmp|/usr|/var)
 			echo "refusing to delete '\$DATA_DIR': that is a system directory" >&2; exit 1 ;;
 	esac
+	# AND IS IT OURS? The three guards above prove the path is safe to TYPE.
+	# None of them proves polyemesis ever wrote there. DATA_DIR is frozen into
+	# this script when the installer generates it and is never re-read, so an
+	# operator who later moved the data directory and repointed config.yaml by
+	# hand has an uninstaller pointing at a stale path -- which passes all three
+	# checks, deletes whatever now lives there, and reports "database, secret.key
+	# and recordings are gone" whether or not any of that was true. Either an
+	# unrelated tree is destroyed, or the real data survives a decommission the
+	# operator believes finished.
+	if [ ! -e "\$DATA_DIR/polyemesis.db" ] && [ ! -e "\$DATA_DIR/secret.key" ]; then
+		echo "refusing to delete '\$DATA_DIR': it holds neither polyemesis.db nor" >&2
+		echo "secret.key, so it is not this install's data directory. This path was" >&2
+		echo "baked in when the installer ran; if the data was moved since, find the" >&2
+		echo "real dataDir (it was in \$CONFIG_DIR/config.yaml) and delete it yourself." >&2
+		exit 1
+	fi
 	rm -rf "\$DATA_DIR"
 	echo "Deleted \$DATA_DIR - database, secret.key and recordings are gone."
 else
@@ -1999,7 +2193,16 @@ parse_args() {
     off|selfsigned|acme) ;;
     *) die "--tls must be off, selfsigned or acme, not $TLS_MODE" ;;
   esac
-  for pv in HTTP_PORT SRT_PORT; do
+  # RTMP_PORT IS IN THE LIST. It was the one port that skipped this, so
+  # `--rtmp-port 70000` reached docker-compose.yml as a port mapping and failed
+  # at `compose up` -- which is loud, but it fails INSIDE the install, so the
+  # rollback trap then runs against a half-configured host. Refuse it here,
+  # before anything has been created.
+  for pv in HTTP_PORT SRT_PORT RTMP_PORT; do
+    # 0 declines RTMP entirely -- see the ENABLE_RTMP case in
+    # gather_configuration, which reads the port as the switch. It is not a
+    # port, so it does not go through the range check below.
+    if [ "$pv" = RTMP_PORT ] && [ "${!pv}" = "0" ]; then continue; fi
     case "${!pv}" in
       ''|*[!0-9]*) die "$pv must be a number, not ${!pv}" ;;
     esac

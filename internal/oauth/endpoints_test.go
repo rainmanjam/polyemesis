@@ -192,6 +192,26 @@ func TestAStubbedProviderReachesNoRealHost(t *testing.T) {
 				"CheckCredentials": func() { _ = tw.CheckCredentials(ctx, cid, secret) },
 			}
 		},
+		"vimeo": func(t *testing.T, base string) map[string]func() {
+			vm := NewVimeo(WithBaseURL(base))
+			return map[string]func(){
+				"Exchange": func() { _, _ = vm.Exchange(ctx, cid, secret, "https://r.test/cb", "code", "") },
+				// Refresh is deliberately absent: Vimeo issues no refresh token
+				// and the method makes NO request at all, so there is nothing
+				// for this guard to watch. TestVimeoRefreshMakesNoRequest is
+				// what pins that, and it would notice the day somebody "fixed"
+				// Refresh by posting a guessed grant_type at a real host.
+				"Account": func() { _, _ = vm.Account(ctx, cid, tok) },
+				"Ingest":  func() { _, _ = vm.Ingest(ctx, cid, tok) },
+				// The entitlement probe is the call most likely to escape
+				// unnoticed: it is the only one in this package that reaches a
+				// platform's DATA api to ask a question about billing, it runs
+				// inside the OAuth callback with a live token, and a base read
+				// from the wrong accessor would still look plausible.
+				"CheckEntitlement": func() { _ = vm.CheckEntitlement(ctx, cid, tok) },
+				"CheckCredentials": func() { _ = vm.CheckCredentials(ctx, cid, secret) },
+			}
+		},
 		"kick": func(t *testing.T, base string) map[string]func() {
 			k := NewKick(WithBaseURL(base))
 			return map[string]func(){
@@ -207,6 +227,19 @@ func TestAStubbedProviderReachesNoRealHost(t *testing.T) {
 					_, _ = k.PushBroadcastSettings(ctx, cid, tok, BroadcastSettings{EnableDvr: ptrBool(true)})
 				},
 				"CheckCredentials": func() { _ = k.CheckCredentials(ctx, cid, secret) },
+			}
+		},
+		"trovo": func(t *testing.T, base string) map[string]func() {
+			tv := NewTrovo(WithBaseURL(base))
+			return map[string]func(){
+				"Exchange":         func() { _, _ = tv.Exchange(ctx, cid, secret, "https://r.test/cb", "code", "") },
+				"Refresh":          func() { _, _ = tv.Refresh(ctx, cid, secret, "refresh") },
+				"Account":          func() { _, _ = tv.Account(ctx, cid, tok) },
+				"Ingest":           func() { _, _ = tv.Ingest(ctx, cid, tok) },
+				"Stats":            func() { _, _ = tv.Stats(ctx, cid, tok) },
+				"SearchCategories": func() { _, _ = tv.SearchCategories(ctx, cid, tok, "chess") },
+				"UpdateChannel":    func() { _ = tv.UpdateChannel(ctx, cid, tok, "100000021", TrovoChannelUpdate{LiveTitle: "x"}) },
+				"PushMetadata":     func() { _, _ = tv.PushMetadata(ctx, cid, tok, "100000021", Metadata{Title: "x", Category: "Chess"}) },
 			}
 		},
 	}
@@ -248,6 +281,8 @@ func TestEveryProviderCallGoesThroughTheInstanceBase(t *testing.T) {
 		"ytAPIBase", "ytConsentBase", "ytTokenBase",
 		"twitchHelixBase", "twitchIDBase",
 		"kickIDBase", "kickAPIBase",
+		"trovoLoginBase", "trovoAPIBase",
+		"vimeoAPIBase",
 	}
 	// A line may mention a constant if it declares it, comments on it, or wraps
 	// it in the per-instance accessor. Anything else is a direct read.
@@ -310,7 +345,9 @@ func TestProvidersWithAimsTheWholeSetAtOneStub(t *testing.T) {
 	set := NewSet(WithBaseURL(base))
 
 	for _, p := range []db.Platform{
+		db.PlatformYouTube, db.PlatformTwitch, db.PlatformFacebook, db.PlatformKick, db.PlatformTrovo,
 		db.PlatformYouTube, db.PlatformTwitch, db.PlatformFacebook, db.PlatformKick,
+		db.PlatformVimeo,
 	} {
 		pr, err := set.Get(p)
 		if err != nil {

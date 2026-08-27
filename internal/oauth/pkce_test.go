@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -168,6 +169,19 @@ func TestProvidersOnlyClaimPKCEWhereItIsDocumented(t *testing.T) {
 		db.PlatformFacebook: false,
 		// Kick speaks OAuth 2.1, which folds RFC 7636 into the grant itself.
 		db.PlatformKick: true,
+		// Trovo documents an authorization-code flow that exchanges a
+		// client_secret and mentions no PKCE parameter anywhere in its
+		// reference. Sending a challenge to a provider that has not
+		// documented one is the lock-everyone-out risk this map exists for.
+		db.PlatformTrovo: false,
+		// Vimeo's authentication guide documents four grant types -- client
+		// credentials, authorization code, implicit and device code -- and
+		// mentions no PKCE parameter in any of them; the code flow is a
+		// confidential client using client_secret over HTTP Basic. Vimeo's own
+		// account of a malformed authorize request is that "the request fails,
+		// and the standard Vimeo 404 page loads", which is this flag's
+		// lock-everyone-out risk in its least diagnosable form.
+		db.PlatformVimeo: false,
 	}
 	for platform, p := range Providers() {
 		w, ok := want[platform]
@@ -186,7 +200,18 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // captureTokenForm runs a token request against a stub transport and returns
-// the form the provider posted.
+// the parameters the provider posted, whichever way it encoded them.
+//
+// IT USED TO ASSUME A FORM, and the two tests above are about PARAMETERS rather
+// than about encodings -- "did this provider send code, and did it send
+// code_verifier only if it opted into PKCE". Vimeo is the first provider here
+// whose token endpoint takes a JSON body with HTTP Basic client authentication
+// (its Table 8 is explicit about all three headers), and url.ParseQuery on a
+// JSON object does not fail -- it returns a single garbage key. So the guard
+// would have gone on printing ok for a provider it could no longer read,
+// leaking a code_verifier past it unnoticed.
+//
+// Content-Type decides, because that is what the SERVER uses to decide.
 func captureTokenForm(t *testing.T, do func() (*Token, error)) url.Values {
 	t.Helper()
 
@@ -198,6 +223,23 @@ func captureTokenForm(t *testing.T, do func() (*Token, error)) url.Values {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			return nil, err
+		}
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+			var fields map[string]any
+			if err := json.Unmarshal(body, &fields); err != nil {
+				return nil, err
+			}
+			got = url.Values{}
+			for k, v := range fields {
+				if s, ok := v.(string); ok {
+					got.Set(k, s)
+				}
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"access_token":"at","expires_in":3600}`)),
+			}, nil
 		}
 		if got, err = url.ParseQuery(string(body)); err != nil {
 			return nil, err

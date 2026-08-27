@@ -178,6 +178,46 @@ cannot smuggle a credential out by being named after one.
   indistinguishable from one that does not fire at all, and this is the
   difference.
 
+## Private and LAN endpoints: `allowPrivateTarget`
+
+A hook URL that resolves to a non-public address is **refused at save time**, and
+the create or update answers `400` naming the hook:
+
+```
+hook "lan-collector" targets a non-public address; set allowPrivateTarget to
+permit a self-hosted endpoint on purpose
+```
+
+Refused without the opt-in: loopback, link-local — including the cloud metadata
+address `169.254.169.254` — RFC1918 (`10/8`, `172.16/12`, `192.168/16`),
+RFC6598 shared address space — carrier NAT, and the range Tailscale hands out —
+IPv6 unique-local, and the IPv6 equivalents of the same. A
+hook anyone with console access can point at the metadata service is a pivot out
+of the operator console into the rest of the network, not a feature.
+
+Plenty of people run a collector on their own LAN on purpose, so there is an
+opt-in rather than a flat refusal — a refusal with no escape hatch just gets the
+whole feature turned off. Send `allowPrivateTarget` on the create or the update:
+
+```json
+{
+  "name": "lan-collector",
+  "url": "http://192.168.1.20:9000/polyemesis",
+  "triggers": ["ingest.published", "ingest.disconnected"],
+  "allowPrivateTarget": true
+}
+```
+
+It defaults to `false`, it is stored per hook, and it is returned by `GET /hooks`
+alongside the other fields.
+
+**The save-time check is not the enforcement.** A hostname is re-resolved and
+re-checked at dial time on every delivery, which is what closes DNS rebinding —
+a name that answered publicly when the hook was saved and answers `127.0.0.1`
+afterwards is refused then, too. The save-time check exists in addition so an
+obviously bad hook is rejected while somebody is looking at the form, rather
+than three retries into a delivery attempt.
+
 ## Known limitations
 
 Written out rather than discovered later.
@@ -211,11 +251,14 @@ blocking, bounded at `maxAttempts × (timeoutSeconds + backoff)` — 33s at
 defaults, 165s at the maximums. A slow endpoint delays only its own deliveries,
 but it delays all of them.
 
-**No SSRF protection.** A hook URL may point at `127.0.0.1`, a cloud metadata
-service or an internal admin panel, and polyemesis will POST to it. This is the
-position alert rules are already in, so it is not a new exposure — but it is not
-a defended one. Anyone who can create a hook can already reconfigure the
-pipeline.
+**SSRF is defended for hooks, and not yet for alert webhooks.** A hook URL
+pointing at loopback, a cloud metadata service or a LAN address is refused at
+save time and again at dial time, and reaching one on purpose needs
+`allowPrivateTarget` — see [above](#private-and-lan-endpoints-allowprivatetarget).
+An **alert rule's** webhook is still in the old position: it is not checked, so
+anyone who can create one can still POST from this server to `127.0.0.1` or
+`169.254.169.254`. Anyone who can do either can already reconfigure the
+pipeline, which is why it is bounded — but the two paths are not level yet.
 
 **No per-source subscription filter.** A hook receives from every source. An
 install with three programmes gets three `ingest.published` events,

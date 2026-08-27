@@ -87,3 +87,7 @@ coverage.out
 ui/coverage/
 web/coverage/
 .gitnexus
+
+# Astro build cache and dev log. Regenerated on every build; dev.log in
+# particular churns on every run.
+web/.astro/

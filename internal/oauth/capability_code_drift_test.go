@@ -71,6 +71,33 @@ func capabilityJoins() []capabilityJoin {
 			// Registration, not TargetsFor: Ingest is on the base Provider
 			// interface, so signing in is exactly what makes a key fetchable.
 			implemented: registered,
+			exceptions: map[db.Platform]string{
+				// SIGNING IN IS NOT WHAT MAKES A KEY FETCHABLE HERE, which is
+				// the assumption the resolver above encodes and the first
+				// platform to break it.
+				//
+				// Vimeo has no permanent stream key at all: the ingest URL and
+				// key belong to a live event, so obtaining one means reading or
+				// creating an event -- and every live method is Enterprise-only
+				// ("our live API is available only to Vimeo Enterprise
+				// customers"). Vimeo.Ingest returns ErrNoStreamKeyAPI on every
+				// path, saying WHICH of the two reasons applies to the account
+				// in front of it; the cell is By hand because the operator
+				// pastes the pair from the event's setup panel.
+				//
+				// THE RESOLVER WAS NOT WIDENED, and the obvious widening is
+				// wrong: `registered && !ManualKeyFor(p)` looks like the right
+				// discriminator and would fail Kick, which implements ManualKey
+				// for the legacy-token case and fetches its key perfectly well.
+				// The test's own instruction is to check the mechanism before
+				// touching the resolver -- checked, and it is an exception.
+				//
+				// DELETE THIS the day polyemesis creates Vimeo events and the
+				// cell becomes SupportYes. The test will tell you to, because a
+				// stale exception fails as loudly as a missing one.
+				db.PlatformVimeo: "no permanent key exists; the ingest belongs to a live " +
+					"event and every live method is behind Vimeo's Enterprise gate",
+			},
 		},
 		{
 			cap: CapMetadata, label: "Title / category",

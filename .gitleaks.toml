@@ -54,6 +54,21 @@ description = "Made-up fixture values that briefly lived in the wrong commits"
 commits = [
   "5cbe821ff686ddcc59aee9a8aa830269122e9c36",
   "a357fafffad25b8912a5c08aa16312adbedce09d",
+  # Trovo's own PUBLISHED response samples, transcribed byte-for-byte into
+  # trovo_test.go so the fixture could pin the shape -- above all expires_in
+  # arriving as a quoted STRING, which an int field cannot decode and which a
+  # hand-written fixture gets wrong. Trovo prints these 32-hex tokens in its
+  # public documentation; they were never anyone's credential.
+  #
+  # The working tree no longer contains them -- the second commit replaced
+  # them with obviously-fake strings while keeping the shape -- but a diff
+  # that REMOVES a value still contains it, which is the property the
+  # range scan exists to enforce and is not one worth weakening. So both
+  # commits are exempted rather than the path or the value: the path would
+  # exempt trovo_test.go forever, and the value would have to be repeated
+  # here, putting the strings back into the tree this removed them from.
+  "9405ae12ceede97db38a12e772cbea6d99e1be5c",
+  "720ac4bdf3c12107a64dfd492b4a44107f212a7e",
 ]
 
 # AND THE GENERATED CODE INDEX, WHICH IS NOT SOURCE.

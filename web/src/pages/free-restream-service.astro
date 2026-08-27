@@ -220,13 +220,18 @@ const costs = [
       </p>
       <CodeBlock
         label="docker"
-        code={`docker run -d \\
-  --name polyemesis \\
-  -p 8080:8080 \\
-  -p 6000:6000/udp \\
+        code={`docker run -d --name polyemesis \\
+  -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
   -v polyemesis-data:/data \\
-  rainmanjam/polyemesis`}
+  rainmanjam/polyemesis:latest`}
       />
+      <p class="mt-3 text-[11px] leading-relaxed text-subtle">
+        Note the <span class="font-mono">/udp</span> on port 6000. SRT is UDP,
+        and omitting the suffix is the classic reason an ingest silently
+        receives nothing. 1935 is published up front because a container's port
+        mappings are fixed when it is created — an RTMP source added later has
+        nothing listening for it, and says so nowhere.
+      </p>
       <dl class="mt-8 divide-y divide-line border-y border-line">
         {
           [

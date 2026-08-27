@@ -3,8 +3,28 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
+/* THE FLOOR UNDER EVERY SIZE BELOW IS IN rem, NOT IN SPACING STEPS.
+ *
+ * Compact density (see the DENSITY block in index.css) works by rescaling
+ * Tailwind's --spacing, which is what `h-7` and every other size here is
+ * measured in — so it shrinks the things an operator aims at along with the
+ * padding around them. 0.75 of a 28px control is 21px, and a miss on this
+ * product's densest page lands on a card carrying Start and Stop.
+ *
+ * A literal 1.5rem is invisible at comfortable density, where the smallest
+ * control is already 28px, and becomes the floor at compact. Spelled with
+ * min-h/min-w rather than by giving compact its own size variants, because a
+ * second set of sizes is a second set to keep in step. It is on Button alone:
+ * Switch and Checkbox are drawn to a fixed geometry that a min-height would
+ * pull apart.
+ *
+ * The icon size is spelled the same way and for the same reason as the type
+ * scale: 0.875rem is exactly what size-3.5 resolves to at comfortable density,
+ * so nothing moves today, and at compact the glyph keeps its size while the
+ * padding around it gives way. Compacting a console means compressing the
+ * whitespace, not the content — an icon is the label on half these buttons. */
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-surface disabled:pointer-events-none disabled:opacity-40 [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0",
+  "inline-flex min-h-[1.5rem] min-w-[1.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-surface disabled:pointer-events-none disabled:opacity-40 [&_svg]:pointer-events-none [&_svg]:size-[0.875rem] [&_svg]:shrink-0",
   {
     variants: {
       variant: {

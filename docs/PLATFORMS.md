@@ -11,7 +11,7 @@ This page answers both, then gives the OAuth app setup for each platform that
 supports sign-in.
 
 - [Capability matrix](#capability-matrix)
-- [The four that need a sentence each](#the-four-that-need-a-sentence-each)
+- [The platforms that need a sentence each](#the-platforms-that-need-a-sentence-each)
 - [Connecting an account](#connecting-an-account)
 - [Multiple accounts](#multiple-accounts)
 - [Compliance metadata](#compliance-metadata)
@@ -27,23 +27,23 @@ below. The table is what each platform's **published API** allows today.
 The same matrix is rendered in `Settings → Platform credentials` and served from
 `GET /api/v1/platforms/capabilities`.
 
-| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers  Start / end |
+| Platform | Sign in | Stream key | Metadata | Chat read | Chat send | Moderation | Viewers | Start / end |
 |---|---|---|---|---|---|---|---|---|
 | **YouTube Live** | Works | Works | Works | Works | Works | Works | Works | Works |
 | **Twitch** | Works | Works | Works | Works | Works | Works | Works | Not possible |
 | **Facebook Live** | Works | Works | Works | Works | Not possible | Works | Unverified | Works |
 | **Kick** | Works | Works | Works | Works | Works | Works | Works | Not possible |
+| **Vimeo Livestream** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **X (Twitter) Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Rumble** | Not possible | By hand | By hand | Works | Not possible | Not possible | Unverified | Not possible |
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Trovo** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **Trovo** | Works | Works | Works | Unverified | Unverified | Unverified | Works | Not possible |
 | **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **Vimeo Livestream** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **TikTok LIVE** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Instagram Live** | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible |
-| *Everything else* | — | By hand | — | — | — | — | — |
+| *Everything else* | — | By hand | — | — | — | — | — | — |
 
 | Term | Means |
 |---|---|
@@ -53,12 +53,15 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **Not possible** | Somebody read the platform's published API and the thing is not in it. No amount of setup will produce it |
 
 *Everything else* is the other nineteen entries in the destination preset
+catalogue — PeerTube, Owncast, Cloudflare Stream, Mux, AWS IVS and the rest.
+The platforms named in the table above are not among them, however faint their
+row reads. They stream perfectly over RTMP, RTMPS
 catalogue — PeerTube, Owncast, Cloudflare Stream, Mux, AWS IVS, LinkedIn, Trovo,
-Odysee, Vimeo, Dailymotion and the rest. They stream perfectly over RTMP, RTMPS
+Odysee, Dailymotion and the rest. They stream perfectly over RTMP, RTMPS
 or SRT with a pasted URL and key; we simply have not researched their APIs, and
 "unverified" is the honest thing to say about an API nobody here has read.
 
-## The four that need a sentence each
+## The platforms that need a sentence each
 
 **Facebook — read this before you start.** Full support, and Meta requires
 **App Review** first. Your own account works immediately as a developer or
@@ -124,7 +127,7 @@ scopes. Invisible twice over.
 
 **An account connected before this landed must be disconnected and reconnected
 once.** Granting a scope never upgrades a token that has already been issued —
-and Settings → Platforms flags exactly this, so it does not have to be
+and Settings → Platform credentials flags exactly this, so it does not have to be
 remembered from a page of documentation.
 
 **X (Twitter) — paste your key, there is no API.** X's developer platform covers
@@ -164,6 +167,38 @@ word. Somebody inside either programme may well find every column is a yes.
 The stream key on both is *by hand* and, worth knowing, **per broadcast**:
 TikTok issues it for the LIVE session and LinkedIn for the event, so a saved
 destination goes stale between streams rather than persisting like a Twitch key.
+
+**Vimeo — sign-in works for everyone; the live API is Enterprise-only.** That
+is Vimeo's own sentence, on its live API reference read 2026-08-26: *"Please
+note that our live API is available only to Vimeo Enterprise customers."* It is
+a commercial gate, not a permission — no scope, no reconnection and no app
+setting lifts it — and it covers the whole live surface: create an event,
+activate it, end it, read its ingest status, its RTMP destinations, its M3U8
+playback and its thumbnails.
+
+So this row reads **Works / By hand / Unverified ×6**, and the six deserve an
+explanation because two of them are not really unverified at all. Metadata and
+Start / end were *checked* — Vimeo publishes "Update an event", "Activate an
+event" and "End an event" — they are simply not built here, and none of the
+four words above says "documented and unbuilt". *Unverified* is the least wrong
+of the four because it is the fail-open one and invites you to try; *Not
+possible* would be a refusal Vimeo's own reference contradicts, and *Works*
+would be a promise no code keeps.
+
+**The stream key stays pasted even on Enterprise**, and for a reason worth
+knowing before you go looking for a setting: Vimeo has no permanent key. The
+ingest URL and key belong to a live event, so obtaining one means reading or
+creating an event — which is the gated surface, and which polyemesis does not
+do yet regardless. Create a **recurring** event (Vimeo is deprecating one-time
+live events and recommends avoiding them), open its setup panel, and copy the
+RTMPS server URL and stream key across.
+
+**Connect an account anyway.** Sign-in is what lets polyemesis *ask* Vimeo
+whether your account reaches the live API, with your own token, the moment you
+connect — and tell you then. Without it the first evidence is a refusal in the
+middle of a broadcast from an API that never uses the word Enterprise. Vimeo
+also verifies your client ID and secret directly, so a typo is caught on the
+credentials page rather than at consent time.
 
 **Rumble** is the row that changed, and it is worth reading as a case study in
 why this table says *unverified* rather than *no*. It used to be unverified all
@@ -319,7 +354,7 @@ Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, disconnect and reconnect once.
 
 polyemesis now says so itself. Each platform carries a scope version that is
-stored with the account, and **Settings → Platforms marks an account
+stored with the account, and **Settings → Platform credentials marks an account
 "reconnect needed"** when the running build asks for more than that account was
 granted. Accounts connected before the version existed are judged on the scopes
 the platform actually returned, so an account that already holds everything is
@@ -448,7 +483,7 @@ destination editor for a while. **This is the first release that sends them
 anywhere.**
 
 They ride along on the same metadata push as title and description — the one
-the composer's "Push metadata" button already starts — rather than needing a
+the composer's "Push to platforms" button already starts — rather than needing a
 separate action. Any destination that has a privacy status, a COPPA
 declaration or a content label saved sends it on the very next push after
 upgrading, whether or not that push actually changes the title or description.

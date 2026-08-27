@@ -276,6 +276,7 @@ const WITHHELD_ROWS = [
   ["DESIGN-DESTINATION-HEALTH.md", "Design note for unshipped work."],
   ["DESIGN-ONE-PORT-ONLY.md", "Design note for unshipped work."],
   ["DESIGN-ONE-PORT-INGEST.md", "Design note for unshipped work."],
+  ["DESIGN-OAUTH-BROKER.md", "Design note for unshipped work."],
   ["README.md", "A directory of the others; /docs is that page here."],
 ];
 

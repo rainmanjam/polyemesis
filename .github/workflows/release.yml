@@ -25,6 +25,22 @@ on:
         type: boolean
         default: true
 
+# ONE PUBLISH PER REF AT A TIME. Delete and re-push v0.7.0 to fix a wrong
+# CHANGELOG date, or press "Re-run all jobs" on a run whose images job failed,
+# and two runs executed the same publish steps concurrently:
+# softprops/action-gh-release UPDATES an existing release rather than refusing
+# one, so both runs uploaded dist/* to the same release and the asset set could
+# end up half from each. Every other workflow here already has a group --
+# ci.yml, installer.yml, pages.yml, security.yml and seven more. This was the
+# only one without, and it is the one that publishes.
+#
+# cancel-in-progress: FALSE, deliberately. Cancelling a run mid-push leaves a
+# container tag without the release it belongs to, which is the exact failure
+# the `needs: binaries` serialisation below was added to prevent. Queue instead.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 # Declared per job rather than once here. The two jobs need DIFFERENT things,
 # and granting the union to both hands each of them a capability it never uses:
 # the images job could have rewritten the repository, and the binaries job
@@ -108,14 +124,69 @@ jobs:
             exit 1
           }
 
-          successes=$(echo "${runs_json}" | jq '[.workflow_runs[]? | select(.status == "completed" and .conclusion == "success")] | length')
+          # AS MAIN, ON A PUSH. A bare "some green ci.yml run exists" was
+          # narrower than its name: ci.yml's suite picker keeps the full
+          # acceptance set only for `schedule` or REF = refs/heads/main, and
+          # every other ref falls through to `suites=[]`. The container matrix
+          # is then empty, those jobs are skipped, and the run's conclusion is
+          # still `success`. So a commit whose only ci.yml run was a manual
+          # workflow_dispatch on a hotfix branch satisfied this gate having
+          # never run the acceptance suites at all.
+          successes=$(echo "${runs_json}" | jq '[.workflow_runs[]? | select(.status == "completed" and .conclusion == "success" and .event == "push" and .head_branch == "main")] | length')
 
           if [ "${successes:-0}" -lt 1 ]; then
-            echo "::error::No successful ci.yml run found for commit ${SHA}. A version tag must point at a commit that has passed CI. Refusing to publish."
+            echo "::error::No successful ci.yml run found for commit ${SHA} from a push to main. A version tag must point at a commit that passed CI *as main* -- a workflow_dispatch or branch run skips the acceptance matrix and still reports success. Merge to main and let CI run there, then tag. Refusing to publish."
             exit 1
           fi
 
           echo "Found ${successes} successful ci.yml run(s) for ${SHA}. Proceeding."
+
+  # THE INSTALLER WAS NOT ON THE RELEASE'S CRITICAL PATH (#559). installer.yml
+  # runs on push/pull_request filtered to scripts/install.sh,
+  # scripts/acceptance-install.sh and its own file -- and a tag push matches no
+  # `paths` filter at all -- so the release published without the installer
+  # suite having run against the released commit. ci-gate requires ci.yml only.
+  # install.sh is what every operator uses.
+  #
+  # RUN HERE RATHER THAN LOOKED FOR ELSEWHERE. Asking the API for a green
+  # installer.yml run against this SHA (the shape ci-gate uses) would refuse
+  # almost every release, because that workflow's paths filter means most
+  # release commits legitimately never triggered it -- a gate that is wrong most
+  # of the time gets bypassed. So this runs the parts of it that are properties
+  # of the SCRIPT rather than of a distro: the parse, the argument validator,
+  # and the acceptance suite that drives the generated update.sh and
+  # uninstall.sh against temporary directories. Seconds, no container matrix,
+  # and it fails the release closed.
+  #
+  # NOT COVERED HERE, said plainly: the per-distribution preflight and the real
+  # install/uninstall/interrupt job in installer.yml. Those need containers and
+  # a runner that can be dirtied, and they are the reason that workflow exists.
+  # This is the half that can be made a release gate, not a replacement for it.
+  installer-gate:
+    name: installer suite (fail closed)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: install.sh parses and its argument validator refuses bad input
+        run: |
+          set -euo pipefail
+          bash -n scripts/install.sh
+          bash -n scripts/acceptance-install.sh
+          for bad in "--mode wat" "--tls wat" "--http-port abc" "--http-port 70000" "--srt-port 0" "--rtmp-port 70000" "--unknown"; do
+            # shellcheck disable=SC2086
+            if bash scripts/install.sh $bad >/dev/null 2>&1; then
+              echo "::error::install.sh accepted '${bad}'. The argument validator is what stands between an operator's typo and a half-configured host."
+              exit 1
+            fi
+            echo "refused: ${bad}"
+          done
+
+      - name: Installer acceptance
+        run: ./scripts/acceptance-install.sh
   # RB-5 (#499): CHANGELOG.md claimed 0.7.0 shipped -- a dated `## [0.7.0] —
   # 2026-08-21` heading -- while no v0.7.0 tag existed anywhere: not in git,
   # not on GitHub Releases, not on Docker Hub. Every install path therefore
@@ -136,7 +207,12 @@ jobs:
       contents: read
     timeout-minutes: 5
     steps:
+      # fetch-depth: 0 so the TAG OBJECT itself is present, not just the commit
+      # it points at. The annotated-tag check below reads the object's type, and
+      # a shallow fetch can leave nothing to read.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Require the pushed tag to match CHANGELOG.md's top dated heading
         env:
@@ -147,12 +223,38 @@ jobs:
 
           # A workflow_dispatch rehearsal runs from a BRANCH, not a tag --
           # REF_NAME is something like "docs/accuracy-pass", which was never
-          # going to match a "## [x.y.z] — date" heading and isn't claiming
-          # to. Nothing here would be published either way (see PUBLISH), so
-          # there is nothing for this gate to protect.
+          # going to match a "## [x.y.z] — date" heading and isn't claiming to.
+          #
+          # THE PREMISE THAT USED TO BE HERE WAS FALSE. This said "nothing here
+          # would be published either way (see PUBLISH)" and exited 0 -- but
+          # PUBLISH is exactly what makes it false: a workflow_dispatch with
+          # dry_run: false publishes for real, from a branch, with this gate
+          # stepped aside. `github.ref` is then refs/heads/main, which contains
+          # no hyphen, so metadata-action ENABLES :latest -- and install.sh
+          # writes `image: <IMAGE>:latest` into every docker operator's compose
+          # file, so the next update.sh hands them a build of an untagged main
+          # that no release gate examined. One un-ticked checkbox.
+          #
+          # So: a non-tag run may rehearse, and may not publish. Refusing is the
+          # inverted condition that turns this from a skip into a gate.
           if [ "${REF_TYPE}" != "tag" ]; then
-            echo "Not a tag push (${REF_TYPE} '${REF_NAME}'); nothing to compare against CHANGELOG.md."
+            if [ "${PUBLISH}" = "true" ]; then
+              echo "::error::Refusing to publish from ${REF_TYPE} '${REF_NAME}'. Only a version tag can publish: a branch has no CHANGELOG heading to check against, and publishing from one overwrites the :latest, :cuda and :vaapi tags every docker install tracks. Re-run with dry_run: true to rehearse, or push a v* tag to release."
+              exit 1
+            fi
+            echo "Not a tag push (${REF_TYPE} '${REF_NAME}') and nothing will be published; nothing to compare against CHANGELOG.md."
             exit 0
+          fi
+
+          # ANNOTATED, not lightweight. A lightweight tag publishes identically
+          # and leaves no tagger, no date and no message in the object, so the
+          # only record of who cut a release and when is the Actions run that
+          # eventually expires. v0.4.0 through v0.6.0 are all annotated; nothing
+          # made that true except a human typing -a.
+          tag_type="$(git cat-file -t "refs/tags/${REF_NAME}" 2>/dev/null || echo unknown)"
+          if [ "${tag_type}" != "tag" ]; then
+            echo "::error::${REF_NAME} is a ${tag_type} object, not an annotated tag. A release tag must carry a tagger, a date and a message. Delete it and re-cut it: git tag -d ${REF_NAME} && git push origin :${REF_NAME} && git tag -a ${REF_NAME} -m 'release ${REF_NAME}' && git push origin ${REF_NAME}. Refusing to publish."
+            exit 1
           fi
 
           # v0.7.0 -> 0.7.0
@@ -195,12 +297,32 @@ jobs:
           # release is being prepared, which is correct; it stops being correct
           # the moment a tag claims that release has shipped. Naming the exact
           # edit, because the previous message named the wrong entry entirely.
-          if ! echo "${heading}" | grep -qE '— [0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$'; then
+          heading_date="$(echo "${heading}" | sed -nE 's/^.*— ([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]*$/\1/p')"
+          if [ -z "${heading_date}" ]; then
             echo "::error::CHANGELOG.md's ${heading_version} heading is not dated: '${heading}'. A tag says this release shipped, so date it before tagging -- change it to '## [${heading_version}] — $(date -u +%Y-%m-%d)' and push the tag again. Refusing to publish."
             exit 1
           fi
 
-          echo "Tag ${REF_NAME} matches CHANGELOG.md's top version heading (${heading_version}), and it is dated." 
+          # DATED TODAY, not merely dated. The check above proves the heading
+          # HAS a date; it never proved the date was right, and the two come
+          # apart in the ordinary case: the heading is dated while the release
+          # is being prepared and the tag is held for a few days -- which is
+          # literally what happened for 0.7.0, dated 2026-08-21 in #487 and
+          # re-dated later. A heading dated a week ago published happily, and
+          # the release notes then asserted a ship date the artefacts
+          # contradict. GHSA advisories point at this document.
+          #
+          # UTC, and exactly today. A midnight-boundary push fails here and the
+          # recovery is the same one the undated branch prints: re-date, re-tag.
+          # That is a rare annoyance; a silently wrong ship date is a permanent
+          # false claim.
+          today="$(date -u +%Y-%m-%d)"
+          if [ "${heading_date}" != "${today}" ]; then
+            echo "::error::CHANGELOG.md's ${heading_version} heading is dated ${heading_date}, but this release is being published on ${today} (UTC). Change it to '## [${heading_version}] — ${today}', then delete and re-push ${REF_NAME}. Refusing to publish a release whose notes claim a ship date the artefacts contradict."
+            exit 1
+          fi
+
+          echo "Tag ${REF_NAME} matches CHANGELOG.md's top version heading (${heading_version}), dated ${heading_date}, which is today."
 
   images:
     name: container images
@@ -252,8 +374,53 @@ jobs:
       #
       # Read from the environment rather than interpolated into the script, so
       # a ref name can never be treated as shell.
-      - name: Derive a ref-safe version
-        run: echo "VERSION=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+      # The GPU tag lists are derived HERE rather than written as literals below,
+      # for two reasons that both come from the same place: metadata-action does
+      # this correctly for the default image and the GPU steps were hand-written.
+      #
+      #   PRERELEASE (#556). `:latest` is withheld for a tag containing a hyphen
+      #   -- `enable=${{ !contains(github.ref, '-') }}` on the raw tag below --
+      #   but `:cuda` and `:vaapi` were unconditional literals, so tagging
+      #   v0.7.0-rc1 to rehearse a real release silently made an rc build the
+      #   floating tag `docker pull rainmanjam/polyemesis:cuda` resolves. Same
+      #   guard, same set.
+      #
+      #   NAMESPACE (#585). metadata-action's {{version}} strips the leading v,
+      #   giving :0.7.0, while these steps interpolated VERSION -- GITHUB_REF_NAME
+      #   with slashes replaced, i.e. v0.7.0 -- giving :v0.7.0-cuda. Two
+      #   spellings of one release in one registry, so :0.7.0-cuda, the one a
+      #   reader would infer from :0.7.0, did not exist.
+      #
+      # VERSION itself keeps the v: it is the build-arg the binary reports and
+      # the tag name people cite.
+      - name: Derive a ref-safe version and the GPU image tags
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME//\//-}"
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+
+          # Same test metadata-action applies to :latest, applied to the same
+          # question: is this ref a prerelease?
+          floating=true
+          case "$GITHUB_REF" in *-*) floating=false ;; esac
+          echo "Floating GPU tags enabled: ${floating} (ref ${GITHUB_REF})"
+
+          for variant in cuda vaapi; do
+            # tr, not ${variant^^}: that is bash 4+, and this script is also run
+            # by scripts/test-release-gates.sh on whatever bash a contributor
+            # has -- macOS still ships 3.2, where it is a `bad substitution`.
+            upper="$(printf '%s' "$variant" | tr '[:lower:]' '[:upper:]')"
+            {
+              echo "TAGS_${upper}<<GPUTAGS"
+              if [ "$floating" = true ]; then
+                echo "${IMAGE}:${variant}"
+                echo "${GHCR_IMAGE}:${variant}"
+              fi
+              echo "${IMAGE}:${version#v}-${variant}"
+              echo "${GHCR_IMAGE}:${version#v}-${variant}"
+              echo GPUTAGS
+            } >> "$GITHUB_ENV"
+          done
 
       # QEMU lets one amd64 runner produce an arm64 image. It is slower than a
       # native arm64 runner but needs no extra infrastructure.
@@ -325,11 +492,7 @@ jobs:
           # the Dockerfiles now carry their own as well, which is what a manual
           # `docker build` gets.
           labels: ${{ steps.meta.outputs.labels }}
-          tags: |
-            ${{ env.IMAGE }}:cuda
-            ${{ env.IMAGE }}:${{ env.VERSION }}-cuda
-            ${{ env.GHCR_IMAGE }}:cuda
-            ${{ env.GHCR_IMAGE }}:${{ env.VERSION }}-cuda
+          tags: ${{ env.TAGS_CUDA }}
           push: ${{ env.PUBLISH == 'true' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -342,11 +505,7 @@ jobs:
           platforms: linux/amd64
           build-args: VERSION=${{ env.VERSION }}
           labels: ${{ steps.meta.outputs.labels }}
-          tags: |
-            ${{ env.IMAGE }}:vaapi
-            ${{ env.IMAGE }}:${{ env.VERSION }}-vaapi
-            ${{ env.GHCR_IMAGE }}:vaapi
-            ${{ env.GHCR_IMAGE }}:${{ env.VERSION }}-vaapi
+          tags: ${{ env.TAGS_VAAPI }}
           push: ${{ env.PUBLISH == 'true' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -385,7 +544,7 @@ jobs:
     # version, and a correctly-named tag on a red commit, are both bad
     # releases, and each gate is blind to the other's failure. `images`
     # already needs `binaries`, so both publish paths are gated through here.
-    needs: [ci-gate, changelog-gate]
+    needs: [ci-gate, changelog-gate, installer-gate]
     permissions:
       # Creates the GitHub Release and uploads the assets. No packages: write —
       # this job pushes no images.
@@ -597,12 +756,71 @@ jobs:
           path: dist/polyemesis-sbom.*.json
           if-no-files-found: error
 
+      # THE RELEASE BODY IS THE FIRST THING AN OPERATOR READS, and it used to be
+      # `generate_release_notes: true` alone -- a list of merged PR titles and
+      # nothing else. Three facts an operator needs BEFORE they upgrade were
+      # therefore in no release note at all:
+      #
+      #   * UPGRADES ARE ONE-WAY (#531, measured). A v0.6.0 binary opens a
+      #     v0.7.0 database with no warning and no refusal, and runs every
+      #     destination with an EMPTY stream key -- enabled=1, publishing
+      #     nothing, silently, mid-show. Nothing 0.7.0 ships can prevent that:
+      #     the code that would refuse has to be in 0.6.0, which is already on
+      #     the machine being rolled back to. refuseNewerSchema buys every
+      #     rollback from 0.7.0 forward and cannot reach backwards. So the only
+      #     place this can be said is here, before the download.
+      #   * A BACKUP WITHOUT secret.key IS NOT A BACKUP (#557). 0.7.0 seals
+      #     destination stream keys at rest, so polyemesis.db alone -- a
+      #     COMPLETE destination backup in 0.6.0 -- silently stopped being one.
+      #     The update.sh that checks for this is generated at install time, so
+      #     a 0.6.0 install is running the 0.6.0 helper, which does not check;
+      #     re-running install.sh first is what regenerates it.
+      #   * WINDOWS SHIPS WITH KNOWN ABORTS (#584). windows/amd64 and
+      #     windows/arm64 are published here, and #440 is an intermittent Go
+      #     runtime abort that takes the whole process down mid-broadcast --
+      #     a different failure from the recording truncation docs/INSTALL.md
+      #     already names.
+      #
+      # generate_release_notes stays on: this is prepended to it, not instead
+      # of it.
       - name: Publish GitHub Release
         if: env.PUBLISH == 'true'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           files: dist/*
           generate_release_notes: true
+          body: |
+            ## Before you upgrade
+
+            **This upgrade is one-way.** Migrations run forward only. An older
+            binary opens a newer database *without complaint* and then runs every
+            destination with an empty stream key — enabled, live, publishing
+            nothing, with no error anywhere. Rolling back is not a supported
+            recovery path; restoring your backup is.
+
+            **Back up the whole data directory, not just `polyemesis.db`.**
+            Since 0.7.0 destination stream keys are sealed at rest with
+            `secret.key`. A database restored *without* that file comes back with
+            every destination disabled — by design, because a key that will not
+            open disables its destination rather than failing open. That restore
+            looks completely successful until someone goes live.
+
+            **Re-run `install.sh` before upgrading an install older than 0.7.0.**
+            `update.sh` and `uninstall.sh` are written to disk when you install,
+            so an older install is running older helpers — including one whose
+            backup check does not know to look for `secret.key`. Re-running the
+            installer regenerates them. See
+            [docs/UPGRADING.md](https://github.com/rainmanjam/polyemesis/blob/main/docs/UPGRADING.md).
+
+            **Windows is tested, not operated.** Two known unresolved defects:
+            recordings are truncated on service stop, and #440 — an intermittent
+            Go runtime abort that ends the process mid-broadcast. See
+            [docs/INSTALL.md](https://github.com/rainmanjam/polyemesis/blob/main/docs/INSTALL.md#windows).
+
+            Verify your download against `SHA256SUMS`, published below.
+
+            ---
+
           # A tag containing a hyphen (v1.0.0-rc1) is a prerelease, and must
           # not become the download the front page points at.
           prerelease: ${{ contains(github.ref_name, '-') }}

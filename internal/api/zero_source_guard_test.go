@@ -384,7 +384,10 @@ func TestTheSilenceCheckRefusesRatherThanReadingAnAbsentIngest(t *testing.T) {
 	s, _, _ := zeroSourceServer(t)
 
 	w := httptest.NewRecorder()
-	if !s.refuseIfSilent(w, routing.Profile{}) {
+	// A nil programme, which is what a body with no sourceId carries. The
+	// install-wide check comes first and answers here whatever was named, which
+	// is the property this test is about.
+	if !s.refuseIfSilent(w, nil, routing.Profile{}) {
 		t.Fatal("refuseIfSilent let a destination through on an install with no engine, " +
 			"having written nothing")
 	}

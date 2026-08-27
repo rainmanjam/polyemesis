@@ -8,10 +8,44 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+- **Trovo signs in.** OAuth 2.0 authorization code (no PKCE — Trovo documents
+  none), the **stream key** over `channel_details_self`, title and category
+  push over `channel_update_self`, and the live viewer count off the same
+  channel response the key comes from. Trovo publishes no broadcast object at
+  all, so start/end is *Not possible* there exactly as on Twitch and Kick.
+  Chat and moderation are documented and deliberately not built yet; their
+  scopes are not requested until they are.
+- **A platform may now supply the stream key without an ingest URL.** Trovo
+  issues its ingest hostname per region and publishes it nowhere in its API, so
+  the server URL is copied out of the creator dashboard once. `Refresh stream
+  key` keeps whatever URL the destination already had rather than blanking it,
+  and says which field to go and fetch when there is none — previously it
+  overwrote unconditionally, which for a platform like this turned a working
+  destination into "an RTMP URL is required".
 
-## [0.7.0] — unreleased
+## [0.7.0] — 2026-08-26
+
+### Upgrading
+- **TLS now serves on :443 rather than :8080 when a certificate is configured.**
+  An install reached at `https://host:8080` moves, and a firewall that only
+  opens 8080 makes the console unreachable after the upgrade with nothing on
+  screen to say why. Open 443, or set the listen address back explicitly.
 
 ### Fixed
+- **A scheduled broadcast could silently fail to go on air on a multi-programme
+  install.** `schedules` carries no `source_id` — a timetable is a property of
+  the box — but every engine ran its own `scheduler.Runner` over that one table.
+  Whichever swept first wrote `enabled` on every destination, including other
+  programmes', then reconciled ONLY ITS OWN engine and marked the occurrence
+  handled; the other engines read it as handled and never reconciled. Those
+  destinations sat enabled in the database with no process publishing, while the
+  log said `schedule fired`. `MarkScheduleRun`'s `WHERE last_run_at < ?` is a
+  ratchet on the row, not a lease over the work, and the actuator has no way to
+  learn whether it won it. There is now one runner, owned by the manager, whose
+  reconcile covers every engine — so the shape that caused this is no longer
+  representable rather than merely unlikely. The runs page also stops reporting
+  the default programme's scheduler as though it were the only one.
 - **The dashboard's grouped destination list and the Prometheus scrape lost
   every programme but one.** Scoping `Engine.Status` to its own source was
   right, and it removed a leak three callers were quietly relying on: the

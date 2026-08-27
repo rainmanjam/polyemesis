@@ -234,23 +234,32 @@ func (s *Server) recordings() *recording.Manager { return s.mgr.Recordings() }
 // explain a recorder that stopped on its own -- see the field comment on
 // recording.DiskUsage.Storage.
 //
-// The default engine's, because this endpoint is unscoped and that is the
-// programme it speaks for everywhere else. On a real install the answer is the
-// same whichever engine is asked: one volume, one floor, one install-wide
-// Recording block (see engine.effectiveSettings, which overlays the ingest and
-// nothing else).
+// ANY ENGINE THAT HAS HALTED, not the default one (#579). The floor is
+// install-wide -- one volume, one free-space limit, one Recording block, see
+// engine.effectiveSettings -- but the HALT is not: it is one recorder child
+// being stopped by the guard on THAT engine's own recording manager. On a
+// two-programme install where programme 2 is recording and programme 1 is not,
+// asking the default engine reported the zero verdict while programme 2's
+// recorder had already been stopped: recording had halted and the one endpoint
+// whose job is to explain a recorder that stopped on its own said nothing had.
 //
-// No engine means the zero verdict, and that is the TRUE answer rather than a
-// fallback: nothing has been halted because nothing was recording.
+// The FIRST halt in display order wins rather than a merge, because the
+// question the banner asks is "has the floor stopped recording", which is
+// answered by one programme having stopped, and Reason is a sentence for a
+// human rather than a set to union.
+//
+// No engine, or no engine halted, means the zero verdict, and that is the TRUE
+// answer rather than a fallback: nothing has been halted.
 func (s *Server) storageVerdict() recording.StorageState {
 	if s.mgr == nil {
 		return recording.StorageState{}
 	}
-	e := s.mgr.Default()
-	if e == nil {
-		return recording.StorageState{}
+	for _, e := range s.mgr.Engines() {
+		if st := e.Recordings().Storage(); st.Halted {
+			return st
+		}
 	}
-	return e.Recordings().Storage()
+	return recording.StorageState{}
 }
 
 // Server wires the HTTP layer to everything else.

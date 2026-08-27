@@ -273,7 +273,47 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.log.Info("platform account connected", "platform", platform, "account", acct.Name)
-	s.oauthDone(w, r, fmt.Sprintf("Connected %s as %s", platform, saved.AccountName), "")
+	s.oauthWarn(w, r, fmt.Sprintf("Connected %s as %s", platform, saved.AccountName),
+		s.entitlementWarning(ctx, platform, creds.ClientID, tok.AccessToken))
+}
+
+// entitlementWarning asks a commercially gated platform, at the earliest moment
+// there is a token to ask with, whether this account reaches the gated API.
+//
+// IT RUNS AFTER THE ACCOUNT IS STORED AND NEVER FAILS THE CONNECTION. The
+// account connected -- that is true whatever the gate says, and unwinding a
+// successful sign-in because a probe came back unhappy would turn "your plan
+// does not include this" into "connecting is broken", which is a worse lie than
+// the silence it replaces.
+//
+// WHY HERE AND NOT AT GO-LIVE. This is the whole point of the mechanism: the
+// alternative is a refusal arriving mid-broadcast from an API that never names
+// the reason. Vimeo's live API is Enterprise-only and says so nowhere in its
+// error responses, so an operator with correct credentials, granted scopes and
+// a connected account has no route from what polyemesis shows them to the
+// actual explanation. One extra GET, once, at connect.
+//
+// Returns "" for every platform without a gate, which is all of them but one.
+func (s *Server) entitlementWarning(ctx context.Context, platform db.Platform, clientID, accessToken string) string {
+	gated, ok := s.providers.EntitlementFor(platform)
+	if !ok {
+		return ""
+	}
+	err := gated.CheckEntitlement(ctx, clientID, accessToken)
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, oauth.ErrNotEntitled) {
+		return err.Error()
+	}
+	// The probe did not complete. Reporting the gate on this evidence would be
+	// a claim about somebody's contract made on the strength of a timeout --
+	// the same defect credcheck.go describes for CheckUnreachable. Saying
+	// nothing is the other half of it: a silent success reads as a clean bill
+	// of health, and the operator would learn about the gate mid-broadcast
+	// after all.
+	return fmt.Sprintf("polyemesis could not check whether this account reaches %s's gated API (%v). %s",
+		platform, err, gated.EntitlementReason())
 }
 
 // oauthDone returns the browser to the SPA with the outcome in the query
@@ -289,9 +329,42 @@ func (s *Server) oauthDone(w http.ResponseWriter, r *http.Request, ok, errMsg st
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
+// oauthWarn is oauthDone with a third outcome: connected, AND there is
+// something the operator has to know before they rely on it.
+//
+// A THIRD OUTCOME RATHER THAN A LONGER SUCCESS MESSAGE. Appending the gate to
+// the ok string would render it as a green tick with a paragraph after it,
+// which is the shape of message people stop reading. It is also not an error --
+// the connection worked, there is nothing to retry, and colouring it red would
+// send an operator back round a flow that already succeeded.
+//
+// An empty warn is the common case and is byte-for-byte the old behaviour, so
+// every platform without a gate redirects exactly as it did.
+func (s *Server) oauthWarn(w http.ResponseWriter, r *http.Request, ok, warn string) {
+	if warn == "" {
+		s.oauthDone(w, r, ok, "")
+		return
+	}
+	http.Redirect(w, r, "/settings?tab=platforms&oauth_ok="+urlEscape(ok)+
+		"&oauth_warn="+urlEscape(warn), http.StatusFound)
+}
+
 func urlEscape(s string) string {
 	return strings.NewReplacer(
 		"%", "%25", " ", "%20", "&", "%26", "#", "%23",
+		// A SEMICOLON IS A SEPARATOR TO GO'S OWN PARSER, and this was found by
+		// a message that happened to contain one. net/url.Values.Get silently
+		// DROPS any pair whose key or value carries a `;` -- ParseQuery records
+		// an error for it and u.Query() discards that error -- so an operator
+		// message with a semicolon in it does not arrive truncated, it does not
+		// arrive at all. Browsers stopped treating `;` as a separator years
+		// ago, which is exactly why this went unnoticed: the SPA reads it fine
+		// and anything Go-side reading the same URL sees nothing.
+		//
+		// Every string that comes through here is written for a human -- a
+		// platform's refusal, a gate explanation -- and semicolons are ordinary
+		// in those.
+		";", "%3B",
 		"?", "%3F", "+", "%2B", "\n", " ", "\r", " ",
 	).Replace(s)
 }
@@ -410,7 +483,29 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		s.setFacebookBroadcast(acct.AccountRef, b.ID)
 	}
 
-	dest.URL = b.Ingest.URL
+	// A PLATFORM MAY SUPPLY THE KEY AND NOT THE URL, and overwriting here would
+	// destroy the half the operator supplied.
+	//
+	// This was an unconditional assignment, which was right while every
+	// provider returned both fields. Trovo returns only the key: it publishes
+	// the stream key on its channel resource and publishes the ingest hostname
+	// nowhere at all -- the host is regional and lives only in the creator
+	// dashboard, so the operator copies it across once. Blanking it on every
+	// key refresh would take a working destination and make it unsavable,
+	// reported as "an RTMP URL is required" from a button labelled Refresh
+	// stream key.
+	//
+	// Behaviour for every other platform is unchanged: they always answer with
+	// a URL, so the branch is never taken for them.
+	if b.Ingest.URL != "" {
+		dest.URL = b.Ingest.URL
+	} else if strings.TrimSpace(dest.URL) == "" {
+		writeError(w, http.StatusBadRequest,
+			string(acct.Platform)+" supplies the stream key but does not publish an ingest URL, and this "+
+				"destination has none yet. Copy the server URL from the platform's own dashboard into "+
+				"this destination first, then fetch the key — refreshing it afterwards leaves the URL alone.")
+		return
+	}
 	dest.StreamKey = b.Ingest.Key
 	dest.Kind = db.DestRTMP
 	// Recorded even when empty: a destination that used to have a backup

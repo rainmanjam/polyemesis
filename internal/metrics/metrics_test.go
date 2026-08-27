@@ -15,10 +15,22 @@ func testSnapshot() Snapshot {
 		Version: "1.2.3",
 		Uptime:  90 * time.Second,
 		Sources: &sources,
-		Ingest: Process{
-			State:       "running",
-			Restarts:    2,
-			BitrateKbps: 6000,
+		Ingests: []Ingest{
+			{
+				Process: Process{State: "running", Restarts: 2, BitrateKbps: 6000},
+				Relay:   Relay{Subscribers: 4, RxPackets: 100, RxBytes: 131600, TxPackets: 400, Dropped: 5},
+				ID:      1,
+				Name:    "Main",
+			},
+			// A SECOND PROGRAMME, and it is down. Without it every assertion
+			// below reads identically on the unlabelled scalars this replaced,
+			// which is exactly the single-source blindness that hid #528.
+			{
+				Process: Process{State: "failed", Restarts: 9},
+				Relay:   Relay{Subscribers: 1, RxPackets: 7, RxBytes: 11, TxPackets: 3, Dropped: 2},
+				ID:      2,
+				Name:    "Studio B",
+			},
 		},
 		Destinations: []Destination{
 			{
@@ -37,7 +49,6 @@ func testSnapshot() Snapshot {
 				Platform: "custom",
 			},
 		},
-		Relay:      Relay{Subscribers: 4, RxPackets: 100, RxBytes: 131600, TxPackets: 400, Dropped: 5},
 		Recordings: Recordings{Files: 6, UsedBytes: 1 << 30, FreeBytes: 1 << 40, TotalBytes: 2 << 40},
 		Host: Host{
 			CPUPercent: 41.5, MemUsedBytes: 1024, MemTotalBytes: 4096,
@@ -55,10 +66,17 @@ func parse(t *testing.T, text string) map[string]string {
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
-		series, value, ok := strings.Cut(line, " ")
-		if !ok {
+		// The LAST space, not the first. A label value is free text typed by
+		// an operator -- "Studio B", "Twitch (backup)" -- and cutting at the
+		// first space split the series identifier in half, so every programme
+		// whose name contains one collapsed into the same key and read as a
+		// duplicate series. The value is the final field of an exposition line;
+		// there is nothing after it.
+		at := strings.LastIndex(line, " ")
+		if at < 0 {
 			t.Fatalf("sample line has no value: %q", line)
 		}
+		series, value := line[:at], line[at+1:]
 		if _, dup := out[series]; dup {
 			t.Errorf("duplicate series %q", series)
 		}
@@ -79,9 +97,13 @@ func TestSnapshotIsExposedAsPrometheusSamples(t *testing.T) {
 		{"uptime is in seconds", "polyemesis_uptime_seconds", "90"},
 		{"configured programmes are counted", "polyemesis_sources", "2"},
 
-		{"ingest is up while running", "polyemesis_ingest_up", "1"},
-		{"ingest kbps is exposed as bits per second", "polyemesis_ingest_bitrate_bits_per_second", "6e+06"},
-		{"ingest restarts are counted", "polyemesis_ingest_restarts_total", "2"},
+		{"ingest is up while running", `polyemesis_ingest_up{id="1",name="Main"}`, "1"},
+		// THE SERIES #528 IS ABOUT. Programme 2's encoder has stopped and the
+		// scrape says so; before the label there was no series that could.
+		{"a second programme's dead ingest is its own series", `polyemesis_ingest_up{id="2",name="Studio B"}`, "0"},
+		{"ingest kbps is exposed as bits per second", `polyemesis_ingest_bitrate_bits_per_second{id="1",name="Main"}`, "6e+06"},
+		{"ingest restarts are counted", `polyemesis_ingest_restarts_total{id="1",name="Main"}`, "2"},
+		{"the second programme's restarts are its own", `polyemesis_ingest_restarts_total{id="2",name="Studio B"}`, "9"},
 
 		{"destination labels are on info", `polyemesis_destination_info{id="9",name="Twitch",kind="rtmp",platform="twitch"}`, "1"},
 		{"a running destination is enabled", `polyemesis_destination_enabled{id="9",name="Twitch"}`, "1"},
@@ -91,11 +113,14 @@ func TestSnapshotIsExposedAsPrometheusSamples(t *testing.T) {
 		{"dropped frames are counted", `polyemesis_destination_dropped_frames_total{id="9",name="Twitch"}`, "12"},
 		{"a disabled destination still reports", `polyemesis_destination_enabled{id="3",name="Archive"}`, "0"},
 
-		{"relay subscribers", "polyemesis_relay_subscribers", "4"},
-		{"relay rx packets", "polyemesis_relay_received_packets_total", "100"},
-		{"relay rx bytes", "polyemesis_relay_received_bytes_total", "131600"},
-		{"relay tx packets", "polyemesis_relay_transmitted_packets_total", "400"},
-		{"relay drops", "polyemesis_relay_dropped_packets_total", "5"},
+		{"relay subscribers", `polyemesis_relay_subscribers{id="1",name="Main"}`, "4"},
+		{"relay rx packets", `polyemesis_relay_received_packets_total{id="1",name="Main"}`, "100"},
+		{"relay rx bytes", `polyemesis_relay_received_bytes_total{id="1",name="Main"}`, "131600"},
+		{"relay tx packets", `polyemesis_relay_transmitted_packets_total{id="1",name="Main"}`, "400"},
+		{"relay drops", `polyemesis_relay_dropped_packets_total{id="1",name="Main"}`, "5"},
+		// One hub per engine: two programmes' counters are not addable, and a
+		// scrape that added them would report traffic no interface carried.
+		{"the second programme's relay is its own series", `polyemesis_relay_received_bytes_total{id="2",name="Studio B"}`, "11"},
 
 		{"recording file count", "polyemesis_recording_files", "6"},
 		{"recording bytes used", "polyemesis_recording_used_bytes", "1.073741824e+09"},
@@ -129,7 +154,8 @@ func TestExactlyOneStateSampleIsSetPerProcess(t *testing.T) {
 		prefix  string
 		current string
 	}{
-		{"ingest reports running", "polyemesis_ingest_state{", "running"},
+		{"ingest reports running", `polyemesis_ingest_state{id="1",name="Main",`, "running"},
+		{"the second programme reports failed", `polyemesis_ingest_state{id="2",name="Studio B",`, "failed"},
 		{"destination reports reconnecting", `polyemesis_destination_state{id="9",name="Twitch",`, "reconnecting"},
 		{"stopped destination reports stopped", `polyemesis_destination_state{id="3",name="Archive",`, "stopped"},
 	}

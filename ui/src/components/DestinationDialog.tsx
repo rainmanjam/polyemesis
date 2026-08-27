@@ -255,10 +255,11 @@ const PRESETS: DestPreset[] = [
     group: "video",
     transport: "rtmp",
     kind: "rtmp",
+    platform: "trovo",
     url: "",
     separateKey: true,
     notes:
-      "Copy the server URL and stream key from the Trovo creator dashboard → Stream. Trovo's ingest hostname varies by region, so nothing is prefilled here.",
+      "Connect a Trovo account in Settings → Platform credentials and polyemesis fetches the stream key itself, over the channel_details_self scope. The server URL is yours to supply either way: Trovo's ingest hostname varies by region and appears nowhere in its API, so copy it once from the Trovo creator dashboard → Stream. Refreshing the key afterwards leaves that URL alone.",
   },
   {
     id: "dlive",
@@ -300,10 +301,17 @@ const PRESETS: DestPreset[] = [
     group: "video",
     transport: "rtmps",
     kind: "rtmp",
+    // Named, and the key is STILL pasted — the first preset here where those
+    // two come apart. The platform carries sign-in and the live-API
+    // entitlement probe; separateKey stays because Vimeo issues the ingest per
+    // live event and creating one is Enterprise-only. See
+    // internal/oauth/vimeo.go before "finishing" this by clearing separateKey.
+    platform: "vimeo",
     url: "",
     separateKey: true,
+    helpUrl: "https://developer.vimeo.com/api/reference/live",
     notes:
-      "Vimeo issues an RTMPS URL and key per live event. Open the event in Vimeo and copy the server URL and stream key from its setup panel.",
+      "Vimeo issues an RTMPS URL and key per live event. Open the event in Vimeo and copy the server URL and stream key from its setup panel — connecting a Vimeo account does not change that, because Vimeo's live API is available only to Vimeo Enterprise customers and a key belongs to an event. Connect one anyway if you have an account: polyemesis asks the live API whether YOURS reaches it and tells you at connect time, rather than letting the refusal turn up mid-broadcast. Create a RECURRING event — Vimeo is deprecating one-time live events and recommends avoiding them.",
   },
   {
     id: "dailymotion",

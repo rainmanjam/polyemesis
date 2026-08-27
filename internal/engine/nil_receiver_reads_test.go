@@ -34,7 +34,6 @@ var nilEngineAnswers = map[string]bool{
 	"Levels":      true,
 	"Processes":   true,
 	"Alerts":      true,
-	"Scheduler":   true,
 	"Loudness":    true,
 	// The Meters page's switch, which cannot assert a state it has not been
 	// told. An install with no engine has no analyser tier running, so `false`
@@ -196,10 +195,13 @@ func TestWhatANilEngineActuallyReports(t *testing.T) {
 	if e.Failover() != nil {
 		t.Error("Failover reported a selector tier on an install with no engine")
 	}
-	if e.Alerts() != nil || e.Scheduler() != nil {
-		t.Error("Alerts/Scheduler handed back a notifier or runner that cannot exist; " +
-			"their callers test for nil and refuse, which is how the test-send route " +
-			"avoids reporting \"sent\" for a webhook nobody sent")
+	// Scheduler is no longer here to ask: there is ONE runner and it belongs to
+	// the Manager, because `schedules` has no source_id and a timetable is a
+	// property of the box. See Manager.Scheduler and #526.
+	if e.Alerts() != nil {
+		t.Error("Alerts handed back a notifier that cannot exist; its callers " +
+			"test for nil and refuse, which is how the test-send route avoids " +
+			"reporting \"sent\" for a webhook nobody sent")
 	}
 	if _, at := e.Levels(); !at.IsZero() {
 		t.Errorf("Levels reported a measurement time of %v with nothing metering", at)
