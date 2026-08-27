@@ -37,3 +37,20 @@ ui/src/lib/contract/** text eol=lf
 # rather than a line-ending problem. Nothing runs these on Windows today; this
 # is here so that stays true by construction rather than by luck.
 *.sh text eol=lf
+
+# The third time. docs/PLATFORMS.md, docs/API.md and docs/SITE-DEPLOY.md are
+# all PARSED BY GO TESTS -- the capability table, the endpoint list and the
+# deploy steps are each compared against the running code -- which makes the
+# claim at the top of this file ("harmless for anything this repository
+# compiles or parses") no longer true of markdown.
+#
+# What it cost: the header pattern in platforms_doc_drift_test.go was anchored
+# on ` *$`, which does not match a line ending in \r, so it found no header at
+# all and reported that the capability table "has moved or been renamed". On
+# windows-latest and nowhere else, about an intact document, five minutes after
+# the push. A failure that accuses the wrong file is worse than a slow one.
+#
+# By pattern rather than by directory this time: the next drift test may read a
+# README, and the point of pinning is that it inherits the fix. Nothing renders
+# markdown differently for a \r, so there is no cost on the other side.
+*.md text eol=lf
