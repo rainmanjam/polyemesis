@@ -546,7 +546,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label={t("mon.hostCpu")}
+              labelKey="mon.hostCpu"
               value={pct(system?.cpuPercent ?? 0)}
               tone={(system?.cpuPercent ?? 0) > 85 ? "warn" : "default"}
             />
@@ -558,7 +558,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label={t("mon.memory")}
+              labelKey="mon.memory"
               value={pct(system?.memPercent ?? 0)}
               tone={(system?.memPercent ?? 0) > 90 ? "warn" : "default"}
             />
@@ -570,7 +570,7 @@ export function MonitoringPage() {
         </Card>
         <Card>
           <CardContent className="pt-3">
-            <Stat label={t("mon.relayIn")} value={bytes(status?.relay.rxBytes ?? 0)} />
+            <Stat labelKey="mon.relayIn" value={bytes(status?.relay.rxBytes ?? 0)} />
             <div className="mt-1 text-[10px] text-muted-foreground">
               {status?.relay.subscribers?.length ?? 0} subscribers · port {status?.relay.port ?? "—"}
             </div>
@@ -579,7 +579,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label={t("mon.relayDrops")}
+              labelKey="mon.relayDrops"
               value={status?.relay.dropped ?? 0}
               tone={(status?.relay.dropped ?? 0) > 0 ? "warn" : "muted"}
             />
@@ -591,7 +591,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat
-              label={t("mon.ingestLoss")}
+              labelKey="mon.ingestLoss"
               value={`${(status?.relay.lossPercent ?? 0).toFixed(2)}%`}
               tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
             />
@@ -697,14 +697,14 @@ export function MonitoringPage() {
                     <Badge variant={toneBadge[tone]}>{stateLabel(p.state)}</Badge>
                   </div>
                   <div className="mt-1 grid grid-cols-3 gap-1">
-                    <Stat label={t("mon.pid")} value={p.pid || "—"} tone="muted" />
+                    <Stat labelKey="mon.pid" value={p.pid || "—"} tone="muted" />
                     <Stat
-                      label={t("mon.uptime")}
+                      labelKey="mon.uptime"
                       value={p.state === "running" ? duration(p.uptimeSec) : "—"}
                       tone="muted"
                     />
                     <Stat
-                      label={t("mon.restarts")}
+                      labelKey="mon.restarts"
                       value={p.restarts}
                       tone={p.restarts > 0 ? "warn" : "muted"}
                     />

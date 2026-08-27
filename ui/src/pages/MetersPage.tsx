@@ -190,7 +190,10 @@ export function MetersPage() {
         title={t("meters.title")}
         subtitle={t("meters.subtitle")}
         actions={
-          <Badge variant={metersRunning ? "live" : "outline"}>
+          <Badge
+            variant={metersRunning ? "live" : "outline"}
+            title={t("meters.metering.hint")}
+          >
             {metersRunning ? t("meters.metering") : t("dash.idle")}
           </Badge>
         }
@@ -290,7 +293,16 @@ export function MetersPage() {
                   )}
                 </CardTitle>
                 <div className="flex items-center gap-1.5">
-                  {clipping && <Badge variant="down">clip</Badge>}
+                  {/* CLIPPING IS NOT "LOUD", and the badge said neither. A bare
+                      three-letter word in a red pill tells an operator that
+                      something is wrong and nothing about what to do, on the
+                      one reading here that is already unrecoverable by the
+                      time they see it. */}
+                  {clipping && (
+                    <Badge variant="down" title={t("meters.clip.hint")}>
+                      {t("meters.clip")}
+                    </Badge>
+                  )}
                   <span
                     className={cn(
                       "tnum font-mono text-[11px]",
@@ -361,7 +373,6 @@ export function ComplianceRow({
   report: LoudnessReport;
   truePeakFailOverDb: number;
 }) {
-  const t = useT();
   const tone = VERDICT_TONE[report.verdict] ?? "idle";
   const targeted = report.target.source !== "none";
   /* Nothing has gone through the analyser yet: every float is still at its
@@ -401,37 +412,37 @@ export function ComplianceRow({
             {/* Every one of these is a dash until something has been measured,
                 not just the two that happened to be guarded. */}
             <Stat
-              label={t("meters.momentary")}
+              labelKey="meters.momentary"
               value={measured ? lufs(report.momentaryLufs) : "—"}
               unit="LUFS"
             />
             <Stat
-              label={t("meters.shortTerm")}
+              labelKey="meters.shortTerm"
               value={measured ? lufs(report.shortTermLufs) : "—"}
               unit="LUFS"
             />
             {/* The only figure a platform normalizes against, so it carries the
                 verdict's colour and the others stay neutral. */}
             <Stat
-              label={t("meters.integrated")}
+              labelKey="meters.integrated"
               value={measured && report.integrated ? lufs(report.integratedLufs) : "—"}
               unit="LUFS"
               tone={VERDICT_STAT[report.verdict] ?? "muted"}
             />
             <Stat
-              label={t("meters.deviation")}
+              labelKey="meters.deviation"
               value={measured && targeted && report.integrated ? signed(report.deviationLu) : "—"}
               unit="LU"
               tone="muted"
             />
             <Stat
-              label={t("meters.range")}
+              labelKey="meters.range"
               value={measured ? lufs(report.rangeLu) : "—"}
               unit="LU"
               tone="muted"
             />
             <Stat
-              label={t("meters.truePeak")}
+              labelKey="meters.truePeak"
               value={measured ? dbtp(report.truePeakDbtp) : "—"}
               unit="dBTP"
               tone={peakOver ? "down" : "default"}

@@ -395,22 +395,22 @@ function GatePanel({ view }: { view: JobsOverview }) {
     <Card>
       <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-3 py-3">
         <Stat
-          label={t("jobs.running")}
+          labelKey="jobs.running"
           value={view.stats.running}
           tone={view.stats.running > 0 ? "live" : "muted"}
         />
-        <Stat label={t("jobs.queued")} value={view.counts.queued ?? 0} />
+        <Stat labelKey="jobs.queued" value={view.counts.queued ?? 0} />
         <Stat
-          label={t("jobs.deferred")}
+          labelKey="jobs.deferred"
           value={view.counts.deferred ?? 0}
           tone={(view.counts.deferred ?? 0) > 0 ? "warn" : "muted"}
         />
         <Stat
-          label={t("jobs.failed")}
+          labelKey="jobs.failed"
           value={view.counts.failed ?? 0}
           tone={(view.counts.failed ?? 0) > 0 ? "down" : "muted"}
         />
-        <Stat label={t("jobs.completed")} value={view.stats.completed} tone="muted" />
+        <Stat labelKey="jobs.completed" value={view.stats.completed} tone="muted" />
 
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           {g?.ingestLive && (

@@ -353,28 +353,28 @@ export function ClipsPage() {
                 "none". */}
             <CardContent className="grid grid-cols-2 gap-2">
               <Stat
-                label={t("clips.held")}
+                labelKey="clips.held"
                 value={stats ? `${held.toFixed(0)}s` : "—"}
                 tone={held > 0 ? "live" : "muted"}
               />
-              <Stat label={t("clips.window")} value={`${stats?.windowSeconds.toFixed(0) ?? "—"}s`} />
+              <Stat labelKey="clips.window" value={`${stats?.windowSeconds.toFixed(0) ?? "—"}s`} />
               <Stat
-                label={t("clips.inMemory")}
+                labelKey="clips.inMemory"
                 value={stats ? bytes(stats.bytes) : "—"}
                 tone="muted"
               />
               <Stat
-                label={t("clips.ceiling")}
+                labelKey="clips.ceiling"
                 value={stats ? bytes(stats.maxBytes) : "—"}
                 tone="muted"
               />
               <Stat
-                label={t("clips.bitrate")}
+                labelKey="clips.bitrate"
                 value={stats ? `${stats.bitrateKbps} kbps` : "—"}
                 tone="muted"
               />
               <Stat
-                label={t("clips.keyframes")}
+                labelKey="clips.keyframes"
                 value={
                   keyframes.verdict === "unknown"
                     ? "—"
@@ -441,8 +441,8 @@ export function ClipsPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <Stat label={t("clips.clipsKept")} value={view?.usage.count ?? 0} />
-                <Stat label={t("clips.onDisk")} value={bytes(view?.usage.usedBytes ?? 0)} tone="muted" />
+                <Stat labelKey="clips.clipsKept" value={view?.usage.count ?? 0} />
+                <Stat labelKey="clips.onDisk" value={bytes(view?.usage.usedBytes ?? 0)} tone="muted" />
               </div>
               <p className="text-[10px] text-muted-foreground">
                 Retention keeps at most {view?.usage.maxClips ?? 0} clips and{" "}

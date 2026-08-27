@@ -1163,24 +1163,24 @@ function PlanPanel({
             <p className="text-[12px]">{plan.describe}</p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Stat
-                label={t("clipedit.starts")}
+                labelKey="clipedit.starts"
                 value={timecode(plan.inMs)}
                 tone={moved ? "warn" : "default"}
               />
               <Stat
-                label={t("clipedit.startMoved")}
+                labelKey="clipedit.startMoved"
                 value={
                   !plan.driftKnown ? "unknown" : drift === 0 ? "not at all" : driftText(drift)
                 }
                 tone={!plan.driftKnown ? "warn" : moved ? "warn" : "default"}
               />
               <Stat
-                label={t("clipedit.copied")}
+                labelKey="clipedit.copied"
                 value={`${Math.round(plan.losslessFraction * 100)}%`}
                 tone={plan.losslessFraction >= 0.999 ? "live" : "default"}
               />
               <Stat
-                label={t("clipedit.reencoded")}
+                labelKey="clipedit.reencoded"
                 value={plan.reEncodedMs > 0 ? `${plan.reEncodedMs} ms` : "nothing"}
                 tone={plan.reEncodedMs > 0 ? "warn" : "live"}
               />

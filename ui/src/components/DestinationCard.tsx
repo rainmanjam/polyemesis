@@ -289,12 +289,12 @@ export function DestinationCard({
         {/* --- performance --- */}
         <div className="grid grid-cols-5 gap-2">
           <Stat
-            label="Bitrate"
+            labelKey="dest.bitrate"
             value={running ? kbps(progress?.bitrateKbps ?? 0) : "—"}
             tone={running ? "default" : "muted"}
           />
           <Stat
-            label="Uptime"
+            labelKey="dest.uptime"
             value={running ? duration(dest.process?.uptimeSec ?? 0) : "—"}
             tone={running ? "default" : "muted"}
           />
@@ -315,12 +315,12 @@ export function DestinationCard({
               `running` like Bitrate, Uptime and Speed beside it, so every cell
               in the row now answers the same question the same way. */}
           <Stat
-            label="Restarts"
+            labelKey="dest.restarts"
             value={dest.process ? (dest.process.restarts ?? 0) : "—"}
             tone={dest.process && (dest.process.restarts ?? 0) > 0 ? "warn" : "muted"}
           />
           <Stat
-            label="Dropped"
+            labelKey="dest.dropped"
             value={running && progress ? (progress.dropFrames ?? 0) : "—"}
             tone={running && (progress?.dropFrames ?? 0) > 0 ? "warn" : "muted"}
           />
@@ -330,7 +330,7 @@ export function DestinationCard({
               yet" rather than stopped, which is why it renders as a dash and
               not as a failure. */}
           <Stat
-            label="Speed"
+            labelKey="dest.speed"
             value={running && (progress?.speed ?? 0) > 0 ? `${(progress?.speed ?? 0).toFixed(2)}x` : "—"}
             tone={
               !running || (progress?.speed ?? 0) === 0

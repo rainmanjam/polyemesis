@@ -599,20 +599,20 @@ function AlertRules({
               {t("auto.deliveryUnread")}
             </p>
           )}
-          <Stat label={t("auto.sent")} value={stats?.sent ?? 0} />
-          <Stat label={t("auto.failed")} value={stats?.failed ?? 0} tone={stats?.failed ? "down" : "muted"} />
-          <Stat label={t("auto.coalesced")} value={stats?.coalesced ?? 0} tone="muted" />
-          <Stat label={t("auto.pending")} value={stats?.pending ?? 0} tone="muted" />
+          <Stat labelKey="auto.sent" value={stats?.sent ?? 0} />
+          <Stat labelKey="auto.failed" value={stats?.failed ?? 0} tone={stats?.failed ? "down" : "muted"} />
+          <Stat labelKey="auto.coalesced" value={stats?.coalesced ?? 0} tone="muted" />
+          <Stat labelKey="auto.pending" value={stats?.pending ?? 0} tone="muted" />
           <Stat
-            label={t("auto.dropped")}
+            labelKey="auto.dropped"
             value={stats?.dropped ?? 0}
             tone={stats?.dropped ? "warn" : "muted"}
           />
-          <Stat label={t("auto.retries")} value={stats?.retries ?? 0} tone="muted" />
+          <Stat labelKey="auto.retries" value={stats?.retries ?? 0} tone="muted" />
           {stats?.lastSent && (
             <Stat
               className="col-span-2"
-              label={t("auto.lastDelivery")}
+              labelKey="auto.lastDelivery"
               value={timestamp(stats.lastSent)}
               tone="muted"
             />

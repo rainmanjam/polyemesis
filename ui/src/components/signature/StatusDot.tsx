@@ -14,10 +14,14 @@ export function StatusDot({
   tone,
   size = "md",
   className,
+  title,
 }: {
   tone: SignalTone;
   size?: "sm" | "md" | "lg" | "xl";
   className?: string;
+  /** Overrides the tone's own wording, for a dot whose row can say something
+   *  more specific than "Failed" -- a rendition nobody has enabled, say. */
+  title?: string;
 }) {
   const dim =
     size === "sm"
@@ -51,8 +55,17 @@ export function StatusDot({
   // tones now share one structure, so the asymmetry cannot come back by
   // someone editing a single branch.
   const pulse = tone === "live" ? "animate-signal" : tone === "warn" ? "animate-signal-fast" : null;
+  // A THIRD CHANNEL, in words. Hue and silhouette both require knowing the
+  // vocabulary before they say anything, and neither reaches a screen reader.
+  // The wording lives on toneMark in lib/signal.ts so a new tone cannot be
+  // added without one.
   return (
-    <span className={cn("relative inline-flex shrink-0", dim, className)}>
+    <span
+      className={cn("relative inline-flex shrink-0", dim, className)}
+      title={title ?? mark.title}
+      role="img"
+      aria-label={title ?? mark.title}
+    >
       {pulse && (
         <span className={cn("absolute inline-flex h-full w-full opacity-60", pulse, mark.shape)} />
       )}

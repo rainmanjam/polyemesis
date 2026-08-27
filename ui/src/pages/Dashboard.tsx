@@ -1257,7 +1257,7 @@ export function Dashboard() {
               )}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Stat
-                  label={t("dash.bitrate")}
+                  labelKey="dash.bitrate"
                   value={(() => {
                     // See ingestBitrateKbps: for SRT there is no ingest
                     // process, so this asked the wrong source and printed "—"
@@ -1274,13 +1274,13 @@ export function Dashboard() {
                   })()}
                 />
                 <Stat
-                  label={t("dash.uptime")}
+                  labelKey="dash.uptime"
                   value={ingest?.state === "running" ? duration(ingest.uptimeSec) : "—"}
                 />
                 {/* "—" until the probe answers, not "0". See audioTrackCount(). */}
-                <Stat label={t("dash.audioTracks")} value={audioTrackCount(source)} />
+                <Stat labelKey="dash.audioTracks" value={audioTrackCount(source)} />
                 <Stat
-                  label={t("dash.reconnects")}
+                  labelKey="dash.reconnects"
                   value={ingest?.restarts ?? 0}
                   tone={(ingest?.restarts ?? 0) > 0 ? "warn" : "muted"}
                 />

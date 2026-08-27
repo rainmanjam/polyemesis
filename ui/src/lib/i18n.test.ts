@@ -194,11 +194,25 @@ describe("translation catalogues", () => {
   // can happen without anyone agreeing to it. Adding a key means translating it
   // or deliberately lowering this floor, which is a reviewable act rather than
   // an oversight.
+  /** A tooltip explanation rather than a label an operator reads on the page.
+   *
+   *  THE PAIRING, not the suffix. Stat's contract is that a label key `x` has a
+   *  matching `x.hint`, so a hint is a key whose name minus `.hint` is ALSO a
+   *  key. Testing the suffix alone was wrong and immediately proved it:
+   *  `playlist.hint` is a label an operator reads on the playlist editor, it
+   *  has no `playlist` twin, and treating it as a tooltip would have quietly
+   *  exempted a real string from the full-translation rule below -- which is
+   *  the exact class of hole that rule exists to close. */
+  const isHint = (k: string) =>
+    k.endsWith(".hint") && k.slice(0, -".hint".length) in english;
+
   it("every locale stays fully translated", () => {
     const behind = Object.entries(CATALOGUES)
       .map(([lang, cat]) => ({
         lang,
-        missing: Object.keys(english).filter((k) => !(k in cat) || cat[k].trim() === ""),
+        missing: Object.keys(english)
+          .filter((k) => !isHint(k))
+          .filter((k) => !(k in cat) || cat[k].trim() === ""),
       }))
       .filter((r) => r.missing.length > 0)
       .map((r) => `${r.lang}: ${r.missing.length} missing (${r.missing.slice(0, 5).join(", ")}…)`);
@@ -208,6 +222,45 @@ describe("translation catalogues", () => {
       "a key was added to en.json without translations. Translate it in every " +
         "locale, or lower this floor on purpose — but do not let it happen silently.",
     ).toEqual([]);
+  });
+
+  /* HINTS RATCHET SEPARATELY, and the split is the point.
+   *
+   * The `.hint` keys behind Stat's tooltips arrived as 73 keys at once. Holding
+   * them to the rule above would have left one option that fits in a session --
+   * lowering the whole floor -- and that floor is the only thing standing
+   * between the labels an operator READS and fourteen locales silently
+   * rendering English. Weakening it to admit a tooltip backlog would spend the
+   * strong guard on the weak case.
+   *
+   * So the strength stays where the damage is. A missing LABEL still fails
+   * outright. A missing hint is counted against a floor of its own, which is
+   * pinned to the exact current coverage rather than to a minimum: translating
+   * a single hint fails this test until someone raises the number, so progress
+   * is recorded rather than drifting, and so is regression.
+   *
+   * Untranslated hints degrade to English by way of the per-key fallback in
+   * lib/i18n.ts, which is the same thing that makes the ratchet above a policy
+   * rather than a crash. Tracked in #615.
+   */
+  const HINT_FLOOR = 0;
+
+  it("tooltip hints ratchet on their own floor", () => {
+    const hints = Object.keys(english).filter(isHint);
+    expect(hints.length, "the hint keys have gone; did Stat stop using them?").toBeGreaterThan(0);
+
+    const counts = Object.entries(CATALOGUES).map(([lang, cat]) => ({
+      lang,
+      have: hints.filter((k) => k in cat && cat[k].trim() !== "").length,
+    }));
+    const lowest = Math.min(...counts.map((c) => c.have));
+
+    expect(
+      lowest,
+      `the least-translated locale now carries ${lowest} of ${hints.length} hints, ` +
+        `not the pinned ${HINT_FLOOR}. If hints were translated, raise HINT_FLOOR to ` +
+        `record it. If they were lost, put them back.`,
+    ).toBe(HINT_FLOOR);
   });
 });
 

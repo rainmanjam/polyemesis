@@ -354,23 +354,23 @@ export function RecordingsPage() {
                   other two printed "Recordings 0, Used 0 B" beside "Free —,
                   Volume —" when the usage read had simply failed, which reads
                   as an empty disk rather than as an unanswered question. */}
-              <Stat label={t("rec.diskRecordings")} value={usage ? usage.count : "—"} />
-              <Stat label={t("rec.used")} value={usage ? bytes(usage.usedBytes) : "—"} />
+              <Stat labelKey="rec.diskRecordings" value={usage ? usage.count : "—"} />
+              <Stat labelKey="rec.used" value={usage ? bytes(usage.usedBytes) : "—"} />
               <Stat
-                label={t("rec.free")}
+                labelKey="rec.free"
                 value={usage?.freeBytes ? bytes(usage.freeBytes) : "—"}
                 tone={
                   usage && usage.freeBytes > 0 && usage.freeBytes < 5 * 1024 ** 3 ? "warn" : "muted"
                 }
               />
-              <Stat label={t("rec.volume")} value={usage?.totalBytes ? bytes(usage.totalBytes) : "—"} tone="muted" />
+              <Stat labelKey="rec.volume" value={usage?.totalBytes ? bytes(usage.totalBytes) : "—"} tone="muted" />
               {/* Stems are not in the recordings index, so their bytes are not
                   in `used` either — showing them separately is the only way the
                   disk figures add up on a machine that writes them. */}
               {stems.length > 0 && (
                 <Stat
                   className="col-span-2"
-                  label={t("rec.stemsUsage", { count: stems.length })}
+                  labelKey="rec.stemsUsage" labelParams={{ count: stems.length }}
                   value={bytes(stemBytes)}
                   tone="muted"
                 />
