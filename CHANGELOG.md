@@ -8,7 +8,7 @@ its first tagged release.
 
 ## [Unreleased]
 
-_Nothing yet._
+Nothing yet.
 
 ## [0.7.0] — 2026-08-27
 
