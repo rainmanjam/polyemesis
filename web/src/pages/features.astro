@@ -103,9 +103,9 @@ const sections = [
       "Every other destination still receives its own single mix, exactly as before. The picture is still copied rather than re-encoded; the second track is a second AAC encode, which is cheap and is not free.",
     ],
     note: "The negotiation itself is proven: polyemesis's tests reach ingest.twitch.tv on every run, and Twitch accepts a supported-GPU inventory, grants the VOD audio track and mints a key. What nobody has watched yet is a broadcast published through that key — the last step, and the one this feature is for. Nothing is gated on that: a negotiation that does not succeed falls back to the ordinary Twitch ingest, which is what every install used before this existed.",
-    shot: "02-routing.png",
+    shot: "18-destinations.png",
     caption: "The archive mix is per destination, and off unless asked for.",
-    alt: "polyemesis routing page: per-destination track selection with music policy and loudness target",
+    alt: "polyemesis destination cards: each destination showing which ingest tracks it carries, one with the music bed and one without",
   },
   {
     id: "matrix",
