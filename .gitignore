@@ -1,4 +1,8 @@
 /polyemesis
+# `go build ./scripts/cmd/gotest/` drops its binary in the working directory,
+# which is the repository root, and 2.7MB of it very nearly went into a commit
+# about not letting things pass unnoticed.
+/gotest
 /dist/
 /data/
 node_modules/
