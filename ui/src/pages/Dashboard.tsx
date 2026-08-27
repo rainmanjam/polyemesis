@@ -1,10 +1,13 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
 import { audioTrackCount, ingestAttribution, ingestBitrateKbps, processAbsence } from "@/lib/dashboardFacts";
 import { laneLayout } from "@/lib/sourceLanes";
+import { cn } from "@/lib/utils";
+import { topRowLayout } from "@/lib/dashboardLayout";
 import { trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, RadioTower, Square } from "lucide-react";
@@ -779,6 +782,20 @@ function BulkDestinationControl({
   );
 }
 
+/** The dashboard's right-hand cards: a stack in one grid cell, or two cells.
+ *
+ *  A COMPONENT RATHER THAN A TERNARY AROUND THE CHILDREN, because the children
+ *  are a couple of hundred lines of JSX and the alternative was writing them
+ *  twice. Duplicated markup is how the two arrangements would drift -- a row
+ *  added to the pipeline card in one branch and not the other, on a page where
+ *  which branch you see depends on how many programmes the install has, and so
+ *  is not something the person editing it is likely to be toggling.
+ */
+function SideColumn({ stacked, children }: { stacked: boolean; children: ReactNode }) {
+  if (stacked) return <div className="flex flex-col gap-3">{children}</div>;
+  return <>{children}</>;
+}
+
 export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
@@ -980,6 +997,10 @@ export function Dashboard() {
     [tiles, destinations, sources],
   );
 
+  /* The top row's shape, from one call so its two halves cannot disagree.
+   * See lib/dashboardLayout.ts and #614. */
+  const topRow = topRowLayout(lanes.laned);
+
   /* ONE CARD, rendered from the GLOBAL index rather than a per-group one.
    *
    * The move arrows reorder the whole list and the order is persisted whole, so
@@ -1155,7 +1176,23 @@ export function Dashboard() {
           than a flat inventory of the install. See components/OnAirBar.tsx. */}
       <OnAirBar status={status} />
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      {/* TWO COLUMNS WITH A PREVIEW, THREE WITHOUT.
+       *
+       * The left column's tallest element is the preview, and lanes suppress it
+       * (see the Suspense block below) because each lane carries its own. That
+       * left the column holding nothing but the Ingest card while the right one
+       * still stacked chat above the pipeline -- a grid row as tall as the
+       * taller side, and roughly four hundred pixels of empty page directly
+       * under the card an operator looks at first. It read as a component that
+       * had failed to render. See #614.
+       *
+       * Unstacking the side column is the fix rather than filling the hole:
+       * chat and the pipeline are both short, so side by side they make a row
+       * about half the height the stack did. The dead space goes away AND the
+       * destination area -- the thing lanes exist to organise -- moves up the
+       * page instead of further down it.
+       */}
+      <div className={cn("grid gap-3", topRow.gridClass)}>
         {/* ---------- preview + ingest ---------- */}
         <div className="flex flex-col gap-3">
           <Suspense
@@ -1284,11 +1321,13 @@ export function Dashboard() {
         </div>
 
         {/* ---------- side stats ---------- */}
-        <div className="flex flex-col gap-3">
-          {/* Chat sits above the pipeline because it is the only thing on this
-              column an operator reads mid-broadcast. It renders honestly when
-              nothing is connected — "no platforms connected", not an error —
-              so it costs an install with no accounts nothing but a heading. */}
+        {/* A FRAGMENT WHEN LANED, so the two cards become grid children in
+            their own columns rather than a stack in one. Chat still comes
+            first: reading order is unchanged, and it is the only thing on this
+            side an operator reads mid-broadcast. It renders honestly when
+            nothing is connected — "no platforms connected", not an error — so
+            it costs an install with no accounts nothing but a heading. */}
+        <SideColumn stacked={topRow.sideStacked}>
           <ChatPanel className="h-80" />
 
           <Card>
@@ -1364,7 +1403,7 @@ export function Dashboard() {
               </div>
             </CardContent>
           </Card>
-        </div>
+        </SideColumn>
       </div>
 
       <GoLiveComposer />

@@ -56,10 +56,39 @@ export interface ButtonProps
   asChild?: boolean;
 }
 
+/* AN ICON BUTTON'S NAME IS ALSO ITS TOOLTIP.
+ *
+ * Every icon-only button in this codebase already carries an aria-label -- the
+ * accessible name is not the gap. The gap is that aria-label produces NO hover
+ * text, so the sighted operator moving a mouse over a row of six identical
+ * glyphs gets nothing, while a screen-reader user gets a full sentence. Of the
+ * icon buttons here, exactly one had also been given a `title`, which is what
+ * "remember to write it twice" reliably produces.
+ *
+ * So the second copy is derived rather than remembered. There is one place to
+ * put the words, and a button cannot be given an accessible name without also
+ * getting the tooltip. An explicit `title` still wins, for the cases where the
+ * hover text should differ from the announced one.
+ *
+ * Only for the icon sizes. A button with a visible label does not want a
+ * tooltip repeating the word already printed on it. */
+function iconOnly(size: ButtonProps["size"]): boolean {
+  return size === "icon" || size === "icon-sm";
+}
+
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
-    return <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />;
+    const title =
+      props.title ?? (iconOnly(size) ? props["aria-label"] : undefined);
+    return (
+      <Comp
+        className={cn(buttonVariants({ variant, size, className }))}
+        ref={ref}
+        {...props}
+        title={title}
+      />
+    );
   },
 );
 Button.displayName = "Button";

@@ -255,10 +255,19 @@ func main() {
 		programmes = 2
 		extra = len(secondProgramme.destinations)
 	}
+	// COUNTS FOR WHAT ACTUALLY RAN. These are constants, so printing them
+	// unconditionally told a `solo` run it had seeded "5 alert rules, 3 hooks,
+	// 4 schedules" immediately after the branch above had skipped every one --
+	// a summary line asserting the opposite of what happened, which is the
+	// failure this repo names as an absence reading like an answer.
+	automation := "automation skipped (solo)"
+	if mode != "solo" {
+		automation = fmt.Sprintf("%d alert rules, %d hooks, %d schedules",
+			len(demoAlertRules), len(demoHooks), len(demoSchedules))
+	}
 	fmt.Fprintf(os.Stderr, "seeded: %d + %d destinations over %d programme(s), "+
-		"%d alert rules, %d hooks, %d schedules, relay on udp/%d\n",
-		len(demoDestinations), extra, programmes,
-		len(demoAlertRules), len(demoHooks), len(demoSchedules), relay)
+		"%s, relay on udp/%d\n",
+		len(demoDestinations), extra, programmes, automation, relay)
 }
 
 // The arrangement itself. Three destinations over three tracks, chosen so no
