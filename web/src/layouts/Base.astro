@@ -87,6 +87,42 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
         "by default; optional shared renditions re-encode it.",
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
       isAccessibleForFree: true,
+      /* sameAs binds the coined word to something already known. "polyemesis"
+         is not a word, which is a gift for ranking and a problem for identity:
+         nothing but this tells a search engine or an answer engine that the
+         name, this site and the repository are one thing rather than three
+         strings that happen to co-occur. Both URLs are ours and both resolve,
+         so this asserts nothing that is not already true. */
+      sameAs: [
+        "https://github.com/rainmanjam/polyemesis",
+        "https://github.com/rainmanjam/polyemesis/releases/latest",
+      ],
+    })} />
+    )}
+
+    {/* The site as an entity, distinct from the software it documents. Kept to
+        the two properties that are load-bearing for that distinction -- a name
+        and a URL -- because everything else a WebSite node can carry is either
+        duplicated from the SoftwareApplication above or a claim about search
+        behaviour we do not control.
+
+        DELIBERATELY ABSENT, and this is the pattern rather than an oversight:
+        no FAQPage, no ItemList over the comparison pages, no dateModified.
+        FAQPage was rejected twice already for content reasons -- see
+        download.astro and free-restream-service.astro, which explain it better
+        than a summary here would. ItemList over /vs/ fails the same test those
+        rejections establish: structured data detaches a figure from the
+        "checked" date sitting beside it on the page, and a competitor's price
+        reproduced in a result card without that stamp is a stale claim we
+        published. dateModified is absent for the plainest reason -- the docs
+        carry no date to read, and inventing one would be the same offence in a
+        smaller font. */}
+    {!noindex && (
+    <script type="application/ld+json" is:inline set:html={JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: "polyemesis",
+      url: "https://polyemesis.com",
     })} />
     )}
 
