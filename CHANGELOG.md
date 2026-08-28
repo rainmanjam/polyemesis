@@ -10,7 +10,7 @@ its first tagged release.
 
 Nothing yet.
 
-## [0.7.0] — 2026-08-27
+## [0.7.0] — 2026-08-28
 
 ### Upgrading
 - **Building from source now needs Go 1.27.** `go.mod` declares `go 1.27.0`, so
