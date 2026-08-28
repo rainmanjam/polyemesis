@@ -95,3 +95,34 @@ web/coverage/
 # Astro build cache and dev log. Regenerated on every build; dev.log in
 # particular churns on every run.
 web/.astro/
+
+# Video production for polyemesis. Large binaries, generated images and
+# work-in-progress scripts; the repository is not the place for them.
+#
+# Ignored as a directory rather than by extension: a capture run writes numbered
+# PNGs by the hundred, and an extension rule would either miss them or start
+# swallowing docs/media, which is committed on purpose.
+/video/
+
+# Session investigation notes, excluded by name rather than by pattern.
+#
+# docs/investigations/ IS tracked -- its README states the point of the place:
+# "a negative result is a result and re-deriving one costs the same as deriving
+# it the first time." A wildcard here would silently exclude the next
+# investigation somebody meant to keep, and negating the tracked files back in
+# would leave a rule nobody can read. So: an explicit list, which stays honest
+# by being annoying to extend.
+#
+# These seven are chat/SEO/launch research notes from 2026-08-27 and -28. They
+# are kept locally because several carry claims marked unverified in the text --
+# the YouTube per-call quota costs are estimates the documents say so about, and
+# the launch plan's subreddit rules were asserted by an assistant and never
+# checked against the subreddits themselves. This directory's promise is evidence
+# a reader can re-run, not notes a reader has to grade.
+docs/investigations/chat-platform-limits.md
+docs/investigations/launch-promotion-plan.md
+docs/investigations/site-seo-ai-search-review.md
+docs/investigations/social-stream-ninja-chat-source.md
+docs/investigations/youtube-chat-capture-flow-and-cost.md
+docs/investigations/youtube-chat-quota-and-oauth-proxy.md
+docs/investigations/youtube-limits-own-dev-account.md
