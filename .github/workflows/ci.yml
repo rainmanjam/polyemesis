@@ -1957,6 +1957,13 @@ jobs:
           # Matroska is exactly the size it was when the process died, so only
           # a decode tells you.
           - acceptance-recording-stop
+          # The same assertion -- no child outlives its grace period -- against
+          # the three RECONCILE trajectories: ingest mode switch, source stop,
+          # source change. acceptance-recording-stop covers only a whole-server
+          # SIGTERM with the input still flowing, and passed for weeks while
+          # production accumulated 53 escalations from these paths instead. A
+          # fixed-value check is only as good as the population it counts.
+          - acceptance-reconcile-teardown
           # Retained MQTT telemetry. Brings up eclipse-mosquitto as a container
           # rather than installing a broker on the runner, so it needs no
           # apt step of its own -- Docker is already present on ubuntu-latest.

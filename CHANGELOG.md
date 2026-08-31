@@ -8,7 +8,28 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **Processes with nothing to flush now get a 1-second shutdown grace instead of
+  8.** `meters`, `loudness` and `silence` write nothing a reader will ever look
+  at — `-f null` for the first two, an mpegts stream to a UDP relay for the
+  third — so waiting eight seconds to kill them cost that long on every ingest
+  switch and stop, and the waits stack serially. Every other kind keeps the full
+  window: an unlisted kind defaults to 8 seconds, so forgetting to classify a new
+  process costs latency and never a truncated recording.
+
+### Added
+
+- **A teardown counter with a denominator.** The supervisor now counts clean and
+  killed teardowns per process kind. Previously only kills were recorded, in a
+  log line, and a clean teardown wrote nothing at all — `supervise()` returns on
+  context cancellation before reaching the exit log — so there was no ratio to be
+  alarmed by and no way to see an exceptional path becoming the normal one.
+- **`acceptance-reconcile-teardown`**, asserting that no child outlives its grace
+  period across an ingest mode switch, a source stop and a source change. The
+  existing `acceptance-recording-stop` makes the same assertion against a
+  whole-server SIGTERM and passed throughout, because those are different
+  populations.
 
 ## [0.7.0] — 2026-08-28
 
