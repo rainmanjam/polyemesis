@@ -228,6 +228,17 @@ type Process struct {
 	pid       int
 	restarts  int
 	startedAt time.Time
+	// mediaAt is when this run first carried media, which is what uptime
+	// reports. It is NOT startedAt: an ingest is spawned listening, so the
+	// process exists and is Running from the moment it can accept a connection,
+	// and the interval before OBS actually connects is waiting, not uptime.
+	// Counting it told an operator their stream had been up for twenty minutes
+	// when it had been live for two.
+	//
+	// Zero while a spawned process has not yet seen media. Reset on every
+	// respawn, because a reconnect starts a new stream from the platform's
+	// point of view and continuing the old total would hide the gap.
+	mediaAt   time.Time
 	lastErr   string
 	nextRetry time.Time
 	progress  ffmpeg.Progress
@@ -881,6 +892,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	p.mu.Lock()
 	p.pid = cmd.Process.Pid
 	p.startedAt = time.Now()
+	p.mediaAt = time.Time{}
 	p.progress = ffmpeg.Progress{}
 	p.mu.Unlock()
 	p.setState(StateRunning, "")
@@ -991,11 +1003,28 @@ func (p *Process) runOnce(ctx context.Context) error {
 	return waitErr
 }
 
+// noteProgress records one progress block and, the first time that block shows
+// media actually moving, starts the uptime clock.
+//
+// OutTimeMS is the output timestamp, so it advances for audio-only destinations
+// where Frame never leaves zero, and it stays at zero while FFmpeg is bound and
+// waiting rather than reading. That makes it the one field meaning "media has
+// moved" for every kind of process here.
+//
+// Only the FIRST such block counts. Restamping on every block would peg uptime
+// near zero forever, which reads as a stream that never stays up.
+func (p *Process) noteProgress(pr ffmpeg.Progress) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.progress = pr
+	if p.mediaAt.IsZero() && pr.OutTimeMS > 0 {
+		p.mediaAt = time.Now()
+	}
+}
+
 func (p *Process) defaultStdout(r io.Reader) error {
 	return ffmpeg.ParseProgress(r, func(pr ffmpeg.Progress) {
-		p.mu.Lock()
-		p.progress = pr
-		p.mu.Unlock()
+		p.noteProgress(pr)
 		if p.spec.OnProgress != nil {
 			p.spec.OnProgress(pr)
 		}
@@ -1139,7 +1168,14 @@ func (p *Process) Status() Status {
 	if p.state == StateRunning && !p.startedAt.IsZero() {
 		t := p.startedAt
 		st.StartedAt = &t
-		st.UptimeSec = time.Since(p.startedAt).Seconds()
+		// StartedAt stays the spawn -- it answers "since when has this process
+		// existed", which is the right question for a restart count beside it.
+		// UptimeSec answers a different one, "how long has this been on air",
+		// and stays 0 until media arrives. A listening ingest reports Running
+		// with no uptime, which is exactly what it is doing.
+		if !p.mediaAt.IsZero() {
+			st.UptimeSec = time.Since(p.mediaAt).Seconds()
+		}
 	}
 	if p.state == StateReconnecting && !p.nextRetry.IsZero() {
 		if d := time.Until(p.nextRetry).Seconds(); d > 0 {

@@ -8,7 +8,15 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **`uptimeSec` now counts from the first media, not from the spawn.** An ingest
+  is started *listening*, so the old figure included however long it sat waiting
+  for an encoder to connect: arming a source in the morning and going live at
+  noon reported four hours of uptime for a stream that had been on air for none.
+  A process that is running but has seen no media reports `uptimeSec: 0`, which
+  is what it is doing. `startedAt` is unchanged and still reports the spawn.
+  **This changes the meaning of a published MQTT field** — see `docs/MQTT.md`.
 
 ## [0.7.0] — 2026-08-28
 
