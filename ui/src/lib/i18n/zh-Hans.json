@@ -1093,6 +1093,8 @@
   "route.videoLaterThanAudio": "视频晚于音频",
   "route.withoutATargetTheMix": "没有目标时，混音会按输入本身的电平直接发出，只应用上面的削波保护。",
   "route.youtubeTwitchSpotify": "YouTube、Twitch、Spotify",
+  "secret.hide": "隐藏",
+  "secret.reveal": "显示",
   "set.acceptSelfSigned": "接受自签名证书",
   "set.accountDisconnected": "已断开账号连接。",
   "set.acmeBlocked": "照现在的状态还无法工作。",

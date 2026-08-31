@@ -1093,6 +1093,8 @@
   "route.videoLaterThanAudio": "Video lebih lambat dari audio",
   "route.withoutATargetTheMix": "Tanpa target, campurannya keluar pada level apa pun yang dihasilkan masukan, hanya dengan perlindungan clipping di atas yang diterapkan.",
   "route.youtubeTwitchSpotify": "YouTube, Twitch, Spotify",
+  "secret.hide": "Sembunyikan",
+  "secret.reveal": "Tampilkan",
   "set.acceptSelfSigned": "Terima sertifikat yang ditandatangani sendiri",
   "set.accountDisconnected": "Akun diputuskan.",
   "set.acmeBlocked": "Dengan keadaan ini belum akan berhasil.",

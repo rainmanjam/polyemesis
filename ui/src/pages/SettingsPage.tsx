@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/SecretInput";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useIngestLive } from "@/hooks/useLiveData";
@@ -451,9 +452,8 @@ function IngestSettings({
               </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="srt-pass">{t("set.passphrase")}</Label>
-                <Input
+                <SecretInput
                   id="srt-pass"
-                  type="password"
                   value={draft.ingest.srt.passphrase}
                   placeholder={t("set.passphrasePlaceholder")}
                   onChange={(e) =>
@@ -491,7 +491,7 @@ function IngestSettings({
               </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="rtmp-key">{t("set.streamKey")}</Label>
-                <Input
+                <SecretInput
                   id="rtmp-key"
                   value={draft.ingest.rtmp.streamKey}
                   onChange={(e) =>
@@ -1235,9 +1235,8 @@ function PipelineSettings({
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="mq-pw">{t("set.password")}</Label>
-                  <Input
+                  <SecretInput
                     id="mq-pw"
-                    type="password"
                     value={mqttPassword}
                     placeholder={draft.mqtt?.hasPassword ? "(unchanged)" : ""}
                     onChange={(e) => setMqttPassword(e.target.value)}
@@ -2052,9 +2051,8 @@ function PlatformCredCard({
               </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor={`cs-${guide.platform}`}>{t("set.clientSecret")}</Label>
-                <Input
+                <SecretInput
                   id={`cs-${guide.platform}`}
-                  type="password"
                   value={clientSecret}
                   placeholder={creds?.hasSecret ? "•••••••• (stored, encrypted)" : ""}
                   onChange={(e) => setClientSecret(e.target.value)}
