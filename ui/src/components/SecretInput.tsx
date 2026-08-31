@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 /** A text input for a value that should not be readable over a shoulder.
@@ -27,7 +28,12 @@ export function SecretInput({
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   }
 >) {
+  const t = useT();
   const [shown, setShown] = useState(false);
+  // Translated, because the icon alone says nothing to a screen reader and this
+  // control guards a credential -- the one place a reader most needs to know
+  // what the button will do before pressing it.
+  const label = shown ? t("secret.hide") : t("secret.reveal");
   return (
     <div className="relative flex items-center">
       <Input
@@ -45,8 +51,8 @@ export function SecretInput({
         variant="ghost"
         className="absolute end-0 h-6 w-6"
         onClick={() => setShown((v) => !v)}
-        aria-label={shown ? "Hide" : "Reveal"}
-        title={shown ? "Hide" : "Reveal"}
+        aria-label={label}
+        title={label}
       >
         {shown ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
       </Button>

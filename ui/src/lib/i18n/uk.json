@@ -1093,6 +1093,8 @@
   "route.videoLaterThanAudio": "Відео пізніше за звук",
   "route.withoutATargetTheMix": "Без цільового значення мікс виходить із тим рівнем, який дав вхід, — застосовується лише захист від кліпінгу вище.",
   "route.youtubeTwitchSpotify": "YouTube, Twitch, Spotify",
+  "secret.hide": "Приховати",
+  "secret.reveal": "Показати",
   "set.acceptSelfSigned": "Приймати самопідписаний сертифікат",
   "set.accountDisconnected": "Обліковий запис відʼєднано.",
   "set.acmeBlocked": "У такому вигляді це ще не спрацює.",
