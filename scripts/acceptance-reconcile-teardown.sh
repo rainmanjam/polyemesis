@@ -141,16 +141,32 @@ TOKEN=$(curl -fsS -m5 -b "$CJ" "$API/sources" \
 step "3. Publish until the ingest is measured"
 # The wedge only happens once a child is actually reading, so a trajectory run
 # against a never-started ingest would pass without testing anything.
+# Lifted from acceptance-recording-stop.sh, which is the invocation known to
+# work on the runners. Two differences from a first draft worth keeping: the
+# process is identified by -metadata title rather than a drawtext filter, so it
+# needs no libfreetype and cleanup can still pkill it by name; and -t bounds it,
+# because -shortest across two INFINITE lavfi inputs is not short.
 ffmpeg -hide_banner -loglevel error -re \
-  -f lavfi -i "testsrc2=size=320x180:rate=15,drawtext=text='acceptance-reconcile-source'" \
-  -f lavfi -i "sine=frequency=440" \
-  -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 30 \
-  -c:a aac -b:a 64k -shortest -f mpegts \
-  "srt://127.0.0.1:$SRT_PORT?streamid=$TOKEN&mode=caller" >publisher.log 2>&1 &
+  -f lavfi -i "testsrc2=size=320x180:rate=30" \
+  -f lavfi -i "sine=frequency=440:sample_rate=48000" \
+  -map 0:v -map 1:a \
+  -c:v libx264 -preset ultrafast -tune zerolatency -b:v 600k -pix_fmt yuv420p \
+  -c:a aac -b:a 96k -metadata title=acceptance-reconcile-source \
+  -t 180 -f mpegts \
+  "srt://127.0.0.1:$SRT_PORT?streamid=$TOKEN&mode=caller&transtype=live&latency=200000" \
+  >publisher.log 2>&1 &
 PUB=$!
+# WAIT ON "probed", NOT ON A GUESS. SourceInfo.Probed is set when the ingest
+# layout has actually been measured, which is the state every child this suite
+# tears down is waiting for. An earlier version polled for a "live" field that
+# /status does not have, so the loop could only ever time out -- a readiness
+# gate that cannot succeed fails the suite for the wrong reason and teaches
+# nobody anything.
 measured=0
 for _ in $(seq 1 60); do
-  if curl -fsS -m2 -b "$CJ" "$API/status" 2>/dev/null | grep -q '"live":true'; then
+  if curl -fsS -m2 -b "$CJ" "$API/status" 2>/dev/null \
+     | python3 -c 'import sys,json; print(json.load(sys.stdin).get("source",{}).get("probed") is True)' 2>/dev/null \
+     | grep -qx True; then
     measured=1; break
   fi
   sleep 0.5
@@ -181,6 +197,10 @@ printf "        (switch took %ss)\n" "$(echo "$T1 - $T0" | bc)"
 
 # ---------------------------------------------------------------- trajectory 2
 step "5. Trajectory B — source stopped"
+# The SRT publisher was dropped by trajectory A, so this and trajectory C tear
+# down children whose feed has ALREADY gone quiet. That is not a weaker test --
+# it is precisely the wedge condition internal/engine/manager.go describes, and
+# the one a live-feed teardown cannot reach.
 B=$(kills_so_far)
 python3 - <<'PY' || { echo "could not build the disabled source document"; exit 1; }
 import json
