@@ -1093,6 +1093,8 @@
   "route.videoLaterThanAudio": "비디오가 오디오보다 늦음",
   "route.withoutATargetTheMix": "목표값이 없으면 믹스는 입력이 만들어 낸 레벨 그대로 나가며, 위의 클리핑 보호만 적용됩니다.",
   "route.youtubeTwitchSpotify": "YouTube, Twitch, Spotify",
+  "secret.hide": "숨기기",
+  "secret.reveal": "표시",
   "set.acceptSelfSigned": "자체 서명 인증서 허용",
   "set.accountDisconnected": "계정 연결을 끊었습니다.",
   "set.acmeBlocked": "지금 상태로는 아직 동작하지 않습니다.",

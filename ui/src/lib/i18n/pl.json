@@ -1093,6 +1093,8 @@
   "route.videoLaterThanAudio": "Obraz później niż dźwięk",
   "route.withoutATargetTheMix": "Bez wartości docelowej miks wychodzi na poziomie, jaki dało wejście, z zastosowaną jedynie powyższą ochroną przed przesterowaniem.",
   "route.youtubeTwitchSpotify": "YouTube, Twitch, Spotify",
+  "secret.hide": "Ukryj",
+  "secret.reveal": "Pokaż",
   "set.acceptSelfSigned": "Akceptuj certyfikat samopodpisany",
   "set.accountDisconnected": "Konto odłączone.",
   "set.acmeBlocked": "W tej postaci jeszcze by nie zadziałało.",
