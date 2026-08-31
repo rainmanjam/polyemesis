@@ -505,6 +505,11 @@ func (e *Engine) Status() Status {
 			if row.KeyUnreadable != "" {
 				ds.Warnings = append(slices.Clip(ds.Warnings), row.KeyUnreadable)
 			}
+			// Same Clip discipline as above, and for the same reason: ds.Warnings
+			// may still be routing's shared compiled slice.
+			if w := passthroughCodecWarning(row.Kind, row.Platform, row.RenditionID, e.videoInfo); w != "" {
+				ds.Warnings = append(slices.Clip(ds.Warnings), w)
+			}
 			st.Destinations = append(st.Destinations, ds)
 		}
 	}
