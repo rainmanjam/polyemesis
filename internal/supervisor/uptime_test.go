@@ -87,8 +87,17 @@ func TestAudioOnlyMediaStartsTheClock(t *testing.T) {
 
 	p.noteProgress(ffmpeg.Progress{Frame: 0, OutTimeMS: 1000, Speed: 1})
 
-	if got := p.Status().UptimeSec; got == 0 {
-		t.Error("UptimeSec = 0, want > 0: audio-only media is media")
+	// ASSERT THE CLOCK STARTED, NOT THAT TIME HAS PASSED. An earlier version
+	// checked UptimeSec > 0 microseconds after the stamp and failed on Windows,
+	// whose timer granularity is coarse enough that time.Since can return
+	// exactly zero. The claim being tested is "audio-only media starts the
+	// clock", and mediaAt being set is that claim; the derived seconds are a
+	// race against the platform's clock resolution.
+	p.mu.Lock()
+	started := !p.mediaAt.IsZero()
+	p.mu.Unlock()
+	if !started {
+		t.Error("mediaAt is still zero: audio-only media did not start the clock")
 	}
 }
 
