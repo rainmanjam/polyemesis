@@ -100,12 +100,17 @@ for _ in $(seq 1 50); do
 done
 curl -fsS -m5 "$API/health" >/dev/null 2>&1 \
   && ok "server is up" || { bad "server did not start"; exit 1; }
+# BOTH CALLS CARRY A USERNAME, AND THE ROUTE IS /auth/login. An earlier version
+# omitted the username and posted to /login: handleSetup rejects a blank
+# username outright, and /login is not a route at all. Copied from
+# acceptance-recording-stop.sh rather than reconstructed, which is what should
+# have happened the first time.
 curl -fsS -m5 -X POST -H 'Content-Type: application/json' \
-  -d "{\"password\":\"$PW\"}" "$API/setup" >/dev/null 2>&1 \
-  && ok "first-run setup accepted" || { bad "setup failed"; exit 1; }
+  -d "{\"username\":\"admin\",\"password\":\"$PW\"}" "$API/setup" >/dev/null 2>&1 \
+  && ok "first-run setup accepted" || { bad "setup failed"; tail -20 server.log; exit 1; }
 curl -fsS -m5 -c "$CJ" -X POST -H 'Content-Type: application/json' \
-  -d "{\"password\":\"$PW\"}" "$API/login" >/dev/null 2>&1 \
-  && ok "logged in" || { bad "login failed"; exit 1; }
+  -d "{\"username\":\"admin\",\"password\":\"$PW\"}" "$API/auth/login" >/dev/null 2>&1 \
+  && ok "logged in" || { bad "login failed"; tail -20 server.log; exit 1; }
 
 step "2. A source publishing over SRT"
 curl -fsS -m5 -b "$CJ" "$API/settings" > settings.json 2>/dev/null || { bad "could not read settings"; exit 1; }
