@@ -511,9 +511,8 @@ export function SourceCard({
                   {t("sources.passphrase")}
                   <InfoHint body="sources.help.passphrase" title="sources.passphrase" />
                 </Label>
-                <Input
+                <SecretInput
                   className="h-7 text-[11px]"
-                  type="password"
                   value={ing.srt.passphrase}
                   placeholder={t("sources.passphrasePlaceholder")}
                   onChange={(e) => setIngest({ srt: { ...ing.srt, passphrase: e.target.value } })}

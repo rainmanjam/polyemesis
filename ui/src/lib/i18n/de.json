@@ -1093,6 +1093,8 @@
   "route.videoLaterThanAudio": "Video später als Audio",
   "route.withoutATargetTheMix": "Ohne Ziel geht die Mischung mit dem Pegel hinaus, den der Eingang geliefert hat; angewendet wird nur der Übersteuerungsschutz oben.",
   "route.youtubeTwitchSpotify": "YouTube, Twitch, Spotify",
+  "secret.hide": "Verbergen",
+  "secret.reveal": "Anzeigen",
   "set.acceptSelfSigned": "Selbstsigniertes Zertifikat akzeptieren",
   "set.accountDisconnected": "Konto getrennt.",
   "set.acmeBlocked": "So würde es noch nicht funktionieren.",

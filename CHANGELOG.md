@@ -10,6 +10,13 @@ its first tagged release.
 
 ### Changed
 
+- **`uptimeSec` now counts from the first media, not from the spawn.** An ingest
+  is started *listening*, so the old figure included however long it sat waiting
+  for an encoder to connect: arming a source in the morning and going live at
+  noon reported four hours of uptime for a stream that had been on air for none.
+  A process that is running but has seen no media reports `uptimeSec: 0`, which
+  is what it is doing. `startedAt` is unchanged and still reports the spawn.
+  **This changes the meaning of a published MQTT field** — see `docs/MQTT.md`.
 - **Processes with nothing to flush now get a 1-second shutdown grace instead of
   8.** `meters`, `loudness` and `silence` write nothing a reader will ever look
   at — `-f null` for the first two, an mpegts stream to a UDP relay for the
@@ -30,6 +37,20 @@ its first tagged release.
   existing `acceptance-recording-stop` makes the same assertion against a
   whole-server SIGTERM and passed throughout, because those are different
   populations.
+
+### Fixed
+
+- **The RTMP ingest stream key was rendered in plain text.** Settings drew it
+  with an ordinary text input, so the credential OBS authenticates with was
+  readable on screen with nothing marking it as a secret — during exactly the
+  activity that puts a screen in front of an audience.
+- **Secret fields had no way to reveal what was typed.** The SRT passphrases,
+  the MQTT password, the OAuth client secret and the destination stream key were
+  masked but had no toggle, so checking a pasted key meant saving and reopening.
+  All six now use the existing `SecretInput`, which masks by default and reveals
+  only on an explicit press. A test now fails if any input bound to a credential
+  is not one, because the component already existed and nothing required it.
+- The reveal control is now translated rather than hardcoded English.
 
 ## [0.7.0] — 2026-08-28
 
