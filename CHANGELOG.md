@@ -28,6 +28,26 @@ its first tagged release.
   multi-source metering, it stops the page reporting a slice of the install as
   though it were all of it. See #638 for the switcher.
 
+### Removed
+
+- **The compact/comfortable layout density toggle**, which sat in the console
+  header between the username and the language switcher. It rescaled Tailwind's
+  `--spacing` inside `<main>` to pack more onto the screen, and remembered the
+  choice per browser.
+
+  Removed whole rather than hidden. The preference was applied on mount from
+  `localStorage`, so deleting only the button would have left anyone already
+  switched to compact stuck there with nothing to switch back — a setting with
+  no control is worse than no setting. Gone with it: the `useDensity` hook, the
+  `DENSITY` block in `index.css`, and the `dense-grid` opt-in that gave the
+  dashboard a fourth column above 1280px.
+
+  `Button`'s `min-h`/`min-w` floors and its `rem`-spelled icon size stay. They
+  were written to stop compact from shrinking a control carrying Start and Stop
+  below a reliable target, and at a single density they are no-ops — but a
+  minimum target size is worth asserting on its own terms rather than left to
+  whatever the spacing scale produces.
+
 ## [0.8.0] — 2026-09-01
 
 ### Changed
