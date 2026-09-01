@@ -136,7 +136,21 @@ func run(h *hooks) error {
 	log := h.debugLogger(*logLevel, diagSwitch, diagRecorder)
 
 	h.progress("loading the configuration")
-	cfg, err := config.Load(*configPath)
+	// An explicit --config that is absent refuses to start; the implicit
+	// default name still defaults so a fresh box boots. flag.Visit reports
+	// only flags that were actually set, which is the one signal that tells
+	// the two apart. #644.
+	configExplicit := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "config" {
+			configExplicit = true
+		}
+	})
+	loadConfig := config.Load
+	if configExplicit {
+		loadConfig = config.LoadRequired
+	}
+	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		return err
 	}

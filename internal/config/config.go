@@ -136,11 +136,28 @@ func Default() Config {
 // A malformed file is an error: silently running on defaults after the
 // operator wrote a config would be worse than refusing to start.
 func Load(path string) (Config, error) {
+	return load(path, false)
+}
+
+// LoadRequired is Load for a path the operator typed. An absent file is an
+// error rather than a default, because defaulting here does not "run without
+// a config" -- it boots a DIFFERENT install: creates ./data, mints a new
+// secret.key, opens an empty database, binds :8080 in the clear and reopens
+// unauthenticated POST /setup, while looking healthy. A typo in --config must
+// stop at the door, naming the path. #644.
+func LoadRequired(path string) (Config, error) {
+	return load(path, true)
+}
+
+func load(path string, required bool) (Config, error) {
 	cfg := Default()
 
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if required {
+				return cfg, fmt.Errorf("config %s: %w (the path was given explicitly, so refusing to start on defaults)", path, err)
+			}
 			return cfg, nil
 		}
 		return cfg, fmt.Errorf("read %s: %w", path, err)

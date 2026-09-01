@@ -50,6 +50,14 @@ its first tagged release.
 
 ### Fixed
 
+- **A `--config` path that did not exist booted a different, empty install.**
+  `config.Load` returned defaults on a missing file, which is right for the
+  implicit `config.yaml` and wrong for a path the operator typed: a typo
+  created `./data`, minted a **new `secret.key`**, opened an empty database,
+  bound `:8080` in the clear and reopened unauthenticated `POST /setup` — the
+  window `-reset-admin` exists to close — while looking healthy. An explicit
+  `--config` that is absent now refuses to start, naming the path; the
+  implicit default still defaults. (#644)
 - **The console printed credentials as readable text in five places.** The
   Sources page showed the publish token twice — once as `STREAMKEY`, once as
   `TOKEN` — in plain text on the page an operator opens while someone is
