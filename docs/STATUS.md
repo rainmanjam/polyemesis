@@ -165,10 +165,44 @@ one. Device: `enforce_admins: true`. Control rung.
   the only #631 detector lives on an unmerged branch; no hardware encode and
   no real minted-key publish has ever been observed (#375/#376/#380).
 
-## Not in this document
+**C9 (#651) — The docs-drift guards never run on the PRs that drift the
+docs.** The guards are Go tests (`internal/oauth/platforms_doc_drift_test.go`
+reads `docs/`); ci.yml's documentation gate skips every Go step when a PR
+touches only documentation (`ci.yml:201–207`). Silent: the docs-only leg
+reports green as "did no work". Device: run the `*_doc_drift_test.go`
+packages on the docs-only path — they read markdown and cost seconds.
+Control rung.
 
-Docs-vs-code drift is being audited separately and lands in a follow-up
-revision of this file.
+## Documentation drift (verified)
+
+Fourteen cross-document contradictions were confirmed; the ones an operator
+acts on:
+
+- `docs/UPGRADING.md:83` — 0.7.0 "not yet released" (v0.7.0 and v0.8.0 are
+  tagged), prefacing a mandatory credential-scrub `VACUUM` with "nothing below
+  applies to you".
+- `docs/UPGRADING.md:266` — "only the **first** playlist item plays;
+  sequencing is a later change" — `selector.go` emits a concat entry per item,
+  `internal/ffmpeg/concat.go` renders it, and `acceptance-playlist-phase0` is a
+  required CI leg. The stale sentence sits inside a *breaking* migration note.
+- `docs/MODULES.md:177–178` — `Dockerfile.vaapi` base `ubuntu:24.04` (it is
+  `ubuntu:26.04`, `Dockerfile.vaapi:89`; `HARDWARE.md` has it right) and build
+  stage `golang:1.26-alpine` (all three Dockerfiles: `golang:1.27-alpine`) —
+  contradicting the same file's "Go 1.27.0 floor" ten lines above.
+- `docs/INSTALL.md` tells the operator to fix the `:443` warning in a way the
+  code does not honour (docs MAJ-2, detail in the audit report).
+- `docs/TESTING.md` §10's acceptance-suite inventory disagrees with ci.yml's
+  matrix in three places.
+- `docs/DEPENDENCIES.md` states an `@types/node` invariant the lockfile does
+  not hold.
+- The CUDA image pins FFmpeg 6.1.1, below the 7.1 four documents say Enhanced
+  RTMP needs; nothing connects the two facts.
+- `docs/SITE-DEPLOY.md:3–5` omits `docs/**` from the Pages path filter.
+
+Six undocumented, tested behaviours and five unverified leads are listed in
+the reviewer's report. Of thirteen contradictions the knowledge graph
+proposed, six were false on reading — the graph was useful for reach, not
+judgement.
 
 ## Housekeeping observed during the audit
 

@@ -17,6 +17,7 @@ Nothing else on this list is enforced until this is. Every required check on
 | #649 | `enforce_admins: true` on the `main` ruleset | Control | `gh api …/branches/main/protection` shows `enforce_admins.enabled: true` |
 | #648 | Add the three `container:` legs to required contexts | Control | protection lists 27 contexts; a red `acceptance-browser` blocks a PR |
 | — | Make SonarCloud a required context, or remove it; same for Socket | Control | a failing quality gate turns `mergeStateStatus` to `BLOCKED`, not `UNSTABLE` |
+| #651 | Run the `*_doc_drift_test.go` packages on the docs-only CI path | Control | a docs-only PR that breaks `platforms_doc_drift_test` goes red |
 
 ## Stage 1 — the operator cannot be harmed by the tools built to protect them
 
@@ -57,7 +58,8 @@ install or the data. They block v1.0 outright.
 |---|---|---|---|
 | — | `update.sh` (docker) gets the same on-air guard as `uninstall.sh` | Control | it refuses while a destination is publishing, with `--force` |
 | — | Both `update.sh` variants keep a rollback artefact (`.previous` binary / image digest) and print the rollback command | Control | `internal/upgrade` finds what the script left |
-| — | `docs/UPGRADING.md:83` no longer says 0.7.0 is unreleased; the VACUUM credential scrub is stated as required | Warning | docs-drift check covers UPGRADING.md |
+| — | `docs/UPGRADING.md:83` no longer says 0.7.0 is unreleased; the VACUUM credential scrub is stated as required; `:266` no longer says only the first playlist item plays | Warning | docs-drift check covers UPGRADING.md |
+| — | `docs/MODULES.md:177–178` image table matches the Dockerfiles (`ubuntu:26.04`, `golang:1.27-alpine`); `TESTING.md` §10 matches ci.yml's matrix; `SITE-DEPLOY.md` names the `docs/**` filter | Warning | a test asserts MODULES.md's table against `FROM` lines |
 | — | `/api/v1/health` reports something that can be false (engine reachable, DB opens, disk floor) | Warning | installer `verify` and the debug bundle read a real answer |
 | — | A release runbook: merge → wait for push-to-main ci → tag → publish → deploy → verify; the same-day-UTC changelog gate documented | 0 → Warning | `docs/RELEASING.md` exists and the release workflow links to it |
 | — | `secret.key` minted over an existing database logs a WARN naming the count of destinations that will fail to open | Warning | boot log line + test |
