@@ -27,6 +27,13 @@ its first tagged release.
 
 ### Added
 
+- **A warning when the ingest's video codec is copied to an RTMP destination that
+  may refuse it.** Selecting HEVC or AV1 in OBS produces Enhanced RTMP, which
+  polyemesis ingests; video is then stream-copied, so that bitstream reaches the
+  platform verbatim. FFmpeg muxes HEVC into FLV happily and the platform drops the
+  stream — a failure that looks correct everywhere the operator can see. The
+  destination card now says so. It suggests and never refuses: a custom endpoint
+  that does accept HEVC is a real setup.
 - **A teardown counter with a denominator.** The supervisor now counts clean and
   killed teardowns per process kind. Previously only kills were recorded, in a
   log line, and a clean teardown wrote nothing at all — `supervise()` returns on
