@@ -337,7 +337,7 @@ func New(log *slog.Logger, spec Spec) *Process {
 		state:   StateStopped,
 		logs:    newRing(logRingSize),
 		secrets: alerts.NewSecretSet(log, spec.Secrets...),
-		grace:   shutdownGrace,
+		grace:   graceFor(spec.Kind),
 		drain:   drainGrace,
 	}
 }
@@ -1065,13 +1065,23 @@ func (p *Process) terminate() {
 		defer p.escalators.Done()
 		t := time.NewTimer(p.grace)
 		defer t.Stop()
+		// BOTH OUTCOMES ARE COUNTED HERE, in the one select that decides which
+		// happened. Counting them at separate call sites is how a denominator
+		// quietly stops matching its numerator -- and an absent denominator is
+		// why this escalation ran unnoticed for weeks. See teardown_stats.go.
 		select {
 		case <-exited:
 			// Reaped inside the grace period. There is nothing to escalate to,
 			// and killGroup on a reaped pid is a signal to whoever holds that
 			// number now.
+			noteTeardown(p.spec.Kind, false)
 		case <-t.C:
+			// KEEP THIS STRING. scripts/acceptance-recording-stop.sh greps for
+			// it verbatim as a required CI gate, and nothing links the two at
+			// compile time -- rewording it silently disarms that check.
+			// grace_string_test.go pins it.
 			p.log.Warn("process did not exit after grace period; killing group")
+			noteTeardown(p.spec.Kind, true)
 			killGroup(cmd)
 		}
 	}()

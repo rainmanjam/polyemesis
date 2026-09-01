@@ -17,6 +17,21 @@ its first tagged release.
   A process that is running but has seen no media reports `uptimeSec: 0`, which
   is what it is doing. `startedAt` is unchanged and still reports the spawn.
   **This changes the meaning of a published MQTT field** — see `docs/MQTT.md`.
+- **Processes with nothing to flush now get a 1-second shutdown grace instead of
+  8.** `meters`, `loudness` and `silence` write nothing a reader will ever look
+  at — `-f null` for the first two, an mpegts stream to a UDP relay for the
+  third — so waiting eight seconds to kill them cost that long on every ingest
+  switch and stop, and the waits stack serially. Every other kind keeps the full
+  window: an unlisted kind defaults to 8 seconds, so forgetting to classify a new
+  process costs latency and never a truncated recording.
+
+### Added
+
+- **A teardown counter with a denominator.** The supervisor now counts clean and
+  killed teardowns per process kind. Previously only kills were recorded, in a
+  log line, and a clean teardown wrote nothing at all — `supervise()` returns on
+  context cancellation before reaching the exit log — so there was no ratio to be
+  alarmed by and no way to see an exceptional path becoming the normal one.
 
 ### Fixed
 
