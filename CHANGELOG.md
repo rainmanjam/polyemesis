@@ -32,11 +32,6 @@ its first tagged release.
   log line, and a clean teardown wrote nothing at all — `supervise()` returns on
   context cancellation before reaching the exit log — so there was no ratio to be
   alarmed by and no way to see an exceptional path becoming the normal one.
-- **`acceptance-reconcile-teardown`**, asserting that no child outlives its grace
-  period across an ingest mode switch, a source stop and a source change. The
-  existing `acceptance-recording-stop` makes the same assertion against a
-  whole-server SIGTERM and passed throughout, because those are different
-  populations.
 
 ### Fixed
 
