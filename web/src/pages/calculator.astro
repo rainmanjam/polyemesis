@@ -153,7 +153,7 @@ const CHECKED = "2026-08-06";
           <h2 class="text-sm font-semibold text-fg">What you are sending</h2>
           <div class="mt-4 grid gap-4 sm:grid-cols-2">
             <label class="flex flex-col gap-1">
-              <span class="text-xs text-muted">Video bitrate (kbps)</span>
+              <span class="text-xs text-muted">Video from your encoder (kbps)</span>
               <input
                 id="video-kbps"
                 type="number"
@@ -204,7 +204,7 @@ const CHECKED = "2026-08-06";
                 class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
               />
               <span class="text-[11px] text-muted">
-                RTMP framing plus TCP/IP. An estimate, not a measurement — measure yours.
+                RTMP framing plus TCP/IP. An estimate, not a measurement.
               </span>
             </label>
             <label class="flex flex-col gap-1">
@@ -219,10 +219,27 @@ const CHECKED = "2026-08-06";
                 class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
               />
               <span class="text-[11px] text-muted">
-                A link run at exactly its rated speed drops frames on the first burst.
+                A link run at its rated speed drops frames on the first burst.
               </span>
             </label>
           </div>
+        </div>
+
+        <!-- PER-DESTINATION, and the constraint is the feature.
+             Video is stream-copied, so a destination either takes the ingest's
+             bitstream unchanged or it takes a RENDITION -- a separate encode.
+             Typing a different number per destination is therefore not a free
+             choice, it is a request for an encoder, and this table says so as
+             you make it. Renditions are SHARED: two destinations asking for the
+             same bitrate cost one encode, not two. -->
+        <div class="verbose-only card p-5" hidden>
+          <h2 class="text-sm font-semibold text-fg">Per destination</h2>
+          <p class="mt-1 text-xs text-muted">
+            Copy sends the ingest's video untouched and costs no CPU. Any other
+            bitrate is a rendition — a re-encode. Destinations asking for the same
+            bitrate share one.
+          </p>
+          <div id="per-dest" class="mt-4 flex flex-col gap-2"></div>
         </div>
 
         <div class="card p-5">
@@ -301,15 +318,22 @@ const CHECKED = "2026-08-06";
           the whole point of a restreamer.
         </li>
         <li>
-          <span class="text-fg">Server uplink</span> = (video + audio) × destinations.
-          The video is the same copied bitstream each time — no re-encode, so no
-          per-platform video bitrate.
+          <span class="text-fg">Server uplink</span> = the sum of what each destination
+          actually sends. In simple mode every one takes the copied bitstream, so that
+          is (video + audio) × destinations. Give one a rendition and it sends its own
+          video instead, and the sum stops being a multiplication.
         </li>
         <li>
-          <span class="text-fg">The ceiling that binds</span> is the lowest of your
-          selected destinations. Exceed it and that platform rejects or transcodes the
-          stream. Sending different video to different platforms means a rendition,
-          which re-encodes and costs CPU.
+          <span class="text-fg">The ceiling that binds</span> is the lowest among the
+          destinations still taking the <em>copied</em> stream, because that is one
+          bitstream they all share. A destination on a rendition is exempt — that is
+          what the rendition bought.
+        </li>
+        <li>
+          <span class="text-fg">Renditions are shared, not per-destination.</span> Two
+          destinations asking for the same bitrate cost one encode on the server and two
+          uploads. A rendition re-encodes video only; audio is routed and encoded per
+          destination either way.
         </li>
         <li>
           <span class="text-fg">Data</span> = Mbps × 450 MB per hour, times your hours.
@@ -329,8 +353,7 @@ const CHECKED = "2026-08-06";
 
 <script>
   /* Plain DOM, matching MixMatrix: a framework for one form would outweigh the
-     page. No dependencies, no build-time data — everything below runs from the
-     values the markup already carries. */
+     page it sits on. */
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
     document.getElementById(id) as T | null;
@@ -341,17 +364,25 @@ const CHECKED = "2026-08-06";
     return Number.isFinite(v) ? v : fallback;
   };
 
-  type Dest = { name: string; max: number };
+  type Dest = { key: string; name: string; max: number };
 
-  /** Endpoints the visitor added by hand. Presets are a floor, not a ceiling. */
+  /** Endpoints the visitor added. The presets are a floor, not a ceiling. */
   const custom: Dest[] = [];
+
+  /** Per-destination overrides, keyed by dest key. video === null means COPY.
+      Kept outside the DOM so a row rebuilt on re-render keeps its values. */
+  const perDest = new Map<string, { video: number | null; audio: number | null }>();
+
+  let verbose = false;
 
   function selected(): Dest[] {
     const out: Dest[] = [];
     document.querySelectorAll<HTMLInputElement>(".dest-on:checked").forEach((cb) => {
       const label = cb.closest("[data-platform]");
+      const key = cb.dataset.id ?? "?";
       out.push({
-        name: label?.querySelector("span span")?.textContent?.trim() ?? cb.dataset.id ?? "?",
+        key,
+        name: label?.querySelector("span span")?.textContent?.trim() ?? key,
         max: parseInt(cb.dataset.max ?? "0", 10),
       });
     });
@@ -360,7 +391,7 @@ const CHECKED = "2026-08-06";
 
   const mbps = (kbps: number) => kbps / 1000;
   const fmtRate = (k: number) => `${mbps(k).toFixed(1)} Mbps`;
-  /* GB, decimal — the unit hosts bill in. 1 Mbps for 1 hour is 450 MB:
+  /* Decimal GB -- the unit hosts bill in. 1 Mbps for 1 hour is 450 MB:
      1e6 bits/s x 3600 s / 8 = 450e6 bytes. */
   const gbFor = (k: number, hours: number) => (mbps(k) * 450 * hours) / 1000;
   const fmtData = (gb: number) =>
@@ -379,10 +410,127 @@ const CHECKED = "2026-08-06";
     box.appendChild(el);
   }
 
+  /** The rate this destination actually sends: its own if it has a rendition,
+      the copied ingest bitstream otherwise. */
+  function ratesFor(d: Dest, sharedVideo: number, sharedAudio: number) {
+    const o = perDest.get(d.key);
+    const video = verbose && o && o.video !== null ? o.video : sharedVideo;
+    const audio = verbose && o && o.audio !== null ? o.audio : sharedAudio;
+    return { video, audio, copied: !(verbose && o && o.video !== null) };
+  }
+
+  /** Signature of the current row set. Rows are rebuilt only when this changes.
+      Rebuilding on every render would destroy the input the cursor is in and
+      drop focus on each keystroke -- the classic re-render-on-input bug, and
+      the reason the row inputs below own their own listeners. */
+  let rowSig = "";
+
+  /** One row per selected destination, rebuilt whenever the selection changes. */
+  function renderRows(sharedVideo: number, sharedAudio: number) {
+    const host = $("per-dest");
+    if (!host) return;
+    const dests = selected();
+
+    const sig = dests.map((d) => `${d.key}:${d.max}`).join("|") + `#${verbose}`;
+    if (sig === rowSig) return;
+    rowSig = sig;
+
+    host.innerHTML = "";
+
+    if (!dests.length) {
+      const p = document.createElement("p");
+      p.className = "text-xs text-muted";
+      p.textContent = "Select a destination above.";
+      host.appendChild(p);
+      return;
+    }
+
+    for (const d of dests) {
+      const o = perDest.get(d.key) ?? { video: null, audio: null };
+      const row = document.createElement("div");
+      row.className =
+        "grid grid-cols-[1fr_auto_auto] items-center gap-3 rounded-md border border-line px-3 py-2";
+
+      const nameEl = document.createElement("div");
+      nameEl.className = "min-w-0";
+      const n = document.createElement("div");
+      n.className = "truncate text-sm text-fg";
+      n.textContent = d.name;
+      const c = document.createElement("div");
+      c.className = "font-mono text-[11px] text-muted";
+      c.textContent = `ceiling ${d.max} kbps`;
+      nameEl.append(n, c);
+
+      // Video: "Copy" or a number. Copy is the default because it is the
+      // default in the product, and because it is the one that costs nothing.
+      const vWrap = document.createElement("label");
+      vWrap.className = "flex items-center gap-2";
+      const vLabel = document.createElement("span");
+      vLabel.className = "text-[11px] text-muted";
+      vLabel.textContent = "video";
+      const vSel = document.createElement("select");
+      vSel.className =
+        "rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
+      vSel.innerHTML = `<option value="copy">Copy</option><option value="rendition">Rendition</option>`;
+      vSel.value = o.video === null ? "copy" : "rendition";
+      const vNum = document.createElement("input");
+      vNum.type = "number";
+      vNum.min = "100";
+      vNum.step = "100";
+      vNum.value = String(o.video ?? sharedVideo);
+      vNum.className =
+        "w-24 rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
+      vNum.hidden = o.video === null;
+
+      vSel.addEventListener("change", () => {
+        const cur = perDest.get(d.key) ?? { video: null, audio: null };
+        const rendition = vSel.value !== "copy";
+        cur.video = rendition ? parseFloat(vNum.value) || sharedVideo : null;
+        perDest.set(d.key, cur);
+        // Toggled here rather than left to a rebuild: rows are only rebuilt
+        // when the SELECTION changes, so nothing else would reveal the field
+        // the operator just asked for.
+        vNum.hidden = !rendition;
+        if (rendition) vNum.focus();
+        render();
+      });
+      vNum.addEventListener("input", () => {
+        const cur = perDest.get(d.key) ?? { video: null, audio: null };
+        cur.video = parseFloat(vNum.value);
+        perDest.set(d.key, cur);
+        render();
+      });
+      vWrap.append(vLabel, vSel, vNum);
+
+      const aWrap = document.createElement("label");
+      aWrap.className = "flex items-center gap-2";
+      const aLabel = document.createElement("span");
+      aLabel.className = "text-[11px] text-muted";
+      aLabel.textContent = "audio";
+      const aNum = document.createElement("input");
+      aNum.type = "number";
+      aNum.min = "32";
+      aNum.step = "32";
+      aNum.value = String(o.audio ?? sharedAudio);
+      aNum.className =
+        "w-20 rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
+      aNum.addEventListener("input", () => {
+        const cur = perDest.get(d.key) ?? { video: null, audio: null };
+        cur.audio = parseFloat(aNum.value);
+        perDest.set(d.key, cur);
+        render();
+      });
+      aWrap.append(aLabel, aNum);
+
+      row.append(nameEl, vWrap, aWrap);
+      host.appendChild(row);
+    }
+  }
+
   function render() {
     const dests = selected();
-    const video = num("video-kbps", 6000);
-    const audio = num("audio-kbps", 160);
+    const sharedVideo = num("video-kbps", 6000);
+    const sharedAudio = num("audio-kbps", 160);
     const tracks = Math.max(1, num("tracks", 1));
     const overhead = 1 + num("overhead", 5) / 100;
     const headroom = 1 + num("headroom", 20) / 100;
@@ -392,60 +540,84 @@ const CHECKED = "2026-08-06";
     const box = $("warnings");
     if (box) box.innerHTML = "";
 
-    // The two legs. Ingest carries one video and every audio track once;
-    // egress carries the copied video and one audio mix per destination.
-    const ingestRaw = video + audio * tracks;
-    const egressRaw = dests.length * (video + audio);
+    // Egress is the sum of what each destination actually sends -- not a single
+    // bitrate multiplied by a count, once any of them has a rendition.
+    let egressRaw = 0;
+    const renditionRates = new Set<number>();
+    const copied: Dest[] = [];
+    for (const d of dests) {
+      const r = ratesFor(d, sharedVideo, sharedAudio);
+      egressRaw += r.video + r.audio;
+      if (r.copied) copied.push(d);
+      else renditionRates.add(r.video);
+      if (!r.copied && r.video > d.max) {
+        warn("hard", `${d.name}: its rendition is ${r.video} kbps, above the ${d.max} kbps ceiling.`);
+      }
+    }
 
-    const ingest = ingestRaw * overhead * headroom;
-    const egress = egressRaw * overhead * headroom;
-
-    $("r-ingest")!.textContent = fmtRate(ingest);
-    $("r-egress")!.textContent = fmtRate(egress);
+    const ingestRaw = sharedVideo + sharedAudio * tracks;
+    $("r-ingest")!.textContent = fmtRate(ingestRaw * overhead * headroom);
+    $("r-egress")!.textContent = fmtRate(egressRaw * overhead * headroom);
     $("r-ingest-note")!.textContent =
       `${fmtRate(ingestRaw)} of media${tracks > 1 ? ` across ${tracks} tracks` : ""}, ` +
       `plus overhead and headroom.`;
     $("r-egress-note")!.textContent = dests.length
-      ? `${dests.length} destination${dests.length === 1 ? "" : "s"} × ` +
-        `${fmtRate(video + audio)} of media, plus overhead and headroom.`
+      ? `${dests.length} destination${dests.length === 1 ? "" : "s"}, ` +
+        `${fmtRate(egressRaw)} of media, plus overhead and headroom.`
       : "No destinations selected.";
 
-    // Data volume uses overhead but NOT headroom: headroom is capacity you buy,
-    // not bytes you send, and billing one as the other overstates the bill.
+    // Data uses overhead but not headroom: headroom is capacity you provision,
+    // not bytes you send, and billing one as the other overstates the invoice.
     const perStream = gbFor(egressRaw * overhead, hours);
     $("r-per")!.textContent = fmtData(perStream);
     $("r-week")!.textContent = fmtData(perStream * perWeek);
     $("r-month")!.textContent = fmtData(perStream * perWeek * 4.35);
 
-    // THE CONSTRAINT THAT MATTERS, and the reason this page exists.
+    // The copied bitstream is ONE stream, so its ceiling is the strictest of
+    // the destinations still taking it. Destinations on a rendition are exempt:
+    // that is precisely what the rendition bought.
     const hint = $("video-hint");
-    if (dests.length) {
-      const tightest = dests.reduce((a, b) => (b.max < a.max ? b : a));
-      if (hint) hint.textContent = `Ceiling for this set: ${tightest.max} kbps (${tightest.name}).`;
-      if (video > tightest.max) {
+    if (copied.length) {
+      const tightest = copied.reduce((a, b) => (b.max < a.max ? b : a));
+      if (hint)
+        hint.textContent = `Ceiling for the copied stream: ${tightest.max} kbps (${tightest.name}).`;
+      if (sharedVideo > tightest.max) {
         warn(
           "hard",
-          `${video} kbps exceeds ${tightest.name}'s ${tightest.max} kbps ceiling. ` +
-            `Because video is copied rather than re-encoded, every destination gets this ` +
-            `same bitstream — so lower it to ${tightest.max}, drop that destination, or ` +
-            `give it a rendition, which re-encodes and costs CPU.`,
+          `${sharedVideo} kbps exceeds ${tightest.name}'s ${tightest.max} kbps ceiling, and ` +
+            `${copied.length === 1 ? "it is" : `${copied.length} destinations are`} taking the ` +
+            `copied stream. Lower it, drop that destination, or give it a rendition.`,
         );
       }
     } else if (hint) {
-      hint.textContent = "";
+      hint.textContent = dests.length
+        ? "No destination is taking the copied stream — every one has a rendition."
+        : "";
+    }
+
+    // Renditions are SHARED: two destinations asking the same bitrate are one
+    // encode. Counting them per-destination would overstate the CPU.
+    if (renditionRates.size) {
+      warn(
+        "soft",
+        `${renditionRates.size} rendition${renditionRates.size === 1 ? "" : "s"} ` +
+          `(${[...renditionRates].sort((a, b) => a - b).join(", ")} kbps). Each is one video ` +
+          `encode on the server, shared by every destination asking for that bitrate — so this ` +
+          `costs CPU that a copied stream does not. Audio is unaffected: a rendition re-encodes ` +
+          `video only.`,
+      );
     }
 
     if (dests.length > 3) {
       warn(
         "soft",
         `YouTube is capped at 3 simultaneous destinations through polyemesis today: one ` +
-          `liveStream is reused across destinations, so YouTube's shared-ingestion limit ` +
-          `binds before its per-channel one. Other platforms are unaffected.`,
+          `liveStream is reused across destinations, so its shared-ingestion limit binds ` +
+          `before the per-channel one. Other platforms are unaffected.`,
       );
     }
-    if (ingest > 50_000) {
-      warn("soft", "That upstream is beyond most domestic connections. Check yours before relying on it.");
-    }
+
+    renderRows(sharedVideo, sharedAudio);
   }
 
   function addCustom() {
@@ -461,22 +633,22 @@ const CHECKED = "2026-08-06";
       return;
     }
 
-    const dest: Dest = { name, max };
+    const dest: Dest = { key: `custom-${Date.now()}-${custom.length}`, name, max };
     custom.push(dest);
 
     const row = document.createElement("div");
-    row.className =
-      "flex items-center gap-3 rounded-md border border-line px-3 py-2 text-sm";
+    row.className = "flex items-center gap-3 rounded-md border border-line px-3 py-2 text-sm";
     row.innerHTML =
       `<span class="flex-1 text-fg"></span>` +
       `<span class="font-mono text-[11px] text-muted"></span>` +
-      `<button type="button" class="text-[11px] text-muted hover:text-fg" aria-label="Remove">Remove</button>`;
-    // textContent rather than interpolation: the name is whatever was typed.
+      `<button type="button" class="text-[11px] text-muted hover:text-fg">Remove</button>`;
+    // textContent, not interpolation: the name is whatever was typed.
     row.children[0].textContent = name;
     row.children[1].textContent = `${max} kbps`;
     row.children[2].addEventListener("click", () => {
       const i = custom.indexOf(dest);
       if (i >= 0) custom.splice(i, 1);
+      perDest.delete(dest.key);
       row.remove();
       render();
     });
@@ -487,25 +659,33 @@ const CHECKED = "2026-08-06";
     render();
   }
 
-  function setMode(verbose: boolean) {
+  function setMode(v: boolean) {
+    verbose = v;
     document.querySelectorAll<HTMLElement>(".verbose-only").forEach((el) => {
-      el.hidden = !verbose;
+      el.hidden = !v;
     });
     const s = $("mode-simple");
-    const v = $("mode-verbose");
-    s?.setAttribute("aria-pressed", String(!verbose));
-    v?.setAttribute("aria-pressed", String(verbose));
-    s?.classList.toggle("btn-primary", !verbose);
-    s?.classList.toggle("btn-ghost", verbose);
-    v?.classList.toggle("btn-primary", verbose);
-    v?.classList.toggle("btn-ghost", !verbose);
-    // Simple mode uses the defaults rather than hiding numbers that still
-    // apply -- the results must not change just because a control is hidden.
+    const b = $("mode-verbose");
+    s?.setAttribute("aria-pressed", String(!v));
+    b?.setAttribute("aria-pressed", String(v));
+    s?.classList.toggle("btn-primary", !v);
+    s?.classList.toggle("btn-ghost", v);
+    b?.classList.toggle("btn-primary", v);
+    b?.classList.toggle("btn-ghost", !v);
     render();
   }
 
-  document.addEventListener("input", render);
-  document.addEventListener("change", render);
+  document.addEventListener("input", (e) => {
+    // Rows handle their own inputs and call render themselves; re-rendering
+    // from the delegated listener too would rebuild the row under the cursor
+    // and drop focus mid-keystroke.
+    if ((e.target as HTMLElement)?.closest("#per-dest")) return;
+    render();
+  });
+  document.addEventListener("change", (e) => {
+    if ((e.target as HTMLElement)?.closest("#per-dest")) return;
+    render();
+  });
   $("custom-add")?.addEventListener("click", addCustom);
   $("mode-simple")?.addEventListener("click", () => setMode(false));
   $("mode-verbose")?.addEventListener("click", () => setMode(true));
