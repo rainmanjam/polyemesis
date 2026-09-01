@@ -151,9 +151,34 @@ jobs:
     # what it cost the one time it was got wrong.
     needs: changes
     runs-on: ubuntu-latest
-    # Above the 15m per-package go test timeout below, so Go's diagnostic
-    # panic wins the race against this.
-    timeout-minutes: 25
+    # THE COMPARISON IS AGAINST START-OF-STEP, NOT START-OF-JOB, AND THAT IS
+    # WHAT WAS WRONG HERE.
+    #
+    # The intent has always been right: keep this ceiling above the `go test
+    # -timeout` below, so a hung test dies by Go's clock and leaves a goroutine
+    # dump rather than by GitHub's, which leaves a bare "cancelled" and nothing
+    # to read. What the old value compared was 25 against 20 and called it five
+    # minutes of headroom.
+    #
+    # It is not, because `go test` does not start when the job does. gofmt,
+    # build, vet, the Windows vet, the route-coverage preflight and the
+    # internal/api coverage run first and take between six and seven minutes.
+    # So the test step had 25 - 6.5 = 18.5 minutes of wall clock to spend
+    # against its own 20-minute deadline: THIS ceiling always fired first, the
+    # diagnostic could never be produced, and the invariant the comment
+    # asserted had been false for as long as the preflights existed.
+    #
+    # Observed rather than theorised: three runs on 2026-09-01 died at 25m16s,
+    # 25m17s and 25m20s. The suite is not flaky, it is over budget -- the job
+    # sat on its ceiling and a few seconds of runner variance decided each one.
+    #
+    # So the value is now derived rather than picked: the steps before the test
+    # (~7m) plus the test's own deadline (20m) plus headroom for the runner to
+    # act on it (~8m). Raise it by the same arithmetic when a preflight is added
+    # -- and note the instruction below still stands, that raising `-timeout`
+    # itself means splitting the package first. ci-timeout_test.go fails if this
+    # number ever drops back under the sum.
+    timeout-minutes: 35
     env:
       # #187. The comment below the checkout has said since the beginning that a
       # missing FFmpeg makes those tests SKIP, "which is worse, because the run
