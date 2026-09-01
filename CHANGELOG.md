@@ -47,7 +47,24 @@ Nothing yet.
   server's uplink separately, because those are different connections, and
   converts both into data per stream, week and month, which is what a host bills
   on. Platform ceilings are the server's own figures from `internal/db/platforms.go`,
-  dated on the page. Custom RTMP and SRT endpoints can be added by name.
+  dated on the page. Custom RTMP and SRT endpoints can be added by name. A
+  verbose mode adds overhead, headroom and audio-track inputs, and gives each
+  selected destination its own video mode, rendition bitrate and audio bitrate
+  in that destination's own row — the case where one platform's ceiling forces
+  a rendition and the others keep the copy.
+- **Structured data binding the name, the site and the repository.** "polyemesis"
+  is a coined word, which helps ranking and hurts identity: nothing told a search
+  or answer engine that the name, this site and the GitHub repository were one
+  thing rather than three strings that happen to co-occur. The site now emits a
+  `SoftwareApplication` node with `sameAs` pointing at the repository, and a
+  `WebSite` node for the site as an entity distinct from the software it
+  documents. Both assert only what is already true and independently checkable.
+  Deliberately absent, and recorded in the layout as a rule rather than an
+  omission: no `FAQPage`, no `ItemList` over the comparison pages, and no
+  `dateModified` — structured data detaches a figure from the "checked" date
+  beside it on the page, and a competitor's price reproduced in a result card
+  without that stamp is a stale claim we published.
+
 - **A teardown counter with a denominator.** The supervisor now counts clean and
   killed teardowns per process kind. Previously only kills were recorded, in a
   log line, and a clean teardown wrote nothing at all — `supervise()` returns on
