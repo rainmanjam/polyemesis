@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { SecretCode } from "@/components/SecretCode";
+import { copyToClipboard } from "@/lib/clipboard";
 import { Stat } from "@/components/signature/Stat";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, Pencil, Plus, Send, Trash2, Webhook } from "lucide-react";
+import { AlertTriangle, Copy, Loader2, Pencil, Plus, Send, Trash2, Webhook } from "lucide-react";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Badge } from "@/components/ui/badge";
@@ -316,7 +318,22 @@ export function HooksCard() {
         {newSecret && (
           <div className="rounded border border-warn/40 bg-warn/10 px-3 py-2 text-xs">
             <p className="mb-1 font-medium text-warn">{t("hooks.secretTitle")}</p>
-            <code className="block break-all font-mono text-[11px]">{newSecret}</code>
+            {/* Masked, with Copy alongside. Copy works while masked, which is
+                the point: moving a secret to the clipboard never required
+                putting it on the screen, and this block renders during setup —
+                often while screen-sharing with whoever is helping. Before this
+                there was no Copy at all, so reading it off the screen was the
+                only way to get it. */}
+            <div className="flex items-center gap-1.5">
+              <SecretCode value={newSecret} />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => copyToClipboard(t, newSecret, "Secret")}
+              >
+                <Copy className="h-3 w-3" /> {t("common.copy")}
+              </Button>
+            </div>
             <Button
               variant="ghost"
               size="sm"

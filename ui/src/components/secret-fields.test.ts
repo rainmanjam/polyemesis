@@ -39,6 +39,21 @@ import { describe, expect, it } from "vitest";
 const SECRET_BINDING =
   /value=\{[^}]*\b(streamKey|passphrase|clientSecret|[a-zA-Z]*[Ss]ecret|[a-zA-Z]*[Pp]assword|apiKey|[a-zA-Z]*Token)\b[^}]*\}/;
 
+/** The same identifiers, appearing as the whole body of a `<code>` element.
+ *
+ *  A DISPLAYED credential is worse than an editable one and the guard above
+ *  could not see it. SECRET_BINDING matches `value={...}`; the Sources page
+ *  printed the publish token as `<code>{source.token}</code>` -- no `value`,
+ *  no `<Input>`, invisible to every check here -- twice, on the page an
+ *  operator opens while someone is helping them go live. It shipped, reviewed
+ *  clean, and was found by looking at the running console.
+ *
+ *  Same rung and same known hole as SECRET_BINDING: it matches the expression,
+ *  so a rename defeats it. It catches the mistake that has now actually
+ *  happened. */
+const SECRET_PRINTED =
+  /<code[^>]*>\s*\{\s*[^}]*\b(streamKey|passphrase|clientSecret|plaintext|newSecret|[a-zA-Z]*[Ss]ecret|[a-zA-Z]*[Pp]assword|apiKey|[a-zA-Z]*[Tt]oken)\b[^}]*\}\s*<\/code>/;
+
 /** Fields that are legitimately a plain input, each with the reason.
  *
  *  Paths are relative to `ui/`, which is vitest's working directory.
@@ -64,6 +79,16 @@ function tsxFiles(dir: string): string[] {
     if (statSync(full).isDirectory()) return tsxFiles(full);
     return full.endsWith(".tsx") && !full.includes(".test.") ? [full] : [];
   });
+}
+
+/** Comments stripped before matching.
+ *
+ *  A guard that reads prose reports the docstring explaining the bug as the
+ *  bug. SecretCode's own comment quotes `<code>{source.token}</code>` verbatim,
+ *  which is exactly the string this looks for — so the first run of this check
+ *  failed on the file that fixes it. */
+function code(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 }
 
 const files = tsxFiles("src");
@@ -100,6 +125,28 @@ describe("secret fields", () => {
       "These inputs hold a credential but are not SecretInput, so the value is " +
         "readable on screen and cannot be deliberately revealed or re-hidden. " +
         "Use <SecretInput>, or add an entry to ALLOWED with the reason:\n  " +
+        offenders.join("\n  "),
+    ).toEqual([]);
+  });
+
+  it("no credential is printed into a <code> block", () => {
+    // The read-only half of the same rule. SecretCode is the fix: masked to a
+    // fixed width, with a deliberate reveal, and Copy still works while masked.
+    const offenders: string[] = [];
+
+    for (const file of files) {
+      const src = code(readFileSync(file, "utf8"));
+      const m = SECRET_PRINTED.exec(src);
+      if (!m) continue;
+      const line = src.slice(0, m.index).split("\n").length;
+      offenders.push(`${file}:${line}  ${m[0].replace(/\s+/g, " ").slice(0, 80)}`);
+    }
+
+    expect(
+      offenders,
+      "These render a credential as readable text on screen, which is the " +
+        "projector case SecretInput was written for -- but read-only, so it " +
+        "cannot be typed over or masked by the browser. Use <SecretCode>:\n  " +
         offenders.join("\n  "),
     ).toEqual([]);
   });

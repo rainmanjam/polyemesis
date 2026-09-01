@@ -57,6 +57,9 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
    * programme resolves -- one extra round trip on a multi-source install,
    * against never rendering at all. */
   const [programme, setProgramme] = useState<number | null>(null);
+  /* Set from the same /sources response that resolves the programme, so the
+     count and the choice can never describe different lists. */
+  const [sourceCount, setSourceCount] = useState(0);
   /* Whether the programme question has been ANSWERED -- including the answer
      "there is none", which is legitimate. See the effect below for why this is
      a gate WITH A DEADLINE rather than either extreme. */
@@ -227,6 +230,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       .then((rows) => {
         if (!live) return;
         const ids = rows.map((r) => r.id);
+        setSourceCount(ids.length);
         const picked = resolveProgramme(ids, rememberedProgramme());
         setProgramme(picked);
         rememberProgramme(picked);
@@ -272,6 +276,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
     () => ({
       programme,
       programmeKnown,
+      sourceCount,
       connected,
       status,
       source,
@@ -286,6 +291,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
     [
       programme,
       programmeKnown,
+      sourceCount,
       connected,
       status,
       source,

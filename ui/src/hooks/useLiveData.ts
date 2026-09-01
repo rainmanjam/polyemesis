@@ -49,6 +49,14 @@ export interface LiveData {
    *  reappearing after the client was fixed. Gate the control on this, not on
    *  the id. */
   programmeKnown: boolean;
+  /** How many programmes this install has.
+   *
+   *  The console follows ONE at a time and has no switcher, so a page that
+   *  shows programme-scoped figures cannot say whether it is showing the
+   *  install or a slice of it. This is what lets a page label itself only when
+   *  the label carries information — on the single-source install that is the
+   *  overwhelming majority, a name that never varies is furniture. */
+  sourceCount: number;
   connected: boolean;
   status: Status | null;
   source: SourceInfo | null;
