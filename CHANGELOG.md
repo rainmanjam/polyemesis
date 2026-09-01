@@ -47,7 +47,11 @@ Nothing yet.
   server's uplink separately, because those are different connections, and
   converts both into data per stream, week and month, which is what a host bills
   on. Platform ceilings are the server's own figures from `internal/db/platforms.go`,
-  dated on the page. Custom RTMP and SRT endpoints can be added by name.
+  dated on the page. Custom RTMP and SRT endpoints can be added by name. A
+  verbose mode adds overhead, headroom and audio-track inputs, and gives each
+  selected destination its own video mode, rendition bitrate and audio bitrate
+  in that destination's own row — the case where one platform's ceiling forces
+  a rendition and the others keep the copy.
 - **A teardown counter with a denominator.** The supervisor now counts clean and
   killed teardowns per process kind. Previously only kills were recorded, in a
   log line, and a clean teardown wrote nothing at all — `supervise()` returns on
