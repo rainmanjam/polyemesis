@@ -88,28 +88,40 @@ const CHECKED = "2026-08-06";
             Ceilings are what each platform publishes, checked {CHECKED}. They are the
             same figures the server validates against.
           </p>
+          {/* THE OPTIONS LIVE ON THE DESTINATION THEY CONFIGURE. A separate
+              table below meant reading a name in one place and setting its
+              bitrate in another, with nothing tying the two rows together but
+              their order. Each destination now carries its own controls and
+              reveals them when it is switched on, so the thing being configured
+              and the thing configuring it are never more than a line apart.
+
+              The grid collapses to one column in verbose mode: two columns of
+              expanded rows leaves the selects too narrow to read. */}
           <div id="platforms" class="mt-4 grid gap-2 sm:grid-cols-2">
             {
               PLATFORMS.map((p) => (
-                <label
-                  class="flex cursor-pointer items-center gap-3 rounded-md border border-line px-3 py-2 text-sm hover:border-line-strong"
+                <div
+                  class="rounded-md border border-line transition-colors hover:border-line-strong"
                   data-platform={p.id}
                 >
-                  <input
-                    type="checkbox"
-                    class="dest-on accent-[var(--color-primary)]"
-                    data-id={p.id}
-                    data-min={p.min}
-                    data-max={p.max}
-                    checked={p.id === "youtube" || p.id === "twitch"}
-                  />
-                  <span class="flex-1">
-                    <span class="text-fg">{p.name}</span>
-                    <span class="ml-2 font-mono text-[11px] text-muted">
-                      {p.min === p.max ? `${p.min}` : `${p.min}–${p.max}`} kbps
+                  <label class="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      class="dest-on accent-[var(--color-primary)]"
+                      data-id={p.id}
+                      data-min={p.min}
+                      data-max={p.max}
+                      checked={p.id === "youtube" || p.id === "twitch"}
+                    />
+                    <span class="flex-1">
+                      <span class="text-fg">{p.name}</span>
+                      <span class="ml-2 font-mono text-[11px] text-muted">
+                        {p.min === p.max ? `${p.min}` : `${p.min}–${p.max}`} kbps
+                      </span>
                     </span>
-                  </span>
-                </label>
+                  </label>
+                  <div class="dest-opts border-t border-line px-3 py-2" data-opts-for={p.id} hidden />
+                </div>
               ))
             }
           </div>
@@ -223,23 +235,6 @@ const CHECKED = "2026-08-06";
               </span>
             </label>
           </div>
-        </div>
-
-        <!-- PER-DESTINATION, and the constraint is the feature.
-             Video is stream-copied, so a destination either takes the ingest's
-             bitstream unchanged or it takes a RENDITION -- a separate encode.
-             Typing a different number per destination is therefore not a free
-             choice, it is a request for an encoder, and this table says so as
-             you make it. Renditions are SHARED: two destinations asking for the
-             same bitrate cost one encode, not two. -->
-        <div class="verbose-only card p-5" hidden>
-          <h2 class="text-sm font-semibold text-fg">Per destination</h2>
-          <p class="mt-1 text-xs text-muted">
-            Copy sends the ingest's video untouched and costs no CPU. Any other
-            bitrate is a rendition — a re-encode. Destinations asking for the same
-            bitrate share one.
-          </p>
-          <div id="per-dest" class="mt-4 flex flex-col gap-2"></div>
         </div>
 
         <div class="card p-5">
@@ -419,112 +414,98 @@ const CHECKED = "2026-08-06";
     return { video, audio, copied: !(verbose && o && o.video !== null) };
   }
 
-  /** Signature of the current row set. Rows are rebuilt only when this changes.
-      Rebuilding on every render would destroy the input the cursor is in and
-      drop focus on each keystroke -- the classic re-render-on-input bug, and
-      the reason the row inputs below own their own listeners. */
-  let rowSig = "";
-
-  /** One row per selected destination, rebuilt whenever the selection changes. */
-  function renderRows(sharedVideo: number, sharedAudio: number) {
-    const host = $("per-dest");
-    if (!host) return;
-    const dests = selected();
-
-    const sig = dests.map((d) => `${d.key}:${d.max}`).join("|") + `#${verbose}`;
-    if (sig === rowSig) return;
-    rowSig = sig;
-
+  /** Build the option controls for one destination, once, into its own row.
+      Returns the node so a custom endpoint can host the same controls a preset
+      does -- one code path, so the two cannot drift apart. */
+  function buildOpts(d: Dest, host: HTMLElement) {
+    if (host.dataset.built === "1") return;
+    host.dataset.built = "1";
     host.innerHTML = "";
 
-    if (!dests.length) {
-      const p = document.createElement("p");
-      p.className = "text-xs text-muted";
-      p.textContent = "Select a destination above.";
-      host.appendChild(p);
-      return;
-    }
+    const wrap = document.createElement("div");
+    wrap.className = "flex flex-wrap items-center gap-x-3 gap-y-2";
 
-    for (const d of dests) {
-      const o = perDest.get(d.key) ?? { video: null, audio: null };
-      const row = document.createElement("div");
-      row.className =
-        "grid grid-cols-[1fr_auto_auto] items-center gap-3 rounded-md border border-line px-3 py-2";
+    const vLabel = document.createElement("span");
+    vLabel.className = "text-[11px] text-muted";
+    vLabel.textContent = "video";
 
-      const nameEl = document.createElement("div");
-      nameEl.className = "min-w-0";
-      const n = document.createElement("div");
-      n.className = "truncate text-sm text-fg";
-      n.textContent = d.name;
-      const c = document.createElement("div");
-      c.className = "font-mono text-[11px] text-muted";
-      c.textContent = `ceiling ${d.max} kbps`;
-      nameEl.append(n, c);
+    const vSel = document.createElement("select");
+    vSel.className = "rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
+    vSel.innerHTML = `<option value="copy">Copy</option><option value="rendition">Rendition</option>`;
 
-      // Video: "Copy" or a number. Copy is the default because it is the
-      // default in the product, and because it is the one that costs nothing.
-      const vWrap = document.createElement("label");
-      vWrap.className = "flex items-center gap-2";
-      const vLabel = document.createElement("span");
-      vLabel.className = "text-[11px] text-muted";
-      vLabel.textContent = "video";
-      const vSel = document.createElement("select");
-      vSel.className =
-        "rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
-      vSel.innerHTML = `<option value="copy">Copy</option><option value="rendition">Rendition</option>`;
-      vSel.value = o.video === null ? "copy" : "rendition";
-      const vNum = document.createElement("input");
-      vNum.type = "number";
-      vNum.min = "100";
-      vNum.step = "100";
-      vNum.value = String(o.video ?? sharedVideo);
-      vNum.className =
-        "w-24 rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
-      vNum.hidden = o.video === null;
+    const vNum = document.createElement("input");
+    vNum.type = "number";
+    vNum.min = "100";
+    vNum.step = "100";
+    vNum.className = "w-24 rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
+    vNum.hidden = true;
 
-      vSel.addEventListener("change", () => {
-        const cur = perDest.get(d.key) ?? { video: null, audio: null };
-        const rendition = vSel.value !== "copy";
-        cur.video = rendition ? parseFloat(vNum.value) || sharedVideo : null;
-        perDest.set(d.key, cur);
-        // Toggled here rather than left to a rebuild: rows are only rebuilt
-        // when the SELECTION changes, so nothing else would reveal the field
-        // the operator just asked for.
-        vNum.hidden = !rendition;
-        if (rendition) vNum.focus();
-        render();
-      });
-      vNum.addEventListener("input", () => {
-        const cur = perDest.get(d.key) ?? { video: null, audio: null };
-        cur.video = parseFloat(vNum.value);
-        perDest.set(d.key, cur);
-        render();
-      });
-      vWrap.append(vLabel, vSel, vNum);
+    const aLabel = document.createElement("span");
+    aLabel.className = "ml-1 text-[11px] text-muted";
+    aLabel.textContent = "audio";
 
-      const aWrap = document.createElement("label");
-      aWrap.className = "flex items-center gap-2";
-      const aLabel = document.createElement("span");
-      aLabel.className = "text-[11px] text-muted";
-      aLabel.textContent = "audio";
-      const aNum = document.createElement("input");
-      aNum.type = "number";
-      aNum.min = "32";
-      aNum.step = "32";
-      aNum.value = String(o.audio ?? sharedAudio);
-      aNum.className =
-        "w-20 rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
-      aNum.addEventListener("input", () => {
-        const cur = perDest.get(d.key) ?? { video: null, audio: null };
-        cur.audio = parseFloat(aNum.value);
-        perDest.set(d.key, cur);
-        render();
-      });
-      aWrap.append(aLabel, aNum);
+    const aNum = document.createElement("input");
+    aNum.type = "number";
+    aNum.min = "32";
+    aNum.step = "32";
+    aNum.className = "w-20 rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
 
-      row.append(nameEl, vWrap, aWrap);
-      host.appendChild(row);
-    }
+    const cur = () => perDest.get(d.key) ?? { video: null, audio: null };
+
+    vSel.addEventListener("change", () => {
+      const c = cur();
+      const rendition = vSel.value !== "copy";
+      c.video = rendition ? parseFloat(vNum.value) || num("video-kbps", 6000) : null;
+      perDest.set(d.key, c);
+      // Toggled here rather than by a rebuild: these controls are built once
+      // and never replaced, so nothing else would reveal the field just asked
+      // for -- and rebuilding on input is what drops focus mid-keystroke.
+      vNum.hidden = !rendition;
+      if (rendition) {
+        vNum.value = String(c.video);
+        vNum.focus();
+      }
+      render();
+    });
+    vNum.addEventListener("input", () => {
+      const c = cur();
+      c.video = parseFloat(vNum.value);
+      perDest.set(d.key, c);
+      render();
+    });
+    aNum.addEventListener("input", () => {
+      const c = cur();
+      c.audio = parseFloat(aNum.value);
+      perDest.set(d.key, c);
+      render();
+    });
+
+    wrap.append(vLabel, vSel, vNum, aLabel, aNum);
+    host.appendChild(wrap);
+    host.dataset.role = "opts";
+    (host as any)._sync = (sharedVideo: number, sharedAudio: number) => {
+      const c = cur();
+      vSel.value = c.video === null ? "copy" : "rendition";
+      vNum.hidden = c.video === null;
+      // Only write a value the operator is not currently editing.
+      if (document.activeElement !== vNum) vNum.value = String(c.video ?? sharedVideo);
+      if (document.activeElement !== aNum) aNum.value = String(c.audio ?? sharedAudio);
+    };
+  }
+
+  /** Show or hide each destination's controls, and keep them in step with the
+      shared defaults while they are untouched. */
+  function syncOpts(sharedVideo: number, sharedAudio: number) {
+    const on = new Map(selected().map((d) => [d.key, d]));
+    document.querySelectorAll<HTMLElement>(".dest-opts").forEach((host) => {
+      const key = host.dataset.optsFor ?? "";
+      const d = on.get(key);
+      const show = Boolean(d) && verbose;
+      host.hidden = !show;
+      if (!show || !d) return;
+      buildOpts(d, host);
+      (host as any)._sync?.(sharedVideo, sharedAudio);
+    });
   }
 
   function render() {
@@ -617,7 +598,7 @@ const CHECKED = "2026-08-06";
       );
     }
 
-    renderRows(sharedVideo, sharedAudio);
+    syncOpts(sharedVideo, sharedAudio);
   }
 
   function addCustom() {
@@ -649,10 +630,22 @@ const CHECKED = "2026-08-06";
       const i = custom.indexOf(dest);
       if (i >= 0) custom.splice(i, 1);
       perDest.delete(dest.key);
-      row.remove();
+      wrapper.remove();
       render();
     });
-    list.appendChild(row);
+
+    // A custom endpoint hosts the same controls a preset does, through the same
+    // builder. Two code paths here would drift, and the one nobody uses would
+    // be the one that breaks.
+    const wrapper = document.createElement("div");
+    wrapper.className = "rounded-md border border-line";
+    row.className = "flex items-center gap-3 px-3 py-2 text-sm";
+    const opts = document.createElement("div");
+    opts.className = "dest-opts border-t border-line px-3 py-2";
+    opts.dataset.optsFor = dest.key;
+    opts.hidden = true;
+    wrapper.append(row, opts);
+    list.appendChild(wrapper);
 
     nameEl.value = "";
     kbpsEl.value = "";
@@ -679,11 +672,11 @@ const CHECKED = "2026-08-06";
     // Rows handle their own inputs and call render themselves; re-rendering
     // from the delegated listener too would rebuild the row under the cursor
     // and drop focus mid-keystroke.
-    if ((e.target as HTMLElement)?.closest("#per-dest")) return;
+    if ((e.target as HTMLElement)?.closest(".dest-opts")) return;
     render();
   });
   document.addEventListener("change", (e) => {
-    if ((e.target as HTMLElement)?.closest("#per-dest")) return;
+    if ((e.target as HTMLElement)?.closest(".dest-opts")) return;
     render();
   });
   $("custom-add")?.addEventListener("click", addCustom);
