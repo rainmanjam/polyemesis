@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { urlCarriesCredential } from "@/lib/credential-url";
+import { SecretCode } from "@/components/SecretCode";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
@@ -542,9 +544,13 @@ function IngestSettings({
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
-            <code className="min-w-0 flex-1 break-all font-mono text-[10px] text-muted-foreground">
-              {system?.ingestUrl ?? "…"}
-            </code>
+            {urlCarriesCredential(system?.ingestUrl ?? "") ? (
+              <SecretCode value={system?.ingestUrl ?? ""} />
+            ) : (
+              <code className="min-w-0 flex-1 break-all font-mono text-[10px] text-muted-foreground">
+                {system?.ingestUrl ?? "…"}
+              </code>
+            )}
             <Button variant="ghost" size="icon-sm" onClick={copyUrl} aria-label={t("set.copy")}>
               <Copy />
             </Button>
@@ -2844,9 +2850,7 @@ function ApiTokens() {
               Copy {minted.token.name} now — it is never shown again.
             </span>
             <div className="flex items-center gap-1.5">
-              <code className="min-w-0 flex-1 overflow-x-auto rounded border border-border bg-background px-2 py-1 font-mono text-[11px]">
-                {minted.plaintext}
-              </code>
+              <SecretCode value={minted.plaintext} />
               <Button size="sm" variant="outline" onClick={copy}>
                 {copied ? <Check /> : <Copy />} {copied ? t("clipedit.copied") : t("common.copy")}
               </Button>
