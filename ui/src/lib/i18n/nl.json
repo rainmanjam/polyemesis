@@ -1093,6 +1093,8 @@
   "route.videoLaterThanAudio": "Video later dan audio",
   "route.withoutATargetTheMix": "Zonder doel gaat de mix eruit op het niveau dat de ingang produceerde, met alleen de clipbescherming hierboven toegepast.",
   "route.youtubeTwitchSpotify": "YouTube, Twitch, Spotify",
+  "secret.hide": "Verbergen",
+  "secret.reveal": "Tonen",
   "set.acceptSelfSigned": "Een zelfondertekend certificaat accepteren",
   "set.accountDisconnected": "Account losgekoppeld.",
   "set.acmeBlocked": "Zo zou het nog niet werken.",

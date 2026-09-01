@@ -1093,6 +1093,8 @@
   "route.videoLaterThanAudio": "Video sesten sonra",
   "route.withoutATargetTheMix": "Hedef değer olmadan miks, girişin ürettiği seviyede çıkar; yalnızca yukarıdaki kırpılma koruması uygulanır.",
   "route.youtubeTwitchSpotify": "YouTube, Twitch, Spotify",
+  "secret.hide": "Gizle",
+  "secret.reveal": "Göster",
   "set.acceptSelfSigned": "Kendinden imzalı sertifikayı kabul et",
   "set.accountDisconnected": "Hesap bağlantısı kesildi.",
   "set.acmeBlocked": "Bu haliyle henüz çalışmaz.",

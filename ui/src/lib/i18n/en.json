@@ -1093,6 +1093,8 @@
   "route.videoLaterThanAudio": "Video later than audio",
   "route.withoutATargetTheMix": "Without a target the mix goes out at whatever level the ingest produced, with only the clip protection above applied.",
   "route.youtubeTwitchSpotify": "YouTube, Twitch, Spotify",
+  "secret.hide": "Hide",
+  "secret.reveal": "Reveal",
   "set.acceptSelfSigned": "Accept a self-signed certificate",
   "set.accountDisconnected": "Account disconnected.",
   "set.acmeBlocked": "This would not work yet.",

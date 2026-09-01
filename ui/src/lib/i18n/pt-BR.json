@@ -1093,6 +1093,8 @@
   "route.videoLaterThanAudio": "Vídeo depois do áudio",
   "route.withoutATargetTheMix": "Sem um alvo, a mistura sai no nível que a entrada produziu, com apenas a proteção contra clipping acima aplicada.",
   "route.youtubeTwitchSpotify": "YouTube, Twitch, Spotify",
+  "secret.hide": "Ocultar",
+  "secret.reveal": "Mostrar",
   "set.acceptSelfSigned": "Aceitar um certificado autoassinado",
   "set.accountDisconnected": "Conta desconectada.",
   "set.acmeBlocked": "Assim ainda não funcionaria.",

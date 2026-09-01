@@ -1093,6 +1093,8 @@
   "route.videoLaterThanAudio": "映像が音声より遅い",
   "route.withoutATargetTheMix": "ターゲットを設定しない場合、ミックスは入力が出したレベルのまま送出され、上のクリップ保護だけが適用されます。",
   "route.youtubeTwitchSpotify": "YouTube, Twitch, Spotify",
+  "secret.hide": "非表示",
+  "secret.reveal": "表示",
   "set.acceptSelfSigned": "自己署名証明書を受け入れる",
   "set.accountDisconnected": "アカウントの接続を解除しました。",
   "set.acmeBlocked": "このままではまだ動作しません。",

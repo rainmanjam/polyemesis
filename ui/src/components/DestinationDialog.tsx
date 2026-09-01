@@ -15,6 +15,7 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/SecretInput";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -1367,9 +1368,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           {kind === "rtmp" && (
             <div className="flex flex-col gap-1">
               <Label htmlFor="dest-key">{t("dest.streamKeyLabel")}</Label>
-              <Input
+              <SecretInput
                 id="dest-key"
-                type="password"
                 value={streamKey}
                 onChange={(e) => setStreamKey(e.target.value)}
                 className="font-mono"

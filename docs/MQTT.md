@@ -128,6 +128,15 @@ still attached.
 
 ## Payloads
 
+> **`uptimeSec` changed meaning in v0.8.0.** It now counts from the moment media
+> first arrived on that process, not from when the process was spawned. An
+> ingest is started *listening*, so the old figure included however long it sat
+> waiting for an encoder to connect — arming a source in the morning and going
+> live at noon reported four hours of uptime for a stream that had been on air
+> for none. A listening ingest now reports `live: false` and `uptimeSec: 0`,
+> which is what it is doing. `startedAt`, where it appears, is unchanged and
+> still reports the spawn.
+
 ```jsonc
 // polyemesis/studio/source/cam-1/state
 {
@@ -135,7 +144,7 @@ still attached.
   "live": true,              // bytes arriving on the relay, not process state
   "ingestMode": "srt",
   "bitrateKbps": 6120.4,
-  "uptimeSec": 3812.5,
+  "uptimeSec": 3812.5,       // since media FIRST ARRIVED, not since spawn
   "restarts": 0,
   "lossPercent": 0,          // MPEG-TS continuity-counter loss
   "recording": true,
