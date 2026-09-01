@@ -50,6 +50,19 @@ its first tagged release.
 
 ### Fixed
 
+- **`update.sh` backed up a live database and never checked the copy opened.**
+  Both generated scripts copied the data directory while the server was still
+  running — `cp -a` for binary installs, `docker run … tar czf` for compose —
+  and stopped the service afterwards. The guard checked that `polyemesis.db`
+  and `secret.key` *existed*, then printed "backup verified". Migrations run
+  forward only, so that copy is the only way back from an upgrade, and every
+  way it can exist without being usable leaves a file of plausible size. Both
+  scripts now stop the service **before** copying, and the copy is opened,
+  walked with `integrity_check` and checked for this server's schema by the
+  installed binary itself (`polyemesis -verify-backup`), which runs no
+  migration. The binary install also keeps the running executable as
+  `polyemesis.previous`, since the rollback instructions said "reinstall the
+  previous binary" without keeping one. (#643)
 - **The console printed credentials as readable text in five places.** The
   Sources page showed the publish token twice — once as `STREAMKEY`, once as
   `TOKEN` — in plain text on the page an operator opens while someone is

@@ -1647,8 +1647,25 @@ if [ -e "\$dest" ]; then
   exit 1
 fi
 
+# STOP BEFORE COPYING. cp -a of a live WAL database copies a moving target:
+# the main file, the -wal and the -shm are read at three different instants, so
+# the result can hold a torn transaction and is not guaranteed to open. It is
+# also the ONLY way back from an upgrade, because migrations run forward only.
+# The service has to stop for the upgrade anyway -- stopping here costs the
+# same downtime and makes the copy consistent.
+echo "stopping \$SERVICE_NAME so the copy is consistent"
+sudo systemctl stop "\$SERVICE_NAME"
+
 echo "backing up \$DATA_DIR to \$dest"
 cp -a "\$DATA_DIR" "\$dest"
+
+# KEEP THE BINARY THAT WORKS. This script has always told the operator to
+# "reinstall the previous binary" on rollback without keeping one, so the way
+# back required finding the old release by hand while the server was down.
+if [ -x "\$BIN_PATH" ]; then
+  cp -a "\$BIN_PATH" "\$dest/polyemesis.previous"
+  echo "kept the running binary at \$dest/polyemesis.previous"
+fi
 
 # THE CHECK THAT MATTERS. Not "is there a backup" but "does the backup hold the
 # file that makes the database usable". Without secret.key every destination
@@ -1665,11 +1682,24 @@ if [ ! -f "\$dest/polyemesis.db" ]; then
   exit 1
 fi
 
-echo "backup verified: database and secret.key both present"
+# EXISTENCE IS NOT THE PROPERTY THAT MATTERS. The two checks above say the
+# files are there; they cannot say the database opens. A copy taken from a
+# live server, a truncated file, a full disk that stopped the copy halfway --
+# each leaves a file of plausible size, and none is noticed until the restore.
+# The server binary carries the same SQLite driver it runs on, so it can answer
+# for real: open the file, walk it, read the schema, run no migration.
+echo "checking the backup opens..."
+if ! "\$BIN_PATH" -verify-backup "\$dest"; then
+  echo "ERROR: the backup at \$dest is not usable. Refusing to upgrade." >&2
+  echo "The service is still stopped; start it with:" >&2
+  echo "    sudo systemctl start \$SERVICE_NAME" >&2
+  exit 1
+fi
+
+echo "backup verified: it opens, passes integrity_check and holds the schema"
 echo
-echo "Now replace \$BIN_PATH with the new binary and restart:"
+echo "The service is STOPPED. Replace the binary and start it:"
 echo
-echo "    sudo systemctl stop \$SERVICE_NAME"
 echo "    sudo install -m 0755 ./polyemesis \$BIN_PATH"
 echo "    sudo systemctl start \$SERVICE_NAME"
 echo
@@ -1677,7 +1707,8 @@ echo "If the upgrade goes wrong, the way back is:"
 echo
 echo "    sudo systemctl stop \$SERVICE_NAME"
 echo "    sudo rm -rf \$DATA_DIR && sudo cp -a \$dest \$DATA_DIR"
-echo "    (then reinstall the previous binary)"
+echo "    sudo install -m 0755 \$dest/polyemesis.previous \$BIN_PATH"
+echo "    sudo systemctl start \$SERVICE_NAME"
 EOF
   chmod +x "$INSTALL_DIR/update.sh"
 }
@@ -1888,6 +1919,18 @@ docker volume inspect polyemesis-data >/dev/null 2>&1 || {
   exit 1
 }
 
+# STOP BEFORE ARCHIVING. tar of a live WAL database reads the main file, the
+# -wal and the -shm at three different instants, so the archive can hold a torn
+# transaction and is not guaranteed to open -- and it is the ONLY way back,
+# because migrations run forward only. The container has to stop for the
+# upgrade anyway, so stopping here costs the same downtime and makes the
+# archive consistent.
+#
+# `stop`, not `down`: down removes the container, and the operator may want it
+# back untouched if the checks below refuse the upgrade.
+echo "stopping the container so the archive is consistent"
+$COMPOSE_CMD stop
+
 docker run --rm -v polyemesis-data:/data -v "$INSTALL_DIR:/backup" alpine \\
   tar czf "/backup/backup-\${stamp}.tar.gz" -C /data .
 
@@ -1925,7 +1968,27 @@ if ! grep -q "secret\.key" <<<"\$listing"; then
   echo "every destination disabled. Refusing to upgrade." >&2
   exit 1
 fi
-echo "backup verified: \${entries} entries"
+# ENTRIES AND A FILENAME ARE NOT "IT OPENS". The checks above say the archive
+# is non-empty and names secret.key; neither can say the database inside will
+# open. Unpack it somewhere disposable and ask the image's own binary, which
+# carries the same SQLite driver the server runs on. It opens the file, walks
+# it and reads the schema; it runs no migration, because migrating the backup
+# would move the copy forward to the schema being kept a way back from. #643.
+echo "checking the backup opens..."
+verify_dir="\$(mktemp -d)"
+trap 'rm -rf "\$verify_dir"' EXIT
+if ! tar xzf "\$dest" -C "\$verify_dir"; then
+  echo "ERROR: the backup archive will not unpack. Refusing to upgrade." >&2
+  exit 1
+fi
+if ! docker run --rm -v "\$verify_dir:/backup:ro" "$IMAGE" -verify-backup /backup; then
+  echo "ERROR: the backup at \$dest is not usable. Refusing to upgrade." >&2
+  echo "The container is still stopped; bring it back with:" >&2
+  echo "    $COMPOSE_CMD start" >&2
+  exit 1
+fi
+
+echo "backup verified: \${entries} entries, and the database opens"
 $COMPOSE_CMD pull
 $COMPOSE_CMD up -d
 echo "updated. Watch the first minute: $COMPOSE_CMD logs -f"
