@@ -1573,7 +1573,7 @@ export function Dashboard() {
                 </section>
               ))
             ) : (
-              <div className="dense-grid grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {destinations.map((d, i) => renderDestination(d, i))}
               </div>
             )}
@@ -1584,7 +1584,7 @@ export function Dashboard() {
                  still be running, and this is the only screen that lists it. */
               <section className="flex flex-col gap-2">
                 <p className="text-[11px] text-warn">{t("dash.destOrphaned")}</p>
-                <div className="dense-grid grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {lanes.orphans.map((d) => renderDestination(d, destinations.indexOf(d)))}
                 </div>
               </section>
