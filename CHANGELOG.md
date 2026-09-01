@@ -34,6 +34,16 @@ its first tagged release.
   stream — a failure that looks correct everywhere the operator can see. The
   destination card now says so. It suggests and never refuses: a custom endpoint
   that does accept HEVC is a real setup.
+- **A bandwidth calculator on the website**, at `/calculator`. It models a
+  stream-copying restreamer rather than multistreaming in general: because video
+  is copied and not re-encoded, the video half of the sum is one bitstream
+  repeated, and it is bounded by the lowest ceiling among the destinations
+  receiving it — so sending 6000 to Twitch and 12000 to YouTube is not a choice
+  the operator has without a rendition. It reports the encoder's upstream and the
+  server's uplink separately, because those are different connections, and
+  converts both into data per stream, week and month, which is what a host bills
+  on. Platform ceilings are the server's own figures from `internal/db/platforms.go`,
+  dated on the page. Custom RTMP and SRT endpoints can be added by name.
 - **A teardown counter with a denominator.** The supervisor now counts clean and
   killed teardowns per process kind. Previously only kills were recorded, in a
   log line, and a clean teardown wrote nothing at all — `supervise()` returns on
