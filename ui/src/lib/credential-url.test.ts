@@ -25,6 +25,19 @@ describe("urlCarriesCredential", () => {
     expect(urlCarriesCredential("srt://host.example:6000?passphrase=hunter2")).toBe(true);
   });
 
+  it("is true for the SRT publish URL, which carries both passphrase and streamid", () => {
+    // The shape publishURLs actually builds. The first version of this
+    // function knew passphrase and not streamid, and masked neither on the
+    // Sources page because the row was keyed by label rather than by content.
+    expect(
+      urlCarriesCredential("srt://host:6000?latency=200&passphrase=x&streamid=t"),
+    ).toBe(true);
+  });
+
+  it("is true for streamid alone, whether or not it is enforced", () => {
+    expect(urlCarriesCredential("srt://host:6000?streamid=t")).toBe(true);
+  });
+
   it("is true for a pull URL with userinfo", () => {
     expect(urlCarriesCredential("rtsp://user:pass@camera.local/stream")).toBe(true);
   });

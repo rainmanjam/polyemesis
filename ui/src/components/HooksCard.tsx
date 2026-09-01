@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { SecretCode } from "@/components/SecretCode";
+import { copyToClipboard } from "@/lib/clipboard";
 import { Stat } from "@/components/signature/Stat";
 import { toast } from "sonner";
 import { AlertTriangle, Copy, Loader2, Pencil, Plus, Send, Trash2, Webhook } from "lucide-react";
@@ -328,7 +329,7 @@ export function HooksCard() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => void navigator.clipboard?.writeText(newSecret)}
+                onClick={() => copyToClipboard(t, newSecret, "Secret")}
               >
                 <Copy className="h-3 w-3" /> {t("common.copy")}
               </Button>

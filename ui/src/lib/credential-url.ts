@@ -18,8 +18,14 @@
  *  server actually constructs today. */
 export function urlCarriesCredential(url: string): boolean {
   if (!url) return false;
-  // SRT: the passphrase rides in the query string.
-  if (/[?&]passphrase=[^&]+/i.test(url)) return true;
+  // SRT: the passphrase rides in the query string, and so does the publish
+  // token -- internal/api/sources.go appends `streamid=<token>` to the SRT
+  // publish URL. Masked regardless of tokenEnforced: when enforced it is the
+  // gate, and when not it still names the source, which is not an address an
+  // onlooker should be handed. The first version of this function knew about
+  // passphrase and not streamid, and the Sources page printed both on every
+  // SRT install while the RTMP box it was verified on looked fixed.
+  if (/[?&](passphrase|streamid)=[^&]+/i.test(url)) return true;
   // Pull: userinfo before the host, i.e. scheme://user:pass@host. Guarded to
   // the authority section so a '@' anywhere later in the URL does not count.
   const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(url)?.[1] ?? "";
