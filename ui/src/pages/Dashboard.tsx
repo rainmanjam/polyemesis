@@ -1,4 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { urlCarriesCredential } from "@/lib/credential-url";
+import { SecretCode } from "@/components/SecretCode";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -1338,9 +1340,13 @@ export function Dashboard() {
 
               <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
                 <Radio className="h-3 w-3 shrink-0 text-muted-foreground" />
-                <code className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
-                  {system?.ingestUrl ?? "…"}
-                </code>
+                {urlCarriesCredential(system?.ingestUrl ?? "") ? (
+                  <SecretCode value={system?.ingestUrl ?? ""} />
+                ) : (
+                  <code className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
+                    {system?.ingestUrl ?? "…"}
+                  </code>
+                )}
                 <Button variant="ghost" size="icon-sm" onClick={copyIngest} aria-label={t("dash.copyIngestUrl")}>
                   <Copy />
                 </Button>

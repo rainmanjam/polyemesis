@@ -48,6 +48,34 @@ its first tagged release.
   minimum target size is worth asserting on its own terms rather than left to
   whatever the spacing scale produces.
 
+### Fixed
+
+- **The console printed credentials as readable text in five places.** The
+  Sources page showed the publish token twice — once as `STREAMKEY`, once as
+  `TOKEN` — in plain text on the page an operator opens while someone is
+  helping them get a broadcast up. 0.8.0 masked the stream key *input*; it did
+  not touch these, because they are not inputs. Also fixed: the webhook signing
+  secret shown after creating a hook, the API token shown after minting one,
+  and the ingest URL on the dashboard and in Settings, which embeds the SRT
+  passphrase in cleartext for an admin (the server masks it only for a
+  read-scope principal).
+
+  All now render through a new `SecretCode`: masked to a fixed width, with a
+  deliberate reveal. **Copy still works while masked** — moving a secret to the
+  clipboard never required putting it on the screen. The webhook secret gained
+  a Copy button it never had, so reading it off the screen is no longer the
+  only way to get it.
+
+  Not masked, deliberately: the RTMP address beside the stream key, and an
+  ingest URL with no credential in it. Masking those would train an operator to
+  press reveal on everything, which is how a mask stops meaning anything.
+
+  `secret-fields.test.ts` grew the check that would have caught this. It asked
+  whether any `<Input>` was bound to a credential — a question no `<code>` block
+  can fail. It now also asks whether one is printed into element text, and it
+  strips comments first, because the first version failed on the docstring
+  explaining the bug.
+
 ## [0.8.0] — 2026-09-01
 
 ### Changed

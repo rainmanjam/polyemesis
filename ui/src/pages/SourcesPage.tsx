@@ -47,6 +47,7 @@ import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
 import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
 import { InfoHint } from "@/components/InfoHint";
+import { SecretCode } from "@/components/SecretCode";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
 import { publishRows } from "@/lib/publish-url";
@@ -600,9 +601,18 @@ export function SourceCard({
               <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
                 {proto}
               </span>
-              <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-[10px]">
-                {url}
-              </code>
+              {/* Only the streamKey row is a credential -- it carries the
+                  token verbatim (see publishURLs in internal/api/sources.go).
+                  The address beside it is not secret and stays readable: an
+                  operator checks the host at a glance, and masking it would
+                  train them to hit reveal on everything. */}
+              {proto === "streamKey" ? (
+                <SecretCode value={url} />
+              ) : (
+                <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-[10px]">
+                  {url}
+                </code>
+              )}
               <Button
                 size="icon"
                 variant="ghost"
@@ -637,9 +647,7 @@ export function SourceCard({
             <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
               {t("sources.token")}
             </span>
-            <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-[10px]">
-              {source.token}
-            </code>
+            <SecretCode value={source.token} />
             <Button
               size="icon"
               variant="ghost"
