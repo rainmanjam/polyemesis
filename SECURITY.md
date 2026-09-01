@@ -230,6 +230,12 @@ admin UI, this field is not your biggest problem.
   reaching it over an SSH tunnel is the zero-configuration alternative.
 - Put it behind a reverse proxy if you want anything resembling access control,
   and set `trustProxyHeaders: true` so throttling sees real client addresses.
+  `trustProxyHeaders` means "a proxy I control sets these headers": only turn it
+  on when the server is genuinely unreachable except through that proxy, because
+  it makes the server read addresses out of a header. polyemesis takes the
+  **rightmost** `X-Forwarded-For` hop — the one the proxy appended — so both the
+  appending and the overwriting nginx forms are safe; `deploy/nginx.conf.example`
+  overwrites.
 - Set an SRT passphrase or an RTMP stream key even on a private network.
 - Rotate the source token if it has ever been in a chat message, a screenshot or
   a support thread. `POST /api/v1/sources/{id}/token` does it with a five-minute
