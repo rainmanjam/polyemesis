@@ -8,6 +8,10 @@ its first tagged release.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.8.0] — 2026-09-01
+
 ### Changed
 
 - **`uptimeSec` now counts from the first media, not from the spawn.** An ingest
@@ -3570,7 +3574,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/rainmanjam/polyemesis/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rainmanjam/polyemesis/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rainmanjam/polyemesis/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rainmanjam/polyemesis/compare/v0.4.0...v0.5.0
