@@ -214,6 +214,13 @@ export interface SourceInfo {
   name: string;
   probed: boolean;
   tracks: SourceTrack[] | null;
+  /** How many trailing tracks the metering process could not cover — amerge
+   *  refuses past 64 channels, so a very wide ingest is metered as a prefix.
+   *
+   *  Absent on the common payload and on any server that predates it. Rendered
+   *  because an unmetered track and a silent track draw identically, and the
+   *  meters page exists to tell those apart. */
+  metersDropped?: number;
   video?: VideoStream | null;
   /** `tracks` describes the silence tier's synthetic output rather than the
    *  ingest's, because the ingest carries no audio at all. */

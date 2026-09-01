@@ -8,7 +8,25 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **The meters page says when tracks are not being metered, and which programme
+  it is showing.** One metering process merges every track, and amerge refuses
+  past 64 channels, so a very wide ingest was measured as a prefix while the
+  remaining tracks drew flat bars — indistinguishable from silence, on the one
+  page whose whole job is telling those apart. The server had counted the
+  dropped tracks since the limit existed and the number reached nothing:
+  `ffmpeg.MetersDropped` says in as many words that it exists "so a wide ingest
+  degrades visibly", and then no caller carried it out of the package. It now
+  rides on the source payload and renders as a warning that says *unmeasured,
+  not silent*. Absent when nothing is dropped, which is every install anyone is
+  likely to run.
+
+  The page also names its programme when the install has more than one. The
+  console follows a single programme, resolved to whichever source is first when
+  nothing is remembered, and there is still no switcher — so this does not fix
+  multi-source metering, it stops the page reporting a slice of the install as
+  though it were all of it. See #638 for the switcher.
 
 ## [0.8.0] — 2026-09-01
 

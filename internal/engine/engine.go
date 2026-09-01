@@ -3360,6 +3360,20 @@ type SourceInfo struct {
 	// install that has never opened the roles editor sends the payload it
 	// always did.
 	Annotations []routing.TrackAnnotation `json:"annotations,omitempty"`
+	// MetersDropped is how many TRAILING tracks the metering process could not
+	// cover, because amerge refuses past 64 channels.
+	//
+	// ffmpeg.MetersDropped has computed this since the limit was introduced,
+	// and its comment says why: so a wide ingest "degrades visibly instead of
+	// silently metering a prefix and letting an operator believe a track is
+	// silent when it is merely unmeasured". Nothing carried it out of that
+	// package, so the degradation was not visible anywhere and the meters page
+	// drew flat bars indistinguishable from real silence -- on the one page
+	// whose entire job is telling those two apart.
+	//
+	// Zero for every ingest anyone is likely to send: 32 stereo tracks fit. It
+	// is omitempty for exactly that reason, so the common payload is unchanged.
+	MetersDropped int `json:"metersDropped,omitempty"`
 }
 
 // SourceInfo returns the layout downstream graphs are compiled against, which
@@ -3396,10 +3410,19 @@ func (e *Engine) sourceInfoLocked() SourceInfo {
 	if synthetic {
 		src = synthTrack()
 	}
+	// Computed from the SAME track list this snapshot reports, not from what
+	// the running meters process happens to have been started with. Those can
+	// differ for one reconcile, and the number an operator reads must describe
+	// the layout beside it rather than a previous one.
+	chans := make([]int, 0, len(src.Tracks))
+	for _, t := range src.Tracks {
+		chans = append(chans, t.Channels)
+	}
 	return SourceInfo{
 		ID: e.sourceID, Name: e.sourceName,
 		Probed: e.probed, Tracks: src.Tracks, Video: video, Synthetic: synthetic,
-		Annotations: e.settings.Ingest.Annotations,
+		Annotations:   e.settings.Ingest.Annotations,
+		MetersDropped: ffmpeg.MetersDropped(chans),
 	}
 }
 
