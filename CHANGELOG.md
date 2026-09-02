@@ -69,6 +69,19 @@ its first tagged release.
   whether a proxy appends or overwrites; the shipped nginx example overwrites.
   A chain of several trusted proxies now keys everyone behind the last one
   together, which throttles too much rather than too little. (#647)
+- **The documentation-drift guards never ran on the pull requests that drift
+  the documentation.** The guards are Go tests — `platforms_doc_drift_test.go`
+  reads `docs/PLATFORMS.md`, `api_docs_route_table_test.go` reads
+  `docs/API.md` — and every Go step in CI is gated on the change touching
+  code, so a documentation-only pull request ran none of them and reported
+  green as "did no work". That is how `docs/UPGRADING.md` came to tell an
+  operator, mid-migration, that a CI-tested feature does not work, and how
+  `docs/MODULES.md` came to name a base image and a Go version no Dockerfile
+  uses. The docs-only path now discovers the packages whose tests read
+  `docs/*.md` and runs them; it costs seconds, because those tests read
+  markdown and need no ffmpeg, database or network. It also counts what ran
+  and fails on a low count, since `go test -run` matching nothing exits 0.
+  (#651)
 - **The console printed credentials as readable text in five places.** The
   Sources page showed the publish token twice — once as `STREAMKEY`, once as
   `TOKEN` — in plain text on the page an operator opens while someone is

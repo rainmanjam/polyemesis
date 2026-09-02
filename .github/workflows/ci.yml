@@ -197,10 +197,56 @@ jobs:
     steps:
       # Says out loud why a green check did no work, so a reader of the
       # checks list is never left guessing whether this ran or no-opped.
-      - name: Documentation-only change, so this job did no work
+      # THE DOCS-ONLY PATH IS NOT A NO-OP ANY MORE, AND THAT WAS A REAL HOLE.
+      #
+      # The guards that check documentation against code are Go tests --
+      # internal/oauth/platforms_doc_drift_test.go reads docs/PLATFORMS.md,
+      # internal/api/api_docs_route_table_test.go reads docs/API.md, and so on.
+      # Every Go step below is gated on `code == 'true'`, so the ONE class of
+      # pull request that can drift the docs was the one class on which the
+      # drift guards never ran. That is how docs/UPGRADING.md came to tell an
+      # operator mid-migration that a CI-tested feature does not work, and how
+      # docs/MODULES.md came to name a base image and a Go version that no
+      # Dockerfile uses. #651.
+      #
+      # These tests read markdown and compare it to Go declarations. They need
+      # no ffmpeg, no database and no network, so they cost seconds -- which is
+      # why the docs-only path can afford to run them and could never afford
+      # the full suite.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.code != 'true'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        if: needs.changes.outputs.code != 'true'
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Documentation-only change, so only the doc-drift guards ran
         if: needs.changes.outputs.code != 'true'
         run: |
-          echo "::notice title=go build, vet, test::this check did no work -- every changed path was documentation. See the 'which changes' job."
+          set -euo pipefail
+
+          # Discovered, not listed. A hardcoded package list is a second thing
+          # to keep in step with the tests, and the failure mode of letting it
+          # fall behind is silence -- exactly the shape of the bug this step
+          # exists to close. internal/testenv/docdrift_packages_test.go asserts
+          # this grep and the one it runs stay the same.
+          pkgs="$(grep -rlE 'docs/[A-Z][A-Za-z-]*\.md' --include='*_test.go' internal \
+                  | xargs -n1 dirname | sort -u | sed 's|^|./|' | tr '\n' ' ')"
+          echo "doc-drift packages: ${pkgs}"
+          if [ -z "${pkgs// /}" ]; then
+            echo "::error::found no test package reading docs/*.md; the discovery grep has gone stale and this check would pass having run nothing"
+            exit 1
+          fi
+
+          # -run matching NOTHING exits 0, so counting what actually ran is the
+          # difference between a check and a green tick.
+          go test ${pkgs} -run 'Doc|Drift|Documented|Matches|Agrees|Restate' -v 2>&1 | tee /tmp/drift.log
+          ran="$(grep -c '^=== RUN' /tmp/drift.log || true)"
+          echo "doc-drift tests executed: ${ran}"
+          if [ "${ran:-0}" -lt 5 ]; then
+            echo "::error::only ${ran} doc-drift tests ran; the -run pattern no longer matches the guards, so this check is passing by finding nothing"
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.code == 'true'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
