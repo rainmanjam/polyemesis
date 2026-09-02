@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 
 import { UpdateBanner } from "./UpdateBanner";
+import { VersionTag } from "./VersionTag";
+
+import type { VersionInfo } from "@/lib/types";
 import { TourOffer } from "./Tour";
 import { BrandMark } from "./BrandMark";
 import {
@@ -102,6 +105,16 @@ export function AppLayout({
   const { status, connected, frameError } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
+
+  // Held here so the chrome can show the running version without a second
+  // /version call: that endpoint surveys the on-air state fresh on every
+  // request, so two callers means two surveys per page load. UpdateBanner
+  // fetches it once and hands it over. #660.
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+  // useCallback because UpdateBanner's fetch effect depends on this; a new
+  // function each render would refetch on every render, which is the bug this
+  // arrangement exists to avoid.
+  const onVersionInfo = useCallback((v: VersionInfo) => setVersionInfo(v), []);
   const location = useLocation();
   const t = useT();
   const stateLabel = useStateLabel();
@@ -152,7 +165,7 @@ export function AppLayout({
   return (
     <div className="flex h-dvh flex-col bg-surface">
       {/* ---- top bar: the always-visible answer to "am I on air?" ---- */}
-      <UpdateBanner />
+      <UpdateBanner onInfo={onVersionInfo} />
       {/* An OFFER, not a launch. It renders nothing once the tour has been
           taken or dismissed, and nothing at all until the server has said
           which. Above the header and outside <main> so it pushes the console
@@ -236,6 +249,10 @@ export function AppLayout({
             </Badge>
           )}
           <span className="hidden text-[11px] text-muted-foreground lg:inline">{username}</span>
+
+          {/* Between the username and the language button -- the slot the
+              layout density toggle vacated in c1c9c514. */}
+          <VersionTag info={versionInfo} />
 
           {/* Sits in the chrome rather than on Settings: the operator who needs
               it cannot necessarily read the nav item that would lead there. */}

@@ -158,6 +158,7 @@
   "chrome.language": "言語",
   "chrome.liveCount": "{count} 件ライブ中",
   "chrome.releaseNotes": "リリースノート",
+  "chrome.runningVersion": "polyemesis {version} を実行中",
   "chrome.signOut": "サインアウト",
   "chrome.socketOffline": "オフライン",
   "chrome.socketOfflineHint": "ライブ更新が切断されました。再試行します。",

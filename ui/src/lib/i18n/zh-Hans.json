@@ -158,6 +158,7 @@
   "chrome.language": "语言",
   "chrome.liveCount": "{count} 个直播",
   "chrome.releaseNotes": "发行说明",
+  "chrome.runningVersion": "正在运行 polyemesis {version}",
   "chrome.signOut": "注销",
   "chrome.socketOffline": "离线",
   "chrome.socketOfflineHint": "直播更新已断开；正在重试",

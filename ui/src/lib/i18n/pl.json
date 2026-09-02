@@ -158,6 +158,7 @@
   "chrome.language": "Język",
   "chrome.liveCount": "{count} transmisji na żywo",
   "chrome.releaseNotes": "Informacje o wydaniu",
+  "chrome.runningVersion": "Działa polyemesis {version}",
   "chrome.signOut": "Wyloguj się",
   "chrome.socketOffline": "offline",
   "chrome.socketOfflineHint": "Aktualizacje na żywo zostały odłączone; ponawianie próby",
