@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -876,7 +877,10 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		// leaves the signature and the hex manifest standing in the log. Empty
 		// when nothing was minted, which destSecrets and alerts.NewSecretSet
 		// both drop. See TestTheMintedKeyIsMaskedWholeAndNotJustItsTail.
-		Secrets:     destSecrets(row, mt.MintedKey),
+		Secrets: destSecrets(row, mt.MintedKey),
+		// The only signal that says this destination is PUBLISHING rather than
+		// merely spawned. See firstMediaLogger and #675.
+		OnProgress:  e.firstMediaLogger(row.Name, row.Kind),
 		AutoRestart: true,
 		// Per-destination reconnect policy. Zero values leave the supervisor's
 		// own defaults in place, which is what every destination ran on before
@@ -932,7 +936,20 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	// the warning is about THIS destination's current situation, not a log.
 	e.noteStopOutcome(row.ID, nil)
 	proc.Start()
-	e.log.Info("destination started", "dest", row.Name, "kind", row.Kind,
+	// SPAWNED, NOT PUBLISHING, and the wording now says so.
+	//
+	// This line read "destination started" and was written on the instruction
+	// after proc.Start(), which reports only that a child process exists.
+	// FFmpeg can and does fail after that -- "Error initializing filters!",
+	// "Could not open encoder before EOF", "Nothing was written into output
+	// file" -- and every one of those leaves this line standing as the last
+	// word on the destination's health.
+	//
+	// It cost a whole investigation: an operator, and five passes of debugging,
+	// saw a healthy console and a started destination while nothing at all
+	// reached the platform. The failure was visible only from the receiving end
+	// as an absence, which is the least informative place to observe it. #675.
+	e.log.Info("destination starting", "dest", row.Name, "kind", row.Kind,
 		"tracks", compiled.Summary, "rendition", renditionLabel(row))
 	e.logMultitrack(row, mt, vodDropped)
 	e.noteReload("destination", row.Name, reloadRestart, "started")
@@ -1271,5 +1288,40 @@ func (e *Engine) stopBackup(d *destination) {
 	}
 	if d.backupPort != 0 {
 		e.alloc.Release(d.backupPort)
+	}
+}
+
+// firstMediaLogger returns an OnProgress handler that says once, per run, that
+// a destination has actually published something.
+//
+// OutTimeMS is the field that means "media has moved": it advances for
+// audio-only destinations where Frame never leaves zero, and it stays at zero
+// while FFmpeg is bound and waiting rather than writing. supervisor.noteProgress
+// uses the same field to start the uptime clock, so this is the same definition
+// of "up", said out loud in the log rather than only in a status struct.
+//
+// ONCE PER RUN, NOT ONCE PER PROCESS. The handler outlives a restart -- the
+// supervisor keeps its Spec across them -- so a plain sync.Once would announce
+// the first publish of the first run and stay silent through every reconnect
+// after it, which is exactly when an operator most needs to know the stream
+// came back. A run is detected by OutTimeMS going BACKWARDS: a fresh FFmpeg
+// starts its output clock near zero, so a value below the last one can only
+// mean a new child.
+func (e *Engine) firstMediaLogger(name string, kind db.DestKind) func(ffmpeg.Progress) {
+	var (
+		mu   sync.Mutex
+		last int64
+	)
+	return func(pr ffmpeg.Progress) {
+		if pr.OutTimeMS <= 0 {
+			return
+		}
+		mu.Lock()
+		newRun := last == 0 || pr.OutTimeMS < last
+		last = pr.OutTimeMS
+		mu.Unlock()
+		if newRun {
+			e.log.Info("destination publishing", "dest", name, "kind", kind)
+		}
 	}
 }
