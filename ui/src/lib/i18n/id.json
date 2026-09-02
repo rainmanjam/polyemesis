@@ -158,6 +158,7 @@
   "chrome.language": "Bahasa",
   "chrome.liveCount": "{count} aktif",
   "chrome.releaseNotes": "Catatan rilis",
+  "chrome.runningVersion": "Menjalankan polyemesis {version}",
   "chrome.signOut": "Keluar",
   "chrome.socketOffline": "offline",
   "chrome.socketOfflineHint": "Pembaruan langsung terputus; mencoba lagi",

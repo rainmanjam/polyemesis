@@ -28,7 +28,15 @@ import type { UpgradePlan, UpgradeResult, VersionInfo } from "../lib/types";
  *  with ProtectSystem=strict, so /usr/local/bin is read-only to the service and
  *  the server answers with the command to run instead. That is rendered as
  *  instructions, not as an error, because it is not one. */
-export function UpdateBanner() {
+/** onInfo reports the version answer upward as soon as it arrives.
+ *
+ *  The chrome shows the running version beside the username, and it must not
+ *  fetch /version a second time to learn it: that endpoint surveys what a
+ *  restart would interrupt FRESH ON EVERY CALL, so a second caller means a
+ *  second on-air survey on every page load. This component already holds the
+ *  answer -- including the refreshed one after a check -- so it hands it over
+ *  rather than making the chrome ask again. #660. */
+export function UpdateBanner({ onInfo }: { onInfo?: (v: VersionInfo) => void }) {
   const t = useT();
   const [info, setInfo] = useState<VersionInfo | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -55,12 +63,17 @@ export function UpdateBanner() {
       .then((v) => {
         if (!alive) return;
         setInfo(v);
+        onInfo?.(v);
         // One check per session, and only when the server has never run one --
         // otherwise an install nobody clicks would never learn anything.
         if (!v.checkedAt) {
           api
             .checkUpdate()
-            .then((fresh) => alive && setInfo(fresh))
+            .then((fresh) => {
+              if (!alive) return;
+              setInfo(fresh);
+              onInfo?.(fresh);
+            })
             .catch(() => {});
         }
       })
@@ -68,7 +81,7 @@ export function UpdateBanner() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [onInfo]);
 
   if (!info || dismissed) return null;
   // A failed check says nothing and must look like nothing: an operator whose

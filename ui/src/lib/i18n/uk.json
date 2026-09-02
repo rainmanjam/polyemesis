@@ -158,6 +158,7 @@
   "chrome.language": "Мова",
   "chrome.liveCount": "{count} у прямому ефірі",
   "chrome.releaseNotes": "Примітки до випуску",
+  "chrome.runningVersion": "Запущено polyemesis {version}",
   "chrome.signOut": "Вийти",
   "chrome.socketOffline": "Офлайн",
   "chrome.socketOfflineHint": "З’єднання з сервером оновлень втрачено; повторна спроба",

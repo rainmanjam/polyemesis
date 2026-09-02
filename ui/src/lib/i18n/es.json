@@ -158,6 +158,7 @@
   "chrome.language": "Idioma",
   "chrome.liveCount": "{count} en vivo",
   "chrome.releaseNotes": "Notas de la versión",
+  "chrome.runningVersion": "Ejecutando polyemesis {version}",
   "chrome.signOut": "Cerrar sesión",
   "chrome.socketOffline": "desconectado",
   "chrome.socketOfflineHint": "Las actualizaciones en vivo están desconectadas; reintentando",

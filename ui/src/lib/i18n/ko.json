@@ -158,6 +158,7 @@
   "chrome.language": "언어",
   "chrome.liveCount": "{count}개의 라이브 방송",
   "chrome.releaseNotes": "릴리스 노트",
+  "chrome.runningVersion": "polyemesis {version} 실행 중",
   "chrome.signOut": "로그아웃",
   "chrome.socketOffline": "오프라인",
   "chrome.socketOfflineHint": "실시간 업데이트 연결 끊김, 재시도 중",

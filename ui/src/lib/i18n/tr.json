@@ -158,6 +158,7 @@
   "chrome.language": "Dil",
   "chrome.liveCount": "{count} canlı",
   "chrome.releaseNotes": "Sürüm notları",
+  "chrome.runningVersion": "polyemesis {version} çalışıyor",
   "chrome.signOut": "Oturumu kapat",
   "chrome.socketOffline": "çevrimdışı",
   "chrome.socketOfflineHint": "Canlı güncellemeler bağlantısı kesildi; yeniden deneniyor",
