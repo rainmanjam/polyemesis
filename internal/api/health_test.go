@@ -124,7 +124,14 @@ func TestAFullRecordingVolumeIsReportedWithoutTakingTheServerDown(t *testing.T) 
 
 	engines := srv.mgr.Engines()
 	if len(engines) == 0 {
-		t.Skip("fixture built no engine, so there is no recorder to halt")
+		// Not t.Skip. The skip census is right that this is not an
+		// environmental skip: it does not depend on the OS or on a tool being
+		// installed, it depends on the fixture this test builds for itself. If
+		// engineServer stops producing an engine, the health check below is
+		// measuring nothing, and a test that quietly declines to run prints ok
+		// and counts as coverage. That is a failure to report, not a skip.
+		t.Fatal("engineServer built no engine, so there is no recorder to halt " +
+			"and this test cannot exercise the full-volume path")
 	}
 	engines[0].Recordings().CheckFreeSpace(db.RecordingSettings{MinFreeGB: 1 << 40})
 
