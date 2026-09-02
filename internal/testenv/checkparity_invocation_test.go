@@ -53,7 +53,12 @@ const (
 	// scripts/check_parity_test.go; this is the half that was not.
 	invocationCIJob = "go"
 	// The local gate both tests compare against.
-	invocationGateTarget = "check"
+	// check-ci, not check. `check` is deliberately the FAST loop -- plain
+	// `go test ./...` -- because a twenty-five minute pre-commit target is one
+	// nobody runs, and a gate people route around is rung zero. `check-ci` is
+	// the target that claims parity, so it is the one this compares. If the
+	// split is ever undone, repoint this rather than deleting it.
+	invocationGateTarget = "check-ci"
 )
 
 // ---------------------------------------------------------------- invocation

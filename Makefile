@@ -110,7 +110,10 @@ dev: build-go ## Run the backend only (pair with `make ui-dev`)
 # knows that is what they are getting. -race also needs a C toolchain, so this
 # target now fails on a machine with Go and no cc, where it used to pass.
 .PHONY: test
-test: preflight-guard ## Run the Go suite exactly as CI does: strict ledger, -race, 20m
+test: preflight-guard ## Run the Go suite the fast way -- the loop you run before every commit
+	go test ./...
+
+test-ci: preflight-guard ## Run the Go suite EXACTLY as CI does: strict ledger, -race, 20m
 	POLYEMESIS_LEDGER=strict go test -race -timeout 20m ./...
 
 .PHONY: preflight-guard
@@ -313,7 +316,21 @@ endif
 # reported 22.0% -- and nothing reachable from `check` ran it. The parity guard
 # did not notice because it only ever compared the `ui` job.
 .PHONY: check
-check: fmtcheck vet test coverage-instrument-guard sh-syntax typecheck lint ui-test ui ## gofmt, both vets, CI's go test, the coverage probe, bash -n, tsc, oxlint, vitest, ui build -- no Docker
+# TWO TARGETS, BECAUSE ONE CANNOT BE BOTH FAST AND CI.
+#
+# `check` was made to run CI's exact go test -- strict ledger, -race, 20m --
+# because its parity guard was certifying a parity it did not have. That closed
+# the false claim and bought a four-minute loop turning into a twenty-five
+# minute one, which is how a pre-commit check stops being run at all. A gate
+# people route around is back to rung zero, which is where this started.
+#
+# So: `check` is the loop, `check-ci` is the parity, and the guard in
+# internal/testenv/checkparity_invocation_test.go compares CHECK-CI against
+# ci.yml. Neither target claims to be the other. `check`'s help line says
+# "fast", so nobody reads it as a promise about CI.
+check: fmtcheck vet test coverage-instrument-guard sh-syntax typecheck lint ui-test ui ## FAST pre-commit loop: gofmt, both vets, plain go test, coverage probe, bash -n, tsc, oxlint, vitest, ui build
+
+check-ci: fmtcheck vet test-ci coverage-instrument-guard sh-syntax typecheck lint ui-test ui ## Everything `check` runs, but with CI's exact go test (strict ledger, -race). Slow; needs a C toolchain
 
 # NOT IN `check`, ON PURPOSE. Everything above runs on a bare checkout with Go
 # and Node and nothing else, and that property is worth keeping: the moment the
