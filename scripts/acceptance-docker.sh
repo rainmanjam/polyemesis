@@ -516,7 +516,26 @@ if [ "${SZ:-0}" -gt 10000 ] 2>/dev/null; then
   ok "the RTMP sink recorded the published stream ($SZ bytes)"
 else
   bad "the RTMP sink recorded ${SZ:-0} bytes; nothing below is measurable"
+  # WHAT THE PUBLISHER TRIED, not only what the sink observed.
+  #
+  # This dump used to report the sink's silence and nothing else, and "no bytes
+  # arrived" is compatible with every fault a sender can have -- so it pointed
+  # at the sink, which was innocent, and cost three wrong fixes to the test
+  # before anyone read the destination's own stderr. That stderr named the
+  # cause in one line. See #674.
+  #
+  # Filtered rather than tailed: the meters child emits a timestamp line every
+  # 2ms on this ingest and buries the ring.
+  printf "        --- sink lifetime ---\n"
+  docker inspect rtmp-sink --format '          started {{.State.StartedAt}}
+          exited  {{.State.FinishedAt}} (code {{.State.ExitCode}})' 2>&1 | sed 's/^/          /'
   printf "        --- sink ---\n";  docker logs rtmp-sink 2>&1 | tail -4 | sed 's/^/          /'
+  printf "        --- destination stderr, which is the one that says why ---\n"
+  inctr "grep -a 'dest:' /data/logs/process.log | tail -18" | sed 's/^/          /'
+  printf "        --- ingest health ---\n"
+  inctr "grep -ac 'timestamp discontinuity' /data/logs/process.log" \
+    | sed 's/^/          timestamp-discontinuity lines: /'
+  inctr "grep -a 'ingest:' /data/logs/process.log | tail -4" | sed 's/^/          /'
   printf "        --- server ---\n"; docker logs "$CTR" 2>&1 | grep -i "R-track2" | tail -4 | sed 's/^/          /'
 fi
 
