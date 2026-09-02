@@ -12,7 +12,7 @@
 // A property asserted only in a commit message is not asserted.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import { api } from "@/lib/api";
@@ -121,5 +121,40 @@ describe("the chrome's version wiring", () => {
     renderChrome();
     await waitFor(() => expect(screen.getByText("admin")).toBeTruthy());
     expect(screen.queryByText("v0.9.0")).toBeNull();
+  });
+});
+
+describe("the collapsed rail", () => {
+  it("opens no tooltip for links the pointer crossed before collapsing", async () => {
+    // #662 at unit level. The e2e suite pins that labels leave the rail; this
+    // pins the property that fix was actually about -- that collapsing does not
+    // paint a tooltip for every link the pointer had already crossed, because
+    // Radix opens a Root on hover whether or not it has content to show.
+    vi.spyOn(api, "version").mockResolvedValue(info);
+    renderChrome();
+    await waitFor(() => expect(screen.getByText("v0.9.0")).toBeTruthy());
+
+    // Browse the expanded nav the way anyone does.
+    for (const name of ["Dashboard", "Sources", "Routing"]) {
+      const link = within(screen.getByRole("navigation")).getByRole("link", { name });
+      fireEvent.pointerMove(link, { pointerType: "mouse" });
+      fireEvent.focus(link);
+    }
+
+    // Scoped to the nav: the header carries a second toggle for the mobile
+    // drawer with the same accessible name, and an unscoped query matches both.
+    const rail = screen.getByRole("navigation");
+    fireEvent.click(within(rail).getByRole("button", { name: "Toggle navigation" }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    // A label appears twice when its tooltip is open: once in the link, once in
+    // the tooltip.
+    const doubled = ["Dashboard", "Sources", "Routing"].filter(
+      (n) => screen.queryAllByText(n).length > 1,
+    );
+    expect(
+      doubled,
+      "collapsing painted a tooltip for every link the pointer had crossed while the rail was expanded",
+    ).toEqual([]);
   });
 });
