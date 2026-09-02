@@ -856,6 +856,221 @@ if (headersText && !/^\s+Content-Security-Policy:\s*\S/m.test(headersText)) {
   );
 }
 
+/* llms.txt LISTS EVERY PAGE THE SITE SERVES.
+ *
+ * The file's whole purpose is to be the map a model reads instead of crawling,
+ * so a page absent from it is a page that, to its only audience, does not
+ * exist. It listed five of the fifteen -- including neither the bandwidth
+ * calculator nor any of the five head-to-head comparisons -- and nothing said
+ * so, because a hand-written index cannot notice what is not in it.
+ *
+ * Top-level and /vs pages only: the 23 rendered documents are represented by
+ * /docs, which is the index of them, and enumerating all 23 here would bury the
+ * ten pages a reader actually needs pointed at. */
+const llmsSkip = new Set(["/404"]);
+let llmsTxt = "";
+try {
+  llmsTxt = readFileSync(join(DIST, "llms.txt"), "utf8");
+} catch {
+  fail.push("no dist/llms.txt. It lives in public/ and Astro copies public/ verbatim, so this means it was deleted or renamed.");
+}
+if (llmsTxt) {
+  const missing = pages
+    .map(servedAt)
+    .filter((path) => !path.startsWith("/docs/") && !llmsSkip.has(path))
+    .filter((path) => !llmsTxt.includes(`https://polyemesis.com${path === "/" ? "/" : path})`));
+  if (missing.length) {
+    fail.push(
+      `llms.txt does not link ${missing.join(", ")}. It is the index a model reads instead ` +
+      "of crawling, so an unlisted page is invisible to the audience the file exists for. " +
+      "Add a line, or add the path to llmsSkip with a reason.",
+    );
+  }
+}
+
+/* EVERY SUBMITTED URL CARRIES A lastmod.
+ *
+ * astro.config.mjs stamps lastmod from the last commit that touched a page's
+ * SOURCE, looked up through a hand-maintained pageSource map. A page missing
+ * from that map still ships, still gets a sitemap entry, and simply has no date
+ * -- there is no error and nothing in the source says a page was forgotten.
+ * /calculator was in exactly that state: the one URL in the feed with no date,
+ * for the ten months since the page was added.
+ *
+ * Read off the built feed rather than off the map, because the feed is the
+ * artefact with the defect in it. A page added tomorrow and forgotten fails
+ * here on its first build.
+ *
+ * Omitting lastmod when git is unavailable is the config's documented
+ * degradation, so this check declines to run when NO url has one -- a shallow
+ * CI clone must not turn a deliberate fallback into a build failure. */
+const sitemapPath = join(DIST, "sitemap-0.xml");
+let sitemapXml = "";
+try {
+  sitemapXml = readFileSync(sitemapPath, "utf8");
+} catch {
+  fail.push(
+    "no dist/sitemap-0.xml. The sitemap integration is configured and robots.txt points " +
+    "crawlers at sitemap-index.xml, so its absence is a silent delisting of the whole site.",
+  );
+}
+if (sitemapXml) {
+  const entries = sitemapXml.match(/<url>[\s\S]*?<\/url>/g) || [];
+  const undated = entries
+    .filter((u) => !u.includes("<lastmod>"))
+    .map((u) => (/<loc>([^<]*)<\/loc>/.exec(u) || [, "(no loc)"])[1]);
+  if (entries.length && undated.length && undated.length < entries.length) {
+    fail.push(
+      `${undated.length} of ${entries.length} sitemap URLs carry no lastmod: ` +
+      `${undated.join(", ")}. Every other URL has one, so this is a page missing from ` +
+      "pageSource in astro.config.mjs, not git being unavailable.",
+    );
+  }
+}
+
+/* THE CALCULATOR'S PLATFORM TABLE, AGAINST THE TABLE IT WAS TRANSCRIBED FROM.
+ *
+ * /calculator renders ten bitrate figures copied by hand out of
+ * internal/db/platforms.go, and a paragraph dating them. Hand-copied numbers
+ * drift, and this pair drifts silently: a stale figure looks exactly like a
+ * fresh one, and the page is the only place a visitor ever sees it.
+ *
+ * The comparison is data against data, not source-grepping to infer behaviour
+ * (the anti-pattern the COMPARISON.md check above is careful about).
+ * destinationPresets is a Go literal that IS the catalogue -- the same shape as
+ * a JSON fixture -- and the built page carries the transcription in data-min /
+ * data-max attributes. Both sides are values; neither is a claim about code.
+ *
+ * WHAT THIS DOES NOT ASSERT, and the reason the page's wording changed: that
+ * these figures are limits. They are not. VideoGuidance says of itself
+ * "ADVISORY, ALWAYS", and no Go outside the catalogue and one range-sanity test
+ * reads KbpsMin or KbpsMax at all. The check pins the transcription; it does
+ * not endorse a reading of it. */
+const PLATFORMS_GO = new URL("../../internal/db/platforms.go", import.meta.url).pathname;
+let platformsGo = "";
+try {
+  platformsGo = readFileSync(PLATFORMS_GO, "utf8");
+} catch {
+  fail.push(
+    `could not read ${PLATFORMS_GO}. The calculator's platform figures are transcribed ` +
+    "from that file and this build cannot confirm they still match it.",
+  );
+}
+
+/** One entry per catalogue preset, parsed out of the Go literal.
+ * @type {Map<string, {integrated: boolean, transport: string, min?: number, max?: number, checked?: string}>} */
+const goPresets = new Map();
+if (platformsGo) {
+  const start = platformsGo.indexOf("var destinationPresets");
+  // Entries start at one tab of indentation inside the slice literal.
+  for (const chunk of platformsGo.slice(start).split("\n\t{\n").slice(1)) {
+    const id = /ID: "([^"]+)"/.exec(chunk);
+    if (!id) continue;
+    const kbps = /KbpsMin: (\d+), KbpsMax: (\d+)/.exec(chunk);
+    const checked = /Checked: "([^"]+)"/.exec(chunk);
+    const transport = /Transport: Preset(\w+)/.exec(chunk);
+    goPresets.set(id[1], {
+      integrated: /\bPlatform: Platform\w+/.test(chunk),
+      transport: transport ? transport[1] : "",
+      min: kbps ? Number(kbps[1]) : undefined,
+      max: kbps ? Number(kbps[2]) : undefined,
+      checked: checked ? checked[1] : undefined,
+    });
+  }
+  if (goPresets.size < 20) {
+    fail.push(
+      `parsed only ${goPresets.size} presets out of internal/db/platforms.go, which means ` +
+      "the literal's shape changed and every check below it is passing without looking.",
+    );
+  }
+}
+
+const calcPath = "calculator.html";
+if (goPresets.size && pages.includes(calcPath)) {
+  const calc = readFileSync(join(DIST, calcPath), "utf8");
+  const rows = [...calc.matchAll(/data-id="([a-z-]+)"\s+data-min="(\d+)"\s+data-max="(\d+)"/g)];
+  if (rows.length < 5) {
+    fail.push(
+      `/calculator rendered ${rows.length} platform rows carrying data-min/data-max. The ` +
+      "markup that check reads changed, so the figures are no longer being compared to " +
+      "internal/db/platforms.go at all.",
+    );
+  }
+  const checkedDates = new Set();
+  for (const [, id, min, max] of rows) {
+    const go = goPresets.get(id);
+    if (!go) {
+      fail.push(`/calculator lists a platform "${id}" that internal/db/platforms.go has no preset for.`);
+      continue;
+    }
+    if (go.min === undefined) {
+      fail.push(
+        `/calculator publishes ${min}-${max} kbps for "${id}", but that preset ships no ` +
+        "VideoGuidance. \"Not published\" is a real answer in the catalogue and the site " +
+        "must not invent one.",
+      );
+      continue;
+    }
+    if (Number(min) !== go.min || Number(max) !== go.max) {
+      fail.push(
+        `/calculator says ${id} is ${min}-${max} kbps; internal/db/platforms.go says ` +
+        `${go.min}-${go.max}. The page is a transcription of that table and has drifted.`,
+      );
+    }
+    if (go.checked) checkedDates.add(go.checked);
+  }
+  // The page prints ONE "checked" date over all of them, which is only honest
+  // while the catalogue agrees on one.
+  const shown = /checked\s+(\d{4}-\d{2}-\d{2})/.exec(norm(calc).replace(/\s+/g, " "));
+  if (!shown) {
+    fail.push("/calculator no longer dates its platform figures. Undated bitrates are the failure the catalogue's Checked field exists to prevent.");
+  } else if (checkedDates.size !== 1 || !checkedDates.has(shown[1])) {
+    fail.push(
+      `/calculator dates its platform figures ${shown[1]}, but the presets it lists were ` +
+      `checked ${[...checkedDates].sort().join(", ") || "(no date)"} in ` +
+      "internal/db/platforms.go.",
+    );
+  }
+}
+
+/* THE PASTED-KEY PRESET COUNT ON /features.
+ *
+ * "N other presets in the catalogue work exactly that way" is a countable claim
+ * about the same Go literal, and it was wrong by six. Same reasoning as above:
+ * count it, do not trust it. "Other" means not backed by an OAuth integration;
+ * the sentence's own qualifier is "over RTMP, RTMPS or SRT", so an HLS push
+ * preset does not count; and Instagram is excluded because the same page says
+ * two paragraphs later that it is listed as unsupported. */
+const NUMBER_WORDS = {
+  20: "twenty", 21: "twenty-one", 22: "twenty-two", 23: "twenty-three",
+  24: "twenty-four", 25: "twenty-five", 26: "twenty-six", 27: "twenty-seven",
+  28: "twenty-eight", 29: "twenty-nine", 30: "thirty",
+};
+if (goPresets.size && pages.includes("features.html")) {
+  const pasteable = [...goPresets].filter(
+    ([id, p]) => !p.integrated && id !== "instagram" && ["RTMP", "RTMPS", "SRT"].includes(p.transport),
+  ).length;
+  const word = NUMBER_WORDS[pasteable];
+  const features = norm(readFileSync(join(DIST, "features.html"), "utf8"));
+  const claimed = /(\w+(?:-\w+)?) other presets in the catalogue/.exec(features);
+  if (!claimed) {
+    fail.push(
+      "/features no longer states how many other presets take a pasted key. If the claim " +
+      "was reworded, reword this check with it; if it was deleted, delete this check.",
+    );
+  } else if (!word) {
+    fail.push(
+      `internal/db/platforms.go now has ${pasteable} pasted-key RTMP/RTMPS/SRT presets, which ` +
+      "is outside the range this check spells as a word. Extend NUMBER_WORDS.",
+    );
+  } else if (claimed[1] !== word) {
+    fail.push(
+      `/features says "${claimed[1]} other presets in the catalogue" take a pasted key; ` +
+      `internal/db/platforms.go has ${pasteable} (${word}).`,
+    );
+  }
+}
+
 if (fail.length) {
   console.error("build checks FAILED:\n" + fail.map((f) => "  - " + f).join("\n"));
   process.exit(1);
