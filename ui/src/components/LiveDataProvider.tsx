@@ -42,6 +42,30 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
   const [frameError, setFrameError] = useState(false);
+
+  // WHETHER THE FIRST STATUS SNAPSHOT HAS ARRIVED, derived rather than tracked.
+  //
+  // Every consumer reaches `status` through optional chaining, and `?.` on a
+  // null status yields undefined -- identical, to the code reading it, to a
+  // loaded status that genuinely holds nothing. So the dashboard printed "No
+  // destinations yet" with an Add button while the first snapshot was still in
+  // flight, then swapped it for the hold note when the snapshot landed. #663.
+  //
+  // DERIVED, and that is the correction rather than the design. This was first
+  // written as its own useState set inside the socket's `status` case -- which
+  // made it true of the SOCKET, not of the status. Status also arrives over
+  // REST, from the api.status() bootstrap below, and on any load where that
+  // wins the race or the socket is blocked by a proxy, the flag stayed false
+  // while status was perfectly well known. The dashboard then hid real
+  // destinations behind a loading card indefinitely: worse than the bug it was
+  // fixing. The browser suite caught it, on three tests that mute the socket
+  // on purpose.
+  //
+  // `status !== null` is the whole fact and cannot drift from it, because
+  // there is no second thing to keep in step. A flag tracking what a value
+  // already says is a second source of truth for one fact, which is the shape
+  // this audit keeps finding.
+
   /* Which programme every request below names.
    *
    * NULL UNTIL THE SOURCE LIST LANDS, AND NOTHING WAITS FOR IT. An earlier
@@ -313,6 +337,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       sourceCount,
       refreshSources: resolveSources,
       connected,
+      snapshotKnown: status !== null,
       status,
       source,
       levels,
@@ -329,6 +354,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       sourceCount,
       resolveSources,
       connected,
+
       status,
       source,
       levels,

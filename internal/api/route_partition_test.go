@@ -119,6 +119,30 @@ var unstableSweeps = map[string]string{
 	// writing to it. A guard that is stable only when nothing else is happening
 	// is the same species as a guard that is thorough over a set excluding the
 	// bug, so it is declared rather than left to flap.
+	// THE SECOND ONE FOUND BY RUNNING RATHER THAN PREDICTED, and by the same
+	// mechanism as the entry below: stable on a quiet machine, unstable under
+	// load. It was recorded as invariant from a sweep that happened to sample a
+	// idle box, and CI -- which runs -race alongside the rest of the suite --
+	// caught it on two of three consecutive samples.
+	//
+	// handleStats embeds stats.System, whose CPUPercent, MemUsedBytes and
+	// ProcMemBytes are live host readings taken at the moment of the request.
+	// They cannot be stable between two reads on a machine doing anything, and
+	// making them stable would mean freezing a number whose entire purpose is
+	// to move.
+	//
+	// Principal-independent BY INSPECTION, which is the part that matters
+	// before declaring a route unstable: handleStats takes nothing from the
+	// request. It calls s.hostSystem(), s.ingestBitrate() and s.relayStats(),
+	// none of which receive r, and it does not go through scopedEngine. The
+	// bytes describe the box and the hub, not the caller. Swept for sentinels
+	// regardless, so declaring it unstable withdraws the equality claim without
+	// withdrawing the disclosure check.
+	"/api/v1/stats": "embeds stats.System -- CPUPercent, MemUsedBytes and ProcMemBytes " +
+		"are live host readings that move between two reads on any machine under load. " +
+		"Principal-independent by inspection of handleStats, which takes nothing from the " +
+		"request, and swept for sentinels regardless.",
+
 	"/api/v1/recordings/usage": "reports free bytes on the recordings filesystem, which " +
 		"moves under any concurrent write -- including the rest of this test suite. " +
 		"Principal-independent by inspection of handleRecordingUsage, and swept for " +

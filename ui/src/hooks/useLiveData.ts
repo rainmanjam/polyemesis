@@ -49,6 +49,20 @@ export interface LiveData {
    *  reappearing after the client was fixed. Gate the control on this, not on
    *  the id. */
   programmeKnown: boolean;
+  /** Whether the FIRST status snapshot has arrived from the socket.
+   *
+   *  Distinct from `status != null` in exactly the way programmeKnown above is
+   *  distinct from `programme != null`, and for the same reason: every consumer
+   *  reads status through `?.`, and `?.` on a null status is indistinguishable
+   *  from a loaded status that holds nothing. A page that draws a CONCLUSION
+   *  from that -- "no destinations yet", "0 kbps", "OFF AIR" -- states as fact
+   *  something it has not been told, and states the opposite a second later
+   *  when the snapshot lands.
+   *
+   *  Gate any decided empty state or zero measurement on this. Chrome, nav and
+   *  anything else known without the server may render immediately; it is only
+   *  claims about the install that have to wait. #663. */
+  snapshotKnown: boolean;
   /** How many programmes this install has.
    *
    *  The console follows ONE at a time and has no switcher, so a page that
