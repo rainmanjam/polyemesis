@@ -439,6 +439,9 @@ export function MonitoringPage() {
   // be indefinite, or the table keeps showing processes that stopped existing
   // and reads as current.
   const procFreshness = useStaleTracker();
+  // Destructured for the dependency list below; see MetersPage for why the
+  // object itself must not be a dependency.
+  const { ok: procOk, failed: procFailed } = procFreshness;
   useEffect(() => {
     if (!programmeKnown) return;
     const load = () =>
@@ -446,9 +449,9 @@ export function MonitoringPage() {
         .listProcesses(programme)
         .then((p) => {
           setProcesses(p);
-          procFreshness.ok();
+          procOk();
         })
-        .catch(procFreshness.failed);
+        .catch(procFailed);
     load();
     const t = window.setInterval(load, 5000);
     return () => window.clearInterval(t);
@@ -458,7 +461,7 @@ export function MonitoringPage() {
     // programmeKnown rather than on `programme != null`: null means either "no
     // sources", which the route accepts, or "not resolved yet", which it
     // refuses, and only the second is a bug.
-  }, [programme, programmeKnown]);
+  }, [programme, programmeKnown, procOk, procFailed]);
 
   // The socket only carries lines produced after it connected, so a page opened
   // mid-session would start blank. Drain each process's ring buffer once to

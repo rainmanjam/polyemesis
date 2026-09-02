@@ -169,6 +169,37 @@ func (d *DB) DeleteAPIToken(id int64) error {
 	return nil
 }
 
+// DeleteAllAPITokens revokes every API token and reports how many it revoked.
+//
+// THE MISSING HALF OF A PASSWORD CHANGE. SetPassword bumps users.token_epoch,
+// which ends every signed-in SESSION; API tokens are resolved by hash alone
+// (LookupAPIToken) and carry no epoch, so they were untouched by the one
+// gesture an operator makes when they believe a credential has leaked. An admin
+// token copied out of this install before an incident outlived the response to
+// it.
+//
+// Deleting the rows rather than adding an epoch column to api_tokens: a token's
+// plaintext exists nowhere after it is minted, so there is no such thing as
+// re-issuing the one somebody's CI runner holds. Whether the epoch matched or
+// the row is gone, the operator's next step is identical -- mint a new token and
+// paste it in -- and a row that can never authenticate again is not a row worth
+// keeping.
+//
+// Zero is a successful result, not ErrNotFound. The caller is asking for a
+// state ("no API token that predates this moment can authenticate"), not for a
+// particular row, and an install with no tokens is already in it.
+func (d *DB) DeleteAllAPITokens() (int64, error) {
+	res, err := d.sql.Exec(`DELETE FROM api_tokens`)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // LookupAPIToken resolves a plaintext token, returning ErrNotFound if it does
 // not match a live token.
 func (d *DB) LookupAPIToken(plaintext string) (*APIToken, error) {

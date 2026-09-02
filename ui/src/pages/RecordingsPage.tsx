@@ -37,6 +37,15 @@ import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import {
+  failedRead,
+  mayClaim,
+  okRead,
+  pendingRead,
+  readFailed,
+  rowsOf,
+  type ReadState,
+} from "@/lib/readState";
 import { InfoHint } from "@/components/InfoHint";
 import { autoApi } from "@/lib/autoApi";
 import { bytes, shortDuration, timestamp } from "@/lib/format";
@@ -75,7 +84,11 @@ function masterKey(filename: string): string {
 export function RecordingsPage() {
   const t = useT();
   const { recordingsRevision, status } = useLiveData();
-  const [recordings, setRecordings] = useState<Recording[]>([]);
+  /* A READ, NOT AN ARRAY. An empty list from a FAILED GET /recordings is not
+   * the same fact as an empty list from a successful one, and the empty state
+   * below -- "no recordings" -- is a positive claim about a machine's disk.
+   * Storing both as `[]` is the bug lib/readState.ts exists to forbid. */
+  const [recRead, setRecRead] = useState<ReadState<Recording[]>>(pendingRead);
   const [usage, setUsage] = useState<DiskUsage | null>(null);
   /* The last thing the SERVER said. Nothing on this card writes to it except a
      completed save, which is what makes it safe for a switch to build a PUT
@@ -85,10 +98,14 @@ export function RecordingsPage() {
      into `settings`, and every switch on the card spread that same object -- so
      flipping Stems PUT a half-typed segment length with it. */
   const [draft, setDraft] = useState<RetentionDraft | null>(null);
-  const [stems, setStems] = useState<StemFile[]>([]);
+  /* Same again, and this one was written down as deliberate: the stems GET
+   * caught to `[]` so that losing it would not cost the recordings list. That
+   * half is right and is kept. What it also did was make every row claim "no
+   * per-track files" -- an em dash in the Stems column, no disclosure chevron
+   * -- for a read that never came back. */
+  const [stemRead, setStemRead] = useState<ReadState<StemFile[]>>(pendingRead);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
     Promise.all([
@@ -97,21 +114,35 @@ export function RecordingsPage() {
       api.getSettings(),
       // Stems are files on disk rather than index rows, so they are listed
       // separately and joined here. A failure to read them must not cost the
-      // recordings list, which is why it resolves to an empty list.
-      autoApi.get<StemFile[]>("/recordings/stems").catch(() => [] as StemFile[]),
+      // recordings list, which is why it resolves rather than rejecting -- but
+      // it now resolves to a FAILED READ rather than to an empty list, so the
+      // Stems column can say "unknown" instead of "none".
+      autoApi
+        .get<StemFile[]>("/recordings/stems")
+        .then((st) => okRead(st ?? []))
+        .catch(() => failedRead<StemFile[]>()),
     ])
       .then(([r, u, s, st]) => {
-        setRecordings(r);
+        setRecRead(okRead(r));
         setUsage(u);
         setSettings(s);
         setDraft(retentionDraft(s));
-        setStems(st ?? []);
+        setStemRead(st);
       })
-      .catch((err) => toast.error(err instanceof Error ? err.message : t("rec.loadFailed")))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        setRecRead(failedRead());
+        setStemRead(failedRead());
+        toast.error(err instanceof Error ? err.message : t("rec.loadFailed"));
+      });
   }, [t]);
 
   useEffect(load, [load, recordingsRevision]);
+
+  const recordings = rowsOf(recRead);
+  const stems = rowsOf(stemRead);
+  // True only when the server actually answered. Where it is false the column
+  // says so rather than drawing a dash, which would read as "none".
+  const stemsKnown = mayClaim(stemRead);
 
   const stemsByMaster = useMemo(() => {
     const m = new Map<string, StemFile[]>();
@@ -193,7 +224,11 @@ export function RecordingsPage() {
             <CardTitle>{t("rec.segments")}</CardTitle>
           </CardHeader>
           <CardContent className="px-0 pb-0">
-            {loading ? (
+            {readFailed(recRead) ? (
+              <div className="px-3 py-8 text-center text-[12px] text-warn">
+                {t("rec.listUnread")}
+              </div>
+            ) : !mayClaim(recRead) ? (
               <div className="flex justify-center py-8">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               </div>
@@ -272,8 +307,18 @@ export function RecordingsPage() {
                                 <AudioLines className="h-2.5 w-2.5" />
                                 {mine.length}
                               </Badge>
-                            ) : (
+                            ) : stemsKnown ? (
                               <span className="text-[11px] text-muted-foreground">—</span>
+                            ) : (
+                              // NOT a dash. The stems read did not come back,
+                              // so "this segment has no per-track files" is a
+                              // claim nobody is entitled to make here.
+                              <span
+                                className="text-[11px] text-warn"
+                                title={t("rec.stemsUnread")}
+                              >
+                                ?
+                              </span>
                             )}
                           </TableCell>
                           <TableCell className="tnum text-right font-mono text-[11px]">
@@ -367,7 +412,7 @@ export function RecordingsPage() {
               {/* Stems are not in the recordings index, so their bytes are not
                   in `used` either — showing them separately is the only way the
                   disk figures add up on a machine that writes them. */}
-              {stems.length > 0 && (
+              {stemsKnown && stems.length > 0 && (
                 <Stat
                   className="col-span-2"
                   labelKey="rec.stemsUsage" labelParams={{ count: stems.length }}

@@ -1337,6 +1337,26 @@ install_docker_mode() {
     # whatever was being written, so this matches the project's own compose file.
     printf '    stop_grace_period: 30s\n'
 
+    # LOGS HAVE NO CEILING UNLESS ONE IS WRITTEN HERE. Docker's default
+    # json-file driver keeps every line the container ever wrote, forever, in
+    # /var/lib/docker/containers/<id>/*-json.log. polyemesis logs per request
+    # and per encoder tick, and a 24/7 broadcast box is exactly the install
+    # that never restarts, so the file only grows. When it fills the disk the
+    # symptom is not "logs are large": SQLite cannot write, recordings stop
+    # finalising, and the container starts failing in ways that look like a
+    # bug in the server.
+    #
+    # 10m x 3 is a ceiling of 30 MB per container -- enough to hold the last
+    # several hours of a busy stream, which is the window an operator actually
+    # reads after an incident, and small enough that it can never be the
+    # reason a box runs out of space. The systemd path already has this:
+    # journald applies SystemMaxUse. Only docker installs were unbounded.
+    printf '    logging:\n'
+    printf '      driver: "json-file"\n'
+    printf '      options:\n'
+    printf '        max-size: "10m"\n'
+    printf '        max-file: "3"\n'
+
     # The image bakes in `wget -qO- http://127.0.0.1:8080/api/v1/health`, and
     # both halves of that are assumptions this installer is free to break.
     #
@@ -1947,6 +1967,67 @@ write_helper_scripts() {
 # no downgrade path. The backup is the only way back.
 set -euo pipefail
 cd "$INSTALL_DIR"
+
+# THE COMPOSE COMMAND IS DATA, NOT A SPLICE INTO COMMAND POSITION.
+#
+# Every use below used to be written \`\$COMPOSE_CMD pull\` INSIDE this
+# unquoted heredoc, so it was expanded while the file was being GENERATED and
+# the value was pasted into the script. When install.sh reached here with the
+# variable empty -- any path that writes the helpers without having run
+# install_docker -- the generated file got the bare line \`pull\`, and \`up -d\`,
+# and (in uninstall.sh) \`down --remove-orphans\`. Those are not errors an
+# operator can read: \`pull: command not found\` on the upgrade path, after the
+# container has already been stopped. Baking the value into one assignment and
+# referencing it at RUN time makes an empty value a refusal instead of three
+# mangled command lines. #658.
+#
+# Unquoted on use, deliberately: the value is two words for the compose plugin
+# ("docker compose") and one for the standalone binary, and it must split.
+COMPOSE_CMD="$COMPOSE_CMD"
+if [ -z "\$COMPOSE_CMD" ]; then
+  echo "ERROR: this update.sh was generated without a compose command." >&2
+  echo "It cannot stop, pull or start anything. Re-run install.sh to regenerate it." >&2
+  exit 1
+fi
+
+FORCE=false
+for arg in "\$@"; do
+	case "\$arg" in
+		--force|-f) FORCE=true ;;
+		-h|--help)
+			echo "usage: update.sh [--force]"
+			echo
+			echo "  --force  do not refuse while a broadcast is on air"
+			exit 0 ;;
+		*) echo "unknown option: \$arg" >&2; exit 2 ;;
+	esac
+done
+
+# IS ANYTHING ON AIR? Same question uninstall.sh asks, and for the same reason:
+# this script STOPS the container -- to take a consistent archive, and again to
+# swap the image -- and a live broadcast that ends cannot be resumed. uninstall
+# refused; update did not, so the safer-sounding operation was the one that
+# would silently cut a stream mid-show. Asked of the container's own process
+# table, so an ffmpeg elsewhere on the host is not mistaken for this install's.
+publishing_now() {
+	local out
+	out=\$(\$COMPOSE_CMD top 2>/dev/null || true)
+	case "\$out" in
+		*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+			echo "\$out" | grep -E 'ffmpeg.*(rtmp|srt):' | head -3 >&2
+			return 0 ;;
+	esac
+	return 1
+}
+
+if [ "\$FORCE" != true ] && publishing_now; then
+	echo >&2
+	echo "REFUSING: this install is publishing right now (listed above)." >&2
+	echo "Upgrading stops the container, and a live broadcast that ends cannot be resumed." >&2
+	echo "Wait for the broadcast to end, or pass --force if you mean to end it." >&2
+	exit 1
+fi
+
 stamp="\$(date +%F-%H%M)"
 dest="$INSTALL_DIR/backup-\${stamp}.tar.gz"
 echo "backing up to \$dest"
@@ -1979,10 +2060,10 @@ docker volume inspect polyemesis-data >/dev/null 2>&1 || {
 # upgrade anyway, so stopping here costs the same downtime and makes the
 # archive consistent.
 #
-# Deliberately stop rather than down: down removes the container, and the
-# operator may want it back untouched if the checks below refuse the upgrade.
+# \`stop\`, not \`down\`: down removes the container, and the operator may want it
+# back untouched if the checks below refuse the upgrade.
 echo "stopping the container so the archive is consistent"
-${COMPOSE_CMD:-true} stop
+\$COMPOSE_CMD stop
 
 docker run --rm -v polyemesis-data:/data -v "$INSTALL_DIR:/backup" alpine \\
   tar czf "/backup/backup-\${stamp}.tar.gz" -C /data .
@@ -2037,14 +2118,14 @@ fi
 if ! docker run --rm -v "\$verify_dir:/backup:ro" "$IMAGE" -verify-backup /backup; then
   echo "ERROR: the backup at \$dest is not usable. Refusing to upgrade." >&2
   echo "The container is still stopped; bring it back with:" >&2
-  echo "    $COMPOSE_CMD start" >&2
+  echo "    \$COMPOSE_CMD start" >&2
   exit 1
 fi
 
 echo "backup verified: \${entries} entries, and the database opens"
-$COMPOSE_CMD pull
-$COMPOSE_CMD up -d
-echo "updated. Watch the first minute: $COMPOSE_CMD logs -f"
+\$COMPOSE_CMD pull
+\$COMPOSE_CMD up -d
+echo "updated. Watch the first minute: \$COMPOSE_CMD logs -f"
 EOF
   chmod +x "$INSTALL_DIR/update.sh"
 
@@ -2052,6 +2133,17 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$INSTALL_DIR"
+
+# Baked in as data and referenced at run time -- see the same note in update.sh.
+# Spliced at generation time, an empty value left this file with the bare line
+# \`down --remove-orphans\`, on the script whose whole job is to remove things.
+COMPOSE_CMD="$COMPOSE_CMD"
+if [ -z "\$COMPOSE_CMD" ]; then
+  echo "ERROR: this uninstall.sh was generated without a compose command." >&2
+  echo "It cannot tell whether anything is on air, let alone stop it safely." >&2
+  echo "Remove the container by hand, or re-run install.sh to regenerate this script." >&2
+  exit 1
+fi
 
 REMOVE_DATA=false
 FORCE=false
@@ -2075,7 +2167,7 @@ done
 # mistaken for this install's broadcast.
 publishing_now() {
 	local out
-	out=\$($COMPOSE_CMD top 2>/dev/null || true)
+	out=\$(\$COMPOSE_CMD top 2>/dev/null || true)
 	case "\$out" in
 		*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
 			echo "\$out" | grep -E 'ffmpeg.*(rtmp|srt):' | head -3 >&2
@@ -2102,7 +2194,7 @@ if [ "\$FORCE" != true ]; then
 	[ "\$reply" = "remove" ] || { echo "Not confirmed; nothing was changed." >&2; exit 1; }
 fi
 
-$COMPOSE_CMD down --remove-orphans
+\$COMPOSE_CMD down --remove-orphans
 echo
 echo "Stopped and removed the container."
 

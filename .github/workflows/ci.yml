@@ -413,6 +413,36 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: GOOS=windows go vet ./...
 
+      # EVERY SHELL SCRIPT PARSES, which was true of none of them as far as CI
+      # was concerned.
+      #
+      # This repository has 44 files under scripts/*.sh and 25 of them are
+      # acceptance suites that run only in the acceptance matrix, on dispatch,
+      # or not at all. scripts/acceptance-multistream.sh is the extreme case:
+      # 70 KB, run NOWHERE in CI by deliberate decision (docs/TESTING.md
+      # explains it -- with credentials it publishes to a real account), and yet
+      # three Go tests cite its behaviour as the thing they are keeping in step
+      # with. A syntax error in it would have been found by whoever next ran it
+      # by hand, which is a schedule nobody controls.
+      #
+      # `bash -n` is the cheapest possible half of that: it parses without
+      # executing, so it needs no FFmpeg, no ports, no credentials and no
+      # network, and the whole directory finishes in well under a second. It
+      # cannot tell you the script is CORRECT -- only that it is not garbage --
+      # and that is exactly the class of breakage an unrun script accumulates,
+      # because nothing else looks at it at all.
+      #
+      # release.yml already did this for two scripts by name. Naming scripts is
+      # how you end up covering the two somebody remembered; the glob covers the
+      # ones nobody did.
+      #
+      # `make sh-syntax` rather than an inline loop, so `make check` runs the
+      # same thing -- see internal/testenv/checkparity_invocation_test.go.
+      - name: Every shell script parses
+        if: needs.changes.outputs.code == 'true'
+        timeout-minutes: 2
+        run: make sh-syntax
+
       # THE PREFLIGHT'S OWN LIVENESS, and it runs HERE because it was not
       # running anywhere.
       #
@@ -462,7 +492,7 @@ jobs:
       # 14 rather than something tighter, so the ordering the file argues for
       # everywhere else holds: three probes at -timeout 4m is 12m of worst case,
       # and Go has to be able to win that race and print the goroutine dump
-      # before this fires. Below the job's 25 either way, which is the property
+      # before this fires. Below the job's 35 either way, which is the property
       # being claimed.
       - name: internal/api coverage measures the tests, not the preflight
         if: needs.changes.outputs.code == 'true'
@@ -494,7 +524,7 @@ jobs:
         #
         # internal/api hit the 15m wall on 2026-08-16 and reported 900.034s. The
         # panic named the test that was running, which is exactly why Go's
-        # timeout is kept below this job's timeout-minutes: 25, and it read
+        # timeout is kept below this job's timeout-minutes: 35, and it read
         #
         #     running tests:
         #       TestAMutationReconcilesEveryProgrammeRatherThanTheDefault (0s)
@@ -510,7 +540,7 @@ jobs:
         # is the part that should have been unnecessary; this is the part that
         # was overdue.
         #
-        # Still five minutes below the job's own timeout, so Go keeps its
+        # Still fifteen minutes below the job's own timeout, so Go keeps its
         # goroutine dump. If this needs raising again, split the package first.
         run: POLYEMESIS_LEDGER=strict go test -race -timeout 20m ./...
 
@@ -529,7 +559,7 @@ jobs:
       # :327-334 and :393-396 give for the two smoke steps: a job timeout names
       # nothing, a step timeout names the step. Each of these four runs a shell
       # harness that starts and kills processes, so each can hang exactly the way
-      # #179 hung, and behind this job's timeout-minutes: 25 a hang here costs 25
+      # #179 hung, and behind this job's timeout-minutes: 35 a hang here costs 35
       # minutes and reports "the job was cancelled".
       #
       # HONEST ABOUT THE NUMBERS: only one of the four has a measurement --
@@ -538,7 +568,7 @@ jobs:
       # teardown harnesses on a shared developer machine kills processes
       # belonging to whatever else is running on it. So these are blast-radius
       # ceilings, not fitted bounds: sized to be unreachable by a healthy run and
-      # far below the job's 25, which is the only property being claimed.
+      # far below the job's 35, which is the only property being claimed.
       - if: needs.changes.outputs.code == 'true'
         run: ./scripts/test-lib-observe.sh
         timeout-minutes: 6
@@ -1716,6 +1746,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       suites: ${{ steps.pick.outputs.suites }}
+      skipped: ${{ steps.pick.outputs.skipped }}
     steps:
       # Full history: the diff below needs both endpoints of the PR, and the
       # default shallow fetch has neither.
@@ -1734,12 +1765,39 @@ jobs:
           set -euo pipefail
           ALL='["acceptance-docker","acceptance-multisource","acceptance-browser"]'
 
+          # ONE WRITER FOR BOTH OUTPUTS, so `suites` and `skipped` cannot drift
+          # apart. A suite that appears in neither list produces no check of
+          # that name at all -- and `container: acceptance-docker` and
+          # `container: acceptance-multisource` are REQUIRED contexts on main.
+          # A required check that never reports leaves the pull request blocked
+          # forever with nothing red to point at, which is how #650, #656 and
+          # #659 came to sit unmergeable behind a wall of green checks. The
+          # skipped list is what the shim job reports, so the context is always
+          # answered: either the suite ran, or it says why it did not.
+          emit() {
+            SEL="$1"; WHY="$2"
+            SKIP="$(jq -cn --argjson all "$ALL" --argjson sel "$SEL" '$all - $sel')"
+            # Fixed-value check: the two lists must reconstitute the full set.
+            # Getting this wrong reintroduces the exact bug above, silently.
+            N_ALL="$(jq -n --argjson a "$ALL" '$a|length')"
+            N_SEL="$(jq -n --argjson a "$SEL" '$a|length')"
+            N_SKIP="$(jq -n --argjson a "$SKIP" '$a|length')"
+            if [ "$((N_SEL + N_SKIP))" -ne "$N_ALL" ]; then
+              echo "::error::suite partition lost a suite: selected=$SEL skipped=$SKIP of $ALL"
+              exit 1
+            fi
+            {
+              echo "suites=$SEL"
+              echo "skipped=$SKIP"
+            } >> "$GITHUB_OUTPUT"
+            echo "$WHY"
+            exit 0
+          }
+
           # main and the weekly schedule keep the full set. This job changes
           # what PRs get, and takes nothing away from anywhere else.
           if [ "$EVENT" = "schedule" ] || [ "$REF" = "refs/heads/main" ]; then
-            echo "suites=$ALL" >> "$GITHUB_OUTPUT"
-            echo "full set: main or schedule"
-            exit 0
+            emit "$ALL" "full set: main or schedule"
           fi
 
           # A PR that touches ui/ gets the browser suite and only the browser
@@ -1785,20 +1843,15 @@ jobs:
             # sourced by all three, and working out which suite a shared
             # library can break is exactly the reasoning that produced the gap.
             if grep -qE '^scripts/(acceptance-(docker|multisource|browser)\.sh|lib-[a-z-]+\.sh)$' <<<"$CHANGED"; then
-              echo "suites=$ALL" >> "$GITHUB_OUTPUT"
-              echo "full set: this PR changes a container suite's own script or a library it sources"
-              exit 0
+              emit "$ALL" "full set: this PR changes a container suite's own script or a library it sources"
             fi
 
             if grep -qE '^(ui/|\.github/workflows/ci\.yml$)' <<<"$CHANGED"; then
-              echo 'suites=["acceptance-browser"]' >> "$GITHUB_OUTPUT"
-              echo "browser: this PR touches ui/ or this workflow"
-              exit 0
+              emit '["acceptance-browser"]' "browser: this PR touches ui/ or this workflow"
             fi
           fi
 
-          echo 'suites=[]' >> "$GITHUB_OUTPUT"
-          echo "none: this PR touches neither ui/ nor this workflow nor a container suite's script"
+          emit '[]' "none: this PR touches neither ui/ nor this workflow nor a container suite's script"
 
   # The suites that need the shipped IMAGE rather than a host binary: SRT ingest
   # (Ubuntu's FFmpeg may lack libsrt, the image never does), the one-port
@@ -1813,6 +1866,48 @@ jobs:
   # accessible names, and a toggle that destroyed keyboard focus. Every one of
   # those guards contributed NOTHING to that PR's status, because this job only
   # ran after the merge. Tests that cannot fail before you merge are not a gate.
+  # THE SHIM THAT ANSWERS A REQUIRED CHECK THE SUITE DID NOT RUN.
+  #
+  # `container: acceptance-docker` and `container: acceptance-multisource` are
+  # required contexts on main, and the job above deliberately does not run them
+  # on most pull requests -- they assert routing and token handling that a UI
+  # change cannot reach, and each costs an image build.
+  #
+  # Those two facts contradicted each other for as long as they both existed. A
+  # skipped job reports NOTHING, not success, so branch protection waited on a
+  # check that was never going to arrive: #659 sat at 40 of 40 green and
+  # unmergeable, #656 and #650 the same, and nothing anywhere was red. The
+  # failure had no symptom to search for, which is what made it expensive.
+  #
+  # So the contexts are always answered. Either the suite ran and reported its
+  # real result, or this job reports that it was not applicable and says why.
+  # The two matrices are disjoint by construction -- `emit` above computes
+  # skipped as ALL minus selected and refuses to write a partition that lost a
+  # suite -- so exactly one of them reports each name.
+  #
+  # WHAT THIS DOES NOT DO, deliberately: it does not make the suite's absence
+  # invisible. The reason is printed and appears in the check's own log, so
+  # "this passed" and "this did not run" remain distinguishable to a reader who
+  # looks. What it removes is only the state where nobody can merge and nothing
+  # can be pointed at.
+  container-not-applicable:
+    name: "container: ${{ matrix.suite }}"
+    needs: container-suites
+    if: needs.container-suites.outputs.skipped != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.container-suites.outputs.skipped) }}
+    steps:
+      - name: Not applicable to this pull request
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          echo "::notice title=${SUITE} did not run::This pull request changes nothing the suite covers, so it was not built. It runs in full on main and on the weekly schedule. See the container-suites job for the rule that decided this."
+          echo "${SUITE}: not applicable to this pull request; runs on main and on schedule."
+
   container:
     name: "container: ${{ matrix.suite }}"
     needs: container-suites

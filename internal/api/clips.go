@@ -661,7 +661,7 @@ func (s *Server) clipRequest(tl clipTimeline, body clipRequestBody) (clipper.Req
 		// falls back to it whenever detection cannot demonstrate anything,
 		// which is the fail-open answer.
 		if tools := s.tools(); tools != nil {
-			req.VideoEncoder = clipper.HeadEncoder(tools, tools.HWEncoders)
+			req.VideoEncoder = clipper.HeadEncoder(tools, hardwareFallbackOrder(tools))
 		}
 	}
 	return req, nil
