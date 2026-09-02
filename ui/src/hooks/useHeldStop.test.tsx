@@ -64,6 +64,52 @@ describe("useHeldStop", () => {
     expect(screen.getByTestId("state").textContent).toBe("idle");
   });
 
+  /* NAVIGATING AWAY IS NOT AN UNDO.
+   *
+   * The commit lived only in the interval, so unmounting inside the window
+   * discarded the stop with no request, no toast and nothing on screen. The
+   * card said "Stopping" until it stopped existing, and the destination
+   * stayed live. */
+  it("sends a stop that is still owed when the card goes away", () => {
+    const commit = vi.fn();
+    const { unmount } = render(<HeldHarness onCommit={commit} />);
+
+    act(() => screen.getByText("hold").click());
+    act(() => void vi.advanceTimersByTime(1_000));
+    // The operator leaves the page well inside the undo window.
+    unmount();
+
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends nothing on unmount once undo has been pressed", () => {
+    const commit = vi.fn();
+    const { unmount } = render(<HeldHarness onCommit={commit} />);
+
+    act(() => screen.getByText("hold").click());
+    act(() => screen.getByText("cancel").click());
+    unmount();
+
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it("does not send twice when the window closed before the card did", () => {
+    const commit = vi.fn();
+    const { unmount } = render(<HeldHarness onCommit={commit} />);
+
+    act(() => screen.getByText("hold").click());
+    act(() => void vi.advanceTimersByTime(STOP_UNDO_MS + 200));
+    unmount();
+
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends nothing on unmount when no stop was ever held", () => {
+    const commit = vi.fn();
+    const { unmount } = render(<HeldHarness onCommit={commit} />);
+    unmount();
+    expect(commit).not.toHaveBeenCalled();
+  });
 });
 
 function SettledHarness({ enabled }: { enabled: boolean }) {
