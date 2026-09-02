@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { STOP_UNDO_MS, actionFor, clickIsTrustworthy, type DestAction } from "@/lib/destinationAction";
+import {
+  FLIP_GUARD_MS,
+  STOP_UNDO_MS,
+  actionFor,
+  clickIsTrustworthy,
+  type DestAction,
+} from "@/lib/destinationAction";
 
 /** Tracks how long the button has been showing its current action.
  *
@@ -34,11 +40,27 @@ export function useSettledAction(enabled: boolean): {
   // some unrelated repaint happened to arrive. On a card whose socket has gone
   // quiet -- which is exactly the state an operator is trying to act on -- that
   // could be for ever.
+  //
+  // THE DELAY IS WHAT IS LEFT, NOT WHAT HAS PASSED. It was
+  // `Date.now() - flippedAt.current` -- the elapsed time, which is ~0 at the
+  // moment of a flip. So the self-clearing re-render was scheduled for
+  // immediately, arrived while the guard was still live, and recomputed the
+  // same `unsettled: true`; with `[unsettled]` for deps nothing had changed,
+  // the effect never re-ran, and the timer was never re-armed. The button on a
+  // quiet card stayed dead for ever -- the exact failure this effect exists to
+  // prevent, in the code written to prevent it.
+  //
+  // No dependency array on purpose. Every render re-derives the remaining time
+  // from the ref and re-arms, so the wake-up is correct no matter which render
+  // it was scheduled from, and the `!unsettled` early return terminates it. A
+  // dependency list here is what let the one interesting transition -- guarded
+  // to guarded, with less time left -- go unnoticed.
   useEffect(() => {
     if (!unsettled) return;
-    const t = setTimeout(() => force((n) => n + 1), Date.now() - flippedAt.current);
+    const left = FLIP_GUARD_MS - (Date.now() - flippedAt.current);
+    const t = setTimeout(() => force((n) => n + 1), Math.max(left, 0));
     return () => clearTimeout(t);
-  }, [unsettled]);
+  });
 
   return { action, unsettled };
 }

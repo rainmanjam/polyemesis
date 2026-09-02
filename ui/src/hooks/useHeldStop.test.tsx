@@ -1,14 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useHeldStop, useSettledAction } from "@/hooks/useHeldStop";
 import { FLIP_GUARD_MS, STOP_UNDO_MS } from "@/lib/destinationAction";
 
 afterEach(cleanup);
-beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
 
 function HeldHarness({ onCommit }: { onCommit: () => void }) {
   const held = useHeldStop(onCommit);
@@ -22,6 +20,9 @@ function HeldHarness({ onCommit }: { onCommit: () => void }) {
 }
 
 describe("useHeldStop", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   /* NOTHING REACHES THE SERVER UNTIL THE WINDOW CLOSES. This is the property
    * that makes it undo rather than a compensating "start it again": a stop
    * that was already sent cannot be taken back, because the broadcast it
@@ -62,6 +63,7 @@ describe("useHeldStop", () => {
     expect(commit).not.toHaveBeenCalled();
     expect(screen.getByTestId("state").textContent).toBe("idle");
   });
+
 });
 
 function SettledHarness({ enabled }: { enabled: boolean }) {
@@ -69,34 +71,62 @@ function SettledHarness({ enabled }: { enabled: boolean }) {
   return <span data-testid="s">{`${action}:${unsettled ? "guarded" : "ready"}`}</span>;
 }
 
+/* REAL TIMERS, DELIBERATELY, and this is the whole reason the guard's own bug
+ * survived its own test.
+ *
+ * With `vi.useFakeTimers()`, `Date.now` is faked too, and
+ * `act(() => vi.advanceTimersByTime(750))` moves the clock 750ms forward
+ * BEFORE React flushes the re-render queued from inside that block. So the
+ * hook's wake-up -- which was scheduled for the elapsed time, i.e. ~0ms, and
+ * fired immediately while still guarded -- recomputed `unsettled` against a
+ * clock that had already jumped past FLIP_GUARD_MS, and read "ready". The
+ * assertion passed on a re-render the fix is what actually produces.
+ *
+ * On a real clock the wake-up has to be scheduled for the REMAINING time or it
+ * arrives too early, finds itself still guarded, and (with a dependency array
+ * that cannot see "still guarded, but less so") never re-arms. That is the
+ * button that stays dead for ever, and `waitFor` is what notices. */
 describe("useSettledAction", () => {
   it("guards the button for a moment after the action flips", () => {
     const { rerender } = render(<SettledHarness enabled={false} />);
-    act(() => void vi.advanceTimersByTime(FLIP_GUARD_MS * 2));
-    expect(screen.getByTestId("s").textContent).toBe("start:ready");
 
     // The socket repaint that inverts the button under the cursor.
     rerender(<SettledHarness enabled={true} />);
     expect(screen.getByTestId("s").textContent).toBe("stop:guarded");
   });
 
-  it("settles on its own, without waiting for another repaint", () => {
+  it("settles on its own, without waiting for another repaint", async () => {
     // A card whose socket has gone quiet is exactly the one an operator is
     // trying to act on. If the guard only lifted on the next render, the
-    // button would stay disabled indefinitely.
+    // button would stay disabled indefinitely. NOTHING RE-RENDERS THIS
+    // HARNESS after the flip: only the hook waking itself can move it.
     const { rerender } = render(<SettledHarness enabled={false} />);
     rerender(<SettledHarness enabled={true} />);
     expect(screen.getByTestId("s").textContent).toBe("stop:guarded");
 
-    act(() => void vi.advanceTimersByTime(FLIP_GUARD_MS + 50));
-    expect(screen.getByTestId("s").textContent).toBe("stop:ready");
+    await waitFor(
+      () => expect(screen.getByTestId("s").textContent).toBe("stop:ready"),
+      { timeout: FLIP_GUARD_MS * 4, interval: 25 },
+    );
   });
 
-  it("does not restart the window on an unrelated repaint", () => {
+  it("is still guarded a moment before the window closes", async () => {
+    // The other half: a wake-up armed for the remaining time must not lift the
+    // guard early, or the flip window it exists to cover is not covered.
+    const { rerender } = render(<SettledHarness enabled={false} />);
+    rerender(<SettledHarness enabled={true} />);
+    await new Promise((r) => setTimeout(r, FLIP_GUARD_MS / 2));
+    expect(screen.getByTestId("s").textContent).toBe("stop:guarded");
+  });
+
+  it("does not restart the window on an unrelated repaint", async () => {
     // The socket sends a dozen things that re-render this card. Only a change
     // of ACTION is a reason to distrust a click.
     const { rerender } = render(<SettledHarness enabled={true} />);
-    act(() => void vi.advanceTimersByTime(FLIP_GUARD_MS + 50));
+    await waitFor(
+      () => expect(screen.getByTestId("s").textContent).toBe("stop:ready"),
+      { timeout: FLIP_GUARD_MS * 4, interval: 25 },
+    );
     rerender(<SettledHarness enabled={true} />);
     expect(screen.getByTestId("s").textContent).toBe("stop:ready");
   });
