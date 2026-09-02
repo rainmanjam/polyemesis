@@ -1683,8 +1683,18 @@ fi
 # also the ONLY way back from an upgrade, because migrations run forward only.
 # The service has to stop for the upgrade anyway -- stopping here costs the
 # same downtime and makes the copy consistent.
-echo "stopping \$SERVICE_NAME so the copy is consistent"
-sudo systemctl stop "\$SERVICE_NAME"
+# Only if there is something to stop. A box where the unit is not running --
+# a first upgrade before enabling it, or a restore rehearsal -- has a
+# consistent data directory already, and an unconditional stop would abort
+# this script under set -e before a single check had run.
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "\$SERVICE_NAME" 2>/dev/null; then
+  echo "stopping \$SERVICE_NAME so the copy is consistent"
+  sudo systemctl stop "\$SERVICE_NAME"
+  STOPPED_BY_US=true
+else
+  echo "\$SERVICE_NAME is not running; nothing to stop"
+  STOPPED_BY_US=false
+fi
 
 echo "backing up \$DATA_DIR to \$dest"
 cp -a "\$DATA_DIR" "\$dest"
@@ -1718,6 +1728,15 @@ fi
 # each leaves a file of plausible size, and none is noticed until the restore.
 # The server binary carries the same SQLite driver it runs on, so it can answer
 # for real: open the file, walk it, read the schema, run no migration.
+# The check is not optional. If the binary that would answer is missing, that
+# is a refusal, not a reason to skip: printing "verified" without opening the
+# copy is the exact failure this replaced.
+if [ ! -x "\$BIN_PATH" ]; then
+  echo "ERROR: cannot verify the backup -- no executable at \$BIN_PATH." >&2
+  echo "Refusing to upgrade: an unverified backup is the thing this check exists to prevent." >&2
+  exit 1
+fi
+
 echo "checking the backup opens..."
 if ! "\$BIN_PATH" -verify-backup "\$dest"; then
   echo "ERROR: the backup at \$dest is not usable. Refusing to upgrade." >&2
@@ -1728,7 +1747,11 @@ fi
 
 echo "backup verified: it opens, passes integrity_check and holds the schema"
 echo
-echo "The service is STOPPED. Replace the binary and start it:"
+if [ "\$STOPPED_BY_US" = true ]; then
+  echo "The service is STOPPED. Replace the binary and start it:"
+else
+  echo "The service was not running. Replace the binary and start it:"
+fi
 echo
 echo "    sudo install -m 0755 ./polyemesis \$BIN_PATH"
 echo "    sudo systemctl start \$SERVICE_NAME"

@@ -169,6 +169,42 @@ gen_binary_update() { # gen_binary_update <install_dir> <data_dir>
     BIN_PATH="$1/polyemesis"
     SERVICE_NAME="polyemesis-acceptance"
     write_binary_update_script )
+
+  # THE BACKUP CHECK IS NOT OPTIONAL, SO THE SUITE HAS TO SUPPLY IT.
+  #
+  # update.sh asks the installed binary whether the copy it just took actually
+  # opens -- `polyemesis -verify-backup <dir>` -- and refuses the upgrade when
+  # it cannot ask. That refusal is the point (#643): printing "verified"
+  # without opening the copy is the bug it replaced. So this stub stands in for
+  # the real binary and answers the same question the shell can answer: are the
+  # two files there. The database-level checks it cannot do -- integrity_check,
+  # a truncated file, a valid SQLite file that is not ours -- are covered in
+  # internal/db/verifybackup_test.go. This suite is testing update.sh's control
+  # flow, not SQLite.
+  cat > "$1/polyemesis" <<'BINSTUB'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = "-verify-backup" ]; then
+  d="${2:-}"
+  [ -f "$d/polyemesis.db" ] || { echo "stub: no polyemesis.db in $d" >&2; exit 1; }
+  [ -f "$d/secret.key" ]    || { echo "stub: no secret.key in $d" >&2; exit 1; }
+  # The stub has to be able to say NO for a reason the EXISTENCE checks in
+  # update.sh cannot already reach, or the verify step is never what decides
+  # and a suite that removes it still passes. The SQLite magic is the cheapest
+  # honest stand-in for "it opens": a copy taken mid-write, a truncated file
+  # and a wrong file all fail it. The real checks are in
+  # internal/db/verifybackup_test.go.
+  case "$(head -c 15 "$d/polyemesis.db" 2>/dev/null)" in
+    "SQLite format 3") ;;
+    *) echo "stub: $d/polyemesis.db is not a SQLite database" >&2; exit 1 ;;
+  esac
+  echo "backup at $d opens, passes integrity_check and holds this server's schema"
+  exit 0
+fi
+echo "stub polyemesis: unexpected invocation: $*" >&2
+exit 1
+BINSTUB
+  chmod +x "$1/polyemesis"
 }
 
 check_refusal() { # check_refusal <label> <status> <output> <substring the message must name>
@@ -224,7 +260,7 @@ check_refusal "an empty data directory is refused" "$st" "$out" "is empty"
 # (3) THE ONE THAT MATTERS. A database with no key beside it. Everything about
 #     this backup looks fine to a count of files.
 root="$work/nokey"; mkdir -p "$root/data"
-printf 'sqlite\n'    > "$root/data/polyemesis.db"
+printf 'SQLite format 3\000' > "$root/data/polyemesis.db"
 printf 'recording\n' > "$root/data/recording.mp4"
 gen_binary_update "$root/opt" "$root/data"
 out="$(bash "$root/opt/update.sh" 2>&1)"; st=$?
@@ -252,11 +288,38 @@ check_refusal "a backup with no polyemesis.db is refused" "$st" "$out" "polyemes
 #     exists while both runs land in the same minute. If the clock crosses one
 #     mid-case the two runs chose different names and the case tested nothing;
 #     retry rather than report a pass it did not earn.
+# THE CASE THE EXISTENCE CHECKS CANNOT REACH.
+#
+# Both files are present, so every check update.sh had before #643 passes --
+# and the database still does not open, which is exactly what a copy taken
+# from a live server can look like. Without this case the verify step never
+# decides anything here: measured, stubbing the verify call out entirely left
+# the suite green at 89/89.
+a_backup_that_exists_but_will_not_open() { # <root>
+  local root="$1" out st
+  mkdir -p "$root/data"
+  printf 'key\n' > "$root/data/secret.key"
+  printf 'this is not a database\n' > "$root/data/polyemesis.db"
+  gen_binary_update "$root/opt" "$root/data"
+
+  out="$(bash "$root/opt/update.sh" 2>&1)"; st=$?
+  if [ "$st" -eq 0 ]; then
+    bad "a backup whose database does not open was accepted -- the upgrade would have gone ahead with no way back"
+    printf '        %s\n' "$(printf '%s' "$out" | tr '\n' ' ')"
+    return
+  fi
+  case "$out" in
+    *"not usable"*) ok "a backup whose database does not open is refused, and the message says it is not usable" ;;
+    *) bad "it refused, but the message never says the backup is unusable"
+       printf '        got: %s\n' "$(printf '%s' "$out" | tr '\n' ' ')" ;;
+  esac
+}
+
 happy_path_then_a_second_run() { # <root> -> 2 if the clock crossed a minute
   local root="$1" before after out1 st1 out2 st2 dest
   mkdir -p "$root/data"
-  printf 'key\n'    > "$root/data/secret.key"
-  printf 'sqlite\n' > "$root/data/polyemesis.db"
+  printf 'key\n' > "$root/data/secret.key"
+  printf 'SQLite format 3\000' > "$root/data/polyemesis.db"
   gen_binary_update "$root/opt" "$root/data"
 
   before="$(date +%F-%H%M)"
@@ -271,10 +334,15 @@ happy_path_then_a_second_run() { # <root> -> 2 if the clock crossed a minute
     bad "the guard refused a complete backup (exit $st1)"
     printf '        %s\n' "$(printf '%s' "$out1" | tr '\n' ' ')"
   fi
+  # The line changed with #643 and the claim in it got stronger. It used to
+  # say the two files were PRESENT; presence is not the property that matters,
+  # because a copy taken from a live database exists and may not open. It now
+  # reports that the copy was opened. Pinned here for the same reason the old
+  # line was: rewording it is a reviewable act, not an accident.
   case "$out1" in
-    *"backup verified: database and secret.key both present"*)
-      ok "and it names the two files it verified rather than saying \"done\"" ;;
-    *) bad "the success line no longer names what it checked" ;;
+    *"backup verified: it opens"*)
+      ok "and the success line claims the copy was OPENED, not merely that two files exist" ;;
+    *) bad "the success line no longer says the backup was opened" ;;
   esac
 
   # The reported path is the operator's only way back. It has to be real.
@@ -295,6 +363,8 @@ happy_path_then_a_second_run() { # <root> -> 2 if the clock crossed a minute
     && ok "one run, one backup" \
     || bad "two runs left $(backups_under "$root") backup directories"
 }
+
+a_backup_that_exists_but_will_not_open "$work/unopenable"
 
 tries=0
 while :; do
@@ -322,6 +392,26 @@ case "${1:-}" in
       ls)      echo "DRIVER  VOLUME NAME"; echo "local   some-other-volume"; exit 0 ;;
     esac ;;
   run)
+    # TWO shapes now. The second one is the backup check added for #643:
+    #   docker run --rm -v DIR:/backup:ro IMAGE -verify-backup /backup
+    # It is matched first because both carry a /backup path and the tar branch
+    # below would otherwise swallow it and archive nothing.
+    for a in "$@"; do
+      if [ "$a" = "-verify-backup" ]; then
+        # The unpacked copy is the host directory bound at /backup:ro.
+        mount=""
+        for m in "$@"; do case "$m" in *:/backup:ro) mount="${m%%:/backup:ro}" ;; esac; done
+        [ -n "$mount" ] || { echo "stub docker: no :/backup:ro mount in: $*" >&2; exit 1; }
+        [ -f "$mount/polyemesis.db" ] || { echo "stub: no polyemesis.db in the archive" >&2; exit 1; }
+        [ -f "$mount/secret.key" ]    || { echo "stub: no secret.key in the archive" >&2; exit 1; }
+        case "$(head -c 15 "$mount/polyemesis.db" 2>/dev/null)" in
+          "SQLite format 3") ;;
+          *) echo "stub: the archived polyemesis.db is not a SQLite database" >&2; exit 1 ;;
+        esac
+        echo "backup opens, passes integrity_check and holds this server's schema"
+        exit 0
+      fi
+    done
     # ... -v polyemesis-data:/data -v DIR:/backup alpine tar czf /backup/NAME -C /data .
     archive=""
     for a in "$@"; do case "$a" in /backup/*) archive="${a#/backup/}" ;; esac; done
@@ -369,7 +459,7 @@ check_refusal "an empty volume is refused" "$st" "$out" "archive is empty"
 rm -f "$docker_dir"/backup-*.tar.gz
 
 vol="$work/vol-nokey"; mkdir -p "$vol"
-printf 'sqlite\n' > "$vol/polyemesis.db"
+printf 'SQLite format 3\000' > "$vol/polyemesis.db"
 out="$(run_docker_update "$docker_dir" "$vol")"; st=$?
 check_refusal "an archive with a database but NO secret.key is refused" "$st" "$out" "no secret.key"
 case "$out" in
@@ -380,7 +470,7 @@ esac
 rm -f "$docker_dir"/backup-*.tar.gz
 
 vol="$work/vol-ok"; mkdir -p "$vol"
-printf 'sqlite\n' > "$vol/polyemesis.db"
+printf 'SQLite format 3\000' > "$vol/polyemesis.db"
 printf 'key\n'    > "$vol/secret.key"
 out="$(run_docker_update "$docker_dir" "$vol")"; st=$?
 if [ "$st" -eq 0 ]; then
