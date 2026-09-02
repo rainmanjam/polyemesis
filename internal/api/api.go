@@ -694,9 +694,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 		r.Get("/setup", s.handleSetupStatus)
 		r.Post("/setup", s.handleSetup)
 		r.Post("/auth/login", s.handleLogin)
-		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		})
+		// Not a constant any more; see handleHealth for what it now measures
+		// and why only some of it can answer 503.
+		r.Get("/health", s.handleHealth)
 		// Sessionless on purpose: in selfsigned mode the browser will not let
 		// the user reach the login form until this CA is installed. See
 		// handleDownloadCA for the full argument.
