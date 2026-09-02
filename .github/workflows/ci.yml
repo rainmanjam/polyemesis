@@ -367,6 +367,36 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: GOOS=windows go vet ./...
 
+      # EVERY SHELL SCRIPT PARSES, which was true of none of them as far as CI
+      # was concerned.
+      #
+      # This repository has 44 files under scripts/*.sh and 25 of them are
+      # acceptance suites that run only in the acceptance matrix, on dispatch,
+      # or not at all. scripts/acceptance-multistream.sh is the extreme case:
+      # 70 KB, run NOWHERE in CI by deliberate decision (docs/TESTING.md
+      # explains it -- with credentials it publishes to a real account), and yet
+      # three Go tests cite its behaviour as the thing they are keeping in step
+      # with. A syntax error in it would have been found by whoever next ran it
+      # by hand, which is a schedule nobody controls.
+      #
+      # `bash -n` is the cheapest possible half of that: it parses without
+      # executing, so it needs no FFmpeg, no ports, no credentials and no
+      # network, and the whole directory finishes in well under a second. It
+      # cannot tell you the script is CORRECT -- only that it is not garbage --
+      # and that is exactly the class of breakage an unrun script accumulates,
+      # because nothing else looks at it at all.
+      #
+      # release.yml already did this for two scripts by name. Naming scripts is
+      # how you end up covering the two somebody remembered; the glob covers the
+      # ones nobody did.
+      #
+      # `make sh-syntax` rather than an inline loop, so `make check` runs the
+      # same thing -- see internal/testenv/checkparity_invocation_test.go.
+      - name: Every shell script parses
+        if: needs.changes.outputs.code == 'true'
+        timeout-minutes: 2
+        run: make sh-syntax
+
       # THE PREFLIGHT'S OWN LIVENESS, and it runs HERE because it was not
       # running anywhere.
       #

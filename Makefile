@@ -204,6 +204,37 @@ fmtcheck: ## Fail if any Go source needs formatting (what CI actually gates on)
 lint: $(UI_DIR)/node_modules ## Lint the frontend
 	cd $(UI_DIR) && npm run lint
 
+# THE SCRIPTS NOTHING RUNS STILL HAVE TO PARSE.
+#
+# 44 files under scripts/, and 25 of them are acceptance suites that run only in
+# the acceptance matrix, on dispatch, or not at all.
+# scripts/acceptance-multistream.sh is 70 KB, runs NOWHERE in CI on purpose --
+# with credentials it publishes to a real account, which docs/TESTING.md
+# explains -- and three Go tests nonetheless cite its behaviour as the thing
+# they are keeping in step with. Nothing parsed it. A syntax error would have
+# been found by whoever next ran it by hand, on a schedule nobody controls.
+#
+# `bash -n` parses without executing: no FFmpeg, no ports, no credentials, no
+# network, under a second for the whole directory. It cannot say a script is
+# CORRECT, only that it is not garbage -- which is the class of breakage an
+# unrun script accumulates, because nothing else looks at it at all.
+#
+# GLOBBED, NOT LISTED. release.yml already did this for install.sh and
+# acceptance-install.sh by name, and naming scripts is how you cover the two
+# somebody remembered.
+.PHONY: sh-syntax
+sh-syntax: ## bash -n every scripts/*.sh, including the ones nothing runs
+	@n=0; for f in scripts/*.sh scripts/*/*.sh; do \
+	  [ -e "$$f" ] || continue; \
+	  bash -n "$$f" || exit 1; \
+	  n=$$((n+1)); \
+	done; \
+	if [ "$$n" -lt 20 ]; then \
+	  echo "sh-syntax: only $$n scripts parsed; the glob has gone stale and this target is passing having checked almost nothing"; \
+	  exit 1; \
+	fi; \
+	echo "sh-syntax: $$n shell scripts parse"
+
 # ------------------------------------------------------------------- gate
 
 # WHICH WORKTREE AM I IN. This repository has seventeen git worktrees, and a
@@ -282,7 +313,7 @@ endif
 # reported 22.0% -- and nothing reachable from `check` ran it. The parity guard
 # did not notice because it only ever compared the `ui` job.
 .PHONY: check
-check: fmtcheck vet test coverage-instrument-guard typecheck lint ui-test ui ## gofmt, both vets, CI's go test, the coverage probe, tsc, oxlint, vitest, ui build -- no Docker
+check: fmtcheck vet test coverage-instrument-guard sh-syntax typecheck lint ui-test ui ## gofmt, both vets, CI's go test, the coverage probe, bash -n, tsc, oxlint, vitest, ui build -- no Docker
 
 # NOT IN `check`, ON PURPOSE. Everything above runs on a bare checkout with Go
 # and Node and nothing else, and that property is worth keeping: the moment the

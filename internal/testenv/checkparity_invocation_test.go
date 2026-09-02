@@ -230,6 +230,14 @@ var invocationGoJobGates = []invocationGoJobGate{
 			"~60s. THIS IS THE ONE THE `ui`-only parity guard could not see.",
 	},
 	{
+		name:  "make sh-syntax",
+		re:    regexp.MustCompile(`\bmake sh-syntax\b`),
+		local: regexp.MustCompile(`\bbash -n\b`),
+		costs: "`bash -n` over every scripts/*.sh, including the 25 that run only in the " +
+			"acceptance matrix, on dispatch, or nowhere at all. Without it a syntax error in " +
+			"an unrun script is found by whoever next runs it by hand.",
+	},
+	{
 		name:  "go test",
 		re:    regexp.MustCompile(`\bgo test\b.*\./\.\.\.`),
 		local: regexp.MustCompile(`\bgo test\b.*\./\.\.\.`),
