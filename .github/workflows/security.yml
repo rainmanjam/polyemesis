@@ -180,6 +180,50 @@ jobs:
       # team learns to pass --force.
       - run: npm audit --omit=dev --audit-level=high
 
+  # THE CONTEXT BRANCH PROTECTION ASKS FOR, WHICH THE MATRIX STOPPED PRODUCING.
+  #
+  # `npm-audit` is a required check on main. Splitting the job across ui and web
+  # renamed its checks to `npm-audit (ui)` and `npm-audit (web)`, and no check
+  # called plain `npm-audit` has existed since -- so protection waits on a name
+  # nothing emits, and the pull request is blocked with nothing red on it. That
+  # is the same failure the container shim in ci.yml exists for, arriving a
+  # second time by a different route: a rename, rather than a skip.
+  #
+  # Both routes share a cause worth naming. A job's NAME is part of its
+  # contract with branch protection, and neither the matrix change nor the skip
+  # rule had any way to know that. Nothing in the workflow files records which
+  # names are load-bearing, which is why internal/testenv/required_checks_test.go
+  # now does.
+  #
+  # if: always() because the point is to report a verdict, and a matrix that
+  # failed still needs one -- without it this job would itself be skipped and
+  # the required context would go missing exactly when something is wrong.
+  npm-audit-result:
+    name: npm-audit
+    needs: npm-audit
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report the matrix's verdict
+        env:
+          RESULT: ${{ needs.npm-audit.result }}
+        run: |
+          set -euo pipefail
+          echo "npm-audit matrix: $RESULT"
+          case "$RESULT" in
+            success) exit 0 ;;
+            skipped)
+              # Not a pass. The matrix is skipped when a dependency of it was,
+              # and reporting success here would hand protection a green check
+              # for an audit that never ran.
+              echo "::error::the npm-audit matrix did not run, so nothing was audited"
+              exit 1 ;;
+            *)
+              echo "::error::npm-audit failed for at least one project; see the npm-audit (ui) and npm-audit (web) checks"
+              exit 1 ;;
+          esac
+
   # Committed credentials, across the full history.
   #
   # A pinned binary rather than gitleaks/gitleaks-action@v2, for two reasons
