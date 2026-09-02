@@ -345,8 +345,11 @@ proves nothing about the container build.
 
 ### `@types/node` tracks the Node the UI is actually built on
 
-Currently `^24.13.3`, matching `FROM node:24-alpine` in the Dockerfile's UI
-stage.
+**They do not agree today.** `ui/package.json` declares `@types/node`
+`^20.19.43` and `ui/package-lock.json` resolves it to `20.19.43`, while all
+three Dockerfiles build the UI on `FROM node:24-alpine`. This is the harmless
+direction — see below — but it is drift, and closing it means moving the pin to
+a `^24.x` that still satisfies Vite 8's peer range.
 
 The rule, which is what matters rather than the number: type definitions should
 describe the runtime you actually have. Declaring Node 26 types while building
@@ -356,7 +359,8 @@ is `node:path` and `__dirname` in `vite.config.ts`. Declaring older types than
 the runtime is the harmless direction, and was the state here while the image
 was on Node 22.
 
-`^24.13.3` satisfies Vite 8's peer range (`^20.19.0 || >=22.12.0`).
+The current `^20.19.43` satisfies Vite 8's peer range (`^20.19.0 || >=22.12.0`),
+which is why nothing complains.
 
 **These two values are supposed to agree.** If you move the Dockerfile's Node,
 move this pin with it — and if you find them disagreeing, the Dockerfile is the

@@ -395,26 +395,40 @@ Note that `e2e/` is Playwright's and is excluded from vitest in
 
 ## 10. Acceptance suites
 
-Sixteen scripts drive the built binary — or the shipped image — through a real
+Seventeen scripts drive the built binary — or the shipped image — through a real
 ingest and assert on what came out the other end. They need `make build` first,
 and they are the only tests that can fail on something the unit tests cannot
 see.
 
-Against the host binary:
+The list below is derived from `.github/workflows/ci.yml`. Its `acceptance` job
+runs **thirteen** of them as a matrix, and every leg is a required status check
+in the branch-protection ruleset, so adding or removing one here without adding
+or removing it there is how this list goes stale. `acceptance-multistream.sh` is
+the one host-binary suite that is *not* in that matrix, for the reason given
+below it.
+
+Against the host binary. These thirteen are the `acceptance` matrix in
+`ci.yml`, in the order that file lists them:
 
 ```bash
 ./scripts/acceptance.sh              # per-destination audio routing, by measurement
 ./scripts/acceptance-audio.sh        # per-track RMS through a bandpass
 ./scripts/acceptance-renditions.sh   # one shared encode serving two destinations
 ./scripts/acceptance-ladder.sh       # three tiers at once: N encodes, ref-counted up and down
-./scripts/acceptance-tls.sh          # every TLS mode, including the old configs
 ./scripts/acceptance-encoders.sh     # hardware-encoder detection
-./scripts/acceptance-failover.sh     # a source switch without restarting a destination
-./scripts/acceptance-synth.sh        # the silence tier and the standby slate
+./scripts/acceptance-tls.sh          # every TLS mode, including the old configs
 ./scripts/acceptance-pull.sh         # dial-out ingest
 ./scripts/acceptance-playlist-phase0.sh  # scheduled file broadcast, no encoder
+./scripts/acceptance-synth.sh        # the silence tier and the standby slate
+./scripts/acceptance-failover.sh     # a source switch without restarting a destination
 ./scripts/acceptance-postprod.sh     # recording, jobs, retention
+./scripts/acceptance-recording-stop.sh  # a recording finalised on SIGTERM, not truncated
 ./scripts/acceptance-mqtt.sh         # retained telemetry, against a real broker
+```
+
+And one that is deliberately not in the matrix:
+
+```bash
 ./scripts/acceptance-multistream.sh  # one source to four platforms, each with its own mix
 ```
 
@@ -468,8 +482,12 @@ carries its secret in the path), so it comes from the environment only and
 nothing derived from it is ever printed — not the URL, not the host, not the
 endpoint's reply.
 
-Against the shipped container — these build the image and are the ones CI runs
-only on `main` and on a schedule:
+Against the shipped container — these build the image, so `ci.yml`'s
+`which container suites` job picks which of them a run gets
+(`.github/workflows/ci.yml:1667-1757`). All three on `main` and on the weekly
+schedule, and on a pull request that changes one of these three scripts or a
+`scripts/lib-*.sh` they source; `acceptance-browser` alone on a pull request
+that touches `ui/` or `ci.yml`; none on any other pull request:
 
 ```bash
 ./scripts/acceptance-docker.sh       # routing, passthrough, persistence

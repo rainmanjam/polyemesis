@@ -173,9 +173,18 @@ do not reach polyemesis's own MIT-licensed code.
 | Image | Base | FFmpeg | Platforms |
 |---|---|---|---|
 | `Dockerfile` (default) | `alpine:3.24` | pinned `8.1.2-r0` | linux/amd64, linux/arm64 |
-| `Dockerfile.cuda` | `nvidia/cuda:12.6.3-base-ubuntu24.04` | pinned | linux/amd64 |
-| `Dockerfile.vaapi` | `ubuntu:24.04` | pinned | linux/amd64 |
-| build stages | `golang:1.26-alpine`, `node:24-alpine` | — | cross-compiled from `$BUILDPLATFORM` |
+| `Dockerfile.cuda` | `nvidia/cuda:12.6.3-base-ubuntu24.04` | pinned `7:6.1.1-3ubuntu5` | linux/amd64 |
+| `Dockerfile.vaapi` | `ubuntu:26.04` | pinned `7:8.0.1-3ubuntu2` | linux/amd64 |
+| build stages | `golang:1.27-alpine`, `node:24-alpine` | — | cross-compiled from `$BUILDPLATFORM` |
+
+> **The CUDA image is the one below the Enhanced RTMP floor.** Its base is
+> Ubuntu 24.04, whose stock FFmpeg is 6.1.1, and multitrack FLV demuxing landed
+> in FFmpeg **7.1** — so Enhanced RTMP multitrack ingest, which
+> [OBS.md](OBS.md), [FAQ.md](FAQ.md), [CONFIGURATION.md](CONFIGURATION.md) and
+> the README all describe as working on 7.1+, does **not** work in this image.
+> The default Alpine image (8.1.2) and the VA-API image (8.0.1) are both above
+> the floor. NVENC is what `Dockerfile.cuda` is for; if you also need multitrack
+> RTMP ingest, do not use it.
 
 Runtime packages: `ffmpeg` (pinned exactly), `ca-certificates`, `tzdata`; plus
 `intel-media-va-driver`, `i965-va-driver` and `mesa-va-drivers` in the VA-API
