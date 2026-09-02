@@ -218,7 +218,7 @@ export function PlayoutPage() {
       )}
 
       <div className="grid gap-3 lg:grid-cols-2">
-        <ShareCard view={view} play={play} busy={busy} onRotate={() => void rotate()} />
+        <ShareCard view={view} play={play} busy={busy} onRotate={rotate} />
 
         <Card>
           <CardHeader>
@@ -439,7 +439,8 @@ function CopyField({
   );
 }
 
-function ShareCard({
+/** Exported for its test, like VariantsCard below. */
+export function ShareCard({
   view,
   play,
   busy,
@@ -448,10 +449,24 @@ function ShareCard({
   view: PlayoutAdminView;
   play: PlayoutSettings;
   busy: boolean;
-  onRotate: () => void;
+  /** Awaited, so the dialog stays up until the rotation has actually landed
+   *  rather than closing over a request still in flight. */
+  onRotate: () => Promise<void>;
 }) {
   const t = useT();
   const protectedLink = play.public && view.protection === "token";
+  /* ONE CLICK ROTATED THE TOKEN. Every link already shared stopped working and
+   * every viewer currently pulling segments was dropped, on a single
+   * unconfirmed press of a ghost button -- on a page whose ladder rungs, which
+   * are three fields to rebuild, ask first and name the viewers. The sentence
+   * under the button said what it did; it said it BEFORE, to somebody who had
+   * already decided to click, which is the one moment prose does not reach.
+   *
+   * The old token cannot be brought back, so there is nothing to undo to. It
+   * goes through the same dialog every other destructive action here uses, and
+   * the dialog names the number that makes it a decision. */
+  const [rotateOpen, setRotateOpen] = useState(false);
+  const viewers = view.status.analytics.viewers;
   return (
     <Card>
       <CardHeader>
@@ -495,14 +510,36 @@ function ShareCard({
         </div>
         {protectedLink && (
           <div>
-            <Button variant="ghost" size="sm" disabled={busy} onClick={onRotate}>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => setRotateOpen(true)}
+            >
               <KeyRound />
-              Generate a new link
+              {t("play.rotate")}
             </Button>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              Immediately stops every link already shared. This is how you revoke
-              access.
+              {t("play.rotateHint")}
             </p>
+            <ConfirmDestructive
+              open={rotateOpen}
+              onOpenChange={setRotateOpen}
+              subject={t("play.rotate")}
+              title={t("play.rotateTitle")}
+              description={t("play.rotateDescription")}
+              consequencesLabel={t("play.rotateDrops")}
+              // Only when somebody is actually watching. A row reading 0 says
+              // "this does nothing", and that is false -- every shared link
+              // dies whether or not a player is pulling segments right now.
+              consequences={
+                viewers > 0
+                  ? [{ label: t("play.watching"), count: viewers }]
+                  : undefined
+              }
+              confirmLabel={t("play.rotate")}
+              onConfirm={onRotate}
+            />
           </div>
         )}
       </CardContent>

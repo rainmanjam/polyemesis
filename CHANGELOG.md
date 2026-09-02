@@ -8,6 +8,88 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Security
+
+- **The server no longer listens on every interface in the clear by default.**
+  With no `config.yaml` and no `--addr`, the default is now `127.0.0.1:8080`.
+  An explicit address still binds where it is told, with the existing warning.
+  Every shipped launch path — the systemd unit, `install.sh`, all three
+  Dockerfiles and `config.example.yaml` — passes an address explicitly and is
+  unaffected.
+- **Pull-source URLs go through the same address guard as webhooks.** They were
+  scheme-checked only, so a pull of `http://169.254.169.254/` was dialled.
+  Loopback and link-local are now refused. **Cost:** pulling from a service on
+  the same box is refused with no per-source opt-in yet; LAN and RFC1918
+  sources are still allowed. **Bound, and stated in code:** literal addresses
+  only — FFmpeg resolves its own names, so a hostname pointing at a private
+  address still passes.
+- **HTTP and HLS pulls carry `-protocol_whitelist`** without `file`. Defence in
+  depth: measured on FFmpeg 9.0.1, the local-file read the audit suspected did
+  **not** reproduce — the refusal was already FFmpeg's default. This makes it
+  ours rather than a dependency's.
+- **Changing the admin password can revoke API tokens, and always says what
+  survived.** The password change killed sessions and left `api_tokens`
+  untouched, so a leaked admin token outlived the operator's incident-response
+  gesture. Revocation is opt-in because a password change cannot tell a routine
+  rotation from a compromise; the disclosure is unconditional.
+- **`POST /setup` is throttled** per address, on its own counter, so first boot
+  is no longer an unlimited race.
+
+### Fixed
+
+- **A data race between clip planning and encoder re-detection.**
+  `internal/api/clips.go` read `tools.HWEncoders` unlocked while
+  `RefreshEncoderCapabilities` rewrote it — a read the neighbouring
+  `renditions.go` documents as unsafe and avoids.
+- **`/api/v1/health` reports something that can be false.** It was a constant
+  three mechanisms treated as proof. It now reads a real database page, checks
+  the engine, and reports the recording floor. A halted recorder is `degraded`
+  with 200, not 503: a restart adds no disk and would drop live video.
+  **Behaviour change:** an install with sources and no engine now fails its
+  container HEALTHCHECK where it used to pass.
+- **A restored data directory with no `secret.key` no longer mints one
+  silently.** Boot now names how many destinations cannot be read and why.
+- **The Start/Stop flip guard never lifted itself** — it armed for elapsed
+  rather than remaining time, and its test was green only because fake timers
+  advanced the clock before React flushed.
+- **A held stop is no longer discarded on unmount**; leaving the page now sends
+  the stop it owed.
+- **The one confirmation dialog fronting every destructive action was
+  untranslated.** Four English literals `i18n.test.ts` structurally could not
+  see are now keys in all 15 catalogues.
+- **Clips and Recordings claimed "none" for reads that failed** — the exact
+  bug `lib/readState.ts` exists to forbid.
+- **Playout link rotation and clip-history purge now confirm before acting**,
+  naming the viewers dropped and the files deleted.
+- **`update.sh` refuses to restart a container that is publishing**, matching
+  the guard `uninstall.sh` already had. Docker installs also gained log
+  rotation.
+- **The generated helper scripts no longer splice an empty compose command into
+  command position** (#658), and backticks in a generated comment no longer
+  execute at write time.
+
+### Changed
+
+- **`make check` runs what CI runs** — `POLYEMESIS_LEDGER=strict`, `-race`, and
+  the Windows vet leg — and its parity guard compares the invocation rather
+  than a substring. **Cost:** the local loop goes from about four minutes to
+  about twenty-five, and needs a C toolchain.
+- **Lint can fail the build.** `react-hooks/exhaustive-deps` and
+  `no-unused-vars` are errors; the three violations that surfaced are fixed
+  with no suppressions.
+- **SonarCloud waits for its quality gate**, `web/`'s lockfile is watched by
+  dependabot and audited, every shell script is parsed by `make sh-syntax`, and
+  the installer suite refuses to report PASS when a step did not run (#657).
+- **The website says what the server actually does.** Platform figures are
+  recommendations, not enforced ceilings — and the build now asserts them
+  against `internal/db/platforms.go`, so the page cannot drift from the code.
+  A stale "YouTube is capped at 3 destinations" warning that fired with no
+  YouTube selected is gone.
+- **Eight documentation contradictions corrected**, including `UPGRADING.md`
+  telling an operator mid-migration that a CI-tested feature does not work, and
+  `MODULES.md` naming a base image and Go version no Dockerfile uses.
+
+
 ### Added
 
 - **The meters page says when tracks are not being metered, and which programme
@@ -50,6 +132,90 @@ its first tagged release.
 
 ### Fixed
 
+- **A `--config` path that did not exist booted a different, empty install.**
+  `config.Load` returned defaults on a missing file, which is right for the
+  implicit `config.yaml` and wrong for a path the operator typed: a typo
+  created `./data`, minted a **new `secret.key`**, opened an empty database,
+  bound `:8080` in the clear and reopened unauthenticated `POST /setup` — the
+  window `-reset-admin` exists to close — while looking healthy. An explicit
+  `--config` that is absent now refuses to start, naming the path; the
+  implicit default still defaults. (#644)
+- **Login throttling could be bypassed behind the reverse proxy the docs tell
+  you to deploy.** `deploy/nginx.conf.example` shipped
+  `$proxy_add_x_forwarded_for`, which appends to whatever the client sent, and
+  the server read the *leftmost* `X-Forwarded-For` hop — the client's own bytes.
+  Rotating that header minted a fresh throttle key per request, so the
+  5-attempt policy never fired: unlimited online guessing at the single admin
+  password, with attacker-chosen addresses in the audit log. The server now
+  reads the **rightmost** hop, the one the proxy appended, which is correct
+  whether a proxy appends or overwrites; the shipped nginx example overwrites.
+  A chain of several trusted proxies now keys everyone behind the last one
+  together, which throttles too much rather than too little. (#647)
+- **The documentation-drift guards never ran on the pull requests that drift
+  the documentation.** The guards are Go tests — `platforms_doc_drift_test.go`
+  reads `docs/PLATFORMS.md`, `api_docs_route_table_test.go` reads
+  `docs/API.md` — and every Go step in CI is gated on the change touching
+  code, so a documentation-only pull request ran none of them and reported
+  green as "did no work". That is how `docs/UPGRADING.md` came to tell an
+  operator, mid-migration, that a CI-tested feature does not work, and how
+  `docs/MODULES.md` came to name a base image and a Go version no Dockerfile
+  uses. The docs-only path now discovers the packages whose tests read
+  `docs/*.md` and runs them; it costs seconds, because those tests read
+  markdown and need no ffmpeg, database or network. It also counts what ran
+  and fails on a low count, since `go test -run` matching nothing exits 0.
+  (#651)
+- **Shutdown had no single deadline, so a stop could outlast the one systemd
+  waits for.** `TimeoutStopSec=45` sat above four budgets chosen separately and
+  added together by the order they ran in: 20s for the HTTP servers, 5s for the
+  lifecycle drain, then **30 seconds per engine, stopped one after another**,
+  plus a captioner wait that took no context at all. On a two-programme install
+  one wedged child passed 45s without anything in the process believing it had
+  overrun; systemd then SIGKILLed the cgroup, and a recorder killed mid-write
+  leaves a Matroska file with no trailer at exactly the size a reader would
+  call plausible. The process now has one budget
+  (`engine.ShutdownBudget`, 35s) that every phase draws from, engines are
+  stopped concurrently so sharing a deadline does not mean dividing it, and
+  running out of it is logged rather than left to systemd to reveal. A test
+  pins the budget below the `TimeoutStopSec` in both the shipped unit and the
+  one `install.sh` writes. (#645)
+- **The console resolved its programme once per page load.** `/sources` was
+  read in an effect that never re-ran, so creating a second source during
+  first-run setup — or deleting the one being followed — left the whole
+  console pointed at a stale answer until someone reloaded: Meters read "NOT
+  UPDATING", Monitoring's process list died, Clips showed "No clips yet.", all
+  against a healthy server. Every one of those is a plausible idle state,
+  which is why it was never reported as a bug. The Sources page now asks for a
+  re-resolve after a create or delete, and the provider re-resolves on its own
+  when the status socket names a programme it has not seen — which covers the
+  changes made in another tab, by another operator, or straight through the
+  API. An operator already on a programme that still exists stays on it.
+  (#646)
+- **`install.sh --tls acme` uninstalled the working server it had just
+  installed.** `verify()` probed `https://127.0.0.1:PORT` with `-k` in every
+  TLS mode. That connection carries no SNI, and the ACME path sets only
+  `GetCertificate` — no `Certificates` fallback, unlike selfsigned, whose leaf
+  carries `127.0.0.1` — so autocert had no name to look up and the handshake
+  aborted before any HTTP happened. `-k` skips *verifying* a certificate; it
+  cannot invent one. `verify()` then returned 1 before `INSTALL_COMPLETE` was
+  set, and the EXIT trap disabled the unit, removed the binary,
+  `/etc/polyemesis`, `/opt/polyemesis` and the service account, then printed
+  that nothing was left running. In acme mode the installer now asks the
+  question that has an answer on loopback — the `:80` redirect listener acme
+  mode binds — and the failure trap refuses to remove a service that is
+  `active`, saying so and pointing at `uninstall.sh`. (#642)
+- **`update.sh` backed up a live database and never checked the copy opened.**
+  Both generated scripts copied the data directory while the server was still
+  running — `cp -a` for binary installs, `docker run … tar czf` for compose —
+  and stopped the service afterwards. The guard checked that `polyemesis.db`
+  and `secret.key` *existed*, then printed "backup verified". Migrations run
+  forward only, so that copy is the only way back from an upgrade, and every
+  way it can exist without being usable leaves a file of plausible size. Both
+  scripts now stop the service **before** copying, and the copy is opened,
+  walked with `integrity_check` and checked for this server's schema by the
+  installed binary itself (`polyemesis -verify-backup`), which runs no
+  migration. The binary install also keeps the running executable as
+  `polyemesis.previous`, since the rollback instructions said "reinstall the
+  previous binary" without keeping one. (#643)
 - **The console printed credentials as readable text in five places.** The
   Sources page showed the publish token twice — once as `STREAMKEY`, once as
   `TOKEN` — in plain text on the page an operator opens while someone is

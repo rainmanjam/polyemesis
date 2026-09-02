@@ -23,6 +23,14 @@ import { autoApi } from "@/lib/autoApi";
 import { keyframeVerdict, windowOnBufferToggle } from "@/lib/clipBufferFacts";
 import { bytes, timestamp } from "@/lib/format";
 import { useT } from "@/lib/i18n";
+import {
+  failedRead,
+  mayClaim,
+  okRead,
+  pendingRead,
+  readFailed,
+  type ReadState,
+} from "@/lib/readState";
 import { useLiveData } from "@/hooks/useLiveData";
 
 interface Clip {
@@ -88,8 +96,13 @@ export function ClipsPage() {
   // Which programme a captured clip belongs to. POST /clips and PUT
   // /clips/buffer are refused without it on any install with two.
   const { programme, programmeKnown } = useLiveData();
-  const [view, setView] = useState<ClipsView | null>(null);
-  const [loading, setLoading] = useState(true);
+  /* A READ, NOT A NULLABLE VIEW. `view: ClipsView | null` stored a failed GET
+   * as the same value as a page that had not answered yet, and `loading` went
+   * false either way -- so a 500 on /clips drew "No clips yet." over a machine
+   * that may well have had clips on it. That sentence is a positive claim: it
+   * says the server answered and there is nothing there. See lib/readState.ts,
+   * which exists to make exactly this unwriteable. */
+  const [read, setRead] = useState<ReadState<ClipsView>>(pendingRead);
   const [capturing, setCapturing] = useState(false);
   const [windowSec, setWindow] = useState(60);
   const [custom, setCustom] = useState(20);
@@ -99,13 +112,17 @@ export function ClipsPage() {
       autoApi
         .listClips<ClipsView>(programme)
         .then((v) => {
-          setView(v);
+          setRead(okRead(v));
           if (v.buffer.buffer) setWindow(Math.round(v.buffer.buffer.windowSeconds));
         })
         .catch((err) => {
+          // The toast is still suppressed on a background poll -- a red toast
+          // every three seconds is its own fault report -- but the STATE is
+          // recorded either way. Silencing the notification is a choice about
+          // noise; silencing the fact was the bug.
+          setRead(failedRead());
           if (!quiet) toast.error(errText(err, t("clips.couldNotLoadClips")));
-        })
-        .finally(() => setLoading(false)),
+        }),
     // programme, because listClips is scoped and this callback closes over it.
     // Omitted, it froze at the mount value -- null -- and every poll went out
     // unscoped and took a 400 on any install with two programmes. See the same
@@ -125,6 +142,8 @@ export function ClipsPage() {
     return () => window.clearInterval(t);
   }, [load]);
 
+  const view = mayClaim(read) ? read.value : null;
+  const failed = readFailed(read);
   const buffer = view?.buffer;
   const stats = buffer?.buffer ?? null;
   const clips = view?.clips ?? [];
@@ -152,7 +171,7 @@ export function ClipsPage() {
         { enabled, windowSeconds },
         programme,
       );
-      setView((v) => (v ? { ...v, buffer: st } : v));
+      setRead((r) => (mayClaim(r) ? okRead({ ...r.value, buffer: st }) : r));
       await load(true);
     } catch (err) {
       toast.error(errText(err, t("clips.couldNotChangeTheClip")));
@@ -264,13 +283,17 @@ export function ClipsPage() {
               <CardTitle>{t("clips.captured")}</CardTitle>
             </CardHeader>
             <CardContent className="px-0 pb-0">
-              {loading ? (
+              {failed ? (
+                <div className="px-3 py-8 text-center text-[12px] text-warn">
+                  {t("clips.listUnread")}
+                </div>
+              ) : !mayClaim(read) ? (
                 <div className="flex justify-center py-8">
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 </div>
               ) : clips.length === 0 ? (
                 <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
-                  No clips yet.
+                  {t("clips.noneYet")}
                 </div>
               ) : (
                 <Table>

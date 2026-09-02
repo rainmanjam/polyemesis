@@ -1,0 +1,55 @@
+# THE CHECK NAMES BRANCH PROTECTION REQUIRES ON main.
+#
+# This file is a MIRROR of a setting that lives on GitHub, not the setting
+# itself. It exists because the setting is invisible from inside the repository:
+# nothing in .github/workflows records which job names are load-bearing, so a
+# rename or a skip rule can remove a required check with no local signal at all.
+#
+# What that cost, on 2026-09-02: pull requests #650, #656 and #659 were all
+# unmergeable at once, #659 with forty of forty checks green and nothing red
+# anywhere. Three separate causes, none of them visible in a diff:
+#
+#   - `container: acceptance-docker` and `container: acceptance-multisource`
+#     are deliberately not run on most pull requests, and a skipped job reports
+#     nothing rather than success.
+#   - `npm-audit` was split into a ui/web matrix, which renamed its checks to
+#     `npm-audit (ui)` and `npm-audit (web)`; no check by the required name has
+#     existed since.
+#
+# internal/testenv/required_checks_test.go asserts every name below is one some
+# workflow job can actually emit. It cannot read the GitHub setting, so it
+# cannot tell you this file has drifted from it -- it can only tell you the
+# workflows stopped being able to satisfy what this file claims. That is the
+# direction the failure came from all three times.
+#
+# WHEN YOU CHANGE BRANCH PROTECTION, CHANGE THIS FILE IN THE SAME COMMIT.
+# Recover the live list with:
+#   gh api repos/rainmanjam/polyemesis/branches/main/protection \
+#     --jq '.required_status_checks.contexts[]' | sort
+acceptance: acceptance
+acceptance: acceptance-audio
+acceptance: acceptance-encoders
+acceptance: acceptance-failover
+acceptance: acceptance-ladder
+acceptance: acceptance-mqtt
+acceptance: acceptance-playlist-phase0
+acceptance: acceptance-postprod
+acceptance: acceptance-pull
+acceptance: acceptance-recording-stop
+acceptance: acceptance-renditions
+acceptance: acceptance-synth
+acceptance: acceptance-tls
+container: acceptance-browser
+container: acceptance-docker
+container: acceptance-multisource
+cross-compile all release targets
+gitleaks
+go build, vet, test
+govulncheck
+npm-audit
+semgrep
+test: macos-latest
+test: ubuntu-latest
+test: windows-latest
+ui typecheck, lint, build
+which container suites

@@ -201,8 +201,13 @@ func TestLoadWithNoFileDefaultsToTLSOff(t *testing.T) {
 	if cfg.TLS.Mode != ModeOff {
 		t.Errorf("mode = %q, want %q", cfg.TLS.Mode, ModeOff)
 	}
-	if cfg.Addr != ":8080" || cfg.DataDir != "./data" {
-		t.Errorf("defaults = %q/%q", cfg.Addr, cfg.DataDir)
+	// Loopback, not ":8080": the do-nothing configuration must not put a
+	// plaintext login form on every interface. See DefaultAddr.
+	if cfg.Addr != DefaultAddr || cfg.DataDir != "./data" {
+		t.Errorf("defaults = %q/%q, want %q/%q", cfg.Addr, cfg.DataDir, DefaultAddr, "./data")
+	}
+	if !cfg.AddrDefaulted {
+		t.Error("AddrDefaulted is false after loading nothing at all")
 	}
 }
 

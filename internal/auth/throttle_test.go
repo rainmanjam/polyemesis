@@ -162,11 +162,21 @@ func TestClientIPTrustsForwardedHeadersOnlyWhenConfiguredTo(t *testing.T) {
 			want:       "198.51.100.7",
 		},
 		{
-			name:       "leftmost entry of a chain is the client",
+			// RIGHTMOST. The leftmost half of this header is whatever the
+			// client sent; the rightmost is what the trusted proxy appended.
+			// See the bypass described on ClientIP. #647.
+			name:       "rightmost entry is the hop the proxy appended",
 			trustProxy: true,
 			remoteAddr: "10.0.0.1:51000",
 			headers:    map[string]string{"X-Forwarded-For": " 198.51.100.7 , 10.0.0.5 "},
-			want:       "198.51.100.7",
+			want:       "10.0.0.5",
+		},
+		{
+			name:       "a trailing comma falls back to the socket, never to the client half",
+			trustProxy: true,
+			remoteAddr: "10.0.0.1:51000",
+			headers:    map[string]string{"X-Forwarded-For": "198.51.100.7,"},
+			want:       "10.0.0.1",
 		},
 		{
 			name:       "X-Real-IP is the fallback",

@@ -34,6 +34,24 @@ updates:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
 
+  # web/, THE DOCUMENTATION SITE, WHICH WAS NOT HERE. Its package-lock.json is
+  # 342 KB and nothing watched it: not this file, not the npm-audit job in
+  # security.yml, which named ui/ alone. A static site does not ship its
+  # dependencies to a server, but it does build on a runner, which is the path
+  # that matters.
+  #
+  # Ungrouped on purpose. ui/ groups Radix because fourteen packages move
+  # together there; web/ has no such family, and inventing a group for a handful
+  # of build-time packages would only hide which one changed.
+  - package-ecosystem: npm
+    directory: "/web"
+    schedule: { interval: weekly, day: monday }
+    open-pull-requests-limit: 5
+    groups:
+      dev-tooling:
+        dependency-type: development
+        update-types: [minor, patch]
+
   # The actions are pinned by major tag; this is what notices a v7 -> v8.
   - package-ecosystem: github-actions
     directory: "/"

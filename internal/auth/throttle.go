@@ -177,21 +177,49 @@ func (t *Throttle) evictLocked(now time.Time) {
 // X-Forwarded-For is honoured only when the operator has declared a proxy in
 // front of us; otherwise any client could mint a fresh key per request and
 // walk straight past the throttle.
+//
+// RIGHTMOST, NOT LEFTMOST, AND THAT WAS A REAL BYPASS. This used to take the
+// leftmost entry on the premise that trustProxyHeaders asserts the proxy
+// REWRITES the header. Our own deploy/nginx.conf.example did not: it shipped
+// $proxy_add_x_forwarded_for, which APPENDS to whatever the client sent, and
+// both SECURITY.md and docs/INSTALL.md tell the operator to turn
+// trustProxyHeaders on. So on the documented deployment the leftmost entry was
+// attacker-supplied: rotate it and every request gets a fresh throttle key,
+// which is unlimited online guessing at the one admin password, with
+// attacker-chosen addresses in the audit log to match.
+//
+// The rightmost entry is the hop the trusted proxy appended -- the address it
+// actually saw -- so this is correct whether the proxy appends or overwrites,
+// including proxy configurations we do not ship. The cost is a chain of
+// several trusted proxies, where the rightmost is the previous proxy rather
+// than the client: everyone behind it then shares one key, which throttles too
+// much rather than too little. That is the direction a mistake here should
+// point, and the fix for it is a trusted-hop count rather than trusting the
+// client's own bytes. #647.
 func ClientIP(r *http.Request, trustProxy bool) string {
 	if trustProxy {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			// Leftmost is the original client. Trusting it is exactly what
-			// trustProxyHeaders asserts: that the proxy rewrites the header
-			// rather than appending to whatever the client sent.
-			if first, _, ok := strings.Cut(xff, ","); ok {
-				return strings.TrimSpace(first)
+			if i := strings.LastIndexByte(xff, ','); i >= 0 {
+				if last := strings.TrimSpace(xff[i+1:]); last != "" {
+					return last
+				}
+				// A trailing comma means the proxy appended nothing usable;
+				// fall through to the socket rather than to the client's half.
+				return socketHost(r)
 			}
-			return strings.TrimSpace(xff)
+			if only := strings.TrimSpace(xff); only != "" {
+				return only
+			}
 		}
 		if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
 			return ip
 		}
 	}
+	return socketHost(r)
+}
+
+// socketHost is the peer address with its port removed.
+func socketHost(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
