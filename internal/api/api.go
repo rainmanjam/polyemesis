@@ -278,6 +278,14 @@ type Server struct {
 	bus       *events.Broker
 	sessions  *auth.Manager
 	logins    *auth.Throttle
+	// setups throttles POST /api/v1/setup per client address.
+	//
+	// SEPARATE FROM logins, not shared with it. They count different things
+	// about the same address and merging them would let either one lock the
+	// operator out of the other: a first-boot race would spend the login
+	// allowance the admin needs the moment setup succeeds, and a mistyped
+	// password would slow down the one request that creates the account.
+	setups *auth.Throttle
 	// providers is the OAuth provider set every handler resolves through, and
 	// it replaced five function-pointer fields on this struct.
 	//
@@ -609,6 +617,7 @@ func New(o Options) *Server {
 		diagLevel:     o.DiagLevel,
 		startedAt:     time.Now(),
 		logins:        auth.NewThrottle(),
+		setups:        auth.NewThrottle(),
 		kickKeys:      &chat.KickKeyFetcher{},
 		revoked:       map[int64]struct{}{},
 		sessions: auth.New(
@@ -685,9 +694,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 		r.Get("/setup", s.handleSetupStatus)
 		r.Post("/setup", s.handleSetup)
 		r.Post("/auth/login", s.handleLogin)
-		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		})
+		// Not a constant any more; see handleHealth for what it now measures
+		// and why only some of it can answer 503.
+		r.Get("/health", s.handleHealth)
 		// Sessionless on purpose: in selfsigned mode the browser will not let
 		// the user reach the login form until this CA is installed. See
 		// handleDownloadCA for the full argument.

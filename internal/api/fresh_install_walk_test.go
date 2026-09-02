@@ -323,6 +323,16 @@ func assertFreshInstallRefusal(t *testing.T, pair, path string, body []byte) boo
 // noSourceRefusalSites next door is one: there is no `-update-coverage` that
 // can regenerate it, so an entry is a sentence somebody wrote on purpose.
 var freshInstallSubsystemRefusals = map[string]string{
+	"GET /api/v1/health": "this is not a refusal at all -- it is health REPORTING, " +
+		"and reporting a true thing. The walk's fixture is an install with a source " +
+		"and no engine running, which is precisely the state handleHealth exists to " +
+		"stop answering \"ok\" to: nothing is being published. It is NOT given " +
+		"codeNoSource, and it does not carry this API's error shape at all, because " +
+		"it is not an error body -- it is the check document, and the callers that " +
+		"read the 503 are a container healthcheck and a monitor rather than the " +
+		"dashboard. The route the dashboard would draw an empty state from is " +
+		"/setup, which answers 200 with sources:0. See handleHealth for why only the " +
+		"database and the engine can reach 503 and the recording floor cannot.",
 	"POST /api/v1/playout/analytics/reset": "playout is not running, which on an " +
 		"install with no source is permanent rather than incidental -- the playout " +
 		"origin is an engine's. It is NOT given codeNoSource: the same 503 answers on " +

@@ -2057,6 +2057,57 @@ func (d *DB) MigrateStrandedStreamKeys() error {
 	return checkpointTruncate(d)
 }
 
+// UnreadableStreamKeys counts the destinations whose sealed stream key this
+// install's secret key cannot open, and names them.
+//
+// IT EXISTS BECAUSE THE SECRET KEY IS MINTED IN SILENCE. secrets.LoadOrCreate
+// writes a fresh random key whenever the file is absent, which is exactly the
+// state a restored data directory is in when the restore copied
+// polyemesis.db and left secret.key behind -- a tar built with an exclude, an
+// rsync of the wrong subtree, a backup script that only ever knew about the
+// database. Nothing failed. The server boots, the API answers, and every
+// destination whose key was sealed under the OLD secret comes back with a
+// stream key that cannot be decrypted. The restore reads as a success until
+// somebody tries to go live.
+//
+// It is deliberately a measurement of the CONSEQUENCE rather than of the mint.
+// "Was the key file newly created" is a proxy; this is the question the
+// operator actually has, it also catches a key that is present but wrong, and
+// it is silent on the fresh install where a minted key is the correct and
+// unremarkable thing to have happened.
+//
+// A row counts once however many of its two keys are unreadable: the unit is
+// "a destination that will not open", which is what the operator is counting.
+//
+// Cheap enough for boot: one query over a table with tens of rows, and a
+// secretbox open per sealed key.
+func (d *DB) UnreadableStreamKeys() (names []string, err error) {
+	rows, err := d.sql.Query(`SELECT name, stream_key, stream_key_enc,
+		backup_stream_key, backup_stream_key_enc FROM destinations
+		WHERE stream_key_enc IS NOT NULL OR backup_stream_key_enc IS NOT NULL
+		ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("scan destinations for unreadable stream keys: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, key, backup string
+		var keyEnc, backupEnc []byte
+		if err := rows.Scan(&name, &key, &keyEnc, &backup, &backupEnc); err != nil {
+			return nil, fmt.Errorf("scan destinations for unreadable stream keys: %w", err)
+		}
+		_, keyErr := d.openStreamKey(keyEnc, key)
+		_, bakErr := d.openStreamKey(backupEnc, backup)
+		if errors.Is(keyErr, ErrKeyUnreadable) || errors.Is(bakErr, ErrKeyUnreadable) {
+			names = append(names, name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan destinations for unreadable stream keys: %w", err)
+	}
+	return names, nil
+}
+
 // backfillDestinationStreamKeys seals every stream key still sitting in a
 // plaintext column and blanks the column it came out of.
 //

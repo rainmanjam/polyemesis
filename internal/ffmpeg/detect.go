@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -26,6 +27,44 @@ import (
 // stable multi-track MPEG-TS mapping, the modern channel-layout API used by
 // pan/amerge, and `-progress` output that includes the fields we parse.
 const MinMajorVersion = 6
+
+// AssumeMajorEnv lets an operator state the major version of a build whose own
+// -version output does not carry a readable one -- the FFmpeg master nightlies
+// ("N-113518-gd6a4b1e") being the honest case.
+//
+// AN ENV VAR AND NOT A CONFIG KEY, deliberately. This is consulted exactly once,
+// before the database is open and before anything is served, by an operator who
+// is standing at a terminal reading the refusal that named it. A config key
+// would be a permanent, settable, forgettable claim about a binary that gets
+// upgraded underneath it; an env var in a unit file or a shell has to be
+// re-stated by whoever changes the environment.
+//
+// It is a claim, not an override: a value below MinMajorVersion is refused
+// rather than honoured, so it cannot be used to run a build this floor exists
+// to keep out.
+const AssumeMajorEnv = "POLYEMESIS_FFMPEG_ASSUME_MAJOR"
+
+// assumedMajor reads AssumeMajorEnv. It returns 0 when unset, an error when set
+// to something that is not a usable major version -- never a silent zero for a
+// value the operator did set, because a typo that reads as "unset" would put
+// them back at the refusal with no idea why their answer was ignored.
+func assumedMajor() (int, error) {
+	raw := strings.TrimSpace(os.Getenv(AssumeMajorEnv))
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s is %q, which is not a major version number. Set it to the "+
+			"leading number of this FFmpeg's version, e.g. %s=7", AssumeMajorEnv, raw, AssumeMajorEnv)
+	}
+	if n < MinMajorVersion {
+		return 0, fmt.Errorf("%s says this build is FFmpeg %d, but polyemesis requires %d.0 or "+
+			"newer. Multi-track MPEG-TS routing is not reliable on older builds",
+			AssumeMajorEnv, n, MinMajorVersion)
+	}
+	return n, nil
+}
 
 // Tools is a validated pair of binaries.
 type Tools struct {
@@ -129,6 +168,15 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 	if m := versionRe.FindStringSubmatch(text); m != nil {
 		t.Version = m[1]
 	}
+	// What to NAME when the version cannot be read. If the banner did not even
+	// match "ffmpeg version <x>", t.Version is empty and quoting "" tells the
+	// operator nothing, so fall back to the first line of the output -- which
+	// is the thing they can go and look at themselves.
+	reported := strings.TrimSpace(t.Version)
+	if reported == "" {
+		reported, _, _ = strings.Cut(strings.TrimSpace(text), "\n")
+		reported = strings.TrimSpace(reported)
+	}
 	// Distro builds report things like "6.1.1-3ubuntu5" and git builds report
 	// "N-113518-gd6a4b1e" or "n7.0". Only the leading numeric pair matters,
 	// and a build we cannot parse is not automatically a build we should
@@ -149,10 +197,48 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 			binFFmpeg, t.Version, MinMajorVersion)
 	}
 	if t.Major == 0 {
-		// An unrecognised version string is almost always a git/nightly build,
-		// which is newer than 6.0, not older. Refusing to start would be the
-		// wrong call; the protocol probe below is the real capability check.
-		t.Version = strings.TrimSpace(t.Version) + " (unrecognised version string; assuming >= 6.0)"
+		// FAILS CLOSED NOW, AND NAMES THE STRING IT COULD NOT READ.
+		//
+		// This branch used to say "an unrecognised version string is almost
+		// always a git/nightly build, which is newer than 6.0" and let the
+		// binary through on that guess. The guess is not checkable and the
+		// failure it admits is not cheap: an old build accepts every command
+		// line this package writes -- the arguments are all long-standing
+		// flags -- and goes wrong at the multi-track MPEG-TS mapping, hours
+		// later, on air, on the one destination nobody is watching the log of.
+		// A floor that only refuses versions it can already read is not a
+		// floor; it is a floor with a gap the exact width of "unparseable".
+		//
+		// The comment also claimed "the protocol probe below is the real
+		// capability check". It is not. checkSRT, checkEncoders and
+		// checkFilters are advisory by construction -- every one of them
+		// returns silently when the probe fails, on purpose -- and none of them
+		// asks about channel layouts, TS mapping or -progress fields, which are
+		// what the floor is actually for.
+		//
+		// THE ESCAPE HATCH IS AN ENV VAR AND IS NAMED IN THE ERROR, because
+		// refusing to start is the one failure an operator cannot fix from
+		// inside the product, and a nightly build reporting "N-113518-gd6a4b1e"
+		// really is newer than the floor. They just have to say so themselves,
+		// which turns an unverifiable assumption made by us into a claim made
+		// by the person who installed the binary.
+		assumed, err := assumedMajor()
+		if err != nil {
+			return nil, err
+		}
+		if assumed == 0 {
+			return nil, fmt.Errorf(
+				"%s reports its version as %q, which polyemesis cannot read as a version number, "+
+					"so it cannot confirm this build is FFmpeg %d.0 or newer. Refusing to start: an "+
+					"older build accepts these command lines and then fails on air, on multi-track "+
+					"MPEG-TS mapping, hours later. Install a build that reports a numeric version "+
+					"(macOS: brew install ffmpeg; Debian/Ubuntu: apt install ffmpeg), point "+
+					"ffmpeg.binary in config.yaml at one, or set %s to this build's major version "+
+					"if you know what it is",
+				binFFmpeg, reported, MinMajorVersion, AssumeMajorEnv)
+		}
+		t.Major = assumed
+		t.Version = fmt.Sprintf("%s (unreadable version string; %s=%d)", reported, AssumeMajorEnv, assumed)
 	}
 
 	t.checkSRT(ctx)

@@ -169,6 +169,42 @@ gen_binary_update() { # gen_binary_update <install_dir> <data_dir>
     BIN_PATH="$1/polyemesis"
     SERVICE_NAME="polyemesis-acceptance"
     write_binary_update_script )
+
+  # THE BACKUP CHECK IS NOT OPTIONAL, SO THE SUITE HAS TO SUPPLY IT.
+  #
+  # update.sh asks the installed binary whether the copy it just took actually
+  # opens -- `polyemesis -verify-backup <dir>` -- and refuses the upgrade when
+  # it cannot ask. That refusal is the point (#643): printing "verified"
+  # without opening the copy is the bug it replaced. So this stub stands in for
+  # the real binary and answers the same question the shell can answer: are the
+  # two files there. The database-level checks it cannot do -- integrity_check,
+  # a truncated file, a valid SQLite file that is not ours -- are covered in
+  # internal/db/verifybackup_test.go. This suite is testing update.sh's control
+  # flow, not SQLite.
+  cat > "$1/polyemesis" <<'BINSTUB'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = "-verify-backup" ]; then
+  d="${2:-}"
+  [ -f "$d/polyemesis.db" ] || { echo "stub: no polyemesis.db in $d" >&2; exit 1; }
+  [ -f "$d/secret.key" ]    || { echo "stub: no secret.key in $d" >&2; exit 1; }
+  # The stub has to be able to say NO for a reason the EXISTENCE checks in
+  # update.sh cannot already reach, or the verify step is never what decides
+  # and a suite that removes it still passes. The SQLite magic is the cheapest
+  # honest stand-in for "it opens": a copy taken mid-write, a truncated file
+  # and a wrong file all fail it. The real checks are in
+  # internal/db/verifybackup_test.go.
+  case "$(head -c 15 "$d/polyemesis.db" 2>/dev/null)" in
+    "SQLite format 3") ;;
+    *) echo "stub: $d/polyemesis.db is not a SQLite database" >&2; exit 1 ;;
+  esac
+  echo "backup at $d opens, passes integrity_check and holds this server's schema"
+  exit 0
+fi
+echo "stub polyemesis: unexpected invocation: $*" >&2
+exit 1
+BINSTUB
+  chmod +x "$1/polyemesis"
 }
 
 check_refusal() { # check_refusal <label> <status> <output> <substring the message must name>
@@ -224,7 +260,7 @@ check_refusal "an empty data directory is refused" "$st" "$out" "is empty"
 # (3) THE ONE THAT MATTERS. A database with no key beside it. Everything about
 #     this backup looks fine to a count of files.
 root="$work/nokey"; mkdir -p "$root/data"
-printf 'sqlite\n'    > "$root/data/polyemesis.db"
+printf 'SQLite format 3\000' > "$root/data/polyemesis.db"
 printf 'recording\n' > "$root/data/recording.mp4"
 gen_binary_update "$root/opt" "$root/data"
 out="$(bash "$root/opt/update.sh" 2>&1)"; st=$?
@@ -252,11 +288,38 @@ check_refusal "a backup with no polyemesis.db is refused" "$st" "$out" "polyemes
 #     exists while both runs land in the same minute. If the clock crosses one
 #     mid-case the two runs chose different names and the case tested nothing;
 #     retry rather than report a pass it did not earn.
+# THE CASE THE EXISTENCE CHECKS CANNOT REACH.
+#
+# Both files are present, so every check update.sh had before #643 passes --
+# and the database still does not open, which is exactly what a copy taken
+# from a live server can look like. Without this case the verify step never
+# decides anything here: measured, stubbing the verify call out entirely left
+# the suite green at 89/89.
+a_backup_that_exists_but_will_not_open() { # <root>
+  local root="$1" out st
+  mkdir -p "$root/data"
+  printf 'key\n' > "$root/data/secret.key"
+  printf 'this is not a database\n' > "$root/data/polyemesis.db"
+  gen_binary_update "$root/opt" "$root/data"
+
+  out="$(bash "$root/opt/update.sh" 2>&1)"; st=$?
+  if [ "$st" -eq 0 ]; then
+    bad "a backup whose database does not open was accepted -- the upgrade would have gone ahead with no way back"
+    printf '        %s\n' "$(printf '%s' "$out" | tr '\n' ' ')"
+    return
+  fi
+  case "$out" in
+    *"not usable"*) ok "a backup whose database does not open is refused, and the message says it is not usable" ;;
+    *) bad "it refused, but the message never says the backup is unusable"
+       printf '        got: %s\n' "$(printf '%s' "$out" | tr '\n' ' ')" ;;
+  esac
+}
+
 happy_path_then_a_second_run() { # <root> -> 2 if the clock crossed a minute
   local root="$1" before after out1 st1 out2 st2 dest
   mkdir -p "$root/data"
-  printf 'key\n'    > "$root/data/secret.key"
-  printf 'sqlite\n' > "$root/data/polyemesis.db"
+  printf 'key\n' > "$root/data/secret.key"
+  printf 'SQLite format 3\000' > "$root/data/polyemesis.db"
   gen_binary_update "$root/opt" "$root/data"
 
   before="$(date +%F-%H%M)"
@@ -271,10 +334,15 @@ happy_path_then_a_second_run() { # <root> -> 2 if the clock crossed a minute
     bad "the guard refused a complete backup (exit $st1)"
     printf '        %s\n' "$(printf '%s' "$out1" | tr '\n' ' ')"
   fi
+  # The line changed with #643 and the claim in it got stronger. It used to
+  # say the two files were PRESENT; presence is not the property that matters,
+  # because a copy taken from a live database exists and may not open. It now
+  # reports that the copy was opened. Pinned here for the same reason the old
+  # line was: rewording it is a reviewable act, not an accident.
   case "$out1" in
-    *"backup verified: database and secret.key both present"*)
-      ok "and it names the two files it verified rather than saying \"done\"" ;;
-    *) bad "the success line no longer names what it checked" ;;
+    *"backup verified: it opens"*)
+      ok "and the success line claims the copy was OPENED, not merely that two files exist" ;;
+    *) bad "the success line no longer says the backup was opened" ;;
   esac
 
   # The reported path is the operator's only way back. It has to be real.
@@ -295,6 +363,8 @@ happy_path_then_a_second_run() { # <root> -> 2 if the clock crossed a minute
     && ok "one run, one backup" \
     || bad "two runs left $(backups_under "$root") backup directories"
 }
+
+a_backup_that_exists_but_will_not_open "$work/unopenable"
 
 tries=0
 while :; do
@@ -322,6 +392,26 @@ case "${1:-}" in
       ls)      echo "DRIVER  VOLUME NAME"; echo "local   some-other-volume"; exit 0 ;;
     esac ;;
   run)
+    # TWO shapes now. The second one is the backup check added for #643:
+    #   docker run --rm -v DIR:/backup:ro IMAGE -verify-backup /backup
+    # It is matched first because both carry a /backup path and the tar branch
+    # below would otherwise swallow it and archive nothing.
+    for a in "$@"; do
+      if [ "$a" = "-verify-backup" ]; then
+        # The unpacked copy is the host directory bound at /backup:ro.
+        mount=""
+        for m in "$@"; do case "$m" in *:/backup:ro) mount="${m%%:/backup:ro}" ;; esac; done
+        [ -n "$mount" ] || { echo "stub docker: no :/backup:ro mount in: $*" >&2; exit 1; }
+        [ -f "$mount/polyemesis.db" ] || { echo "stub: no polyemesis.db in the archive" >&2; exit 1; }
+        [ -f "$mount/secret.key" ]    || { echo "stub: no secret.key in the archive" >&2; exit 1; }
+        case "$(head -c 15 "$mount/polyemesis.db" 2>/dev/null)" in
+          "SQLite format 3") ;;
+          *) echo "stub: the archived polyemesis.db is not a SQLite database" >&2; exit 1 ;;
+        esac
+        echo "backup opens, passes integrity_check and holds this server's schema"
+        exit 0
+      fi
+    done
     # ... -v polyemesis-data:/data -v DIR:/backup alpine tar czf /backup/NAME -C /data .
     archive=""
     for a in "$@"; do case "$a" in /backup/*) archive="${a#/backup/}" ;; esac; done
@@ -334,19 +424,40 @@ exit 1
 STUB
 chmod +x "$stub/docker"
 
-gen_docker_update() { # gen_docker_update <install_dir>
+gen_docker_update() { # gen_docker_update <install_dir> [compose_cmd]
   # Read by install.sh's write_helper_scripts, same as above.
   # shellcheck disable=SC2034
   ( load_install_defs || exit 1
     INSTALL_DIR="$1"
     MODE=docker
-    COMPOSE_CMD="echo [stub compose]"
+    COMPOSE_CMD="${2-echo [stub compose]}"
     write_helper_scripts >/dev/null )
 }
 
-run_docker_update() { # run_docker_update <install_dir> <volume_dir>
-  STUB_VOLUME="$2" STUB_BACKUP_DIR="$1" PATH="$stub:$PATH" bash "$1/update.sh" 2>&1
+run_docker_update() { # run_docker_update <install_dir> <volume_dir> [args...]
+  local dir="$1" vol="$2"; shift 2
+  STUB_VOLUME="$vol" STUB_BACKUP_DIR="$dir" PATH="$stub:$PATH" \
+    bash "$dir/update.sh" "$@" 2>&1
 }
+
+# A compose stub that can answer `top` two ways, so the on-air guard has
+# something to refuse. Everything else it echoes, exactly as the plain
+# `echo [stub compose]` command used elsewhere in this section does, so the
+# assertions about reaching `pull` read the same.
+cat > "$stub/compose" <<'COMPOSESTUB'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = "top" ]; then
+  if [ "${STUB_ON_AIR:-false}" = true ]; then
+    echo "polyemesis"
+    echo "UID   PID   CMD"
+    echo "root  4211  ffmpeg -re -i srt://127.0.0.1:9000 -f flv rtmp://live.example.net/app/streamkey"
+  fi
+  exit 0
+fi
+echo "[stub compose] $*"
+COMPOSESTUB
+chmod +x "$stub/compose"
 
 docker_dir="$work/docker"; mkdir -p "$docker_dir"
 gen_docker_update "$docker_dir"
@@ -369,7 +480,7 @@ check_refusal "an empty volume is refused" "$st" "$out" "archive is empty"
 rm -f "$docker_dir"/backup-*.tar.gz
 
 vol="$work/vol-nokey"; mkdir -p "$vol"
-printf 'sqlite\n' > "$vol/polyemesis.db"
+printf 'SQLite format 3\000' > "$vol/polyemesis.db"
 out="$(run_docker_update "$docker_dir" "$vol")"; st=$?
 check_refusal "an archive with a database but NO secret.key is refused" "$st" "$out" "no secret.key"
 case "$out" in
@@ -380,7 +491,7 @@ esac
 rm -f "$docker_dir"/backup-*.tar.gz
 
 vol="$work/vol-ok"; mkdir -p "$vol"
-printf 'sqlite\n' > "$vol/polyemesis.db"
+printf 'SQLite format 3\000' > "$vol/polyemesis.db"
 printf 'key\n'    > "$vol/secret.key"
 out="$(run_docker_update "$docker_dir" "$vol")"; st=$?
 if [ "$st" -eq 0 ]; then
@@ -929,6 +1040,136 @@ EOF
     || bad "the data directory is left at mkdir's 0755 — it holds secret.key and the recordings (#297)"
 fi
 
+step "17. The docker update.sh refuses to upgrade a broadcast that is on air"
+#
+# uninstall.sh has asked this question since it was written; update.sh did not,
+# and update.sh stops the container TWICE -- once to take a consistent archive,
+# once to swap the image. So the operation that sounds safe was the one that
+# would cut a live show mid-sentence, while the one that sounds dangerous
+# asked first. A completed broadcast cannot be returned to.
+
+onair_dir="$work/onair"; mkdir -p "$onair_dir"
+gen_docker_update "$onair_dir" "$stub/compose"
+onair_vol="$work/vol-onair"; mkdir -p "$onair_vol"
+printf 'SQLite format 3\000' > "$onair_vol/polyemesis.db"
+printf 'key\n'               > "$onair_vol/secret.key"
+
+out="$(STUB_ON_AIR=true run_docker_update "$onair_dir" "$onair_vol")"; st=$?
+check_refusal "an upgrade while ffmpeg is publishing is refused" "$st" "$out" "publishing right now"
+case "$out" in
+  *"[stub compose] stop"*)
+    bad "it refused AFTER stopping the container — the broadcast was already over" ;;
+  *) ok "and it refused BEFORE the stop, so the stream was still running when it gave up" ;;
+esac
+if [ "$(find "$onair_dir" -maxdepth 1 -name 'backup-*.tar.gz' | wc -l | tr -d ' ')" = 0 ]; then
+  ok "and it wrote no archive, so a later same-minute retry is not blocked by its own leftovers"
+else
+  bad "the refused run still left a backup archive behind"
+fi
+
+out="$(STUB_ON_AIR=true run_docker_update "$onair_dir" "$onair_vol" --force)"; st=$?
+if [ "$st" -eq 0 ]; then
+  ok "--force goes ahead anyway, so the refusal is a guard and not a wall"
+else
+  bad "--force was still refused (exit $st)"
+  printf '        %s\n' "$(printf '%s' "$out" | tr '\n' ' ')"
+fi
+case "$out" in
+  *"[stub compose] pull"*) ok "and the forced run reaches the pull" ;;
+  *) bad "--force never reached \`compose pull\`" ;;
+esac
+
+# Nothing on air: the guard must be invisible.
+out="$(run_docker_update "$onair_dir" "$onair_vol" 2>&1)"; st=$?
+case "$out" in
+  *"publishing right now"*) bad "the guard refused an idle install — every upgrade now needs --force" ;;
+  *) ok "an idle install is not refused (the guard is not a blanket stop)" ;;
+esac
+
+step "18. The generated helpers carry the compose command as DATA, not spliced into command position"
+#
+# The heredocs are unquoted, so \$COMPOSE_CMD written bare inside them was
+# expanded while the file was being WRITTEN. With an empty value the generated
+# update.sh contained the bare lines `pull` and `up -d`, and uninstall.sh
+# contained `down --remove-orphans`: `pull: command not found`, on the upgrade
+# path, after the container had already been stopped. #658.
+
+empty_dir="$work/nocompose"; mkdir -p "$empty_dir"
+gen_docker_update "$empty_dir" ""
+for f in update.sh uninstall.sh; do
+  if grep -qE '^COMPOSE_CMD="' "$empty_dir/$f"; then
+    ok "$f assigns COMPOSE_CMD once, at the top, as a value"
+  else
+    bad "$f has no COMPOSE_CMD assignment — the value is being spliced in at generation time again"
+  fi
+done
+if grep -qE '^[[:space:]]*(pull|up -d|down --remove-orphans|stop|start)([[:space:]]|$)' "$empty_dir/update.sh" "$empty_dir/uninstall.sh"; then
+  bad "a generated helper holds a bare compose subcommand in command position:"
+  grep -nE '^[[:space:]]*(pull|up -d|down --remove-orphans|stop|start)([[:space:]]|$)' "$empty_dir/update.sh" "$empty_dir/uninstall.sh" \
+    | sed 's/^/        /'
+else
+  ok 'no bare `pull` / `up -d` / `down --remove-orphans` line in either helper'
+fi
+bash -n "$empty_dir/update.sh" && bash -n "$empty_dir/uninstall.sh" \
+  && ok "both helpers still parse when the compose command is empty" \
+  || bad "an empty compose command produces a helper with a syntax error"
+out="$(bash "$empty_dir/update.sh" 2>&1)"; st=$?
+check_refusal "an update.sh generated without a compose command refuses to run" "$st" "$out" "without a compose command"
+out="$(bash "$empty_dir/uninstall.sh" --force 2>&1)"; st=$?
+check_refusal "and so does the uninstall.sh" "$st" "$out" "without a compose command"
+
+step "19. The generated compose file caps the container's logs"
+#
+# Docker's default json-file driver keeps every line forever. polyemesis logs
+# per request and per encoder tick, and the install that never restarts is the
+# 24/7 broadcast box, so the log only grows until the disk is full -- at which
+# point SQLite stops writing and recordings stop finalising, and none of it
+# looks like a logging problem. journald caps the systemd path already; only
+# docker was unbounded. Checked against install.sh's source because writing the
+# compose file means running install_docker_mode, which pulls and starts.
+compose_block="$(sed -n "/printf 'services:/,/} > \"\$INSTALL_DIR\/docker-compose.yml\"/p" "$INSTALL")"
+if printf '%s' "$compose_block" | grep -q "logging:"; then
+  ok "the compose service declares a logging section"
+else
+  bad "the generated compose file sets no logging options — container logs grow until the disk fills"
+fi
+for opt in 'max-size' 'max-file'; do
+  printf '%s' "$compose_block" | grep -q "$opt" \
+    && ok "and it bounds $opt" \
+    || bad "the logging section does not set $opt, so it still has no ceiling"
+done
+
+# ------------------------------------------------------------- vacuity guard
+#
+# THE VERDICT ABOVE IS DERIVED FROM COUNTERS, AND COUNTERS CANNOT SEE A STEP
+# THAT NEVER RAN.
+#
+# This suite runs under `set -uo pipefail` with no `-e`, deliberately: several
+# steps run commands that are SUPPOSED to fail and read their status. The cost
+# is that a step which fails to EXECUTE -- a helper renamed, a function that
+# moved into a subshell, a typo in a call -- prints "command not found" to
+# stderr, increments neither counter, and the run still ends "0 failed" and
+# exits PASS. That is not hypothetical: it is #657, found when an undefined
+# helper produced exactly that and the suite reported PASS.
+#
+# So the run has to state how much it actually checked. Deliberately BELOW the
+# current total rather than equal to it: this is a vacuity guard, not a
+# ratchet on the number of assertions, which is free to move either way. The
+# same device as stopSiteFloor in internal/testenv/stopdiscard_test.go and the
+# package-count floor in internal/testenv/docdrift_packages_test.go.
+ASSERTION_FLOOR=100
+
 printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"
+
+total=$((pass + fail))
+if [ "$total" -lt "$ASSERTION_FLOOR" ]; then
+  printf "\n  \033[31mINSTALLER ACCEPTANCE INCOMPLETE\033[0m\n"
+  printf "  only %d assertions ran, and this suite has at least %d.\n" "$total" "$ASSERTION_FLOOR"
+  printf "  Steps did not execute — scroll up for \"command not found\" or an\n"
+  printf "  unbound variable. A verdict from counters cannot see a step that\n"
+  printf "  never ran, so this run is reported as a failure, not a pass.\n"
+  exit 1
+fi
+
 [ "$fail" -eq 0 ] || { printf "\n  \033[31mINSTALLER ACCEPTANCE FAILED\033[0m\n"; exit 1; }
-printf "\n  \033[32mINSTALLER ACCEPTANCE PASSED\033[0m\n"
+printf "\n  \033[32mINSTALLER ACCEPTANCE PASSED\033[0m (%d assertions)\n" "$total"

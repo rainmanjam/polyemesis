@@ -48,6 +48,7 @@ import { api } from "@/lib/api";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { InfoHint } from "@/components/InfoHint";
 import { SecretCode } from "@/components/SecretCode";
+import { useLiveData } from "@/hooks/useLiveData";
 import { copyToClipboard as copy } from "@/lib/clipboard";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { LIMITS } from "@/lib/limits";
@@ -74,6 +75,7 @@ import type { Source, SourceId, SourceView } from "@/lib/types";
 
 export function SourcesPage() {
   const t = useT();
+  const { refreshSources } = useLiveData();
   const [sources, setSources] = useState<SourceView[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -111,6 +113,10 @@ export function SourcesPage() {
       setNewName("");
       toast.success(t("sources.added", { name }));
       await load();
+      // The console follows ONE programme, resolved from /sources. Adding a
+      // source changes that answer -- on a first-run install it changes it
+      // from "none" to this one -- and nothing else re-asks. #646.
+      await refreshSources();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("sources.addFailed"));
     }
@@ -176,6 +182,10 @@ export function SourcesPage() {
       toast.success(t(wasOnly ? "sources.deletedLast" : "sources.deleted", { name: deleting.name }));
       setDeleting(null);
       await load();
+      // Deleting the programme the console is following leaves every other
+      // page pointed at a source that no longer exists, rendering plausible
+      // idle states against a healthy server. #646.
+      await refreshSources();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("sources.deleteFailed"));
     } finally {

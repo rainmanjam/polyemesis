@@ -3,6 +3,22 @@
   "plugins": ["react", "typescript", "oxc"],
   "rules": {
     "react/rules-of-hooks": "error",
+    // ERRORS, BECAUSE A WARNING IS NOT A GATE. `npm run lint` exits 0 on
+    // warnings, so every rule below "error" was advice nobody had to take --
+    // and exhaustive-deps is the rule that catches the stale-closure class
+    // behind #606, #612 and #646, where a polling effect closed over a
+    // `programme` that was still null at mount and every request afterwards
+    // went out unscoped. That defect shipped three times with the rule
+    // reporting it, in yellow, in a command whose exit code said fine.
+    //
+    // Promoted narrowly rather than with --deny-warnings. The remaining
+    // warnings (set-state-in-effect, refs, purity) are 50-odd sites of
+    // real-but-stylistic React advice; turning them on wholesale would mean
+    // fifty suppressions written in one sitting, which is how a linter
+    // becomes something people learn to silence. These two are enforceable
+    // today with zero suppressions in the tree.
+    "react-hooks/exhaustive-deps": "error",
+    "eslint/no-unused-vars": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }]
   },
   // src/components/ui is vendored shadcn, kept byte-identical to upstream so it

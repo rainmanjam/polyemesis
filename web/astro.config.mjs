@@ -35,6 +35,7 @@ import { hastMermaid } from "./src/lib/hast-mermaid.mjs";
 const pageSource = {
   "/": "src/pages/index.astro",
   "/features": "src/pages/features.astro",
+  "/calculator": "src/pages/calculator.astro",
   "/comparison": "src/pages/comparison.astro",
   "/docs": "src/pages/docs.astro",
   "/download": "src/pages/download.astro",
