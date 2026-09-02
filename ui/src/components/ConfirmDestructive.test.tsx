@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { ConfirmDestructive } from "./ConfirmDestructive";
+import { setLanguage, translate, type LanguageCode } from "@/lib/i18n";
 
 /* A DIALOG MUST NOT ASK FOR A STRING IT IS MISSPELLING.
  *
@@ -102,6 +103,73 @@ describe("ConfirmDestructive: the typed challenge with no subject", () => {
     fireEvent.change(input, { target: { value: "Main" } });
     expect((screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(
       false,
+    );
+  });
+});
+
+/* THE ONE CONFIRMATION EVERY DESTRUCTIVE ACTION GOES THROUGH SPOKE ENGLISH.
+ *
+ * Four strings were literals in the component: "Type X to confirm", "Cancel",
+ * the default confirm label "Delete", and the default consequences heading
+ * "This also removes". Every locale had common.cancel and common.delete
+ * already translated, and this dialog ignored both.
+ *
+ * lib/i18n.test.ts cannot see this and never could: it compares catalogues
+ * against each other, so a string that was never given a key is invisible to
+ * it by construction. A key is only missing if it exists. So the check has to
+ * be here, at the render, and it has to run in a language that is not English
+ * -- which is the only way a hard-coded literal shows itself.
+ */
+describe("ConfirmDestructive speaks the operator's language", () => {
+  afterEach(() => {
+    cleanup();
+    setLanguage("en");
+  });
+
+  const showIn = (lang: LanguageCode) => {
+    setLanguage(lang);
+    return render(
+      <ConfirmDestructive
+        open
+        onOpenChange={() => {}}
+        subject="Main"
+        title="Titel"
+        description="Beschreibung"
+        consequences={[{ label: "Ziele", count: 2 }]}
+        requireTyping
+        onConfirm={() => {}}
+      />,
+    );
+  };
+
+  it("translates the buttons it labels itself", () => {
+    showIn("de");
+    expect(screen.getByRole("button", { name: translate("de", "common.cancel") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: translate("de", "common.delete") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
+  it("translates the typed challenge and the consequences heading", () => {
+    showIn("de");
+    expect(screen.getByText(translate("de", "confirm.alsoRemoves"))).toBeTruthy();
+    // The subject is a styled element inside the sentence, so the sentence is
+    // asserted through the Label's text rather than as one node.
+    const label = screen.getByText("Main", { selector: "span" }).closest("label");
+    expect(label?.textContent).toBe(
+      translate("de", "confirm.typeToConfirm").replace("{subject}", "Main"),
+    );
+  });
+
+  /* WORD ORDER IS THE TRANSLATOR'S, not the component's. A sentence assembled
+   * from "Type" + subject + "to confirm" would put the name in the English
+   * position in all fifteen locales. Japanese puts it before a trailing verb
+   * phrase; the split-on-token rendering is what lets that be true. */
+  it("puts the subject where the catalogue puts it", () => {
+    showIn("ja");
+    const label = screen.getByText("Main", { selector: "span" }).closest("label");
+    expect(label?.textContent).toBe(
+      translate("ja", "confirm.typeToConfirm").replace("{subject}", "Main"),
     );
   });
 });

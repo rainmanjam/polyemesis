@@ -37,6 +37,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { StatusDot } from "@/components/signature/StatusDot";
@@ -126,6 +127,7 @@ export function JobsPage() {
   const [view, setView] = useState<JobsOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [purgeOpen, setPurgeOpen] = useState(false);
   // The policy is edited locally and saved explicitly. Live-saving every
   // keystroke of a CPU ceiling would write a policy nobody meant through the
   // half-typed values on the way there.
@@ -343,11 +345,38 @@ export function JobsPage() {
                 variant="outline"
                 size="sm"
                 disabled={busy}
-                onClick={() => void purgeHistory()}
+                onClick={() => setPurgeOpen(true)}
               >
                 <Trash2 />
-                Purge history
+                {t("jobs.purge")}
               </Button>
+              {/* IT DELETES FILES, and it said how many only afterwards.
+                  handlePurgeJobs calls removeClipExport for every job it drops,
+                  so the button labelled "Purge history" reaches past the
+                  history rows and takes the exported clips off disk with them.
+                  The count arrived in a toast, which is a report, not a
+                  decision -- by the time it is on screen the files are gone.
+                  Same dialog as every other destructive action here, and it
+                  says what leaves. */}
+              <ConfirmDestructive
+                open={purgeOpen}
+                onOpenChange={setPurgeOpen}
+                subject={t("jobs.purge")}
+                title={t("jobs.purgeTitle")}
+                description={t("jobs.purgeDescription")}
+                consequencesLabel={t("jobs.purgeRemoves")}
+                // Only the rows on screen can be counted here: which of them
+                // are old enough to go is the server's retention policy to
+                // apply, and a number this page guessed would be worse than
+                // none. The description names the rule; this names the pool.
+                consequences={
+                  view.recent.length > 0
+                    ? [{ label: t("jobs.finished"), count: view.recent.length }]
+                    : undefined
+                }
+                confirmLabel={t("jobs.purge")}
+                onConfirm={purgeHistory}
+              />
             </CardHeader>
             <CardContent className="px-0 pb-0">
               <JobTable
