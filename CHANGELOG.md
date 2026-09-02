@@ -8,6 +8,88 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Security
+
+- **The server no longer listens on every interface in the clear by default.**
+  With no `config.yaml` and no `--addr`, the default is now `127.0.0.1:8080`.
+  An explicit address still binds where it is told, with the existing warning.
+  Every shipped launch path — the systemd unit, `install.sh`, all three
+  Dockerfiles and `config.example.yaml` — passes an address explicitly and is
+  unaffected.
+- **Pull-source URLs go through the same address guard as webhooks.** They were
+  scheme-checked only, so a pull of `http://169.254.169.254/` was dialled.
+  Loopback and link-local are now refused. **Cost:** pulling from a service on
+  the same box is refused with no per-source opt-in yet; LAN and RFC1918
+  sources are still allowed. **Bound, and stated in code:** literal addresses
+  only — FFmpeg resolves its own names, so a hostname pointing at a private
+  address still passes.
+- **HTTP and HLS pulls carry `-protocol_whitelist`** without `file`. Defence in
+  depth: measured on FFmpeg 9.0.1, the local-file read the audit suspected did
+  **not** reproduce — the refusal was already FFmpeg's default. This makes it
+  ours rather than a dependency's.
+- **Changing the admin password can revoke API tokens, and always says what
+  survived.** The password change killed sessions and left `api_tokens`
+  untouched, so a leaked admin token outlived the operator's incident-response
+  gesture. Revocation is opt-in because a password change cannot tell a routine
+  rotation from a compromise; the disclosure is unconditional.
+- **`POST /setup` is throttled** per address, on its own counter, so first boot
+  is no longer an unlimited race.
+
+### Fixed
+
+- **A data race between clip planning and encoder re-detection.**
+  `internal/api/clips.go` read `tools.HWEncoders` unlocked while
+  `RefreshEncoderCapabilities` rewrote it — a read the neighbouring
+  `renditions.go` documents as unsafe and avoids.
+- **`/api/v1/health` reports something that can be false.** It was a constant
+  three mechanisms treated as proof. It now reads a real database page, checks
+  the engine, and reports the recording floor. A halted recorder is `degraded`
+  with 200, not 503: a restart adds no disk and would drop live video.
+  **Behaviour change:** an install with sources and no engine now fails its
+  container HEALTHCHECK where it used to pass.
+- **A restored data directory with no `secret.key` no longer mints one
+  silently.** Boot now names how many destinations cannot be read and why.
+- **The Start/Stop flip guard never lifted itself** — it armed for elapsed
+  rather than remaining time, and its test was green only because fake timers
+  advanced the clock before React flushed.
+- **A held stop is no longer discarded on unmount**; leaving the page now sends
+  the stop it owed.
+- **The one confirmation dialog fronting every destructive action was
+  untranslated.** Four English literals `i18n.test.ts` structurally could not
+  see are now keys in all 15 catalogues.
+- **Clips and Recordings claimed "none" for reads that failed** — the exact
+  bug `lib/readState.ts` exists to forbid.
+- **Playout link rotation and clip-history purge now confirm before acting**,
+  naming the viewers dropped and the files deleted.
+- **`update.sh` refuses to restart a container that is publishing**, matching
+  the guard `uninstall.sh` already had. Docker installs also gained log
+  rotation.
+- **The generated helper scripts no longer splice an empty compose command into
+  command position** (#658), and backticks in a generated comment no longer
+  execute at write time.
+
+### Changed
+
+- **`make check` runs what CI runs** — `POLYEMESIS_LEDGER=strict`, `-race`, and
+  the Windows vet leg — and its parity guard compares the invocation rather
+  than a substring. **Cost:** the local loop goes from about four minutes to
+  about twenty-five, and needs a C toolchain.
+- **Lint can fail the build.** `react-hooks/exhaustive-deps` and
+  `no-unused-vars` are errors; the three violations that surfaced are fixed
+  with no suppressions.
+- **SonarCloud waits for its quality gate**, `web/`'s lockfile is watched by
+  dependabot and audited, every shell script is parsed by `make sh-syntax`, and
+  the installer suite refuses to report PASS when a step did not run (#657).
+- **The website says what the server actually does.** Platform figures are
+  recommendations, not enforced ceilings — and the build now asserts them
+  against `internal/db/platforms.go`, so the page cannot drift from the code.
+  A stale "YouTube is capped at 3 destinations" warning that fired with no
+  YouTube selected is gone.
+- **Eight documentation contradictions corrected**, including `UPGRADING.md`
+  telling an operator mid-migration that a CI-tested feature does not work, and
+  `MODULES.md` naming a base image and Go version no Dockerfile uses.
+
+
 ### Added
 
 - **The meters page says when tracks are not being metered, and which programme
