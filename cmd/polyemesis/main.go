@@ -497,14 +497,7 @@ func run(h *hooks) error {
 	// next start performs before its first tick.
 	srv.DrainLifecycleWithin(shutdownCtx)
 	eng.StopWithin(shutdownCtx)
-	if err := shutdownCtx.Err(); err != nil {
-		// Said out loud, because the alternative is systemd killing us and the
-		// operator finding a truncated recording with nothing in the log to
-		// connect it to. If this fires, a child did not answer SIGTERM inside
-		// the budget -- see #628 and #631.
-		log.Warn("shutdown ran out of its budget; some children may have been killed rather than finishing",
-			"budget", engine.ShutdownBudget.String())
-	}
+	warnIfShutdownOverran(shutdownCtx, log)
 	log.Info("goodbye")
 	return nil
 }
@@ -1009,4 +1002,22 @@ func verifyBackup(dir string, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "backup at %s opens, passes integrity_check and holds this server's schema\n", dir)
 	return nil
+}
+
+// warnIfShutdownOverran says out loud that the shutdown budget was spent.
+//
+// The alternative is systemd killing the process and the operator finding a
+// truncated recording with nothing in the log connecting the two. If this
+// fires, a child did not answer SIGTERM inside engine.ShutdownBudget -- see
+// #628 and #631.
+//
+// A function rather than an inline block so the branch can be tested. The
+// whole value of the line is that it appears on the bad day, and a line nobody
+// has watched appear is a line nobody should rely on. #645.
+func warnIfShutdownOverran(ctx context.Context, log *slog.Logger) {
+	if ctx.Err() == nil {
+		return
+	}
+	log.Warn("shutdown ran out of its budget; some children may have been killed rather than finishing",
+		"budget", engine.ShutdownBudget.String())
 }
