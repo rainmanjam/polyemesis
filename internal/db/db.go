@@ -453,6 +453,21 @@ func (d *DB) SQL() *sql.DB { return d.sql }
 // Close closes the database.
 func (d *DB) Close() error { return d.sql.Close() }
 
+// Ping reads one page out of the database file, for a caller that needs to know
+// the store still answers.
+//
+// A REAL READ, NOT sql.DB.Ping. The driver's Ping is satisfied by having a
+// connection, which a handle to a file that has been deleted or whose volume
+// has been unmounted still has. sqlite_master is the schema table SQLite keeps
+// on page one, so counting it exercises the file and the lock and nothing else.
+//
+// Cheap enough to serve from an unauthenticated health check on every poll:
+// one page, already in the page cache of any process that has done anything.
+func (d *DB) Ping() error {
+	var n int
+	return d.sql.QueryRow(`SELECT count(*) FROM sqlite_master`).Scan(&n)
+}
+
 // SealedOnOpen is how many destination stream keys this Open moved out of the
 // database and into the sealed column.
 //

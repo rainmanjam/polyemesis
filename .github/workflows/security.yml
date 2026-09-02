@@ -6,6 +6,39 @@
 # out of ci.yml means a red badge here never blocks a merge on work that is
 # unrelated to it, and the weekly schedule catches advisories that land between
 # pushes.
+#
+# ---------------------------------------------------------------------------
+# WHAT ELSE SCANS THIS REPOSITORY, AND WHY IT IS NOT IN HERE.
+#
+# Socket Security posts a report on every pull request. Nothing in this
+# repository configures it, requests it, or can turn it off: it is a GitHub
+# App installed on the repository through github.com, it reads the dependency
+# manifests directly, and it answers to settings held in the Socket dashboard
+# and the App's installation, not to any file committed here.
+#
+# WHAT IT DOES. It looks at what a dependency change PULLS IN -- install
+# scripts, native code, network and filesystem capabilities, typosquats,
+# telemetry, maintainer churn -- which is a different question from the one
+# `npm audit` and `govulncheck` below ask. Those two ask "is there a published
+# advisory against a version you resolve". Socket asks "does this package do
+# something a build-time dependency has no business doing", which is the shape
+# of a supply-chain attack that has no CVE yet because nobody has noticed.
+#
+# WHAT IT GATES: NOTHING. Its comment is a comment. It is not in this
+# workflow, so it cannot fail this workflow; it is not a required status
+# context, so a red Socket report does not block a merge; and its own alert
+# thresholds live in a dashboard nobody reviewing a pull request opens. A
+# reader who sees it report on every commit is entitled to assume it is part
+# of the gate, and it is not.
+#
+# THE FIX THAT IS NOT HERE. Socket reads a `socket.yml` at the REPOSITORY
+# ROOT -- not from .github/ -- which is where its issueRules, triggerPaths and
+# githubApp settings become reviewable in a pull request instead of being a
+# dashboard state nobody can diff. That file does not exist yet. Until it
+# does, this comment is the whole of what the repository says about a check it
+# publishes on every commit, and a comment is not a device: it makes the gap
+# announced, not closed.
+# ---------------------------------------------------------------------------
 name: security
 
 on:
@@ -105,21 +138,38 @@ jobs:
           go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./...
 
   # JavaScript dependencies.
+  #
+  # A MATRIX OVER EVERY LOCKFILE, because it used to name one directory and this
+  # repository has two. web/ -- the documentation site, 342 KB of
+  # package-lock.json -- was audited by nothing: not here, not by Dependabot
+  # (.github/dependabot.yml listed / and /ui), not by anything. It is a static
+  # site, so nothing it depends on reaches a server this project runs; what it
+  # does have is a build that runs on a runner holding repository credentials,
+  # which is the supply-chain path `--ignore-scripts` below exists for.
+  #
+  # internal/testenv/lockfile_coverage_test.go asserts this list and
+  # dependabot.yml between them cover every package-lock.json in the tree, so a
+  # third one cannot arrive unaudited the way the second did.
   npm-audit:
     runs-on: ubuntu-latest
     # See the note on the govulncheck job for why ten, for all four jobs here.
     # This one's single point of stall is the npm registry, during `npm ci`.
     timeout-minutes: 10
+    strategy:
+      # Both answers are wanted when both are red.
+      fail-fast: false
+      matrix:
+        project: [ui, web]
     defaults:
       run:
-        working-directory: ui
+        working-directory: ${{ matrix.project }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: ui/package-lock.json
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
       # --ignore-scripts: this job never builds anything, it only needs the
       # resolved dependency tree for `npm audit`. Running install lifecycle
       # scripts would execute code from every package in that tree on a runner,
@@ -129,6 +179,50 @@ jobs:
       # dependency does not ship to anybody, and treating it as urgent is how a
       # team learns to pass --force.
       - run: npm audit --omit=dev --audit-level=high
+
+  # THE CONTEXT BRANCH PROTECTION ASKS FOR, WHICH THE MATRIX STOPPED PRODUCING.
+  #
+  # `npm-audit` is a required check on main. Splitting the job across ui and web
+  # renamed its checks to `npm-audit (ui)` and `npm-audit (web)`, and no check
+  # called plain `npm-audit` has existed since -- so protection waits on a name
+  # nothing emits, and the pull request is blocked with nothing red on it. That
+  # is the same failure the container shim in ci.yml exists for, arriving a
+  # second time by a different route: a rename, rather than a skip.
+  #
+  # Both routes share a cause worth naming. A job's NAME is part of its
+  # contract with branch protection, and neither the matrix change nor the skip
+  # rule had any way to know that. Nothing in the workflow files records which
+  # names are load-bearing, which is why internal/testenv/required_checks_test.go
+  # now does.
+  #
+  # if: always() because the point is to report a verdict, and a matrix that
+  # failed still needs one -- without it this job would itself be skipped and
+  # the required context would go missing exactly when something is wrong.
+  npm-audit-result:
+    name: npm-audit
+    needs: npm-audit
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report the matrix's verdict
+        env:
+          RESULT: ${{ needs.npm-audit.result }}
+        run: |
+          set -euo pipefail
+          echo "npm-audit matrix: $RESULT"
+          case "$RESULT" in
+            success) exit 0 ;;
+            skipped)
+              # Not a pass. The matrix is skipped when a dependency of it was,
+              # and reporting success here would hand protection a green check
+              # for an audit that never ran.
+              echo "::error::the npm-audit matrix did not run, so nothing was audited"
+              exit 1 ;;
+            *)
+              echo "::error::npm-audit failed for at least one project; see the npm-audit (ui) and npm-audit (web) checks"
+              exit 1 ;;
+          esac
 
   # Committed credentials, across the full history.
   #

@@ -31,6 +31,13 @@ type Config struct {
 	// optional and an empty Binary means "look on $PATH"; a machine without
 	// whisper installed is an ordinary machine, not a misconfigured one.
 	Transcription Transcription `yaml:"transcription"`
+	// AddrDefaulted records that nobody chose Addr -- there was no config.yaml,
+	// or it carried no addr key -- so the loopback default below is in force.
+	// It is not a setting and never appears in config.yaml (`yaml:"-"`); it is
+	// how InsecureExposureWarning tells "bound to loopback on purpose, behind a
+	// proxy" apart from "bound to loopback because nobody said otherwise", which
+	// are the same address and need opposite messages.
+	AddrDefaulted bool `yaml:"-"`
 	// TrustProxyHeaders makes the server honour X-Forwarded-Proto when
 	// deciding whether to set the Secure flag on the session cookie. Only
 	// enable it when polyemesis really is behind a reverse proxy, otherwise a
@@ -119,16 +126,54 @@ type Transcription struct {
 	Binary string `yaml:"binary"`
 }
 
+// DefaultAddr is the listen address used when nobody picks one.
+//
+// LOOPBACK, NOT ":8080", AND THAT IS A DELIBERATE BREAK. The old default was
+// ":8080" -- every interface -- with tls.mode defaulting to off and the session
+// cookie's Secure flag therefore unset. So the shipped, do-nothing
+// configuration served a login form and its session cookie in cleartext to the
+// whole network, and the only thing standing between that and an operator was
+// InsecureExposureWarning below: one line, in a banner, on a boot nobody reads
+// twice. A log line is rung 0. It announces the exposure to somebody who has
+// already been exposed and cannot un-send the password they just typed.
+//
+// The safest default that does not break a deliberate plaintext install is to
+// make the exposure a thing somebody TYPED. An operator who wants plaintext on
+// every interface still has it: `addr: "0.0.0.0:8080"` in config.yaml, or
+// `--addr :8080` on the command line, and both keep the warning they had. What
+// no longer happens is reaching that state by installing the software and
+// doing nothing.
+//
+// WHO THIS DOES NOT TOUCH, which is most people. The Dockerfile's CMD passes
+// `-addr :8080`; deploy/polyemesis.service passes `--addr :8080`; install.sh
+// writes an addr into the config.yaml it generates; config.example.yaml carries
+// `addr: ":8080"`. A flag or a file key wins over this, so every one of those
+// paths binds exactly what it bound before.
+//
+// WHO IT DOES, stated plainly because it is a real cost: an install that has no
+// config.yaml, or one with no addr key, and that was being reached from another
+// machine over plain HTTP, becomes reachable only from the box itself after
+// this upgrade. That operator sees the banner print http://127.0.0.1:8080 and
+// the sentence InsecureExposureWarning returns for exactly this case, which
+// names the two keys that give them back what they had. It is a one-line fix
+// with a printed instruction, and the alternative is leaving a cleartext login
+// form on every interface of every default install.
+const DefaultAddr = "127.0.0.1:8080"
+
 // Default returns the configuration used when no config.yaml exists.
 //
 // TLS defaults to off rather than auto: a config file that predates tls.mode
 // must keep serving exactly what it served yesterday. New deployments opt in
-// by copying config.example.yaml, which ships mode: auto.
+// by copying config.example.yaml, which ships mode: auto. That is also why the
+// bind, not the TLS mode, is what moved: turning TLS on by default would swap a
+// working plaintext install for a certificate warning, whereas narrowing the
+// bind leaves the protocol alone.
 func Default() Config {
 	return Config{
-		Addr:    ":8080",
-		DataDir: "./data",
-		TLS:     TLS{Mode: ModeOff},
+		Addr:          DefaultAddr,
+		AddrDefaulted: true,
+		DataDir:       "./data",
+		TLS:           TLS{Mode: ModeOff},
 	}
 }
 
@@ -136,11 +181,28 @@ func Default() Config {
 // A malformed file is an error: silently running on defaults after the
 // operator wrote a config would be worse than refusing to start.
 func Load(path string) (Config, error) {
+	return load(path, false)
+}
+
+// LoadRequired is Load for a path the operator typed. An absent file is an
+// error rather than a default, because defaulting here does not "run without
+// a config" -- it boots a DIFFERENT install: creates ./data, mints a new
+// secret.key, opens an empty database, binds :8080 in the clear and reopens
+// unauthenticated POST /setup, while looking healthy. A typo in --config must
+// stop at the door, naming the path. #644.
+func LoadRequired(path string) (Config, error) {
+	return load(path, true)
+}
+
+func load(path string, required bool) (Config, error) {
 	cfg := Default()
 
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if required {
+				return cfg, fmt.Errorf("config %s: %w (the path was given explicitly, so refusing to start on defaults)", path, err)
+			}
 			return cfg, nil
 		}
 		return cfg, fmt.Errorf("read %s: %w", path, err)
@@ -148,11 +210,16 @@ func Load(path string) (Config, error) {
 	// Zero the mode before unmarshalling so an absent tls.mode is
 	// distinguishable from an explicit one and can fall back to tls.enabled.
 	cfg.TLS.Mode = ""
+	// Same trick for addr, and for the same reason: the default has to be
+	// applied AFTER the file is read, or "the file said nothing" and "the file
+	// said 127.0.0.1:8080" become the same state and AddrDefaulted lies.
+	cfg.Addr = ""
 	if err := yaml.Unmarshal(b, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
-	if cfg.Addr == "" {
-		cfg.Addr = ":8080"
+	cfg.AddrDefaulted = strings.TrimSpace(cfg.Addr) == ""
+	if cfg.AddrDefaulted {
+		cfg.Addr = DefaultAddr
 	}
 	if cfg.DataDir == "" {
 		cfg.DataDir = "./data"
@@ -363,6 +430,21 @@ func BindsPublicly(addr string) bool {
 // cookie — in plaintext on every interface is the single biggest practical
 // exposure this product has, and it is also the default bind.
 func (c Config) InsecureExposureWarning() string {
+	// The other half of the loopback default, and the half that keeps it from
+	// being a silent break. An operator who upgrades and finds the box
+	// unreachable from their laptop needs the reason in the same eight lines
+	// that used to tell them the URL. Gated on the address still BEING the
+	// default: someone who typed 127.0.0.1 themselves, or passed --addr with a
+	// loopback host, chose this and is not told anything.
+	if c.AddrDefaulted && c.Addr == DefaultAddr && !c.ServesTLS() {
+		return fmt.Sprintf("no addr is configured, so polyemesis is listening on %s and is "+
+			"reachable only from this machine. That is the default because the alternative -- "+
+			"plaintext on every interface -- puts the login form and the session cookie on the "+
+			"network in the clear. To reach it from elsewhere, set tls.mode: auto in config.yaml "+
+			"(recommended), or set addr: \":8080\" to keep serving plain HTTP everywhere, or bind "+
+			"loopback deliberately behind a reverse proxy and set trustProxyHeaders: true.",
+			c.Addr)
+	}
 	if !BindsPublicly(c.Addr) || c.TrustProxyHeaders || c.ServesTLS() {
 		return ""
 	}

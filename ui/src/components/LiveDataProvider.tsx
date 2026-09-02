@@ -83,6 +83,9 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   /* Set from the same /sources response that resolves the programme, so the
      count and the choice can never describe different lists. */
   const [sourceCount, setSourceCount] = useState(0);
+  /* The ids the last /sources answer carried, so the socket effect can tell
+     "a programme we have never seen" from "the one we are already on". */
+  const knownIds = useRef<number[]>([]);
   /* Whether the programme question has been ANSWERED -- including the answer
      "there is none", which is legitimate. See the effect below for why this is
      a gate WITH A DEADLINE rather than either extreme. */
@@ -246,27 +249,44 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   // single-source install, and which on a multi-source one produces the same
   // 400 as before but only in the case where the alternative was a blank
   // console forever.
+  /* RESOLVED MORE THAN ONCE, BECAUSE THE ANSWER CHANGES.
+
+     This ran in an effect with [] deps and nothing ever re-ran it. Creating a
+     second source during setup -- or deleting the current one -- left the
+     console pointed at a programme that was no longer the right answer, or no
+     longer existed: Meters read "NOT UPDATING", Monitoring's process list
+     died, Clips showed "No clips yet.", all against a healthy server, until
+     someone reloaded the page. Every one of those is a plausible idle state,
+     which is why it was never reported as a bug. #646. */
+  const resolveSources = useCallback(async () => {
+    try {
+      const rows = await api.listSources();
+      const ids = rows.map((r) => r.id);
+      knownIds.current = ids;
+      setSourceCount(ids.length);
+      setProgramme((current) => {
+        // Keep the operator on their programme while it still exists.
+        // Re-resolving from scratch every time would drag a two-programme
+        // install back to the first source whenever any source was touched.
+        const remembered =
+          current != null && ids.some((id) => id === current) ? current : rememberedProgramme();
+        const picked = resolveProgramme(ids, remembered);
+        rememberProgramme(picked);
+        return picked;
+      });
+    } catch {
+      // A console that will not render because it could not list sources is
+      // worse than one showing the install's only programme.
+      setProgramme(null);
+    } finally {
+      setProgrammeKnown(true);
+    }
+  }, []);
+
   useEffect(() => {
     let live = true;
     let cleanupTimer: number | undefined;
-    api
-      .listSources()
-      .then((rows) => {
-        if (!live) return;
-        const ids = rows.map((r) => r.id);
-        setSourceCount(ids.length);
-        const picked = resolveProgramme(ids, rememberedProgramme());
-        setProgramme(picked);
-        rememberProgramme(picked);
-      })
-      .catch(() => {
-        // A console that will not render because it could not list sources is
-        // worse than one showing the install's only programme.
-        if (live) setProgramme(null);
-      })
-      .finally(() => {
-        if (live) setProgrammeKnown(true);
-      });
+    void resolveSources();
 
     // THE DEADLINE. Two seconds is longer than any healthy /sources and shorter
     // than an operator's patience with a blank screen. Without it a request
@@ -279,7 +299,21 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       live = false;
       if (cleanupTimer !== undefined) window.clearTimeout(cleanupTimer);
     };
-  }, []);
+  }, [resolveSources]);
+
+  /* SELF-HEALING, for the changes this tab did not make.
+
+     A source created or deleted in another tab, by another operator, or
+     straight through the API never passes through refreshSources(). The status
+     socket is install-wide and every snapshot names the programme it belongs
+     to, so a snapshot naming a source we have never heard of is proof our list
+     is stale. One /sources call, only when that happens. */
+  useEffect(() => {
+    if (!programmeKnown || source == null) return;
+    if (programme != null && source.id === programme) return;
+    if (knownIds.current.includes(source.id)) return;
+    void resolveSources();
+  }, [source, programme, programmeKnown, resolveSources]);
 
   // Seed from REST so the first paint is populated even if the socket is slow,
   // and so a browser that cannot open a WebSocket still shows something real.
@@ -301,6 +335,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       programme,
       programmeKnown,
       sourceCount,
+      refreshSources: resolveSources,
       connected,
       snapshotKnown,
       status,
@@ -317,6 +352,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       programme,
       programmeKnown,
       sourceCount,
+      resolveSources,
       connected,
       snapshotKnown,
       status,

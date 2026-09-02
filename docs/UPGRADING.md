@@ -80,15 +80,13 @@ instead.
 
 ## Version-specific notes
 
-> **0.7.0 has not been released.** No `v0.7.0` tag exists in git, on GitHub
-> Releases, or on Docker Hub as of this writing — every install path still
-> delivers 0.6.0. The rest of this section documents what 0.7.0 will do once
-> it is tagged, written in advance so it ships with the release rather than
-> after it; nothing below applies to a build you can install today.
-> `.github/workflows/release.yml`'s changelog-gate refuses to let a tag
-> publish unless [CHANGELOG.md](../CHANGELOG.md)'s top dated heading agrees
-> with it, which is what keeps this note itself from going stale the way the
-> changelog heading did (RB-5, #499).
+> **Everything in this section is released and applies to you.** `v0.7.0`
+> (2026-08-28) and `v0.8.0` (2026-09-01) are both tagged; the newest heading in
+> [CHANGELOG.md](../CHANGELOG.md) is the authority on what a tag contains, and
+> `.github/workflows/release.yml`'s changelog-gate refuses to let a tag publish
+> unless that heading agrees with it. If you are coming from 0.6.0 or earlier,
+> the 0.7.0 note below — including its **mandatory** remediation — is work you
+> still have to do.
 
 ### Upgrading to 0.7.0: sealed stream keys — **breaking to roll back**
 
@@ -263,9 +261,9 @@ What changes:
   and the slate stays on air — until every item's job has finished. Like all
   background work it yields to a live stream, so an item added while you are
   broadcasting normalises when the stream ends. Watch it on the Jobs page.
-- Today the list may hold several items but only the **first** one plays.
-  Sequencing is a later change; the list is stored, validated and normalised in
-  full now so that nothing has to be re-entered when it arrives.
+- **Every entry plays**, in the order the list gives them, and the list repeats
+  from the top when it reaches the end. The lap boundary is not a clean cut —
+  see [SCHEDULED-BROADCAST.md](SCHEDULED-BROADCAST.md) for the measured seam.
 
 ### `tls.enabled` → `tls.mode`
 

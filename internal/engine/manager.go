@@ -198,6 +198,48 @@ func (m *Manager) Scheduler() *scheduler.Runner {
 // downloads must keep working when the engine that wrote them is long gone.
 func (m *Manager) Recordings() *recording.Manager { return m.recman }
 
+// warnAboutUnreadableStreamKeys says at boot how many destinations this
+// install's secret key cannot open.
+//
+// THE SILENT PATH THIS CLOSES IS A RESTORE. secrets.LoadOrCreate mints a fresh
+// random key whenever secret.key is absent, and says nothing when it does --
+// which is correct on a first boot and catastrophic on a restored data
+// directory whose backup copied polyemesis.db and not the key beside it.
+// Nothing fails. The server starts, the API answers, the destinations are all
+// there, and every one of them holds a stream key sealed under a secret that no
+// longer exists. The restore reads as a success right up to the moment somebody
+// tries to go live, which is the worst possible moment to find out.
+//
+// WARNING, NOT CONTROL, and the choice is deliberate. Refusing to start would
+// make this unmissable and would also mean that an install with one dead
+// destination among twenty cannot serve the nineteen -- or the screen the
+// operator needs in order to fix the one. Off the air is not a safer place to
+// be than on it with a warning. So it comes up, and it says the number and the
+// names, at ERROR level because "your restore did not restore" is not
+// housekeeping.
+//
+// It never blocks the boot. A count that cannot be taken is logged and dropped:
+// a failed diagnostic must not be the reason a server does not start.
+func (m *Manager) warnAboutUnreadableStreamKeys() {
+	if m.store == nil {
+		return
+	}
+	names, err := m.store.UnreadableStreamKeys()
+	if err != nil {
+		m.log.Warn("could not check whether the destination stream keys are readable", "err", err)
+		return
+	}
+	if len(names) == 0 {
+		return
+	}
+	m.log.Error("destination stream keys cannot be decrypted with this install's secret key; "+
+		"these destinations will fail to open. This is what a data directory restored "+
+		"without its secret.key looks like: a new key was generated in its place and the "+
+		"stored keys were sealed under the old one. Restore secret.key from the backup, or "+
+		"re-enter the stream key on each destination",
+		"destinations", len(names), "names", names)
+}
+
 // Start brings up an engine for every source.
 //
 // A source that fails to start does not stop the others. With several
@@ -211,6 +253,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.started = true
 	m.hostStop = stopHost
 	m.mu.Unlock()
+
+	// FIRST, so it is in the log above the noise of everything coming up.
+	m.warnAboutUnreadableStreamKeys()
 
 	// Before the engines and outside the error paths below: the resource
 	// sampler describes the box, so it is worth having on an install where not
@@ -861,7 +906,15 @@ func (m *Manager) Reconcile() error {
 }
 
 // Stop shuts every engine down.
+// Stop tears every engine down within ShutdownBudget.
 func (m *Manager) Stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), ShutdownBudget)
+	defer cancel()
+	m.StopWithin(ctx)
+}
+
+// StopWithin tears every engine down inside the caller's deadline.
+func (m *Manager) StopWithin(ctx context.Context) {
 	m.mu.Lock()
 	// Captured here, stopped at the BOTTOM of this function. The ordering is
 	// the whole point and it is not obvious, so:
@@ -922,9 +975,28 @@ func (m *Manager) Stop() {
 		stopHost()
 	}
 
+	// CONCURRENTLY, AND THAT IS THE POINT OF THE SHARED DEADLINE.
+	//
+	// This loop used to be serial with a 30-second budget inside each
+	// Engine.Stop, so two programmes could spend a minute here on their own,
+	// under a TimeoutStopSec of 45. Sharing one context and stopping in
+	// sequence would only move the problem: the first wedged engine would
+	// spend the whole budget and the second would get none, so its recording
+	// would be the one truncated. Concurrent stops give every engine the same
+	// remaining time.
+	//
+	// They are independent by construction -- separate children, ports and
+	// hubs, and the publishers that feed them all stay up until the bottom of
+	// this function -- so there is no ordering between them to preserve.
+	var wg sync.WaitGroup
 	for _, eng := range engines {
-		eng.Stop()
+		wg.Add(1)
+		go func(eng *Engine) {
+			defer wg.Done()
+			eng.StopWithin(ctx)
+		}(eng)
 	}
+	wg.Wait()
 
 	// After the engines, so the children finalised against a live feed.
 	if srt != nil {
