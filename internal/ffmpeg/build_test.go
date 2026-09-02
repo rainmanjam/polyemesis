@@ -317,17 +317,22 @@ func TestIngestArgsPullReconnectFlagsPerScheme(t *testing.T) {
 		{
 			name: "http gets streamed reconnect",
 			spec: IngestSpec{Kind: IngestPull, PullURL: "http://origin.example/live.ts"},
-			want: []string{"-reconnect", "-reconnect_streamed", "-reconnect_delay_max"},
+			// -protocol_whitelist IS on an HTTP pull now, and its value is the
+			// assertion: the list must carry what the source is made of and must
+			// NOT carry file, which is the one that turns a remote manifest into
+			// a local-file read. (This case used to assert the flag was absent,
+			// on the reasoning that it "would refuse the protocol the source
+			// needs" -- true only of a list that omits http.)
+			want: []string{"-reconnect", "-reconnect_streamed", "-reconnect_delay_max", "-protocol_whitelist"},
 			// -reconnect alone only retries seekable inputs, which a live
 			// source never is.
 			wantVal: map[string]string{
 				"-reconnect":           "1",
 				"-reconnect_streamed":  "1",
 				"-reconnect_delay_max": "30",
+				"-protocol_whitelist":  "http,https,tcp,tls,crypto,data",
 			},
-			// -protocol_whitelist is scoped to the file family. On an HTTP pull
-			// it would refuse the protocol the source needs.
-			absent: []string{"-rtsp_transport", "-stream_loop", "-re", "-protocol_whitelist"},
+			absent: []string{"-rtsp_transport", "-stream_loop", "-re"},
 		},
 		{
 			name:    "https honours a custom backoff ceiling",
