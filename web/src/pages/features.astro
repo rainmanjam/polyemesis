@@ -152,7 +152,7 @@ const sections = [
     body: [
       "Connect YouTube, Twitch, Facebook or Kick and polyemesis fetches the stream key itself, then pushes your title, category and description at go-live. On YouTube and Kick it takes the ingest URL too; on Facebook it creates the broadcast and splits out the RTMPS ingest and key; on Kick it also reads viewer stats back.",
       "No subscription gates any of it, and nothing proxies your video: the OAuth connection carries metadata and chat, while the stream goes straight from your box to the platform's ingest. There is no intermediary to rate-limit your bitrate or count your destinations.",
-      "It is not all-or-nothing, and the UI says which is which per platform rather than implying parity. A pasted key is a fully supported destination, not a degraded one — nineteen other presets in the catalogue work exactly that way, over RTMP, RTMPS or SRT.",
+      "It is not all-or-nothing, and the UI says which is which per platform rather than implying parity. A pasted key is a fully supported destination, not a degraded one — twenty-three other presets in the catalogue work exactly that way, over RTMP, RTMPS or SRT.",
     ],
     note: "Instagram is listed and marked unsupported rather than shipped as a preset that quietly never connects — which looks like a bug in polyemesis when there is nothing to fix. There is no Live broadcast API, so nothing can create a broadcast, fetch a key, read chat or report viewers. If your account still has Live Producer, its URL and key work as a generic RTMPS destination, pasted by hand and changing every broadcast. X and Rumble are key-paste platforms; Rumble chat needs a key from your account page because that API has no sign-in.",
     shot: "13-automation.png",
