@@ -114,6 +114,7 @@ func run(h *hooks) error {
 		logLevel    = flag.String("log", "info", "log level: debug, info, warn, error")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 		resetPass   = flag.Bool("reset-admin", false, "set a new admin password and sign out every session, then exit")
+		verifyBak   = flag.String("verify-backup", "", "check that a backup directory holds a database that opens, then exit")
 	)
 	flag.Parse()
 
@@ -180,6 +181,19 @@ func run(h *hooks) error {
 	// this is run on a box where the real server is usually already running, and
 	// a second instance racing it for the listener would fail for a reason that
 	// has nothing to do with the password.
+	// Before anything else that touches state. update.sh calls this on the copy
+	// it just took, and the whole point is that it answers about THAT
+	// directory: it opens the file, walks it, and reads the schema, without
+	// running a migration -- migrating the backup would move the copy forward
+	// to the schema the operator is keeping a way back from. #643.
+	if *verifyBak != "" {
+		if err := db.VerifyBackup(*verifyBak); err != nil {
+			return fmt.Errorf("backup at %s is not usable: %w", *verifyBak, err)
+		}
+		fmt.Fprintf(os.Stdout, "backup at %s opens, passes integrity_check and holds this server's schema\n", *verifyBak)
+		return nil
+	}
+
 	if *resetPass {
 		return resetAdmin(cfg, os.Stdin, os.Stdout)
 	}
