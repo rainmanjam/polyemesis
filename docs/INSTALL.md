@@ -595,7 +595,8 @@ Three details in that unit are load-bearing:
 ### Behind a reverse proxy
 
 If nginx, Caddy or Traefik already terminates TLS, set `trustProxyHeaders: true`
-and leave `tls.mode: auto` — it deliberately resolves to `off`, so polyemesis
+— only if the server cannot be reached except through that proxy, since it makes
+login throttling read client addresses out of a header — and leave `tls.mode: auto` — it deliberately resolves to `off`, so polyemesis
 does not bind `:80` and does not compete with the proxy for ACME challenges.
 There is a worked config in
 [`deploy/nginx.conf.example`](../deploy/nginx.conf.example).

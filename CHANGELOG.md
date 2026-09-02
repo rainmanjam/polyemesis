@@ -58,6 +58,17 @@ its first tagged release.
   window `-reset-admin` exists to close — while looking healthy. An explicit
   `--config` that is absent now refuses to start, naming the path; the
   implicit default still defaults. (#644)
+- **Login throttling could be bypassed behind the reverse proxy the docs tell
+  you to deploy.** `deploy/nginx.conf.example` shipped
+  `$proxy_add_x_forwarded_for`, which appends to whatever the client sent, and
+  the server read the *leftmost* `X-Forwarded-For` hop — the client's own bytes.
+  Rotating that header minted a fresh throttle key per request, so the
+  5-attempt policy never fired: unlimited online guessing at the single admin
+  password, with attacker-chosen addresses in the audit log. The server now
+  reads the **rightmost** hop, the one the proxy appended, which is correct
+  whether a proxy appends or overwrites; the shipped nginx example overwrites.
+  A chain of several trusted proxies now keys everyone behind the last one
+  together, which throttles too much rather than too little. (#647)
 - **The console printed credentials as readable text in five places.** The
   Sources page showed the publish token twice — once as `STREAMKEY`, once as
   `TOKEN` — in plain text on the page an operator opens while someone is

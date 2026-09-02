@@ -72,7 +72,14 @@ server {
 
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        # $remote_addr, NOT $proxy_add_x_forwarded_for. The latter APPENDS to
+        # whatever the client sent, so the header arrives as
+        # "<whatever-the-client-typed>, <real-client>". polyemesis reads the
+        # rightmost hop precisely so that shape is still safe, but overwriting
+        # here means the header carries one address and no forged bytes at all.
+        # If you replace this with a chain-preserving form, keep in mind that
+        # every entry left of the last one is client-supplied. #647.
+        proxy_set_header X-Forwarded-For   $remote_addr;
         # polyemesis reads these two when trustProxyHeaders is enabled: they are
         # what make the session cookie Secure and the OAuth redirect URI https.
         proxy_set_header X-Forwarded-Proto $scheme;
