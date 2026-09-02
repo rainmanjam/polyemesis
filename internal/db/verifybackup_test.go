@@ -139,3 +139,73 @@ func TestVerifyBackupRefusesSomeoneElsesDatabase(t *testing.T) {
 		t.Errorf("error does not say what is wrong with it: %v", err)
 	}
 }
+
+func TestVerifyBackupRefusesABackupWhereTheCopyNeverRan(t *testing.T) {
+	// The most ordinary failure of the lot, and the one the old existence
+	// check was closest to catching: the directory is there, secret.key is
+	// there, and polyemesis.db simply is not -- a copy that was never issued,
+	// or was issued against a path that did not exist. update.sh then reports
+	// success on a directory holding no database at all.
+	//
+	// Kept distinct from the truncated and corrupted cases because the remedy
+	// differs: nothing here can be salvaged, so the operator has to take the
+	// backup again before upgrading, and the message has to say so rather than
+	// implying the file needs repair.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := VerifyBackup(dir)
+	if err == nil {
+		t.Fatal("accepted a backup directory with no polyemesis.db in it")
+	}
+	if !strings.Contains(err.Error(), "no polyemesis.db") {
+		t.Errorf("the error does not name the missing file, so the operator cannot "+
+			"tell it apart from a corrupt one: %v", err)
+	}
+}
+
+func TestVerifyBackupRefusesADatabaseSQLiteCannotEvenWalk(t *testing.T) {
+	// A distinct failure path from the single-corrupted-page case, and worth
+	// separating: damage spread across every page does not come back as a list
+	// of integrity_check problems at all. SQLite refuses the query itself with
+	// "database disk image is malformed", so the code never reaches the
+	// problem-collecting branch. This test was originally written as if it did,
+	// and asserted the truncation conditionally -- which is to say it asserted
+	// nothing while looking thorough. It is named for what it actually proves.
+	dir := goodBackup(t)
+	p := filepath.Join(dir, "polyemesis.db")
+
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const page = 4096
+	if len(b) < page*4 {
+		t.Fatalf("seeded database is only %d bytes; too small to damage several pages", len(b))
+	}
+	for off := page; off+page <= len(b); off += page {
+		copy(b[off+16:off+64], strings.Repeat("\xa5", 48))
+	}
+	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err = VerifyBackup(dir)
+	if err == nil {
+		t.Fatal("accepted a database damaged on every page")
+	}
+	if !strings.Contains(err.Error(), "could not be read") {
+		t.Errorf("wholesale damage should be reported as unreadable rather than as a "+
+			"list of individual problems, so the operator knows there is nothing to "+
+			"salvage: %v", err)
+	}
+}
+
+// NOT TESTED, DELIBERATELY, RECORDED SO THE GAP IS NOT MISTAKEN FOR AN
+// OVERSIGHT: the branch in VerifyBackup that keeps the first five
+// integrity_check problems and counts the rest. Reaching it needs damage mild
+// enough that SQLite still walks the file but bad enough that it reports more
+// than five distinct problems, and how many rows it emits for a given byte
+// pattern is SQLite's business. A test pinning that would assert SQLite's
+// internals, break on a version bump, and tell us nothing about this function.

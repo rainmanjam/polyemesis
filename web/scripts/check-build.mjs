@@ -1027,10 +1027,24 @@ if (goPresets.size && pages.includes(calcPath)) {
   } else if (checkedDates.size !== 1 || !checkedDates.has(shown[1])) {
     fail.push(
       `/calculator dates its platform figures ${shown[1]}, but the presets it lists were ` +
-      `checked ${[...checkedDates].sort().join(", ") || "(no date)"} in ` +
+      // Dates are ISO-8601, where byte order IS chronological order -- but a
+      // bare .sort() sorts by UTF-16 code unit and only happens to be right
+      // here. Stated explicitly so the next person to widen the Checked
+      // field to any other format sees the assumption instead of inheriting it.
+      `checked ${[...checkedDates].sort(compareIso).join(", ") || "(no date)"} in ` +
       "internal/db/platforms.go.",
     );
   }
+}
+
+/** Byte-order compare for ISO-8601 date strings, which is their chronological
+ * order. localeCompare is deliberately not used: it varies with the runtime's
+ * locale, and a CI failure message that reorders itself between machines is
+ * one nobody can diff. */
+function compareIso(a, b) {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
 }
 
 /* THE PASTED-KEY PRESET COUNT ON /features.
