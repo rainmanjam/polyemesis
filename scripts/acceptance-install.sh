@@ -1139,6 +1139,37 @@ for opt in 'max-size' 'max-file'; do
     || bad "the logging section does not set $opt, so it still has no ceiling"
 done
 
+# ------------------------------------------------------------- vacuity guard
+#
+# THE VERDICT ABOVE IS DERIVED FROM COUNTERS, AND COUNTERS CANNOT SEE A STEP
+# THAT NEVER RAN.
+#
+# This suite runs under `set -uo pipefail` with no `-e`, deliberately: several
+# steps run commands that are SUPPOSED to fail and read their status. The cost
+# is that a step which fails to EXECUTE -- a helper renamed, a function that
+# moved into a subshell, a typo in a call -- prints "command not found" to
+# stderr, increments neither counter, and the run still ends "0 failed" and
+# exits PASS. That is not hypothetical: it is #657, found when an undefined
+# helper produced exactly that and the suite reported PASS.
+#
+# So the run has to state how much it actually checked. Deliberately BELOW the
+# current total rather than equal to it: this is a vacuity guard, not a
+# ratchet on the number of assertions, which is free to move either way. The
+# same device as stopSiteFloor in internal/testenv/stopdiscard_test.go and the
+# package-count floor in internal/testenv/docdrift_packages_test.go.
+ASSERTION_FLOOR=100
+
 printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"
+
+total=$((pass + fail))
+if [ "$total" -lt "$ASSERTION_FLOOR" ]; then
+  printf "\n  \033[31mINSTALLER ACCEPTANCE INCOMPLETE\033[0m\n"
+  printf "  only %d assertions ran, and this suite has at least %d.\n" "$total" "$ASSERTION_FLOOR"
+  printf "  Steps did not execute — scroll up for \"command not found\" or an\n"
+  printf "  unbound variable. A verdict from counters cannot see a step that\n"
+  printf "  never ran, so this run is reported as a failure, not a pass.\n"
+  exit 1
+fi
+
 [ "$fail" -eq 0 ] || { printf "\n  \033[31mINSTALLER ACCEPTANCE FAILED\033[0m\n"; exit 1; }
-printf "\n  \033[32mINSTALLER ACCEPTANCE PASSED\033[0m\n"
+printf "\n  \033[32mINSTALLER ACCEPTANCE PASSED\033[0m (%d assertions)\n" "$total"
