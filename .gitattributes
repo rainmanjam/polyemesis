@@ -1,3 +1,36 @@
+# THE DEFAULT, ADDED THE FIFTH TIME THIS BUG WAS FOUND.
+#
+# Everything below this line is the record of the same failure happening four
+# times: a golden file, a generated contract, the shell scripts, the parsed
+# markdown. Each was fixed by pinning one more pattern, and each fix worked --
+# for the pattern it named. The fifth was .github/workflows/sonar.yml, read by
+# internal/testenv/sonar_gate_test.go with strings.Index(wf, "\n  sonar:\n").
+# Checked out with CRLF that anchor matches nothing, so the guard reported the
+# `sonar` job "has been renamed" -- about a file nobody had touched, on
+# windows-latest and nowhere else.
+#
+# Pinning a sixth pattern would be the same fix a fifth time, and it relies on
+# the next person writing the next guard remembering that this class of bug
+# exists. It does not survive that. So the default is inverted: no tracked text
+# file is checked out with CRLF, and a new file type inherits the fix instead of
+# rediscovering it.
+#
+# `text=auto` still leaves genuinely binary files alone -- git detects those and
+# does not touch their bytes.
+* text=auto eol=lf
+
+# The one deliberate exception. These run under Windows PowerShell, which is the
+# single consumer in this repository that has a real reason to want CRLF, and
+# nothing parses them byte for byte.
+*.ps1 text eol=crlf
+
+# ---------------------------------------------------------------------------
+# What follows is now redundant with the default above. It is kept because it
+# is the evidence for it: five incidents is why the default exists, and a
+# future reader deciding whether the blanket rule is worth its breadth should
+# be able to read what it replaced.
+# ---------------------------------------------------------------------------
+
 # Line endings.
 #
 # Git on Windows checks text files out with CRLF by default. That is harmless
