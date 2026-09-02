@@ -82,6 +82,38 @@ describe("the chrome's version wiring", () => {
     ).toBe(1);
   });
 
+  it("checks for an update once when the server has never checked, and shows the refreshed version", async () => {
+    // UpdateBanner's rule: the CACHED answer on mount, never a check -- except
+    // once, when checkedAt is empty, because an install nobody clicks would
+    // otherwise never learn anything. The refreshed answer must reach the
+    // chrome too, or the tag would sit on the stale one for the session.
+    const version = vi
+      .spyOn(api, "version")
+      .mockResolvedValue({ ...info, version: "v0.9.0", checkedAt: undefined } as VersionInfo);
+    const check = vi
+      .spyOn(api, "checkUpdate")
+      .mockResolvedValue({ ...info, version: "v0.9.1", checkedAt: "now" } as VersionInfo);
+
+    renderChrome();
+
+    await waitFor(() => expect(screen.getByText("v0.9.1")).toBeTruthy());
+    expect(version).toHaveBeenCalledTimes(1);
+    expect(
+      check.mock.calls.length,
+      "a check ran more than once for a single page load, which is what turns a pull-only design into a phone-home one",
+    ).toBe(1);
+  });
+
+  it("does not check when the server already has", async () => {
+    // The control. Checking on every load reaches GitHub from every operator's
+    // browser session, which is the property this feature was built to avoid.
+    vi.spyOn(api, "version").mockResolvedValue(info); // checkedAt present
+    const check = vi.spyOn(api, "checkUpdate").mockResolvedValue(info);
+    renderChrome();
+    await waitFor(() => expect(screen.getByText("v0.9.0")).toBeTruthy());
+    expect(check).not.toHaveBeenCalled();
+  });
+
   it("renders the chrome without a version when the server cannot answer", async () => {
     // A box with no answer must still get a usable console, and must not show
     // a placeholder where a version belongs. #663's rule, one component over.
