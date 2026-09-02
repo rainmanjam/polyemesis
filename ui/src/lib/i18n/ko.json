@@ -339,6 +339,7 @@
   "dash.laneNoPreview": "아직 미리보기가 없습니다. 이 프로그램의 인코더를 시작하세요.",
   "dash.leaveUnchanged": "변경하지 않음",
   "dash.leaveUnchangedNote": "‘변경하지 않음’은 아무것도 보내지 않으므로 플랫폼이 가진 값을 그대로 둡니다. 켜기나 끄기를 고르면 그 값을 씁니다.",
+  "dash.loadingDestinations": "이 설치에 무엇이 구성되어 있는지 확인하는 중…",
   "dash.metaCategory": "카테고리",
   "dash.metaDescription": "설명",
   "dash.metaTags": "태그",
