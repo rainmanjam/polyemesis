@@ -848,14 +848,14 @@ tls mode=… hostname=…
 > **The startup warning about `:443` is not an error.** `internal/config`'s
 > `TLSPortWarning` prints it once at startup whenever TLS is being served and
 > the port read out of `addr` is neither `443` nor absent
-> (`internal/config/config.go:396-406`) — so `addr: "0.0.0.0:443"` silences it
+> (`internal/config/config.go:414-406`) — so `addr: "0.0.0.0:443"` silences it
 > just as `":443"` does, and nothing else does.
 >
 > **Setting `addr: ":443"` is only half the fix on a systemd install.** The unit
 > runs unprivileged and cannot bind a port below 1024 without
 > `AmbientCapabilities=CAP_NET_BIND_SERVICE`, and `install.sh` grants that
 > **conditionally** — only when `tls.mode` is `acme`, or the port chosen *at
-> install time* is 443 or 80 (`scripts/install.sh:1476-1480`). So an operator
+> install time* is 443 or 80 (`scripts/install.sh:1508-1480`). So an operator
 > who declined the installer's "Serve HTTPS on 443?" offer and later edits
 > `config.yaml` gets a unit with no capability and a service that fails to bind.
 > Add both lines to the unit yourself, or use one of the alternatives
