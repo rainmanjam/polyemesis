@@ -82,6 +82,19 @@ its first tagged release.
   markdown and need no ffmpeg, database or network. It also counts what ran
   and fails on a low count, since `go test -run` matching nothing exits 0.
   (#651)
+- **`install.sh --tls acme` uninstalled the working server it had just
+  installed.** `verify()` probed `https://127.0.0.1:PORT` with `-k` in every
+  TLS mode. That connection carries no SNI, and the ACME path sets only
+  `GetCertificate` — no `Certificates` fallback, unlike selfsigned, whose leaf
+  carries `127.0.0.1` — so autocert had no name to look up and the handshake
+  aborted before any HTTP happened. `-k` skips *verifying* a certificate; it
+  cannot invent one. `verify()` then returned 1 before `INSTALL_COMPLETE` was
+  set, and the EXIT trap disabled the unit, removed the binary,
+  `/etc/polyemesis`, `/opt/polyemesis` and the service account, then printed
+  that nothing was left running. In acme mode the installer now asks the
+  question that has an answer on loopback — the `:80` redirect listener acme
+  mode binds — and the failure trap refuses to remove a service that is
+  `active`, saying so and pointing at `uninstall.sh`. (#642)
 - **`update.sh` backed up a live database and never checked the copy opened.**
   Both generated scripts copied the data directory while the server was still
   running — `cp -a` for binary installs, `docker run … tar czf` for compose —

@@ -192,6 +192,36 @@ cleanup_on_failure() {
   [ "$INSTALL_COMPLETE" = true ] && exit 0
   [ "$code" -eq 0 ] && exit 0
 
+  # A RUNNING SERVER IS NEVER TORN DOWN BY A FAILED CHECK.
+  #
+  # Everything below removes what the install created. That is right when the
+  # install genuinely failed, and catastrophic when only the last CHECK failed:
+  # #642 was verify() probing loopback TLS in acme mode, where no certificate
+  # can exist yet, so a perfectly good server was uninstalled and the operator
+  # was told nothing was left running.
+  #
+  # The check is deliberately the service's own state rather than a flag this
+  # script sets: a flag records what we believe we did, and the question here
+  # is what is actually true on the host right now. Docker installs keep the
+  # existing behaviour -- CONTAINER_STARTED already distinguishes a container
+  # this run created from one that predates it.
+  if [ "$MODE" != docker ] && [ -n "${SERVICE_NAME:-}" ] \
+     && systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    echo
+    warn "install reported a failure (exit $code), but $SERVICE_NAME is RUNNING."
+    warn "Leaving it alone: removing a working server because a check failed is"
+    warn "worse than the failed check. Investigate with:"
+    if [ "$TLS_MODE" = acme ]; then
+      echo "     journalctl -u $SERVICE_NAME -n 50 --no-pager" >&2
+      echo "     (acme mode issues its certificate on the first request for" >&2
+      echo "      $DOMAIN_NAME, not on loopback -- see the note on verify())" >&2
+    else
+      echo "     journalctl -u $SERVICE_NAME -n 50 --no-pager" >&2
+    fi
+    echo "     To remove it deliberately: $INSTALL_DIR/uninstall.sh" >&2
+    exit "$code"
+  fi
+
   echo
   warn "install failed (exit $code) — undoing what it had already done"
 
@@ -2073,6 +2103,32 @@ EOF
 
 verify() {
   local scheme="http" url deadline
+
+  # ACME CANNOT BE PROBED ON 127.0.0.1, AND TRYING TO UNINSTALLED THE SERVER.
+  #
+  # This asked https://127.0.0.1:PORT/health with -k in every mode. In acme
+  # mode that connection carries no SNI, and internal/tlsx's acme path sets
+  # only conf.GetCertificate -- there is no conf.Certificates fallback the way
+  # selfsigned has, whose leaf carries 127.0.0.1 in its SANs. autocert has no
+  # name to look up, so the handshake aborts before any HTTP happens, and -k
+  # cannot help: -k skips VERIFYING a certificate, it cannot invent one.
+  # hostPolicy would refuse the bare IP even if SNI were sent, and on a fresh
+  # install no certificate has been issued yet regardless.
+  #
+  # verify() returning 1 made the caller exit non-zero BEFORE INSTALL_COMPLETE
+  # was set, so the EXIT trap tore down a server that was working: unit
+  # disabled, binary removed, /etc/polyemesis and /opt/polyemesis deleted,
+  # service account dropped -- then it printed "nothing was left running".
+  #
+  # So in acme mode, ask the question that HAS an answer on loopback: the
+  # redirect listener on :80, which acme mode binds for the challenge. A
+  # response of any status proves the server is up, which is all this check
+  # was ever for. #642.
+  if [ "$TLS_MODE" = acme ]; then
+    verify_acme_redirect
+    return $?
+  fi
+
   [ "$TLS_MODE" = "off" ] || scheme="https"
   url="${scheme}://127.0.0.1:${HTTP_PORT}/api/v1/health"
 
@@ -2089,6 +2145,34 @@ verify() {
   done
 
   err "the server did not answer within 60s."
+  if [ "$MODE" = docker ]; then
+    echo "     logs: cd $INSTALL_DIR && $COMPOSE_CMD logs --tail 50"
+  else
+    echo "     logs: journalctl -u $SERVICE_NAME -n 50 --no-pager"
+  fi
+  return 1
+}
+
+# verify_acme_redirect proves the server is up without needing a certificate.
+#
+# acme mode binds :80 for the ACME challenge and to redirect browsers, so a
+# plain HTTP request there is answered by polyemesis itself. Any status counts:
+# a 301 to https is the redirect doing its job, and this is a liveness check,
+# not an authorization one.
+verify_acme_redirect() {
+  local deadline code
+  info "waiting for the server to answer on :80 (acme mode; loopback TLS has no certificate yet)"
+  deadline=$(( $(date +%s) + 60 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:80/" 2>/dev/null || true)"
+    if [ -n "$code" ] && [ "$code" != "000" ]; then
+      ok "server is up (:80 answered $code)"
+      return 0
+    fi
+    sleep 2
+  done
+
+  err "the server did not answer on :80 within 60s."
   if [ "$MODE" = docker ]; then
     echo "     logs: cd $INSTALL_DIR && $COMPOSE_CMD logs --tail 50"
   else
