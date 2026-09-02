@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -173,11 +174,7 @@ func run(h *hooks) error {
 	// running a migration -- migrating the backup would move the copy forward
 	// to the schema the operator is keeping a way back from. #643.
 	if *verifyBak != "" {
-		if err := db.VerifyBackup(*verifyBak); err != nil {
-			return fmt.Errorf("backup at %s is not usable: %w", *verifyBak, err)
-		}
-		fmt.Fprintf(os.Stdout, "backup at %s opens, passes integrity_check and holds this server's schema\n", *verifyBak)
-		return nil
+		return verifyBackup(*verifyBak, os.Stdout)
 	}
 
 	if *resetPass {
@@ -964,4 +961,25 @@ func parseLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// verifyBackup is the -verify-backup flag's whole body, lifted out of run().
+//
+// It was inline, and inline meant untested: run() parses flags, opens a
+// database, binds sockets and starts an engine, so nothing can call it to ask
+// one question. The lines that decide whether an operator is told their backup
+// is usable were therefore the least exercised in the file -- which is the
+// wrong way round, because this is the path that runs immediately before an
+// upgrade destroys the only way back.
+//
+// Taking an io.Writer rather than printing to os.Stdout is what makes the
+// success message assertable. The message is not decoration: update.sh prints
+// it as the evidence that the backup was checked, so its wording is part of
+// what the operator relies on.
+func verifyBackup(dir string, out io.Writer) error {
+	if err := db.VerifyBackup(dir); err != nil {
+		return fmt.Errorf("backup at %s is not usable: %w", dir, err)
+	}
+	fmt.Fprintf(out, "backup at %s opens, passes integrity_check and holds this server's schema\n", dir)
+	return nil
 }
