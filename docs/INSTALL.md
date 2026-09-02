@@ -846,13 +846,26 @@ tls mode=… hostname=…
 | 80 | TCP | only for `tls.mode: acme` (HTTP-01 validation), plus the HTTP→HTTPS redirect whenever polyemesis terminates TLS |
 | 443 | TCP | whenever polyemesis terminates TLS for browsers. Serving TLS on 8080 works, but every visitor has to type the port and `http://` redirects carry it too — so the server **warns at startup** when TLS is on and `addr` is not `:443`. Keep another port only if something in front of this box terminates TLS on 443, or the port is deliberate. |
 
-> **The startup warning about `:443` is not an error.** `install.sh` asks about
-> this and grants `AmbientCapabilities=CAP_NET_BIND_SERVICE` in the unit it
-> writes, so an operator who used the installer never sees it. The one who does
-> is the operator with a hand-written unit, an Ansible role or a compose file:
-> they set `tls.mode`, get a working server on 8080, and nothing else would
-> ever tell them their visitors need a port. Set `addr: ":443"` — and grant
-> that capability if the service runs as a non-root user.
+> **The startup warning about `:443` is not an error.** `internal/config`'s
+> `TLSPortWarning` prints it once at startup whenever TLS is being served and
+> the port read out of `addr` is neither `443` nor absent
+> (`internal/config/config.go:414-406`) — so `addr: "0.0.0.0:443"` silences it
+> just as `":443"` does, and nothing else does.
+>
+> **Setting `addr: ":443"` is only half the fix on a systemd install.** The unit
+> runs unprivileged and cannot bind a port below 1024 without
+> `AmbientCapabilities=CAP_NET_BIND_SERVICE`, and `install.sh` grants that
+> **conditionally** — only when `tls.mode` is `acme`, or the port chosen *at
+> install time* is 443 or 80 (`scripts/install.sh:1508-1480`). So an operator
+> who declined the installer's "Serve HTTPS on 443?" offer and later edits
+> `config.yaml` gets a unit with no capability and a service that fails to bind.
+> Add both lines to the unit yourself, or use one of the alternatives
+> `deploy/polyemesis.service:51-57` lists (the
+> `net.ipv4.ip_unprivileged_port_start` sysctl, or a port forward).
+>
+> The operator this warning is really for is the one with a hand-written unit,
+> an Ansible role or a compose file: they set `tls.mode`, get a working server
+> on 8080, and nothing else would ever tell them their visitors need a port.
 
 The ingest listeners bind `0.0.0.0` regardless of `addr`, so restricting `addr`
 to loopback for a reverse-proxy deployment does not restrict ingest. Set an SRT

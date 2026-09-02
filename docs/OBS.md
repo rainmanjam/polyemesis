@@ -175,6 +175,13 @@ FFmpeg 6.1.1, which is Ubuntu 24.04's stock build: that refuses with *"at most
 one audio stream is supported in flv"*, and the extra tracks are lost with no
 error at either end.
 
+**That build is what one of the images we ship runs.** `Dockerfile.cuda` is
+based on `nvidia/cuda:12.6.3-base-ubuntu24.04` and pins `7:6.1.1-3ubuntu5`
+(`Dockerfile.cuda:132`), so this section does not apply to the CUDA image at
+all — it is below the 7.1 floor. The default Alpine image (FFmpeg 8.1.2) and
+`Dockerfile.vaapi` (8.0.1) are above it. If you need NVENC *and* multitrack
+RTMP ingest, you cannot get both from the images in this repository today.
+
 What has not been done is a run with OBS itself as the publisher — the testing
 used FFmpeg. OBS writes the same `MULTITRACKTYPE_ONE_TRACK` format (read from
 its `flv-mux.c`), so the wire format is not in question, but the handshake and

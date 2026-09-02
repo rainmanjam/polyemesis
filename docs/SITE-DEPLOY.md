@@ -1,8 +1,18 @@
 # Publishing polyemesis.com
 
-The marketing site in `web/` is a static Astro build. `.github/workflows/pages.yml`
-builds it on every pull request that touches `web/`, and publishes it to
-Cloudflare Pages on every push to `main` — **once two repository secrets exist**.
+The marketing site in `web/` is a static Astro build.
+`.github/workflows/pages.yml` builds it on every pull request touching `web/**`,
+`docs/**` or `pages.yml`, and publishes it to Cloudflare Pages on a push to
+`main` **matching those same three paths** — plus after every `release` run
+(`workflow_run`, no path filter, so a tag redeploys the site) and on
+`workflow_dispatch` — **once two repository secrets exist**.
+
+`docs/**` is in both filters on purpose: `web/`'s content collection loads with
+`base: "../docs"`, so this build renders the repository's `docs/`, not a copy.
+Without it a docs-only correction would merge to `main` and never reach the
+published site (#499). A push to `main` that touches none of the three paths
+still publishes nothing, so a change to, say, `README.md` alone does not
+redeploy.
 They do not exist yet, so today that workflow builds the site, says so in a
 notice, and stops. Adding the secrets is what turns it into a deploy; no edit to
 the workflow is needed.
