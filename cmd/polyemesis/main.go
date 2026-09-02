@@ -461,7 +461,20 @@ func run(h *hooks) error {
 
 	h.stopping()
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	// ONE DEADLINE FOR EVERY PHASE BELOW.
+	//
+	// This was 20 seconds for the HTTP servers, and each phase after it owned
+	// a constant of its own: a 5s lifecycle drain, then 30 seconds PER ENGINE
+	// stopped one after another. Nothing added them up, and their sum passes
+	// TimeoutStopSec=45 on an install with two programmes. systemd then
+	// SIGKILLs the cgroup, which truncates whatever was being recorded --
+	// silently, at exactly the right file size. See
+	// internal/engine/shutdown_budget.go. #645.
+	//
+	// Every phase now draws from this one context, so a slow HTTP shutdown
+	// leaves less for the engines rather than adding to them, and the total
+	// cannot exceed what systemd is waiting for.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), engine.ShutdownBudget)
 	defer shutdownCancel()
 	if redirectServer != nil {
 		// The redirect helper holds nothing a client can be mid-transfer on,
@@ -482,8 +495,16 @@ func run(h *hooks) error {
 	// a broadcast live. An unclean shutdown -- a kill, a power cut -- is covered
 	// instead by the platform's enableAutoStop plus the boot reconciliation the
 	// next start performs before its first tick.
-	srv.DrainLifecycle()
-	eng.Stop()
+	srv.DrainLifecycleWithin(shutdownCtx)
+	eng.StopWithin(shutdownCtx)
+	if err := shutdownCtx.Err(); err != nil {
+		// Said out loud, because the alternative is systemd killing us and the
+		// operator finding a truncated recording with nothing in the log to
+		// connect it to. If this fires, a child did not answer SIGTERM inside
+		// the budget -- see #628 and #631.
+		log.Warn("shutdown ran out of its budget; some children may have been killed rather than finishing",
+			"budget", engine.ShutdownBudget.String())
+	}
 	log.Info("goodbye")
 	return nil
 }

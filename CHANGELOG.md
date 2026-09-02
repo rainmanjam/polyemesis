@@ -82,6 +82,20 @@ its first tagged release.
   markdown and need no ffmpeg, database or network. It also counts what ran
   and fails on a low count, since `go test -run` matching nothing exits 0.
   (#651)
+- **Shutdown had no single deadline, so a stop could outlast the one systemd
+  waits for.** `TimeoutStopSec=45` sat above four budgets chosen separately and
+  added together by the order they ran in: 20s for the HTTP servers, 5s for the
+  lifecycle drain, then **30 seconds per engine, stopped one after another**,
+  plus a captioner wait that took no context at all. On a two-programme install
+  one wedged child passed 45s without anything in the process believing it had
+  overrun; systemd then SIGKILLed the cgroup, and a recorder killed mid-write
+  leaves a Matroska file with no trailer at exactly the size a reader would
+  call plausible. The process now has one budget
+  (`engine.ShutdownBudget`, 35s) that every phase draws from, engines are
+  stopped concurrently so sharing a deadline does not mean dividing it, and
+  running out of it is logged rather than left to systemd to reveal. A test
+  pins the budget below the `TimeoutStopSec` in both the shipped unit and the
+  one `install.sh` writes. (#645)
 - **The console resolved its programme once per page load.** `/sources` was
   read in an effect that never re-ran, so creating a second source during
   first-run setup — or deleting the one being followed — left the whole

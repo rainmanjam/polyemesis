@@ -861,7 +861,15 @@ func (m *Manager) Reconcile() error {
 }
 
 // Stop shuts every engine down.
+// Stop tears every engine down within ShutdownBudget.
 func (m *Manager) Stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), ShutdownBudget)
+	defer cancel()
+	m.StopWithin(ctx)
+}
+
+// StopWithin tears every engine down inside the caller's deadline.
+func (m *Manager) StopWithin(ctx context.Context) {
 	m.mu.Lock()
 	// Captured here, stopped at the BOTTOM of this function. The ordering is
 	// the whole point and it is not obvious, so:
@@ -922,9 +930,28 @@ func (m *Manager) Stop() {
 		stopHost()
 	}
 
+	// CONCURRENTLY, AND THAT IS THE POINT OF THE SHARED DEADLINE.
+	//
+	// This loop used to be serial with a 30-second budget inside each
+	// Engine.Stop, so two programmes could spend a minute here on their own,
+	// under a TimeoutStopSec of 45. Sharing one context and stopping in
+	// sequence would only move the problem: the first wedged engine would
+	// spend the whole budget and the second would get none, so its recording
+	// would be the one truncated. Concurrent stops give every engine the same
+	// remaining time.
+	//
+	// They are independent by construction -- separate children, ports and
+	// hubs, and the publishers that feed them all stay up until the bottom of
+	// this function -- so there is no ordering between them to preserve.
+	var wg sync.WaitGroup
 	for _, eng := range engines {
-		eng.Stop()
+		wg.Add(1)
+		go func(eng *Engine) {
+			defer wg.Done()
+			eng.StopWithin(ctx)
+		}(eng)
 	}
+	wg.Wait()
 
 	// After the engines, so the children finalised against a live feed.
 	if srt != nil {

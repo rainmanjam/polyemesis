@@ -873,13 +873,27 @@ func (e *Engine) Start(ctx context.Context) error {
 }
 
 // Stop tears every child down in dependency order and closes the relay.
+// Stop tears the engine down within ShutdownBudget.
+//
+// Kept for callers that have no deadline of their own -- tests, and the
+// single-engine paths in Manager. Anything shutting the PROCESS down must use
+// StopWithin and share one context, or the per-engine budgets add up past
+// what systemd allows. See shutdown_budget.go. #645.
 func (e *Engine) Stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), ShutdownBudget)
+	defer cancel()
+	e.StopWithin(ctx)
+}
+
+// StopWithin tears the engine down inside the caller's deadline.
+//
+// The context is the WHOLE process's remaining shutdown time, not this
+// engine's share of it. Engines are stopped concurrently precisely so that
+// sharing one deadline does not mean dividing it.
+func (e *Engine) StopWithin(ctx context.Context) {
 	if e.cancel != nil {
 		e.cancel()
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 
 	// Consumers first, then the renditions they read, then the ingest. Stopping
 	// an upstream first would make everything below it log a spurious "input
