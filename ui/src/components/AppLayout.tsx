@@ -102,6 +102,32 @@ export function AppLayout({
   const { status, connected, frameError } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
+
+  // WHICH RAIL TOOLTIP IS OPEN, held here rather than by Radix.
+  //
+  // Radix opens a Tooltip.Root on hover whether or not it has any content to
+  // show. The expanded nav renders no TooltipContent -- the label is already on
+  // screen -- so every link the pointer crossed while expanded left its Root
+  // sitting in the open state, invisibly and with nothing to indicate it.
+  // Collapsing mounts the content, and every one of those Roots painted at
+  // once: a column of labels over the page for exactly the links that had been
+  // hovered, and none for the ones that had not.
+  //
+  // Controlling `open` fixes it at the source. While expanded the expression
+  // below is false for every link, so no amount of hovering can leave anything
+  // to resurface.
+  const [openRailTip, setOpenRailTip] = useState<string | null>(null);
+
+  // Adjusting state during render rather than in an effect, deliberately: an
+  // effect runs after the browser has had a frame to paint, and that frame is
+  // the exact bug this prevents. React documents this pattern; the previous
+  // value is held in state rather than a ref because a ref read during render
+  // is the thing the linter objects to, correctly.
+  const [railWasCollapsed, setRailWasCollapsed] = useState(navCollapsed);
+  if (railWasCollapsed !== navCollapsed) {
+    setRailWasCollapsed(navCollapsed);
+    setOpenRailTip(null);
+  }
   const location = useLocation();
   const t = useT();
   const stateLabel = useStateLabel();
@@ -351,7 +377,18 @@ export function AppLayout({
               // constant across the toggle is what lets React diff instead of
               // replace, so focus survives.
               return (
-                <Tooltip key={to}>
+                <Tooltip
+                  key={to}
+                  open={navCollapsed && openRailTip === to}
+                  // Only clear when the link closing is the one recorded. Radix
+                  // reports the outgoing tooltip's close AFTER the incoming
+                  // one's open when a pointer moves between two triggers, so an
+                  // unconditional null here would immediately shut the tooltip
+                  // that had just legitimately opened.
+                  onOpenChange={(open) =>
+                    setOpenRailTip((prev) => (open ? to : prev === to ? null : prev))
+                  }
+                >
                   <TooltipTrigger asChild>
                     <NavLink
                       key={to}
