@@ -1979,8 +1979,8 @@ docker volume inspect polyemesis-data >/dev/null 2>&1 || {
 # upgrade anyway, so stopping here costs the same downtime and makes the
 # archive consistent.
 #
-# `stop`, not `down`: down removes the container, and the operator may want it
-# back untouched if the checks below refuse the upgrade.
+# Deliberately stop rather than down: down removes the container, and the
+# operator may want it back untouched if the checks below refuse the upgrade.
 echo "stopping the container so the archive is consistent"
 ${COMPOSE_CMD:-true} stop
 
