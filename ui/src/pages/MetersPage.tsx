@@ -135,6 +135,12 @@ export function MetersPage() {
      re-checked against Date.now() here: `at` is the server's clock, and a
      browser an hour out of step would blank every verdict on the page. */
   const freshness = useStaleTracker();
+  /* Destructured, so the poll below can name what it actually uses. The two
+     callbacks are stable (useCallback in useStaleTracker); the OBJECT is not,
+     because `failures` changes -- and naming the object in the dependency list
+     would restart the interval on every failure, which is an immediate retry
+     loop against a server that is already down. */
+  const { ok: freshOk, failed: freshFailed } = freshness;
 
   // Polled rather than pushed: the analyser publishes once a second, and a
   // second socket subscription for one card is not worth the wiring.
@@ -146,9 +152,9 @@ export function MetersPage() {
         .then((v) => {
           setLoudness(v);
           if (!toggling.current) setMonitorOn(v.enabled ?? null);
-          freshness.ok();
+          freshOk();
         })
-        .catch(freshness.failed);
+        .catch(freshFailed);
     void read();
     const t = window.setInterval(read, 2000);
     return () => window.clearInterval(t);
@@ -167,7 +173,7 @@ export function MetersPage() {
     // "no sources exist", which the route accepts, OR "not resolved yet",
     // which it refuses. Only the second is a bug, and only this tells them
     // apart.
-  }, [programme, programmeKnown]);
+  }, [programme, programmeKnown, freshOk, freshFailed]);
 
   const reports = loudness?.reports ?? [];
 

@@ -31,7 +31,7 @@ func everyAuditEvent() []alerts.Event {
 	return []alerts.Event{
 		auditLoginFailed(dirty, 7),
 		auditLoginSucceeded(dirty, 7),
-		auditPasswordChanged(dirty),
+		auditPasswordChanged(dirty, 0, 1),
 		// The scope is NOT planted, and the asymmetry is the point: the name is
 		// free text an operator types, while the scope is validated against a
 		// closed set before it is ever stored, so a hostile value cannot reach
