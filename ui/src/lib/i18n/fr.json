@@ -285,6 +285,8 @@
   "common.save": "Enregistrer",
   "common.start": "Démarrer",
   "common.stop": "Arrêter",
+  "confirm.alsoRemoves": "Cela supprime également",
+  "confirm.typeToConfirm": "Saisissez {subject} pour confirmer",
   "dash.audioTracks": "Pistes audio",
   "dash.audioTracks.hint": "Combien de pistes audio l'entrée transporte. Les mixages par destination y puisent, donc un nombre inférieur à l'attendu signifie que l'encodeur ne les envoie pas toutes.",
   "dash.bitrate": "Débit",

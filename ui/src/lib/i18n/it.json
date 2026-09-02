@@ -285,6 +285,8 @@
   "common.save": "Salva",
   "common.start": "Avvia",
   "common.stop": "Arresta",
+  "confirm.alsoRemoves": "Questo rimuove anche",
+  "confirm.typeToConfirm": "Digita {subject} per confermare",
   "dash.audioTracks": "Tracce audio",
   "dash.audioTracks.hint": "Quante tracce audio trasporta l'ingresso. I mix per destinazione scelgono da queste, quindi un numero più basso del previsto significa che l'encoder non le invia tutte.",
   "dash.bitrate": "Bitrate",

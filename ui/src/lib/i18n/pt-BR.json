@@ -285,6 +285,8 @@
   "common.save": "Salvar",
   "common.start": "Iniciar",
   "common.stop": "Parar",
+  "confirm.alsoRemoves": "Isto também remove",
+  "confirm.typeToConfirm": "Digite {subject} para confirmar",
   "dash.audioTracks": "Faixas de áudio",
   "dash.audioTracks.hint": "Quantas faixas de áudio a entrada carrega. As mixagens por destino escolhem entre elas, então um número menor que o esperado significa que o codificador não está enviando todas.",
   "dash.bitrate": "Taxa de bits",

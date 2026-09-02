@@ -285,6 +285,8 @@
   "common.save": "Zapisz",
   "common.start": "Rozpocznij",
   "common.stop": "Zatrzymaj",
+  "confirm.alsoRemoves": "Spowoduje to również usunięcie",
+  "confirm.typeToConfirm": "Wpisz {subject}, aby potwierdzić",
   "dash.audioTracks": "Ścieżki dźwiękowe",
   "dash.audioTracks.hint": "Ile ścieżek dźwiękowych niesie sygnał wejściowy. Miksy dla poszczególnych celów wybierają spośród nich, więc mniejsza liczba niż oczekiwana oznacza, że koder nie wysyła wszystkich.",
   "dash.bitrate": "Przepływność",

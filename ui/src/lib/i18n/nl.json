@@ -285,6 +285,8 @@
   "common.save": "Opslaan",
   "common.start": "Start",
   "common.stop": "Stoppen",
+  "confirm.alsoRemoves": "Dit verwijdert ook",
+  "confirm.typeToConfirm": "Typ {subject} om te bevestigen",
   "dash.audioTracks": "Audiotracks",
   "dash.audioTracks.hint": "Hoeveel audiotracks de ingest meedraagt. De mixen per bestemming kiezen hieruit, dus een lager getal dan verwacht betekent dat de encoder ze niet allemaal stuurt.",
   "dash.bitrate": "Bitrate",

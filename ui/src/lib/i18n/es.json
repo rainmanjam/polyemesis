@@ -285,6 +285,8 @@
   "common.save": "Guardar",
   "common.start": "Iniciar",
   "common.stop": "Detener",
+  "confirm.alsoRemoves": "Esto también elimina",
+  "confirm.typeToConfirm": "Escribe {subject} para confirmar",
   "dash.audioTracks": "Pistas de audio",
   "dash.audioTracks.hint": "Cuántas pistas de audio trae la entrada. Las mezclas por destino eligen de estas, así que un número menor del esperado significa que el codificador no las envía todas.",
   "dash.bitrate": "Tasa de bits",

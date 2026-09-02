@@ -285,6 +285,8 @@
   "common.save": "保存",
   "common.start": "开始",
   "common.stop": "停止",
+  "confirm.alsoRemoves": "同时会删除",
+  "confirm.typeToConfirm": "输入 {subject} 以确认",
   "dash.audioTracks": "音轨",
   "dash.audioTracks.hint": "输入携带的音轨数量。各目标的混音从中挑选，因此数量少于预期说明编码器没有把它们全部发出。",
   "dash.bitrate": "码率",

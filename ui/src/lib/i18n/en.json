@@ -285,6 +285,8 @@
   "common.save": "Save",
   "common.start": "Start",
   "common.stop": "Stop",
+  "confirm.alsoRemoves": "This also removes",
+  "confirm.typeToConfirm": "Type {subject} to confirm",
   "dash.audioTracks": "Audio tracks",
   "dash.audioTracks.hint": "How many audio tracks the ingest is carrying. Per-destination mixes select from these, so a number lower than expected means the encoder is not sending them all.",
   "dash.bitrate": "Bitrate",

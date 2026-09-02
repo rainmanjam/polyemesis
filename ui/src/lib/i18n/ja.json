@@ -285,6 +285,8 @@
   "common.save": "保存",
   "common.start": "開始",
   "common.stop": "停止",
+  "confirm.alsoRemoves": "次のものも削除されます",
+  "confirm.typeToConfirm": "確認のため {subject} と入力してください",
   "dash.audioTracks": "音声トラック",
   "dash.audioTracks.hint": "取り込みが運んでいる音声トラック数。配信先ごとのミックスはここから選ぶため、想定より少なければエンコーダーが全部送っていません。",
   "dash.bitrate": "ビットレート",

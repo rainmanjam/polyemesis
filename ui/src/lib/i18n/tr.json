@@ -285,6 +285,8 @@
   "common.save": "Kaydet",
   "common.start": "Başlat",
   "common.stop": "Durdur",
+  "confirm.alsoRemoves": "Bu ayrıca şunları kaldırır",
+  "confirm.typeToConfirm": "Onaylamak için {subject} yazın",
   "dash.audioTracks": "Ses parçaları",
   "dash.audioTracks.hint": "Girişin taşıdığı ses parçası sayısı. Hedef başına karışımlar bunlardan seçer, dolayısıyla beklenenden düşük bir sayı kodlayıcının hepsini göndermediği anlamına gelir.",
   "dash.bitrate": "Bit hızı",

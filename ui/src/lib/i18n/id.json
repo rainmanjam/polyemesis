@@ -285,6 +285,8 @@
   "common.save": "Simpan",
   "common.start": "Mulai",
   "common.stop": "Berhenti",
+  "confirm.alsoRemoves": "Ini juga menghapus",
+  "confirm.typeToConfirm": "Ketik {subject} untuk mengonfirmasi",
   "dash.audioTracks": "Trek audio",
   "dash.audioTracks.hint": "Berapa trek audio yang dibawa ingest. Mix per tujuan memilih dari trek-trek ini, jadi angka yang lebih kecil dari perkiraan berarti encoder tidak mengirim semuanya.",
   "dash.bitrate": "Bitrate",

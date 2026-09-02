@@ -285,6 +285,8 @@
   "common.save": "Speichern",
   "common.start": "Starten",
   "common.stop": "Stoppen",
+  "confirm.alsoRemoves": "Dies entfernt außerdem",
+  "confirm.typeToConfirm": "Zur Bestätigung {subject} eingeben",
   "dash.audioTracks": "Audiospuren",
   "dash.audioTracks.hint": "Wie viele Tonspuren der Eingang führt. Die Mischungen je Ziel wählen aus diesen aus – eine niedrigere Zahl als erwartet heißt, der Encoder sendet nicht alle.",
   "dash.bitrate": "Bitrate",
