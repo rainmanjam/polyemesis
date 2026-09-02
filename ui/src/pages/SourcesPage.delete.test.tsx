@@ -5,6 +5,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router";
 
 import { SourcesPage } from "./SourcesPage";
+// SourcesPage now asks the provider to re-resolve the programme after a
+// create or delete, because the console follows one source and that answer
+// changes when the set does. #646.
+import { LiveDataProvider } from "@/components/LiveDataProvider";
 import { asSourceId, type SourceView } from "@/lib/types";
 
 /* #18: remove() had no busy guard, unlike patch()/rotate() in this same file.
@@ -69,7 +73,9 @@ describe("SourcesPage, deleting a source", () => {
 
     render(
       <MemoryRouter>
-        <SourcesPage />
+        <LiveDataProvider>
+          <SourcesPage />
+        </LiveDataProvider>
       </MemoryRouter>,
     );
 

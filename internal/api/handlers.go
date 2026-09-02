@@ -64,7 +64,40 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
+// handleSetup creates the admin account on a fresh install.
+//
+// UNAUTHENTICATED BY NECESSITY -- there is no account to authenticate against
+// yet -- AND THROTTLED FOR THE SAME REASON. GET /setup advertises needsSetup to
+// anyone who asks, so the window between a process starting and its operator
+// reaching the browser is a race that is announced to the network it is running
+// on. CreateUser's WHERE NOT EXISTS is what makes the race narrow rather than
+// total: it cannot take over an install that already has a user, so the prize
+// is only the unconfigured install and only until the real operator gets there.
+//
+// Narrow is not the same as bounded, though, and unthrottled this endpoint let
+// one address hold the door open indefinitely -- a bcrypt hash per request,
+// spun as fast as the network allows, on the one route that runs before any
+// credential exists. The throttle is what makes losing the race cost something:
+// five free attempts, then a doubling delay to a five-minute ceiling, per
+// address, forgotten after an hour of quiet.
+//
+// EVERY ATTEMPT IS COUNTED, not only the failures, which is the one place this
+// differs from the login throttle. There is exactly one attempt in the life of
+// an install that is supposed to succeed; a second POST arriving from the same
+// address is either a retry of a request that already worked or somebody
+// probing, and neither needs to be fast.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
+	// Before the body is read and long before CreateUser pays for a bcrypt
+	// hash, for the same reason the login throttle sits where it does.
+	ip := auth.ClientIP(r, s.cfg.TrustProxyHeaders)
+	if wait := s.setups.Retry(ip); wait > 0 {
+		s.log.Warn("throttled setup attempt", "remote", ip, "retryAfter", wait)
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+		writeError(w, http.StatusTooManyRequests, "too many setup attempts, try again later")
+		return
+	}
+	s.setups.Fail(ip)
+
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -83,6 +116,10 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// The operator who just configured this install is not a suspect. Their
+	// own address starts clean, so a browser that reloads onto the login form
+	// and mistypes a password is not already partway into a penalty.
+	s.setups.Succeed(ip)
 
 	token, err := s.sessions.Issue(user.ID, user.Username)
 	if err != nil {
@@ -252,10 +289,36 @@ func (s *Server) handleTourComplete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tourState{Completed: true, CompletedAt: at})
 }
 
+// handleChangePassword replaces the admin password.
+//
+// A PASSWORD CHANGE IS AN INCIDENT-RESPONSE GESTURE AND IT WAS ONLY HALF OF
+// ONE. SetPassword bumps users.token_epoch, which refuses every session token
+// issued before this moment. API tokens are resolved by hash alone and carry no
+// epoch, so an admin token copied out of this install before an incident kept
+// working afterwards -- and nothing said so at the moment the operator was
+// making exactly that decision.
+//
+// REVOCATION IS OFFERED, NOT FORCED, and this is the judgement call. The same
+// route serves two intents that the request cannot tell apart: a routine
+// rotation, where destroying the token in somebody's CI runner is an outage
+// nobody asked for, and a suspected compromise, where leaving it is the hole.
+// Guessing wrong in the second direction is worse, but guessing at all is what
+// produced this finding: a device wired to the wrong thing. So the operator
+// says which one this is, with revokeApiTokens.
+//
+// WHAT IS NOT OPTIONAL IS THE DISCLOSURE. The response always carries what
+// survives -- the count and the tokens themselves, name and prefix and scope --
+// so no client can render "password changed" without holding the list of
+// credentials that still reach this API. The audit event carries the same
+// sentence, for the reader who did not do this.
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Current string `json:"current"`
 		New     string `json:"new"`
+		// RevokeAPITokens destroys every API token as part of the change.
+		// Absent means false, which is the answer that changes nothing about
+		// what this endpoint did before.
+		RevokeAPITokens bool `json:"revokeApiTokens"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -288,12 +351,52 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_ = s.sessions.SetSession(w, r, token)
 	}
+	// AFTER the password is settled, so a failed revoke cannot be mistaken for
+	// a failed password change. A revoke that errors is reported in the body
+	// rather than as a 500: the password DID change, the client must not retry
+	// it, and the tokens are then listed as surviving -- which they are.
+	revoked := 0
+	revokeErr := ""
+	if req.RevokeAPITokens {
+		n, err := s.store.DeleteAllAPITokens()
+		if err != nil {
+			s.log.Error("could not revoke API tokens during a password change", "err", err)
+			revokeErr = "the password changed, but the API tokens could not be revoked: " + err.Error()
+		}
+		revoked = int(n)
+	}
+
+	// Read back rather than inferred, so the list is what the database holds
+	// and not what the branch above believes it did.
+	surviving, err := s.store.ListAPITokens()
+	if err != nil {
+		s.log.Error("could not list API tokens after a password change", "err", err)
+	}
+
 	// Raised after the store call and regardless of whether the re-issue above
 	// worked, because the password genuinely did change either way -- and the
 	// operator who did NOT do this is the reader who needs it most, at the exact
 	// moment their own session stopped working.
-	s.publishAudit(auditPasswordChanged(s.clientIP(r)))
-	writeJSON(w, http.StatusOK, map[string]string{"status": "password changed"})
+	s.publishAudit(auditPasswordChanged(s.clientIP(r), revoked, len(surviving)))
+
+	body := map[string]any{
+		"status": "password changed",
+		// Always present, both of them, and `apiTokens` is a list rather than
+		// a flag: a client that renders this response cannot show success
+		// without having been handed the credentials that still work.
+		"apiTokensRevoked": revoked,
+		"apiTokens":        surviving,
+	}
+	if len(surviving) > 0 {
+		body["apiTokensNote"] = fmt.Sprintf(
+			"%s NOT revoked by this change and can still reach the API. "+
+				"Revoke them if you are changing this password because a credential leaked.",
+			plural(len(surviving), "API token was", "API tokens were"))
+	}
+	if revokeErr != "" {
+		body["apiTokensError"] = revokeErr
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // ------------------------------------------------------------------- system

@@ -10,8 +10,9 @@ import Base from "../layouts/Base.astro";
  *   1. Video is stream-copied. The SAME bitstream goes to every destination
  *      without a rendition, so the video half of the sum is one number reused,
  *      not N independent ones -- and it cannot differ per platform.
- *   2. Which means the video bitrate is bounded by the LOWEST ceiling among the
- *      destinations receiving it. Twitch at 6000 and YouTube at 12000 is not
+ *   2. Which means ONE video bitrate has to suit every destination receiving
+ *      it, and the useful reference point is the LOWEST figure among the ones
+ *      they publish. Twitch recommending 6000 alongside YouTube's 12000 is not
  *      "send each what it wants"; it is "send 6000, or add a rendition and pay
  *      for the encode". That constraint is the single most useful thing this
  *      page can tell somebody, and a generic calculator cannot express it.
@@ -22,13 +23,25 @@ import Base from "../layouts/Base.astro";
  * usually a VPS. Conflating them into one "bandwidth needed" figure is how
  * somebody provisions a server that is fine and a router that is not.
  *
- * THE PLATFORM NUMBERS ARE THE ONES THE SERVER USES, and they are dated.
- * internal/db/platforms.go carries a VideoGuidance per preset with a Source URL
- * and a Checked date; these are those figures, transcribed. A second set of
- * numbers invented for a web page would drift from the ones the product
- * actually validates against, and the operator would meet the disagreement as a
- * rejected stream. Where a platform publishes one figure rather than a range,
- * min and max are equal here because they are equal there.
+ * THE PLATFORM NUMBERS ARE PUBLISHED RECOMMENDATIONS, NOT LIMITS ANYTHING
+ * ENFORCES, and they are dated. internal/db/platforms.go carries a
+ * VideoGuidance per preset with a Source URL and a Checked date; these are
+ * those figures, transcribed. That type says of itself "ADVISORY, ALWAYS ...
+ * it must never hide an option, refuse a value, or block a save", and no code
+ * in this repository reads KbpsMin or KbpsMax to decide anything -- the only
+ * Go that mentions them outside the catalogue is a test asserting the ranges
+ * are not inverted. So this page must not tell an operator that a figure it
+ * shows is a limit they will be stopped at. Several of them are explicitly not:
+ * YouTube's 12000 is annotated "not a ceiling" against OBS's 51000, and X
+ * offers no maximum at all until two of its own published pages agree.
+ *
+ * What the page CAN say honestly is "this is above what the platform
+ * recommends, and the copied bitstream is shared", which is advice, not a
+ * refusal -- so it is rendered as advice.
+ *
+ * Where a platform publishes one figure rather than a range, min and max are
+ * equal here because they are equal there. scripts/check-build.mjs re-reads
+ * platforms.go against the built page so a transcription cannot drift.
  */
 
 /** Sourced from internal/db/platforms.go, all checked 2026-08-06. */
@@ -113,8 +126,10 @@ const CHECKED = "2026-08-06";
         <div class="card p-5">
           <h2 class="text-sm font-semibold text-fg">Destinations</h2>
           <p class="mt-1 text-xs text-muted">
-            Ceilings are what each platform publishes, checked {CHECKED}. They are the
-            same figures the server validates against.
+            These are the bitrates each platform <em>recommends</em>, checked {CHECKED}.
+            polyemesis ships the same figures as guidance and does not enforce them —
+            nothing here refuses a value, and some platforms publish a higher maximum
+            than the figure they recommend.
           </p>
           {/* THE OPTIONS LIVE ON THE DESTINATION THEY CONFIGURE. A separate
               table below meant reading a name in one place and setting its
@@ -174,7 +189,7 @@ const CHECKED = "2026-08-06";
                 />
               </label>
               <label class="flex flex-col gap-1">
-                <span class="text-[11px] text-muted">Ceiling (kbps)</span>
+                <span class="text-[11px] text-muted">Limit (kbps)</span>
                 <input
                   id="custom-kbps"
                   type="number"
@@ -320,10 +335,11 @@ const CHECKED = "2026-08-06";
           video instead, and the sum stops being a multiplication.
         </li>
         <li>
-          <span class="text-fg">The ceiling that binds</span> is the lowest among the
-          destinations still taking the <em>copied</em> stream, because that is one
+          <span class="text-fg">The recommendation that binds</span> is the lowest among
+          the destinations still taking the <em>copied</em> stream, because that is one
           bitstream they all share. A destination on a rendition is exempt — that is
-          what the rendition bought.
+          what the rendition bought. It binds your <em>choice</em>, not the software:
+          nothing here or in polyemesis refuses a bitrate above it.
         </li>
         <li>
           <span class="text-fg">Renditions are shared, not per-destination.</span> Two
@@ -339,9 +355,11 @@ const CHECKED = "2026-08-06";
         </li>
       </ul>
       <p class="mt-4 text-xs text-muted">
-        Platform ceilings are transcribed from the server's own preset table, checked
-        {CHECKED}. Protocol overhead is an estimate and varies with resolution, keyframe
-        interval and network path.
+        Platform figures are the bitrates each platform recommends, transcribed from the
+        server's own preset table and checked {CHECKED}. They are advisory there too —
+        polyemesis never refuses a value for being above one, and some platforms accept
+        more than they recommend. Protocol overhead is an estimate and varies with
+        resolution, keyframe interval and network path.
       </p>
     </div>
   </section>
@@ -533,7 +551,12 @@ const CHECKED = "2026-08-06";
       if (r.copied) copied.push(d);
       else renditionRates.add(r.video);
       if (!r.copied && r.video > d.max) {
-        warn("hard", `${d.name}: its rendition is ${r.video} kbps, above the ${d.max} kbps ceiling.`);
+        warn(
+          "soft",
+          `${d.name}: its rendition is ${r.video} kbps, above the ${d.max} kbps ` +
+            `${d.key.startsWith("custom-") ? "limit you set" : "figure the platform recommends"}. ` +
+            `Nothing here or on the server refuses it — check what the platform accepts.`,
+        );
       }
     }
 
@@ -555,20 +578,25 @@ const CHECKED = "2026-08-06";
     $("r-week")!.textContent = fmtData(perStream * perWeek);
     $("r-month")!.textContent = fmtData(perStream * perWeek * 4.35);
 
-    // The copied bitstream is ONE stream, so its ceiling is the strictest of
-    // the destinations still taking it. Destinations on a rendition are exempt:
-    // that is precisely what the rendition bought.
+    // The copied bitstream is ONE stream, so the binding recommendation is the
+    // strictest of the destinations still taking it. Destinations on a
+    // rendition are exempt: that is precisely what the rendition bought.
+    // Advisory, so this is a soft warning -- see the header comment.
     const hint = $("video-hint");
     if (copied.length) {
       const tightest = copied.reduce((a, b) => (b.max < a.max ? b : a));
       if (hint)
-        hint.textContent = `Ceiling for the copied stream: ${tightest.max} kbps (${tightest.name}).`;
+        hint.textContent =
+          `Lowest recommendation among the destinations taking the copied stream: ` +
+          `${tightest.max} kbps (${tightest.name}).`;
       if (sharedVideo > tightest.max) {
         warn(
-          "hard",
-          `${sharedVideo} kbps exceeds ${tightest.name}'s ${tightest.max} kbps ceiling, and ` +
-            `${copied.length === 1 ? "it is" : `${copied.length} destinations are`} taking the ` +
-            `copied stream. Lower it, drop that destination, or give it a rendition.`,
+          "soft",
+          `${sharedVideo} kbps is above the ${tightest.max} kbps ${tightest.name} recommends, ` +
+            `and ${copied.length === 1 ? "it is" : `${copied.length} destinations are`} taking ` +
+            `the copied stream. That is a recommendation, not a limit — polyemesis will send ` +
+            `it, and several platforms accept more than they recommend. If that one does not, ` +
+            `lower the bitrate, drop the destination, or give it a rendition.`,
         );
       }
     } else if (hint) {
@@ -587,15 +615,6 @@ const CHECKED = "2026-08-06";
           `encode on the server, shared by every destination asking for that bitrate — so this ` +
           `costs CPU that a copied stream does not. Audio is unaffected: a rendition re-encodes ` +
           `video only.`,
-      );
-    }
-
-    if (dests.length > 3) {
-      warn(
-        "soft",
-        `YouTube is capped at 3 simultaneous destinations through polyemesis today: one ` +
-          `liveStream is reused across destinations, so its shared-ingestion limit binds ` +
-          `before the per-channel one. Other platforms are unaffected.`,
       );
     }
 

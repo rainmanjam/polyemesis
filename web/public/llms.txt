@@ -35,6 +35,22 @@ the summary is wrong.
 - [Comparison](https://polyemesis.com/comparison): versus Restreamer, restream.io, obs-multi-rtmp, Aitum, MistServer
 - [Install](https://polyemesis.com/download): Docker, one-line installer, or a static binary
 - [Documentation](https://polyemesis.com/docs)
+- [Bandwidth calculator](https://polyemesis.com/calculator): what a multistream costs an uplink, modelling copied video
+
+## Guides and answers
+
+- [Multistreaming](https://polyemesis.com/multistream): what it is, and what a self-hosted one does differently
+- [Multistream from OBS](https://polyemesis.com/how-to-multistream-from-obs): the SRT multitrack setup, step by step
+- [Twitch VOD track](https://polyemesis.com/twitch-vod-track): a music-free VOD from the same broadcast
+- [Free restreaming](https://polyemesis.com/free-restream-service): what "free" costs on a hosted service, and what self-hosting costs instead
+
+## Head to head
+
+- [vs Restreamer](https://polyemesis.com/vs/restreamer)
+- [vs obs-multi-rtmp](https://polyemesis.com/vs/obs-multi-rtmp)
+- [vs Aitum Multistream](https://polyemesis.com/vs/aitum-multistream)
+- [vs Streamlabs](https://polyemesis.com/vs/streamlabs)
+- [vs StreamElements](https://polyemesis.com/vs/streamelements)
 
 ## Source
 

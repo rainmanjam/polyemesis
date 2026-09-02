@@ -545,6 +545,52 @@ func isHardwareEncoder(e db.VideoEncoder) bool {
 	return e != db.EncoderX264 && e != db.EncoderX265
 }
 
+// hardwareFallbackOrder is the usable hardware encoders, for a caller that
+// needs the list rather than the single default.
+//
+// IT EXISTS BECAUSE ffmpeg.Tools.HWEncoders IS NOT A FIELD A HANDLER MAY READ.
+// RefreshEncoderCapabilities rewrites that slice under Tools' own mutex while
+// the server is running -- the encoder list a few screens up has said so in a
+// comment since it was written, and derives its own answer instead -- but
+// clipRequest read it bare, which is a genuine data race and not a theoretical
+// one: `go test -race` flags it. This is that same derivation, written once so
+// the next caller reaches for a function rather than the field.
+//
+// Every read below goes through a Tools method that takes the read lock, so
+// the result is a snapshot of one moment rather than a slice another goroutine
+// is in the middle of rebuilding.
+//
+// PROBED AND UNPROBED ARE DIFFERENT QUESTIONS, and this keeps the distinction
+// HWEncoders itself keeps. Once the probe has run, only an encoder that
+// demonstrably encoded a frame is offered. Before it has run there is nothing
+// to have demonstrated, so the build's own hardware list stands in -- a hint,
+// exactly as the field's doc comment says, and the same hint the field held.
+//
+// The order is db.KnownEncoders', which is the order the encoder endpoint
+// already reports its "hardware" list in. It differs from detection's internal
+// preference order only on a machine where two vendors' blocks both encode,
+// and there either answer is a correct one.
+func hardwareFallbackOrder(tools *ffmpeg.Tools) []string {
+	if tools == nil {
+		return nil
+	}
+	probed := len(tools.Capabilities()) > 0
+	var out []string
+	for _, e := range db.KnownEncoders {
+		if !isHardwareEncoder(e) || !tools.HasEncoder(string(e)) {
+			continue
+		}
+		if probed {
+			c, ok := tools.Capability(string(e))
+			if !ok || !c.Works {
+				continue
+			}
+		}
+		out = append(out, string(e))
+	}
+	return out
+}
+
 // ------------------------------------------------------------ hardware scan
 
 // hardware caches the GPU enumeration.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useT } from "@/lib/i18n";
 
 /* ===========================================================================
    One confirmation for every destructive action.
@@ -60,7 +61,9 @@ export interface ConfirmDestructiveProps {
    *  what does.
    *
    *  A default rather than a required prop, so the deletions that meant the
-   *  original sentence keep saying it without being touched. */
+   *  original sentence keep saying it without being touched. The default is now
+   *  `t("confirm.alsoRemoves")` rather than a literal, and it is resolved
+   *  inside the component because a default parameter cannot call a hook. */
   consequencesLabel?: string;
   confirmLabel?: string;
   onConfirm: () => void | Promise<void>;
@@ -74,10 +77,11 @@ export function ConfirmDestructive({
   description,
   requireTyping = false,
   consequences,
-  consequencesLabel = "This also removes",
-  confirmLabel = "Delete",
+  consequencesLabel,
+  confirmLabel,
   onConfirm,
 }: Readonly<ConfirmDestructiveProps>) {
+  const t = useT();
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -106,6 +110,11 @@ export function ConfirmDestructive({
   // code, and it must not be able to turn the control off.
   const unlocked = !requireTyping || (subject !== "" && typed.trim() === subject);
 
+  // The template, not the rendered string: the subject is a styled element
+  // rather than text, so the sentence is split at the `{subject}` token and the
+  // element goes in the gap.
+  const typeToConfirm = t("confirm.typeToConfirm").split("{subject}");
+
   const run = async () => {
     if (!unlocked || busy) return;
     setBusy(true);
@@ -131,7 +140,7 @@ export function ConfirmDestructive({
         {consequences && consequences.length > 0 && (
           <div className="flex flex-col gap-1 rounded-md border border-down/40 bg-down-dim/20 px-2.5 py-2">
             <span className="text-[10px] uppercase tracking-wider text-subtle-foreground">
-              {consequencesLabel}
+              {consequencesLabel ?? t("confirm.alsoRemoves")}
             </span>
             {consequences.map((c) => (
               <div
@@ -160,12 +169,26 @@ export function ConfirmDestructive({
                 do not come back and the friction is the point; a dialog that
                 asks for a string it is itself misspelling is not friction, it is
                 a dead end. Fix the display, not the comparison. */}
+            {/* SPLIT ON THE PLACEHOLDER rather than concatenated from two
+                keys. The subject has to be its own element to escape Label's
+                `uppercase` (see above), which means the sentence cannot be one
+                string -- but "Type" + subject + "to confirm" hard-codes English
+                word order, and German puts the verb at the end while Japanese
+                puts the whole clause the other way round. One key with a
+                `{subject}` token lets each catalogue decide where the name
+                goes; i18n.test.ts already fails any locale that drops the
+                token. */}
             <Label htmlFor="confirm-subject">
-              Type{" "}
-              <span className="font-mono font-semibold normal-case">
-                {subject}
-              </span>{" "}
-              to confirm
+              {typeToConfirm.map((part, i) => (
+                <Fragment key={i}>
+                  {i > 0 && (
+                    <span className="font-mono font-semibold normal-case">
+                      {subject}
+                    </span>
+                  )}
+                  {part}
+                </Fragment>
+              ))}
             </Label>
             <Input
               id="confirm-subject"
@@ -185,14 +208,14 @@ export function ConfirmDestructive({
             onClick={() => onOpenChange(false)}
             disabled={busy}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="destructive"
             onClick={() => void run()}
             disabled={!unlocked || busy}
           >
-            {confirmLabel}
+            {confirmLabel ?? t("common.delete")}
           </Button>
         </DialogFooter>
       </DialogContent>
