@@ -64,7 +64,40 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
+// handleSetup creates the admin account on a fresh install.
+//
+// UNAUTHENTICATED BY NECESSITY -- there is no account to authenticate against
+// yet -- AND THROTTLED FOR THE SAME REASON. GET /setup advertises needsSetup to
+// anyone who asks, so the window between a process starting and its operator
+// reaching the browser is a race that is announced to the network it is running
+// on. CreateUser's WHERE NOT EXISTS is what makes the race narrow rather than
+// total: it cannot take over an install that already has a user, so the prize
+// is only the unconfigured install and only until the real operator gets there.
+//
+// Narrow is not the same as bounded, though, and unthrottled this endpoint let
+// one address hold the door open indefinitely -- a bcrypt hash per request,
+// spun as fast as the network allows, on the one route that runs before any
+// credential exists. The throttle is what makes losing the race cost something:
+// five free attempts, then a doubling delay to a five-minute ceiling, per
+// address, forgotten after an hour of quiet.
+//
+// EVERY ATTEMPT IS COUNTED, not only the failures, which is the one place this
+// differs from the login throttle. There is exactly one attempt in the life of
+// an install that is supposed to succeed; a second POST arriving from the same
+// address is either a retry of a request that already worked or somebody
+// probing, and neither needs to be fast.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
+	// Before the body is read and long before CreateUser pays for a bcrypt
+	// hash, for the same reason the login throttle sits where it does.
+	ip := auth.ClientIP(r, s.cfg.TrustProxyHeaders)
+	if wait := s.setups.Retry(ip); wait > 0 {
+		s.log.Warn("throttled setup attempt", "remote", ip, "retryAfter", wait)
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+		writeError(w, http.StatusTooManyRequests, "too many setup attempts, try again later")
+		return
+	}
+	s.setups.Fail(ip)
+
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -83,6 +116,10 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// The operator who just configured this install is not a suspect. Their
+	// own address starts clean, so a browser that reloads onto the login form
+	// and mistypes a password is not already partway into a penalty.
+	s.setups.Succeed(ip)
 
 	token, err := s.sessions.Issue(user.ID, user.Username)
 	if err != nil {
