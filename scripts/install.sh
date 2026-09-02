@@ -1947,6 +1947,29 @@ write_helper_scripts() {
 # no downgrade path. The backup is the only way back.
 set -euo pipefail
 cd "$INSTALL_DIR"
+
+# THE COMPOSE COMMAND IS DATA, NOT A SPLICE INTO COMMAND POSITION.
+#
+# Every use below used to be written \`\$COMPOSE_CMD pull\` INSIDE this
+# unquoted heredoc, so it was expanded while the file was being GENERATED and
+# the value was pasted into the script. When install.sh reached here with the
+# variable empty -- any path that writes the helpers without having run
+# install_docker -- the generated file got the bare line \`pull\`, and \`up -d\`,
+# and (in uninstall.sh) \`down --remove-orphans\`. Those are not errors an
+# operator can read: \`pull: command not found\` on the upgrade path, after the
+# container has already been stopped. Baking the value into one assignment and
+# referencing it at RUN time makes an empty value a refusal instead of three
+# mangled command lines. #658.
+#
+# Unquoted on use, deliberately: the value is two words for the compose plugin
+# ("docker compose") and one for the standalone binary, and it must split.
+COMPOSE_CMD="$COMPOSE_CMD"
+if [ -z "\$COMPOSE_CMD" ]; then
+  echo "ERROR: this update.sh was generated without a compose command." >&2
+  echo "It cannot stop, pull or start anything. Re-run install.sh to regenerate it." >&2
+  exit 1
+fi
+
 stamp="\$(date +%F-%H%M)"
 dest="$INSTALL_DIR/backup-\${stamp}.tar.gz"
 echo "backing up to \$dest"
@@ -1979,10 +2002,10 @@ docker volume inspect polyemesis-data >/dev/null 2>&1 || {
 # upgrade anyway, so stopping here costs the same downtime and makes the
 # archive consistent.
 #
-# `stop`, not `down`: down removes the container, and the operator may want it
+# \`stop\`, not \`down\`: down removes the container, and the operator may want it
 # back untouched if the checks below refuse the upgrade.
 echo "stopping the container so the archive is consistent"
-${COMPOSE_CMD:-true} stop
+\$COMPOSE_CMD stop
 
 docker run --rm -v polyemesis-data:/data -v "$INSTALL_DIR:/backup" alpine \\
   tar czf "/backup/backup-\${stamp}.tar.gz" -C /data .
@@ -2037,14 +2060,14 @@ fi
 if ! docker run --rm -v "\$verify_dir:/backup:ro" "$IMAGE" -verify-backup /backup; then
   echo "ERROR: the backup at \$dest is not usable. Refusing to upgrade." >&2
   echo "The container is still stopped; bring it back with:" >&2
-  echo "    $COMPOSE_CMD start" >&2
+  echo "    \$COMPOSE_CMD start" >&2
   exit 1
 fi
 
 echo "backup verified: \${entries} entries, and the database opens"
-$COMPOSE_CMD pull
-$COMPOSE_CMD up -d
-echo "updated. Watch the first minute: $COMPOSE_CMD logs -f"
+\$COMPOSE_CMD pull
+\$COMPOSE_CMD up -d
+echo "updated. Watch the first minute: \$COMPOSE_CMD logs -f"
 EOF
   chmod +x "$INSTALL_DIR/update.sh"
 
@@ -2052,6 +2075,17 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$INSTALL_DIR"
+
+# Baked in as data and referenced at run time -- see the same note in update.sh.
+# Spliced at generation time, an empty value left this file with the bare line
+# \`down --remove-orphans\`, on the script whose whole job is to remove things.
+COMPOSE_CMD="$COMPOSE_CMD"
+if [ -z "\$COMPOSE_CMD" ]; then
+  echo "ERROR: this uninstall.sh was generated without a compose command." >&2
+  echo "It cannot tell whether anything is on air, let alone stop it safely." >&2
+  echo "Remove the container by hand, or re-run install.sh to regenerate this script." >&2
+  exit 1
+fi
 
 REMOVE_DATA=false
 FORCE=false
@@ -2075,7 +2109,7 @@ done
 # mistaken for this install's broadcast.
 publishing_now() {
 	local out
-	out=\$($COMPOSE_CMD top 2>/dev/null || true)
+	out=\$(\$COMPOSE_CMD top 2>/dev/null || true)
 	case "\$out" in
 		*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
 			echo "\$out" | grep -E 'ffmpeg.*(rtmp|srt):' | head -3 >&2
@@ -2102,7 +2136,7 @@ if [ "\$FORCE" != true ]; then
 	[ "\$reply" = "remove" ] || { echo "Not confirmed; nothing was changed." >&2; exit 1; }
 fi
 
-$COMPOSE_CMD down --remove-orphans
+\$COMPOSE_CMD down --remove-orphans
 echo
 echo "Stopped and removed the container."
 

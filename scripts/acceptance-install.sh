@@ -424,13 +424,13 @@ exit 1
 STUB
 chmod +x "$stub/docker"
 
-gen_docker_update() { # gen_docker_update <install_dir>
+gen_docker_update() { # gen_docker_update <install_dir> [compose_cmd]
   # Read by install.sh's write_helper_scripts, same as above.
   # shellcheck disable=SC2034
   ( load_install_defs || exit 1
     INSTALL_DIR="$1"
     MODE=docker
-    COMPOSE_CMD="echo [stub compose]"
+    COMPOSE_CMD="${2-echo [stub compose]}"
     write_helper_scripts >/dev/null )
 }
 
@@ -1018,6 +1018,37 @@ EOF
     && ok "the installer chmods the data directory 0750, as the shipped unit's header calls for" \
     || bad "the data directory is left at mkdir's 0755 — it holds secret.key and the recordings (#297)"
 fi
+step "18. The generated helpers carry the compose command as DATA, not spliced into command position"
+#
+# The heredocs are unquoted, so \$COMPOSE_CMD written bare inside them was
+# expanded while the file was being WRITTEN. With an empty value the generated
+# update.sh contained the bare lines `pull` and `up -d`, and uninstall.sh
+# contained `down --remove-orphans`: `pull: command not found`, on the upgrade
+# path, after the container had already been stopped. #658.
+
+empty_dir="$work/nocompose"; mkdir -p "$empty_dir"
+gen_docker_update "$empty_dir" ""
+for f in update.sh uninstall.sh; do
+  if grep -qE '^COMPOSE_CMD="' "$empty_dir/$f"; then
+    ok "$f assigns COMPOSE_CMD once, at the top, as a value"
+  else
+    bad "$f has no COMPOSE_CMD assignment — the value is being spliced in at generation time again"
+  fi
+done
+if grep -qE '^[[:space:]]*(pull|up -d|down --remove-orphans|stop|start)([[:space:]]|$)' "$empty_dir/update.sh" "$empty_dir/uninstall.sh"; then
+  bad "a generated helper holds a bare compose subcommand in command position:"
+  grep -nE '^[[:space:]]*(pull|up -d|down --remove-orphans|stop|start)([[:space:]]|$)' "$empty_dir/update.sh" "$empty_dir/uninstall.sh" \
+    | sed 's/^/        /'
+else
+  ok 'no bare `pull` / `up -d` / `down --remove-orphans` line in either helper'
+fi
+bash -n "$empty_dir/update.sh" && bash -n "$empty_dir/uninstall.sh" \
+  && ok "both helpers still parse when the compose command is empty" \
+  || bad "an empty compose command produces a helper with a syntax error"
+out="$(bash "$empty_dir/update.sh" 2>&1)"; st=$?
+check_refusal "an update.sh generated without a compose command refuses to run" "$st" "$out" "without a compose command"
+out="$(bash "$empty_dir/uninstall.sh" --force 2>&1)"; st=$?
+check_refusal "and so does the uninstall.sh" "$st" "$out" "without a compose command"
 
 printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"
 [ "$fail" -eq 0 ] || { printf "\n  \033[31mINSTALLER ACCEPTANCE FAILED\033[0m\n"; exit 1; }
