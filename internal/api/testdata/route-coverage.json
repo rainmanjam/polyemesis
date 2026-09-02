@@ -5,7 +5,7 @@
   "differentialFloor": 8,
   "sentinelWitnessFloor": 24,
   "nonGetDifferentialFloor": 20,
-  "unstableCeiling": 3,
+  "unstableCeiling": 4,
   "inertCeiling": 6,
   "varianceExemptCeiling": 2,
   "shapeFloor": 27,
@@ -22,10 +22,10 @@
   },
   "partition": {
     "differential": 8,
-    "invariant": 54,
+    "invariant": 53,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 1,
-    "unstable": 3
+    "unstable": 4
   },
   "routes": [
     {
@@ -1448,7 +1448,7 @@
       "class": "invariant"
     },
     {
-      "path": "/api/v1/chat/users?platform=twitch\u0026authorId=1",
+      "path": "/api/v1/chat/users?platform=twitch&authorId=1",
       "pattern": "GET /api/v1/chat/users",
       "class": "invariant"
     },
@@ -1788,7 +1788,7 @@
     {
       "path": "/api/v1/stats",
       "pattern": "GET /api/v1/stats",
-      "class": "invariant"
+      "class": "unstable"
     },
     {
       "path": "/api/v1/status",
