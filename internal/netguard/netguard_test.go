@@ -183,3 +183,51 @@ func TestDialContextReportsADialFailureForAPublicAddress(t *testing.T) {
 			"fail against the context deadline")
 	}
 }
+
+// TestHostLocalIsTheStricterHalfOfTheSameList pins the relationship the two
+// predicates are meant to have: anything host-local is non-public, and the
+// difference between them is exactly the ranges a pull ingest is allowed to
+// reach and a webhook is not.
+func TestHostLocalIsTheStricterHalfOfTheSameList(t *testing.T) {
+	hostLocal := []string{
+		"127.0.0.1", "127.7.7.7", "::1",
+		"169.254.169.254", // the cloud metadata service
+		"169.254.10.9", "fe80::1",
+		"0.0.0.0", "::",
+		"224.0.0.1", "ff02::1",
+		"::ffff:127.0.0.1", // IPv4-mapped loopback
+	}
+	for _, s := range hostLocal {
+		ip := net.ParseIP(s)
+		if ip == nil {
+			t.Fatalf("test bug: %q does not parse", s)
+		}
+		if !IsHostLocalAddr(ip) {
+			t.Errorf("IsHostLocalAddr(%s) = false", s)
+		}
+		if IsPublicAddr(ip) {
+			t.Errorf("IsPublicAddr(%s) = true; host-local must imply non-public", s)
+		}
+	}
+
+	// Reachable but not the host: refused for a webhook, allowed for a pull.
+	// This gap is the entire reason the two predicates exist separately.
+	nearby := []string{"192.168.1.50", "10.0.0.8", "172.16.4.4", "100.64.0.1", "fd00::1"}
+	for _, s := range nearby {
+		ip := net.ParseIP(s)
+		if IsHostLocalAddr(ip) {
+			t.Errorf("IsHostLocalAddr(%s) = true; an RTSP camera lives here", s)
+		}
+		if IsPublicAddr(ip) {
+			t.Errorf("IsPublicAddr(%s) = true; a webhook must not reach it", s)
+		}
+	}
+
+	// nil fails closed in both directions.
+	if !IsHostLocalAddr(nil) {
+		t.Error("IsHostLocalAddr(nil) = false; a malformed address must fail closed")
+	}
+	if IsPublicAddr(nil) {
+		t.Error("IsPublicAddr(nil) = true")
+	}
+}

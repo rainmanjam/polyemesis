@@ -192,7 +192,27 @@ These are design decisions, not oversights. Read them as operating instructions.
   publish credential never doubles as a viewing one.
 - **Nothing is encrypted on the wire unless you say so.** Plain HTTP means the
   password and session cookie cross the network in clear text. The server warns
-  about this at startup; the warning is not decorative.
+  about this at startup; the warning is not decorative. What changed is that it
+  is no longer the *default*: with no `addr` configured, polyemesis binds
+  `127.0.0.1:8080` and is reachable only from the machine it runs on. Plaintext
+  on every interface is still available and still supported — write
+  `addr: ":8080"` in `config.yaml`, or pass `--addr :8080` — it just has to be
+  something somebody typed. If you upgrade and the box goes unreachable from
+  your laptop, that is this change, and the startup banner names the two keys
+  that undo it.
+- **A pull source cannot be aimed at this machine.** A pull ingest URL is
+  operator input that the server dials, so it is an SSRF primitive, and it used
+  to be checked for its scheme and nothing else —
+  `http://169.254.169.254/latest/meta-data/…` was a valid ingest. Literal
+  addresses naming the host or its link (loopback, `0.0.0.0`, multicast, and
+  link-local, which is where cloud instance metadata answers) are now refused by
+  the same guard webhooks use, `internal/netguard`.
+  **A source on your LAN is deliberately still allowed** — an RTSP camera on
+  `192.168.1.50` is the ordinary case, and a guard that refused it would be a
+  guard people turn off. **And the check sees literal addresses only:** a
+  hostname that resolves to `169.254.169.254` still gets through, because FFmpeg
+  does its own DNS and dials its own socket, so there is no dial-time hook to
+  install the way there is for a webhook.
 - **There is no audit log.** Nothing records which change was made when, or from
   where. With one operator that is a gap rather than a hazard, but do not deploy
   this expecting to reconstruct events after an incident.
@@ -227,7 +247,13 @@ admin UI, this field is not your biggest problem.
 
 - **Do not expose it to the internet, or to a LAN you do not control, without
   TLS.** `tls.mode: auto` is the one-line fix. Binding to `127.0.0.1` and
-  reaching it over an SSH tunnel is the zero-configuration alternative.
+  reaching it over an SSH tunnel is the zero-configuration alternative, and is
+  now what an unconfigured install does on its own.
+- **Install an FFmpeg that reports a version number.** The 6.0 floor refuses a
+  build whose `-version` output it cannot parse, naming the string it could not
+  read, rather than assuming the build is new. If you run a master nightly
+  (`N-113518-gd6a4b1e`), set `POLYEMESIS_FFMPEG_ASSUME_MAJOR` to its major
+  version to vouch for it; it will not accept a value below the floor.
 - Put it behind a reverse proxy if you want anything resembling access control,
   and set `trustProxyHeaders: true` so throttling sees real client addresses.
   `trustProxyHeaders` means "a proxy I control sets these headers": only turn it
