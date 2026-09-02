@@ -1970,6 +1970,44 @@ if [ -z "\$COMPOSE_CMD" ]; then
   exit 1
 fi
 
+FORCE=false
+for arg in "\$@"; do
+	case "\$arg" in
+		--force|-f) FORCE=true ;;
+		-h|--help)
+			echo "usage: update.sh [--force]"
+			echo
+			echo "  --force  do not refuse while a broadcast is on air"
+			exit 0 ;;
+		*) echo "unknown option: \$arg" >&2; exit 2 ;;
+	esac
+done
+
+# IS ANYTHING ON AIR? Same question uninstall.sh asks, and for the same reason:
+# this script STOPS the container -- to take a consistent archive, and again to
+# swap the image -- and a live broadcast that ends cannot be resumed. uninstall
+# refused; update did not, so the safer-sounding operation was the one that
+# would silently cut a stream mid-show. Asked of the container's own process
+# table, so an ffmpeg elsewhere on the host is not mistaken for this install's.
+publishing_now() {
+	local out
+	out=\$(\$COMPOSE_CMD top 2>/dev/null || true)
+	case "\$out" in
+		*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+			echo "\$out" | grep -E 'ffmpeg.*(rtmp|srt):' | head -3 >&2
+			return 0 ;;
+	esac
+	return 1
+}
+
+if [ "\$FORCE" != true ] && publishing_now; then
+	echo >&2
+	echo "REFUSING: this install is publishing right now (listed above)." >&2
+	echo "Upgrading stops the container, and a live broadcast that ends cannot be resumed." >&2
+	echo "Wait for the broadcast to end, or pass --force if you mean to end it." >&2
+	exit 1
+fi
+
 stamp="\$(date +%F-%H%M)"
 dest="$INSTALL_DIR/backup-\${stamp}.tar.gz"
 echo "backing up to \$dest"

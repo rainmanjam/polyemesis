@@ -434,9 +434,30 @@ gen_docker_update() { # gen_docker_update <install_dir> [compose_cmd]
     write_helper_scripts >/dev/null )
 }
 
-run_docker_update() { # run_docker_update <install_dir> <volume_dir>
-  STUB_VOLUME="$2" STUB_BACKUP_DIR="$1" PATH="$stub:$PATH" bash "$1/update.sh" 2>&1
+run_docker_update() { # run_docker_update <install_dir> <volume_dir> [args...]
+  local dir="$1" vol="$2"; shift 2
+  STUB_VOLUME="$vol" STUB_BACKUP_DIR="$dir" PATH="$stub:$PATH" \
+    bash "$dir/update.sh" "$@" 2>&1
 }
+
+# A compose stub that can answer `top` two ways, so the on-air guard has
+# something to refuse. Everything else it echoes, exactly as the plain
+# `echo [stub compose]` command used elsewhere in this section does, so the
+# assertions about reaching `pull` read the same.
+cat > "$stub/compose" <<'COMPOSESTUB'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = "top" ]; then
+  if [ "${STUB_ON_AIR:-false}" = true ]; then
+    echo "polyemesis"
+    echo "UID   PID   CMD"
+    echo "root  4211  ffmpeg -re -i srt://127.0.0.1:9000 -f flv rtmp://live.example.net/app/streamkey"
+  fi
+  exit 0
+fi
+echo "[stub compose] $*"
+COMPOSESTUB
+chmod +x "$stub/compose"
 
 docker_dir="$work/docker"; mkdir -p "$docker_dir"
 gen_docker_update "$docker_dir"
@@ -1018,6 +1039,53 @@ EOF
     && ok "the installer chmods the data directory 0750, as the shipped unit's header calls for" \
     || bad "the data directory is left at mkdir's 0755 — it holds secret.key and the recordings (#297)"
 fi
+
+step "17. The docker update.sh refuses to upgrade a broadcast that is on air"
+#
+# uninstall.sh has asked this question since it was written; update.sh did not,
+# and update.sh stops the container TWICE -- once to take a consistent archive,
+# once to swap the image. So the operation that sounds safe was the one that
+# would cut a live show mid-sentence, while the one that sounds dangerous
+# asked first. A completed broadcast cannot be returned to.
+
+onair_dir="$work/onair"; mkdir -p "$onair_dir"
+gen_docker_update "$onair_dir" "$stub/compose"
+onair_vol="$work/vol-onair"; mkdir -p "$onair_vol"
+printf 'SQLite format 3\000' > "$onair_vol/polyemesis.db"
+printf 'key\n'               > "$onair_vol/secret.key"
+
+out="$(STUB_ON_AIR=true run_docker_update "$onair_dir" "$onair_vol")"; st=$?
+check_refusal "an upgrade while ffmpeg is publishing is refused" "$st" "$out" "publishing right now"
+case "$out" in
+  *"[stub compose] stop"*)
+    bad "it refused AFTER stopping the container — the broadcast was already over" ;;
+  *) ok "and it refused BEFORE the stop, so the stream was still running when it gave up" ;;
+esac
+if [ "$(find "$onair_dir" -maxdepth 1 -name 'backup-*.tar.gz' | wc -l | tr -d ' ')" = 0 ]; then
+  ok "and it wrote no archive, so a later same-minute retry is not blocked by its own leftovers"
+else
+  bad "the refused run still left a backup archive behind"
+fi
+
+out="$(STUB_ON_AIR=true run_docker_update "$onair_dir" "$onair_vol" --force)"; st=$?
+if [ "$st" -eq 0 ]; then
+  ok "--force goes ahead anyway, so the refusal is a guard and not a wall"
+else
+  bad "--force was still refused (exit $st)"
+  printf '        %s\n' "$(printf '%s' "$out" | tr '\n' ' ')"
+fi
+case "$out" in
+  *"[stub compose] pull"*) ok "and the forced run reaches the pull" ;;
+  *) bad "--force never reached \`compose pull\`" ;;
+esac
+
+# Nothing on air: the guard must be invisible.
+out="$(run_docker_update "$onair_dir" "$onair_vol" 2>&1)"; st=$?
+case "$out" in
+  *"publishing right now"*) bad "the guard refused an idle install — every upgrade now needs --force" ;;
+  *) ok "an idle install is not refused (the guard is not a blanket stop)" ;;
+esac
+
 step "18. The generated helpers carry the compose command as DATA, not spliced into command position"
 #
 # The heredocs are unquoted, so \$COMPOSE_CMD written bare inside them was
