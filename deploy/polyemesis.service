@@ -35,6 +35,16 @@ ExecStart=/usr/local/bin/polyemesis \
     --data /var/lib/polyemesis \
     --addr :8080
 
+# --- The listen address ---
+# `--addr :8080` is EXPLICIT ON PURPOSE and must stay that way. With no addr
+# from a flag or config.yaml, polyemesis binds 127.0.0.1:8080 and is reachable
+# only from this host -- deliberately, because the do-nothing configuration used
+# to serve a login form and its session cookie in cleartext on every interface.
+# This unit is a considered deployment, so it says what it binds. If this box is
+# reachable by anyone you do not trust, put TLS in front of it (tls.mode: auto,
+# or the reverse proxy in deploy/nginx.conf.example) rather than deleting the
+# line: dropping it narrows the bind, it does not encrypt anything.
+
 # --- TLS ---
 # As written this serves whatever /etc/polyemesis/config.yaml asks for on :8080.
 #
