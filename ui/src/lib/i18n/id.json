@@ -335,6 +335,7 @@
   "dash.laneNoPreview": "Belum ada pratinjau — mulai encoder untuk program ini.",
   "dash.leaveUnchanged": "Biarkan tidak berubah",
   "dash.leaveUnchangedNote": "“Biarkan tidak berubah” sama sekali tidak mengirim apa pun, jadi platform mempertahankan nilai yang sudah ada. Memilih Aktif atau Mati akan menuliskan nilai itu.",
+  "dash.loadingDestinations": "Memeriksa apa yang telah dikonfigurasi pada instalasi ini…",
   "dash.metaCategory": "Kategori",
   "dash.metaDescription": "Deskripsi",
   "dash.metaTags": "Tag",

@@ -335,6 +335,7 @@
   "dash.laneNoPreview": "プレビューはまだありません。この番組のエンコーダーを開始してください。",
   "dash.leaveUnchanged": "変更しない",
   "dash.leaveUnchangedNote": "「変更しない」は何も送らないため、プラットフォームは現在の値を保ちます。オンまたはオフを選ぶと、その値が書き込まれます。",
+  "dash.loadingDestinations": "このインストールの設定を確認しています…",
   "dash.metaCategory": "カテゴリー",
   "dash.metaDescription": "説明",
   "dash.metaTags": "タグ",

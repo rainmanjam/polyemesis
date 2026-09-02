@@ -335,6 +335,7 @@
   "dash.laneNoPreview": "Ainda sem pré-visualização — inicie seu codificador para este programa.",
   "dash.leaveUnchanged": "Deixar sem alteração",
   "dash.leaveUnchangedNote": "“Deixar sem alteração” não envia absolutamente nada, então a plataforma mantém o que tem. Escolher Ligado ou Desligado grava aquele valor.",
+  "dash.loadingDestinations": "Verificando o que esta instalação tem configurado…",
   "dash.metaCategory": "Categoria",
   "dash.metaDescription": "Descrição",
   "dash.metaTags": "Tags",

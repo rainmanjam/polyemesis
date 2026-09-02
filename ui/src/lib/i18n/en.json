@@ -335,6 +335,7 @@
   "dash.laneNoPreview": "No preview yet — start your encoder for this programme.",
   "dash.leaveUnchanged": "Leave unchanged",
   "dash.leaveUnchangedNote": "“Leave unchanged” sends nothing at all, so the platform keeps what it has. Choosing On or Off writes that value.",
+  "dash.loadingDestinations": "Checking what this install has configured…",
   "dash.metaCategory": "Category",
   "dash.metaDescription": "Description",
   "dash.metaTags": "Tags",

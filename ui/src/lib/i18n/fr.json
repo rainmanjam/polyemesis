@@ -335,6 +335,7 @@
   "dash.laneNoPreview": "Pas encore d'aperçu — démarrez votre encodeur pour ce programme.",
   "dash.leaveUnchanged": "Laisser inchangé",
   "dash.leaveUnchangedNote": "« Laisser inchangé » n'envoie strictement rien, la plateforme conserve donc ce qu'elle a. Choisir Activé ou Désactivé écrit cette valeur.",
+  "dash.loadingDestinations": "Vérification de ce qui est configuré sur cette installation…",
   "dash.metaCategory": "Catégorie",
   "dash.metaDescription": "Description",
   "dash.metaTags": "Étiquettes",

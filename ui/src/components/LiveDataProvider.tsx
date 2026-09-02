@@ -42,6 +42,29 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
   const [frameError, setFrameError] = useState(false);
+
+  // WHETHER THE FIRST STATUS SNAPSHOT HAS ARRIVED, which is not the same
+  // question as whether `status` is null, and the difference is a page that
+  // contradicts itself between two refreshes.
+  //
+  // Every consumer reaches `status` through optional chaining, and `?.` on a
+  // null status yields undefined -- identical, to the code reading it, to a
+  // loaded status that genuinely holds nothing. So the dashboard printed "No
+  // destinations yet" with an Add button while the socket was still connecting,
+  // then swapped it for the hold note when the snapshot landed. Which of the
+  // two pages an operator saw depended on whether the socket beat the paint.
+  //
+  // The same collapse happens numerically: `?? 0` on a bitrate that has not
+  // been reported prints "0 kbps" beside a green dot. Zero is a reading and
+  // absent is not one, and "0 kbps, live" is the most alarming thing this UI
+  // can say to someone mid-broadcast.
+  //
+  // This is programmeKnown's argument one level up. That flag exists for
+  // exactly this reason -- see its comment in hooks/useLiveData.ts, which
+  // already says the distinction is the whole point -- and was never
+  // generalised, so every other consumer went back to inferring loadedness
+  // from the value. #663.
+  const [snapshotKnown, setSnapshotKnown] = useState(false);
   /* Which programme every request below names.
    *
    * NULL UNTIL THE SOURCE LIST LANDS, AND NOTHING WAITS FOR IT. An earlier
@@ -127,6 +150,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
             // publishes onto it, so a plain replace made the destination list --
             // which is the whole install on one page -- flip to whichever
             // programme spoke last. See mergeStatusDestinations.
+            setSnapshotKnown(true);
             setStatus((prev) => {
               const incoming = msg.data as Status;
               return {
@@ -278,6 +302,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       programmeKnown,
       sourceCount,
       connected,
+      snapshotKnown,
       status,
       source,
       levels,
@@ -293,6 +318,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       programmeKnown,
       sourceCount,
       connected,
+      snapshotKnown,
       status,
       source,
       levels,

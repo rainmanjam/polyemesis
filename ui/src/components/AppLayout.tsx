@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+
+import { ingestChipReading } from "@/lib/ingestChip";
 import { NavLink, Outlet, useLocation } from "react-router";
 
 import { UpdateBanner } from "./UpdateBanner";
@@ -193,11 +195,17 @@ export function AppLayout({
                 state otherwise. An SRT source is live without a child, so it
                 has no bitrate to show here — saying "Running" is the honest
                 answer rather than printing 0 kbps at a stream that is fine. */}
-            {ingest?.state === "running"
-              ? kbps(ingest.progress?.bitrateKbps ?? 0)
-              : ingestLive
-                ? stateLabel("running")
-                : stateLabel(ingest?.state)}
+            {/* `?? 0` used to sit on that bitrate, and it is the same mistake
+                the paragraph above rejects, arriving by a different route: a
+                child that has started but not yet reported progress has NO
+                bitrate, and printing 0 kbps for it beside a live dot tells an
+                operator mid-broadcast that their stream is running at zero.
+                Absent is not a reading. Fall back to the state, exactly as the
+                SRT case does. #663. */}
+            {(() => {
+              const r = ingestChipReading(ingest, ingestLive);
+              return r.kind === "bitrate" ? kbps(r.kbps) : stateLabel(r.state);
+            })()}
           </span>
         </div>
 

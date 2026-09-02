@@ -834,7 +834,7 @@ function SideColumn({ stacked, children }: { stacked: boolean; children: ReactNo
 export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
-  const { status, bitrate } = useLiveData();
+  const { status, bitrate, snapshotKnown } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
   /* The failover settings, for the exposure line above the destinations. Null
@@ -1418,7 +1418,10 @@ export function Dashboard() {
               <div className="mt-1 flex items-center justify-between border-t border-border pt-1.5">
                 <span className="text-[11px] text-muted-foreground">{t("dash.relaySubscribers")}</span>
                 <span className="tnum font-mono text-[10px]">
-                  {status?.relay.subscribers?.length ?? 0}
+                  {/* Not `?? 0`: before the first snapshot there is no
+                      subscriber count, and zero subscribers is a meaningful,
+                      alarming number to show someone who is broadcasting. #663. */}
+                  {snapshotKnown ? (status?.relay.subscribers?.length ?? 0) : "—"}
                 </span>
               </div>
 
@@ -1507,7 +1510,21 @@ export function Dashboard() {
             construction: a held pass plans no destination at all. */}
         <DestinationHoldNote hold={status?.destinationHold} />
 
-        {destinations.length === 0 ? (
+        {/* snapshotKnown, not `destinations.length === 0` alone. Before the
+            first snapshot arrives the list is empty because nothing has been
+            said yet, and this card states the opposite: that the install HAS
+            no destinations, with a button to add one. An operator refreshing
+            during a slow connect saw that page, then saw the hold note replace
+            it -- two different answers to "what is configured here" seconds
+            apart. Waiting is the honest render; it is a fact we do not have
+            yet, not a fact that is empty. #663. */}
+        {!snapshotKnown ? (
+          <Card>
+            <CardContent className="py-8 text-center">
+              <p className="text-[12px] text-muted-foreground">{t("dash.loadingDestinations")}</p>
+            </CardContent>
+          </Card>
+        ) : destinations.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
               <p className="text-[12px] text-muted-foreground">
