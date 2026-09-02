@@ -198,6 +198,48 @@ func (m *Manager) Scheduler() *scheduler.Runner {
 // downloads must keep working when the engine that wrote them is long gone.
 func (m *Manager) Recordings() *recording.Manager { return m.recman }
 
+// warnAboutUnreadableStreamKeys says at boot how many destinations this
+// install's secret key cannot open.
+//
+// THE SILENT PATH THIS CLOSES IS A RESTORE. secrets.LoadOrCreate mints a fresh
+// random key whenever secret.key is absent, and says nothing when it does --
+// which is correct on a first boot and catastrophic on a restored data
+// directory whose backup copied polyemesis.db and not the key beside it.
+// Nothing fails. The server starts, the API answers, the destinations are all
+// there, and every one of them holds a stream key sealed under a secret that no
+// longer exists. The restore reads as a success right up to the moment somebody
+// tries to go live, which is the worst possible moment to find out.
+//
+// WARNING, NOT CONTROL, and the choice is deliberate. Refusing to start would
+// make this unmissable and would also mean that an install with one dead
+// destination among twenty cannot serve the nineteen -- or the screen the
+// operator needs in order to fix the one. Off the air is not a safer place to
+// be than on it with a warning. So it comes up, and it says the number and the
+// names, at ERROR level because "your restore did not restore" is not
+// housekeeping.
+//
+// It never blocks the boot. A count that cannot be taken is logged and dropped:
+// a failed diagnostic must not be the reason a server does not start.
+func (m *Manager) warnAboutUnreadableStreamKeys() {
+	if m.store == nil {
+		return
+	}
+	names, err := m.store.UnreadableStreamKeys()
+	if err != nil {
+		m.log.Warn("could not check whether the destination stream keys are readable", "err", err)
+		return
+	}
+	if len(names) == 0 {
+		return
+	}
+	m.log.Error("destination stream keys cannot be decrypted with this install's secret key; "+
+		"these destinations will fail to open. This is what a data directory restored "+
+		"without its secret.key looks like: a new key was generated in its place and the "+
+		"stored keys were sealed under the old one. Restore secret.key from the backup, or "+
+		"re-enter the stream key on each destination",
+		"destinations", len(names), "names", names)
+}
+
 // Start brings up an engine for every source.
 //
 // A source that fails to start does not stop the others. With several
@@ -211,6 +253,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.started = true
 	m.hostStop = stopHost
 	m.mu.Unlock()
+
+	// FIRST, so it is in the log above the noise of everything coming up.
+	m.warnAboutUnreadableStreamKeys()
 
 	// Before the engines and outside the error paths below: the resource
 	// sampler describes the box, so it is worth having on an install where not
