@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type {
   BitrateSample,
   Levels,
@@ -126,9 +126,18 @@ export function useIngestLive(): boolean {
  *  that is merely slow is not a poll that is broken. */
 export function useStaleTracker(threshold = 3) {
   const [failures, setFailures] = useState(0);
+  /* STABLE IDENTITIES, because every caller puts these inside a polling
+   * effect. Fresh closures each render made the effect's dependency list
+   * unsatisfiable: naming `freshness` restarted the poll on every render, so
+   * both callers left it out and took an exhaustive-deps warning instead --
+   * and a suppressed dependency warning on a polling effect is precisely the
+   * stale-closure shape that made #606 and #612 possible. Memoised, the
+   * honest dependency list is also the correct one. */
+  const ok = useCallback(() => setFailures(0), []);
+  const failed = useCallback(() => setFailures((n) => n + 1), []);
   return {
-    ok: () => setFailures(0),
-    failed: () => setFailures((n) => n + 1),
+    ok,
+    failed,
     /** True once the data on screen should no longer be trusted as current. */
     stale: failures >= threshold,
     failures,

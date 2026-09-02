@@ -65,7 +65,12 @@ describe("MetersPage, wired to what it has been told", () => {
     // clock and no "as of".
     expect(src).not.toContain(".catch(() => {})");
     expect(src).toContain("useStaleTracker()");
-    expect(src).toContain("freshness.failed");
+    // The CLAIM, not one spelling of it: the failing branch of the poll goes to
+    // the tracker. It was pinned as the literal `freshness.failed`, and broke
+    // when the two callbacks were destructured so the effect could name them in
+    // its dependency list -- a change that strengthens exactly what this guard
+    // is guarding. Same reasoning as the `disabled=` assertion above.
+    expect(src).toMatch(/\.catch\(fresh(ness\.failed|Failed)\)/);
     expect(src).toContain('t("meters.notUpdating")');
   });
 
