@@ -416,7 +416,7 @@ jobs:
       # 14 rather than something tighter, so the ordering the file argues for
       # everywhere else holds: three probes at -timeout 4m is 12m of worst case,
       # and Go has to be able to win that race and print the goroutine dump
-      # before this fires. Below the job's 25 either way, which is the property
+      # before this fires. Below the job's 35 either way, which is the property
       # being claimed.
       - name: internal/api coverage measures the tests, not the preflight
         if: needs.changes.outputs.code == 'true'
@@ -448,7 +448,7 @@ jobs:
         #
         # internal/api hit the 15m wall on 2026-08-16 and reported 900.034s. The
         # panic named the test that was running, which is exactly why Go's
-        # timeout is kept below this job's timeout-minutes: 25, and it read
+        # timeout is kept below this job's timeout-minutes: 35, and it read
         #
         #     running tests:
         #       TestAMutationReconcilesEveryProgrammeRatherThanTheDefault (0s)
@@ -464,7 +464,7 @@ jobs:
         # is the part that should have been unnecessary; this is the part that
         # was overdue.
         #
-        # Still five minutes below the job's own timeout, so Go keeps its
+        # Still fifteen minutes below the job's own timeout, so Go keeps its
         # goroutine dump. If this needs raising again, split the package first.
         run: POLYEMESIS_LEDGER=strict go test -race -timeout 20m ./...
 
@@ -483,7 +483,7 @@ jobs:
       # :327-334 and :393-396 give for the two smoke steps: a job timeout names
       # nothing, a step timeout names the step. Each of these four runs a shell
       # harness that starts and kills processes, so each can hang exactly the way
-      # #179 hung, and behind this job's timeout-minutes: 25 a hang here costs 25
+      # #179 hung, and behind this job's timeout-minutes: 35 a hang here costs 35
       # minutes and reports "the job was cancelled".
       #
       # HONEST ABOUT THE NUMBERS: only one of the four has a measurement --
@@ -492,7 +492,7 @@ jobs:
       # teardown harnesses on a shared developer machine kills processes
       # belonging to whatever else is running on it. So these are blast-radius
       # ceilings, not fitted bounds: sized to be unreachable by a healthy run and
-      # far below the job's 25, which is the only property being claimed.
+      # far below the job's 35, which is the only property being claimed.
       - if: needs.changes.outputs.code == 'true'
         run: ./scripts/test-lib-observe.sh
         timeout-minutes: 6
