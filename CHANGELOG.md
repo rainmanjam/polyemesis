@@ -82,6 +82,18 @@ its first tagged release.
   markdown and need no ffmpeg, database or network. It also counts what ran
   and fails on a low count, since `go test -run` matching nothing exits 0.
   (#651)
+- **The console resolved its programme once per page load.** `/sources` was
+  read in an effect that never re-ran, so creating a second source during
+  first-run setup — or deleting the one being followed — left the whole
+  console pointed at a stale answer until someone reloaded: Meters read "NOT
+  UPDATING", Monitoring's process list died, Clips showed "No clips yet.", all
+  against a healthy server. Every one of those is a plausible idle state,
+  which is why it was never reported as a bug. The Sources page now asks for a
+  re-resolve after a create or delete, and the provider re-resolves on its own
+  when the status socket names a programme it has not seen — which covers the
+  changes made in another tab, by another operator, or straight through the
+  API. An operator already on a programme that still exists stays on it.
+  (#646)
 - **`install.sh --tls acme` uninstalled the working server it had just
   installed.** `verify()` probed `https://127.0.0.1:PORT` with `-k` in every
   TLS mode. That connection carries no SNI, and the ACME path sets only

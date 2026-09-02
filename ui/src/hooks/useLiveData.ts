@@ -57,6 +57,13 @@ export interface LiveData {
    *  the label carries information — on the single-source install that is the
    *  overwhelming majority, a name that never varies is furniture. */
   sourceCount: number;
+  /** Re-read /sources and re-resolve the programme.
+   *
+   *  Call after creating or deleting a source. The provider also re-resolves
+   *  on its own when the status socket names a programme it has not seen --
+   *  that covers the changes this tab did not make; this is the fast path for
+   *  the ones it did. #646. */
+  refreshSources: () => Promise<void>;
   connected: boolean;
   status: Status | null;
   source: SourceInfo | null;
