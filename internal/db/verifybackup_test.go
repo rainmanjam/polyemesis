@@ -62,8 +62,15 @@ func TestVerifyBackupRefusesATruncatedDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Not a t.Skip. The skip ratchet in internal/testenv counts bare skips and
+	// it caught this one -- correctly, because a test that declines to run
+	// prints ok and is counted as coverage. The seeded schema is ~260 KiB and
+	// deterministic, so this branch cannot fire; if it ever does, the seeding
+	// changed underneath the test and passing quietly would be the wrong
+	// answer.
 	if len(b) < 8192 {
-		t.Skip("seeded database is too small to truncate meaningfully")
+		t.Fatalf("seeded database is %d bytes, too small to truncate meaningfully -- "+
+			"the schema this test relies on has changed", len(b))
 	}
 	if err := os.WriteFile(p, b[:len(b)/3], 0o600); err != nil {
 		t.Fatal(err)

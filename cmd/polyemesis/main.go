@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -187,11 +188,7 @@ func run(h *hooks) error {
 	// running a migration -- migrating the backup would move the copy forward
 	// to the schema the operator is keeping a way back from. #643.
 	if *verifyBak != "" {
-		if err := db.VerifyBackup(*verifyBak); err != nil {
-			return fmt.Errorf("backup at %s is not usable: %w", *verifyBak, err)
-		}
-		fmt.Fprintf(os.Stdout, "backup at %s opens, passes integrity_check and holds this server's schema\n", *verifyBak)
-		return nil
+		return verifyBackup(*verifyBak, os.Stdout)
 	}
 
 	if *resetPass {
@@ -978,4 +975,17 @@ func parseLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// verifyBackup answers whether a backup directory can be restored from.
+//
+// A function rather than a block inside run() so it can be tested: the whole
+// point of this flag is that it says no when the copy is unusable, and a check
+// nobody has watched say no is a check nobody should trust. #643.
+func verifyBackup(dir string, out io.Writer) error {
+	if err := db.VerifyBackup(dir); err != nil {
+		return fmt.Errorf("backup at %s is not usable: %w", dir, err)
+	}
+	fmt.Fprintf(out, "backup at %s opens, passes integrity_check and holds this server's schema\n", dir)
+	return nil
 }

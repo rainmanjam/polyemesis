@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // VerifyBackup answers the only question a backup has to answer: does it open.
@@ -99,14 +98,4 @@ func VerifyBackup(dir string) error {
 			"so it is not this server's database")
 	}
 	return nil
-}
-
-// BackupAge is how old the newest file in a backup directory is, used only to
-// tell an operator which of several stamped directories they are looking at.
-func BackupAge(dir string) (time.Duration, error) {
-	st, err := os.Stat(filepath.Join(dir, "polyemesis.db"))
-	if err != nil {
-		return 0, err
-	}
-	return time.Since(st.ModTime()), nil
 }
