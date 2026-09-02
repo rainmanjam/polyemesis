@@ -21,8 +21,9 @@ package testenv
 // neither YAML dialect can enumerate a directory.
 
 import (
-	"io/fs"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,30 +32,32 @@ import (
 func TestEveryLockfileIsAuditedAndTracked(t *testing.T) {
 	root := repoRootFromTest(t)
 
-	var dirs []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", ".git", "dist", "data":
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != "package-lock.json" {
-			return nil
-		}
-		rel, rerr := filepath.Rel(root, filepath.Dir(path))
-		if rerr != nil {
-			return rerr
-		}
-		dirs = append(dirs, filepath.ToSlash(rel))
-		return nil
-	})
+	// ASK GIT, NOT THE FILESYSTEM.
+	//
+	// A walk finds every package-lock.json on disk, including ones inside
+	// scratch worktrees under .claude/worktrees/ and any other untracked
+	// directory a developer happens to have. Those are not shipped, cannot be
+	// audited, and are none of dependabot's business -- but the walk reported
+	// each as an unaudited lockfile, so this guard failed for anyone with a
+	// worktree open. It found four of them the first time these branches were
+	// integrated.
+	//
+	// `git ls-files` answers the question actually being asked: which
+	// lockfiles does this repository SHIP.
+	out, err := exec.Command("git", "-C", root, "ls-files", "*package-lock.json").Output()
 	if err != nil {
-		t.Fatalf("walking the tree: %v", err)
+		t.Fatalf("git ls-files: %v", err)
+	}
+	var dirs []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		dirs = append(dirs, path.Dir(filepath.ToSlash(line)))
+	}
+	if len(dirs) == 0 {
+		t.Fatal("git ls-files found no package-lock.json at all; this guard would " +
+			"pass by finding nothing")
 	}
 
 	// Liveness. If the walk stops finding lockfiles, this test passes over an

@@ -70,7 +70,7 @@
       "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
     }
   ],
-  "total": 95,
+  "total": 96,
   "byPackage": {
     "cmd/polyemesis": 1,
     "internal/api": 7,
@@ -79,7 +79,7 @@
     "internal/config": 1,
     "internal/db": 3,
     "internal/engine": 6,
-    "internal/ffmpeg": 23,
+    "internal/ffmpeg": 24,
     "internal/media": 5,
     "internal/meters": 3,
     "internal/playlistmedia": 5,
@@ -130,6 +130,15 @@
       "why": "ONE site, for TestAVFRSourceKeepsItsTimingThroughARendition, which closes #342. The test measures real frame timing through a real encode, so it needs ffmpeg AND ffprobe on the machine and can do nothing useful with either alone. Written as a single skip rather than the two LookPath skips the neighbouring tests use, because the condition really is one condition -- the census should count what is true, not how many if-statements express it.",
       "whyNotAvoidable": "The alternative is asserting on the argv instead of on an encode, and that is exactly what #342 said was missing: RenditionArgs was already readable and nobody could say what the frames did. A test that reads the same flags a second time would have added no information. Verified by mutation -- adding `-fps_mode cfr` takes the fixture from 72 frames to 120, and only a real encode can see that.",
       "handEditedRatherThanRegenerated": "Same reason as every entry above: -update-skips only records a count that has FALLEN, so a deliberate raise has to be written down with its reason rather than absorbed."
+    },
+    {
+      "pr": 659,
+      "from": 95,
+      "to": 96,
+      "packages": {
+        "internal/ffmpeg": "23 -> 24"
+      },
+      "why": "ONE site, environmental, and it is the Windows arm of the test written to close the FFmpeg version-floor Major: Detect must now REFUSE a build whose version string it cannot parse instead of admitting it. Proving that needs a binary printing a chosen banner, and the stub is a /bin/sh script, so the Windows arm cannot run it. The behaviour under test is platform-independent and is covered on every other OS. Raised by hand: `-update-skips` rewrites this file and DROPS raisedBy/loweredBy entirely -- 86 lines of provenance, every previous raise with its PR and from/to -- and does not update the total either. Do not regenerate."
     }
   ],
   "raisedBy5": [

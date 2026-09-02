@@ -46,12 +46,19 @@ func TestLoadRequiredReadsAnExistingFileLikeLoad(t *testing.T) {
 
 func TestLoadStillDefaultsForTheImplicitName(t *testing.T) {
 	// The control. The fix must not make a fresh install refuse to start.
+	//
+	// The expected address is DefaultAddr rather than a literal: it is loopback
+	// now, not ":8080", because a server with no configuration should not be
+	// reachable from the network in the clear. Writing the literal here once
+	// meant this control failed the moment that default was tightened -- which
+	// is the test being wrong, not the code, and is exactly what integrating
+	// two branches surfaced.
 	cfg, err := Load(filepath.Join(t.TempDir(), "config.yaml"))
 	if err != nil {
 		t.Fatalf("Load on the absent default name must default, got: %v", err)
 	}
-	if cfg.Addr != ":8080" {
-		t.Errorf("default Addr = %q", cfg.Addr)
+	if cfg.Addr != DefaultAddr {
+		t.Errorf("default Addr = %q, want DefaultAddr (%q)", cfg.Addr, DefaultAddr)
 	}
 }
 
