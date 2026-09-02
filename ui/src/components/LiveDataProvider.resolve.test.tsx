@@ -22,6 +22,7 @@ import { api } from "@/lib/api";
  */
 
 const list = vi.spyOn(api, "listSources");
+const srcOf = vi.spyOn(api, "source");
 
 function Probe() {
   const { programme, sourceCount, refreshSources, programmeKnown } = useLiveData();
@@ -47,6 +48,8 @@ function draw() {
 
 beforeEach(() => {
   list.mockReset();
+  srcOf.mockReset();
+  srcOf.mockResolvedValue(null as never);
   try {
     localStorage.clear();
   } catch {
@@ -105,5 +108,37 @@ describe("LiveDataProvider: programme resolution", () => {
     draw();
     await waitFor(() => expect(screen.getByTestId("known").textContent).toBe("true"));
     expect(screen.getByTestId("programme").textContent).toBe("null");
+  });
+});
+
+describe("LiveDataProvider: self-healing from the socket", () => {
+  it("re-reads /sources when a snapshot names a programme it has never seen", async () => {
+    // The changes this tab did not make: a source created in another tab, by
+    // another operator, or straight through the API never passes through
+    // refreshSources(). The status feed is install-wide and every snapshot
+    // names its programme, so one naming an id we do not hold is proof the
+    // list is stale. #646.
+    list.mockResolvedValue(rows(1));
+    srcOf.mockResolvedValue({ id: 99, name: "made elsewhere", probed: true, tracks: null } as never);
+
+    draw();
+    await waitFor(() => expect(screen.getByTestId("known").textContent).toBe("true"));
+
+    // One call to establish the list, at least one more once the snapshot
+    // arrives naming a programme outside it.
+    await waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(1), { timeout: 3000 });
+  });
+
+  it("does not re-read for a snapshot about the programme it is already on", async () => {
+    // The control. Without it this would pass on a provider that re-read
+    // /sources on every snapshot, which is a request per poll forever.
+    list.mockResolvedValue(rows(1));
+    srcOf.mockResolvedValue({ id: 1, name: "Main", probed: true, tracks: null } as never);
+
+    draw();
+    await waitFor(() => expect(screen.getByTestId("known").textContent).toBe("true"));
+    const settled = list.mock.calls.length;
+    await new Promise((r) => setTimeout(r, 300));
+    expect(list.mock.calls.length).toBe(settled);
   });
 });
