@@ -1118,6 +1118,27 @@ check_refusal "an update.sh generated without a compose command refuses to run" 
 out="$(bash "$empty_dir/uninstall.sh" --force 2>&1)"; st=$?
 check_refusal "and so does the uninstall.sh" "$st" "$out" "without a compose command"
 
+step "19. The generated compose file caps the container's logs"
+#
+# Docker's default json-file driver keeps every line forever. polyemesis logs
+# per request and per encoder tick, and the install that never restarts is the
+# 24/7 broadcast box, so the log only grows until the disk is full -- at which
+# point SQLite stops writing and recordings stop finalising, and none of it
+# looks like a logging problem. journald caps the systemd path already; only
+# docker was unbounded. Checked against install.sh's source because writing the
+# compose file means running install_docker_mode, which pulls and starts.
+compose_block="$(sed -n "/printf 'services:/,/} > \"\$INSTALL_DIR\/docker-compose.yml\"/p" "$INSTALL")"
+if printf '%s' "$compose_block" | grep -q "logging:"; then
+  ok "the compose service declares a logging section"
+else
+  bad "the generated compose file sets no logging options — container logs grow until the disk fills"
+fi
+for opt in 'max-size' 'max-file'; do
+  printf '%s' "$compose_block" | grep -q "$opt" \
+    && ok "and it bounds $opt" \
+    || bad "the logging section does not set $opt, so it still has no ceiling"
+done
+
 printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"
 [ "$fail" -eq 0 ] || { printf "\n  \033[31mINSTALLER ACCEPTANCE FAILED\033[0m\n"; exit 1; }
 printf "\n  \033[32mINSTALLER ACCEPTANCE PASSED\033[0m\n"

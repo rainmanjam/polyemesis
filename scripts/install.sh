@@ -1337,6 +1337,26 @@ install_docker_mode() {
     # whatever was being written, so this matches the project's own compose file.
     printf '    stop_grace_period: 30s\n'
 
+    # LOGS HAVE NO CEILING UNLESS ONE IS WRITTEN HERE. Docker's default
+    # json-file driver keeps every line the container ever wrote, forever, in
+    # /var/lib/docker/containers/<id>/*-json.log. polyemesis logs per request
+    # and per encoder tick, and a 24/7 broadcast box is exactly the install
+    # that never restarts, so the file only grows. When it fills the disk the
+    # symptom is not "logs are large": SQLite cannot write, recordings stop
+    # finalising, and the container starts failing in ways that look like a
+    # bug in the server.
+    #
+    # 10m x 3 is a ceiling of 30 MB per container -- enough to hold the last
+    # several hours of a busy stream, which is the window an operator actually
+    # reads after an incident, and small enough that it can never be the
+    # reason a box runs out of space. The systemd path already has this:
+    # journald applies SystemMaxUse. Only docker installs were unbounded.
+    printf '    logging:\n'
+    printf '      driver: "json-file"\n'
+    printf '      options:\n'
+    printf '        max-size: "10m"\n'
+    printf '        max-file: "3"\n'
+
     # The image bakes in `wget -qO- http://127.0.0.1:8080/api/v1/health`, and
     # both halves of that are assumptions this installer is free to break.
     #
