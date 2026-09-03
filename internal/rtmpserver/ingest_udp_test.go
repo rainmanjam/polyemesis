@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/relay"
 )
 
 // THE ONLY DIFFERENCE BETWEEN THE REPRODUCTION AND THE RIG IS THE TRANSPORT.
@@ -347,5 +348,284 @@ func TestADestinationShapedReaderJoiningMidStreamPublishesItsAudio(t *testing.T)
 			t.Errorf("late-joined audio stream %d has no channel configuration "+
 				"(channels=%d sample_rate=%q)", i, st.Channels, st.SampleRate)
 		}
+	}
+}
+
+// THE 4c ORDERING, EXACTLY: the reader starts first, into silence. #674
+//
+// Every reproduction that passes had the ingest ALREADY PRODUCING when the
+// reader attached. The acceptance rig does the opposite: the destination is
+// created and started while nothing is flowing at all, and the publisher
+// arrives seconds later. That ordering is the last untested variable, and it is
+// the original hypothesis -- discarded earlier on the grounds that the
+// destination's probe ran 77 seconds and therefore covered the publisher's
+// whole life. That reasoning assumed the child spawns when the engine logs
+// "destination starting"; the supervisor has a StartDelay and the child had
+// already been restarted three times, so the assumption was never sound.
+//
+// Reader first, into an empty socket. Publisher and ingest afterwards.
+func TestAReaderStartedBeforeAnyDataStillPublishesItsAudio(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs three FFmpeg processes and an ffprobe")
+	}
+	ffmpegBin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ffprobeBin, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is not installed")
+	}
+	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
+		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
+	}
+
+	tg := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
+	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"mt": tg}))
+	if err := s.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer s.Stop()
+	s.mu.Lock()
+	addr := s.ln.Addr().String()
+	s.mu.Unlock()
+	_, portStr, _ := strings.Cut(addr, ":")
+	port, _ := strconv.Atoi(portStr)
+
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve udp port: %v", err)
+	}
+	relayPort := pc.LocalAddr().(*net.UDPAddr).Port
+	_ = pc.Close()
+	relayURL := fmt.Sprintf("udp://127.0.0.1:%d", relayPort)
+
+	// THE READER FIRST, into a socket nothing is sending to yet.
+	tsPath := filepath.Join(t.TempDir(), "early.ts")
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 60*time.Second)
+	defer stopRd()
+	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
+		ffmpeg.RelayInputArgs()...)
+	rdArgs = append(rdArgs, "-i", ffmpeg.RelayInputURL(relayURL),
+		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1:first_pts=0[aout]",
+		"-map", "0:v:0", "-c:v", "copy",
+		"-map", "[aout]", "-c:a", "aac", "-b:a", "128k",
+		"-f", "mpegts", "-flush_packets", "1", "-t", "12", "-y", tsPath)
+	rd := exec.CommandContext(rdCtx, ffmpegBin, rdArgs...)
+	var rdErr strings.Builder
+	rd.Stderr = &rdErr
+	if err := rd.Start(); err != nil {
+		t.Fatalf("early reader: %v", err)
+	}
+	defer func() { _ = rd.Process.Kill(); _ = rd.Wait() }()
+
+	// Nothing is flowing. This is the gap 4c puts a destination into.
+	time.Sleep(5 * time.Second)
+
+	pubCtx, stopPub := context.WithCancel(context.Background())
+	defer stopPub()
+	pub := exec.CommandContext(pubCtx, ffmpegBin, "-nostdin", "-hide_banner", "-loglevel", "error", "-re",
+		"-f", "lavfi", "-i", "testsrc2=size=320x240:rate=15",
+		"-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=1700:sample_rate=48000",
+		"-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a",
+		"-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "500k",
+		"-c:a", "aac", "-ac", "2",
+		"-f", "flv", "rtmp://"+addr+"/live/mt")
+	if err := pub.Start(); err != nil {
+		t.Fatalf("publisher: %v", err)
+	}
+	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
+	waitPublishing(t, s, tg.SourceID, 25*time.Second)
+
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 45*time.Second)
+	defer stopIngest()
+	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
+		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
+		RelayURL: relayURL,
+	})...)
+	var ingErr strings.Builder
+	ing.Stderr = &ingErr
+	if err := ing.Start(); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	defer func() { _ = ing.Process.Kill(); _ = ing.Wait() }()
+
+	if err := rd.Wait(); err != nil {
+		t.Logf("early reader exited: %v", err)
+	}
+
+	fi, _ := os.Stat(tsPath)
+	var size int64 = -1
+	if fi != nil {
+		size = fi.Size()
+	}
+	out, probeErr := exec.Command(ffprobeBin, "-hide_banner", "-loglevel", "error",
+		"-f", "mpegts", "-select_streams", "a", "-show_streams", "-of", "json", tsPath).Output()
+	if probeErr != nil {
+		t.Fatalf("a reader started before any data produced nothing parseable "+
+			"(%d bytes): %v\n\nTHIS IS THE 4c ORDERING. If it reproduces here it "+
+			"reproduces in seconds.\n\nreader stderr:\n%s\n\ningest stderr:\n%s",
+			size, probeErr, rdErr.String(), ingErr.String())
+	}
+	var probed struct {
+		Streams []struct {
+			Channels   int    `json:"channels"`
+			SampleRate string `json:"sample_rate"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out, &probed); err != nil {
+		t.Fatalf("ffprobe json: %v\n%s", err, out)
+	}
+	t.Logf("early-start capture: %d bytes, %d audio streams", size, len(probed.Streams))
+	if len(probed.Streams) != 1 {
+		t.Fatalf("a reader started BEFORE any data produced %d of 1 audio streams "+
+			"(%d bytes).\n\nThe same reader attaching to an already-running ingest "+
+			"produces one. If starting into silence is what breaks it, this is #674 "+
+			"reproduced in seconds instead of a twelve-minute rig.\n\n"+
+			"reader stderr:\n%s", len(probed.Streams), size, rdErr.String())
+	}
+}
+
+// THE WHOLE CHAIN, in production shape: ingest -> HUB -> destination. #674
+//
+// Everything is cleared piecewise and the rig still fails, which means the
+// fault is in a COMBINATION rather than a part. This is the combination never
+// built: previous tests pointed the reader at the ingest's own port, and the
+// hub hop was measured separately with synthetic datagrams. Here the ingest
+// writes into a real relay.Hub, the hub fans out to a real subscription, and a
+// destination-shaped reader consumes that subscription -- the exact path a
+// destination takes, with nothing standing in for anything.
+func TestTheWholeChainThroughARealHubCarriesTheRoutedAudio(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs three FFmpeg processes, a hub and an ffprobe")
+	}
+	ffmpegBin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ffprobeBin, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is not installed")
+	}
+	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
+		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
+	}
+
+	tg := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
+	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"mt": tg}))
+	if err := s.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer s.Stop()
+	s.mu.Lock()
+	addr := s.ln.Addr().String()
+	s.mu.Unlock()
+	_, portStr, _ := strings.Cut(addr, ":")
+	port, _ := strconv.Atoi(portStr)
+
+	// A REAL HUB, as the engine builds one.
+	hub, err := relay.New(quiet(), 0)
+	if err != nil {
+		t.Fatalf("hub: %v", err)
+	}
+	defer hub.Close()
+
+	// A real subscription, on a real port, as a destination gets.
+	subPC, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("subscriber port: %v", err)
+	}
+	subPort := subPC.LocalAddr().(*net.UDPAddr).Port
+	_ = subPC.Close() // the reader binds it
+	subURL := hub.Subscribe("dest:test", subPort)
+	defer hub.Unsubscribe("dest:test")
+
+	pubCtx, stopPub := context.WithCancel(context.Background())
+	defer stopPub()
+	pub := exec.CommandContext(pubCtx, ffmpegBin, "-nostdin", "-hide_banner", "-loglevel", "error", "-re",
+		"-f", "lavfi", "-i", "testsrc2=size=320x240:rate=15",
+		"-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=1700:sample_rate=48000",
+		"-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a",
+		"-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "500k",
+		"-c:a", "aac", "-ac", "2",
+		"-f", "flv", "rtmp://"+addr+"/live/mt")
+	if err := pub.Start(); err != nil {
+		t.Fatalf("publisher: %v", err)
+	}
+	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
+	waitPublishing(t, s, tg.SourceID, 25*time.Second)
+
+	// The ingest writes into the HUB's input, not straight at the reader.
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 45*time.Second)
+	defer stopIngest()
+	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
+		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
+		RelayURL: hub.InputURL(),
+	})...)
+	var ingErr strings.Builder
+	ing.Stderr = &ingErr
+	if err := ing.Start(); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	defer func() { _ = ing.Process.Kill(); _ = ing.Wait() }()
+
+	time.Sleep(6 * time.Second)
+
+	tsPath := filepath.Join(t.TempDir(), "chain.ts")
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 45*time.Second)
+	defer stopRd()
+	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
+		ffmpeg.RelayInputArgs()...)
+	rdArgs = append(rdArgs, "-i", ffmpeg.RelayInputURL(subURL),
+		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1:first_pts=0[aout]",
+		"-map", "0:v:0", "-c:v", "copy",
+		"-map", "[aout]", "-c:a", "aac", "-b:a", "128k",
+		"-f", "mpegts", "-flush_packets", "1", "-t", "10", "-y", tsPath)
+	rd := exec.CommandContext(rdCtx, ffmpegBin, rdArgs...)
+	var rdErr strings.Builder
+	rd.Stderr = &rdErr
+	if err := rd.Start(); err != nil {
+		t.Fatalf("chain reader: %v", err)
+	}
+	if err := rd.Wait(); err != nil {
+		t.Logf("chain reader exited: %v", err)
+	}
+
+	st := hub.Stats()
+	t.Logf("hub: rx=%d tx=%d dropped=%d tsLost=%d loss=%.3f%%",
+		st.RxPackets, st.TxPackets, st.Dropped, st.TSLost, st.LossPercent)
+
+	fi, _ := os.Stat(tsPath)
+	var size int64 = -1
+	if fi != nil {
+		size = fi.Size()
+	}
+	out, probeErr := exec.Command(ffprobeBin, "-hide_banner", "-loglevel", "error",
+		"-f", "mpegts", "-select_streams", "a", "-show_streams", "-of", "json", tsPath).Output()
+	if probeErr != nil {
+		t.Fatalf("the full chain produced nothing parseable (%d bytes): %v\n\n"+
+			"hub rx=%d tx=%d dropped=%d\n\nreader stderr:\n%s\n\ningest stderr:\n%s",
+			size, probeErr, st.RxPackets, st.TxPackets, st.Dropped, rdErr.String(), ingErr.String())
+	}
+	var probed struct {
+		Streams []struct {
+			Channels   int    `json:"channels"`
+			SampleRate string `json:"sample_rate"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out, &probed); err != nil {
+		t.Fatalf("ffprobe json: %v\n%s", err, out)
+	}
+	t.Logf("through-the-hub capture: %d bytes, %d audio streams", size, len(probed.Streams))
+	if len(probed.Streams) != 1 {
+		t.Fatalf("the full chain -- ingest -> hub -> destination -- produced %d of 1 "+
+			"audio streams (%d bytes).\n\nEvery link passes on its own. If the "+
+			"COMBINATION fails, this is #674 reproduced in seconds.\n\n"+
+			"hub rx=%d tx=%d dropped=%d\n\nreader stderr:\n%s",
+			len(probed.Streams), size, st.RxPackets, st.TxPackets, st.Dropped, rdErr.String())
 	}
 }
