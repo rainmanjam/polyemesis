@@ -53,3 +53,18 @@ test: ubuntu-latest
 test: windows-latest
 ui typecheck, lint, build
 which container suites
+
+# SonarCloud analysis
+#
+# Added 2026-09-03, and it is the last item of the readiness audit's Stage 0.
+# The job already FAILS on a red gate -- sonar-project.properties sets
+# sonar.qualitygate.wait=true and internal/testenv/sonar_gate_test.go keeps it
+# set -- but a failing job is not a blocked merge until the context is required
+# here, which is a repository setting no test can commit. That gap is finding
+# #648 in a different shape: a check that reports and cannot block leaves a wall
+# of green that is not evidence.
+#
+# It earned the promotion the hard way. On PR #676 the gate failed for real --
+# new_coverage 70.6% against a threshold of 80, every other condition clean --
+# and nothing would have stopped that merge.
+SonarCloud analysis
