@@ -117,7 +117,7 @@ func TestTheIngestRemuxKeepsItsAudioOverUDP(t *testing.T) {
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
 		RelayURL: relayURL,
 	})
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 36*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 30*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, args...)
 	var ingErr, ingOut strings.Builder
@@ -242,7 +242,7 @@ func TestADestinationShapedReaderJoiningMidStreamPublishesItsAudio(t *testing.T)
 	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
 	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 120*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 60*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
@@ -259,7 +259,7 @@ func TestADestinationShapedReaderJoiningMidStreamPublishesItsAudio(t *testing.T)
 	time.Sleep(8 * time.Second)
 
 	tsPath := filepath.Join(t.TempDir(), "late.ts")
-	rdCtx, stopRd := context.WithTimeout(context.Background(), 120*time.Second)
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 60*time.Second)
 	defer stopRd()
 	// THE DESTINATION'S OWN SHAPE, not -c copy.
 	//
@@ -363,7 +363,7 @@ func TestAReaderStartedBeforeAnyDataStillPublishesItsAudio(t *testing.T) {
 
 	// THE READER FIRST, into a socket nothing is sending to yet.
 	tsPath := filepath.Join(t.TempDir(), "early.ts")
-	rdCtx, stopRd := context.WithTimeout(context.Background(), 180*time.Second)
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 90*time.Second)
 	defer stopRd()
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
@@ -400,7 +400,7 @@ func TestAReaderStartedBeforeAnyDataStillPublishesItsAudio(t *testing.T) {
 	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
 	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 135*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 67*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
@@ -508,7 +508,7 @@ func TestTheWholeChainThroughARealHubCarriesTheRoutedAudio(t *testing.T) {
 	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
 	// The ingest writes into the HUB's input, not straight at the reader.
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 135*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 67*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
@@ -524,7 +524,7 @@ func TestTheWholeChainThroughARealHubCarriesTheRoutedAudio(t *testing.T) {
 	time.Sleep(6 * time.Second)
 
 	tsPath := filepath.Join(t.TempDir(), "chain.ts")
-	rdCtx, stopRd := context.WithTimeout(context.Background(), 135*time.Second)
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 67*time.Second)
 	defer stopRd()
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
@@ -579,11 +579,16 @@ func TestTheWholeChainThroughARealHubCarriesTheRoutedAudio(t *testing.T) {
 }
 
 // NOTE ON TIMEOUTS IN THIS FILE. Every context here is a WATCHDOG against a
-// hung process, never a schedule the test runs to. They were first sized on a
-// laptop and CI killed a reader mid-run at 79.72s -- a slower machine turned a
-// safety net into the thing that failed the test. They are now generous enough
-// that only a genuinely stuck process trips one; the tests still finish in
-// their own time because each reader ends on its own -t.
+// hung process, never a schedule the test runs to, and each reader ends on its
+// own -t long before one fires.
+//
+// When CI killed a reader at 79.72s the timeouts were raised, and that was
+// treating a symptom: the test was not slow, it was waiting for data that could
+// never arrive, and a longer watchdog only made it fail later (219s on the next
+// run). A reader carrying -t 12 that runs for 79 seconds is not a slow machine
+// -- it is a reader receiving nothing, because -t bounds OUTPUT. The cause was
+// the gap test assuming an ingest survives a publish, which stopped being true
+// the moment the server started ending subscribers with the publish.
 
 // THE 4b -> 4c SHAPE: a publisher ends, a gap, another begins. #674
 //
@@ -637,7 +642,7 @@ func TestAReaderJoiningBetweenTwoPublishesResolvesTheSecondOnesAudio(t *testing.
 	}
 	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 270*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 135*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
@@ -663,7 +668,7 @@ func TestAReaderJoiningBetweenTwoPublishesResolvesTheSecondOnesAudio(t *testing.
 	defer hub.Unsubscribe("dest:test")
 
 	tsPath := filepath.Join(t.TempDir(), "gap.ts")
-	rdCtx, stopRd := context.WithTimeout(context.Background(), 210*time.Second)
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 105*time.Second)
 	defer stopRd()
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
@@ -687,6 +692,29 @@ func TestAReaderJoiningBetweenTwoPublishesResolvesTheSecondOnesAudio(t *testing.
 		t.Fatalf("publisher 2: %v", err)
 	}
 	defer func() { _ = pub2.Process.Kill(); _ = pub2.Wait() }()
+
+	// AND A SECOND INGEST, because the first one is GONE.
+	//
+	// The server now ends its subscribers when a publish finishes (#674), so
+	// the first ingest exited with publisher 1 -- which is the entire point of
+	// that fix. In production the supervisor brings it straight back on a 500ms
+	// floor; there is no supervisor here, so without this the hub has nothing
+	// feeding it, the reader never receives a byte, its -t never fires because
+	// -t bounds OUTPUT, and the context eventually kills it. That is exactly how
+	// this test failed on CI after the fix landed: 219s, "gap reader exited:
+	// signal: killed".
+	_ = ing.Process.Kill()
+	_ = ing.Wait()
+	ing2 := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
+		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
+		RelayURL: hub.InputURL(),
+	})...)
+	var ing2Err strings.Builder
+	ing2.Stderr = &ing2Err
+	if err := ing2.Start(); err != nil {
+		t.Fatalf("ingest 2: %v", err)
+	}
+	defer func() { _ = ing2.Process.Kill(); _ = ing2.Wait() }()
 
 	if err := rd.Wait(); err != nil {
 		t.Logf("gap reader exited: %v", err)
@@ -769,7 +797,7 @@ func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing
 	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
 	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 210*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 105*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
@@ -783,7 +811,7 @@ func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing
 	defer func() { _ = ing.Process.Kill(); _ = ing.Wait() }()
 
 	// EIGHT competing readers, as loudness:1-4, meters and dest:1-3 are.
-	othCtx, stopOth := context.WithTimeout(context.Background(), 180*time.Second)
+	othCtx, stopOth := context.WithTimeout(context.Background(), 90*time.Second)
 	defer stopOth()
 	for i := 0; i < 8; i++ {
 		pc, perr := net.ListenPacket("udp", "127.0.0.1:0")
@@ -819,7 +847,7 @@ func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing
 	defer hub.Unsubscribe("dest:test")
 
 	tsPath := filepath.Join(t.TempDir(), "crowded.ts")
-	rdCtx, stopRd := context.WithTimeout(context.Background(), 150*time.Second)
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 75*time.Second)
 	defer stopRd()
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
