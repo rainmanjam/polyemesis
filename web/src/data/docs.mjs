@@ -279,6 +279,7 @@ const WITHHELD_ROWS = [
   ["DESIGN-OAUTH-BROKER.md", "Design note for unshipped work."],
   ["STATUS.md", "Point-in-time readiness audit (2026-09-01); a snapshot of what was true that week, not documentation. Publishing it would put a date-stamped list on the site that nothing updates."],
   ["PATH-TO-PRODUCTION.md", "The remediation plan behind STATUS.md, and stale the moment an item is done. The findings it summarises are public as issues #642-#649 and #651, which is where a reader should be sent."],
+  ["DESTINATIONS-FRAMERATE.md", "A trace of which destination kinds encode video (none do -- every kind is -c:v copy) and where CFR is actually forced. ENCODING.md section 5 is the user-facing half and already carries the VFR measurement; publishing both would give the same behaviour two descriptions that can drift apart."],
   ["README.md", "A directory of the others; /docs is that page here."],
 ];
 
