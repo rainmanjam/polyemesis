@@ -16,7 +16,15 @@ func guidedPreset(t *testing.T) (DestinationPreset, VideoGuidance) {
 			return p, *p.Video
 		}
 	}
-	t.Skip("no preset publishes both a height and a bitrate ceiling")
+	// FATAL, NOT SKIP. platforms.go is committed data, not an environment: if no
+	// preset publishes a height and a bitrate any more, the comparison this file
+	// tests has nothing left to compare and the feature is dead. Skipping would
+	// print ok and count as coverage -- the exact free pass the skip census
+	// exists to remove.
+	t.Fatal("no preset publishes both a height and a bitrate ceiling, so " +
+		"RenditionConcerns can never fire. platforms.go is in this repository: if " +
+		"that is now true it is a regression in the catalogue, not a reason to " +
+		"stop testing.")
 	return DestinationPreset{}, VideoGuidance{}
 }
 
@@ -83,7 +91,11 @@ func TestAPlatformWithNoPublishedGuidanceSaysNothing(t *testing.T) {
 		}
 	}
 	if bare == "" {
-		t.Skip("every preset publishes guidance")
+		// Every preset publishing guidance would be good news, and would make
+		// this case unreachable -- but it is committed data, so say so rather
+		// than printing ok.
+		t.Fatal("every preset now publishes guidance, so the 'no opinion' path is " +
+			"unreachable. Delete this test deliberately rather than letting it skip.")
 	}
 	r := &Rendition{Width: 7680, Height: 4320, FPS: 120, VideoBitrate: 99000}
 	if got := RenditionConcerns(r, Platform(bare)); len(got) != 0 {
@@ -114,5 +126,8 @@ func TestASinglePublishedFigureIsNotDescribedAsARange(t *testing.T) {
 		}
 		return
 	}
-	t.Skip("no preset publishes a single bitrate figure")
+	t.Fatal("no preset publishes a single bitrate figure (KbpsMin == KbpsMax), so " +
+		"the single-figure wording is untested. X published exactly that shape when " +
+		"#661 was written; if it no longer does, check the catalogue rather than " +
+		"dropping the assertion.")
 }
