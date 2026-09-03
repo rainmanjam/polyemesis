@@ -505,6 +505,21 @@ done
 drive startall >/dev/null 2>&1
 sleep 4
 publish_ertmp "rtmp://$CTR:1935/live/$TOK" 40
+
+# CAPTURE ONLY WHILE THE PUBLISHER IS ALIVE -- opening bracket. #674
+#
+# This publisher lives 40s of a ~110s step and video flows for all of it, so
+# slicing the capture by packet count mixes the live publish with whatever
+# follows. Recording the capture's BYTE OFFSET here and again before stopall
+# brackets exactly the bytes produced while E-RTMP was on air.
+#
+# Offsets, not truncation: zeroing the file with `: >` left the relay's open fd
+# at its old position and produced a 9 MB sparse hole, which is what made the
+# first slice analysis unreadable. And NOT `docker wait` here -- blocking 40s at
+# this point would starve the probe checks below, which have to run while the
+# publisher is still up.
+CAPSTART=$(inctr "cat /data/relaycap.*.ts 2>/dev/null | wc -c" | tr -d " ")
+
 NR2=""
 for _ in $(seq 1 40); do
   NR2=$(drive tracks)
@@ -514,6 +529,17 @@ done
 [ "$NR2" = "3" ] && ok "E-RTMP ingest probed 3 audio tracks (4c)" \
   || bad "E-RTMP ingest probed '$NR2' tracks in 4c, expected 3"
 sleep 22
+# CAPTURE ONLY WHILE THE PUBLISHER IS ALIVE -- closing bracket, before the
+# destinations are stopped. tail|head, not dd bs=1: a byte-at-a-time dd over
+# several MB is millions of syscalls.
+CAPEND=$(inctr "cat /data/relaycap.*.ts 2>/dev/null | wc -c" | tr -d " ")
+printf "        relay capture while E-RTMP was on air: bytes %s .. %s\n" "${CAPSTART:-?}" "${CAPEND:-?}"
+inctr "f=\$(ls /data/relaycap.*.ts 2>/dev/null | head -1); [ -n \"\$f\" ] || exit 0
+  tail -c +\$(( ${CAPSTART:-0} + 1 )) \"\$f\" | head -c \$(( ${CAPEND:-0} - ${CAPSTART:-0} )) > /tmp/live.ts
+  echo \"extracted \$(wc -c < /tmp/live.ts) bytes\"
+  ffprobe -hide_banner -loglevel error -f mpegts -select_streams a -show_streams \
+    -of csv=p=0 /tmp/live.ts 2>&1 | head -8" | sed 's/^/        /'
+
 drive stopall >/dev/null
 sleep 6
 # The sink is stopped so it finalises the file. Killed rather than asked
@@ -632,6 +658,19 @@ else
   # its own 15s analyzeduration probe included, fills that queue and the server
   # silently discards messages. Its own comment calls this "the counter that
   # would have shown, in the first minute, that audio was being dropped".
+  # THE INGEST'S REAL COMMAND LINE, from /proc.
+  #
+  # Every argv comparison so far used a spec built by hand in a test. The engine
+  # builds its own from source config and can add ExtraInputArgs,
+  # ExtraOutputArgs, a rendition or a second output. The shipped IngestArgs
+  # carries all three AAC tracks over UDP on 8.1.2 -- proven in
+  # internal/rtmpserver/ingest_udp_test.go -- so if the rig loses them, the
+  # command line it actually runs is the first thing that has to be shown
+  # rather than assumed. /proc, not ps: busybox ps truncates.
+  printf "        --- the ingest's ACTUAL argv (from /proc) ---\n"
+  inctr "for c in /proc/[0-9]*/cmdline; do tr '\\0' ' ' < \"\$c\" 2>/dev/null; echo; done \
+         | grep -a ffmpeg | grep -a -- '-f mpegts' | head -3" \
+    | sed 's/^/          /'
   printf "        --- rtmp subscriber drops (queue=256) ---\n"
   inctr "grep -a 'dropping messages LIVE' /data/logs/process.log | tail -6; \
          grep -ac 'dropping messages LIVE' /data/logs/process.log" \

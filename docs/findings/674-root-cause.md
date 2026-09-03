@@ -189,3 +189,120 @@ is in WHEN it is reset (`resetSetup`) rather than in how it is keyed.
 
 Not yet established: whether the ingest actually restarts at 4c. That is the
 next measurement, and it is a log question, not a rig question.
+
+---
+
+# CORRECTION (2026-09-03, later) — the "GROUND TRUTH" section above is ALSO wrong
+
+That section claimed the relay carries zero audio for the whole E-RTMP window of
+4c. It does not. That reading came from a capture zeroed with `: >`, which left
+the relay's open fd at its old offset and produced a 9 MB SPARSE HOLE, and from
+slicing the remainder by packet count across a ~110s window in which the
+publisher is only alive for 40s. Both artefacts, neither the product.
+
+Captured again, bracketed by BYTE OFFSET between the publisher starting and the
+destinations being stopped -- so the range is exactly what the relay carried
+while E-RTMP was on air:
+
+	13,393,120 bytes
+	1,aac,...,0x101, duration 39.988011, 2318 packets
+	2,aac,...,0x102, duration 39.988011, 2318 packets
+	3,aac,...,0x103, duration 39.988011, 2318 packets
+
+Three audio streams, the expected PIDs, 39.99s of audio against a 40s publisher.
+**The relay carries all three tracks.**
+
+## So the original diagnosis was right
+
+Every component is now individually cleared by measurement:
+
+	RTMP server      drop counter reads a true 0 (once it could fire)
+	setup cache      PMT declares all three AAC streams
+	ingest -> file   3 streams at 48000,2 (mutation-tested)
+	ingest -> UDP    789,600 bytes, 3 streams, SHIPPED argv from /proc
+	relay hub        2048-byte reads vs 1316-byte datagrams; capture proves audio
+	destinations     never had audio to work with
+
+And the ordering in 4c is the whole story:
+
+	~line 485   the RTMP destination is created and starts
+	 line 507   the publisher starts, ~20s LATER
+	            relay carries audio for the next 40s
+	            the destination reads 0 audio packets for its entire life
+
+A destination's FFmpeg characterises its input's streams ONCE, bounded by
+analyzeduration, and never re-probes. Starting it into a relay that carries
+video and no audio yet means no audio stream is ever resolved -- permanently,
+for that process, however much audio arrives afterwards.
+
+## Why widening analyzeduration did not fix it
+
+Because the gap is not a few seconds of sparsity, it is ~20s of NO audio, and
+then the destination is already committed. 15s -> 45s only moved the deadline
+and regressed 4d by tripling every destination's startup wait.
+
+## What the fix has to do
+
+Not "wait longer". Either do not start a destination until the relay carries
+audio, or restart one whose input declares audio streams and has read 0 audio
+packets while the relay is known to be carrying them.
+
+The first was tried and reverted: refusing to start on RxBytes()==0 breaks
+failover, and the suite says so -- "a destination added during a failover has to
+be able to start and carry the slate".
+
+The second was tried as guardSilentPublish and removed: "receiving but
+publishing nothing" is ALSO the steady state of a publisher that does not match
+the profile, and restarting there splits the recording. The trigger has to be
+narrower than that -- audio streams DECLARED but zero packets READ, which is
+specific to this fault and false for both healthy states.
+
+---
+
+# FALSIFIED (2026-09-03, 23:40) — the start-ordering theory does not survive the timing
+
+The correction above said a destination starts before its ingest carries audio,
+probes an audio-less relay, and is stuck for life. The timing refutes it.
+
+	06:35:29.956  RTMP sink starts
+	06:35:30.326  destination R-track2 starts
+	~06:35:34     E-RTMP publisher starts (script sleeps 4s), lives 40s
+	06:36:47.689  the destination's probe finally gives up:
+	              "Consider increasing 'analyzeduration' (15000000)" x3
+
+That probe ran for **77 seconds**, not 15 -- analyzeduration bounds STREAM time,
+not wall clock, and audio streams that yield no packets never advance it. So the
+probe window covered the publisher's ENTIRE 40 seconds, with audio provably on
+the relay throughout (13,398,760 bytes, 2,319 packets per audio PID, 39.99s).
+
+**The destination read the bytes and could not characterise the audio anyway.**
+It is not a race, and it is not start ordering.
+
+## What that leaves, precisely
+
+The same bytes are parseable one way and not the other:
+
+	ffprobe, on the captured relay FILE      -> 3 audio streams, 48000/2, fine
+	the destination, on the live UDP stream  -> 0 audio packets, 0 frames
+
+Both read what fanout() forwards. The difference is a complete seekable file
+versus a subscriber joining a live stream mid-flow. That is now the whole
+question, and it is the one measurement not yet made: capture what a
+DESTINATION's own subscriber port receives, rather than what the hub reads.
+
+## Two repairs were built on the falsified theory
+
+Both are kept, because both are correct detections with mutation-tested guards,
+and neither fires on a healthy state. NEITHER FIXES 4c:
+
+- `reprobeOnUncharacterisedAudio` restarts on the demuxer's own "could not find
+  codec parameters ... (Audio". Correct, but it fires 77s in -- after the window
+  it needs has closed. Measured: fired 06:26:08 for a destination started
+  06:24:43, against a 40s publisher.
+- `reprobeDestinationsThatNeverPublished` fires when the ingest layout is
+  measured. Correct discriminator ("has it ever published" is false for #674 and
+  true for both a failover switch and a mismatched publisher), but the layout
+  does not CHANGE between 4b and 4c, so it fired once at 06:36:47.664 -- 32ms
+  before the sink gave up.
+
+Kept as detection, not sold as a fix. 4c is still red: 48 passed, 2 failed.

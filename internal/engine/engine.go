@@ -519,6 +519,11 @@ type destination struct {
 	// passthrough destination, its rendition's own hub otherwise. Held so
 	// teardown unsubscribes from the same hub it subscribed to.
 	hub *relay.Hub
+	// watch says whether media has ever moved through this child. Read by the
+	// #674 re-probe: a destination that has NEVER published is the one that may
+	// have characterised its input before the ingest carried audio. One that
+	// has published is riding a switch and must not be disturbed.
+	watch *destWatch
 	// spec is a hash of everything that would require a restart. Comparing it
 	// is what keeps an unrelated edit from cycling a healthy stream.
 	spec string
@@ -3273,6 +3278,12 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	if changed {
 		e.log.Info("ingest layout probed", "audioTracks", len(src.Tracks))
 		e.bus.Publish(events.TypeSource, e.SourceInfo())
+		// #674: any destination started before this moment characterised an
+		// input that did not yet carry audio, and FFmpeg never re-probes. This
+		// is the earliest instant a fresh probe would succeed.
+		if len(src.Tracks) > 0 {
+			e.reprobeDestinationsThatNeverPublished("ingest layout probed")
+		}
 	}
 	return changed
 }

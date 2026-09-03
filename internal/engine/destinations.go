@@ -864,9 +864,13 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		}
 	}
 
-	onProgress := e.firstMediaLogger(row.Name, row.Kind)
+	onProgress, watch := e.firstMediaLoggerWatched(row.Name, row.Kind)
 
-	proc := supervisor.New(e.log, supervisor.Spec{
+	// Declared before the Spec because OnLog's #674 re-probe handler closes
+	// over it: that handler is built inside the Spec that constructs this
+	// very child, so it can only resolve the process lazily.
+	var proc *supervisor.Process
+	proc = supervisor.New(e.log, supervisor.Spec{
 		Name:     subName,
 		Kind:     "destination",
 		Bin:      e.tools.FFmpeg,
@@ -894,9 +898,15 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		// Spaced out so going live does not spawn every destination in the
 		// same tick. First spawn only -- a reconnect is never delayed.
 		StartDelay: startDelay,
-		OnLog:      e.onLog,
-		OnState:    e.onState,
-		LogSink:    logSink{e},
+		// #674: a destination that probed before its audio existed can only be
+		// restarted. See reprobeOnUncharacterisedAudio -- the trigger is the
+		// demuxer's own "could not find codec parameters" rather than an
+		// absence of output, because absence of output is also what a
+		// mismatched publisher and a still-probing child look like.
+		OnLog: e.reprobeOnUncharacterisedAudio(row.Name, row.Kind,
+			func() *supervisor.Process { return proc }, e.onLog),
+		OnState: e.onState,
+		LogSink: logSink{e},
 	})
 
 	e.mu.Lock()
@@ -925,7 +935,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		return nil
 	}
 	e.dests[row.ID] = &destination{
-		row: row, proc: proc, port: port, subName: subName,
+		row: row, proc: proc, port: port, subName: subName, watch: watch,
 		compiled: compiled, hub: hub, spec: spec,
 		multitrack: mt, vodDropped: vodDropped,
 	}
