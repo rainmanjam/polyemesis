@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -98,4 +100,61 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// THE TWO WORDINGS ARE THE FEATURE. #627
+//
+// videoCodecConcerns decides WHAT is wrong; warnVideoCodec decides what the
+// operator is told, and the difference between "this platform does not accept
+// it" and "we do not know what this platform accepts" is the whole honesty
+// requirement of the issue. Testing the selection and not the wording would
+// leave the part that can mislead an operator uncovered.
+func TestTheWarningDistinguishesAKnownRejectionFromAnUnknownPlatform(t *testing.T) {
+	var buf syncBuf
+	e := &Engine{log: slog.New(slog.NewTextHandler(&buf, nil))}
+
+	e.warnVideoCodec("hevc", []*db.Destination{
+		rtmpTo("tw", db.PlatformTwitch),  // registry says h264 only
+		rtmpTo("rum", db.PlatformRumble), // registry has no entry
+	})
+	out := buf.String()
+
+	if !strings.Contains(out, "will upload and be rejected") {
+		t.Errorf("a platform the registry records as h264-only produced no definite "+
+			"warning:\n%s", out)
+	}
+	if !strings.Contains(out, "is not recorded") {
+		t.Errorf("a platform with no registry entry produced no UNKNOWN warning:\n%s\n\n"+
+			"Reporting it as a rejection would invent a fact and send the operator to "+
+			"change an encoder setting that may never have been the problem.", out)
+	}
+	if !strings.Contains(out, "accepts=h264") {
+		t.Errorf("the known warning does not say what the platform DOES accept:\n%s\n\n"+
+			"Naming the accepted codec is what makes the warning actionable rather "+
+			"than an instruction to go and look it up.", out)
+	}
+}
+
+func TestH264ProducesNoWarningAtAll(t *testing.T) {
+	var buf syncBuf
+	e := &Engine{log: slog.New(slog.NewTextHandler(&buf, nil))}
+	e.warnVideoCodec("h264", []*db.Destination{rtmpTo("tw", db.PlatformTwitch)})
+	if s := buf.String(); s != "" {
+		t.Fatalf("h264 logged something:\n%s\n\nIt is the overwhelmingly common case; "+
+			"a line here trains the operator to skip the line that matters.", s)
+	}
+}
+
+// A destination with no rendition, or a rendition the engine is not running,
+// must not warn: there is nothing to compare and nothing to say.
+func TestARenditionlessDestinationIsNotJudged(t *testing.T) {
+	var buf syncBuf
+	e := &Engine{log: slog.New(slog.NewTextHandler(&buf, nil)), rends: map[int64]*rendition{}}
+	e.warnRenditionAgainstPlatform(&db.Destination{Name: "d", Platform: db.PlatformTwitch})
+	missing := int64(42)
+	e.warnRenditionAgainstPlatform(&db.Destination{Name: "d", Platform: db.PlatformTwitch, RenditionID: &missing})
+	e.warnRenditionAgainstPlatform(nil)
+	if s := buf.String(); s != "" {
+		t.Fatalf("warned about a destination with no rendition to compare:\n%s", s)
+	}
 }

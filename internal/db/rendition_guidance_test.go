@@ -131,3 +131,57 @@ func TestASinglePublishedFigureIsNotDescribedAsARange(t *testing.T) {
 		"#661 was written; if it no longer does, check the catalogue rather than " +
 		"dropping the assertion.")
 }
+
+// The keyframe interval is the one figure platforms enforce by degrading rather
+// than rejecting, so it is the easiest to get wrong and never notice.
+func TestALongerKeyframeIntervalThanThePlatformAsksForIsFlagged(t *testing.T) {
+	for _, p := range DestinationPresets() {
+		if p.Video == nil || p.Video.GOPSeconds <= 0 {
+			continue
+		}
+		r := &Rendition{GOPSeconds: p.Video.GOPSeconds * 3}
+		got := RenditionConcerns(r, Platform(p.ID))
+		var found bool
+		for _, c := range got {
+			if c.Field == "gop" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s asks for a %gs keyframe interval and a %gs rendition raised no "+
+				"gop concern: %+v", p.Name, p.Video.GOPSeconds, r.GOPSeconds, got)
+		}
+		// And an interval inside the ask must stay silent.
+		if got := RenditionConcerns(&Rendition{GOPSeconds: p.Video.GOPSeconds}, Platform(p.ID)); len(got) != 0 {
+			t.Fatalf("%s raised a concern for a rendition exactly at its published "+
+				"keyframe interval: %+v", p.Name, got)
+		}
+		return
+	}
+	t.Fatal("no preset publishes a keyframe interval, so the gop comparison is " +
+		"untested. platforms.go is committed data: if that is now true, check the " +
+		"catalogue rather than dropping the assertion.")
+}
+
+// Below the published floor is a different failure from above the ceiling: the
+// stream is accepted and looks bad, rather than being dropped.
+func TestABitrateBelowThePublishedFloorIsFlagged(t *testing.T) {
+	for _, p := range DestinationPresets() {
+		if p.Video == nil || p.Video.KbpsMin <= 1 || p.Video.KbpsMin == p.Video.KbpsMax {
+			continue
+		}
+		r := &Rendition{VideoBitrate: p.Video.KbpsMin / 2}
+		got := RenditionConcerns(r, Platform(p.ID))
+		if len(got) == 0 {
+			t.Fatalf("%s publishes at least %d kbps and half that raised nothing",
+				p.Name, p.Video.KbpsMin)
+		}
+		if !strings.Contains(got[0].Detail, "at least") {
+			t.Fatalf("an under-floor bitrate is described as %q; it is a floor, not a "+
+				"ceiling, and the two are different failures", got[0].Detail)
+		}
+		return
+	}
+	t.Fatal("no preset publishes a bitrate RANGE (KbpsMin < KbpsMax), so the floor " +
+		"comparison is untested. Check the catalogue rather than dropping this.")
+}
