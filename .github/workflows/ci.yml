@@ -1716,9 +1716,13 @@ jobs:
   # job costs about fifteen seconds. Gating it would reintroduce the hole for the
   # one change most likely to fall into it.
   #
-  # `go run` at a pinned version rather than a third-party action: Go is already
-  # set up in this file, the version is visible in the diff, and it adds no
-  # action to review for supply-chain risk.
+  # A pinned release binary rather than a third-party action: the version and its
+  # checksum are visible in the diff, and it adds no action to review for
+  # supply-chain risk. This comment used to describe a `go run ...@version` step
+  # and outlived it by one commit -- Sonar's S8545 failed that step for resolving
+  # the tool's own dependencies fresh every run, the step became the curl below,
+  # and the comment stayed. Left recorded rather than quietly rewritten, because
+  # a stale comment is the failure this repository audits for.
   actionlint:
     name: workflow lint
     runs-on: ubuntu-latest
