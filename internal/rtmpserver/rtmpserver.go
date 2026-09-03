@@ -873,7 +873,14 @@ func (s *Server) pump(sc *gortmplib.ServerConn, key PublisherKey) error {
 					// teardown -- and by then the stream nobody could decode is
 					// gone. This is the counter that would have shown, in the
 					// first minute, that audio was being dropped.
-					if dropLogEvery > 0 && sub.dropped%dropLogEvery == 1 {
+					// `== 1 % dropLogEvery`, NOT `== 1`. The natural setting for
+					// "tell me about every drop" is 1, and dropped%1 is always
+					// 0, so `== 1` made POLYEMESIS_RTMP_DROP_LOG=1 the one value
+					// that logs NOTHING. That produced a clean "0 drops" during
+					// #674 which read as "the server dropped nothing" when it
+					// meant "the counter cannot fire". 1%N is 1 for every N>1,
+					// so the every-Nth behaviour is unchanged.
+					if shouldLogDrop(sub.dropped, dropLogEvery) {
 						s.log.Warn("rtmp subscriber dropping messages LIVE",
 							"component", "rtmp-ingest", "dropped", sub.dropped)
 					}
@@ -1090,6 +1097,19 @@ func (s *Server) PublishingRole(sourceID int64, backup bool) bool {
 // dropLogEvery makes the silent drop counter audible, every Nth drop, when
 // POLYEMESIS_RTMP_DROP_LOG is set. Zero -- the default -- logs nothing, so
 // this costs one integer compare per dropped message and nothing otherwise.
+// shouldLogDrop is the sampling gate for the drop counter, extracted so a test
+// can call the REAL predicate.
+//
+// `dropped%every == 1%every`, NOT `== 1`. The natural setting for "tell me
+// about every drop" is 1, and dropped%1 is always 0, so `== 1` made
+// POLYEMESIS_RTMP_DROP_LOG=1 the single value that logs NOTHING. During #674
+// that produced a clean "0 drops" which read as "the server dropped nothing"
+// when it meant "the counter cannot fire". 1%N is 1 for every N>1, so the
+// every-Nth sampling is unchanged.
+func shouldLogDrop(dropped, every int) bool {
+	return every > 0 && dropped%every == 1%every
+}
+
 var dropLogEvery = func() int {
 	if v := os.Getenv("POLYEMESIS_RTMP_DROP_LOG"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

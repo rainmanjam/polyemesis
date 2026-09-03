@@ -132,3 +132,60 @@ So the true control rung — a destination that cannot start before its input is
 characterised — is not reachable without changing that deliberate failover
 behaviour. What is reachable is a probe window that a feed's startup cannot
 exhaust, plus a bounded self-healing restart underneath it.
+
+---
+
+# GROUND TRUTH (2026-09-03) — everything above this line was wrong
+
+Captured `relay.capture` (exactly the bytes `fanout()` forwards to every
+subscriber) scoped to the 4c window, copied to the host, and counted the raw TS
+PIDs. No demuxer, no probing, no inference.
+
+	PID 0x100 (video):  33,612 packets
+	PID 0x103 (audio):     350
+	PID 0x101 (audio):     326
+	PID 0x102 (audio):     320
+
+Split into ten equal slices of the window:
+
+	slice |  video | a:101 | a:102 | a:103
+	  0-7 | ~3,460 |     0 |     0 |     0
+	    8 |  3,193 |    88 |    86 |    94
+	    9 |  2,735 |   238 |   234 |   256
+
+**For the entire E-RTMP portion of 4c the relay carries ZERO audio.** Not
+sparse - none. Audio appears only in the last 20%, which is where the suite
+switches the ingest back to SRT.
+
+## What this retires
+
+- **Probe-window / analyzeduration.** Nothing to probe. Widening it was wrong
+  and regressed 4d.
+- **Interleave buffering in the ingest muxer.** Real mechanism, wrong bug: it
+  cannot explain 80% of a window with no audio at all.
+- **`aformat=channel_layouts=` on the destination legs.** There is no audio to
+  pin a layout onto.
+- **"Audio is sparse at a feed's head."** It is binary: a destination reads
+  ~1,050 audio packets or exactly 0.
+- **The per-PID counts that started this** (1 PES per audio PID in the probe
+  window vs 37 cumulative). Real numbers, but they measured the dump's `tail`
+  window, not the stream.
+
+## What it leaves
+
+E-RTMP audio WORKS in 4b (correct per-track dBFS, minutes earlier, same ingest)
+and is entirely absent in 4c. Between them: the RTMP sink container starts and a
+new destination is created, which triggers an engine reconcile.
+
+So the question is no longer "why is audio malformed" but **"what stops audio
+reaching the relay part-way through an E-RTMP session"**.
+
+Leading candidate: the ingest re-subscribes to the RTMP server mid-broadcast and
+does not receive the per-track AAC sequence headers it needs. `rtmpserver`
+already has a setup cache for exactly this (`internal/rtmpserver/setup.go`:
+"what a subscriber joining mid-stream needs replayed"), and it does key
+multitrack per track (`audio-mt-%d-%s`), so if this is the mechanism the fault
+is in WHEN it is reset (`resetSetup`) rather than in how it is keyed.
+
+Not yet established: whether the ingest actually restarts at 4c. That is the
+next measurement, and it is a log question, not a rig question.

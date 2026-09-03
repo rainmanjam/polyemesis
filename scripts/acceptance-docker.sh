@@ -213,6 +213,8 @@ docker volume create "$VOL" >/dev/null 2>&1
 docker run -d --name "$CTR" --network "$NET" \
   -p "$PORT:8080" -p "$SRTPORT:6000/udp" -p "$RTMPPORT:1935" \
   -e POLYEMESIS_FFMPEG_LOGLEVEL="${POLYEMESIS_FFMPEG_LOGLEVEL:-}" \
+  -e POLYEMESIS_RELAY_CAPTURE=/data/relaycap \
+  -e POLYEMESIS_RTMP_DROP_LOG=1 \
   -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
 
 healthy=no
@@ -485,6 +487,14 @@ RD=$(drive rtmpdest "R-track2" "rtmp://rtmp-sink:1936/live" "out" 1)
 case "$RD" in *RTMPDEST_OK*) ok "an RTMP destination routed to track 2 was created" ;;
               *)             bad "could not create the RTMP destination: $RD" ;; esac
 
+# GROUND TRUTH FOR #674. relay.capture is "exactly the bytes fanout() forwards
+# to every subscriber", so it settles writer-vs-reader without inference. Zeroed
+# HERE, after the case, so it holds only 4c: 4b works, and a whole-run capture
+# would be dominated by 4b's healthy audio and prove nothing about the window
+# that fails. (An earlier revision put this INSIDE the case arms, which is a
+# syntax error -- bash -n caught it and the run was started anyway.)
+inctr 'for f in /data/relaycap.*.ts; do : > "$f"; done' || true
+
 # Wait for the layout to go UNPROBED first. `tracks` reports the engine's
 # current probe state, which after the previous step is still 3 -- so polling
 # for "3" exits on the first request having proved nothing about THIS publish.
@@ -562,8 +572,70 @@ else
   printf "        --- dest:4 first 15 lines (startup) ---\n"
   inctr "grep -a 'dest:4:' /data/logs/process.log | head -15" | sed 's/^/          /'
   fi
+  # PER-STREAM PACKET COUNTS. The one number that separates "the reader got no
+  # audio" from "the reader got audio and could not build its graph" -- two
+  # faults with opposite fixes that present with the SAME "published nothing"
+  # symptom. #674 was misdiagnosed twice for want of this line.
+  #
+  # THEY NEED -loglevel verbose. Measured: warning and info emit nothing,
+  # verbose and debug emit them. The shipped default is warning
+  # (ffmpeg.commonArgs), so they are NOT free -- an earlier version of this
+  # block claimed they were and printed an empty section, which reads exactly
+  # like "looked, found nothing wrong". Say which level is missing instead.
+  printf "        --- per-stream packets read (each destination, at exit) ---\n"
+  case "${POLYEMESIS_FFMPEG_LOGLEVEL:-}" in
+    verbose|debug|trace)
+      inctr "grep -aE 'Input stream #0:[0-9]+ \\((video|audio)\\)|Total: [0-9]+ packets' /data/logs/process.log | tail -12" \
+        | sed 's/^/          /' ;;
+    *)
+      printf "          NOT CAPTURED: needs POLYEMESIS_FFMPEG_LOGLEVEL=verbose\n"
+      printf "          (warning/info emit no per-stream statistics at all). #674\n" ;;
+  esac
+  # WHAT THE RELAY ACTUALLY CARRIED during 4c, counted per stream. If audio is
+  # present here, the bytes were on the wire and every reader failed to take
+  # them; if absent, the ingest never wrote them. Those have opposite fixes.
+  # WHAT THE RELAY ACTUALLY CARRIED during 4c, counted per stream. This is the
+  # measurement that settles writer-vs-reader for #674 without inference: the
+  # capture is exactly the bytes fanout() forwards to every subscriber.
+  #
+  # -count_packets gives nb_read_packets per stream. -f mpegts is forced and
+  # -hide_banner is essential: the capture starts mid-stream (it is truncated
+  # at 4c), and without -hide_banner ffprobe's build banner fills the output
+  # and hides the answer -- which is how the previous two revisions of this
+  # block came back empty. Validated on a truncated fixture before shipping.
+  # COPY THE CAPTURE OUT, to the host, before the volume is destroyed.
+  #
+  # This is the single highest-value line in the dump. Every previous attempt to
+  # read these bytes needed a fresh 12-minute suite run because the volume is
+  # removed at cleanup, so four separate analysis bugs each cost a full run.
+  # With the file on the host the analysis loop is seconds and can be iterated
+  # without the rig at all.
+  for _rc in $(inctr "ls /data/relaycap.*.ts 2>/dev/null"); do
+    docker cp "$CTR:$_rc" "/tmp/674-$(basename "$_rc")" 2>/dev/null \
+      && printf "        saved /tmp/674-%s\n" "$(basename "$_rc")"
+  done
+  printf "        --- GROUND TRUTH: packets per stream in the relay capture ---\n"
+  inctr "for f in /data/relaycap.*.ts; do
+    [ -s \"\$f\" ] || continue
+    echo \"\$f (\$(wc -c < \"\$f\") bytes)\"
+    head -c 4000000 \"\$f\" > /tmp/cap.ts
+    echo 'index,codec_type,codec_name,channels,packets'
+    ffprobe -hide_banner -v error -f mpegts -count_packets \
+      -show_entries stream=index,codec_type,codec_name,channels,nb_read_packets \
+      -of csv=p=0 /tmp/cap.ts 2>&1 | tail -6
+  done" | sed 's/^/          /'
   printf "        --- destination stderr, which is the one that says why ---\n"
   inctr "grep -a 'dest:' /data/logs/process.log | tail -18" | sed 's/^/          /'
+  # RTMP SUBSCRIBER DROPS. pump() forwards to each subscriber with a
+  # NON-BLOCKING send over a 256-message queue (subscriberQueue) -- about 1.6s
+  # at 30fps video plus 3 AAC tracks. Anything that stalls the ingest ffmpeg,
+  # its own 15s analyzeduration probe included, fills that queue and the server
+  # silently discards messages. Its own comment calls this "the counter that
+  # would have shown, in the first minute, that audio was being dropped".
+  printf "        --- rtmp subscriber drops (queue=256) ---\n"
+  inctr "grep -a 'dropping messages LIVE' /data/logs/process.log | tail -6; \
+         grep -ac 'dropping messages LIVE' /data/logs/process.log" \
+    | sed 's/^/          /'
   printf "        --- ingest health ---\n"
   inctr "grep -ac 'timestamp discontinuity' /data/logs/process.log" \
     | sed 's/^/          timestamp-discontinuity lines: /'
@@ -720,6 +792,29 @@ else
 fi
 
 # ------------------------------------------------------- 5. RTMP ingest path
+# THE CONTROL. 4c fails and 4d passes with the same destination code, so the
+# per-stream packet counts of a HEALTHY destination are what make the failing
+# ones interpretable. "0 audio packets read" means nothing until you know a
+# working destination reads more than 0.
+#
+# Unconditional, because a comparison that only runs on failure can never show
+# the healthy side -- the failure dump above prints for 4c and stays silent for
+# 4b and 4d, which is exactly the half that is missing. An earlier revision of
+# this block was deleted as "scaffolding"; the control is not scaffolding.
+case "${POLYEMESIS_FFMPEG_LOGLEVEL:-}" in
+  verbose|debug|trace)
+    # THE WRITER'S OWN NUMBERS, next to the readers'. Every destination reading
+    # 0 audio is either "the relay carried none" or "they all failed to read
+    # it" -- and only the ingest's muxed counts tell them apart.
+    printf "        --- CONTROL: the INGEST's own output (did it mux audio?) ---\n"
+    inctr "grep -aE 'ingest:.*(Output stream #0:[0-9]+|Input stream #0:[0-9]+)' /data/logs/process.log | tail -12" \
+      | sed 's/^/          /'
+    printf "        --- CONTROL: per-stream packets, every destination, whole run ---\n"
+    inctr "grep -aE 'Input stream #0:[0-9]+ \\((video|audio)\\)' /data/logs/process.log \
+      | sed -E 's/.*(dest:[0-9]+).*(Input stream #0:[0-9]+ \\((video|audio)\\)): ([0-9]+) packets read.*/\\1 \\2 = \\4 packets/' \
+      | sort | uniq -c | tail -20" | sed 's/^/          /' ;;
+esac
+
 step "5. RTMP ingest (fallback path)"
 docker rm -f pub-acc >/dev/null 2>&1
 M=$(drive mode rtmp)
@@ -776,6 +871,8 @@ docker rm -f "$CTR" >/dev/null 2>&1
 docker run -d --name "$CTR" --network "$NET" \
   -p "$PORT:8080" -p "$SRTPORT:6000/udp" -p "$RTMPPORT:1935" \
   -e POLYEMESIS_FFMPEG_LOGLEVEL="${POLYEMESIS_FFMPEG_LOGLEVEL:-}" \
+  -e POLYEMESIS_RELAY_CAPTURE=/data/relaycap \
+  -e POLYEMESIS_RTMP_DROP_LOG=1 \
   -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
 sleep 12
 AFTER=$(drive count)

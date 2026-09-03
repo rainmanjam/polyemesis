@@ -636,6 +636,27 @@ func IngestArgs(s IngestSpec) []string {
 		"-f", "mpegts",
 		// Without flush_packets the muxer holds partial TS packets, adding
 		// unnecessary latency to a loopback hop that has none to spare.
+		//
+		// IT IS NOT ENOUGH ON ITS OWN, and believing it was cost #674 a long
+		// investigation. flush_packets flushes the AVIO buffer. It does NOT
+		// touch the INTERLEAVER, which sits in front of it:
+		// av_interleaved_write_frame holds every packet until it has one for
+		// each stream, or until the muxing queue spans max_interleave_delta.
+		// A multitrack FLV ingest whose audio tracks resolve late therefore
+		// writes NOTHING -- video included -- for up to the default 10s, while
+		// out_time climbs and total_size stays at 0. Measured exactly that way
+		// in internal/rtmpserver/ingest_remux_test.go.
+		//
+		// 100ms, NOT 0. Zero is the trap: max_interleave_delta=0 means "buffer
+		// until there is a packet for EVERY stream, however long that takes",
+		// which is the opposite of flushing early and would make the stall
+		// permanent instead of ten seconds. The default is 10000000 (10s); a
+		// small positive value is what forces output regardless. On a loopback
+		// relay 100ms of interleave buffering is already generous.
+		"-max_interleave_delta", "100000",
+		// No initial mux buffering either, for the same loopback reason.
+		"-muxdelay", "0",
+		"-muxpreload", "0",
 		"-flush_packets", "1",
 		RelayOutputURL(s.RelayURL),
 	)

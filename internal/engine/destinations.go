@@ -864,7 +864,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		}
 	}
 
-	onProgress, watch := e.firstMediaLoggerWatched(row.Name, row.Kind)
+	onProgress := e.firstMediaLogger(row.Name, row.Kind)
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name:     subName,
@@ -881,8 +881,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		// both drop. See TestTheMintedKeyIsMaskedWholeAndNotJustItsTail.
 		Secrets: destSecrets(row, mt.MintedKey),
 		// The only signal that says this destination is PUBLISHING rather than
-		// merely spawned. See firstMediaLogger and #675, and guardSilentPublish
-		// below, which acts on its absence.
+		// merely spawned. See firstMediaLogger and #675.
 		OnProgress:  onProgress,
 		AutoRestart: true,
 		// Per-destination reconnect policy. Zero values leave the supervisor's
@@ -954,7 +953,6 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	// as an absence, which is the least informative place to observe it. #675.
 	e.log.Info("destination starting", "dest", row.Name, "kind", row.Kind,
 		"tracks", compiled.Summary, "rendition", renditionLabel(row))
-	e.guardSilentPublish(row.Name, row.Kind, hub, proc, watch)
 	e.logMultitrack(row, mt, vodDropped)
 	e.noteReload("destination", row.Name, reloadRestart, "started")
 	return nil
@@ -1316,8 +1314,18 @@ func (e *Engine) firstMediaLogger(name string, kind db.DestKind) func(ffmpeg.Pro
 	return fn
 }
 
-// firstMediaLoggerWatched is firstMediaLogger plus the latch the #674 watchdog
-// reads. Split rather than folded in because the plain form is what the rest of
+// firstMediaLoggerWatched is firstMediaLogger plus a latch saying whether media
+// has moved.
+//
+// THE WATCHDOG THAT CONSUMED THIS LATCH WAS REMOVED. guardSilentPublish
+// restarted a destination that was "receiving but publishing nothing" -- which
+// is ALSO the correct steady state of a publisher that does not match the
+// profile, and of a destination still inside its own startup probe. It broke
+// acceptance-failover, which pins 0 restarts across a mismatched cut, and then
+// masked the #674 ingest fix in acceptance 4c by restarting the destination
+// every 30s so it never settled. A guard whose trigger cannot tell the fault
+// from two healthy states is not a guard. The latch is kept because it is the
+// honest definition of "publishing"; nothing acts on it automatically. Split rather than folded in because the plain form is what the rest of
 // the engine and its tests want, and a handler that also returned state would
 // make every caller carry something only one of them uses.
 func (e *Engine) firstMediaLoggerWatched(name string, kind db.DestKind) (func(ffmpeg.Progress), *destWatch) {
@@ -1354,98 +1362,4 @@ func (w *destWatch) rearm() {
 	w.mu.Lock()
 	w.published = false
 	w.mu.Unlock()
-}
-
-// silentPublishBudget is how long a destination may run without publishing
-// anything before the watchdog treats it as wedged.
-//
-// DERIVED FROM THE PROBE WINDOW, NOT CHOSEN NEXT TO IT. A destination still
-// inside its own probe has published nothing YET, so a budget at or below
-// ffmpeg.RelayProbeWindow would make this watchdog kill precisely the slow
-// starts it exists to rescue -- and the two numbers live in different packages,
-// so nothing but this expression connects them. Raising the probe window for
-// #674 took it from 15s to 45s and would have made a hardcoded 45s here fire
-// during a legitimate probe; the multiplier is what stops that recurring.
-// TestTheSilentPublishBudgetOutlastsTheProbeWindow pins it.
-const silentPublishBudget = 2 * ffmpeg.RelayProbeWindow
-
-// maxSilentRestarts bounds the self-healing. Three re-probes covers a
-// destination that started alongside its ingest; past that the cause is not
-// timing, and restarting for ever would hide a permanent fault behind a process
-// that always looks freshly started.
-const maxSilentRestarts = 3
-
-// guardSilentPublish restarts a destination that is running, being fed, and
-// publishing nothing. #674.
-//
-// FFmpeg characterises an input's streams ONCE, bounded by analyzeduration. A
-// destination that starts while the relay carries video but no audio yet --
-// which is what happens when a destination and its ingest come up together --
-// resolves no audio stream, and there is no re-probe. It then runs INDEFINITELY
-// reading zero audio packets, its filtergraph never initialised, writing
-// nothing, and it never exits. AutoRestart cannot help: the supervisor restarts
-// on EXIT, and this process does not exit. Nothing in the system notices.
-//
-// The discriminator is the hub's receive counter. "Published nothing" on its
-// own is also true of every destination on an idle install, and restarting
-// those would burn MaxRestarts and then give up PERMANENTLY on a system whose
-// only fault was that nobody was streaming yet -- strictly worse than the bug.
-// So this fires only when the relay is demonstrably receiving while this
-// destination is demonstrably not publishing.
-//
-// Warning rung, not control: it converts a permanent silent failure into a
-// bounded and logged one. The control gate is not starting a destination until
-// the relay carries audio.
-func (e *Engine) guardSilentPublish(name string, kind db.DestKind, hub *relay.Hub, proc *supervisor.Process, w *destWatch) {
-	if hub == nil {
-		return
-	}
-	go e.watchSilentPublish(name, kind, silentPublishBudget, w, silentPublishDeps{
-		retired: proc.Retired,
-		rxBytes: hub.RxBytes,
-		restart: func() { proc.Restart(context.Background()) },
-	})
-}
-
-// silentPublishDeps is what the watchdog actually needs from the process and
-// the relay. Named rather than taken as the concrete types so the loop can be
-// driven in a test at a budget measured in milliseconds: a guard whose only
-// exercise is a 45-second wait is a guard nobody ever watches fail.
-type silentPublishDeps struct {
-	retired func() bool
-	rxBytes func() uint64
-	restart func()
-}
-
-func (e *Engine) watchSilentPublish(name string, kind db.DestKind, budget time.Duration, w *destWatch, d silentPublishDeps) {
-	{
-		t := time.NewTicker(budget)
-		defer t.Stop()
-		restarts := 0
-		for range t.C {
-			if d.retired() {
-				return
-			}
-			if w.publishedSinceRearm() {
-				// Healthy. Re-arm so the NEXT window is judged on its own
-				// evidence rather than on this one's success.
-				w.rearm()
-				restarts = 0
-				continue
-			}
-			if d.rxBytes() == 0 {
-				continue // nothing arriving at all: idle, not wedged
-			}
-			if restarts >= maxSilentRestarts {
-				e.log.Error("destination published nothing across every re-probe; leaving it alone",
-					"dest", name, "kind", kind, "attempts", restarts, "budget", silentPublishBudget)
-				return
-			}
-			restarts++
-			e.log.Warn("destination is receiving but publishing nothing; restarting to re-probe the relay",
-				"dest", name, "kind", kind, "attempt", restarts, "budget", silentPublishBudget)
-			d.restart()
-			w.rearm()
-		}
-	}
 }
