@@ -666,6 +666,23 @@ else
   # join, early start, the destination's own filtergraph and encoder, and the
   # whole chain end to end -- so what is left is what this child saw when it
   # opened the relay, which no dump has ever printed. #674.
+  # WHEN EACH CHILD ACTUALLY EXECED, beside when the engine decided to. The
+  # 73-second gap between "destination starting" and a destination's first read
+  # is the #674 anomaly, and nothing in the logs could attribute it until the
+  # supervisor said when the process really began.
+  # docker logs, NOT process.log: the supervisor's own slog goes to the server's
+  # stdout, while process.log carries the ffmpeg children's output. An earlier
+  # revision grepped process.log and printed an empty section.
+  printf "        --- child exec times (supervisor) vs engine intent ---\n"
+  # EVERY exec of the failing destination, not a tail. dest:4 is R-track2, the
+  # one 4c creates; tail -12 truncated its history and hid how many times it had
+  # already cycled before the window that was visible.
+  docker logs "$CTR" 2>&1 \
+    | grep -aE 'child exec.*process=dest:4|destination starting.*R-track2|dest:4.*(exited|retry)' \
+    | sed 's/^/          /'
+  printf "        --- exec counts, every process ---\n"
+  docker logs "$CTR" 2>&1 | grep -ao 'msg="child exec" process=[a-z:0-9]*' \
+    | sort | uniq -c | sort -rn | head -10 | sed 's/^/          /'
   printf "        --- dest:4 FIRST 30 lines (what it found on the relay) ---\n"
   inctr "grep -a 'dest:4:' /data/logs/process.log | head -30" | sed 's/^/          /'
   printf "        --- every dest:4 spawn in this run ---\n"

@@ -348,3 +348,58 @@ decides to start it), alongside the hub's RxBytes and subscriber list at that
 instant. Every timing conclusion in this investigation has been drawn from
 "destination starting", which is logged after proc.Start() returns and says
 nothing about when the child reached its first read.
+
+---
+
+# CORRECTED AGAIN (00:52) — the child starts instantly, and it DOES exit
+
+`child exec`, logged in supervisor.runOnce immediately after cmd.Start(),
+settles two things that were assumed for this entire investigation:
+
+	07:48:21.055  engine: "destination starting" dest=R-track2
+	07:48:21.056  child exec dest:4 pid=1379     <-- ONE MILLISECOND later
+	07:49:38.573  child exec dest:4 pid=1444     <-- 77s later: it EXITED
+	07:49:55.521  child exec dest:4 pid=1527
+
+## Two load-bearing claims were false
+
+1. **"The child starts late."** It does not. It execs 1ms after the engine
+   decides to. The 73-second gap between the engine's log and the child's first
+   decode is the first incarnation's own failing probe, not a scheduling delay.
+   StartDelay, stagger and backoff were never involved.
+
+2. **"It runs indefinitely without exiting, so AutoRestart never sees it."**
+   FALSE, and it was load-bearing for BOTH repairs built in this session. The
+   process exits after ~77s and the supervisor restarts it; dest:4 execs three
+   times, dest:1-3 five times each. A repair designed to restart a process that
+   is already restarting itself cannot help.
+
+That first claim came from one run's exit statistics and was never checked.
+Every timing conclusion drawn from "destination starting" inherited it, and it
+falsely killed the ordering hypothesis earlier tonight.
+
+## What the run also shows
+
+	ingest      execs ONCE for the whole run
+	dest:1-3    five execs each
+	dest:4      three execs
+	loudness    three execs each
+
+The ingest is a single long-lived process spanning 4b and 4c, so the relay is
+ONE continuous timeline -- which is why a destination joining in 4c sees
+`start: 39.988011` rather than 0. It is not joining a fresh stream; it is
+joining a stream that has been running for forty seconds.
+
+## Where this leaves it
+
+The first destination child starts at the right instant, with the publisher
+arriving ~4s later, and still fails to characterise audio in 77 seconds. The
+same configuration reproduced in isolation -- reader first, into silence,
+publisher afterwards, destination's own filtergraph and encoder -- PASSES in 20
+seconds (TestAReaderStartedBeforeAnyDataStillPublishesItsAudio).
+
+The difference between the two is no longer the media path, which is cleared end
+to end, nor start ordering, nor the process lifecycle. What the rig has that the
+harness does not: nine concurrent subscribers, and a relay whose timeline has
+been running for forty seconds before the destination joins. The next
+reproduction should carry BOTH.

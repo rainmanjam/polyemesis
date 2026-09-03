@@ -845,6 +845,17 @@ func (p *Process) runOnce(ctx context.Context) error {
 	cmd.Stdout, cmd.Stderr = stdoutW, stderrW
 
 	startErr := cmd.Start()
+	// WHEN THE CHILD ACTUALLY EXECS. #674
+	//
+	// Every timing conclusion in that investigation was drawn from the engine's
+	// "destination starting", which is logged after Process.Start() RETURNS --
+	// it says a supervise goroutine exists, not that a process is reading. A
+	// 73-second gap between those two was measured and could not be attributed
+	// without this line, and one hypothesis was falsely falsified on the
+	// assumption they were the same instant.
+	if startErr == nil {
+		p.log.Info("child exec", "process", p.spec.Name, "kind", p.spec.Kind, "pid", cmd.Process.Pid)
+	}
 	// The parent's copies of the write ends, closed unconditionally: the child
 	// has inherited its own, and while the parent holds one the pipe cannot reach
 	// EOF even when every descendant has gone.
