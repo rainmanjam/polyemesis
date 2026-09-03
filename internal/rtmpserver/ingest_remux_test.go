@@ -59,17 +59,7 @@ func tsOutput(args []string, path string) []string {
 }
 
 func TestTheIngestRemuxKeepsEachAACTracksChannelConfiguration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs two FFmpeg processes and an ffprobe")
-	}
-	ffmpegBin, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	ffprobeBin, err := exec.LookPath("ffprobe")
-	if err != nil {
-		t.Skip("ffprobe is not installed")
-	}
+	ffmpegBin, ffprobeBin := requireShippedFFmpeg(t)
 
 	// THE SHIPPED FFmpeg, OR THIS PROVES NOTHING.
 	//
@@ -85,10 +75,6 @@ func TestTheIngestRemuxKeepsEachAACTracksChannelConfiguration(t *testing.T) {
 	// Skipping is the honest outcome: a pass on the wrong FFmpeg would be a
 	// green check asserting something it never tested, which is the failure
 	// this whole audit exists to remove.
-	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
-		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x and this would "+
-			"pass without exercising it. The container suite runs this path on 8.1.2.", major)
-	}
 
 	tg := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
 	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"mt": tg}))

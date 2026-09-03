@@ -32,20 +32,7 @@ import (
 // If they do not, this is the reproduction -- eight seconds instead of twelve
 // minutes. #674.
 func TestTheIngestRemuxKeepsItsAudioOverUDP(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs three FFmpeg processes and an ffprobe")
-	}
-	ffmpegBin, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	ffprobeBin, err := exec.LookPath("ffprobe")
-	if err != nil {
-		t.Skip("ffprobe is not installed")
-	}
-	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
-		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
-	}
+	ffmpegBin, ffprobeBin := requireShippedFFmpeg(t)
 
 	tg := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
 	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"mt": tg}))
@@ -130,7 +117,7 @@ func TestTheIngestRemuxKeepsItsAudioOverUDP(t *testing.T) {
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
 		RelayURL: relayURL,
 	})
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 12*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 36*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, args...)
 	var ingErr, ingOut strings.Builder
@@ -216,20 +203,7 @@ func TestTheIngestRemuxKeepsItsAudioOverUDP(t *testing.T) {
 // streams resolve, mid-stream joining is not the fault. If they do not, this is
 // #674 in eight seconds.
 func TestADestinationShapedReaderJoiningMidStreamPublishesItsAudio(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs three FFmpeg processes and an ffprobe")
-	}
-	ffmpegBin, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	ffprobeBin, err := exec.LookPath("ffprobe")
-	if err != nil {
-		t.Skip("ffprobe is not installed")
-	}
-	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
-		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
-	}
+	ffmpegBin, ffprobeBin := requireShippedFFmpeg(t)
 
 	tg := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
 	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"mt": tg}))
@@ -268,7 +242,7 @@ func TestADestinationShapedReaderJoiningMidStreamPublishesItsAudio(t *testing.T)
 	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
 	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 40*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 120*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
@@ -285,7 +259,7 @@ func TestADestinationShapedReaderJoiningMidStreamPublishesItsAudio(t *testing.T)
 	time.Sleep(8 * time.Second)
 
 	tsPath := filepath.Join(t.TempDir(), "late.ts")
-	rdCtx, stopRd := context.WithTimeout(context.Background(), 40*time.Second)
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 120*time.Second)
 	defer stopRd()
 	// THE DESTINATION'S OWN SHAPE, not -c copy.
 	//
@@ -365,20 +339,7 @@ func TestADestinationShapedReaderJoiningMidStreamPublishesItsAudio(t *testing.T)
 //
 // Reader first, into an empty socket. Publisher and ingest afterwards.
 func TestAReaderStartedBeforeAnyDataStillPublishesItsAudio(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs three FFmpeg processes and an ffprobe")
-	}
-	ffmpegBin, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	ffprobeBin, err := exec.LookPath("ffprobe")
-	if err != nil {
-		t.Skip("ffprobe is not installed")
-	}
-	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
-		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
-	}
+	ffmpegBin, ffprobeBin := requireShippedFFmpeg(t)
 
 	tg := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
 	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"mt": tg}))
@@ -402,7 +363,7 @@ func TestAReaderStartedBeforeAnyDataStillPublishesItsAudio(t *testing.T) {
 
 	// THE READER FIRST, into a socket nothing is sending to yet.
 	tsPath := filepath.Join(t.TempDir(), "early.ts")
-	rdCtx, stopRd := context.WithTimeout(context.Background(), 60*time.Second)
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 180*time.Second)
 	defer stopRd()
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
@@ -439,7 +400,7 @@ func TestAReaderStartedBeforeAnyDataStillPublishesItsAudio(t *testing.T) {
 	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
 	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 45*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 135*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
@@ -498,20 +459,7 @@ func TestAReaderStartedBeforeAnyDataStillPublishesItsAudio(t *testing.T) {
 // destination-shaped reader consumes that subscription -- the exact path a
 // destination takes, with nothing standing in for anything.
 func TestTheWholeChainThroughARealHubCarriesTheRoutedAudio(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs three FFmpeg processes, a hub and an ffprobe")
-	}
-	ffmpegBin, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	ffprobeBin, err := exec.LookPath("ffprobe")
-	if err != nil {
-		t.Skip("ffprobe is not installed")
-	}
-	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
-		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
-	}
+	ffmpegBin, ffprobeBin := requireShippedFFmpeg(t)
 
 	tg := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
 	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"mt": tg}))
@@ -560,7 +508,7 @@ func TestTheWholeChainThroughARealHubCarriesTheRoutedAudio(t *testing.T) {
 	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
 	// The ingest writes into the HUB's input, not straight at the reader.
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 45*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 135*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
@@ -576,7 +524,7 @@ func TestTheWholeChainThroughARealHubCarriesTheRoutedAudio(t *testing.T) {
 	time.Sleep(6 * time.Second)
 
 	tsPath := filepath.Join(t.TempDir(), "chain.ts")
-	rdCtx, stopRd := context.WithTimeout(context.Background(), 45*time.Second)
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 135*time.Second)
 	defer stopRd()
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
@@ -630,6 +578,13 @@ func TestTheWholeChainThroughARealHubCarriesTheRoutedAudio(t *testing.T) {
 	}
 }
 
+// NOTE ON TIMEOUTS IN THIS FILE. Every context here is a WATCHDOG against a
+// hung process, never a schedule the test runs to. They were first sized on a
+// laptop and CI killed a reader mid-run at 79.72s -- a slower machine turned a
+// safety net into the thing that failed the test. They are now generous enough
+// that only a genuinely stuck process trips one; the tests still finish in
+// their own time because each reader ends on its own -t.
+
 // THE 4b -> 4c SHAPE: a publisher ends, a gap, another begins. #674
 //
 // This is what the rig does and no reproduction has carried. The ingest is ONE
@@ -642,20 +597,7 @@ func TestTheWholeChainThroughARealHubCarriesTheRoutedAudio(t *testing.T) {
 // Every earlier reproduction gave the reader a stream whose audio was either
 // always present or had never yet started. Neither is the rig.
 func TestAReaderJoiningBetweenTwoPublishesResolvesTheSecondOnesAudio(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs four FFmpeg processes and an ffprobe")
-	}
-	ffmpegBin, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	ffprobeBin, err := exec.LookPath("ffprobe")
-	if err != nil {
-		t.Skip("ffprobe is not installed")
-	}
-	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
-		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
-	}
+	ffmpegBin, ffprobeBin := requireShippedFFmpeg(t)
 
 	tg := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
 	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"mt": tg}))
@@ -695,7 +637,7 @@ func TestAReaderJoiningBetweenTwoPublishesResolvesTheSecondOnesAudio(t *testing.
 	}
 	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 90*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 270*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
@@ -721,7 +663,7 @@ func TestAReaderJoiningBetweenTwoPublishesResolvesTheSecondOnesAudio(t *testing.
 	defer hub.Unsubscribe("dest:test")
 
 	tsPath := filepath.Join(t.TempDir(), "gap.ts")
-	rdCtx, stopRd := context.WithTimeout(context.Background(), 70*time.Second)
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 210*time.Second)
 	defer stopRd()
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
@@ -792,20 +734,7 @@ func TestAReaderJoiningBetweenTwoPublishesResolvesTheSecondOnesAudio(t *testing.
 // behaviour. This adds eight competing readers and then asks the ninth, the
 // destination-shaped one, whether it can still characterise its audio.
 func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs eleven FFmpeg processes and an ffprobe")
-	}
-	ffmpegBin, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	ffprobeBin, err := exec.LookPath("ffprobe")
-	if err != nil {
-		t.Skip("ffprobe is not installed")
-	}
-	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
-		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
-	}
+	ffmpegBin, ffprobeBin := requireShippedFFmpeg(t)
 
 	tg := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
 	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"mt": tg}))
@@ -840,7 +769,7 @@ func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing
 	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
 	waitPublishing(t, s, tg.SourceID, 25*time.Second)
 
-	ingCtx, stopIngest := context.WithTimeout(context.Background(), 70*time.Second)
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 210*time.Second)
 	defer stopIngest()
 	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
 		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
@@ -854,7 +783,7 @@ func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing
 	defer func() { _ = ing.Process.Kill(); _ = ing.Wait() }()
 
 	// EIGHT competing readers, as loudness:1-4, meters and dest:1-3 are.
-	othCtx, stopOth := context.WithTimeout(context.Background(), 60*time.Second)
+	othCtx, stopOth := context.WithTimeout(context.Background(), 180*time.Second)
 	defer stopOth()
 	for i := 0; i < 8; i++ {
 		pc, perr := net.ListenPacket("udp", "127.0.0.1:0")
@@ -890,7 +819,7 @@ func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing
 	defer hub.Unsubscribe("dest:test")
 
 	tsPath := filepath.Join(t.TempDir(), "crowded.ts")
-	rdCtx, stopRd := context.WithTimeout(context.Background(), 50*time.Second)
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 150*time.Second)
 	defer stopRd()
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
@@ -941,4 +870,33 @@ func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing
 			"hub rx=%d tx=%d dropped=%d\n\nreader stderr:\n%s",
 			len(probed.Streams), size, st.RxPackets, st.TxPackets, st.Dropped, rdErr.String())
 	}
+}
+
+// requireShippedFFmpeg gates the #674 reproductions on the environment they are
+// about, and is ONE place rather than one per test.
+//
+// Four skip sites repeated across five tests is twenty entries in the skip
+// census, and that census exists so that adding a skip is a deliberate,
+// reviewable act rather than something that accumulates. Collapsing them says
+// the same thing once.
+//
+// The version gate is not fussiness: a developer machine on 9.x runs these
+// green while exercising nothing, which is a pass asserting something it never
+// tested. The container suite runs them on the shipped 8.1.2.
+func requireShippedFFmpeg(t *testing.T) (ffmpegBin, ffprobeBin string) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("runs several FFmpeg processes and an ffprobe")
+	}
+	var err error
+	if ffmpegBin, err = exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	if ffprobeBin, err = exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe is not installed")
+	}
+	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
+		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
+	}
+	return ffmpegBin, ffprobeBin
 }
