@@ -532,6 +532,15 @@ sleep 22
 # CAPTURE ONLY WHILE THE PUBLISHER IS ALIVE -- closing bracket, before the
 # destinations are stopped. tail|head, not dd bs=1: a byte-at-a-time dd over
 # several MB is millions of syscalls.
+# WHAT THE HUB THINKS IT DELIVERED, while the destinations are still up. #674
+#
+# fanout() counts every failed WriteToUDP in Hub.dropped and logs it at DEBUG,
+# which this suite never shows -- so a hub shedding most of its sends looks
+# identical to a healthy one. dest:4 read only ~471 video PES across a
+# 77-second life, about sixteen seconds of a forty-second publish, so the
+# question is whether the loss is on the wire or in the reader.
+printf "        --- relay hub stats while the destinations are live ---\n"
+drive relaystats 2>&1 | sed 's/^/        /'
 CAPEND=$(inctr "cat /data/relaycap.*.ts 2>/dev/null | wc -c" | tr -d " ")
 printf "        relay capture while E-RTMP was on air: bytes %s .. %s\n" "${CAPSTART:-?}" "${CAPEND:-?}"
 inctr "f=\$(ls /data/relaycap.*.ts 2>/dev/null | head -1); [ -n \"\$f\" ] || exit 0

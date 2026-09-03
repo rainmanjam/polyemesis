@@ -200,3 +200,152 @@ func TestTheIngestRemuxKeepsItsAudioOverUDP(t *testing.T) {
 		}
 	}
 }
+
+// A DESTINATION JOINS MID-STREAM. Does that break audio characterisation? #674
+//
+// Everything that has parsed this audio successfully read it from the START: a
+// complete capture file, or a socket bound before the sender began. A
+// destination does neither -- it subscribes to a relay that is already running
+// and begins reading at an arbitrary offset. The acceptance rig says such a
+// reader gets 0 audio packets while the hub reports dropped=0 and 0.031% loss,
+// so the bytes reach it and it cannot make sense of them.
+//
+// This starts the ingest, lets it run, and only THEN attaches a reader carrying
+// the destination's own input options (ffmpeg.RelayInputArgs). If the audio
+// streams resolve, mid-stream joining is not the fault. If they do not, this is
+// #674 in eight seconds.
+func TestADestinationShapedReaderJoiningMidStreamPublishesItsAudio(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs three FFmpeg processes and an ffprobe")
+	}
+	ffmpegBin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ffprobeBin, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is not installed")
+	}
+	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
+		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
+	}
+
+	tg := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
+	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"mt": tg}))
+	if err := s.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer s.Stop()
+	s.mu.Lock()
+	addr := s.ln.Addr().String()
+	s.mu.Unlock()
+	_, portStr, _ := strings.Cut(addr, ":")
+	port, _ := strconv.Atoi(portStr)
+
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve udp port: %v", err)
+	}
+	relayPort := pc.LocalAddr().(*net.UDPAddr).Port
+	_ = pc.Close() // the ingest sends here; a real reader binds it below
+	relayURL := fmt.Sprintf("udp://127.0.0.1:%d", relayPort)
+
+	pubCtx, stopPub := context.WithCancel(context.Background())
+	defer stopPub()
+	pub := exec.CommandContext(pubCtx, ffmpegBin, "-nostdin", "-hide_banner", "-loglevel", "error", "-re",
+		"-f", "lavfi", "-i", "testsrc2=size=320x240:rate=15",
+		"-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=1700:sample_rate=48000",
+		"-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a",
+		"-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "500k",
+		"-c:a", "aac", "-ac", "2",
+		"-f", "flv", "rtmp://"+addr+"/live/mt")
+	if err := pub.Start(); err != nil {
+		t.Fatalf("publisher: %v", err)
+	}
+	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
+	waitPublishing(t, s, tg.SourceID, 25*time.Second)
+
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 40*time.Second)
+	defer stopIngest()
+	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
+		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
+		RelayURL: relayURL,
+	})...)
+	var ingErr strings.Builder
+	ing.Stderr = &ingErr
+	if err := ing.Start(); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	defer func() { _ = ing.Process.Kill(); _ = ing.Wait() }()
+
+	// THE POINT: attach LATE, the way a destination does.
+	time.Sleep(8 * time.Second)
+
+	tsPath := filepath.Join(t.TempDir(), "late.ts")
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 40*time.Second)
+	defer stopRd()
+	// THE DESTINATION'S OWN SHAPE, not -c copy.
+	//
+	// Every reader that has parsed this audio so far used -c copy, which only
+	// needs the streams IDENTIFIED. A destination runs a filtergraph and an
+	// encoder, which needs them DECODED -- it routes one track through
+	// pan/aresample and encodes AAC. That is the last configuration this
+	// investigation has never reproduced, and the rig says it reads 0 audio
+	// packets while -c copy readers on the same bytes read all three.
+	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
+		ffmpeg.RelayInputArgs()...)
+	rdArgs = append(rdArgs, "-i", ffmpeg.RelayInputURL(relayURL),
+		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1:first_pts=0[aout]",
+		"-map", "0:v:0", "-c:v", "copy",
+		"-map", "[aout]", "-c:a", "aac", "-b:a", "128k",
+		"-f", "mpegts", "-flush_packets", "1",
+		"-t", "10", "-y", tsPath)
+	rd := exec.CommandContext(rdCtx, ffmpegBin, rdArgs...)
+	var rdErr strings.Builder
+	rd.Stderr = &rdErr
+	if err := rd.Start(); err != nil {
+		t.Fatalf("late reader: %v", err)
+	}
+	if err := rd.Wait(); err != nil {
+		t.Logf("late reader exited: %v", err)
+	}
+
+	fi, _ := os.Stat(tsPath)
+	var size int64 = -1
+	if fi != nil {
+		size = fi.Size()
+	}
+	out, probeErr := exec.Command(ffprobeBin, "-hide_banner", "-loglevel", "error",
+		"-f", "mpegts", "-select_streams", "a", "-show_streams", "-of", "json", tsPath).Output()
+	if probeErr != nil {
+		t.Fatalf("ffprobe: %v (capture %d bytes)\n\nreader stderr:\n%s\n\ningest stderr:\n%s",
+			probeErr, size, rdErr.String(), ingErr.String())
+	}
+	var probed struct {
+		Streams []struct {
+			Channels   int    `json:"channels"`
+			SampleRate string `json:"sample_rate"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out, &probed); err != nil {
+		t.Fatalf("ffprobe json: %v\n%s", err, out)
+	}
+	t.Logf("late-join capture: %d bytes, %d audio streams", size, len(probed.Streams))
+	// ONE stream out: the graph routes track 2 and encodes a single AAC pair.
+	// Zero means the filter never initialised, which is the #674 signature.
+	if len(probed.Streams) != 1 {
+		t.Fatalf("a destination-shaped reader joining mid-stream produced %d of 1 audio streams.\n\n"+
+			"A -c copy reader on these same bytes resolves all three tracks, and the hub\n"+
+			"reports dropped=0. If DECODING is what fails where identifying succeeds, this\n"+
+			"is #674 reproduced in seconds instead of a twelve-minute rig.\n\n"+
+			"reader stderr:\n%s", len(probed.Streams), rdErr.String())
+	}
+	for i, st := range probed.Streams {
+		if st.Channels == 0 || st.SampleRate == "" {
+			t.Errorf("late-joined audio stream %d has no channel configuration "+
+				"(channels=%d sample_rate=%q)", i, st.Channels, st.SampleRate)
+		}
+	}
+}
