@@ -3293,6 +3293,15 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 		if len(src.Tracks) > 0 {
 			e.reprobeDestinationsThatNeverPublished("ingest layout probed")
 		}
+		// #627: the video codec is the ENCODER's choice and is only knowable
+		// here, so this is the first moment an operator can be told that an
+		// HEVC or AV1 ingest will be rejected by a named destination -- rather
+		// than learning it from the platform.
+		if res.Video != nil {
+			if rows, derr := e.store.ListDestinationsBySource(e.sourceID); derr == nil {
+				e.warnVideoCodec(res.Video.Codec, rows)
+			}
+		}
 	}
 	return changed
 }
