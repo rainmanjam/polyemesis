@@ -403,3 +403,54 @@ to end, nor start ordering, nor the process lifecycle. What the rig has that the
 harness does not: nine concurrent subscribers, and a relay whose timeline has
 been running for forty seconds before the destination joins. The next
 reproduction should carry BOTH.
+
+---
+
+# THE ELIMINATION IS COMPLETE, AND THE FIX IS NOT WRITTEN (00:55)
+
+Twelve reproductions now exist, every one on the shipped ffmpeg 8.1.2, every one
+PASSING, every one built because it was expected to fail:
+
+	ingest -> file                          3 streams, 48000/2
+	ingest -> UDP, shipped argv from /proc  789,600 bytes, 3 streams
+	reader joining mid-stream               3 streams
+	reader started before ANY data          1 encoded stream
+	destination shape (filter + encoder)    1 encoded stream
+	hub hop, byte for byte                  400/400 datagrams identical
+	full chain ingest -> hub -> destination 1 stream, dropped=0 tsLost=0
+	reader joining BETWEEN two publishes    1 stream, 897,700 bytes
+
+And in the rig, measured directly:
+
+	RTMP server drop counter    a true 0, once it could fire
+	relay content               40s of audio on all three PIDs, four runs
+	hub stats, live             rx=20588 tx=115146 dropped=0 loss=0.031%
+	child exec                  1ms after the engine decides
+	PMT                         all three AAC streams declared throughout
+
+The acceptance rig still fails: 48 passed, 2 failed.
+
+## What is left
+
+Two differences remain between every passing reproduction and the failing rig:
+
+1. **Nine concurrent subscribers** (dest:1-4, loudness:1-4, meters). Every
+   reproduction has one.
+2. **The engine itself** -- reconcile, restarts, and the destination lifecycle,
+   as opposed to hand-started processes.
+
+Everything else is eliminated by measurement rather than argument.
+
+## What was learned that outlives this bug
+
+Ten instrument defects, each of which produced a result that looked like a
+finding: a drop counter that could not fire at its most useful setting; ffprobe
+stderr discarded twice; counting matches inside a `tail` window and reporting it
+as a trend; a gate that printed OK without gating; SIGKILL losing an output
+buffer; `-t` that cannot fire without input; a bind race from closing a reserved
+socket; `%%` in awk; a sparse-file hole from `: >` truncation; and a format
+string with two verbs and one argument.
+
+Every one of them produced a 0 or an empty section, and a 0 is indistinguishable
+from the finding being sought. Three conclusions were published from such
+artefacts and later retracted.
