@@ -256,8 +256,9 @@ jobs:
       #
       # main's gate was red on five consecutive CI analyses and nobody reading
       # those logs could name the metric. The first run that carried this step
-      # answered it in one line: `Quality gate: NONE`, with no conditions at all.
-      # See the comment above sonar.projectVersion in sonar-project.properties.
+      # answered it in one line: `Quality gate: NONE`, with no conditions at all
+      # -- and then kept answering it, through two attempted fixes, which is the
+      # point of printing it. See sonar-project.properties.
       #
       # ON EVERY ANALYSIS, not only failing ones. A number you see only once it
       # has crossed the line is a number nobody can steer by: new_coverage at 81
@@ -374,7 +375,7 @@ jobs:
           # NONE is a failure too, and it is the one main actually hits: a gate
           # with no conditions evaluated has not passed, it has not been asked.
           if [ "$verdict" = "NONE" ]; then
-            echo "::error title=Quality gate NONE::no condition was evaluated at all. The gate did not pass -- it was never asked. See sonar.projectVersion in sonar-project.properties."
+            echo "::error title=Quality gate NONE::no condition was evaluated at all -- the gate did not pass, it was never asked. The branch has no new-code baseline, and that is the project's New Code definition in SonarCloud (Administration > New Code), which is a setting and not anything in this repository. See sonar-project.properties."
             exit 1
           fi
           if [ "$verdict" != "OK" ]; then
