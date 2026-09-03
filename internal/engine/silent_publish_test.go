@@ -73,31 +73,26 @@ func TestAnIdleDestinationIsLeftAlone(t *testing.T) {
 }
 
 // publishing: healthy, and it stays healthy across windows.
+//
+// Progress is driven from retired(), which the loop calls FIRST on every tick,
+// so the latch is always set before it is read. An earlier version raced a
+// sleeping goroutine against the ticker and failed on CI at 1, 6 and 9
+// restarts: a test whose verdict depends on which goroutine the scheduler
+// picks is not evidence about the guard, it is evidence about the scheduler.
 func TestAPublishingDestinationIsNeverRestarted(t *testing.T) {
 	e := testEngine()
 	var restarts atomic.Int64
 	w := &destWatch{}
 
-	stop := make(chan struct{})
-	defer close(stop)
-	go func() { // media keeps moving
-		ms := int64(0)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			ms += 100
+	go e.watchSilentPublish("d", db.DestRTMP, time.Millisecond, w, silentPublishDeps{
+		retired: func() bool {
+			// Media moved since the last evaluation, which is what publishing
+			// looks like: FFmpeg emits progress continuously while writing.
 			w.mu.Lock()
-			w.last, w.published = ms, true
+			w.published = true
 			w.mu.Unlock()
-			time.Sleep(time.Millisecond)
-		}
-	}()
-
-	go e.watchSilentPublish("d", db.DestRTMP, 2*time.Millisecond, w, silentPublishDeps{
-		retired: func() bool { return false },
+			return false
+		},
 		rxBytes: func() uint64 { return 4096 },
 		restart: func() { restarts.Add(1) },
 	})

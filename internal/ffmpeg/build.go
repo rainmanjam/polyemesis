@@ -733,31 +733,22 @@ const relayFIFOPackets = 32768
 // 32 MB covers one 2-second GOP -- what OBS ships by default -- up to about
 // 128 Mbit/s, and a 10-second GOP at a comfortable broadcast rate.
 //
-// THE WINDOW IS SIZED FOR AUDIO, NOT VIDEO, and that is what changed in #674.
-// 15 seconds covers a GOP far longer than anything this product produces, which
-// is why it was chosen -- but a GOP is the VIDEO worst case, and the binding
-// constraint turned out to be audio. A consumer that starts alongside its
-// ingest sees the feed's first seconds, where audio is far sparser than in
-// steady state. Measured on the acceptance rig, one destination's own probe
-// window:
+// 15 seconds covers a GOP far longer than anything this product produces.
 //
-//	steady state          194 video PES : 37 per audio PID   (~5.2:1)
-//	first 15s of a feed    40 video PES :  1 per audio PID   (~40:1)
+// RAISING THIS DOES NOT FIX #674, and was tried. A destination whose audio the
+// demuxer cannot characterise reports
 //
-// Video resolved; all three audio streams did not, and FFmpeg said so three
-// times -- "Consider increasing the value for the 'analyzeduration'". It
-// characterises streams ONCE and never re-probes, so that destination then ran
-// indefinitely reading 0 audio packets, filtergraph uninitialised, publishing
-// nothing, WITHOUT EXITING -- which is why AutoRestart never saw it.
+//	Could not find codec parameters for stream 1
+//	(Audio: aac ([15][0][0][0] / 0x000F), 0 channels): unspecified sample format
 //
-// 45 seconds is ~3x the observed sparse window. It is free on a healthy stream
-// for the reason stated above: probing ends the moment the parameters are
-// known, so a consumer joining a flowing feed pays nothing for a ceiling it
-// never spends. engine.guardSilentPublish is the warning rung beneath this, for
-// a consumer that exhausts even this budget.
+// at 45s and 32MB exactly as it does at 15s: the parameters are not late, they
+// are absent, so a larger ceiling only buys a longer wait for the same answer.
+// It also REGRESSED a passing case -- acceptance 4d, which publishes fine at
+// 15s, failed at 45s because every destination now spent three times as long
+// probing before giving up, past what the step allows. Left at 15s.
 const (
 	relayProbeSize   = 32 << 20
-	relayProbeWindow = 45 * 1000000 // microseconds
+	relayProbeWindow = 15 * 1000000 // microseconds
 )
 
 // RelayProbeWindow is relayProbeWindow as a Duration, exported because another

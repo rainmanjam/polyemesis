@@ -203,10 +203,29 @@ func ffmpegMajor(t *testing.T, bin string) int {
 	if len(f) < 3 {
 		t.Fatalf("unreadable ffmpeg -version output: %q", string(out))
 	}
-	maj, _, _ := strings.Cut(f[2], ".")
-	n, convErr := strconv.Atoi(maj)
-	if convErr != nil {
+	// A GIT BUILD DOES NOT START WITH A DIGIT. The shipped artefact reports
+	// "n8.1.2-34-g9b6c8969e0-20260812", so cutting at the first "." yielded
+	// "n8" and this fataled on every CI runner -- the test never ran the path
+	// it exists to cover, and said so as a failure rather than a skip. Take the
+	// first run of digits instead, which reads a release ("8.1.2") and a git
+	// description identically.
+	n, ok := leadingInt(f[2])
+	if !ok {
 		t.Fatalf("unreadable ffmpeg version %q", f[2])
 	}
 	return n
+}
+
+// leadingInt returns the first run of digits in s.
+func leadingInt(s string) (int, bool) {
+	start := strings.IndexFunc(s, func(r rune) bool { return r >= '0' && r <= '9' })
+	if start < 0 {
+		return 0, false
+	}
+	end := start
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	n, err := strconv.Atoi(s[start:end])
+	return n, err == nil
 }
