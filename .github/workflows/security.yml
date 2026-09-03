@@ -65,8 +65,14 @@ concurrency:
   group: security-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+# LEAST PRIVILEGE, PER JOB. This was `contents: read` at the workflow level,
+# which grants it to every job whether or not the job reads the repository --
+# Sonar's githubactions:S8264. `{}` here means a job that declares nothing gets
+# NOTHING, so a new job cannot inherit a token by being added; it has to ask.
+# Each job below states what it needs, and `contents: read` is all any of them
+# needs: nothing in this file writes to the repository, opens an issue, or
+# pushes a package.
+permissions: {}
 
 jobs:
   # Go dependency vulnerabilities, filtered by reachability. govulncheck is the
@@ -74,6 +80,8 @@ jobs:
   # actually CALLS, so an advisory against a package you import but never reach
   # does not become a ticket nobody can action.
   govulncheck:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # A ceiling, because GitHub's default is SIX HOURS -- and this workflow
     # runs on every push and pull request, so it is the one most likely to be
@@ -156,6 +164,8 @@ jobs:
   # dependabot.yml between them cover every package-lock.json in the tree, so a
   # third one cannot arrive unaudited the way the second did.
   npm-audit:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # See the note on the govulncheck job for why ten, for all four jobs here.
     # This one's single point of stall is the npm registry, during `npm ci`.
@@ -205,6 +215,8 @@ jobs:
   # the required context would go missing exactly when something is wrong.
   npm-audit-result:
     name: npm-audit
+    permissions:
+      contents: read
     needs: npm-audit
     if: always()
     runs-on: ubuntu-latest
@@ -246,6 +258,8 @@ jobs:
   # Pinning means CI runs the version the config was tested against. The
   # version assertion below is what makes the pin real rather than aspirational.
   gitleaks:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # See the note on the govulncheck job for why ten, for all four jobs here.
     # This one's are the release download below and the `fetch-depth: 0`
@@ -501,6 +515,8 @@ jobs:
 
   # Static analysis.
   semgrep:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # See the note on the govulncheck job for why ten, for all four jobs here.
     # The slowest of the four at 29 to 48 seconds, and it has two stalls
