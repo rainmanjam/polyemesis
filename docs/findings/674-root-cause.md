@@ -541,3 +541,47 @@ be different objects, and nothing reconciles them.
 Which hub does the selector's feed write to during the 4c mode switch, and which
 does upstreamHub return at the moment destinations are (re)started? They must be
 the same object. That is a bounded question in selector.go and destinations.go.
+
+---
+
+# WHERE IT ACTUALLY STANDS (01:37)
+
+The fault is localised to ONE fact, reproduced in every run:
+
+	08:33:12.758  child exec dest:4                     (subscribed, hub receiving)
+	08:34:25.622  relay first delivery dest:4 port=21018  <-- 72.9s LATER
+	08:34:57.328  relay subscriber removed dest:4         (AFTER first delivery)
+
+The hub, the capture and every subscription are on the SAME port (49108 this
+run, 53950 the last), and the capture holds 13.4 MB with 40s of audio across
+the publish. So a hub that is receiving does not deliver to a subscribed
+destination for ~73 seconds, and the destination dies having been sent nothing.
+
+## Ruled out, each by measurement
+
+	the media path        12 reproductions, all passing, all on ffmpeg 8.1.2
+	ordering              reader-before-data passes
+	concurrency           nine subscribers passes
+	the process lifecycle child execs 1ms after the engine decides
+	a hub MISMATCH        capture and subscriptions share one hub port
+	unsubscribe-while-running  the removal is AFTER first delivery, not before
+	the fan-out itself    byte-identical, dropped=0, loss=0.031%
+
+## The one open question
+
+Why is a subscribed target not written to while its hub is receiving? Either the
+subscription is absent from `targets` during that window, or the hub is not
+receiving during it and the capture's 13.4 MB was written outside the bracket.
+
+Those are distinguishable with one more line: log `len(*targets)` and the hub's
+rx counter together, on a ticker, so "receiving with N targets" is visible
+directly rather than inferred from two separate logs.
+
+## A caution for whoever picks this up
+
+The acceptance dump prints TAILS. Twice tonight a conclusion was drawn from a
+truncated section and was wrong -- once counting matches inside `tail` and
+reporting the count as a trend, once reading an absent log line as proof a
+subscription never happened. Before believing any absence in that dump, widen
+the grep and confirm the line is absent from the whole log rather than from the
+last N lines of it.

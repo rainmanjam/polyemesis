@@ -683,6 +683,11 @@ else
   # WHEN THE HUB FIRST SENT TO EACH SUBSCRIBER, beside when each child execed.
   # Together these say whether a destination that read nothing was being sent to
   # and failed to receive, or was never sent to at all. #674.
+  # WHEN each subscriber joined, and WHICH hub it joined. Paired with first
+  # delivery this separates "subscribed late" from "subscribed to a hub that is
+  # not the one being fed". #674.
+  printf "        --- relay subscriptions (name, hub, when) ---\n"
+  docker logs "$CTR" 2>&1 | grep -aE "relay subscriber (added|removed)" | grep -aE "dest:4|total" | tail -18 | sed 's/^/          /'
   printf "        --- relay first delivery, per subscriber ---\n"
   docker logs "$CTR" 2>&1 | grep -a "relay first delivery" | sed 's/^/          /'
   printf "        --- exec counts, every process ---\n"

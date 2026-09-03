@@ -240,7 +240,16 @@ func (h *Hub) SubscribeAddr(name string, ip net.IP, port int) string {
 		addr: &net.UDPAddr{IP: ip, Port: port},
 	}
 	h.rebuildTargets()
-	h.log.Debug("relay subscriber added", "name", name, "addr", ip, "port", port, "total", len(h.subs))
+	// AT INFO, WITH THE HUB'S OWN PORT. #674
+	//
+	// Every subscriber on this hub received its first byte in the same
+	// millisecond, 73 seconds after their children started -- so the hub was
+	// receiving (its capture proves it) while its target list was empty. The
+	// only way to tell "subscribed late" from "subscribed to a different hub"
+	// is to record WHICH hub each Subscribe landed on, and when. At Debug this
+	// said nothing, because the acceptance suite never shows Debug.
+	h.log.Info("relay subscriber added", "name", name, "hubPort", h.port,
+		"subscriberPort", port, "total", len(h.subs))
 	return udpURL(ip, port)
 }
 
@@ -250,7 +259,12 @@ func (h *Hub) Unsubscribe(name string) {
 	defer h.mu.Unlock()
 	delete(h.subs, name)
 	h.rebuildTargets()
-	h.log.Debug("relay subscriber removed", "name", name, "total", len(h.subs))
+	// AT INFO, for the same reason as "added". #674: a destination subscribed at
+	// 08:24:52 and its child started 1ms later, on a hub that was receiving --
+	// and it got nothing until 08:26:05. That is only possible if the
+	// subscription was REMOVED while the child kept running, and at Debug this
+	// line could never show it.
+	h.log.Info("relay subscriber removed", "name", name, "hubPort", h.port, "total", len(h.subs))
 }
 
 // rebuildTargets republishes the fanout list. Caller must hold mu for writing.
