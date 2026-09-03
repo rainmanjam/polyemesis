@@ -2,6 +2,8 @@ package rtmpserver
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -162,24 +164,32 @@ func TestTheIngestRemuxKeepsEachAACTracksChannelConfiguration(t *testing.T) {
 			statErr, strings.Join(args, " "), ingErr.String()+"\n--- stdout ---\n"+ingOut.String(), pubErr.String())
 	}
 
+	// JSON, NOT CSV LINES. On an MPEG-TS ffprobe emits every stream TWICE --
+	// once under the program it belongs to and once under the top-level stream
+	// list, the second copy padded with empty fields. Counting csv lines
+	// therefore reported 7 for a file with 3 audio streams, and the test failed
+	// on a correct remux while claiming the stream count was wrong. #674.
 	out, probeErr := exec.Command(ffprobeBin, "-hide_banner", "-loglevel", "error",
-		"-select_streams", "a",
-		"-show_entries", "stream=channels,sample_rate", "-of", "csv=p=0", tsPath).CombinedOutput()
+		"-select_streams", "a", "-show_streams",
+		"-of", "json", tsPath).Output()
 	if probeErr != nil {
-		t.Fatalf("ffprobe: %v\n%s", probeErr, out)
+		t.Fatalf("ffprobe: %v", probeErr)
 	}
-
-	// Each line is "channels,sample_rate" for one audio stream. A stream whose
-	// configuration was lost reports 0 channels and an empty sample rate, which
-	// is exactly what a destination's filter graph then refuses.
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) != 3 {
+	var probed struct {
+		Streams []struct {
+			Channels   int    `json:"channels"`
+			SampleRate string `json:"sample_rate"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out, &probed); err != nil {
+		t.Fatalf("ffprobe json: %v\n%s", err, out)
+	}
+	if len(probed.Streams) != 3 {
 		t.Fatalf("expected 3 audio streams in the remuxed TS, got %d:\n%s\n\ningest stderr:\n%s",
-			len(lines), out, ingErr.String())
+			len(probed.Streams), out, ingErr.String())
 	}
-	for i, l := range lines {
-		fields := strings.Split(strings.TrimSpace(l), ",")
-		if len(fields) < 2 || fields[0] == "" || fields[0] == "0" || fields[1] == "" {
+	for i, st := range probed.Streams {
+		if st.Channels == 0 || st.SampleRate == "" {
 			t.Errorf("audio stream %d came out of the ingest remux without channel "+
 				"configuration (%q).\n\nEvery destination that must ENCODE this audio "+
 				"then fails with \"Neither number of channels nor channel layout "+
@@ -187,7 +197,8 @@ func TestTheIngestRemuxKeepsEachAACTracksChannelConfiguration(t *testing.T) {
 				"logs a started destination. Recording destinations are unaffected "+
 				"because -c copy needs no layout, which is why routing still measures "+
 				"correct. #674.\n\nfull probe output:\n%s\n\ningest stderr:\n%s",
-				i, strings.TrimSpace(l), out, ingErr.String())
+				i, fmt.Sprintf("channels=%d sample_rate=%q", st.Channels, st.SampleRate),
+				out, ingErr.String())
 		}
 	}
 }
