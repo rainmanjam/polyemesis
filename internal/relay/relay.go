@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // datagramSize is the largest packet we expect: 1316 bytes of TS payload plus
@@ -188,6 +189,8 @@ func New(log *slog.Logger, port int, opts ...Option) (*Hub, error) {
 	}
 	h.wg.Add(1)
 	go h.run()
+	// #674: sampled by the clock so a STARVED window still produces lines.
+	go h.sampleState(3 * time.Second)
 	return h, nil
 }
 
@@ -435,25 +438,36 @@ func (h *Hub) measure(dgram []byte) {
 	}
 }
 
+// sampleState reports rxPackets and the target count on a TIME ticker. #674
+//
+// The first version of this sampled every 500 DATAGRAMS, which cannot describe
+// a window with no datagrams: a starved hub simply stopped logging, so every
+// sample came from after the starvation ended and the interesting period was
+// the one part with no data about it. A period of silence has to be sampled by
+// the clock, not by the thing that has gone silent.
+func (h *Hub) sampleState(every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-h.done:
+			return
+		case <-t.C:
+			count := 0
+			if tp := h.targets.Load(); tp != nil {
+				count = len(*tp)
+			}
+			h.log.Info("relay fanout state", "hubPort", h.port,
+				"rxPackets", h.rxPackets.Load(), "txPackets", h.txPackets.Load(),
+				"targets", count)
+		}
+	}
+}
+
 func (h *Hub) fanout(pkt []byte) {
 	// No lock and no allocation: the list is republished by rebuildTargets on
 	// the rare occasions it changes. Nil until the first subscriber.
 	tp := h.targets.Load()
-	// RECEIVING WITH N TARGETS, AS ONE OBSERVATION. #674
-	//
-	// A subscribed destination went 73 seconds without a byte while this hub
-	// was demonstrably receiving. That could mean the target list was empty or
-	// that the hub was not receiving in that window, and those were only
-	// distinguishable by lining up two separate logs -- which is how two wrong
-	// conclusions were reached. This says both at once. Every 500 datagrams:
-	// roughly twice a second on a live relay, silent on an idle one.
-	if n := h.rxPackets.Add(0); n%500 == 1 {
-		count := 0
-		if tp != nil {
-			count = len(*tp)
-		}
-		h.log.Info("relay fanout state", "hubPort", h.port, "rxPackets", n, "targets", count)
-	}
 	if tp == nil {
 		return
 	}

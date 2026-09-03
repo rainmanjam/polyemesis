@@ -669,3 +669,44 @@ sample I have is from after it ended.
 That is the next measurement, and it is narrow: log fanout state on a TIME
 ticker rather than every 500 packets, so a starved window produces samples
 instead of silence. Sampling per-packet cannot describe a period with no packets.
+
+---
+
+# STATE AT HANDOFF (02:17)
+
+## Fixed, tested, committed — two real defects, neither of them #674
+
+1. **`048f97f9` — a destination whose hub is replaced under it now restarts.**
+   destSpec hashes the argv with the relay URL BLANKED, so a hub swap did not
+   change the spec and stopDestinations kept the destination alive on a port
+   nothing writes to. Mutation-tested both ways: dropping the equality keeps a
+   stale destination, making it a liveness test restarts healthy ones (which is
+   how an earlier repair broke acceptance-failover's zero-restart pin).
+
+2. **`6e2f5a60` — the RTMP server now ends subscribers when a publish ends.**
+   It never did. The ingest child sat attached to a stream that would never
+   produce again: out_time FROZEN at 40021ms, zero bytes for ~80s, speed
+   decaying 0.98 -> 0.36, the relay hub down to ~6 packets/second. After the
+   fix the ingest advances, restarts cleanly into the next publish, and the hub
+   runs at ~277 packets/second. engine.go had asserted this behaviour all along.
+
+## Still open
+
+4c fails: 48 passed, 2 failed. dest:4 execs and receives its first byte ~73
+seconds later, unchanged by either fix.
+
+## The one measurement still missing, and why
+
+Clock-sampled hub state was supposed to show `targets` and `rxPackets` DURING
+the starvation. It does not, because the samples begin only at 09:14:25 while
+dest:4 execs at 09:13:13 -- so either the hub did not exist before then, or the
+dump truncated them.
+
+**Every section of that dump is a tail.** Three conclusions in this
+investigation were drawn from truncated output and were wrong. Before believing
+any absence there, dump the WHOLE `docker logs` to a file and grep that.
+
+The next step is exactly that: capture the full container log as an artefact, as
+the relay capture already is, and read the window 09:13:13-09:14:25 from it. If
+the hub genuinely did not exist before 09:14:25, then destinations are started
+against a hub that is created later, and that is #674.
