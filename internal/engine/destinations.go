@@ -168,16 +168,66 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 	return plans
 }
 
+// keepDestination is the whole test for leaving a running destination alone,
+// extracted so a test can call the REAL decision. An inline copy of this in a
+// test stayed green when the hub check was deleted from the shipped code, which
+// is the same defect the check itself exists to prevent.
+//
+// wantHub is the hub this destination would be given NOW; nil when it could not
+// be resolved, which is itself a reason not to keep it.
+func keepDestination(d *destination, p destPlan, wanted bool, wantHub *relay.Hub) bool {
+	if !wanted || d.proc == nil || p.err != "" || d.spec != p.spec {
+		return false
+	}
+	// A destination that has no hub yet is not running against one, and is
+	// judged on spec alone. One that HAS a hub must still be on the hub it
+	// would now be given: its FFmpeg took the relay URL on its command line and
+	// cannot be told a new one, so a swap can only be repaired by a restart.
+	return d.hub == nil || d.hub == wantHub
+}
+
 // stopDestinations tears down every destination that is gone, newly disabled,
 // newly broken, or running with arguments that no longer match. Everything else
 // is left strictly alone — that is the guarantee that renaming a destination,
 // or editing a different one, never interrupts a live output.
 func (e *Engine) stopDestinations(plans map[int64]destPlan) {
+	// THE HUB A DESTINATION READS IS PART OF WHETHER IT MAY BE KEPT. #674
+	//
+	// destSpec deliberately hashes the argv with the relay URL BLANKED, so a
+	// hub swap does not change it -- and the keep test below was spec-only.
+	// A destination whose hub is replaced under it therefore SURVIVED, holding
+	// a subscription to a hub nobody feeds any more, on a port that is never
+	// written to again. engine.go already states the shape of this failure:
+	// "closing a hub only stops UDP delivery; it does not end the process."
+	//
+	// Measured on the acceptance rig before this fix: the child execed 1ms
+	// after the engine started it and received its FIRST BYTE 72.8 seconds
+	// later -- five seconds before it gave up and exited. It was starved by the
+	// relay, not by FFmpeg, which is why twelve isolated reproductions of the
+	// media path all passed.
+	//
+	// Resolved BEFORE the lock: upstreamHub takes e.mu.RLock for a rendition
+	// destination, and this function holds the write lock.
+	wantHub := make(map[int64]*relay.Hub, len(plans))
+	for id, p := range plans {
+		if p.err != "" || p.row == nil {
+			continue
+		}
+		if h, err := e.upstreamHub(p.row); err == nil {
+			wantHub[id] = h
+		}
+	}
+
 	e.mu.Lock()
 	var toStop []*destination
 	for id, d := range e.dests {
 		p, wanted := plans[id]
-		keep := wanted && d.proc != nil && p.err == "" && d.spec == p.spec
+		// A running destination whose hub is not the hub it would now be given
+		// is reading a port nothing writes to. Restarting it is the only repair:
+		// its FFmpeg took the relay URL on its command line and cannot be told
+		// a new one. A destination that has no hub yet (d.hub == nil) is not
+		// running and is judged on spec alone.
+		keep := keepDestination(d, p, wanted, wantHub[id])
 		if !keep {
 			toStop = append(toStop, d)
 			delete(e.dests, id)

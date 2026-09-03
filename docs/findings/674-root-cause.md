@@ -498,3 +498,46 @@ own hub otherwise".
 Everything about probing, analyzeduration, mid-stream joins, ordering, the
 interleaver, channel layouts, and FFmpeg 8.1.2 generally. The bytes never
 arrived. A reader cannot characterise audio it is not sent.
+
+---
+
+# THE HUB THE INGEST FEEDS IS NOT THE HUB THE DESTINATIONS READ (01:18)
+
+`relay first delivery` per subscriber, with the fix for the hub-SWAP case
+already in place and making no difference:
+
+	08:14:19.392  child exec dest:4 pid=1377
+	08:15:32.142  relay first delivery  dest:1, dest:2, dest:3, dest:4,
+	                                    loudness:2, loudness:3, loudness:4
+	                                    -- ALL OF THEM, the same millisecond
+
+dest:4 was never singled out. EVERY subscriber on that hub is starved for the
+same 73 seconds and they all receive their first byte together. A hub delivers
+to all its targets in one fanout loop, so simultaneous first delivery means the
+hub itself RECEIVED nothing until 08:15:32 -- 29 seconds after the 4c publish
+ended.
+
+And the relay capture, taken in the same runs, shows 40 seconds of audio on all
+three PIDs DURING that publish.
+
+Both are only true if there are two hubs: **the ingest writes to one, the
+destinations read another.** upstreamHub() returns e.selectorHub() when the
+selector has one and e.sourceHub() otherwise; the ingest writes to whichever
+hub.InputURL() the feed was built with. During an ingest-mode switch those can
+be different objects, and nothing reconciles them.
+
+## What this makes of the earlier work
+
+- The hub-swap fix (keepDestination now requires a running destination to be on
+  the hub it would be given NOW) is a REAL latent defect and is kept: destSpec
+  blanks the relay URL, so a swapped hub previously left a destination alive on
+  a port nothing writes to. It is not this bug.
+- Twelve media-path reproductions pass because they all build ONE hub and give
+  it to both sides. The rig's two-hub state cannot occur in them.
+- Every reader-side theory is dead. The readers were never sent anything.
+
+## The remaining question, precisely
+
+Which hub does the selector's feed write to during the 4c mode switch, and which
+does upstreamHub return at the moment destinations are (re)started? They must be
+the same object. That is a bounded question in selector.go and destinations.go.
