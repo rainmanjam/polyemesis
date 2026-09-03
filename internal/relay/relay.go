@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -60,6 +61,9 @@ type Hub struct {
 	rxBytes   atomic.Uint64
 	txPackets atomic.Uint64
 	dropped   atomic.Uint64
+	// capture is the #674 diagnostic sink; nil unless POLYEMESIS_RELAY_CAPTURE
+	// names a path. Written under deliverMu, so it needs no lock of its own.
+	capture *os.File
 	// empty counts zero-length datagrams swallowed by run. See the comment
 	// there: forwarding one takes down every consumer at once, so the count is
 	// the only evidence left that it happened.
@@ -167,6 +171,17 @@ func New(log *slog.Logger, port int, opts ...Option) (*Hub, error) {
 		advertise: cfg.advertise,
 		subs:      map[string]*subscriber{},
 		done:      make(chan struct{}),
+	}
+	// One file per hub port, so a
+	// multi-hub install does not interleave two streams into one capture.
+	if dir := os.Getenv("POLYEMESIS_RELAY_CAPTURE"); dir != "" {
+		name := fmt.Sprintf("%s.%d.ts", dir, h.port)
+		if f, err := os.Create(name); err == nil {
+			h.capture = f
+			log.Info("relay capture armed", "path", name)
+		} else {
+			log.Warn("relay capture could not be opened", "path", name, "err", err)
+		}
 	}
 	h.wg.Add(1)
 	go h.run()
@@ -350,6 +365,16 @@ func (h *Hub) run() {
 		h.deliverMu.Lock()
 		h.fanout(buf[:n])
 		h.measure(buf[:n])
+		// A BYTE-EXACT RECORD OF WHAT EVERY SUBSCRIBER RECEIVES.
+		//
+		// Off unless POLYEMESIS_RELAY_CAPTURE is set. Exactly the bytes fanout() forwards to every subscriber. The earlier
+		// capture was a SECOND OUTPUT on the ingest child, which FFmpeg muxes
+		// independently -- it proved the ingest could produce good audio, not
+		// that these datagrams carry it. This is the stream destinations
+		// actually read.
+		if h.capture != nil {
+			_, _ = h.capture.Write(buf[:n])
+		}
 		h.deliverMu.Unlock()
 	}
 }

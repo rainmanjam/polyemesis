@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -23,7 +24,15 @@ import (
 //     input and silently pause itself
 //   - -loglevel      : warning keeps the log tail useful rather than a firehose
 func commonArgs() []string {
-	return []string{"-hide_banner", "-nostdin", "-loglevel", "warning"}
+	lvl := "warning"
+	// Every child's own log level, raisable without a rebuild. At `debug` the demuxer
+	// reports its PID and PES parsing decisions -- which streams it saw, how
+	// many frames per PID, and why it gave up resolving codec parameters.
+	// Nothing has ever asked the demuxer for its own account of the failure.
+	if v := os.Getenv("POLYEMESIS_FFMPEG_LOGLEVEL"); v != "" {
+		lvl = v
+	}
+	return []string{"-hide_banner", "-nostdin", "-loglevel", lvl}
 }
 
 // progressArgs routes machine-readable stats to stdout, leaving stderr as a
@@ -629,6 +638,15 @@ func IngestArgs(s IngestSpec) []string {
 		"-flush_packets", "1",
 		RelayOutputURL(s.RelayURL),
 	)
+	// AN IDENTICAL SECOND OUTPUT, TO A FILE, WHEN ASKED FOR.
+	//
+	// Off unless POLYEMESIS_INGEST_CAPTURE names a path. It carries the identical stream to a file, so the bytes the
+	// relay fans out can be examined directly instead of approximated. The hub
+	// copies datagrams verbatim (internal/relay/relay.go fanout), so this file
+	// IS what every destination receives.
+	if dir := os.Getenv("POLYEMESIS_INGEST_CAPTURE"); dir != "" {
+		args = append(args, "-map", "0", "-c", "copy", "-f", "mpegts", dir)
+	}
 	return args
 }
 

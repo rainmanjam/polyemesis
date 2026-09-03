@@ -50,6 +50,8 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -863,6 +865,18 @@ func (s *Server) pump(sc *gortmplib.ServerConn, key PublisherKey) error {
 				case sub.ch <- msg:
 				default:
 					sub.dropped++
+					// THE SILENT COUNTER, MADE AUDIBLE ON REQUEST.
+					//
+					// sub.dropped is otherwise reported ONLY in the deferred
+					// cleanup when a subscriber disconnects, so a run that is
+					// shedding messages for its whole life says nothing until
+					// teardown -- and by then the stream nobody could decode is
+					// gone. This is the counter that would have shown, in the
+					// first minute, that audio was being dropped.
+					if dropLogEvery > 0 && sub.dropped%dropLogEvery == 1 {
+						s.log.Warn("rtmp subscriber dropping messages LIVE",
+							"component", "rtmp-ingest", "dropped", sub.dropped)
+					}
 				}
 			}
 			st.mu.Unlock()
@@ -1072,3 +1086,15 @@ func (s *Server) PublishingRole(sourceID int64, backup bool) bool {
 	_, ok := s.live[PublisherKey{SourceID: sourceID, Backup: backup}]
 	return ok
 }
+
+// dropLogEvery makes the silent drop counter audible, every Nth drop, when
+// POLYEMESIS_RTMP_DROP_LOG is set. Zero -- the default -- logs nothing, so
+// this costs one integer compare per dropped message and nothing otherwise.
+var dropLogEvery = func() int {
+	if v := os.Getenv("POLYEMESIS_RTMP_DROP_LOG"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return 0
+}()
