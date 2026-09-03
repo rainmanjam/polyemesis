@@ -593,6 +593,16 @@ func (p *Process) Restart(ctx context.Context) {
 // yet", and that has a different answer from any other stop failure.
 var ErrStopDeadline = errors.New("process did not exit before the stop deadline")
 
+// Retired reports whether this process has been Stopped for good. A watchdog
+// running alongside a child needs it to know when to stand down: without it
+// the goroutine outlives the process it was watching and keeps evaluating a
+// destination that no longer exists.
+func (p *Process) Retired() bool {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+	return p.retired
+}
+
 func (p *Process) stop(ctx context.Context, retire bool) error {
 	p.runMu.Lock()
 	if retire {

@@ -212,6 +212,7 @@ docker network create "$NET" >/dev/null 2>&1
 docker volume create "$VOL" >/dev/null 2>&1
 docker run -d --name "$CTR" --network "$NET" \
   -p "$PORT:8080" -p "$SRTPORT:6000/udp" -p "$RTMPPORT:1935" \
+  -e POLYEMESIS_FFMPEG_LOGLEVEL="${POLYEMESIS_FFMPEG_LOGLEVEL:-}" \
   -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
 
 healthy=no
@@ -530,6 +531,37 @@ else
   docker inspect rtmp-sink --format '          started {{.State.StartedAt}}
           exited  {{.State.FinishedAt}} (code {{.State.ExitCode}})' 2>&1 | sed 's/^/          /'
   printf "        --- sink ---\n";  docker logs rtmp-sink 2>&1 | tail -4 | sed 's/^/          /'
+  # WHY NO AUDIO PACKET EVER ARRIVED. #674
+  #
+  # The filter error is at EOF, 100s after start: ffmpeg deferred graph init
+  # waiting for a first audio frame that never came. So the graph is downstream
+  # of the fault, not the fault. At trace the mpegts demuxer narrates each PID
+  # as it meets it -- which it adds, which it skips, what it makes of the PMT.
+  printf "        --- log volume ---\n"
+  inctr "ls -l /data/logs/process.log 2>/dev/null | awk '{print \$5\" bytes\"}'" | sed 's/^/          /'
+  # dest:4 is the RTMP destination this step creates; dest:1-3 are destA/B/C
+  # from step 4 and are NOT the failing process. Counting per PID rather than
+  # sampling: the question is whether the audio PIDs ever deliver to THIS
+  # reader, and a head -30 of a 4 MB trace only ever shows the first 200ms.
+  # These three read the mpegts demuxer's own narration, which exists only at
+  # -loglevel trace. Off by default: trace costs ~4.5 MB per run and its I/O
+  # perturbs the very startup timing #674 turned on. SAY SO when it is off,
+  # rather than printing three empty sections -- an empty dump reads exactly
+  # like "looked, found nothing wrong", which is the failure mode that cost
+  # four runs of this investigation.
+  if [ -z "${POLYEMESIS_FFMPEG_LOGLEVEL:-}" ]; then
+    printf "        --- demuxer per-PID decisions: NOT CAPTURED ---\n"
+    printf "          Re-run with POLYEMESIS_FFMPEG_LOGLEVEL=trace to get them. #674\n"
+  else
+  printf "        --- dest:4 TS packets seen, per PID ---\n"
+  inctr "grep -a 'dest:4:' /data/logs/process.log | grep -aoE 'pid=[0-9]+' | sort | uniq -c | sort -rn" \
+    | sed 's/^/          /'
+  printf "        --- dest:4 PES / continuity / discard decisions ---\n"
+  inctr "grep -a 'dest:4:' /data/logs/process.log | grep -aiE 'continuity|corrupt|invalid|discard|skip|new stream|probe|PES|scrambl|error' | head -25" \
+    | sed 's/^/          /'
+  printf "        --- dest:4 first 15 lines (startup) ---\n"
+  inctr "grep -a 'dest:4:' /data/logs/process.log | head -15" | sed 's/^/          /'
+  fi
   printf "        --- destination stderr, which is the one that says why ---\n"
   inctr "grep -a 'dest:' /data/logs/process.log | tail -18" | sed 's/^/          /'
   printf "        --- ingest health ---\n"
@@ -743,6 +775,7 @@ BEFORE=$(drive count)
 docker rm -f "$CTR" >/dev/null 2>&1
 docker run -d --name "$CTR" --network "$NET" \
   -p "$PORT:8080" -p "$SRTPORT:6000/udp" -p "$RTMPPORT:1935" \
+  -e POLYEMESIS_FFMPEG_LOGLEVEL="${POLYEMESIS_FFMPEG_LOGLEVEL:-}" \
   -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
 sleep 12
 AFTER=$(drive count)

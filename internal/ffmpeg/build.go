@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
@@ -730,12 +731,43 @@ const relayFIFOPackets = 32768
 // memory during a start that would otherwise have failed.
 //
 // 32 MB covers one 2-second GOP -- what OBS ships by default -- up to about
-// 128 Mbit/s, and a 10-second GOP at a comfortable broadcast rate. 15 seconds
-// covers a GOP far longer than anything this product produces.
+// 128 Mbit/s, and a 10-second GOP at a comfortable broadcast rate.
+//
+// THE WINDOW IS SIZED FOR AUDIO, NOT VIDEO, and that is what changed in #674.
+// 15 seconds covers a GOP far longer than anything this product produces, which
+// is why it was chosen -- but a GOP is the VIDEO worst case, and the binding
+// constraint turned out to be audio. A consumer that starts alongside its
+// ingest sees the feed's first seconds, where audio is far sparser than in
+// steady state. Measured on the acceptance rig, one destination's own probe
+// window:
+//
+//	steady state          194 video PES : 37 per audio PID   (~5.2:1)
+//	first 15s of a feed    40 video PES :  1 per audio PID   (~40:1)
+//
+// Video resolved; all three audio streams did not, and FFmpeg said so three
+// times -- "Consider increasing the value for the 'analyzeduration'". It
+// characterises streams ONCE and never re-probes, so that destination then ran
+// indefinitely reading 0 audio packets, filtergraph uninitialised, publishing
+// nothing, WITHOUT EXITING -- which is why AutoRestart never saw it.
+//
+// 45 seconds is ~3x the observed sparse window. It is free on a healthy stream
+// for the reason stated above: probing ends the moment the parameters are
+// known, so a consumer joining a flowing feed pays nothing for a ceiling it
+// never spends. engine.guardSilentPublish is the warning rung beneath this, for
+// a consumer that exhausts even this budget.
 const (
 	relayProbeSize   = 32 << 20
-	relayProbeWindow = 15 * 1000000 // microseconds
+	relayProbeWindow = 45 * 1000000 // microseconds
 )
+
+// RelayProbeWindow is relayProbeWindow as a Duration, exported because another
+// package's timer has to outlast it. engine.silentPublishBudget restarts a
+// destination that has published nothing; a destination still inside its own
+// probe has published nothing YET, so a budget at or below this window would
+// make the watchdog kill exactly the starts it exists to rescue. Exported as
+// the number itself so the relationship is asserted rather than restated --
+// see engine.TestTheSilentPublishBudgetOutlastsTheProbeWindow.
+const RelayProbeWindow = relayProbeWindow * time.Microsecond
 
 // RelayInputArgs are the input options every relay consumer needs, and they must
 // come BEFORE the -i they belong to.
