@@ -1397,6 +1397,15 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		// leaving the next session waiting.
 		MinBackoff: 500 * time.Millisecond,
 		MaxBackoff: 5 * time.Second,
+		// THE INGEST'S OWN OUTPUT RATE. #674
+		//
+		// The relay hub receives ~6 packets/second for 81 seconds and then
+		// ~135, with consumers subscribed throughout, so it is INPUT-starved
+		// rather than failing to deliver. The ingest is the only thing that
+		// feeds it and it execs once for the whole run -- it is alive and
+		// producing almost nothing. This is its own account of how much it has
+		// written, which nothing has ever recorded.
+		OnProgress: e.ingestProgressLogger(),
 		OnLog:      e.onLog,
 		OnState:    e.onState,
 		LogSink:    logSink{e},

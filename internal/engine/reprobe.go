@@ -198,3 +198,36 @@ func (e *Engine) reprobeDestinationsThatNeverPublished(reason string) {
 		go t.proc.Restart(context.Background())
 	}
 }
+
+// ingestProgressLogger reports how much the ingest has actually written, at a
+// rate an operator can read. #674.
+//
+// The relay hub's own counter shows it receiving ~6 packets/second for 81
+// seconds and then ~135, with subscribers attached the whole time -- so the hub
+// is starved of input, and the ingest is the only thing that feeds it. Nothing
+// recorded what the ingest was producing, so "it is running" and "it is
+// producing" were indistinguishable for this entire investigation.
+//
+// Every 20th progress block: FFmpeg emits roughly two a second, so about one
+// line every ten seconds. Silent when the ingest is not running at all.
+func (e *Engine) ingestProgressLogger() func(ffmpeg.Progress) {
+	var (
+		mu   sync.Mutex
+		n    int
+		last int64
+	)
+	return func(pr ffmpeg.Progress) {
+		mu.Lock()
+		n++
+		show := n%20 == 1
+		delta := pr.TotalSize - last
+		if show {
+			last = pr.TotalSize
+		}
+		mu.Unlock()
+		if show {
+			e.log.Info("ingest output", "totalSize", pr.TotalSize,
+				"bytesSinceLast", delta, "outTimeMs", pr.OutTimeMS, "speed", pr.Speed)
+		}
+	}
+}

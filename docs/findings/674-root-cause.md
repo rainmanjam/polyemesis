@@ -633,3 +633,39 @@ Instrument the ingest's OUTPUT rate the way the hub's input is now instrumented:
 its -progress `total_size` over time, or the RTMP server's per-subscriber
 delivery counter. The question is whether the ingest is being starved by the
 RTMP server or is itself stalling.
+
+---
+
+# A REAL DEFECT FIXED, AND IT IS NOT THE ONE (02:08)
+
+The RTMP server never ended its subscribers when a publish finished. The ingest
+child is such a subscriber, so it sat attached to a stream that would never
+produce again. Measured before the fix:
+
+	ingest out_time FROZEN at 40021ms   -- the publisher's own duration
+	zero bytes written for ~80 seconds  -- speed decaying 0.98 -> 0.36
+
+After ending subscribers with the publish, the ingest no longer freezes: its
+out_time advances, and it restarts cleanly into the next publish at a steady
+~2.26 MB per ten-second sample. The relay hub receives at ~277 packets/second
+where it previously fell to ~6.
+
+engine.go always said this was the intent -- "The ingest listener is expected to
+exit whenever the streamer stops" -- and it could not, because the end of the
+publish was never delivered to it.
+
+**4c is still red.** dest:4 execs at 09:03:19.474 and gets its first byte at
+09:04:33.035: 73.5 seconds, unchanged. So the ingest freeze was real, is fixed,
+and is NOT what starves the destination.
+
+## What that leaves
+
+The hub is receiving healthily and the destination is subscribed, yet gets
+nothing for 73 seconds. The fanout samples covering 09:03:19-09:04:33 were not
+captured -- the dump prints tails -- so the one thing still unmeasured is
+`targets` DURING the starvation for the destination that is starving. Every
+sample I have is from after it ended.
+
+That is the next measurement, and it is narrow: log fanout state on a TIME
+ticker rather than every 500 packets, so a starved window produces samples
+instead of silence. Sampling per-packet cannot describe a period with no packets.

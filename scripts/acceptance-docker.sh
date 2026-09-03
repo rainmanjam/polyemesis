@@ -689,6 +689,12 @@ else
   # RECEIVING WITH N TARGETS, over time. If targets is 0 while rxPackets
   # climbs, the hub has data and nobody to send it to. If targets is non-zero
   # and rxPackets is flat, the hub has consumers and nothing to give them. #674
+  # WHAT THE INGEST ACTUALLY WROTE, beside what the hub received. If the ingest
+  # total_size is flat while the hub is starved, the ingest is producing nothing
+  # and the fault is above it. If it climbs while the hub stays flat, the bytes
+  # are not reaching the hub. #674
+  printf "        --- ingest output rate ---\n"
+  docker logs "$CTR" 2>&1 | grep -a "ingest output" | tail -12 | sed 's/^/          /'
   printf "        --- relay fanout state (rx vs targets) ---\n"
   docker logs "$CTR" 2>&1 | grep -a "relay fanout state" | tail -14 | sed 's/^/          /'
   printf "        --- relay subscriptions (name, hub, when) ---\n"
