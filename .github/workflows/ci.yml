@@ -1695,6 +1695,92 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         run: npm audit --audit-level=high
 
+  # THE WORKFLOWS THEMSELVES WERE NEVER CHECKED.
+  #
+  # An invalid workflow file does not fail a job -- it prevents the job from
+  # existing. Run 33791030925 produced ZERO jobs and the entire report was
+  # "This run likely failed because of a workflow file issue", with no line, no
+  # file and no message. The cause was one pair of expression delimiters written
+  # inside a `run:` block, in a shell COMMENT, by a comment that was explaining
+  # why not to use them: Actions expands that syntax anywhere in a run block, an
+  # empty pair is a parse error, and GitHub then refuses the file whole.
+  #
+  # Nothing in this repository ran actionlint, so the first and only signal was a
+  # push that silently produced nothing. That is the same defect this branch is
+  # fixing one workflow at a time -- a red verdict that will not say what it
+  # caught -- and it belongs at the Control rung: a workflow that cannot parse
+  # should not be mergeable.
+  #
+  # Deliberately NOT gated on the `changes` job. Workflow files are exactly what
+  # this checks, a documentation-only pull request can still edit one, and the
+  # job costs about fifteen seconds. Gating it would reintroduce the hole for the
+  # one change most likely to fall into it.
+  #
+  # `go run` at a pinned version rather than a third-party action: Go is already
+  # set up in this file, the version is visible in the diff, and it adds no
+  # action to review for supply-chain risk.
+  actionlint:
+    name: workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # PINNED BY CHECKSUM, and not `go install ...@version`. Sonar's S8545
+      # failed the first version of this job for exactly that: `go install`
+      # resolves the tool's own dependency graph fresh on every run, with no lock
+      # file, so the bytes that lint this repository's workflows are not the same
+      # bytes twice. It is the same argument the gitleaks step in security.yml
+      # already makes, so this follows that step's shape -- pinned URL, landed to
+      # a file before extracting, and a version assertion afterwards -- and adds
+      # the checksum, because this one is cheap to have and the finding was fair.
+      #
+      # 1.7.12 rather than 1.7.7 for a reason worth recording: actionlint checks
+      # runner labels against a list baked into its own release, and 1.7.7 does
+      # not know macos-26-intel, so it failed srt-probe.yml over a runner that
+      # demonstrably works -- run 32892220990 has a green job named
+      # "macos-26-intel (macOS 26 x64)". The first fix was a .github/actionlint.yaml
+      # declaring the label under `self-hosted-runner`, which is the only hook
+      # actionlint offers and is a misnomer for a GitHub-hosted runner. Pinning
+      # the version that already knows the label is one moving part instead of
+      # two, and it matches what `brew install actionlint` puts on a developer's
+      # PATH -- which is how the stale list went unnoticed locally in the first
+      # place: 1.7.12 here, 1.7.7 in CI, and only CI complained.
+      #
+      # --proto '=https' because -L follows redirects: without it a redirect to
+      # http:// silently downgrades the transport for a binary about to run.
+      - name: install actionlint (pinned)
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          curl -sSfL --proto '=https' --tlsv1.2 \
+            --retry 3 --retry-all-errors --retry-delay 5 --max-time 120 \
+            -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          sudo tar -xz -C /usr/local/bin -f actionlint.tar.gz actionlint
+          rm -f actionlint.tar.gz
+          installed="$(actionlint -version | head -1)"
+          echo "actionlint $installed"
+          if [ "$installed" != "$ACTIONLINT_VERSION" ]; then
+            echo "::error::expected actionlint $ACTIONLINT_VERSION, got $installed"
+            exit 1
+          fi
+      # -shellcheck= and -pyflakes= disable those two integrations, and the
+      # reason belongs here rather than hidden in a flag. With shellcheck on,
+      # this job reports 38 findings on its first run, nearly all of them
+      # shellcheck failing to parse a run block that contains an Actions
+      # expression -- it reads the expansion as broken shell. A guard that fires
+      # 38 times on the day it is installed is one somebody turns off, and it
+      # would bury the class of finding this job exists for.
+      #
+      # What stays on is the part that matters: workflow schema, job and step
+      # keys, `needs` references, matrix shapes, action input names, and the
+      # expression parser -- which is exactly what rejected sonar.yml and left a
+      # run with no jobs and no message.
+      - run: actionlint -color -shellcheck= -pyflakes=
+
   cross:
     name: cross-compile all release targets
     # The documentation gate, #378. On every STEP below, never on this job --

@@ -87,3 +87,63 @@ func TestSonarWaitsForItsQualityGate(t *testing.T) {
 			pollSec, preScanAllowanceSec, pollSec+preScanAllowanceSec, jobSec)
 	}
 }
+
+// AND WHEN IT FAILS, IT HAS TO SAY WHICH CONDITION.
+//
+// `sonar.qualitygate.wait=true` bought a red job. It did not buy a reason: the
+// scanner's whole failure message is
+//
+//	ERROR QUALITY GATE STATUS: FAILED - View details on https://sonarcloud.io/...
+//
+// a verdict and a link. main's gate was red on four consecutive analyses and
+// nobody reading those logs could name the metric, because the only place it is
+// rendered is a browser -- an unauthenticated read of the gate API returns
+// status NONE for a branch, which is indistinguishable from a gate that was
+// never computed. A guard that fires without saying what it caught is most of
+// the way back to no guard at all: what people do with it is re-run and hope.
+//
+// So sonar.yml reads the verdict back with the token it already holds and
+// prints every condition, passing ones included. This test keeps that step
+// present, keeps it running on the failing path, and keeps it unable to swallow
+// a failure.
+func TestSonarNamesTheConditionThatFailed(t *testing.T) {
+	root := repoRootFromTest(t)
+	wf := mustReadRepoFile(t, root, ".github/workflows/sonar.yml")
+
+	step := strings.Index(wf, "Which quality gate conditions were evaluated")
+	if step < 0 {
+		t.Fatal("sonar.yml has no step that reads the quality gate verdict back.\n\n" +
+			"Without it a failure prints `QUALITY GATE STATUS: FAILED` and a URL, and the " +
+			"log cannot answer which metric, what it measured, or what the threshold was. " +
+			"That is a gate people re-run rather than act on.")
+	}
+	body := wf[step:]
+	if end := strings.Index(body, "\n      - name:"); end > 0 {
+		body = body[:end]
+	}
+
+	// It must run on the failing path. `if: failure()` would be fine; what is
+	// not fine is a condition that only holds when the job already succeeded,
+	// which is exactly when nobody needs the explanation.
+	if !strings.Contains(body, "!cancelled()") && !strings.Contains(body, "failure()") {
+		t.Fatalf("the gate-reporting step does not run when the scan fails:\n\n%s\n\n"+
+			"A step that explains failures has to execute on the failing path.", body)
+	}
+
+	// And it must not be able to turn a red job green.
+	if strings.Contains(body, "continue-on-error") {
+		t.Fatalf("the gate-reporting step is continue-on-error:\n\n%s\n\n"+
+			"A step whose only job is to explain a failure must never be able to mask one. "+
+			"If reading the verdict breaks, the job stays red.", body)
+	}
+
+	// The point of the step is the numbers. Printing only the status would tell
+	// the reader what they already knew from the scanner's own message.
+	for _, want := range []string{"actualValue", "errorThreshold", "metricKey"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("the gate-reporting step never reads %s:\n\n%s\n\n"+
+				"Naming the metric without its measurement and its threshold leaves the "+
+				"reader in the same place the scanner left them.", want, body)
+		}
+	}
+}

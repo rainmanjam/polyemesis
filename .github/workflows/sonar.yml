@@ -198,6 +198,101 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+      # WHICH CONDITION FAILED -- because the scanner will not say.
+      #
+      # Its entire failure message is a verdict and a link:
+      #
+      #     ERROR QUALITY GATE STATUS: FAILED - View details on https://sonarcloud.io/...
+      #
+      # main's gate has now been red on every CI analysis since the swap away
+      # from Automatic Analysis -- fd043cc3, e505af76, f8eb5755, 549b4fc7, four
+      # for four -- and nobody reading those logs could say which condition it
+      # was, because the only place it is rendered is a browser. The runs before
+      # the swap read "success" for a different reason again: SONAR_TOKEN was not
+      # set, so the job took its own no-op path. A green history that means "did
+      # not run" and a red one that will not say why are the same defect from
+      # opposite sides.
+      #
+      # This cannot be answered from outside CI. The project is public, but
+      # api/qualitygates/project_status returns status NONE for a branch to an
+      # unauthenticated caller -- and NONE renders identically to a gate that has
+      # simply not been computed, so an outside reader cannot even tell the
+      # difference between "failing" and "not measured". The token is here, and
+      # only here, so this is where the question gets answered.
+      #
+      # ON EVERY ANALYSIS, not only the failing ones. A number you see only once
+      # it has crossed the line is a number nobody can steer by: new_coverage at
+      # 81 and new_coverage at 96 print the same nothing today, and the first
+      # anyone hears of the difference is a blocked merge. Printing the whole
+      # condition set every time costs one API call and makes the trend legible.
+      #
+      # Deliberately NOT continue-on-error: a step whose whole job is to explain
+      # a failure must never be able to turn one green. If this step itself
+      # breaks, the job stays red and says so.
+      - name: Which quality gate conditions were evaluated
+        if: ${{ !cancelled() && steps.gate.outputs.ready == 'true' }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          set -euo pipefail
+          # THE TOKEN DOES NOT GO ON A COMMAND LINE.
+          #
+          # The first version of this step used `curl -u "$SONAR_TOKEN:"`, and
+          # gitleaks failed the build for it -- correctly. Its curl-auth-user
+          # rule cannot tell an expanded variable from a pasted literal, and the
+          # honest response to that is not an allowlist entry: argv is readable
+          # from /proc by anything else on the box, and it is what `set -x` and a
+          # crash dump print. This file's own header already argues the same
+          # point about env versus template interpolation, so the step that reads
+          # the token back should not be the one place that ignores it.
+          #
+          # And that sentence used to name the template syntax literally, which
+          # broke the workflow: Actions expands the expression delimiters ANYWHERE
+          # in a run block, shell comments included, so an empty pair of them is a
+          # parse error and GitHub refuses the whole file -- run 33791030925
+          # created no jobs at all and reported only "likely failed because of a
+          # workflow file issue". Do not write that syntax in this block, not even
+          # to describe it.
+          #
+          # A curl config file keeps the credential in a 0600 file that only this
+          # step can read, and out of every process listing.
+          umask 077
+          cfg=$(mktemp)
+          trap 'rm -f "$cfg" gate.json' EXIT
+          printf 'header = "Authorization: Bearer %s"\n' "$SONAR_TOKEN" > "$cfg"
+          report=.scannerwork/report-task.txt
+          if [ ! -f "$report" ]; then
+            echo "::warning title=No scanner report::$report does not exist, so the scan died before it submitted anything. The failure above is the scanner, not the gate."
+            exit 0
+          fi
+          # ceTaskId=AZ... ; the analysis is queued, so resolve it to an id first.
+          task_id=$(sed -n 's/^ceTaskId=//p' "$report")
+          api=$(sed -n 's/^serverUrl=//p' "$report")
+          analysis=""
+          for _ in $(seq 1 30); do
+            body=$(curl -sS -K "$cfg" "$api/api/ce/task?id=$task_id")
+            status=$(printf '%s' "$body" | jq -r '.task.status // "UNKNOWN"')
+            case "$status" in
+              SUCCESS) analysis=$(printf '%s' "$body" | jq -r '.task.analysisId // ""'); break ;;
+              FAILED|CANCELED) echo "Background task $status; there is no gate verdict to report."; exit 0 ;;
+            esac
+            sleep 5
+          done
+          if [ -z "$analysis" ]; then
+            echo "::warning title=Gate unresolved::The analysis task did not finish within 150s, so the failing condition could not be read."
+            exit 0
+          fi
+          printf '%s\n' "$(curl -sS -K "$cfg" "$api/api/qualitygates/project_status?analysisId=$analysis")" > gate.json
+          echo "Quality gate: $(jq -r '.projectStatus.status' gate.json)"
+          echo
+          jq -r '.projectStatus.conditions[]
+                 | "\(.status)\t\(.metricKey)\tactual=\(.actualValue)\t\(.comparator) \(.errorThreshold)"' gate.json \
+            | sort | column -t -s "$(printf '\t')"
+          # One annotation per failing condition, so the summary names the number
+          # without anyone opening the log.
+          jq -r '.projectStatus.conditions[] | select(.status=="ERROR")
+                 | "::error title=Quality gate: \(.metricKey)::\(.metricKey) is \(.actualValue), and the gate requires \(.comparator|ascii_downcase) \(.errorThreshold)."' gate.json
+
       - name: Nothing to do
         if: steps.gate.outputs.ready != 'true'
         run: echo "No SONAR_TOKEN; this job is a no-op until the swap described in this file is done."
