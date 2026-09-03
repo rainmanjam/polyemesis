@@ -142,6 +142,37 @@ func matchesReprobeSignature(text string) bool {
 	return false
 }
 
+// reprobeTarget is one destination the re-probe would restart.
+type reprobeTarget struct {
+	name string
+	proc *supervisor.Process
+	w    *destWatch
+}
+
+// destinationsNeedingReprobe selects the destinations that have never moved any
+// media, extracted so the SELECTION can be tested without a live child.
+//
+// The discriminator is the whole design: a destination that has published is
+// working and must be left alone -- acceptance-failover pins zero restarts
+// across a switch, and a restart splits a recording across files. One that has
+// never published since it started is the only kind that can be holding a
+// characterisation taken before there was any audio to characterise.
+//
+// Caller holds e.mu.
+func destinationsNeedingReprobe(dests map[int64]*destination) []reprobeTarget {
+	var stuck []reprobeTarget
+	for _, d := range dests {
+		if d == nil || d.proc == nil || d.watch == nil || d.row == nil {
+			continue
+		}
+		if d.watch.publishedSinceRearm() {
+			continue // it is publishing; leave it alone
+		}
+		stuck = append(stuck, reprobeTarget{name: d.row.Name, proc: d.proc, w: d.watch})
+	}
+	return stuck
+}
+
 // reprobeDestinationsThatNeverPublished restarts every destination that has not
 // yet moved any media, at the moment the ingest layout is first measured. #674
 //
@@ -170,21 +201,7 @@ func matchesReprobeSignature(text string) bool {
 // wrong thing.
 func (e *Engine) reprobeDestinationsThatNeverPublished(reason string) {
 	e.mu.Lock()
-	type target struct {
-		name string
-		proc *supervisor.Process
-		w    *destWatch
-	}
-	var stuck []target
-	for _, d := range e.dests {
-		if d == nil || d.proc == nil || d.watch == nil {
-			continue
-		}
-		if d.watch.publishedSinceRearm() {
-			continue // it is publishing; leave it alone
-		}
-		stuck = append(stuck, target{name: d.row.Name, proc: d.proc, w: d.watch})
-	}
+	stuck := destinationsNeedingReprobe(e.dests)
 	e.mu.Unlock()
 
 	for _, t := range stuck {

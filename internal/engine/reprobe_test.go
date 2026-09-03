@@ -1,13 +1,16 @@
 package engine
 
 import (
+	"bytes"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -166,4 +169,81 @@ func TestTheHandlerDoesNotReachForTheProcessOnHealthyLines(t *testing.T) {
 			"pins zero restarts across a mismatched cut, because a restart splits the "+
 			"recording across files.", n)
 	}
+}
+
+// THE SELECTION IS THE DESIGN. #674
+//
+// "Has it ever published" is what keeps this from repeating the two repairs
+// that were reverted: a destination riding a failover switch HAS published, and
+// so has a mismatched publisher -- it just publishes the wrong thing. Only one
+// that has never moved media can be holding a characterisation taken before
+// there was any audio to characterise.
+func TestOnlyDestinationsThatNeverPublishedAreSelected(t *testing.T) {
+	published := &destWatch{}
+	published.mu.Lock()
+	published.published = true
+	published.mu.Unlock()
+
+	dests := map[int64]*destination{
+		1: {row: &db.Destination{Name: "stuck"}, proc: &supervisor.Process{}, watch: &destWatch{}},
+		2: {row: &db.Destination{Name: "publishing"}, proc: &supervisor.Process{}, watch: published},
+		3: {row: &db.Destination{Name: "no-proc"}, watch: &destWatch{}},          // not running
+		4: {row: &db.Destination{Name: "no-watch"}, proc: &supervisor.Process{}}, // nothing to judge on
+		5: nil,
+	}
+
+	got := destinationsNeedingReprobe(dests)
+	if len(got) != 1 || got[0].name != "stuck" {
+		names := make([]string, 0, len(got))
+		for _, g := range got {
+			names = append(names, g.name)
+		}
+		t.Fatalf("selected %v, want exactly [stuck].\n\n"+
+			"Selecting a PUBLISHING destination restarts a working output: "+
+			"acceptance-failover pins zero restarts across a switch because a restart "+
+			"splits a recording across files. Selecting one with no process, or none to "+
+			"judge by, restarts something that is not running.", names)
+	}
+}
+
+// The progress logger must sample rather than log every block, or an operator
+// reading the log cannot see anything else.
+func TestTheIngestProgressLoggerSamples(t *testing.T) {
+	var buf syncBuf
+	e := &Engine{log: slog.New(slog.NewTextHandler(&buf, nil))}
+	log := e.ingestProgressLogger()
+	for i := 1; i <= 60; i++ {
+		log(ffmpeg.Progress{TotalSize: int64(i) * 1000, OutTimeMS: int64(i) * 100})
+	}
+	n := strings.Count(buf.String(), "ingest output")
+	if n != 3 {
+		t.Fatalf("logged %d lines for 60 progress blocks, want 3 (every 20th).\n\n"+
+			"FFmpeg emits roughly two blocks a second; logging each one buries every "+
+			"other line in the file, and logging none is what made 'running' and "+
+			"'producing' indistinguishable for the whole of #674.", n)
+	}
+	if !strings.Contains(buf.String(), "bytesSinceLast") {
+		t.Fatal("no bytesSinceLast in the output: the delta is the point, because a " +
+			"frozen total_size is exactly what a stalled ingest looks like")
+	}
+}
+
+// syncBuf is a mutex-guarded buffer: slog writes from the caller's goroutine
+// here, but a shared engine logger is written from supervisor goroutines too,
+// and an unguarded bytes.Buffer races under -race.
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }

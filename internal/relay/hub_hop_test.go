@@ -1,8 +1,11 @@
 package relay
 
 import (
+	"bytes"
 	"log/slog"
 	"net"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -111,5 +114,144 @@ func TestASubscriberReceivesEveryByteTheHubReceived(t *testing.T) {
 					i, b, sent[i][b], recv[i][b])
 			}
 		}
+	}
+}
+
+// SAMPLING A SILENCE. #674
+//
+// The first version of this sampler fired every 500 DATAGRAMS, which cannot
+// describe a window containing no datagrams: a starved hub simply stopped
+// logging, so every sample came from AFTER the starvation ended and the one
+// period under investigation was the one with no data about it. Sampling by the
+// clock is the whole point, so this asserts it emits while NOTHING is arriving.
+func TestTheHubSamplesItsStateWhileNothingIsArriving(t *testing.T) {
+	var buf syncBuffer
+	h, err := New(slog.New(slog.NewTextHandler(&buf, nil)), 0)
+	if err != nil {
+		t.Fatalf("hub: %v", err)
+	}
+	defer h.Close()
+
+	// No sender at all: rxPackets stays 0 for the whole window.
+	go h.sampleState(20 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
+
+	out := buf.String()
+	n := strings.Count(out, "relay fanout state")
+	if n < 3 {
+		t.Fatalf("emitted %d samples in 200ms at a 20ms interval while idle, want at "+
+			"least 3.\n\nA sampler that goes quiet exactly when the thing it watches goes "+
+			"quiet reports nothing about the only window that matters.", n)
+	}
+	if !strings.Contains(out, "targets=") || !strings.Contains(out, "rxPackets=") {
+		t.Fatalf("a sample carries neither targets nor rxPackets:\n%s\n\n"+
+			"Both in ONE line is the point: correlating two separate logs is how two "+
+			"wrong conclusions were reached during #674.", out)
+	}
+}
+
+// The sampler must stop with the hub, or it outlives it and logs for ever.
+func TestTheStateSamplerStopsWithTheHub(t *testing.T) {
+	var buf syncBuffer
+	h, err := New(slog.New(slog.NewTextHandler(&buf, nil)), 0)
+	if err != nil {
+		t.Fatalf("hub: %v", err)
+	}
+	go h.sampleState(10 * time.Millisecond)
+	time.Sleep(60 * time.Millisecond)
+	_ = h.Close()
+	time.Sleep(30 * time.Millisecond)
+	before := strings.Count(buf.String(), "relay fanout state")
+	time.Sleep(120 * time.Millisecond)
+	if after := strings.Count(buf.String(), "relay fanout state"); after != before {
+		t.Fatalf("the sampler kept logging after Close: %d -> %d samples", before, after)
+	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// FIRST DELIVERY IS LOGGED ONCE, AND A DEAD CONSUMER IS COUNTED. #674
+//
+// "relay first delivery" is the line that located the fault: it is the sender's
+// own record of when a NAMED consumer first got a byte, which no counter could
+// give -- Dropped counts only WriteToUDP errors and txPackets is a total across
+// every subscriber, so a consumer receiving everything and one receiving nothing
+// are identical in the aggregate. It has to fire exactly once per subscriber, or
+// it is unreadable at a relay's packet rate.
+func TestFirstDeliveryIsLoggedOncePerSubscriber(t *testing.T) {
+	var buf syncBuffer
+	h, err := New(slog.New(slog.NewTextHandler(&buf, nil)), 0)
+	if err != nil {
+		t.Fatalf("hub: %v", err)
+	}
+	defer h.Close()
+
+	sub, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("subscriber socket: %v", err)
+	}
+	defer sub.Close()
+	h.Subscribe("dest:1", sub.LocalAddr().(*net.UDPAddr).Port)
+
+	pkt := make([]byte, 188)
+	pkt[0] = 0x47
+	for i := 0; i < 25; i++ {
+		h.fanout(pkt)
+	}
+
+	if n := strings.Count(buf.String(), "relay first delivery"); n != 1 {
+		t.Fatalf("logged first delivery %d times for 25 datagrams, want exactly 1.\n\n"+
+			"At a relay's packet rate anything but once is unreadable, and the whole "+
+			"value of the line is that it marks the INSTANT a consumer started "+
+			"receiving.", n)
+	}
+	if got := h.Stats().TxPackets; got != 25 {
+		t.Fatalf("txPackets = %d after 25 sends, want 25", got)
+	}
+}
+
+// A consumer that has gone away must be counted, not silently skipped: on
+// loopback a departed FFmpeg gives ECONNREFUSED on every write.
+func TestASendToADepartedConsumerIsCounted(t *testing.T) {
+	h, err := New(slog.New(slog.DiscardHandler), 0)
+	if err != nil {
+		t.Fatalf("hub: %v", err)
+	}
+	defer h.Close()
+
+	// Bind and immediately release, so nothing is listening on that port.
+	gone, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("port: %v", err)
+	}
+	port := gone.LocalAddr().(*net.UDPAddr).Port
+	_ = gone.Close()
+	h.Subscribe("departed", port)
+
+	pkt := make([]byte, 188)
+	pkt[0] = 0x47
+	for i := 0; i < 10; i++ {
+		h.fanout(pkt)
+	}
+	st := h.Stats()
+	if st.Dropped == 0 && st.TxPackets == 0 {
+		t.Fatal("ten sends to a departed consumer produced neither a drop nor a tx: " +
+			"the counters cannot both be silent, or a hub shedding every send looks " +
+			"identical to a healthy one")
 	}
 }
