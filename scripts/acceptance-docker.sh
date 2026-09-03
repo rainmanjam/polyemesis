@@ -659,6 +659,18 @@ else
       -show_entries stream=index,codec_type,codec_name,channels,nb_read_packets \
       -of csv=p=0 /tmp/cap.ts 2>&1 | tail -6
   done" | sed 's/^/          /'
+  # THE FAILING CHILD'S FIRST WORDS, not its last.
+  #
+  # Every dump so far has shown the TAIL, which is the teardown. Ten links of
+  # the media path are now cleared by measurement -- ingest, hub, fan-out, late
+  # join, early start, the destination's own filtergraph and encoder, and the
+  # whole chain end to end -- so what is left is what this child saw when it
+  # opened the relay, which no dump has ever printed. #674.
+  printf "        --- dest:4 FIRST 30 lines (what it found on the relay) ---\n"
+  inctr "grep -a 'dest:4:' /data/logs/process.log | head -30" | sed 's/^/          /'
+  printf "        --- every dest:4 spawn in this run ---\n"
+  inctr "grep -acE 'dest:4:.*(Splitting the commandline|Opening an input)' /data/logs/process.log" \
+    | sed 's/^/          spawn-ish lines: /'
   printf "        --- destination stderr, which is the one that says why ---\n"
   inctr "grep -a 'dest:' /data/logs/process.log | tail -18" | sed 's/^/          /'
   # RTMP SUBSCRIBER DROPS. pump() forwards to each subscriber with a

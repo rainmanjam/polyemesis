@@ -306,3 +306,45 @@ and neither fires on a healthy state. NEITHER FIXES 4c:
   before the sink gave up.
 
 Kept as detection, not sold as a fix. 4c is still red: 48 passed, 2 failed.
+
+---
+
+# THE ANOMALY, on a clean baseline (2026-09-03, 00:25)
+
+Both #674 repairs DISABLED, so nothing of mine is in the measurement:
+
+	07:20:09.114  engine: "destination starting" dest=R-track2
+	07:21:22.109  the child's first decode        <-- 73 SECONDS LATER
+	07:21:36.735  max_analyze_duration 15000000 reached ... st:0
+	              "Could not find codec parameters" x3 (audio)
+
+The 4c publisher runs ~07:20:13-07:20:53. So the destination receives its FIRST
+PACKET about 29 seconds AFTER the publish ended. It never sees the live stream
+at all, and `st:0` shows the probe timed out on VIDEO, having had no audio to
+measure. The same 73s gap appeared with the repairs enabled, so it is not mine.
+
+## Ruled out, by reading the code and the run
+
+	subscription order   hub.Subscribe() is line 808, proc.Start() line 950 --
+	                     the port is registered BEFORE the child starts
+	fan-out registration Subscribe() calls rebuildTargets(), which republishes
+	                     the slice fanout() walks. New subscribers are visible.
+	stagger              Destinations.StaggerMS defaults to 0, and the cap is
+	                     5000ms. It cannot produce 73 seconds.
+	ingest backoff       MinBackoff 500ms / MaxBackoff 5s (selector.go:1872).
+	                     It cannot produce a 40-second late join either.
+	two hubs             relaycap.49356.ts is the hub's INPUT port; 21018 is the
+	                     destination's SUBSCRIBER port. One hub, not two.
+
+## The contradiction to resolve
+
+The hub receives a 40-second stream with audio on all three PIDs -- measured
+four times, in four separate runs. The destination is subscribed to that hub
+before its child starts. And the child receives nothing for 73 seconds.
+
+Those cannot all be true. The next measurement is the one that says which is
+false: log the instant the child process actually EXECs (not when the engine
+decides to start it), alongside the hub's RxBytes and subscriber list at that
+instant. Every timing conclusion in this investigation has been drawn from
+"destination starting", which is logged after proc.Start() returns and says
+nothing about when the child reached its first read.
