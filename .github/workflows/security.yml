@@ -193,7 +193,40 @@ jobs:
       # Production dependencies only. A moderate advisory in a build-time dev
       # dependency does not ship to anybody, and treating it as urgent is how a
       # team learns to pass --force.
-      - run: npm audit --omit=dev --audit-level=high
+      #
+      # RETRIED, BECAUSE THE REGISTRY IS NOT THIS REPOSITORY. `npm audit` asks
+      # npmjs.com to score the tree, and when that endpoint is unwell it answers
+      #
+      #     npm error audit endpoint returned an error
+      #
+      # which npm reports as exit 1 -- identical, to this job and to the checks
+      # list, to "a high-severity advisory was found". It happened on run
+      # 33816210312: web failed, ui passed on the same run, same lockfiles. A
+      # security gate that goes red for an outage somewhere else is one people
+      # learn to re-run without reading, and then re-run past a real advisory.
+      #
+      # So: three attempts with a gap, and the failure message says which of the
+      # two things happened. The gitleaks job below already downloads this way,
+      # for the same reason.
+      #
+      # NOT a retry loop around a genuine finding: an advisory is deterministic,
+      # so a real one fails all three attempts and the job still goes red. Only
+      # the transport is retried.
+      - name: npm audit (production dependencies)
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            out=$(npm audit --omit=dev --audit-level=high 2>&1) && exit 0
+            printf '%s\n' "$out"
+            if ! printf '%s' "$out" | grep -q 'audit endpoint returned an error'; then
+              echo "::error title=npm audit::a high-severity advisory was found in ${{ matrix.project }}'s production dependencies. This is a finding, not a registry problem -- read the output above."
+              exit 1
+            fi
+            echo "::warning title=Registry unavailable::attempt $attempt of 3 could not reach npm's audit endpoint; retrying."
+            sleep 15
+          done
+          echo "::error title=Registry unavailable::npm's audit endpoint failed three times, so ${{ matrix.project }} was NOT audited. This is an outage, not a clean bill of health -- the job stays red so nobody reads it as one."
+          exit 1
 
   # THE CONTEXT BRANCH PROTECTION ASKS FOR, WHICH THE MATRIX STOPPED PRODUCING.
   #
