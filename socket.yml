@@ -1,0 +1,84 @@
+# Socket Security, configured HERE rather than in a dashboard.
+#
+# WHAT THIS FILE CLOSES, AND WHAT IT DOES NOT.
+#
+# .github/workflows/security.yml says of Socket: "WHAT IT GATES: NOTHING. Its
+# comment is a comment." Two separate gaps sit behind that sentence, and this
+# file closes exactly one of them.
+#
+#   CLOSED: the settings were dashboard state. issueRules, triggerPaths and the
+#   GitHub app's behaviour lived somewhere no reviewer opens and no diff shows,
+#   so a change to what Socket reports on left no trace in the repository at
+#   all. Socket reads this file from the REPOSITORY ROOT -- not .github/ -- and
+#   these values are now reviewable in a pull request like any other change.
+#
+#   STILL OPEN: Socket still gates nothing. A red Socket report does not block a
+#   merge, because its check is not a required status context on main. That is a
+#   repository setting, not a file, and .github/required-checks.txt is where it
+#   would have to be mirrored if it were ever made one. Placing this file makes
+#   the configuration honest; it does not make the check load-bearing, and
+#   nothing here should be read as though it had.
+#
+# WHY SOCKET AT ALL, given npm audit and govulncheck already run: those two ask
+# "is there a published advisory against a version you resolve". Socket asks
+# "does this package do something a build-time dependency has no business
+# doing" -- install scripts, native code, network and filesystem capability,
+# telemetry, typosquats, maintainer churn. That is the shape of a supply-chain
+# attack that has no CVE yet because nobody has noticed.
+#
+# Schema: https://docs.socket.dev/docs/socket-yml (version 2).
+
+version: 2
+
+# WHEN A PULL REQUEST ALERT RUNS. Socket only ever ingests package manifests,
+# never source, so this is the complete set of files that can change what it has
+# an opinion about. Both are real npm projects: ui/ is the console, web/ is the
+# marketing site. Listing them explicitly means a THIRD npm project added later
+# gets no Socket alerts until somebody adds it here -- which is a visible
+# omission in a diff rather than a silent one in a dashboard.
+triggerPaths:
+  - "ui/package.json"
+  - "ui/package-lock.json"
+  - "web/package.json"
+  - "web/package-lock.json"
+
+# WHAT SOCKET INGESTS. Agent worktrees under .claude/ carry their own copies of
+# ui/ and web/ manifests -- they are scratch checkouts, not shipped code, and
+# ingesting them would report the same dependencies several times over and tie
+# alerts to directories that are deleted without notice.
+projectIgnorePaths:
+  - ".claude"
+
+# THE ALERTS, WRITTEN DOWN. Every one of these is a Socket default; they are
+# stated rather than omitted because an omitted key falls back to the dashboard,
+# which is the state this file exists to stop depending on. Written out, turning
+# one off is a diff somebody has to justify.
+#
+# DEPRECATED UPSTREAM, and recorded as such rather than discovered later:
+# Socket's own documentation says issueRules "are deprecated" in favour of
+# repository labels, which apply the same rules across repositories. They remain
+# supported. When they stop being, the replacement has to land here as
+# deliberately as this did -- moving these settings back into a dashboard would
+# undo precisely what this file is for.
+issueRules:
+  malware: true
+  troll: true
+  telemetry: true
+  installScripts: true
+  hasNativeCode: true
+  shellScriptOverride: true
+  gitDependency: true
+  httpDependency: true
+  didYouMean: true
+  invalidPackageJSON: true
+  unresolvedRequire: true
+
+githubApp:
+  enabled: true
+  # The dependency overview comment is the only part of Socket most reviewers
+  # will read, and it appears on the pull request rather than in a dashboard.
+  dependencyOverviewEnabled: true
+  # Left at the default: this repository has no merge queue and no bot that
+  # opens dependency pull requests Socket should skip. Dependabot's are exactly
+  # the ones worth alerting on.
+  disableCommentsAndCheckRuns: false

@@ -31,13 +31,18 @@
 # reader who sees it report on every commit is entitled to assume it is part
 # of the gate, and it is not.
 #
-# THE FIX THAT IS NOT HERE. Socket reads a `socket.yml` at the REPOSITORY
-# ROOT -- not from .github/ -- which is where its issueRules, triggerPaths and
-# githubApp settings become reviewable in a pull request instead of being a
-# dashboard state nobody can diff. That file does not exist yet. Until it
-# does, this comment is the whole of what the repository says about a check it
-# publishes on every commit, and a comment is not a device: it makes the gap
-# announced, not closed.
+# HALF FIXED, AND THE HALF THAT IS NOT. `socket.yml` now exists at the
+# REPOSITORY ROOT -- not .github/ -- so its issueRules, triggerPaths and
+# githubApp settings are reviewable in a pull request instead of being a
+# dashboard state nobody can diff. Read it: it says which manifests trigger an
+# alert and which alerts are on, and turning one off is now a diff somebody has
+# to justify.
+#
+# WHAT IS STILL TRUE: Socket gates nothing. A red Socket report does not block a
+# merge, because its check is not a required status context on main -- a
+# repository setting, not a file, and one that would have to be mirrored in
+# .github/required-checks.txt to be visible from here. So the sentence above
+# stands for the gate even though the configuration is no longer invisible.
 # ---------------------------------------------------------------------------
 name: security
 
