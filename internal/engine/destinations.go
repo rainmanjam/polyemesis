@@ -1013,6 +1013,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	// as an absence, which is the least informative place to observe it. #675.
 	e.log.Info("destination starting", "dest", row.Name, "kind", row.Kind,
 		"tracks", compiled.Summary, "rendition", renditionLabel(row))
+	e.warnRenditionAgainstPlatform(row)
 	e.logMultitrack(row, mt, vodDropped)
 	e.noteReload("destination", row.Name, reloadRestart, "started")
 	return nil

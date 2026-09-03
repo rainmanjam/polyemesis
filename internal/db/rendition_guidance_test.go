@@ -1,0 +1,118 @@
+package db
+
+import (
+	"strings"
+	"testing"
+)
+
+// #661. The catalogue is a snapshot of somebody else's documentation, so these
+// pin the COMPARISON and the evidence it carries -- never the figures
+// themselves, which change without notice and belong to platforms.go.
+
+func guidedPreset(t *testing.T) (DestinationPreset, VideoGuidance) {
+	t.Helper()
+	for _, p := range DestinationPresets() {
+		if p.Video != nil && p.Video.KbpsMax > 0 && p.Video.Height > 0 {
+			return p, *p.Video
+		}
+	}
+	t.Skip("no preset publishes both a height and a bitrate ceiling")
+	return DestinationPreset{}, VideoGuidance{}
+}
+
+func TestARenditionInsideTheGuidanceRaisesNothing(t *testing.T) {
+	p, g := guidedPreset(t)
+	r := &Rendition{Height: g.Height, FPS: g.FPS, VideoBitrate: g.KbpsMax}
+	if got := RenditionConcerns(r, Platform(p.ID)); len(got) != 0 {
+		t.Fatalf("a rendition exactly at %s's published figures raised %d concerns: %+v\n\n"+
+			"Warning at the published limit trains the operator to ignore the warning.",
+			p.Name, len(got), got)
+	}
+}
+
+func TestAnOverBitrateRenditionIsFlaggedWithItsEvidence(t *testing.T) {
+	p, g := guidedPreset(t)
+	r := &Rendition{Height: g.Height, VideoBitrate: g.KbpsMax * 3}
+	got := RenditionConcerns(r, Platform(p.ID))
+	if len(got) == 0 {
+		t.Fatalf("a rendition at 3x %s's published ceiling raised nothing.\n\n"+
+			"This is not refused at configure time -- it is accepted, encoded, "+
+			"published and dropped by the platform mid-broadcast, with nothing in the "+
+			"console pointing at the bitrate.", p.Name)
+	}
+	c := got[0]
+	if c.Source == "" || c.Checked == "" {
+		t.Errorf("concern %+v carries no Source/Checked.\n\n"+
+			"A warning an operator cannot check is one they can only obey or ignore. "+
+			"X's own two pages disagree materially, so the date and the URL are what "+
+			"let them judge whether the catalogue or their choice is stale.", c)
+	}
+}
+
+// The rate-control CEILING is what the platform sees, not the target.
+func TestTheMaxrateIsWhatIsComparedWhenItIsHigher(t *testing.T) {
+	p, g := guidedPreset(t)
+	r := &Rendition{VideoBitrate: g.KbpsMax, MaxrateKbps: g.KbpsMax * 2}
+	if got := RenditionConcerns(r, Platform(p.ID)); len(got) == 0 {
+		t.Fatalf("a rendition whose maxrate is twice %s's ceiling raised nothing; "+
+			"the peak is what the platform actually receives", p.Name)
+	}
+}
+
+// 0 means "keep the source's", and the source is unknown until something is
+// streaming. Guessing would produce a warning about a figure nobody chose.
+func TestUnsetRenditionFieldsAreNotJudged(t *testing.T) {
+	p, _ := guidedPreset(t)
+	r := &Rendition{VideoBitrate: 1} // width, height, fps, gop all unset
+	for _, c := range RenditionConcerns(r, Platform(p.ID)) {
+		if c.Field == "width" || c.Field == "height" || c.Field == "fps" || c.Field == "gop" {
+			t.Errorf("judged %q on a rendition that leaves it to the source: %s", c.Field, c.Detail)
+		}
+	}
+}
+
+// Eleven of thirty-three presets publish guidance. The rest are "no opinion",
+// which must not read as "no problem" by accident -- it reads as silence
+// because there is genuinely nothing to say.
+func TestAPlatformWithNoPublishedGuidanceSaysNothing(t *testing.T) {
+	var bare string
+	for _, p := range DestinationPresets() {
+		if p.Video == nil {
+			bare = p.ID
+			break
+		}
+	}
+	if bare == "" {
+		t.Skip("every preset publishes guidance")
+	}
+	r := &Rendition{Width: 7680, Height: 4320, FPS: 120, VideoBitrate: 99000}
+	if got := RenditionConcerns(r, Platform(bare)); len(got) != 0 {
+		t.Fatalf("preset %q publishes no guidance yet produced %d concerns: %+v", bare, len(got), got)
+	}
+	if got := RenditionConcerns(r, Platform("no-such-platform")); len(got) != 0 {
+		t.Fatalf("an unknown platform produced %d concerns", len(got))
+	}
+	if got := RenditionConcerns(nil, Platform(bare)); got != nil {
+		t.Fatal("a nil rendition produced concerns")
+	}
+}
+
+// A single published figure is not a range, and must not be described as one.
+func TestASinglePublishedFigureIsNotDescribedAsARange(t *testing.T) {
+	for _, p := range DestinationPresets() {
+		if p.Video == nil || p.Video.KbpsMax == 0 || p.Video.KbpsMin != p.Video.KbpsMax {
+			continue
+		}
+		r := &Rendition{VideoBitrate: p.Video.KbpsMax * 2}
+		got := RenditionConcerns(r, Platform(p.ID))
+		if len(got) == 0 {
+			t.Fatalf("%s publishes a single figure and an over-rate rendition raised nothing", p.Name)
+		}
+		if strings.Contains(got[0].Detail, "up to") {
+			t.Fatalf("%s publishes ONE figure (%d) and the warning calls it a range: %q",
+				p.Name, p.Video.KbpsMax, got[0].Detail)
+		}
+		return
+	}
+	t.Skip("no preset publishes a single bitrate figure")
+}

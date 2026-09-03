@@ -121,3 +121,36 @@ func videoCodecSummary(codec string, rows []*db.Destination) string {
 	return fmt.Sprintf("the encoder is sending %s; %s may be rejected by the platform",
 		strings.ToUpper(codec), strings.Join(names, ", "))
 }
+
+// warnRenditionAgainstPlatform says, at the moment a destination goes up, where
+// its rendition disagrees with what its platform publishes. #661
+//
+// platforms.go carries researched, dated, sourced figures per preset and
+// nothing read them, so a 4K60 rendition at 40 Mbps could be attached to a
+// platform publishing 1080p60/12000 with no objection anywhere. The stream is
+// then accepted, encoded, published, and dropped by the platform mid-broadcast.
+//
+// Warning and not refusal, deliberately: the catalogue is a snapshot of someone
+// else's documentation -- X's own two pages disagree materially -- so every line
+// carries the Source and Checked date and lets the operator judge which is
+// stale, theirs or ours.
+//
+// Per DESTINATION rather than per rendition, because a rendition is shared: one
+// figure can be wrong for a destination on a platform that publishes 12000 and
+// right for another on a platform that publishes 51000.
+func (e *Engine) warnRenditionAgainstPlatform(row *db.Destination) {
+	if row == nil || row.RenditionID == nil {
+		return
+	}
+	e.mu.RLock()
+	r := e.rends[*row.RenditionID]
+	e.mu.RUnlock()
+	if r == nil || r.row == nil {
+		return
+	}
+	for _, c := range db.RenditionConcerns(r.row, row.Platform) {
+		e.log.Warn("this rendition is outside what the platform publishes",
+			"dest", row.Name, "platform", string(row.Platform), "rendition", r.row.Name,
+			"field", c.Field, "detail", c.Detail, "source", c.Source, "checked", c.Checked)
+	}
+}
