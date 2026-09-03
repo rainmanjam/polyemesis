@@ -138,6 +138,9 @@ type subscriber struct {
 	//
 	// Written only in fanout, which runs under Hub.deliverMu.
 	sendErrors int
+	// gotFirst latches the first successful send, so "relay first delivery" is
+	// logged once per subscriber rather than per datagram.
+	gotFirst bool
 }
 
 // New binds the hub's receive socket, on IPv4 loopback unless an option says
@@ -437,6 +440,18 @@ func (h *Hub) fanout(pkt []byte) {
 				h.log.Debug("relay send failed", "subscriber", s.name, "errors", s.sendErrors, "err", err)
 			}
 			continue
+		}
+		// FIRST DELIVERY, ONCE PER SUBSCRIBER. #674
+		//
+		// A destination that reads nothing for 77 seconds is either not being
+		// sent to, or not receiving what is sent. Nothing distinguished those:
+		// dropped counts only WriteToUDP ERRORS, and txPackets is a total
+		// across every subscriber. This is the sender's own record of when a
+		// named consumer first got a byte, which is the number the whole
+		// investigation needed and never had.
+		if !s.gotFirst {
+			s.gotFirst = true
+			h.log.Info("relay first delivery", "subscriber", s.name, "port", s.addr.Port)
 		}
 		s.sendErrors = 0
 		h.txPackets.Add(1)

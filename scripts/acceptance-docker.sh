@@ -680,6 +680,11 @@ else
   docker logs "$CTR" 2>&1 \
     | grep -aE 'child exec.*process=dest:4|destination starting.*R-track2|dest:4.*(exited|retry)' \
     | sed 's/^/          /'
+  # WHEN THE HUB FIRST SENT TO EACH SUBSCRIBER, beside when each child execed.
+  # Together these say whether a destination that read nothing was being sent to
+  # and failed to receive, or was never sent to at all. #674.
+  printf "        --- relay first delivery, per subscriber ---\n"
+  docker logs "$CTR" 2>&1 | grep -a "relay first delivery" | sed 's/^/          /'
   printf "        --- exec counts, every process ---\n"
   docker logs "$CTR" 2>&1 | grep -ao 'msg="child exec" process=[a-z:0-9]*' \
     | sort | uniq -c | sort -rn | head -10 | sed 's/^/          /'

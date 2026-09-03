@@ -454,3 +454,47 @@ string with two verbs and one argument.
 Every one of them produced a 0 or an empty section, and a 0 is indistinguishable
 from the finding being sought. Three conclusions were published from such
 artefacts and later retracted.
+
+---
+
+# ROOT CAUSE LOCATED (01:05) — the hub does not deliver to the destination for 73s
+
+`relay first delivery`, logged once per subscriber on the first successful
+WriteToUDP, is the number this investigation needed from the start:
+
+	08:01:04.877  engine: "destination starting" dest=R-track2
+	08:01:04.878  child exec dest:4 pid=1377              <-- 1ms later
+	08:02:17.702  relay FIRST DELIVERY dest:4 port=21018  <-- 72.8 SECONDS LATER
+	08:02:22.297  child exec dest:4 pid=1439              <-- the first child had died
+
+The destination is subscribed (hub.Subscribe runs at destinations.go:808, before
+proc.Start() at :950) and its child is alive from 08:01:04.878. The hub sends it
+NOTHING for 72.8 seconds. It gets its first byte about five seconds before the
+process exits, having failed to characterise audio it was never sent.
+
+**The destination is starved by the relay, not by FFmpeg.** That is why all
+twelve isolated reproductions pass: every one of them had a hub that delivered.
+
+## The likely mechanism, not yet confirmed
+
+Subscribers appear in generations, each on a fresh port range:
+
+	21000-21007   probe, meters, dest:1-3, loudness:1-3
+	21009-21016   the same names again
+	21017-21019   probe, dest:4, loudness:4
+
+A sibling on the ADJACENT port of the same generation -- probe on 21017 -- got
+its first delivery at 08:00:56, eighty-one seconds before dest:4 on 21018. So
+the hub that fed 21017 was live and fanning out while 21018 received nothing.
+
+That points at a hub-generation mismatch: the destination subscribes to one hub
+while the ingest feeds another, and only a later reconcile re-points it. The
+engine swaps hubs on an ingest-mode change, and destinations.go says a
+destination reads "the ingest hub for a passthrough destination, its rendition's
+own hub otherwise".
+
+## What this retires
+
+Everything about probing, analyzeduration, mid-stream joins, ordering, the
+interleaver, channel layouts, and FFmpeg 8.1.2 generally. The bytes never
+arrived. A reader cannot characterise audio it is not sent.

@@ -782,3 +782,163 @@ func TestAReaderJoiningBetweenTwoPublishesResolvesTheSecondOnesAudio(t *testing.
 			"reader stderr:\n%s", len(probed.Streams), size, rdErr.String())
 	}
 }
+
+// NINE SUBSCRIBERS, as the rig has. #674
+//
+// Every reproduction so far had ONE consumer. The acceptance run has nine:
+// dest:1-4, loudness:1-4 and meters, all reading the same hub at once. That is
+// one of only two differences left between a passing reproduction and the
+// failing rig -- the other being the engine's own reconcile and restart
+// behaviour. This adds eight competing readers and then asks the ninth, the
+// destination-shaped one, whether it can still characterise its audio.
+func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs eleven FFmpeg processes and an ffprobe")
+	}
+	ffmpegBin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ffprobeBin, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is not installed")
+	}
+	if major := ffmpegMajor(t, ffmpegBin); major != 8 {
+		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
+	}
+
+	tg := Target{SourceID: 1, Name: "Main", Enabled: true, Ready: true}
+	s := New(quiet(), "127.0.0.1:0", ConstantTimeLookup(map[string]Target{"mt": tg}))
+	if err := s.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer s.Stop()
+	s.mu.Lock()
+	addr := s.ln.Addr().String()
+	s.mu.Unlock()
+	_, portStr, _ := strings.Cut(addr, ":")
+	port, _ := strconv.Atoi(portStr)
+
+	hub, err := relay.New(quiet(), 0)
+	if err != nil {
+		t.Fatalf("hub: %v", err)
+	}
+	defer hub.Close()
+
+	pub := exec.Command(ffmpegBin, "-nostdin", "-hide_banner", "-loglevel", "error", "-re",
+		"-f", "lavfi", "-i", "testsrc2=size=320x240:rate=15",
+		"-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=900:sample_rate=48000",
+		"-f", "lavfi", "-i", "sine=frequency=1700:sample_rate=48000",
+		"-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a",
+		"-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "500k",
+		"-c:a", "aac", "-ac", "2", "-t", "40",
+		"-f", "flv", "rtmp://"+addr+"/live/mt")
+	if err := pub.Start(); err != nil {
+		t.Fatalf("publisher: %v", err)
+	}
+	defer func() { _ = pub.Process.Kill(); _ = pub.Wait() }()
+	waitPublishing(t, s, tg.SourceID, 25*time.Second)
+
+	ingCtx, stopIngest := context.WithTimeout(context.Background(), 70*time.Second)
+	defer stopIngest()
+	ing := exec.CommandContext(ingCtx, ffmpegBin, ffmpeg.IngestArgs(ffmpeg.IngestSpec{
+		Kind: ffmpeg.IngestRTMP, RTMPPort: port, RTMPApp: "live", RTMPAddress: "mt",
+		RelayURL: hub.InputURL(),
+	})...)
+	var ingErr strings.Builder
+	ing.Stderr = &ingErr
+	if err := ing.Start(); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	defer func() { _ = ing.Process.Kill(); _ = ing.Wait() }()
+
+	// EIGHT competing readers, as loudness:1-4, meters and dest:1-3 are.
+	othCtx, stopOth := context.WithTimeout(context.Background(), 60*time.Second)
+	defer stopOth()
+	for i := 0; i < 8; i++ {
+		pc, perr := net.ListenPacket("udp", "127.0.0.1:0")
+		if perr != nil {
+			t.Fatalf("other subscriber port: %v", perr)
+		}
+		op := pc.LocalAddr().(*net.UDPAddr).Port
+		_ = pc.Close()
+		name := fmt.Sprintf("other:%d", i)
+		ou := hub.Subscribe(name, op)
+		defer hub.Unsubscribe(name)
+		oa := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
+			ffmpeg.RelayInputArgs()...)
+		oa = append(oa, "-i", ffmpeg.RelayInputURL(ou), "-map", "0", "-c", "copy",
+			"-f", "null", "-")
+		oc := exec.CommandContext(othCtx, ffmpegBin, oa...)
+		if serr := oc.Start(); serr != nil {
+			t.Fatalf("other reader %d: %v", i, serr)
+		}
+		defer func() { _ = oc.Process.Kill(); _ = oc.Wait() }()
+	}
+
+	time.Sleep(5 * time.Second)
+
+	// THE NINTH: the destination.
+	subPC, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("subscriber port: %v", err)
+	}
+	subPort := subPC.LocalAddr().(*net.UDPAddr).Port
+	_ = subPC.Close()
+	subURL := hub.Subscribe("dest:test", subPort)
+	defer hub.Unsubscribe("dest:test")
+
+	tsPath := filepath.Join(t.TempDir(), "crowded.ts")
+	rdCtx, stopRd := context.WithTimeout(context.Background(), 50*time.Second)
+	defer stopRd()
+	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
+		ffmpeg.RelayInputArgs()...)
+	rdArgs = append(rdArgs, "-i", ffmpeg.RelayInputURL(subURL),
+		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1:first_pts=0[aout]",
+		"-map", "0:v:0", "-c:v", "copy",
+		"-map", "[aout]", "-c:a", "aac", "-b:a", "128k",
+		"-f", "mpegts", "-flush_packets", "1", "-t", "12", "-y", tsPath)
+	rd := exec.CommandContext(rdCtx, ffmpegBin, rdArgs...)
+	var rdErr strings.Builder
+	rd.Stderr = &rdErr
+	if err := rd.Start(); err != nil {
+		t.Fatalf("destination reader: %v", err)
+	}
+	if err := rd.Wait(); err != nil {
+		t.Logf("destination reader exited: %v", err)
+	}
+
+	st := hub.Stats()
+	fi, _ := os.Stat(tsPath)
+	var size int64 = -1
+	if fi != nil {
+		size = fi.Size()
+	}
+	out, probeErr := exec.Command(ffprobeBin, "-hide_banner", "-loglevel", "error",
+		"-f", "mpegts", "-select_streams", "a", "-show_streams", "-of", "json", tsPath).Output()
+	if probeErr != nil {
+		t.Fatalf("with eight other subscribers the destination produced nothing "+
+			"parseable (%d bytes): %v\n\nhub rx=%d tx=%d dropped=%d subs=%d\n\n"+
+			"reader stderr:\n%s", size, probeErr, st.RxPackets, st.TxPackets,
+			st.Dropped, len(st.Subscribers), rdErr.String())
+	}
+	var probed struct {
+		Streams []struct {
+			Channels   int    `json:"channels"`
+			SampleRate string `json:"sample_rate"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out, &probed); err != nil {
+		t.Fatalf("ffprobe json: %v\n%s", err, out)
+	}
+	t.Logf("crowded capture: %d bytes, %d audio streams, hub rx=%d tx=%d dropped=%d subs=%d",
+		size, len(probed.Streams), st.RxPackets, st.TxPackets, st.Dropped, len(st.Subscribers))
+	if len(probed.Streams) != 1 {
+		t.Fatalf("beside eight other subscribers the destination produced %d of 1 audio "+
+			"streams (%d bytes).\n\nAlone it produces one. If CONCURRENCY is what breaks "+
+			"characterisation, this is #674 -- and the rig runs exactly nine.\n\n"+
+			"hub rx=%d tx=%d dropped=%d\n\nreader stderr:\n%s",
+			len(probed.Streams), size, st.RxPackets, st.TxPackets, st.Dropped, rdErr.String())
+	}
+}
