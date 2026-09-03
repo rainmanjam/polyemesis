@@ -585,3 +585,51 @@ reporting the count as a trend, once reading an absent log line as proof a
 subscription never happened. Before believing any absence in that dump, widen
 the grep and confirm the line is absent from the whole log rather than from the
 last N lines of it.
+
+---
+
+# THE HUB IS INPUT-STARVED (01:47) — not the fan-out, not the subscribers
+
+`relay fanout state` logs rxPackets and len(targets) together, every 500
+datagrams, so "receiving with N targets" is one observation:
+
+	08:43:02.647  rxPackets=16501  targets=2
+	08:44:23.534  rxPackets=17001  targets=10   <-- 500 packets in 81 SECONDS
+	08:44:27.241  rxPackets=17501  targets=9    <-- 500 packets in 3.7 seconds
+	08:44:31.104  rxPackets=18001  targets=9
+	...steady at ~135 packets/second thereafter
+
+**~6 packets per second for 81 seconds, then ~135.** About 4% of rate. targets
+is non-zero throughout, so there were always consumers to send to.
+
+The hub is not failing to deliver. IT HAS NOTHING TO DELIVER. Every destination
+subscribed to it starves together for exactly that window, which is why they all
+report their first delivery in the same millisecond, and why a destination that
+probes during it reads video at a trickle and no audio at all.
+
+## This relocates the fault upstream of the relay
+
+	relay fan-out    byte-identical, dropped=0 -- cleared
+	relay targets    non-zero throughout the starvation -- cleared
+	subscriptions    present, on the right hub, removed only afterwards -- cleared
+	the media path   twelve reproductions, all passing -- cleared
+
+What remains is what FEEDS the hub: the ingest child, and the RTMP server's
+delivery to it. The ingest execs ONCE for the whole run, so it is not crashing
+or restarting -- it is running and producing almost nothing for 81 seconds.
+
+## Note on the capture
+
+The capture on this hub holds 13.4 MB with 40s of audio. That is consistent with
+the starvation only if those bytes were written OUTSIDE the starved window --
+i.e. the ingest delivers the publish late, in a burst, rather than live. The
+capture bracket (CAPSTART..CAPEND) was taken by wall clock around the publisher
+and cannot distinguish the two. That is worth resolving before trusting any
+timing read off the capture.
+
+## Next
+
+Instrument the ingest's OUTPUT rate the way the hub's input is now instrumented:
+its -progress `total_size` over time, or the RTMP server's per-subscriber
+delivery counter. The question is whether the ingest is being starved by the
+RTMP server or is itself stalling.

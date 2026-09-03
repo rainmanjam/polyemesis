@@ -686,6 +686,11 @@ else
   # WHEN each subscriber joined, and WHICH hub it joined. Paired with first
   # delivery this separates "subscribed late" from "subscribed to a hub that is
   # not the one being fed". #674.
+  # RECEIVING WITH N TARGETS, over time. If targets is 0 while rxPackets
+  # climbs, the hub has data and nobody to send it to. If targets is non-zero
+  # and rxPackets is flat, the hub has consumers and nothing to give them. #674
+  printf "        --- relay fanout state (rx vs targets) ---\n"
+  docker logs "$CTR" 2>&1 | grep -a "relay fanout state" | tail -14 | sed 's/^/          /'
   printf "        --- relay subscriptions (name, hub, when) ---\n"
   docker logs "$CTR" 2>&1 | grep -aE "relay subscriber (added|removed)" | grep -aE "dest:4|total" | tail -18 | sed 's/^/          /'
   printf "        --- relay first delivery, per subscriber ---\n"

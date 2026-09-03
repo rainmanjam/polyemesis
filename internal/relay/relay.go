@@ -439,6 +439,21 @@ func (h *Hub) fanout(pkt []byte) {
 	// No lock and no allocation: the list is republished by rebuildTargets on
 	// the rare occasions it changes. Nil until the first subscriber.
 	tp := h.targets.Load()
+	// RECEIVING WITH N TARGETS, AS ONE OBSERVATION. #674
+	//
+	// A subscribed destination went 73 seconds without a byte while this hub
+	// was demonstrably receiving. That could mean the target list was empty or
+	// that the hub was not receiving in that window, and those were only
+	// distinguishable by lining up two separate logs -- which is how two wrong
+	// conclusions were reached. This says both at once. Every 500 datagrams:
+	// roughly twice a second on a live relay, silent on an idle one.
+	if n := h.rxPackets.Add(0); n%500 == 1 {
+		count := 0
+		if tp != nil {
+			count = len(*tp)
+		}
+		h.log.Info("relay fanout state", "hubPort", h.port, "rxPackets", n, "targets", count)
+	}
 	if tp == nil {
 		return
 	}
