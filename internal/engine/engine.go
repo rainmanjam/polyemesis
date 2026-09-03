@@ -519,6 +519,11 @@ type destination struct {
 	// passthrough destination, its rendition's own hub otherwise. Held so
 	// teardown unsubscribes from the same hub it subscribed to.
 	hub *relay.Hub
+	// watch says whether media has ever moved through this child. Read by the
+	// #674 re-probe: a destination that has NEVER published is the one that may
+	// have characterised its input before the ingest carried audio. One that
+	// has published is riding a switch and must not be disturbed.
+	watch *destWatch
 	// spec is a hash of everything that would require a restart. Comparing it
 	// is what keeps an unrelated edit from cycling a healthy stream.
 	spec string
@@ -1392,6 +1397,15 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		// leaving the next session waiting.
 		MinBackoff: 500 * time.Millisecond,
 		MaxBackoff: 5 * time.Second,
+		// THE INGEST'S OWN OUTPUT RATE. #674
+		//
+		// The relay hub receives ~6 packets/second for 81 seconds and then
+		// ~135, with consumers subscribed throughout, so it is INPUT-starved
+		// rather than failing to deliver. The ingest is the only thing that
+		// feeds it and it execs once for the whole run -- it is alive and
+		// producing almost nothing. This is its own account of how much it has
+		// written, which nothing has ever recorded.
+		OnProgress: e.ingestProgressLogger(),
 		OnLog:      e.onLog,
 		OnState:    e.onState,
 		LogSink:    logSink{e},
@@ -3273,6 +3287,12 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	if changed {
 		e.log.Info("ingest layout probed", "audioTracks", len(src.Tracks))
 		e.bus.Publish(events.TypeSource, e.SourceInfo())
+		// #674: any destination started before this moment characterised an
+		// input that did not yet carry audio, and FFmpeg never re-probes. This
+		// is the earliest instant a fresh probe would succeed.
+		if len(src.Tracks) > 0 {
+			e.reprobeDestinationsThatNeverPublished("ingest layout probed")
+		}
 	}
 	return changed
 }

@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -167,16 +168,66 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 	return plans
 }
 
+// keepDestination is the whole test for leaving a running destination alone,
+// extracted so a test can call the REAL decision. An inline copy of this in a
+// test stayed green when the hub check was deleted from the shipped code, which
+// is the same defect the check itself exists to prevent.
+//
+// wantHub is the hub this destination would be given NOW; nil when it could not
+// be resolved, which is itself a reason not to keep it.
+func keepDestination(d *destination, p destPlan, wanted bool, wantHub *relay.Hub) bool {
+	if !wanted || d.proc == nil || p.err != "" || d.spec != p.spec {
+		return false
+	}
+	// A destination that has no hub yet is not running against one, and is
+	// judged on spec alone. One that HAS a hub must still be on the hub it
+	// would now be given: its FFmpeg took the relay URL on its command line and
+	// cannot be told a new one, so a swap can only be repaired by a restart.
+	return d.hub == nil || d.hub == wantHub
+}
+
 // stopDestinations tears down every destination that is gone, newly disabled,
 // newly broken, or running with arguments that no longer match. Everything else
 // is left strictly alone — that is the guarantee that renaming a destination,
 // or editing a different one, never interrupts a live output.
 func (e *Engine) stopDestinations(plans map[int64]destPlan) {
+	// THE HUB A DESTINATION READS IS PART OF WHETHER IT MAY BE KEPT. #674
+	//
+	// destSpec deliberately hashes the argv with the relay URL BLANKED, so a
+	// hub swap does not change it -- and the keep test below was spec-only.
+	// A destination whose hub is replaced under it therefore SURVIVED, holding
+	// a subscription to a hub nobody feeds any more, on a port that is never
+	// written to again. engine.go already states the shape of this failure:
+	// "closing a hub only stops UDP delivery; it does not end the process."
+	//
+	// Measured on the acceptance rig before this fix: the child execed 1ms
+	// after the engine started it and received its FIRST BYTE 72.8 seconds
+	// later -- five seconds before it gave up and exited. It was starved by the
+	// relay, not by FFmpeg, which is why twelve isolated reproductions of the
+	// media path all passed.
+	//
+	// Resolved BEFORE the lock: upstreamHub takes e.mu.RLock for a rendition
+	// destination, and this function holds the write lock.
+	wantHub := make(map[int64]*relay.Hub, len(plans))
+	for id, p := range plans {
+		if p.err != "" || p.row == nil {
+			continue
+		}
+		if h, err := e.upstreamHub(p.row); err == nil {
+			wantHub[id] = h
+		}
+	}
+
 	e.mu.Lock()
 	var toStop []*destination
 	for id, d := range e.dests {
 		p, wanted := plans[id]
-		keep := wanted && d.proc != nil && p.err == "" && d.spec == p.spec
+		// A running destination whose hub is not the hub it would now be given
+		// is reading a port nothing writes to. Restarting it is the only repair:
+		// its FFmpeg took the relay URL on its command line and cannot be told
+		// a new one. A destination that has no hub yet (d.hub == nil) is not
+		// running and is judged on spec alone.
+		keep := keepDestination(d, p, wanted, wantHub[id])
 		if !keep {
 			toStop = append(toStop, d)
 			delete(e.dests, id)
@@ -863,7 +914,13 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		}
 	}
 
-	proc := supervisor.New(e.log, supervisor.Spec{
+	onProgress, watch := e.firstMediaLoggerWatched(row.Name, row.Kind)
+
+	// Declared before the Spec because OnLog's #674 re-probe handler closes
+	// over it: that handler is built inside the Spec that constructs this
+	// very child, so it can only resolve the process lazily.
+	var proc *supervisor.Process
+	proc = supervisor.New(e.log, supervisor.Spec{
 		Name:     subName,
 		Kind:     "destination",
 		Bin:      e.tools.FFmpeg,
@@ -876,7 +933,10 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		// leaves the signature and the hex manifest standing in the log. Empty
 		// when nothing was minted, which destSecrets and alerts.NewSecretSet
 		// both drop. See TestTheMintedKeyIsMaskedWholeAndNotJustItsTail.
-		Secrets:     destSecrets(row, mt.MintedKey),
+		Secrets: destSecrets(row, mt.MintedKey),
+		// The only signal that says this destination is PUBLISHING rather than
+		// merely spawned. See firstMediaLogger and #675.
+		OnProgress:  onProgress,
 		AutoRestart: true,
 		// Per-destination reconnect policy. Zero values leave the supervisor's
 		// own defaults in place, which is what every destination ran on before
@@ -888,9 +948,15 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		// Spaced out so going live does not spawn every destination in the
 		// same tick. First spawn only -- a reconnect is never delayed.
 		StartDelay: startDelay,
-		OnLog:      e.onLog,
-		OnState:    e.onState,
-		LogSink:    logSink{e},
+		// #674: a destination that probed before its audio existed can only be
+		// restarted. See reprobeOnUncharacterisedAudio -- the trigger is the
+		// demuxer's own "could not find codec parameters" rather than an
+		// absence of output, because absence of output is also what a
+		// mismatched publisher and a still-probing child look like.
+		OnLog: e.reprobeOnUncharacterisedAudio(row.Name, row.Kind,
+			func() *supervisor.Process { return proc }, e.onLog),
+		OnState: e.onState,
+		LogSink: logSink{e},
 	})
 
 	e.mu.Lock()
@@ -919,7 +985,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		return nil
 	}
 	e.dests[row.ID] = &destination{
-		row: row, proc: proc, port: port, subName: subName,
+		row: row, proc: proc, port: port, subName: subName, watch: watch,
 		compiled: compiled, hub: hub, spec: spec,
 		multitrack: mt, vodDropped: vodDropped,
 	}
@@ -932,7 +998,20 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	// the warning is about THIS destination's current situation, not a log.
 	e.noteStopOutcome(row.ID, nil)
 	proc.Start()
-	e.log.Info("destination started", "dest", row.Name, "kind", row.Kind,
+	// SPAWNED, NOT PUBLISHING, and the wording now says so.
+	//
+	// This line read "destination started" and was written on the instruction
+	// after proc.Start(), which reports only that a child process exists.
+	// FFmpeg can and does fail after that -- "Error initializing filters!",
+	// "Could not open encoder before EOF", "Nothing was written into output
+	// file" -- and every one of those leaves this line standing as the last
+	// word on the destination's health.
+	//
+	// It cost a whole investigation: an operator, and five passes of debugging,
+	// saw a healthy console and a started destination while nothing at all
+	// reached the platform. The failure was visible only from the receiving end
+	// as an absence, which is the least informative place to observe it. #675.
+	e.log.Info("destination starting", "dest", row.Name, "kind", row.Kind,
 		"tracks", compiled.Summary, "rendition", renditionLabel(row))
 	e.logMultitrack(row, mt, vodDropped)
 	e.noteReload("destination", row.Name, reloadRestart, "started")
@@ -1272,4 +1351,75 @@ func (e *Engine) stopBackup(d *destination) {
 	if d.backupPort != 0 {
 		e.alloc.Release(d.backupPort)
 	}
+}
+
+// firstMediaLogger returns an OnProgress handler that says once, per run, that
+// a destination has actually published something.
+//
+// OutTimeMS is the field that means "media has moved": it advances for
+// audio-only destinations where Frame never leaves zero, and it stays at zero
+// while FFmpeg is bound and waiting rather than writing. supervisor.noteProgress
+// uses the same field to start the uptime clock, so this is the same definition
+// of "up", said out loud in the log rather than only in a status struct.
+//
+// ONCE PER RUN, NOT ONCE PER PROCESS. The handler outlives a restart -- the
+// supervisor keeps its Spec across them -- so a plain sync.Once would announce
+// the first publish of the first run and stay silent through every reconnect
+// after it, which is exactly when an operator most needs to know the stream
+// came back. A run is detected by OutTimeMS going BACKWARDS: a fresh FFmpeg
+// starts its output clock near zero, so a value below the last one can only
+// mean a new child.
+func (e *Engine) firstMediaLogger(name string, kind db.DestKind) func(ffmpeg.Progress) {
+	fn, _ := e.firstMediaLoggerWatched(name, kind)
+	return fn
+}
+
+// firstMediaLoggerWatched is firstMediaLogger plus a latch saying whether media
+// has moved.
+//
+// THE WATCHDOG THAT CONSUMED THIS LATCH WAS REMOVED. guardSilentPublish
+// restarted a destination that was "receiving but publishing nothing" -- which
+// is ALSO the correct steady state of a publisher that does not match the
+// profile, and of a destination still inside its own startup probe. It broke
+// acceptance-failover, which pins 0 restarts across a mismatched cut, and then
+// masked the #674 ingest fix in acceptance 4c by restarting the destination
+// every 30s so it never settled. A guard whose trigger cannot tell the fault
+// from two healthy states is not a guard. The latch is kept because it is the
+// honest definition of "publishing"; nothing acts on it automatically. Split rather than folded in because the plain form is what the rest of
+// the engine and its tests want, and a handler that also returned state would
+// make every caller carry something only one of them uses.
+func (e *Engine) firstMediaLoggerWatched(name string, kind db.DestKind) (func(ffmpeg.Progress), *destWatch) {
+	w := &destWatch{}
+	return func(pr ffmpeg.Progress) {
+		if pr.OutTimeMS <= 0 {
+			return
+		}
+		w.mu.Lock()
+		newRun := w.last == 0 || pr.OutTimeMS < w.last
+		w.last = pr.OutTimeMS
+		w.published = true
+		w.mu.Unlock()
+		if newRun {
+			e.log.Info("destination publishing", "dest", name, "kind", kind)
+		}
+	}, w
+}
+
+// destWatch is what a destination's progress stream has proved so far.
+type destWatch struct {
+	mu        sync.Mutex
+	last      int64
+	published bool
+}
+
+func (w *destWatch) publishedSinceRearm() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.published
+}
+
+func (w *destWatch) rearm() {
+	w.mu.Lock()
+	w.published = false
+	w.mu.Unlock()
 }
