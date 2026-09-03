@@ -549,7 +549,15 @@ done
 RD=$(drive rtmpdest "R-track2" "rtmp://rtmp-sink:1936/live" "out" 1)
 case "$RD" in *RTMPDEST_OK*) ok "an RTMP destination routed to track 2 was created" ;;
               *)             bad "could not create the RTMP destination: $RD" ;; esac
-sleep 22
+# THE PUBLISHING WINDOW, AND IT HAS TO CLEAR THE PROBE. #674
+#
+# A destination's FFmpeg spends up to ffmpeg.relayProbeWindow (15s)
+# characterising the relay before it opens its output, and the ingest switch
+# just above restarts it. At the old value the sink had about five seconds of
+# real publishing to record -- enough on a laptop, nothing on a slower CI
+# runner, which is how this step reported "recorded 0 bytes" while passing
+# locally.
+sleep 45
 # CAPTURE ONLY WHILE THE PUBLISHER IS ALIVE -- closing bracket, before the
 # destinations are stopped. tail|head, not dd bs=1: a byte-at-a-time dd over
 # several MB is millions of syscalls.
@@ -852,7 +860,15 @@ for _ in $(seq 1 40); do
 done
 [ "$NS" = "3" ] && ok "SRT ingest probed 3 audio tracks (4d)" \
   || bad "SRT ingest probed '$NS' tracks in 4d, expected 3"
-sleep 20
+# THE PUBLISHING WINDOW, AND IT HAS TO CLEAR THE PROBE. #674
+#
+# A destination's FFmpeg spends up to ffmpeg.relayProbeWindow (15s)
+# characterising the relay before it opens its output, and the ingest switch
+# just above restarts it. At the old value the sink had about five seconds of
+# real publishing to record -- enough on a laptop, nothing on a slower CI
+# runner, which is how this step reported "recorded 0 bytes" while passing
+# locally.
+sleep 45
 drive stopall >/dev/null
 sleep 6
 docker stop -t 8 rtmp-sink >/dev/null 2>&1
