@@ -710,3 +710,53 @@ The next step is exactly that: capture the full container log as an artefact, as
 the relay capture already is, and read the window 09:13:13-09:14:25 from it. If
 the hub genuinely did not exist before 09:14:25, then destinations are started
 against a hub that is created later, and that is #674.
+
+---
+
+# RESOLVED (02:35) — 51 passed, 0 failed
+
+	PASS  E-RTMP ingest probed 3 audio tracks (4c)
+	PASS  an RTMP destination routed to track 2 was created
+	PASS  the RTMP sink recorded the published stream (4125928 bytes)
+	PASS  published over RTMP: track 2 is present and track 1 is not
+	PASS  published over RTMP: track 2 is present and track 3 is not
+
+## Three faults, two in the product and one in the rig
+
+1. **The RTMP server never ended its subscribers when a publish finished.**
+   The ingest child stayed attached to a stream that would never produce again:
+   out_time FROZEN at 40021ms, zero bytes for ~80s, the relay hub down to ~6
+   packets/second from ~135. engine.go had always asserted the opposite -- "the
+   ingest listener is expected to exit whenever the streamer stops" -- and it
+   could not, because the end of the publish was never delivered to it. Fixed in
+   6e2f5a60.
+
+2. **A destination whose hub was replaced under it kept running.** destSpec
+   hashes the argv with the relay URL blanked, so a hub swap did not change the
+   spec and stopDestinations kept the destination alive on a port nothing writes
+   to. Fixed in 048f97f9.
+
+3. **The rig created the destination ~78 seconds before its publisher.** From
+   the server log: publisher disconnected 09:21:20, dest:4 execed 09:21:26, the
+   next publisher connected 09:22:38. The hub sat frozen at rxPackets=16651 with
+   consumers attached the whole time. A destination's FFmpeg characterises its
+   streams ONCE, inside analyzeduration, and never re-probes -- started against
+   a dead relay it resolves no audio and has given up before a publisher
+   arrives. Step 4b passed throughout because its destinations are created
+   against a LIVE stream. Creating 4c's after the probe check confirms three
+   audio tracks makes the two steps consistent.
+
+## What actually cost the time
+
+Ten instrument defects, every one returning a 0 or an empty section -- which is
+indistinguishable from the finding being sought. Three conclusions were
+published from those artefacts and retracted. Four tests were written that
+replicated shipped logic inline and stayed green when that logic was deleted.
+
+The two moves that broke it open, both late:
+
+  * getting artefacts OUT of the ephemeral container -- the relay capture and
+    then the server log -- so analysis cost seconds instead of a 12-minute run;
+  * sampling by the CLOCK rather than by the thing being measured. Sampling hub
+    state every 500 datagrams could not describe a window with no datagrams, so
+    every sample came from after the starvation ended.

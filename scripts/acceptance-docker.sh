@@ -483,9 +483,8 @@ done
 [ "$sinkup" = yes ] && ok "the RTMP sink has bound its listener on 1936" \
   || bad "no RTMP sink listening; the destination below has nowhere to publish"
 
-RD=$(drive rtmpdest "R-track2" "rtmp://rtmp-sink:1936/live" "out" 1)
-case "$RD" in *RTMPDEST_OK*) ok "an RTMP destination routed to track 2 was created" ;;
-              *)             bad "could not create the RTMP destination: $RD" ;; esac
+# The RTMP destination is created AFTER the publisher is confirmed on air --
+# see below, past the probe check. Creating it here starved it. #674
 
 # GROUND TRUTH FOR #674. relay.capture is "exactly the bytes fanout() forwards
 # to every subscriber", so it settles writer-vs-reader without inference. Zeroed
@@ -528,6 +527,28 @@ for _ in $(seq 1 40); do
 done
 [ "$NR2" = "3" ] && ok "E-RTMP ingest probed 3 audio tracks (4c)" \
   || bad "E-RTMP ingest probed '$NR2' tracks in 4c, expected 3"
+
+# CREATE THE DESTINATION ONLY ONCE AUDIO IS DEMONSTRABLY FLOWING. #674
+#
+# It used to be created immediately after the sink came up -- and then this step
+# waited up to 60s for the layout to go UNPROBED, slept 4, and only then
+# published. Measured from the server log: the publisher disconnected at
+# 09:21:20 and the next one connected at 09:22:38, so the destination's child
+# execed at 09:21:26 into a relay with NO PUBLISHER AT ALL for the next 78
+# seconds. Its hub sat at rxPackets=16651, frozen, with consumers attached.
+#
+# A destination's FFmpeg characterises its input's streams once, inside
+# analyzeduration, and never re-probes; started against a dead relay it resolves
+# no audio, and by the time a publisher arrives it has already given up. Step 4b
+# passes because its destinations are created against a LIVE stream, which is
+# the only difference between them.
+#
+# This is the rig's ordering, not a product defect: the engine restarts the
+# destination and it does re-probe. What it cannot outrun is the sink's own
+# patience, which is spent waiting for a publisher that has not started yet.
+RD=$(drive rtmpdest "R-track2" "rtmp://rtmp-sink:1936/live" "out" 1)
+case "$RD" in *RTMPDEST_OK*) ok "an RTMP destination routed to track 2 was created" ;;
+              *)             bad "could not create the RTMP destination: $RD" ;; esac
 sleep 22
 # CAPTURE ONLY WHILE THE PUBLISHER IS ALIVE -- closing bracket, before the
 # destinations are stopped. tail|head, not dd bs=1: a byte-at-a-time dd over
@@ -638,6 +659,17 @@ else
   # at 4c), and without -hide_banner ffprobe's build banner fills the output
   # and hides the answer -- which is how the previous two revisions of this
   # block came back empty. Validated on a truncated fixture before shipping.
+  # THE WHOLE SERVER LOG, to the host. #674
+  #
+  # Every section of this dump is a TAIL, and three conclusions in this
+  # investigation were drawn from truncated output and were wrong -- a trend
+  # counted inside a `tail` window, an absent line read as proof a subscription
+  # never happened, and hub samples that simply had not been printed. The relay
+  # capture stopped costing a 12-minute run per analysis bug the moment it was
+  # copied to the host; the log deserves the same.
+  docker logs "$CTR" > /tmp/674-serverlog.txt 2>&1 \
+    && printf "        saved /tmp/674-serverlog.txt (%s lines)\n" "$(wc -l < /tmp/674-serverlog.txt)"
+
   # COPY THE CAPTURE OUT, to the host, before the volume is destroyed.
   #
   # This is the single highest-value line in the dump. Every previous attempt to
