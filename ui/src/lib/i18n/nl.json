@@ -158,6 +158,7 @@
   "chrome.language": "Taal",
   "chrome.liveCount": "{count} live",
   "chrome.releaseNotes": "Release-opmerkingen",
+  "chrome.runningVersion": "polyemesis {version} draait",
   "chrome.signOut": "Afmelden",
   "chrome.socketOffline": "offline",
   "chrome.socketOfflineHint": "Live updates zijn verbroken; opnieuw proberen",
@@ -339,6 +340,7 @@
   "dash.laneNoPreview": "Nog geen voorbeeld — start je encoder voor dit programma.",
   "dash.leaveUnchanged": "Ongewijzigd laten",
   "dash.leaveUnchangedNote": "“Ongewijzigd laten” stuurt helemaal niets, dus het platform houdt wat het heeft. Aan of Uit kiezen schrijft die waarde.",
+  "dash.loadingDestinations": "Controleren wat deze installatie heeft ingesteld…",
   "dash.metaCategory": "Categorie",
   "dash.metaDescription": "Beschrijving",
   "dash.metaTags": "Tags",
@@ -439,6 +441,7 @@
   "dest.restarts.hint": "Hoe vaak de encoder van deze bestemming opnieuw is gestart. Boven nul betekent dat hij is uitgevallen en hersteld.",
   "dest.retryAfter": "Opnieuw proberen na (seconden)",
   "dest.sharedEncodeAria": "Gedeelde video-encode",
+  "dest.renditionConcerns": "Buiten wat dit platform publiceert",
   "dest.socketTimeout": "Socket-time-out (seconden)",
   "dest.source": "Bron",
   "dest.sourcePlaceholder": "Kies een programma",
@@ -1438,5 +1441,7 @@
   "tour.routingNav.body": "Een bestemming zonder routingprofiel is gewoon doorsturen, wat elk ander gereedschap ook doet. Een profiel bepaalt welke binnenkomende audiosporen welke bestemming bereiken en hoe ze worden gemengd: een commentaarmicrofoon die een muziekbed wegdrukt voor het ene platform, de muziek volledig weggelaten voor het andere, elk met een eigen luidheidsdoel. Het wordt per bestemming ingesteld, zodat één binnenkomende feed als meerdere verschillende programma's naar buiten gaat.",
   "tour.routingNav.title": "Routing is het deel dat geen doorsturen is",
   "tour.sourcesNav.body": "Een bron is één binnenkomende feed, en op deze pagina staan het publicatieadres en het token ervan. install.sh drukte ze één keer af, tijdens het uitvoeren; is die terminal gesloten, dan vind je ze hier terug. Elke bron draagt een eigen token, zodat meerdere encoders naar één installatie kunnen publiceren en toch gescheiden blijven.",
-  "tour.sourcesNav.title": "Bronnen: waar een encoder verbinding maakt"
+  "tour.sourcesNav.title": "Bronnen: waar een encoder verbinding maakt",
+  "chrome.programme": "Programma",
+  "chrome.programmeHint": "De console volgt één programma tegelijk. Alles op het scherm beschrijft dit programma."
 }

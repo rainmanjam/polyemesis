@@ -146,9 +146,15 @@ type Transcription struct {
 //
 // WHO THIS DOES NOT TOUCH, which is most people. The Dockerfile's CMD passes
 // `-addr :8080`; deploy/polyemesis.service passes `--addr :8080`; install.sh
-// writes an addr into the config.yaml it generates; config.example.yaml carries
-// `addr: ":8080"`. A flag or a file key wins over this, so every one of those
-// paths binds exactly what it bound before.
+// writes an addr into the config.yaml it generates. A flag or a file key wins
+// over this, so every one of those paths binds exactly what it bound before.
+//
+// config.example.yaml USED to carry `addr: ":8080"` and was listed here as
+// unaffected, which was true of the binary and false of the operator: copying
+// the example is how a new install gets its config, so the hardening above was
+// undone by the very file people start from. It now carries
+// `127.0.0.1:8080`, and TestTheShippedExampleDoesNotBindEveryInterface keeps
+// it that way.
 //
 // WHO IT DOES, stated plainly because it is a real cost: an install that has no
 // config.yaml, or one with no addr key, and that was being reached from another

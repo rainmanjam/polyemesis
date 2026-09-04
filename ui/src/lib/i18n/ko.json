@@ -158,6 +158,7 @@
   "chrome.language": "언어",
   "chrome.liveCount": "{count}개의 라이브 방송",
   "chrome.releaseNotes": "릴리스 노트",
+  "chrome.runningVersion": "polyemesis {version} 실행 중",
   "chrome.signOut": "로그아웃",
   "chrome.socketOffline": "오프라인",
   "chrome.socketOfflineHint": "실시간 업데이트 연결 끊김, 재시도 중",
@@ -339,6 +340,7 @@
   "dash.laneNoPreview": "아직 미리보기가 없습니다. 이 프로그램의 인코더를 시작하세요.",
   "dash.leaveUnchanged": "변경하지 않음",
   "dash.leaveUnchangedNote": "‘변경하지 않음’은 아무것도 보내지 않으므로 플랫폼이 가진 값을 그대로 둡니다. 켜기나 끄기를 고르면 그 값을 씁니다.",
+  "dash.loadingDestinations": "이 설치에 무엇이 구성되어 있는지 확인하는 중…",
   "dash.metaCategory": "카테고리",
   "dash.metaDescription": "설명",
   "dash.metaTags": "태그",
@@ -439,6 +441,7 @@
   "dest.restarts.hint": "이 대상의 인코더가 재시작된 횟수. 0보다 크면 죽었다가 복구됐다는 뜻입니다.",
   "dest.retryAfter": "재시도 간격 (초)",
   "dest.sharedEncodeAria": "공유 영상 인코드",
+  "dest.renditionConcerns": "이 플랫폼이 공개한 범위를 벗어납니다",
   "dest.socketTimeout": "소켓 시간 초과 (초)",
   "dest.source": "소스",
   "dest.sourcePlaceholder": "프로그램 선택",
@@ -1438,5 +1441,7 @@
   "tour.routingNav.body": "라우팅 프로파일이 없는 대상은 그냥 재송출이며, 다른 어떤 도구든 하는 일입니다. 프로파일은 들어오는 오디오 트랙 가운데 무엇이 어느 대상에 도달하고 어떻게 섞이는지를 정합니다. 한 플랫폼에는 해설 마이크가 음악 베드를 눌러 주고, 다른 플랫폼에는 음악을 아예 빼며, 각각 고유한 라우드니스 목표를 둘 수 있습니다. 대상마다 따로 설정하므로 들어오는 피드 하나가 서로 다른 여러 프로그램으로 나갈 수 있습니다.",
   "tour.routingNav.title": "라우팅은 재송출이 아닌 부분입니다",
   "tour.sourcesNav.body": "소스는 들어오는 피드 하나이고, 그 발행 주소와 토큰은 이 페이지에 있습니다. install.sh는 실행될 때 딱 한 번 그것들을 출력했습니다. 그 터미널을 닫았다면 다시 찾을 곳이 여기입니다. 소스마다 고유한 토큰을 가지므로, 여러 인코더가 하나의 설치본으로 송출하면서도 서로 섞이지 않습니다.",
-  "tour.sourcesNav.title": "소스: 인코더가 접속하는 곳"
+  "tour.sourcesNav.title": "소스: 인코더가 접속하는 곳",
+  "chrome.programme": "프로그램",
+  "chrome.programmeHint": "콘솔은 한 번에 하나의 프로그램만 따릅니다. 화면의 모든 내용은 이 프로그램에 대한 것입니다."
 }

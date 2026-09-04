@@ -8,7 +8,21 @@
 # run `polyemesis -h` for the list.
 
 # HTTP listen address for the web UI and API.
-addr: ":8080"
+#
+# LOOPBACK, and copying this file must not opt you back out of that. ":8080" is
+# every interface, and with tls.mode resolving to self-signed on a fresh install
+# the session cookie's Secure flag follows the scheme -- so an example that
+# shipped ":8080" served a login form to the whole network to anyone who copied
+# it and changed nothing. internal/config.DefaultAddr made loopback the default
+# for exactly that reason; this file was the remaining way back in.
+#
+# To expose it deliberately, type it: "0.0.0.0:8080" here, or --addr :8080 on
+# the command line. Both keep the exposure warning they always had. What no
+# longer happens is reaching that state by copying the example.
+#
+# Docker and systemd are unaffected -- the Dockerfile's CMD and
+# deploy/polyemesis.service both pass an explicit --addr, and a flag wins.
+addr: "127.0.0.1:8080"
 
 # Holds polyemesis.db, secret.key, recordings/ and hls/.
 # Back this directory up: secret.key decrypts your stored OAuth tokens.

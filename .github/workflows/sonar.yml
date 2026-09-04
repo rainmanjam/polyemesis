@@ -117,6 +117,22 @@ jobs:
       # be produced should leave the analysis to run without it, exactly as it
       # did before this step existed, rather than turning a reporting gap into a
       # red build for a reason nobody can act on.
+      #
+      # -coverpkg=./..., AND WITHOUT IT THE PROFILE UNDERSTATES WORK THAT IS
+      # ACTUALLY TESTED. By default `go test ./...` instruments only the package
+      # under test, so a function exercised solely through ANOTHER package's
+      # tests records zero hits. db.DeleteAllAPITokens is the case that found
+      # this: it has a test -- internal/api/password_change_tokens_test.go,
+      # which drives it through the password-change handler, which is the only
+      # way it is ever called -- and the profile said 0.0%. With -coverpkg it
+      # says 71.4%. Repo-wide the total moves 85.6% -> 87.4%, and every one of
+      # those points is work somebody had already done and was not being
+      # credited for. That is the same defect as the two glob bugs fixed
+      # alongside this: the measurement was wrong, not the code.
+      #
+      # The cost is that every test binary links every package. Measured at
+      # 2m02s against a 20-minute ceiling, so there is room; if that ever
+      # changes, the fix is a bigger ceiling rather than a smaller profile.
       - name: Set up Go
         if: steps.gate.outputs.ready == 'true'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v6.0.0
@@ -128,7 +144,7 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         continue-on-error: true
         timeout-minutes: 20
-        run: go test -coverprofile=coverage.out -covermode=count ./... || true
+        run: go test -coverprofile=coverage.out -covermode=count -coverpkg=./... ./... || true
 
       - name: Set up Node
         if: steps.gate.outputs.ready == 'true'
@@ -192,11 +208,254 @@ jobs:
         working-directory: web
         run: npm ci --ignore-scripts --no-audit --no-fund && npm run coverage || true
 
+      # THE VERSION, WITHOUT WHICH THE GATE ON main EVALUATES NOTHING.
+      #
+      # See the long comment on sonar.projectVersion in sonar-project.properties:
+      # "Sonar way" is entirely new-code conditions, SonarCloud's default new-code
+      # definition is "previous version", and this project had never sent one --
+      # so main had no baseline, no new code, no conditions, and a gate that read
+      # NONE on five consecutive analyses.
+      #
+      # `git describe --tags --always` is the same string the Makefile stamps into
+      # the binaries, so a version here means the same thing it means everywhere
+      # else in this repository. It needs the tags, which is why the checkout
+      # above fetches full history -- it already did, for the new-code diff.
+      - name: Version for the scanner
+        if: steps.gate.outputs.ready == 'true'
+        id: ver
+        run: echo "v=$(git describe --tags --always 2>/dev/null || echo dev)" >> "$GITHUB_OUTPUT"
+
       - name: SonarQube Scan
         if: steps.gate.outputs.ready == 'true'
         uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: -Dsonar.projectVersion=${{ steps.ver.outputs.v }}
+
+      # WHICH CONDITION FAILED -- because the scanner will not say.
+      #
+      # Its entire failure message is a verdict and a link:
+      #
+      #     ERROR QUALITY GATE STATUS: FAILED - View details on https://sonarcloud.io/...
+      #
+      # main's gate has now been red on every CI analysis since the swap away
+      # from Automatic Analysis -- fd043cc3, e505af76, f8eb5755, 549b4fc7, four
+      # for four -- and nobody reading those logs could say which condition it
+      # was, because the only place it is rendered is a browser. The runs before
+      # the swap read "success" for a different reason again: SONAR_TOKEN was not
+      # set, so the job took its own no-op path. A green history that means "did
+      # not run" and a red one that will not say why are the same defect from
+      # opposite sides.
+      #
+      # This cannot be answered from outside CI. The project is public, but
+      # api/qualitygates/project_status returns status NONE for a branch to an
+      # unauthenticated caller -- and NONE renders identically to a gate that has
+      # simply not been computed, so an outside reader cannot even tell the
+      # difference between "failing" and "not measured". The token is here, and
+      # only here, so this is where the question gets answered.
+      #
+      # ON EVERY ANALYSIS, not only the failing ones. A number you see only once
+      # it has crossed the line is a number nobody can steer by: new_coverage at
+      # 81 and new_coverage at 96 print the same nothing today, and the first
+      # anyone hears of the difference is a blocked merge. Printing the whole
+      # condition set every time costs one API call and makes the trend legible.
+      #
+      # Deliberately NOT continue-on-error: a step whose whole job is to explain
+      # a failure must never be able to turn one green. If this step itself
+      # breaks, the job stays red and says so.
+      # WHICH CONDITIONS WERE EVALUATED -- because the scanner will not say.
+      #
+      # Its entire failure message is a verdict and a link:
+      #
+      #     ERROR QUALITY GATE STATUS: FAILED - View details on https://sonarcloud.io/...
+      #
+      # main's gate was red on five consecutive CI analyses and nobody reading
+      # those logs could name the metric. The first run that carried this step
+      # answered it in one line: `Quality gate: NONE`, with no conditions at all
+      # -- and then kept answering it, through two attempted fixes, which is the
+      # point of printing it. See sonar-project.properties.
+      #
+      # ON EVERY ANALYSIS, not only failing ones. A number you see only once it
+      # has crossed the line is a number nobody can steer by: new_coverage at 81
+      # and at 96 print the same nothing, and the first anyone hears of the
+      # difference is a blocked merge.
+      #
+      # Deliberately NOT continue-on-error. The earlier version of this comment
+      # said that was to stop the step turning a red job green, which was wrong
+      # and is worth correcting rather than quietly deleting: the scan step has
+      # already failed by then, and no later step can un-fail a job. What it
+      # actually buys is that a BROKEN reporter fails visibly instead of leaving
+      # a gate unread.
+      - name: Which quality gate conditions were evaluated
+        if: ${{ !cancelled() && steps.gate.outputs.ready == 'true' }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          # THE HOST IS A CONSTANT, NOT A LOOKUP.
+          #
+          # This read the endpoint out of .scannerwork/report-task.txt, which the
+          # scanner writes from sonar.host.url. That is a file a pull request can
+          # change: setting sonar.host.url in sonar-project.properties would have
+          # sent this job's Authorization header, carrying a live SONAR_TOKEN, to
+          # whatever host the author chose. Fork pull requests are safe because
+          # GitHub withholds secrets and this job then takes its no-op path --
+          # same-repo branches are not. sonar.projectKey already pins the project
+          # to one service, so there is nothing to discover here.
+          SONAR_API: https://sonarcloud.io
+          SONAR_PROJECT: rainmanjam_polyemesis
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          # A pull request is not a branch as far as this API is concerned.
+          # component_tree answered 404 four times on every PR run -- once per
+          # retry -- so the per-file list, the whole reason that call exists,
+          # has never once appeared on a pull request, which is the only place
+          # anybody is going to act on it. The gate verdict itself was right
+          # throughout, which is why this went unnoticed: the step failed
+          # correctly and silently withheld the list that says what to fix.
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # RUNNER_TEMP, not the workspace and not bare mktemp: the runner clears
+          # it between jobs even when a SIGKILL means the trap never runs, and
+          # gate.json does not belong in a git working tree.
+          tmp="${RUNNER_TEMP:-/tmp}"
+          umask 077
+          cfg=$(mktemp "$tmp/sonar-curl.XXXXXX")
+          gate=$(mktemp "$tmp/sonar-gate.XXXXXX")
+          trap 'rm -f "$cfg" "$gate" "$gate.files"' EXIT
+          printf 'header = "Authorization: Bearer %s"\n' "$SONAR_TOKEN" > "$cfg"
+
+          # -f so an HTTP error is a non-zero exit instead of a body that jq will
+          # mis-parse later; --max-time so a hung connection cannot eat the job's
+          # ceiling and report "cancelled", naming nothing; --retry so a transient
+          # 502 on a green build does not turn it red.
+          api() {
+            curl -sSf --proto '=https' --tlsv1.2 --max-time 30 \
+              --retry 3 --retry-all-errors --retry-delay 5 \
+              -K "$cfg" "$1" -o "$2"
+          }
+
+          report=.scannerwork/report-task.txt
+          if [ ! -f "$report" ]; then
+            # The scan never submitted anything, so the scan step is already red
+            # and there is no verdict in existence to report. Exiting 0 here adds
+            # no second failure for one cause; it does not mask anything.
+            echo "::warning title=No scanner report::$report does not exist, so the scan died before it submitted an analysis. The failure above is the scanner, not the gate."
+            exit 0
+          fi
+
+          task_id=$(sed -n 's/^ceTaskId=//p' "$report")
+          if [ -z "$task_id" ]; then
+            echo "::error title=No ceTaskId::$report exists but names no ceTaskId, so the analysis cannot be located."
+            exit 1
+          fi
+
+          # The scanner already waited for the gate (sonar.qualitygate.wait), so
+          # the task is normally terminal before this runs. The loop is for the
+          # case where it is not; it is short because a long one only delays a
+          # failure nobody can act on.
+          analysis=""
+          for _ in $(seq 1 12); do
+            if ! api "$SONAR_API/api/ce/task?id=$task_id" "$gate"; then
+              echo "::error title=Gate unreadable::the SonarCloud API refused the request for task $task_id. This is an auth, quota or availability failure -- NOT a slow analysis."
+              exit 1
+            fi
+            status=$(jq -r '.task.status // ""' "$gate")
+            case "$status" in
+              SUCCESS) analysis=$(jq -r '.task.analysisId // ""' "$gate"); break ;;
+              FAILED|CANCELED)
+                echo "::error title=Analysis $status::SonarCloud's background task ended $status, so no gate was ever computed."
+                exit 1 ;;
+              "")
+                echo "::error title=Unreadable task status::the API answered for task $task_id without a status field."
+                exit 1 ;;
+            esac
+            sleep 5
+          done
+          if [ -z "$analysis" ]; then
+            echo "::error title=Analysis never finished::the background task was still running after 60s, so the gate could not be read."
+            exit 1
+          fi
+
+          if ! api "$SONAR_API/api/qualitygates/project_status?analysisId=$analysis" "$gate"; then
+            echo "::error title=Gate unreadable::the SonarCloud API refused the quality gate request for analysis $analysis."
+            exit 1
+          fi
+
+          verdict=$(jq -r '.projectStatus.status // "NONE"' "$gate")
+          echo "Quality gate: $verdict"
+          echo
+          # `?` on the iterator: a NONE verdict carries no conditions, and this
+          # step must report that rather than die on a null.
+          jq -r '.projectStatus.conditions[]?
+                 | "\(.status)\t\(.metricKey)\tactual=\(.actualValue)\t\(.comparator // "") \(.errorThreshold)"' "$gate" \
+            | sort | column -t -s "$(printf '\t')"
+          jq -r '.projectStatus.conditions[]? | select(.status=="ERROR")
+                 | "::error title=Quality gate: \(.metricKey)::\(.metricKey) is \(.actualValue), and the gate requires \(.comparator // "" | ascii_downcase) \(.errorThreshold)."' "$gate"
+
+          # AND THEN FAIL ON IT. ::error annotations do not fail a step, so
+          # without this the step printed "Quality gate: ERROR" and exited 0 --
+          # a reporter for a gate, that did not gate. Today the job is red anyway
+          # because sonar.qualitygate.wait makes the scan step red; this is the
+          # half that does not depend on that setting still being there.
+          #
+          # NONE is a failure too, and it is the one main actually hits: a gate
+          # with no conditions evaluated has not passed, it has not been asked.
+          # AND WHEN IT IS COVERAGE, WHICH FILES. `new_coverage is 79.3, the gate
+          # requires lt 80` names the metric and not one line to go and write a
+          # test for -- and the per-file numbers are withheld from an
+          # unauthenticated caller, so nobody outside CI can look them up. The
+          # token is here. Printing the ten worst turns a percentage into a list
+          # of files, which is the difference between a number and a task.
+          if jq -e '.projectStatus.conditions[]? | select(.metricKey=="new_coverage" and .status=="ERROR")' "$gate" >/dev/null; then
+            # pullRequest= on a PR, branch= on a push. Getting this wrong is a
+            # 404, not an empty list, so it reads as "the API is down" rather
+            # than "you asked for the wrong thing".
+            if [ -n "${PR:-}" ]; then scope="pullRequest=$PR"; else scope="branch=$BRANCH"; fi
+            if api "$SONAR_API/api/measures/component_tree?component=$SONAR_PROJECT&$scope&metricKeys=new_uncovered_lines,new_lines_to_cover&qualifiers=FIL&ps=100&s=metric&metricSort=new_uncovered_lines&asc=false" "$gate.files"; then
+              echo
+              # SORTED HERE, not by the API. The request asks for
+              # metricSort=new_uncovered_lines&asc=false and SonarCloud ignores it
+              # for a new-code metric -- the first run of this printed
+              # acme.go, acme_preflight.go, AcrossTheRoom.tsx, alerts.go,
+              # announcement.go, which is alphabetical order wearing the words
+              # "the most". A list that claims a ranking it does not have sends
+              # somebody to write tests for the wrong file, so the sort happens
+              # where it can be relied on.
+              echo "Files carrying the most uncovered new lines:"
+              { printf 'uncovered\tof-new\tfile\n'
+                # `.value // .period.value // .periods[0].value`, and the last two
+              # are the reason this printed a header and no rows on its first
+              # real failure. component_tree returns NEW-CODE measures under a
+              # period rather than a bare value, so filtering on `.value != null`
+              # skipped every row -- and the output then read as "no file has
+              # uncovered new lines" beside a new_coverage of 79.3. A reporter
+              # that answers confidently with nothing is worse than one that does
+              # not run, which is the defect this whole step exists to remove.
+              jq -r '.components[]?
+                     | (reduce (.measures[]?) as $m ({};
+                         .[$m.metric] = ($m.value // $m.period.value // ($m.periods[0]?.value)))) as $v
+                     | select(($v.new_uncovered_lines // "0") != "0")
+                     | "\($v.new_uncovered_lines)\t\($v.new_lines_to_cover)\t\(.path)"' "$gate.files" \
+                  | sort -t "$(printf '\t')" -k1,1nr | head -10
+              } | column -t -s "$(printf '\t')"
+              if ! jq -e '[.components[]? | .measures[]?
+                           | select(.metric == "new_uncovered_lines")
+                           | (.value // .period.value // (.periods[0]?.value) // "0")
+                           | select(. != "0" and . != 0)] | length > 0' "$gate.files" >/dev/null; then
+                echo "  (the API returned no per-file uncovered-line counts -- the list above is empty because nothing came back, NOT because every file is covered)"
+              fi
+            fi
+            rm -f "$gate.files"
+          fi
+
+          if [ "$verdict" = "NONE" ]; then
+            echo "::error title=Quality gate NONE::no condition was evaluated at all -- the gate did not pass, it was never asked. The branch has no new-code baseline, and that is the project's New Code definition in SonarCloud (Administration > New Code), which is a setting and not anything in this repository. See sonar-project.properties."
+            exit 1
+          fi
+          if [ "$verdict" != "OK" ]; then
+            echo "::error title=Quality gate $verdict::the gate did not pass; the failing conditions are listed above."
+            exit 1
+          fi
 
       - name: Nothing to do
         if: steps.gate.outputs.ready != 'true'
