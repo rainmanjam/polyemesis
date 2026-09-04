@@ -282,6 +282,7 @@ type SilenceStatus struct {
 
 // Silence returns the tier's live state, or nil when there is none.
 func (e *Engine) Silence() *SilenceStatus {
+	e.requireEngine("Silence")
 	e.mu.RLock()
 	t := e.silence
 	e.mu.RUnlock()

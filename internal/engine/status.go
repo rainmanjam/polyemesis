@@ -258,6 +258,7 @@ func procStatus(p *supervisor.Process) *supervisor.Status {
 // an encode, and the one an operator acts on is whichever they opened.
 // reconcileOutputs has always used the scoped sibling ten lines from here.
 func (e *Engine) Renditions() []RenditionStatus {
+	e.requireEngine("Renditions")
 	rows, err := e.store.ListRenditionsBySource(e.sourceID)
 	if err != nil {
 		return []RenditionStatus{}

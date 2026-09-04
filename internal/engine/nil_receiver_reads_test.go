@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -234,5 +235,67 @@ func TestANilEngineStatusSerialisesBothSlicesAsEmptyArrays(t *testing.T) {
 			t.Errorf("zero-source Status carried %s, which the TypeScript type says "+
 				"cannot happen: %s", bad, body)
 		}
+	}
+}
+
+// panicValueOnNil returns what a method panicked WITH, rather than only whether
+// it panicked.
+func panicValueOnNil(m reflect.Method) (v any) {
+	defer func() { v = recover() }()
+	m.Func.Call([]reflect.Value{reflect.ValueOf((*Engine)(nil))})
+	return nil
+}
+
+// THE REFUSALS MUST BE SOFTWARE PANICS, NOT HARDWARE FAULTS. #440.
+//
+// The test above asks whether each method panics, and a nil dereference panics
+// too -- so it passed for the entire time these methods were faulting rather
+// than refusing, and could never have told the two apart.
+//
+// The difference is not cosmetic on Windows. A hardware nil check raises a real
+// EXCEPTION_ACCESS_VIOLATION, and Go's recovery from one writes below the
+// goroutine's stack into the adjacent heap span: golang/go#81238, open. The
+// damage surfaces later and elsewhere -- `found pointer to free object`,
+// `s.allocCount != s.nelems`, a fault inside the collector -- which is fifteen
+// Windows CI aborts in 1,607 runs, always in this package, never on Unix,
+// because Unix delivers signals on a signal stack and never on the goroutine's.
+// This test's own sibling above is what took the fault, on every run.
+//
+// A runtime.Error here means the guard is gone and the hardware path is back.
+// That is invisible in every other way: the method still panics, the contract
+// test still passes, and CI goes on corrupting a heap roughly once in ninety
+// runs on whichever host draws the short straw.
+func TestEveryRefusalIsASoftwarePanicRatherThanANilDereference(t *testing.T) {
+	var checked int
+	for _, m := range argumentlessEngineMethods() {
+		answers, classified := nilEngineAnswers[m.Name]
+		if !classified || answers {
+			continue
+		}
+		checked++
+		v := panicValueOnNil(m)
+		if v == nil {
+			t.Errorf("%s did not panic on a nil receiver at all", m.Name)
+			continue
+		}
+		if _, isRuntime := v.(runtime.Error); isRuntime {
+			t.Errorf("%s panicked with a runtime.Error (%v), which means it "+
+				"DEREFERENCED the nil receiver rather than refusing it. On Windows that "+
+				"is an EXCEPTION_ACCESS_VIOLATION whose recovery writes below the "+
+				"goroutine stack and corrupts the heap (golang/go#81238). Add "+
+				"e.requireEngine(%q) as the method's first statement.", m.Name, v, m.Name)
+			continue
+		}
+		s, ok := v.(string)
+		if !ok || !strings.Contains(s, m.Name) {
+			t.Errorf("%s panicked with %#v; want a string naming the method, so an "+
+				"operator reading a 500 knows which call refused", m.Name, v)
+		}
+	}
+	// A floor, because a classification table that stopped matching the method
+	// set would make every assertion above run zero times and report success.
+	if checked < 15 {
+		t.Fatalf("only %d refusing methods were checked; nilEngineAnswers has "+
+			"drifted from the method set and this test is now vacuous", checked)
 	}
 }

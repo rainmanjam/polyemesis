@@ -398,6 +398,7 @@ func (e *Engine) noteReload(tier, name, action, reason string) {
 // about what moved, which is more useful than a per-caller fiction, but it is
 // not a per-request audit log and must not be read as one.
 func (e *Engine) LastReload() ReloadReport {
+	e.requireEngine("LastReload")
 	rep := e.lastReload.Load()
 	if rep == nil {
 		return ReloadReport{SourceID: e.sourceID, SourceName: e.SourceName()}
