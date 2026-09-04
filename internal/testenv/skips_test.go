@@ -1,8 +1,10 @@
 package testenv_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -204,31 +206,131 @@ func TestNoNewBareSkipCanLand(t *testing.T) {
 	}
 }
 
+// censusKeysOwnedByTheWriter are the only two the regenerator computes. Every
+// other key in the file belongs to whoever hand-edited it, and is carried
+// through untouched -- see nextCensusFile.
+var censusKeysOwnedByTheWriter = map[string]bool{"total": true, "byPackage": true}
+
+// nextCensusFile rewrites only the keys the regenerator owns and preserves
+// everything else, in its original order.
+//
+// #697. This used to unmarshal into skipCensus, build a FRESH one, and marshal
+// that -- so every key the struct does not declare was silently dropped. The
+// file records its own history in seven of them (raisedBy, loweredBy,
+// raisedBy2, raisedBy3, loweredBy2, raisedBy4, raisedBy5 -- the numbering is
+// what happens when a hand edit has nowhere obvious to append), and the ratchet
+// message tells an author to run -update-skips. Following that instruction
+// deleted 142 of the file's 166 lines: every justification for every previous
+// raise, on the one file whose entire purpose is to make raises reviewable.
+//
+// It does NOT know the history schema, deliberately. "Preserve every key I do
+// not own" is the rule that stays correct when the eighth history key appears,
+// and a fix that carried `raisedBy` by name would have dropped the other six.
+//
+// Order is preserved because this file is read in diffs. A map would reorder it
+// on every regeneration and bury the two lines that actually changed.
+func nextCensusFile(prevRaw []byte, note string, total int, byPackage map[string]int) ([]byte, error) {
+	fields := map[string]json.RawMessage{}
+	var order []string
+	if len(prevRaw) > 0 {
+		if err := json.Unmarshal(prevRaw, &fields); err != nil {
+			return nil, fmt.Errorf("parse the existing census: %w", err)
+		}
+		// encoding/json gives no key order, so it is read back off the token
+		// stream. A file this is asked to rewrite has been hand-edited, and
+		// reordering somebody's hand edit is its own small betrayal.
+		dec := json.NewDecoder(bytes.NewReader(prevRaw))
+		if _, err := dec.Token(); err != nil { // opening brace
+			return nil, err
+		}
+		for dec.More() {
+			tok, err := dec.Token()
+			if err != nil {
+				return nil, err
+			}
+			key, ok := tok.(string)
+			if !ok {
+				return nil, fmt.Errorf("census key is %T, not a string", tok)
+			}
+			order = append(order, key)
+			var skip json.RawMessage
+			if err := dec.Decode(&skip); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	set := func(k string, v any) error {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		if _, seen := fields[k]; !seen {
+			order = append(order, k)
+		}
+		fields[k] = b
+		return nil
+	}
+	if _, seen := fields["note"]; !seen {
+		if err := set("note", note); err != nil {
+			return nil, err
+		}
+	}
+	if err := set("total", total); err != nil {
+		return nil, err
+	}
+	if err := set("byPackage", byPackage); err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("{\n")
+	for i, k := range order {
+		kb, err := json.Marshal(k)
+		if err != nil {
+			return nil, err
+		}
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, fields[k], "  ", "  "); err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(&buf, "  %s: %s", kb, pretty.String())
+		if i < len(order)-1 {
+			buf.WriteString(",")
+		}
+		buf.WriteString("\n")
+	}
+	buf.WriteString("}")
+	return buf.Bytes(), nil
+}
+
 func writeSkipCensus(t *testing.T, skips map[string]int, total int) {
 	t.Helper()
 	prev := skipCensus{Total: 1 << 30, ByImport: map[string]int{}}
-	if b, err := os.ReadFile(skipsPath); err == nil {
-		_ = json.Unmarshal(b, &prev)
+	prevRaw, readErr := os.ReadFile(skipsPath)
+	if readErr == nil {
+		_ = json.Unmarshal(prevRaw, &prev)
+	} else {
+		prevRaw = nil
 	}
-	out := skipCensus{
-		Note: "t.Skip/Skipf/SkipNow call sites per package, outside internal/testenv. " +
-			"A COUNT rather than a per-site registry: a registry needs an entry for " +
-			"every one of these, most of which are honest environmental skips, and a " +
-			"list that long becomes a rubber stamp. This can only fall on regeneration; " +
-			"raising it is a hand edit of this file.",
-		Total:    min(total, prev.Total),
-		ByImport: map[string]int{},
-	}
+	byPkg := map[string]int{}
 	for pkg, n := range skips {
 		if p, ok := prev.ByImport[pkg]; ok {
 			n = min(n, p)
 		}
-		out.ByImport[pkg] = n
+		byPkg[pkg] = n
 	}
-	b, err := json.MarshalIndent(out, "", "  ")
+	b, err := nextCensusFile(prevRaw,
+		"t.Skip/Skipf/SkipNow call sites per package, outside internal/testenv. "+
+			"A COUNT rather than a per-site registry: a registry needs an entry for "+
+			"every one of these, most of which are honest environmental skips, and a "+
+			"list that long becomes a rubber stamp. This can only fall on regeneration; "+
+			"raising it is a hand edit of this file.",
+		min(total, prev.Total), byPkg)
 	if err != nil {
-		t.Fatalf("marshal: %v", err)
+		t.Fatalf("build census: %v", err)
 	}
+	out := skipCensus{Total: min(total, prev.Total)}
 	if err := os.MkdirAll(filepath.Dir(skipsPath), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -273,5 +375,114 @@ func TestEveryQuarantineIsLiveAndEnumerated(t *testing.T) {
 				"row, the ceiling comes down with it -- or it was deleted, in which "+
 				"case say so.", e.ID)
 		}
+	}
+}
+
+// #697. The ratchet's own failure message tells an author to regenerate with
+// -update-skips. Following that instruction used to delete 142 of this file's
+// 166 lines: every justification for every previous raise, on the one file
+// whose entire purpose is to make raises reviewable.
+//
+// The cause was that writeSkipCensus unmarshalled into skipCensus, built a
+// FRESH one and marshalled that, so every key the struct does not declare was
+// dropped. The file carries its history in seven of them -- raisedBy,
+// loweredBy, raisedBy2, raisedBy3, loweredBy2, raisedBy4, raisedBy5, the
+// numbering being what happens when a hand edit has nowhere obvious to append.
+//
+// So the property under test is deliberately NOT "raisedBy survives". A fix
+// that carried that one key by name would have dropped the other six and
+// passed a test written about it. The property is that the regenerator
+// preserves every key it does not own.
+func TestRegeneratingTheCensusKeepsEveryKeyItDoesNotOwn(t *testing.T) {
+	before := []byte(`{
+  "note": "the note",
+  "raisedBy": [
+    {"pr": 118, "why": "environmental, and the reason is the whole point"}
+  ],
+  "loweredBy2": ["something a hand edit invented"],
+  "total": 100,
+  "byPackage": {
+    "internal/api": 4
+  },
+  "raisedBy5": {"pr": 696, "why": "a later hand edit, after the owned keys"}
+}`)
+
+	got, err := nextCensusFile(before, "a fresh note", 97, map[string]int{"internal/api": 3})
+	if err != nil {
+		t.Fatalf("nextCensusFile: %v", err)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(got, &fields); err != nil {
+		t.Fatalf("the regenerated census is not valid JSON: %v\n%s", err, got)
+	}
+
+	for _, k := range []string{"raisedBy", "loweredBy2", "raisedBy5"} {
+		if _, ok := fields[k]; !ok {
+			t.Errorf("%q was dropped. That key is somebody's record of why a raise was "+
+				"allowed, and regeneration is advertised in the ratchet's own failure "+
+				"message -- so dropping it destroys the audit trail at the exact moment "+
+				"an author is being told to run this.\n%s", k, got)
+		}
+	}
+	if s := string(fields["raisedBy"]); !strings.Contains(s, "the whole point") {
+		t.Errorf("raisedBy survived as a key but lost its contents: %s", s)
+	}
+
+	// The two it DOES own are rewritten.
+	var total int
+	if err := json.Unmarshal(fields["total"], &total); err != nil || total != 97 {
+		t.Errorf("total = %v (err %v), want 97 -- the regenerator must still do its job", total, err)
+	}
+	var byPkg map[string]int
+	if err := json.Unmarshal(fields["byPackage"], &byPkg); err != nil || byPkg["internal/api"] != 3 {
+		t.Errorf("byPackage = %v (err %v), want internal/api:3", byPkg, err)
+	}
+	// An existing note is left alone: it is prose somebody may have edited.
+	var note string
+	_ = json.Unmarshal(fields["note"], &note)
+	if note != "the note" {
+		t.Errorf("note = %q, want the existing one preserved", note)
+	}
+
+	// ORDER, because this file is read in diffs. Reordering it on every
+	// regeneration buries the two lines that actually changed under a rewrite
+	// of the whole file -- which is how the original bug stayed invisible.
+	want := []string{"note", "raisedBy", "loweredBy2", "total", "byPackage", "raisedBy5"}
+	var order []string
+	dec := json.NewDecoder(bytes.NewReader(got))
+	if _, err := dec.Token(); err != nil {
+		t.Fatal(err)
+	}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			t.Fatal(err)
+		}
+		order = append(order, tok.(string))
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Errorf("key order = %v, want %v", order, want)
+	}
+}
+
+func TestRegeneratingAnAbsentCensusStillWritesOne(t *testing.T) {
+	// The bootstrap path the ratchet's message names: "Run ... -update-skips to
+	// create it." With no previous file there is nothing to preserve, and the
+	// note has to come from the caller rather than from a file that is not there.
+	got, err := nextCensusFile(nil, "the fresh note", 12, map[string]int{"internal/db": 2})
+	if err != nil {
+		t.Fatalf("nextCensusFile on an absent census: %v", err)
+	}
+	var c skipCensus
+	if err := json.Unmarshal(got, &c); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, got)
+	}
+	if c.Total != 12 || c.ByImport["internal/db"] != 2 || c.Note != "the fresh note" {
+		t.Fatalf("bootstrap census is %+v", c)
 	}
 }
