@@ -1731,7 +1731,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	// about to fill takes the database and the preview down with it.
 	if !s.Recording.Enabled || !e.recman.RecordingAllowed() {
 		if cur != nil {
-			e.stopAux(&e.recorder, "recorder")
+			e.stopAux(auxRecorder)
 		}
 		return
 	}
@@ -1743,7 +1743,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		return
 	}
 	if cur != nil {
-		e.stopAux(&e.recorder, "recorder")
+		e.stopAux(auxRecorder)
 	}
 
 	if err := os.MkdirAll(e.cfg.RecordingsDir(), 0o755); err != nil {
@@ -2105,7 +2105,7 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 
 // stopPreviewLocked tears the encoder down. The caller must hold previewMu.
 func (e *Engine) stopPreviewLocked() {
-	e.stopAux(&e.preview, "preview")
+	e.stopAux(auxPreview)
 	// The playlist left behind would be served to the next viewer, pointing at
 	// segments the next start is about to delete. Scoped to THIS source: while
 	// it cleared the shared directory, an engine tearing down took the live
@@ -2189,7 +2189,7 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 
 	if !s.Meters.Enabled || len(src.Tracks) == 0 || !known {
 		if cur != nil {
-			e.stopAux(&e.meters, "meters")
+			e.stopAux(auxMeters)
 		}
 		return
 	}
@@ -2207,7 +2207,7 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 		return
 	}
 	if cur != nil {
-		e.stopAux(&e.meters, "meters")
+		e.stopAux(auxMeters)
 	}
 
 	port, err := e.alloc.Allocate()
@@ -3048,8 +3048,69 @@ func (e *Engine) teardownRendition(r *rendition) {
 	}
 }
 
-func (e *Engine) stopAux(slot **supervisor.Process, name string) {
+// auxSlot names one auxiliary child completely: its process slot, its port, its
+// signature, its hub, and the subscriber name it registered under.
+//
+// #714. stopAux used to take (slot, name) as two arguments and recover the rest
+// from a `switch name`. Two mistakes were available in that shape and both were
+// silent:
+//
+//   - e.stopAux(&e.preview, "recorder") compiles and reads correctly. It stops
+//     the preview, releases the RECORDER's port, unsubscribes "recorder" from
+//     the ingest hub rather than the preview's, and leaks the preview's port
+//     and subscription for ever.
+//   - the switch had no default, so a fourth consumer left port == 0, skipped
+//     the release, never cleared its signature, and left reconcile believing
+//     the child was still running. Nothing failed and nothing logged.
+//
+// One argument means there is no second argument to mismatch, and a value per
+// consumer means there is no switch to fall through. That is the whole device.
+//
+// This also brings the three aux consumers into line with every other
+// subscriber in the package: destinations, renditions, feeds, silence,
+// loudness, clips, captions and playout all store their name at subscribe time
+// and reuse the STORED value at teardown. Recorder, preview and meters were the
+// only three recomputing a bare string literal, and they were exactly the three
+// routed through the switch.
+type auxSlot struct {
+	name string
+	proc func(*Engine) **supervisor.Process
+	port func(*Engine) *int
+	sig  func(*Engine) *string
+	// hub is the consumer's own hub pointer, or nil when it always reads the
+	// ingest hub. The preview and meters read whichever tier is on air, so both
+	// must unsubscribe from the hub they actually JOINED -- unsubscribing from
+	// e.hub instead leaves a live subscription on a selector hub that is about
+	// to close.
+	hub func(*Engine) **relay.Hub
+}
+
+var (
+	auxRecorder = auxSlot{
+		name: "recorder",
+		proc: func(e *Engine) **supervisor.Process { return &e.recorder },
+		port: func(e *Engine) *int { return &e.recorderPort },
+		sig:  func(e *Engine) *string { return &e.recorderSig },
+	}
+	auxPreview = auxSlot{
+		name: "preview",
+		proc: func(e *Engine) **supervisor.Process { return &e.preview },
+		port: func(e *Engine) *int { return &e.previewPort },
+		sig:  func(e *Engine) *string { return &e.previewSig },
+		hub:  func(e *Engine) **relay.Hub { return &e.previewHub },
+	}
+	auxMeters = auxSlot{
+		name: "meters",
+		proc: func(e *Engine) **supervisor.Process { return &e.meters },
+		port: func(e *Engine) *int { return &e.metersPort },
+		sig:  func(e *Engine) *string { return &e.metersSig },
+		hub:  func(e *Engine) **relay.Hub { return &e.metersHub },
+	}
+)
+
+func (e *Engine) stopAux(a auxSlot) {
 	e.mu.Lock()
+	slot := a.proc(e)
 	proc := *slot
 	*slot = nil
 	var port int
@@ -3058,21 +3119,14 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 	// the hub they actually JOINED -- unsubscribing from e.hub instead leaves a
 	// live subscription on a selector hub that is about to close.
 	hub := e.hub
-	switch name {
-	case "recorder":
-		port, e.recorderPort = e.recorderPort, 0
-		e.recorderSig = ""
-	case "preview":
-		port, e.previewPort = e.previewPort, 0
-		e.previewSig = ""
-		if e.previewHub != nil {
-			hub, e.previewHub = e.previewHub, nil
-		}
-	case "meters":
-		port, e.metersPort = e.metersPort, 0
-		e.metersSig = ""
-		if e.metersHub != nil {
-			hub, e.metersHub = e.metersHub, nil
+	{
+		pp := a.port(e)
+		port, *pp = *pp, 0
+		*a.sig(e) = ""
+		if a.hub != nil {
+			if hp := a.hub(e); *hp != nil {
+				hub, *hp = *hp, nil
+			}
 		}
 	}
 	e.mu.Unlock()
@@ -3082,7 +3136,7 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 		_ = proc.Stop(ctx)
 		cancel()
 	}
-	hub.Unsubscribe(name)
+	hub.Unsubscribe(a.name)
 	if port != 0 {
 		e.alloc.Release(port)
 	}

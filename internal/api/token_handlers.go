@@ -129,7 +129,6 @@ func (s *Server) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request) {
 	// This is the only writer of the revoked set, and it is the reason
 	// DeleteAPIToken having exactly one call site was worth checking: a second
 	// deletion path that did not do this would be a silent hole.
-	s.markRevoked(id)
 	s.log.Info("api token revoked", "id", id)
 	s.publishAudit(auditAPITokenRevoked(name, s.clientIP(r)))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})

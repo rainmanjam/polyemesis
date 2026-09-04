@@ -417,22 +417,25 @@ func TestANilChildEndsOneTeardownRatherThanTheWholeReconcile(t *testing.T) {
 // Clearing the wrong one leaks the right one and cycles a healthy child.
 func TestStoppingOneAuxiliaryChildClearsOnlyItsOwnPortAndSignature(t *testing.T) {
 	type slot struct {
-		name string
-		of   func(*Engine) **supervisor.Process
+		aux  auxSlot
 		port func(*Engine) int
 		sig  func(*Engine) string
 	}
+	// AGAINST THE PRODUCTION SLOTS, not a parallel list. #714.
+	//
+	// This table used to carry its own copy of the recorder/preview/meters
+	// correspondence -- which is the same duplication the production switch
+	// had, and would have gone on passing if the two drifted apart. Naming the
+	// real auxSlot values means a fourth consumer added to production without a
+	// row here is a compile error at `aux`, not a silently unexercised path.
 	slots := []slot{
-		{"recorder", func(e *Engine) **supervisor.Process { return &e.recorder },
-			func(e *Engine) int { return e.recorderPort }, func(e *Engine) string { return e.recorderSig }},
-		{"preview", func(e *Engine) **supervisor.Process { return &e.preview },
-			func(e *Engine) int { return e.previewPort }, func(e *Engine) string { return e.previewSig }},
-		{"meters", func(e *Engine) **supervisor.Process { return &e.meters },
-			func(e *Engine) int { return e.metersPort }, func(e *Engine) string { return e.metersSig }},
+		{auxRecorder, func(e *Engine) int { return e.recorderPort }, func(e *Engine) string { return e.recorderSig }},
+		{auxPreview, func(e *Engine) int { return e.previewPort }, func(e *Engine) string { return e.previewSig }},
+		{auxMeters, func(e *Engine) int { return e.metersPort }, func(e *Engine) string { return e.metersSig }},
 	}
 
 	for _, stopping := range slots {
-		t.Run(stopping.name, func(t *testing.T) {
+		t.Run(stopping.aux.name, func(t *testing.T) {
 			e := lifeEngine(t)
 			// Three ports and no spare: a released port is the ONLY one
 			// Allocate can return afterwards, which is what identifies it.
@@ -452,56 +455,56 @@ func TestStoppingOneAuxiliaryChildClearsOnlyItsOwnPortAndSignature(t *testing.T)
 			e.alloc = relay.NewPortAllocator(base, 3)
 			ports := map[string]int{}
 			for _, s := range slots {
-				ports[s.name] = mustAllocate(t, e.alloc, "reserving "+s.name+"'s port")
-				e.hub.Subscribe(s.name, ports[s.name])
+				ports[s.aux.name] = mustAllocate(t, e.alloc, "reserving "+s.aux.name+"'s port")
+				e.hub.Subscribe(s.aux.name, ports[s.aux.name])
 			}
 			e.recorder, e.preview, e.meters = loudTestProc(), loudTestProc(), loudTestProc()
 			e.recorderPort, e.previewPort, e.metersPort = ports["recorder"], ports["preview"], ports["meters"]
 			e.recorderSig, e.previewSig, e.metersSig = "rec-sig", "prev-sig", "met-sig"
 
-			e.stopAux(stopping.of(e), stopping.name)
+			e.stopAux(stopping.aux)
 
-			if got := *stopping.of(e); got != nil {
+			if got := *stopping.aux.proc(e); got != nil {
 				t.Error("the slot still holds a process, so the next reconcile believes " +
 					"the child is running and never starts a replacement")
 			}
 			if got := stopping.port(e); got != 0 {
 				t.Errorf("%s port = %d after stopping it, want 0; the engine will try to "+
-					"release it a second time when the next child takes it", stopping.name, got)
+					"release it a second time when the next child takes it", stopping.aux.name, got)
 			}
 			if got := stopping.sig(e); got != "" {
 				t.Errorf("%s signature = %q after stopping it, want empty; a stale signature "+
-					"makes the next reconcile believe the stopped child is up to date", stopping.name, got)
+					"makes the next reconcile believe the stopped child is up to date", stopping.aux.name, got)
 			}
-			if hasSubscriber(e.hub, stopping.name) {
-				t.Errorf("the hub still forwards to %s after it was stopped", stopping.name)
+			if hasSubscriber(e.hub, stopping.aux.name) {
+				t.Errorf("the hub still forwards to %s after it was stopped", stopping.aux.name)
 			}
 
 			for _, other := range slots {
-				if other.name == stopping.name {
+				if other.aux.name == stopping.aux.name {
 					continue
 				}
-				if *other.of(e) == nil {
-					t.Errorf("stopping %s also cleared %s's process slot", stopping.name, other.name)
+				if *other.aux.proc(e) == nil {
+					t.Errorf("stopping %s also cleared %s's process slot", stopping.aux.name, other.aux.name)
 				}
-				if got := other.port(e); got != ports[other.name] {
+				if got := other.port(e); got != ports[other.aux.name] {
 					t.Errorf("stopping %s changed %s's port to %d, want %d; that child's port "+
 						"is now either leaked or about to be released twice",
-						stopping.name, other.name, got, ports[other.name])
+						stopping.aux.name, other.aux.name, got, ports[other.aux.name])
 				}
 				if other.sig(e) == "" {
 					t.Errorf("stopping %s cleared %s's signature, which cycles a healthy child",
-						stopping.name, other.name)
+						stopping.aux.name, other.aux.name)
 				}
-				if !hasSubscriber(e.hub, other.name) {
-					t.Errorf("stopping %s unsubscribed %s from the hub", stopping.name, other.name)
+				if !hasSubscriber(e.hub, other.aux.name) {
+					t.Errorf("stopping %s unsubscribed %s from the hub", stopping.aux.name, other.aux.name)
 				}
 			}
 
 			// The released port is identifiable because nothing else is free.
-			if got := mustAllocate(t, e.alloc, "after stopping "+stopping.name); got != ports[stopping.name] {
+			if got := mustAllocate(t, e.alloc, "after stopping "+stopping.aux.name); got != ports[stopping.aux.name] {
 				t.Errorf("the allocator handed back port %d, want %d: the wrong port was released",
-					got, ports[stopping.name])
+					got, ports[stopping.aux.name])
 			}
 		})
 	}
@@ -520,7 +523,7 @@ func TestTheMetersSidecarIsUnsubscribedFromTheHubItSubscribedTo(t *testing.T) {
 	e.hub.Subscribe("meters", port) // decoy of the same name on the ingest
 	e.meters, e.metersPort, e.metersSig, e.metersHub = loudTestProc(), port, "met-sig", silenceHub
 
-	e.stopAux(&e.meters, "meters")
+	e.stopAux(auxMeters)
 
 	if hasSubscriber(silenceHub, "meters") {
 		t.Error("the sidecar was not unsubscribed from the relay it was actually reading; " +

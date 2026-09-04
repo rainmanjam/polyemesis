@@ -1117,13 +1117,37 @@ func (p *Process) terminate() {
 	}()
 }
 
+// kill sends SIGKILL to the child's whole process group.
+//
+// THE REAPED-CHECK IS THE POINT. #720. killGroup issues a raw
+// syscall.Kill(-pid, SIGKILL), which names a process GROUP BY NUMBER and
+// bypasses Go's ErrProcessDone guard -- so on a reaped pid it can signal a
+// group this supervisor never started.
+//
+// Its two sibling signal sites each already carry a device for this: terminate
+// has the `signalled` latch, and the escalator has a `<-exited` guard. This one
+// had neither, and rested instead on an ordering argument spanning three
+// functions, written as a comment beside the call it protects. The argument was
+// correct; it was not a device, and the family's other two members did not
+// settle for one.
 func (p *Process) kill() {
 	p.cmdMu.Lock()
-	cmd := p.cmd
+	cmd, exited := p.cmd, p.exited
 	p.cmdMu.Unlock()
-	if cmd != nil {
-		killGroup(cmd)
+	if cmd == nil {
+		return
 	}
+	// Non-blocking: `exited` is closed the instant cmd.Wait() returns for this
+	// cmd, so a closed channel means the pid has been reaped and the number is
+	// no longer ours to signal.
+	if exited != nil {
+		select {
+		case <-exited:
+			return
+		default:
+		}
+	}
+	killGroup(cmd)
 }
 
 func (p *Process) setState(s State, errMsg string) {
