@@ -69,6 +69,11 @@ jobs:
 
       - name: report what is left
         if: always()
+        # Bounded for the same reason ci.yml's smoke report is: an always() step
+        # runs after a failure, when the job is already short of budget, and an
+        # unbounded one turns any hang into a CANCELLED job that reports a
+        # failure naming nothing.
+        timeout-minutes: 3
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

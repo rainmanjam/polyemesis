@@ -1195,6 +1195,22 @@ jobs:
       # and immediately mistaken for the project's coverage.
       - name: Report what the smoke run executed in cmd/polyemesis
         if: always() && needs.changes.outputs.code == 'true'
+        # BOUNDED, because this step says three times over that it is
+        # informational -- always(), "does not fail the job", "informational
+        # only" -- and then took the whole job down twice in one afternoon.
+        #
+        # On windows-latest it hung inside `go tool covdata textfmt` / `go tool
+        # cover` and never returned: measured at 10:49:16 with no completion,
+        # against a normal 1-3 seconds on the same runner. The job hit its
+        # 35-minute ceiling and was CANCELLED, which `gh pr checks` renders as
+        # a failure naming nothing, and the required-check rule then refused
+        # the merge. #694 and #696 both lost a merge to it.
+        #
+        # An informational step that can spend the entire budget is not
+        # informational. Three minutes is sixty times the observed cost and
+        # still bounds the hang; the step's own `exit 0` paths mean a timeout
+        # here costs the report and nothing else.
+        timeout-minutes: 3
         shell: bash
         run: |
           set -uo pipefail

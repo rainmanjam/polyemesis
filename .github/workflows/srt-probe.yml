@@ -80,6 +80,9 @@ jobs:
       # the answer actually lands. Read the four lines under "runtime:".
       - name: What this run showed
         if: always()
+        # Bounded for the same reason ci.yml's smoke report is -- see the comment
+        # there. This one only prints a summary, so three minutes is generous.
+        timeout-minutes: 3
         env:
           POLYEMESIS_SRT_PROBE: "1"
         run: |
