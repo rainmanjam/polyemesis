@@ -441,6 +441,7 @@
   "dest.restarts.hint": "Berapa kali encoder tujuan ini dinyalakan ulang. Di atas nol berarti ia gagal lalu dipulihkan.",
   "dest.retryAfter": "Coba lagi setelah (detik)",
   "dest.sharedEncodeAria": "Enkode video bersama",
+  "dest.renditionConcerns": "Di luar yang dipublikasikan platform ini",
   "dest.socketTimeout": "Batas waktu soket (detik)",
   "dest.source": "Sumber",
   "dest.sourcePlaceholder": "Pilih sebuah program",

@@ -441,6 +441,7 @@
   "dest.restarts.hint": "Wie oft der Encoder dieses Ziels neu gestartet wurde. Über null heißt: er ist ausgefallen und wurde wiederhergestellt.",
   "dest.retryAfter": "Erneut versuchen nach (Sekunden)",
   "dest.sharedEncodeAria": "Gemeinsame Videokodierung",
+  "dest.renditionConcerns": "Außerhalb dessen, was diese Plattform veröffentlicht",
   "dest.socketTimeout": "Socket-Timeout (Sekunden)",
   "dest.source": "Quelle",
   "dest.sourcePlaceholder": "Programm auswählen",

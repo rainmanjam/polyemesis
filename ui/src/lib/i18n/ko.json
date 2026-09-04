@@ -441,6 +441,7 @@
   "dest.restarts.hint": "이 대상의 인코더가 재시작된 횟수. 0보다 크면 죽었다가 복구됐다는 뜻입니다.",
   "dest.retryAfter": "재시도 간격 (초)",
   "dest.sharedEncodeAria": "공유 영상 인코드",
+  "dest.renditionConcerns": "이 플랫폼이 공개한 범위를 벗어납니다",
   "dest.socketTimeout": "소켓 시간 초과 (초)",
   "dest.source": "소스",
   "dest.sourcePlaceholder": "프로그램 선택",

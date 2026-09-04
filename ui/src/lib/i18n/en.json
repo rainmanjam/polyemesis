@@ -441,6 +441,7 @@
   "dest.restarts.hint": "How many times this destination's encoder has been restarted. Above zero means it failed and was brought back.",
   "dest.retryAfter": "Retry after (seconds)",
   "dest.sharedEncodeAria": "Shared video encode",
+  "dest.renditionConcerns": "Outside what this platform publishes",
   "dest.socketTimeout": "Socket timeout (seconds)",
   "dest.source": "Source",
   "dest.sourcePlaceholder": "Choose a programme",
