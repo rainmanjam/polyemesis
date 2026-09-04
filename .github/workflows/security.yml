@@ -31,13 +31,18 @@
 # reader who sees it report on every commit is entitled to assume it is part
 # of the gate, and it is not.
 #
-# THE FIX THAT IS NOT HERE. Socket reads a `socket.yml` at the REPOSITORY
-# ROOT -- not from .github/ -- which is where its issueRules, triggerPaths and
-# githubApp settings become reviewable in a pull request instead of being a
-# dashboard state nobody can diff. That file does not exist yet. Until it
-# does, this comment is the whole of what the repository says about a check it
-# publishes on every commit, and a comment is not a device: it makes the gap
-# announced, not closed.
+# HALF FIXED, AND THE HALF THAT IS NOT. `socket.yml` now exists at the
+# REPOSITORY ROOT -- not .github/ -- so its issueRules, triggerPaths and
+# githubApp settings are reviewable in a pull request instead of being a
+# dashboard state nobody can diff. Read it: it says which manifests trigger an
+# alert and which alerts are on, and turning one off is now a diff somebody has
+# to justify.
+#
+# WHAT IS STILL TRUE: Socket gates nothing. A red Socket report does not block a
+# merge, because its check is not a required status context on main -- a
+# repository setting, not a file, and one that would have to be mirrored in
+# .github/required-checks.txt to be visible from here. So the sentence above
+# stands for the gate even though the configuration is no longer invisible.
 # ---------------------------------------------------------------------------
 name: security
 
@@ -60,8 +65,14 @@ concurrency:
   group: security-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+# LEAST PRIVILEGE, PER JOB. This was `contents: read` at the workflow level,
+# which grants it to every job whether or not the job reads the repository --
+# Sonar's githubactions:S8264. `{}` here means a job that declares nothing gets
+# NOTHING, so a new job cannot inherit a token by being added; it has to ask.
+# Each job below states what it needs, and `contents: read` is all any of them
+# needs: nothing in this file writes to the repository, opens an issue, or
+# pushes a package.
+permissions: {}
 
 jobs:
   # Go dependency vulnerabilities, filtered by reachability. govulncheck is the
@@ -69,6 +80,8 @@ jobs:
   # actually CALLS, so an advisory against a package you import but never reach
   # does not become a ticket nobody can action.
   govulncheck:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # A ceiling, because GitHub's default is SIX HOURS -- and this workflow
     # runs on every push and pull request, so it is the one most likely to be
@@ -151,34 +164,104 @@ jobs:
   # dependabot.yml between them cover every package-lock.json in the tree, so a
   # third one cannot arrive unaudited the way the second did.
   npm-audit:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # See the note on the govulncheck job for why ten, for all four jobs here.
     # This one's single point of stall is the npm registry, during `npm ci`.
-    timeout-minutes: 10
+    # 15, not 10: a registry outage slows `npm ci` as well as the audit, and a
+    # job cancelled at its ceiling reports nothing. Better a job that finishes
+    # and says "NOT audited" than one the runner kills mid-sentence.
+    timeout-minutes: 15
     strategy:
       # Both answers are wanted when both are red.
       fail-fast: false
       matrix:
         project: [ui, web]
-    defaults:
-      run:
-        working-directory: ${{ matrix.project }}
+    # NO working-directory, NO setup-node, NO `npm ci`. osv-scanner reads the
+    # lockfile as a FILE; it does not need node, a registry, or an installed
+    # tree. Dropping the install removes the step that took 58 seconds on a good
+    # day and five minutes during the 503s, and removes a real supply-chain
+    # surface with it: this job no longer runs `npm ci` on a runner at all.
+    #
+    # Paths below are therefore relative to the repository root, which is also
+    # why the working-directory default had to go -- with it, the matrix entry
+    # would have resolved as ui/ui/package-lock.json, and osv-scanner exits 0 on
+    # a path it cannot resolve. That would have passed as a clean audit.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: ${{ matrix.project }}/package-lock.json
-      # --ignore-scripts: this job never builds anything, it only needs the
-      # resolved dependency tree for `npm audit`. Running install lifecycle
-      # scripts would execute code from every package in that tree on a runner,
-      # which is a real supply-chain path and buys nothing here.
-      - run: npm ci --ignore-scripts
-      # Production dependencies only. A moderate advisory in a build-time dev
-      # dependency does not ship to anybody, and treating it as urgent is how a
-      # team learns to pass --force.
-      - run: npm audit --omit=dev --audit-level=high
+
+      - name: Install osv-scanner (pinned, checksummed)
+        env:
+          OSV_VERSION: 2.5.1
+          OSV_SHA256: f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be
+        run: |
+          set -euo pipefail
+          curl -sSfL --proto '=https' --tlsv1.2 \
+            --retry 3 --retry-all-errors --retry-delay 5 --max-time 120 \
+            -o osv-scanner \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SHA256}  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+          sudo mv osv-scanner /usr/local/bin/osv-scanner
+          osv-scanner --version
+
+      # THE GUARD ON THE GUARD, AND IT IS NOT DECORATION.
+      #
+      # A scanner that has gone blind reports a clean tree, which is
+      # indistinguishable from a clean tree. This plants a lockfile pinning
+      # lodash 4.17.15 and minimist 1.2.5 -- five published advisories between
+      # them, one of them 9.8 -- and FAILS THE JOB if the scanner does not see
+      # them. Every run, before the real scan, so "no issues found" below is a
+      # measurement rather than a hope.
+      #
+      # The gitleaks job on this workflow plants a secret every run for exactly
+      # this reason. Same argument, different scanner.
+      - name: Prove the scanner can still see
+        run: |
+          set -euo pipefail
+          d=$(mktemp -d)
+          cat > "$d/package-lock.json" <<'CONTROL'
+          {
+            "name": "control", "version": "1.0.0", "lockfileVersion": 3, "requires": true,
+            "packages": {
+              "": { "name": "control", "version": "1.0.0", "dependencies": { "minimist": "1.2.5", "lodash": "4.17.15" } },
+              "node_modules/minimist": { "version": "1.2.5", "resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.5.tgz" },
+              "node_modules/lodash": { "version": "4.17.15", "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.15.tgz" }
+            }
+          }
+          CONTROL
+          if osv-scanner scan source --lockfile "$d/package-lock.json" > "$d/out" 2>&1; then
+            cat "$d/out"
+            echo "::error title=Scanner is blind::the positive control reported NO vulnerabilities for lodash 4.17.15 and minimist 1.2.5, which carry five published advisories including a 9.8. Whatever this job says about the real lockfiles below is worthless -- it is not a clean bill of health, it is a scanner that cannot see."
+            exit 1
+          fi
+          echo "positive control: the scanner still detects known-vulnerable packages"
+
+      # AND THE SCAN HAS TO HAVE READ SOMETHING.
+      #
+      # osv-scanner exits 0 when the lockfile does not exist -- it prints
+      # "failed to resolve path" to stderr and succeeds. A typo, a moved file or
+      # a renamed directory would therefore pass this job silently, which is the
+      # same defect as a blind scanner wearing different clothes. So the package
+      # count is read back and a scan that found nothing to scan is a failure.
+      - name: Audit ${{ matrix.project }}
+        run: |
+          set -uo pipefail
+          out=$(osv-scanner scan source --lockfile "${{ matrix.project }}/package-lock.json" 2>&1); rc=$?
+          printf '%s\n' "$out"
+          if ! printf '%s' "$out" | grep -qE 'Scanned .*package-lock\.json file and found [0-9]+ packages'; then
+            echo "::error title=Nothing was scanned::osv-scanner did not report reading ${{ matrix.project }}/package-lock.json. It exits 0 when the path does not resolve, so this would otherwise pass as a clean audit."
+            exit 1
+          fi
+          if printf '%s' "$out" | grep -qE 'found 0 packages'; then
+            echo "::error title=Empty lockfile::${{ matrix.project }}/package-lock.json resolved but contains no packages. A tree with nothing in it is not an audited tree."
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Vulnerable dependencies::osv-scanner found known vulnerabilities in ${{ matrix.project }}. This is a finding, not an outage -- the advisories are listed above with their fixed versions."
+            exit 1
+          fi
 
   # THE CONTEXT BRANCH PROTECTION ASKS FOR, WHICH THE MATRIX STOPPED PRODUCING.
   #
@@ -200,6 +283,8 @@ jobs:
   # the required context would go missing exactly when something is wrong.
   npm-audit-result:
     name: npm-audit
+    permissions:
+      contents: read
     needs: npm-audit
     if: always()
     runs-on: ubuntu-latest
@@ -241,6 +326,8 @@ jobs:
   # Pinning means CI runs the version the config was tested against. The
   # version assertion below is what makes the pin real rather than aspirational.
   gitleaks:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # See the note on the govulncheck job for why ten, for all four jobs here.
     # This one's are the release download below and the `fetch-depth: 0`
@@ -496,6 +583,8 @@ jobs:
 
   # Static analysis.
   semgrep:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # See the note on the govulncheck job for why ten, for all four jobs here.
     # The slowest of the four at 29 to 48 seconds, and it has two stalls

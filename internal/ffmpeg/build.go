@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
@@ -23,7 +25,15 @@ import (
 //     input and silently pause itself
 //   - -loglevel      : warning keeps the log tail useful rather than a firehose
 func commonArgs() []string {
-	return []string{"-hide_banner", "-nostdin", "-loglevel", "warning"}
+	lvl := "warning"
+	// Every child's own log level, raisable without a rebuild. At `debug` the demuxer
+	// reports its PID and PES parsing decisions -- which streams it saw, how
+	// many frames per PID, and why it gave up resolving codec parameters.
+	// Nothing has ever asked the demuxer for its own account of the failure.
+	if v := os.Getenv("POLYEMESIS_FFMPEG_LOGLEVEL"); v != "" {
+		lvl = v
+	}
+	return []string{"-hide_banner", "-nostdin", "-loglevel", lvl}
 }
 
 // progressArgs routes machine-readable stats to stdout, leaving stderr as a
@@ -626,9 +636,39 @@ func IngestArgs(s IngestSpec) []string {
 		"-f", "mpegts",
 		// Without flush_packets the muxer holds partial TS packets, adding
 		// unnecessary latency to a loopback hop that has none to spare.
+		//
+		// IT IS NOT ENOUGH ON ITS OWN, and believing it was cost #674 a long
+		// investigation. flush_packets flushes the AVIO buffer. It does NOT
+		// touch the INTERLEAVER, which sits in front of it:
+		// av_interleaved_write_frame holds every packet until it has one for
+		// each stream, or until the muxing queue spans max_interleave_delta.
+		// A multitrack FLV ingest whose audio tracks resolve late therefore
+		// writes NOTHING -- video included -- for up to the default 10s, while
+		// out_time climbs and total_size stays at 0. Measured exactly that way
+		// in internal/rtmpserver/ingest_remux_test.go.
+		//
+		// 100ms, NOT 0. Zero is the trap: max_interleave_delta=0 means "buffer
+		// until there is a packet for EVERY stream, however long that takes",
+		// which is the opposite of flushing early and would make the stall
+		// permanent instead of ten seconds. The default is 10000000 (10s); a
+		// small positive value is what forces output regardless. On a loopback
+		// relay 100ms of interleave buffering is already generous.
+		"-max_interleave_delta", "100000",
+		// No initial mux buffering either, for the same loopback reason.
+		"-muxdelay", "0",
+		"-muxpreload", "0",
 		"-flush_packets", "1",
 		RelayOutputURL(s.RelayURL),
 	)
+	// AN IDENTICAL SECOND OUTPUT, TO A FILE, WHEN ASKED FOR.
+	//
+	// Off unless POLYEMESIS_INGEST_CAPTURE names a path. It carries the identical stream to a file, so the bytes the
+	// relay fans out can be examined directly instead of approximated. The hub
+	// copies datagrams verbatim (internal/relay/relay.go fanout), so this file
+	// IS what every destination receives.
+	if dir := os.Getenv("POLYEMESIS_INGEST_CAPTURE"); dir != "" {
+		args = append(args, "-map", "0", "-c", "copy", "-f", "mpegts", dir)
+	}
 	return args
 }
 
@@ -712,12 +752,34 @@ const relayFIFOPackets = 32768
 // memory during a start that would otherwise have failed.
 //
 // 32 MB covers one 2-second GOP -- what OBS ships by default -- up to about
-// 128 Mbit/s, and a 10-second GOP at a comfortable broadcast rate. 15 seconds
-// covers a GOP far longer than anything this product produces.
+// 128 Mbit/s, and a 10-second GOP at a comfortable broadcast rate.
+//
+// 15 seconds covers a GOP far longer than anything this product produces.
+//
+// RAISING THIS DOES NOT FIX #674, and was tried. A destination whose audio the
+// demuxer cannot characterise reports
+//
+//	Could not find codec parameters for stream 1
+//	(Audio: aac ([15][0][0][0] / 0x000F), 0 channels): unspecified sample format
+//
+// at 45s and 32MB exactly as it does at 15s: the parameters are not late, they
+// are absent, so a larger ceiling only buys a longer wait for the same answer.
+// It also REGRESSED a passing case -- acceptance 4d, which publishes fine at
+// 15s, failed at 45s because every destination now spent three times as long
+// probing before giving up, past what the step allows. Left at 15s.
 const (
 	relayProbeSize   = 32 << 20
 	relayProbeWindow = 15 * 1000000 // microseconds
 )
+
+// RelayProbeWindow is relayProbeWindow as a Duration, exported because another
+// package's timer has to outlast it. engine.silentPublishBudget restarts a
+// destination that has published nothing; a destination still inside its own
+// probe has published nothing YET, so a budget at or below this window would
+// make the watchdog kill exactly the starts it exists to rescue. Exported as
+// the number itself so the relationship is asserted rather than restated --
+// see engine.TestTheSilentPublishBudgetOutlastsTheProbeWindow.
+const RelayProbeWindow = relayProbeWindow * time.Microsecond
 
 // RelayInputArgs are the input options every relay consumer needs, and they must
 // come BEFORE the -i they belong to.

@@ -118,10 +118,25 @@ var parityExclusions = []struct {
 	reason string
 }{
 	{
-		re: regexp.MustCompile(`\bnpm audit\b`),
-		reason: "`npm audit --audit-level=high` fails on an advisory published overnight " +
-			"against code you did not touch. That belongs on a gate you can rerun, not " +
-			"between you and a commit.",
+		// Was `\bnpm audit\b`. The command changed and the ARGUMENT did not: this
+		// carve-out is about WHEN advisories appear, not about which tool reports
+		// them. A dependency advisory is published on somebody else's schedule,
+		// against code you did not touch, and can turn a clean `make check` red
+		// between one commit and the next. That belongs on a gate you can rerun
+		// and read, not between you and a commit.
+		//
+		// The exclusion is deliberately anchored on the SCANNER rather than on
+		// "audit", so a future step that merely mentions auditing does not
+		// inherit the pass. The gate itself is real and lives in CI: ci.yml's ui
+		// job and security.yml's npm-audit matrix, the latter carrying a planted
+		// positive control that fails the job if the scanner stops seeing known
+		// vulnerabilities.
+		re: regexp.MustCompile(`\bosv-scanner scan\b`),
+		reason: "an advisory published overnight against code you did not touch would " +
+			"fail `make check` and block an unrelated commit. That belongs on a gate you " +
+			"can rerun, not on the pre-commit loop. Enforced in CI: ci.yml's ui job and " +
+			"security.yml's audit matrix, which plants a known-vulnerable lockfile every " +
+			"run so a scanner that has gone blind fails rather than reporting clean.",
 	},
 }
 

@@ -49,6 +49,20 @@ export interface LiveData {
    *  reappearing after the client was fixed. Gate the control on this, not on
    *  the id. */
   programmeKnown: boolean;
+  /** Whether the FIRST status snapshot has arrived from the socket.
+   *
+   *  Distinct from `status != null` in exactly the way programmeKnown above is
+   *  distinct from `programme != null`, and for the same reason: every consumer
+   *  reads status through `?.`, and `?.` on a null status is indistinguishable
+   *  from a loaded status that holds nothing. A page that draws a CONCLUSION
+   *  from that -- "no destinations yet", "0 kbps", "OFF AIR" -- states as fact
+   *  something it has not been told, and states the opposite a second later
+   *  when the snapshot lands.
+   *
+   *  Gate any decided empty state or zero measurement on this. Chrome, nav and
+   *  anything else known without the server may render immediately; it is only
+   *  claims about the install that have to wait. #663. */
+  snapshotKnown: boolean;
   /** How many programmes this install has.
    *
    *  The console follows ONE at a time and has no switcher, so a page that
@@ -57,6 +71,26 @@ export interface LiveData {
    *  the label carries information — on the single-source install that is the
    *  overwhelming majority, a name that never varies is furniture. */
   sourceCount: number;
+  /** Every programme the server lists, id and name, in the server's display
+   *  order — which is the order resolveProgramme's fallback picks from.
+   *
+   *  #638: sourceCount alone could say "there is more than one" and nothing
+   *  could say WHICH ones, so a switcher was unbuildable without a second
+   *  /sources call and a second copy of the resolution rule. One list, one
+   *  rule, one place.
+   *
+   *  Empty on a fresh install, and empty is not the same as "not yet read" —
+   *  gate on programmeKnown for that, exactly as with programme itself. */
+  programmes: { id: number; name: string }[];
+  /** Follow a different programme, and remember it across reloads.
+   *
+   *  #638: rememberProgramme existed and was called from exactly one place,
+   *  with the value the resolver had just picked — so the console remembered
+   *  its own default forever and an operator had no way to say otherwise. This
+   *  is the missing half. An id the server does not list is ignored rather
+   *  than stored: a remembered ghost produces a 409 on every poll and a dead
+   *  console with nothing to explain it. */
+  selectProgramme: (id: number) => void;
   /** Re-read /sources and re-resolve the programme.
    *
    *  Call after creating or deleting a source. The provider also re-resolves

@@ -989,6 +989,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// compiled-in list, because operators add their own fonts.
 			r.Get("/fonts", s.handleListFonts)
 			r.Get("/renditions/{id}", s.handleGetRendition)
+			// #661: the platform comparison, where the rendition is CHOSEN.
+			// Read-only and query-parameterised because the dialog asks before
+			// the destination exists.
+			r.Get("/renditions/{id}/concerns", s.handleRenditionConcerns)
 			r.With(s.requireSource).Put("/renditions/{id}", s.handleUpdateRendition)
 			r.With(s.requireSource).Delete("/renditions/{id}", s.handleDeleteRendition)
 			r.With(s.requireSource).Post("/renditions/{id}/restart", s.handleRestartRendition)

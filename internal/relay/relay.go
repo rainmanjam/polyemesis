@@ -25,9 +25,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // datagramSize is the largest packet we expect: 1316 bytes of TS payload plus
@@ -60,6 +62,9 @@ type Hub struct {
 	rxBytes   atomic.Uint64
 	txPackets atomic.Uint64
 	dropped   atomic.Uint64
+	// capture is the #674 diagnostic sink; nil unless POLYEMESIS_RELAY_CAPTURE
+	// names a path. Written under deliverMu, so it needs no lock of its own.
+	capture *os.File
 	// empty counts zero-length datagrams swallowed by run. See the comment
 	// there: forwarding one takes down every consumer at once, so the count is
 	// the only evidence left that it happened.
@@ -134,6 +139,9 @@ type subscriber struct {
 	//
 	// Written only in fanout, which runs under Hub.deliverMu.
 	sendErrors int
+	// gotFirst latches the first successful send, so "relay first delivery" is
+	// logged once per subscriber rather than per datagram.
+	gotFirst bool
 }
 
 // New binds the hub's receive socket, on IPv4 loopback unless an option says
@@ -168,8 +176,21 @@ func New(log *slog.Logger, port int, opts ...Option) (*Hub, error) {
 		subs:      map[string]*subscriber{},
 		done:      make(chan struct{}),
 	}
+	// One file per hub port, so a
+	// multi-hub install does not interleave two streams into one capture.
+	if dir := os.Getenv("POLYEMESIS_RELAY_CAPTURE"); dir != "" {
+		name := fmt.Sprintf("%s.%d.ts", dir, h.port)
+		if f, err := os.Create(name); err == nil {
+			h.capture = f
+			log.Info("relay capture armed", "path", name)
+		} else {
+			log.Warn("relay capture could not be opened", "path", name, "err", err)
+		}
+	}
 	h.wg.Add(1)
 	go h.run()
+	// #674: sampled by the clock so a STARVED window still produces lines.
+	go h.sampleState(3 * time.Second)
 	return h, nil
 }
 
@@ -222,7 +243,16 @@ func (h *Hub) SubscribeAddr(name string, ip net.IP, port int) string {
 		addr: &net.UDPAddr{IP: ip, Port: port},
 	}
 	h.rebuildTargets()
-	h.log.Debug("relay subscriber added", "name", name, "addr", ip, "port", port, "total", len(h.subs))
+	// AT INFO, WITH THE HUB'S OWN PORT. #674
+	//
+	// Every subscriber on this hub received its first byte in the same
+	// millisecond, 73 seconds after their children started -- so the hub was
+	// receiving (its capture proves it) while its target list was empty. The
+	// only way to tell "subscribed late" from "subscribed to a different hub"
+	// is to record WHICH hub each Subscribe landed on, and when. At Debug this
+	// said nothing, because the acceptance suite never shows Debug.
+	h.log.Info("relay subscriber added", "name", name, "hubPort", h.port,
+		"subscriberPort", port, "total", len(h.subs))
 	return udpURL(ip, port)
 }
 
@@ -232,7 +262,12 @@ func (h *Hub) Unsubscribe(name string) {
 	defer h.mu.Unlock()
 	delete(h.subs, name)
 	h.rebuildTargets()
-	h.log.Debug("relay subscriber removed", "name", name, "total", len(h.subs))
+	// AT INFO, for the same reason as "added". #674: a destination subscribed at
+	// 08:24:52 and its child started 1ms later, on a hub that was receiving --
+	// and it got nothing until 08:26:05. That is only possible if the
+	// subscription was REMOVED while the child kept running, and at Debug this
+	// line could never show it.
+	h.log.Info("relay subscriber removed", "name", name, "hubPort", h.port, "total", len(h.subs))
 }
 
 // rebuildTargets republishes the fanout list. Caller must hold mu for writing.
@@ -350,6 +385,16 @@ func (h *Hub) run() {
 		h.deliverMu.Lock()
 		h.fanout(buf[:n])
 		h.measure(buf[:n])
+		// A BYTE-EXACT RECORD OF WHAT EVERY SUBSCRIBER RECEIVES.
+		//
+		// Off unless POLYEMESIS_RELAY_CAPTURE is set. Exactly the bytes fanout() forwards to every subscriber. The earlier
+		// capture was a SECOND OUTPUT on the ingest child, which FFmpeg muxes
+		// independently -- it proved the ingest could produce good audio, not
+		// that these datagrams carry it. This is the stream destinations
+		// actually read.
+		if h.capture != nil {
+			_, _ = h.capture.Write(buf[:n])
+		}
 		h.deliverMu.Unlock()
 	}
 }
@@ -393,6 +438,32 @@ func (h *Hub) measure(dgram []byte) {
 	}
 }
 
+// sampleState reports rxPackets and the target count on a TIME ticker. #674
+//
+// The first version of this sampled every 500 DATAGRAMS, which cannot describe
+// a window with no datagrams: a starved hub simply stopped logging, so every
+// sample came from after the starvation ended and the interesting period was
+// the one part with no data about it. A period of silence has to be sampled by
+// the clock, not by the thing that has gone silent.
+func (h *Hub) sampleState(every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-h.done:
+			return
+		case <-t.C:
+			count := 0
+			if tp := h.targets.Load(); tp != nil {
+				count = len(*tp)
+			}
+			h.log.Info("relay fanout state", "hubPort", h.port,
+				"rxPackets", h.rxPackets.Load(), "txPackets", h.txPackets.Load(),
+				"targets", count)
+		}
+	}
+}
+
 func (h *Hub) fanout(pkt []byte) {
 	// No lock and no allocation: the list is republished by rebuildTargets on
 	// the rare occasions it changes. Nil until the first subscriber.
@@ -412,6 +483,18 @@ func (h *Hub) fanout(pkt []byte) {
 				h.log.Debug("relay send failed", "subscriber", s.name, "errors", s.sendErrors, "err", err)
 			}
 			continue
+		}
+		// FIRST DELIVERY, ONCE PER SUBSCRIBER. #674
+		//
+		// A destination that reads nothing for 77 seconds is either not being
+		// sent to, or not receiving what is sent. Nothing distinguished those:
+		// dropped counts only WriteToUDP ERRORS, and txPackets is a total
+		// across every subscriber. This is the sender's own record of when a
+		// named consumer first got a byte, which is the number the whole
+		// investigation needed and never had.
+		if !s.gotFirst {
+			s.gotFirst = true
+			h.log.Info("relay first delivery", "subscriber", s.name, "port", s.addr.Port)
 		}
 		s.sendErrors = 0
 		h.txPackets.Add(1)

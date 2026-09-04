@@ -6,7 +6,11 @@ WORKDIR /app
 
 # Dependencies first so a content edit does not invalidate the install layer.
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# --ignore-scripts: a build must not execute arbitrary postinstall hooks from the
+# dependency tree. ci.yml already installs this way in every job that touches
+# web/ and ui/; this image was the one place that did not, so the hardening
+# stopped at the edge of the container. Sonar's docker:S6505 caught the gap.
+RUN npm ci --ignore-scripts --no-audit --no-fund
 
 COPY . .
 RUN npm run build
