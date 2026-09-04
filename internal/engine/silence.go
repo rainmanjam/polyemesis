@@ -205,14 +205,14 @@ func (e *Engine) startSilence(spec string) {
 		e.log.Error("start silence tier", "err", err)
 	}
 
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		fail(err)
 		return
 	}
 	hub, err := relay.New(e.log, 0)
 	if err != nil {
-		e.alloc.Release(port)
+		e.releasePort(port)
 		fail(err)
 		return
 	}
@@ -237,7 +237,7 @@ func (e *Engine) startSilence(spec string) {
 	if e.stopped {
 		e.mu.Unlock()
 		e.hub.Unsubscribe(silenceSubName)
-		e.alloc.Release(port)
+		e.releasePort(port)
 		_ = hub.Close()
 		return
 	}
@@ -264,7 +264,7 @@ func (e *Engine) teardownSilence(t *silenceTier) {
 		e.hub.Unsubscribe(t.subName)
 	}
 	if t.port != 0 {
-		e.alloc.Release(t.port)
+		e.releasePort(t.port)
 	}
 	// After the process, so it is never writing into a closed socket.
 	if t.hub != nil {

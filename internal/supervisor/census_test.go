@@ -2,6 +2,9 @@ package supervisor
 
 import (
 	"context"
+	"io"
+	"log/slog"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -232,4 +235,56 @@ func TestASpawnThatFailedEnrolsNothing(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// kill() must not signal a reaped pid. #720.
+//
+// killGroup issues a raw syscall.Kill(-pid, SIGKILL), which names a process
+// GROUP by number and bypasses Go's ErrProcessDone -- so on a reaped pid it can
+// signal a group this supervisor never started. Its two sibling signal sites
+// each carry a guard for this; kill() rested on an ordering argument written as
+// a comment across three functions.
+//
+// TESTED AGAINST THE GUARD DIRECTLY rather than through the supervisor, because
+// the supervisor clears p.exited during teardown -- so waiting for a real reap
+// races the very field the guard reads, and the test would be measuring the
+// teardown rather than the guard. The escalation path on a LIVE child is
+// covered by the stop/kill tests next door; what is missing there, and pinned
+// here, is the reaped one.
+func TestKillIsARefusalOnAReapedChild(t *testing.T) {
+	p := New(slog.New(slog.NewTextHandler(io.Discard, nil)), Spec{Name: "guard", Kind: "test"})
+
+	// A real child, run to completion and reaped, so its pid is a number the
+	// operating system may well have handed to somebody else by now.
+	f := fakeExit(0)
+	cmd := exec.Command(f.bin, f.args...)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	_ = cmd.Wait()
+
+	exited := make(chan struct{})
+	close(exited) // what runOnce does the instant cmd.Wait() returns
+
+	p.cmdMu.Lock()
+	p.cmd, p.exited = cmd, exited
+	p.cmdMu.Unlock()
+
+	// The guard's job: return without reaching killGroup. There is no assertion
+	// available on "no signal was sent" -- the syscall either happened or it did
+	// not -- so what is pinned is that a reaped child with a live cmd handle
+	// takes the early return rather than the signal.
+	done := make(chan struct{})
+	go func() { p.kill(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("kill() blocked on a reaped child")
+	}
+
+	// The other early return: no cmd at all.
+	p.cmdMu.Lock()
+	p.cmd = nil
+	p.cmdMu.Unlock()
+	p.kill()
 }

@@ -30,11 +30,11 @@ func TestStopTakesTheBackupDownWithTheDestination(t *testing.T) {
 	e.alloc = relay.NewPortAllocator(base, 2)
 
 	row := backupRow()
-	primaryPort, err := e.alloc.Allocate()
+	primaryPort, err := e.allocPort()
 	if err != nil {
 		t.Fatalf("allocate primary: %v", err)
 	}
-	backupPort, err := e.alloc.Allocate()
+	backupPort, err := e.allocPort()
 	if err != nil {
 		t.Fatalf("allocate backup: %v", err)
 	}

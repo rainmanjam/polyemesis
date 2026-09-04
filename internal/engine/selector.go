@@ -1548,7 +1548,7 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 		if in == nil {
 			return fail(fmt.Errorf("the %s source has no relay to read", kind))
 		}
-		port, err := e.alloc.Allocate()
+		port, err := e.allocPort()
 		if err != nil {
 			return fail(err)
 		}
@@ -1662,7 +1662,7 @@ func (e *Engine) teardownFeed(f *sourceFeed) error {
 		f.in.Unsubscribe(f.subName)
 	}
 	if f.port != 0 {
-		e.alloc.Release(f.port)
+		e.releasePort(f.port)
 	}
 	return stopErr
 }

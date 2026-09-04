@@ -867,7 +867,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		vodDropped = noteVODNotNegotiated
 	}
 
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		return err
 	}
@@ -898,7 +898,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 			// is reissued and the stale entry blasts transport-stream datagrams
 			// into whatever now owns that socket.
 			hub.Unsubscribe(subName)
-			e.alloc.Release(port)
+			e.releasePort(port)
 			return err
 		}
 		target = resolved
@@ -998,7 +998,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	if e.stopped {
 		e.mu.Unlock()
 		hub.Unsubscribe(subName)
-		e.alloc.Release(port)
+		e.releasePort(port)
 		return nil
 	}
 	e.dests[row.ID] = &destination{
@@ -1094,7 +1094,7 @@ func (e *Engine) teardownDest(d *destination) {
 		hub.Unsubscribe(d.subName)
 	}
 	if d.port != 0 {
-		e.alloc.Release(d.port)
+		e.releasePort(d.port)
 	}
 	e.stopBackup(d)
 }
@@ -1306,7 +1306,7 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 	if hub == nil {
 		hub = e.hub
 	}
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		d.backupErr = "no relay port is free for the backup feed"
 		e.log.Warn("backup ingest has no relay port; the primary is unaffected",
@@ -1367,7 +1367,7 @@ func (e *Engine) stopBackup(d *destination) {
 		hub.Unsubscribe(d.backupSub)
 	}
 	if d.backupPort != 0 {
-		e.alloc.Release(d.backupPort)
+		e.releasePort(d.backupPort)
 	}
 }
 

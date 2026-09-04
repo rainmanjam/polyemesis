@@ -192,3 +192,42 @@ func TestDeleteAPITokenReportsAnUnknownID(t *testing.T) {
 		t.Errorf("DeleteAPIToken(404) error = %v, want ErrNotFound", err)
 	}
 }
+
+// APITokenExists is what a live /ws socket asks instead of consulting an
+// in-process set. #706.
+func TestAPITokenExistsAnswersForBothOutcomes(t *testing.T) {
+	d := testDB(t)
+	tok, _, err := d.CreateAPIToken("ci-runner", string(ScopeAdmin))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	ok, err := d.APITokenExists(tok.ID)
+	if err != nil || !ok {
+		t.Fatalf("a live token reports exists=%v err=%v; a socket would be closed "+
+			"on a credential that still works", ok, err)
+	}
+
+	if err := d.DeleteAPIToken(tok.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	ok, err = d.APITokenExists(tok.ID)
+	if err != nil {
+		t.Fatalf("after delete: %v", err)
+	}
+	if ok {
+		t.Fatal("a deleted token still reports as existing, so the socket opened " +
+			"with it would keep streaming -- which is the whole of #706")
+	}
+
+	// Zero is not an id and must not become a database round trip, because
+	// every socket without a token principal passes one on every ping.
+	if ok, err := d.APITokenExists(0); ok || err != nil {
+		t.Errorf("APITokenExists(0) = %v, %v; want false, nil", ok, err)
+	}
+	// An id that never existed is absent rather than an error: sql.ErrNoRows is
+	// the ordinary answer here and must not close a socket for the wrong reason.
+	if ok, err := d.APITokenExists(999999); ok || err != nil {
+		t.Errorf("APITokenExists(999999) = %v, %v; want false, nil", ok, err)
+	}
+}

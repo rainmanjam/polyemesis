@@ -92,7 +92,10 @@ func TestAProbeThatCannotGetAPortCountsTowardGivingUp(t *testing.T) {
 	src := readEngineFile(t, "engine.go")
 	body := funcBody(t, src, "func (e *Engine) probeOnce(ctx context.Context) bool {")
 
-	at := strings.Index(body, "port, err := e.alloc.Allocate()")
+	// e.allocPort(), not e.alloc.Allocate(): every port in this package now goes
+	// through the engine's own ledger so StopWithin can assert it gave them all
+	// back (#707). The branch this test reads is unchanged.
+	at := strings.Index(body, "port, err := e.allocPort()")
 	if at < 0 {
 		t.Fatal("cannot find the port allocation")
 	}
