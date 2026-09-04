@@ -1692,8 +1692,40 @@ jobs:
       # A vulnerable direct dependency should fail the build, not sit in a
       # report nobody opens. --audit-level=high so a low-severity transitive
       # advisory does not block a hotfix.
+      # RETRIED, AND EACH ATTEMPT BOUNDED. `npm audit` asks npmjs.com to score
+      # the tree, and when that endpoint is unwell npm answers
+      #
+      #     npm error audit endpoint returned an error
+      #
+      # with exit 1 -- indistinguishable, to this job and to the checks list,
+      # from "a high-severity advisory was found". It failed this job four times
+      # across three pull requests while `npm audit --audit-level=high` in the
+      # same directory returned "found 0 vulnerabilities" locally. A security
+      # gate that goes red for someone else's outage is one people learn to
+      # re-run without reading, and then re-run past a real advisory.
+      #
+      # 90s per attempt because npm retries internally and can sit for minutes;
+      # three unbounded attempts once exceeded a job ceiling in security.yml and
+      # the runner CANCELLED it, which names nothing at all. An advisory is
+      # deterministic, so a real one fails the first attempt and exits at once --
+      # only the transport is retried.
       - if: needs.changes.outputs.code == 'true'
-        run: npm audit --audit-level=high
+        name: npm audit (ui)
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            out=$(timeout 90 npm audit --audit-level=high 2>&1) && exit 0
+            rc=$?
+            printf '%s\n' "$out"
+            if [ "$rc" -ne 124 ] && ! printf '%s' "$out" | grep -q 'audit endpoint returned an error'; then
+              echo "::error title=npm audit::a high-severity advisory was found in ui's dependencies. This is a finding, not a registry problem -- read the output above."
+              exit 1
+            fi
+            echo "::warning title=Registry unavailable::attempt $attempt of 3 could not get an answer from npm's audit endpoint; retrying."
+            sleep 15
+          done
+          echo "::error title=Registry unavailable::npm's audit endpoint failed three times, so ui was NOT audited. This is an outage, not a clean bill of health -- the job stays red so nobody reads it as one."
+          exit 1
 
   # THE WORKFLOWS THEMSELVES WERE NEVER CHECKED.
   #
