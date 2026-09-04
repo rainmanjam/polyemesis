@@ -386,6 +386,11 @@ func leakRoutes() []string {
 		"/api/v1/processes",
 		"/api/v1/metadata",
 		"/api/v1/renditions",
+		// #661's console warning. A platform is named so the sweep reads a
+		// populated body rather than the empty list an unknown platform returns --
+		// a route that always answers `[]` would be swept vacuously, which is the
+		// shape this whole ledger exists to refuse.
+		"/api/v1/renditions/1/concerns?platform=youtube",
 		"/api/v1/encoders",
 		"/api/v1/stats",
 		"/api/v1/levels",

@@ -5,7 +5,7 @@ package testenv
 // This repository has two package-lock.json files. ui/ was audited by
 // .github/workflows/security.yml and tracked by .github/dependabot.yml. web/ --
 // the documentation site, 342 KB of resolved dependency tree -- was in neither:
-// dependabot.yml listed `/` and `/ui`, and the npm-audit job hardcoded
+// dependabot.yml listed `/` and `/ui`, and the audit job hardcoded
 // `working-directory: ui`. Nothing would have reported a high-severity advisory
 // against it, and nothing would have opened a PR to move it off one.
 //
@@ -86,9 +86,9 @@ func TestEveryLockfileIsAuditedAndTracked(t *testing.T) {
 		if !strings.Contains(security, "project: [") || !auditMatrixCovers(security, dir) {
 			t.Errorf("%s/package-lock.json is not audited by the npm-audit job in "+
 				".github/workflows/security.yml.\n\n"+
-				"That job runs `npm audit --omit=dev --audit-level=high` over a matrix of "+
-				"project directories, and a directory missing from the matrix is a dependency "+
-				"tree no advisory check ever reads. Add %q to `matrix.project`.\n\n"+
+				"That job scans a matrix of project directories with osv-scanner, and a "+
+				"directory missing from the matrix is a dependency tree no advisory check "+
+				"ever reads. Add %q to `matrix.project`.\n\n"+
 				"web/ was in exactly this position: added second, named in neither file, and "+
 				"audited by nothing for as long as it existed.", dir, dir)
 		}

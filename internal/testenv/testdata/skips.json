@@ -39,6 +39,15 @@
         "internal/db": "2 -> 3"
       },
       "why": "ONE site, the same platform fact as the entry above and for the second half of the same fix. TestReopeningAnOlderInstallSecuresTheSidecarsToo asserts that reopening a database whose -wal and -shm already exist at 0644 narrows them -- the case the first #297 fix missed, because SQLite only gives sidecars the database's mode WHEN IT CREATES THEM. Windows has no mode bits; internal/fsperm carries the same intent there through an ACL. Asserting Unix modes on Windows would pass vacuously."
+    },
+    {
+      "pr": 676,
+      "from": 96,
+      "to": 100,
+      "packages": {
+        "internal/rtmpserver": "10 -> 14"
+      },
+      "why": "FOUR sites, all in one helper. #674's reproductions need the SHIPPED FFmpeg: requireShippedFFmpeg(t) in internal/rtmpserver skips on -short, on ffmpeg or ffprobe being absent, and on a major version other than 8. The version gate is the load-bearing one -- a developer machine on 9.x runs these green while exercising nothing, which is a pass asserting something it never tested, and the bug they cover only occurs on the pinned 8.1.2. These four replace TWENTY-FOUR: the same preamble was written out in each of six reproductions before being collapsed into one helper, which is why this raise is +4 and not +28. The container suite runs every one of them on 8.1.2, so nothing here is skipped where it matters."
     }
   ],
   "loweredBy": [
@@ -70,7 +79,7 @@
       "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
     }
   ],
-  "total": 96,
+  "total": 100,
   "byPackage": {
     "cmd/polyemesis": 1,
     "internal/api": 7,
@@ -85,7 +94,7 @@
     "internal/playlistmedia": 5,
     "internal/relay": 3,
     "internal/routing": 5,
-    "internal/rtmpserver": 10,
+    "internal/rtmpserver": 14,
     "internal/scheduler": 1,
     "internal/secrets": 1,
     "internal/srtserver": 3,

@@ -158,6 +158,7 @@
   "chrome.language": "Dil",
   "chrome.liveCount": "{count} canlı",
   "chrome.releaseNotes": "Sürüm notları",
+  "chrome.runningVersion": "polyemesis {version} çalışıyor",
   "chrome.signOut": "Oturumu kapat",
   "chrome.socketOffline": "çevrimdışı",
   "chrome.socketOfflineHint": "Canlı güncellemeler bağlantısı kesildi; yeniden deneniyor",
@@ -339,6 +340,7 @@
   "dash.laneNoPreview": "Henüz önizleme yok — bu program için kodlayıcınızı başlatın.",
   "dash.leaveUnchanged": "Değiştirmeden bırak",
   "dash.leaveUnchangedNote": "“Değiştirmeden bırak” hiçbir şey göndermez, böylece platform elindekini korur. Açık ya da Kapalı seçmek o değeri yazar.",
+  "dash.loadingDestinations": "Bu kurulumda nelerin yapılandırıldığı denetleniyor…",
   "dash.metaCategory": "Kategori",
   "dash.metaDescription": "Açıklama",
   "dash.metaTags": "Etiketler",
@@ -439,6 +441,7 @@
   "dest.restarts.hint": "Bu hedefin kodlayıcısının kaç kez yeniden başlatıldığı. Sıfırın üstü, düştüğü ve geri getirildiği anlamına gelir.",
   "dest.retryAfter": "Şu kadar sonra yeniden dene (saniye)",
   "dest.sharedEncodeAria": "Paylaşılan video kodlaması",
+  "dest.renditionConcerns": "Bu platformun yayımladığı değerlerin dışında",
   "dest.socketTimeout": "Soket zaman aşımı (saniye)",
   "dest.source": "Kaynak",
   "dest.sourcePlaceholder": "Bir program seçin",
@@ -1438,5 +1441,7 @@
   "tour.routingNav.body": "Yönlendirme profili olmayan bir hedef düpedüz yeniden yayındır, ki bunu başka her araç da yapar. Bir profil, gelen hangi ses izlerinin hangi hedefe ulaşacağına ve nasıl karıştırılacağına karar verir: bir platform için müzik yatağını kısan bir yorum mikrofonu, bir başkası için müziğin tamamen çıkarılması, her biri kendi ses yüksekliği hedefiyle. Hedef başına ayarlanır, yani gelen tek bir yayın birbirinden farklı birkaç program olarak çıkabilir.",
   "tour.routingNav.title": "Yönlendirme, yeniden yayın olmayan kısımdır",
   "tour.sourcesNav.body": "Kaynak, gelen tek bir yayındır ve yayın adresi ile belirteci bu sayfada durur. install.sh bunları çalışırken yalnızca bir kez yazdırdı; o terminal kapatıldıysa yeniden bulunacakları yer burasıdır. Her kaynak kendi belirtecini taşır, böylece birden çok kodlayıcı tek bir kuruluma yayın gönderip yine de birbirinden ayrı kalabilir.",
-  "tour.sourcesNav.title": "Kaynaklar: bir kodlayıcının bağlandığı yer"
+  "tour.sourcesNav.title": "Kaynaklar: bir kodlayıcının bağlandığı yer",
+  "chrome.programme": "Program",
+  "chrome.programmeHint": "Konsol aynı anda tek bir programı izler. Ekrandaki her şey bu programı anlatır."
 }
