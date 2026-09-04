@@ -169,7 +169,10 @@ jobs:
     runs-on: ubuntu-latest
     # See the note on the govulncheck job for why ten, for all four jobs here.
     # This one's single point of stall is the npm registry, during `npm ci`.
-    timeout-minutes: 10
+    # 15, not 10: a registry outage slows `npm ci` as well as the audit, and a
+    # job cancelled at its ceiling reports nothing. Better a job that finishes
+    # and says "NOT audited" than one the runner kills mid-sentence.
+    timeout-minutes: 15
     strategy:
       # Both answers are wanted when both are red.
       fail-fast: false
@@ -224,11 +227,23 @@ jobs:
           # whole change exists to abolish. Observed: npm-audit (ui) cancelled at
           # exactly 5 minutes on run 33822493761 while (web) passed beside it.
           #
-          # 90s x 3 attempts plus two 15s gaps is 300s, comfortably inside the
-          # ceiling. `timeout` exits 124, which is a registry problem by any
-          # other name and is treated as one.
+          # 45s x 3 attempts plus two 10s gaps is 155s. It was 90s x 3 plus two
+          # 15s gaps -- 300s -- and that was too long, for a reason only a real
+          # outage showed: `npm ci` TALKS TO THE SAME REGISTRY. On a healthy day
+          # it takes seconds; during the outage of 2026-09-04 it took 5m01s, and
+          # 5m01s + 5m00s overran this job's ceiling. The runner then CANCELLED
+          # the job, which names nothing at all -- the precise failure this retry
+          # was written to abolish, reintroduced by the retry's own duration.
+          #
+          # So the audit's worst case now fits in what a slow install leaves,
+          # and timeout-minutes below has headroom besides. The point is not to
+          # outlast an outage -- nothing can audit during one -- it is to always
+          # reach the line that SAYS so.
+          #
+          # `timeout` exits 124, which is a registry problem by any other name
+          # and is treated as one.
           for attempt in 1 2 3; do
-            out=$(timeout 90 npm audit --omit=dev --audit-level=high 2>&1) && exit 0
+            out=$(timeout 45 npm audit --omit=dev --audit-level=high 2>&1) && exit 0
             rc=$?
             printf '%s\n' "$out"
             if [ "$rc" -ne 124 ] && ! printf '%s' "$out" | grep -q 'audit endpoint returned an error'; then
@@ -236,11 +251,11 @@ jobs:
               exit 1
             fi
             if [ "$rc" -eq 124 ]; then
-              echo "::warning title=Registry slow::attempt $attempt of 3 exceeded 90s and was killed; retrying."
+              echo "::warning title=Registry slow::attempt $attempt of 3 exceeded 45s and was killed; retrying."
             else
               echo "::warning title=Registry unavailable::attempt $attempt of 3 could not reach npm's audit endpoint; retrying."
             fi
-            sleep 15
+            sleep 10
           done
           echo "::error title=Registry unavailable::npm's audit endpoint failed three times, so ${{ matrix.project }} was NOT audited. This is an outage, not a clean bill of health -- the job stays red so nobody reads it as one."
           exit 1
