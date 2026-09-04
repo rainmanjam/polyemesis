@@ -84,6 +84,9 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   /* Set from the same /sources response that resolves the programme, so the
      count and the choice can never describe different lists. */
   const [sourceCount, setSourceCount] = useState(0);
+  /* #638: the list, not just the count. A switcher needs names, and fetching
+     them separately would mean a second copy of the resolution rule. */
+  const [programmes, setProgrammes] = useState<{ id: number; name: string }[]>([]);
   /* The ids the last /sources answer carried, so the socket effect can tell
      "a programme we have never seen" from "the one we are already on". */
   const knownIds = useRef<number[]>([]);
@@ -264,6 +267,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       const ids = rows.map((r) => r.id);
       knownIds.current = ids;
       setSourceCount(ids.length);
+      setProgrammes(rows.map((r) => ({ id: r.id, name: r.name })));
       setProgramme((current) => {
         // Keep the operator on their programme while it still exists.
         // Re-resolving from scratch every time would drag a two-programme
@@ -281,6 +285,23 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
     } finally {
       setProgrammeKnown(true);
     }
+  }, []);
+
+  /* #638: THE HALF THAT WAS MISSING.
+   *
+   * rememberProgramme was called from exactly one place, with the value the
+   * resolver had just picked — so the console faithfully remembered its own
+   * default and nothing could ever tell it otherwise. An operator with a
+   * horizontal and a vertical programme watched one of them, permanently.
+   *
+   * An id the server does not list is IGNORED rather than stored. Storing one
+   * would survive the reload and produce a 409 on every poll, which reads as a
+   * dead console with nothing on screen to explain it — the same failure
+   * resolveProgramme already discards a stale remembered id to avoid. */
+  const selectProgramme = useCallback((id: number) => {
+    if (!knownIds.current.includes(id)) return;
+    rememberProgramme(id);
+    setProgramme(id);
   }, []);
 
   useEffect(() => {
@@ -335,6 +356,8 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       programme,
       programmeKnown,
       sourceCount,
+      programmes,
+      selectProgramme,
       refreshSources: resolveSources,
       connected,
       snapshotKnown: status !== null,
@@ -352,6 +375,8 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       programme,
       programmeKnown,
       sourceCount,
+      programmes,
+      selectProgramme,
       resolveSources,
       connected,
 

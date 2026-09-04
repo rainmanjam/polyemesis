@@ -48,6 +48,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/signature/StatusDot";
+import { ProgrammeSwitcher } from "@/components/ProgrammeSwitcher";
 import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
 import { useNavCollapsed } from "@/hooks/useNavCollapsed";
 import { toneForState } from "@/lib/signal";
@@ -220,6 +221,11 @@ export function AppLayout({
           <BrandMark size={18} />
           <span className="text-[13px] font-semibold tracking-tight">polyemesis</span>
         </div>
+
+        {/* #638: which programme everything on screen is describing, and the
+            control to change it. Renders nothing at all on a single-programme
+            install, which is most of them. */}
+        <ProgrammeSwitcher />
 
         <div className="ml-2 hidden items-center gap-2 sm:flex">
           <StatusDot tone={ingestTone} />
