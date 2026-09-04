@@ -286,6 +286,8 @@ jobs:
           # same-repo branches are not. sonar.projectKey already pins the project
           # to one service, so there is nothing to discover here.
           SONAR_API: https://sonarcloud.io
+          SONAR_PROJECT: rainmanjam_polyemesis
+          BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           set -euo pipefail
           # RUNNER_TEMP, not the workspace and not bare mktemp: the runner clears
@@ -295,7 +297,7 @@ jobs:
           umask 077
           cfg=$(mktemp "$tmp/sonar-curl.XXXXXX")
           gate=$(mktemp "$tmp/sonar-gate.XXXXXX")
-          trap 'rm -f "$cfg" "$gate"' EXIT
+          trap 'rm -f "$cfg" "$gate" "$gate.files"' EXIT
           printf 'header = "Authorization: Bearer %s"\n' "$SONAR_TOKEN" > "$cfg"
 
           # -f so an HTTP error is a non-zero exit instead of a body that jq will
@@ -374,6 +376,27 @@ jobs:
           #
           # NONE is a failure too, and it is the one main actually hits: a gate
           # with no conditions evaluated has not passed, it has not been asked.
+          # AND WHEN IT IS COVERAGE, WHICH FILES. `new_coverage is 79.3, the gate
+          # requires lt 80` names the metric and not one line to go and write a
+          # test for -- and the per-file numbers are withheld from an
+          # unauthenticated caller, so nobody outside CI can look them up. The
+          # token is here. Printing the ten worst turns a percentage into a list
+          # of files, which is the difference between a number and a task.
+          if jq -e '.projectStatus.conditions[]? | select(.metricKey=="new_coverage" and .status=="ERROR")' "$gate" >/dev/null; then
+            if api "$SONAR_API/api/measures/component_tree?component=$SONAR_PROJECT&branch=$BRANCH&metricKeys=new_uncovered_lines,new_lines_to_cover&qualifiers=FIL&ps=100&s=metric&metricSort=new_uncovered_lines&asc=false" "$gate.files"; then
+              echo
+              echo "Files carrying the most uncovered new lines:"
+              { printf 'uncovered\tof-new\tfile\n'
+                jq -r '.components[]?
+                     | (reduce (.measures[]? | select(.value != null)) as $m ({}; .[$m.metric] = $m.value)) as $v
+                     | select(($v.new_uncovered_lines // "0") != "0")
+                     | "\($v.new_uncovered_lines)\t\($v.new_lines_to_cover)\t\(.path)"' "$gate.files" \
+                  | head -10
+              } | column -t -s "$(printf '\t')"
+            fi
+            rm -f "$gate.files"
+          fi
+
           if [ "$verdict" = "NONE" ]; then
             echo "::error title=Quality gate NONE::no condition was evaluated at all -- the gate did not pass, it was never asked. The branch has no new-code baseline, and that is the project's New Code definition in SonarCloud (Administration > New Code), which is a setting and not anything in this repository. See sonar-project.properties."
             exit 1

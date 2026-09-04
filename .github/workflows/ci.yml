@@ -48,8 +48,14 @@ concurrency:
   group: ci-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+# LEAST PRIVILEGE, PER JOB. This was `contents: read` at the workflow level,
+# which grants it to every job whether or not the job reads the repository --
+# Sonar's githubactions:S8264. `{}` here means a job that declares nothing gets
+# NOTHING, so a new job cannot inherit a token by being added; it has to ask.
+# Each job below states what it needs, and `contents: read` is all any of them
+# needs: nothing in this file writes to the repository, opens an issue, or
+# pushes a package.
+permissions: {}
 
 jobs:
   # Does this pull request contain anything any suite in here could break?
@@ -112,6 +118,8 @@ jobs:
   # gives about itself: a change to how the suites run must run the suites.
   changes:
     name: which changes
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -146,6 +154,8 @@ jobs:
 
   go:
     name: go build, vet, test
+    permissions:
+      contents: read
     # The documentation gate, #378. On every STEP below, never on this job --
     # see the `changes` job for why that distinction is load-bearing and for
     # what it cost the one time it was got wrong.
@@ -691,6 +701,8 @@ jobs:
   # platforms.
   crossplatform:
     name: "test: ${{ matrix.os }}"
+    permissions:
+      contents: read
     # The documentation gate, #378. On every STEP below, never on this job --
     # see the `changes` job for why that distinction is load-bearing and for
     # what it cost the one time it was got wrong.
@@ -1649,6 +1661,8 @@ jobs:
 
   ui:
     name: ui typecheck, lint, build
+    permissions:
+      contents: read
     # The documentation gate, #378. On every STEP below, never on this job --
     # see the `changes` job for why that distinction is load-bearing and for
     # what it cost the one time it was got wrong.
@@ -1725,6 +1739,8 @@ jobs:
   # a stale comment is the failure this repository audits for.
   actionlint:
     name: workflow lint
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -1787,6 +1803,8 @@ jobs:
 
   cross:
     name: cross-compile all release targets
+    permissions:
+      contents: read
     # The documentation gate, #378. On every STEP below, never on this job --
     # see the `changes` job for why that distinction is load-bearing and for
     # what it cost the one time it was got wrong.
@@ -1832,6 +1850,8 @@ jobs:
   # image and publish real streams.
   container-suites:
     name: "which container suites"
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -1982,6 +2002,8 @@ jobs:
   # can be pointed at.
   container-not-applicable:
     name: "container: ${{ matrix.suite }}"
+    permissions:
+      contents: read
     needs: container-suites
     if: needs.container-suites.outputs.skipped != '[]'
     runs-on: ubuntu-latest
@@ -2000,6 +2022,8 @@ jobs:
 
   container:
     name: "container: ${{ matrix.suite }}"
+    permissions:
+      contents: read
     needs: container-suites
     if: needs.container-suites.outputs.suites != '[]'
     runs-on: ubuntu-latest
@@ -2152,6 +2176,8 @@ jobs:
   # buried in a combined log.
   acceptance:
     name: "acceptance: ${{ matrix.suite }}"
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # NO JOB-LEVEL `if:` HERE, DELIBERATELY, and #351 is why. These are required
     # checks. A skipped matrix job never expands its matrix,

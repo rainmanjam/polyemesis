@@ -65,8 +65,14 @@ concurrency:
   group: security-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+# LEAST PRIVILEGE, PER JOB. This was `contents: read` at the workflow level,
+# which grants it to every job whether or not the job reads the repository --
+# Sonar's githubactions:S8264. `{}` here means a job that declares nothing gets
+# NOTHING, so a new job cannot inherit a token by being added; it has to ask.
+# Each job below states what it needs, and `contents: read` is all any of them
+# needs: nothing in this file writes to the repository, opens an issue, or
+# pushes a package.
+permissions: {}
 
 jobs:
   # Go dependency vulnerabilities, filtered by reachability. govulncheck is the
@@ -74,6 +80,8 @@ jobs:
   # actually CALLS, so an advisory against a package you import but never reach
   # does not become a ticket nobody can action.
   govulncheck:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # A ceiling, because GitHub's default is SIX HOURS -- and this workflow
     # runs on every push and pull request, so it is the one most likely to be
@@ -156,6 +164,8 @@ jobs:
   # dependabot.yml between them cover every package-lock.json in the tree, so a
   # third one cannot arrive unaudited the way the second did.
   npm-audit:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # See the note on the govulncheck job for why ten, for all four jobs here.
     # This one's single point of stall is the npm registry, during `npm ci`.
@@ -183,7 +193,57 @@ jobs:
       # Production dependencies only. A moderate advisory in a build-time dev
       # dependency does not ship to anybody, and treating it as urgent is how a
       # team learns to pass --force.
-      - run: npm audit --omit=dev --audit-level=high
+      #
+      # RETRIED, BECAUSE THE REGISTRY IS NOT THIS REPOSITORY. `npm audit` asks
+      # npmjs.com to score the tree, and when that endpoint is unwell it answers
+      #
+      #     npm error audit endpoint returned an error
+      #
+      # which npm reports as exit 1 -- identical, to this job and to the checks
+      # list, to "a high-severity advisory was found". It happened on run
+      # 33816210312: web failed, ui passed on the same run, same lockfiles. A
+      # security gate that goes red for an outage somewhere else is one people
+      # learn to re-run without reading, and then re-run past a real advisory.
+      #
+      # So: three attempts with a gap, and the failure message says which of the
+      # two things happened. The gitleaks job below already downloads this way,
+      # for the same reason.
+      #
+      # NOT a retry loop around a genuine finding: an advisory is deterministic,
+      # so a real one fails all three attempts and the job still goes red. Only
+      # the transport is retried.
+      - name: npm audit (production dependencies)
+        run: |
+          set -uo pipefail
+          # EACH ATTEMPT IS BOUNDED, because the first version of this was not
+          # and that is worse than no retry at all. npm does its own internal
+          # retrying against the registry, so a single unwell `npm audit` can sit
+          # for minutes; three of those in a row exceeded this job's
+          # timeout-minutes and the runner CANCELLED it. A cancelled job is not a
+          # pass and not a failure -- it names nothing, which is the state this
+          # whole change exists to abolish. Observed: npm-audit (ui) cancelled at
+          # exactly 5 minutes on run 33822493761 while (web) passed beside it.
+          #
+          # 90s x 3 attempts plus two 15s gaps is 300s, comfortably inside the
+          # ceiling. `timeout` exits 124, which is a registry problem by any
+          # other name and is treated as one.
+          for attempt in 1 2 3; do
+            out=$(timeout 90 npm audit --omit=dev --audit-level=high 2>&1) && exit 0
+            rc=$?
+            printf '%s\n' "$out"
+            if [ "$rc" -ne 124 ] && ! printf '%s' "$out" | grep -q 'audit endpoint returned an error'; then
+              echo "::error title=npm audit::a high-severity advisory was found in ${{ matrix.project }}'s production dependencies. This is a finding, not a registry problem -- read the output above."
+              exit 1
+            fi
+            if [ "$rc" -eq 124 ]; then
+              echo "::warning title=Registry slow::attempt $attempt of 3 exceeded 90s and was killed; retrying."
+            else
+              echo "::warning title=Registry unavailable::attempt $attempt of 3 could not reach npm's audit endpoint; retrying."
+            fi
+            sleep 15
+          done
+          echo "::error title=Registry unavailable::npm's audit endpoint failed three times, so ${{ matrix.project }} was NOT audited. This is an outage, not a clean bill of health -- the job stays red so nobody reads it as one."
+          exit 1
 
   # THE CONTEXT BRANCH PROTECTION ASKS FOR, WHICH THE MATRIX STOPPED PRODUCING.
   #
@@ -205,6 +265,8 @@ jobs:
   # the required context would go missing exactly when something is wrong.
   npm-audit-result:
     name: npm-audit
+    permissions:
+      contents: read
     needs: npm-audit
     if: always()
     runs-on: ubuntu-latest
@@ -246,6 +308,8 @@ jobs:
   # Pinning means CI runs the version the config was tested against. The
   # version assertion below is what makes the pin real rather than aspirational.
   gitleaks:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # See the note on the govulncheck job for why ten, for all four jobs here.
     # This one's are the release download below and the `fetch-depth: 0`
@@ -501,6 +565,8 @@ jobs:
 
   # Static analysis.
   semgrep:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # See the note on the govulncheck job for why ten, for all four jobs here.
     # The slowest of the four at 29 to 48 seconds, and it has two stalls
