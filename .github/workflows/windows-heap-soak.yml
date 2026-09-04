@@ -40,7 +40,7 @@ on:
       iterations:
         description: "Max times to run the two packages (time budget may stop it sooner)"
         required: false
-        default: "25"
+        default: "60"
       packages:
         description: "Packages to soak"
         required: false
@@ -55,13 +55,23 @@ jobs:
     runs-on: windows-latest
     # Six hours is GitHub's default and is not a budget, it is an accident.
     #
-    # MEASURED: one iteration of these two packages under -race is 72s on an
-    # Apple-silicon laptop (engine 68.6s, relay 2.8s). Windows runners are
-    # slower at this, so budget 2-3 minutes an iteration there. The loop bounds
-    # itself on TIME as well as count for that reason -- see SOAK_BUDGET_SECS
-    # below -- so this ceiling is a backstop rather than the thing that stops
-    # it. A job cancelled at its ceiling loses the dumps, which is the only
-    # reason to have run it.
+    # MEASURED ON THE RUNNER, which corrected the guess this shipped with.
+    #
+    # One iteration is 72s on an Apple-silicon laptop, and the first version of
+    # this file reasoned "Windows runners are slower at this, so budget 2-3
+    # minutes an iteration". Then it was run: 8 iterations in 446s, per-iteration
+    # 49 to 68s, mean 56s. Windows is FASTER here than the laptop, not slower,
+    # and the assumption had made the instrument three times weaker than its own
+    # budget allowed -- 25 iterations where the same 70 minutes buys 60.
+    #
+    # That is the difference between a 23% and a 47% chance of catching one
+    # occurrence per dispatch, at the measured 1.06% rate. Kept at 60 rather
+    # than the 75 the mean allows, because the budget has to survive the slow
+    # tail rather than the mean.
+    #
+    # The loop bounds itself on TIME as well as count, so this ceiling is a
+    # backstop rather than the thing that stops it. A job cancelled at its
+    # ceiling loses the dumps, which is the only reason to have run it.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
@@ -161,7 +171,7 @@ jobs:
           if [ "$aborts" -eq 0 ]; then
             echo "::notice title=No abort in this run::At the measured 1.06% per-suite rate, a"
             echo "clean soak is the ordinary result and is NOT evidence the bug is gone."
-            echo "25 iterations at that rate catch one about a quarter of the time."
+            echo "60 iterations at that rate catch one about half the time."
           fi
 
       - name: Keep the dumps
