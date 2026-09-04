@@ -117,6 +117,22 @@ jobs:
       # be produced should leave the analysis to run without it, exactly as it
       # did before this step existed, rather than turning a reporting gap into a
       # red build for a reason nobody can act on.
+      #
+      # -coverpkg=./..., AND WITHOUT IT THE PROFILE UNDERSTATES WORK THAT IS
+      # ACTUALLY TESTED. By default `go test ./...` instruments only the package
+      # under test, so a function exercised solely through ANOTHER package's
+      # tests records zero hits. db.DeleteAllAPITokens is the case that found
+      # this: it has a test -- internal/api/password_change_tokens_test.go,
+      # which drives it through the password-change handler, which is the only
+      # way it is ever called -- and the profile said 0.0%. With -coverpkg it
+      # says 71.4%. Repo-wide the total moves 85.6% -> 87.4%, and every one of
+      # those points is work somebody had already done and was not being
+      # credited for. That is the same defect as the two glob bugs fixed
+      # alongside this: the measurement was wrong, not the code.
+      #
+      # The cost is that every test binary links every package. Measured at
+      # 2m02s against a 20-minute ceiling, so there is room; if that ever
+      # changes, the fix is a bigger ceiling rather than a smaller profile.
       - name: Set up Go
         if: steps.gate.outputs.ready == 'true'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v6.0.0
@@ -128,7 +144,7 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         continue-on-error: true
         timeout-minutes: 20
-        run: go test -coverprofile=coverage.out -covermode=count ./... || true
+        run: go test -coverprofile=coverage.out -covermode=count -coverpkg=./... ./... || true
 
       - name: Set up Node
         if: steps.gate.outputs.ready == 'true'
@@ -288,6 +304,14 @@ jobs:
           SONAR_API: https://sonarcloud.io
           SONAR_PROJECT: rainmanjam_polyemesis
           BRANCH: ${{ github.head_ref || github.ref_name }}
+          # A pull request is not a branch as far as this API is concerned.
+          # component_tree answered 404 four times on every PR run -- once per
+          # retry -- so the per-file list, the whole reason that call exists,
+          # has never once appeared on a pull request, which is the only place
+          # anybody is going to act on it. The gate verdict itself was right
+          # throughout, which is why this went unnoticed: the step failed
+          # correctly and silently withheld the list that says what to fix.
+          PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           # RUNNER_TEMP, not the workspace and not bare mktemp: the runner clears
@@ -383,7 +407,11 @@ jobs:
           # token is here. Printing the ten worst turns a percentage into a list
           # of files, which is the difference between a number and a task.
           if jq -e '.projectStatus.conditions[]? | select(.metricKey=="new_coverage" and .status=="ERROR")' "$gate" >/dev/null; then
-            if api "$SONAR_API/api/measures/component_tree?component=$SONAR_PROJECT&branch=$BRANCH&metricKeys=new_uncovered_lines,new_lines_to_cover&qualifiers=FIL&ps=100&s=metric&metricSort=new_uncovered_lines&asc=false" "$gate.files"; then
+            # pullRequest= on a PR, branch= on a push. Getting this wrong is a
+            # 404, not an empty list, so it reads as "the API is down" rather
+            # than "you asked for the wrong thing".
+            if [ -n "${PR:-}" ]; then scope="pullRequest=$PR"; else scope="branch=$BRANCH"; fi
+            if api "$SONAR_API/api/measures/component_tree?component=$SONAR_PROJECT&$scope&metricKeys=new_uncovered_lines,new_lines_to_cover&qualifiers=FIL&ps=100&s=metric&metricSort=new_uncovered_lines&asc=false" "$gate.files"; then
               echo
               # SORTED HERE, not by the API. The request asks for
               # metricSort=new_uncovered_lines&asc=false and SonarCloud ignores it
