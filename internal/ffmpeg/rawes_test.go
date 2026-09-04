@@ -702,6 +702,12 @@ func countReason(msg string) string {
 // already cancelled before ProbeFile is called, so ffprobe cannot get far
 // enough to matter and the header read is guaranteed to be the step that ends.
 func TestAProbeCutShortInTheHeaderReadIsNotAVerdictEither(t *testing.T) {
+	// POSIX-only for the same reason its sibling is, and missed on the first
+	// push: the stand-in below is a shell script. The branch it pins is not
+	// platform-specific; the stand-in is.
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in binary this needs is a POSIX shell script")
+	}
 	bins := bothBins(t)
 	dir := t.TempDir()
 	path := buildRawStream(t, filepath.Join(dir, "dump.h264"), "h264", "libx264", "30", "1")
