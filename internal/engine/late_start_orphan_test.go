@@ -126,7 +126,13 @@ func TestAPreviewStartThatPublishesIntoAShutdownStartsNothing(t *testing.T) {
 	// avformat_open_input on a quiet socket.
 	hub := e.downstreamHub()
 	if hub == nil {
-		t.Skip("no downstream hub on this fixture")
+		// Fatal rather than Skip. storeEngine always builds a hub, so a nil here
+		// means the fixture changed under this test -- and a test that quietly
+		// declines to run still prints ok and still counts as coverage, which is
+		// the free pass the skip census exists to refuse. It caught this exact
+		// line as a 101st skip site.
+		t.Fatal("storeEngine produced no downstream hub, so this test cannot reach " +
+			"the window it is about")
 	}
 	e.mu.Lock()
 	e.previewRxHub = hub
