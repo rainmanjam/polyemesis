@@ -176,21 +176,30 @@ Control rung.
 ## Documentation drift (verified)
 
 Fourteen cross-document contradictions were confirmed; the ones an operator
-acts on:
+acts on. **All three below are now fixed** — re-checked against the tree on
+2026-09-03, not recalled. They are kept rather than deleted because a drift list
+that only ever grows is a list nobody finishes, and one that silently loses
+entries cannot be audited either.
 
-- `docs/UPGRADING.md:83` — 0.7.0 "not yet released" (v0.7.0 and v0.8.0 are
+- ~~`docs/UPGRADING.md:83` — 0.7.0 "not yet released" (v0.7.0 and v0.8.0 are
   tagged), prefacing a mandatory credential-scrub `VACUUM` with "nothing below
-  applies to you".
-- `docs/UPGRADING.md:266` — "only the **first** playlist item plays;
-  sequencing is a later change" — `selector.go` emits a concat entry per item,
-  `internal/ffmpeg/concat.go` renders it, and `acceptance-playlist-phase0` is a
-  required CI leg. The stale sentence sits inside a *breaking* migration note.
-- `docs/MODULES.md:177–178` — `Dockerfile.vaapi` base `ubuntu:24.04` (it is
-  `ubuntu:26.04`, `Dockerfile.vaapi:89`; `HARDWARE.md` has it right) and build
-  stage `golang:1.26-alpine` (all three Dockerfiles: `golang:1.27-alpine`) —
-  contradicting the same file's "Go 1.27.0 floor" ten lines above.
-- `docs/INSTALL.md` tells the operator to fix the `:443` warning in a way the
-  code does not honour (docs MAJ-2, detail in the audit report).
+  applies to you".~~ **Fixed.** The summary now states that 0.7.0 and 0.8.0 are
+  released and that the `secret.key` requirement applies now. It had contradicted
+  its own version-specific section seventy lines below, and the summary is the
+  half an operator in a hurry reads.
+- ~~`docs/UPGRADING.md:266` — "only the **first** playlist item plays;
+  sequencing is a later change"~~ **Fixed**; the sentence is gone. `selector.go`
+  emits a concat entry per item, `internal/ffmpeg/concat.go` renders it, and
+  `acceptance-playlist-phase0` is a required CI leg.
+- ~~`docs/MODULES.md:177–178` — `Dockerfile.vaapi` base `ubuntu:24.04` and
+  build stage `golang:1.26-alpine`~~ **Fixed.** The table now reads `ubuntu:26.04`
+  and `golang:1.27-alpine`, which is what `Dockerfile.vaapi:89` and every build
+  stage actually say.
+- ~~`docs/INSTALL.md` tells the operator to fix the `:443` warning in a way the
+  code does not honour~~ **Fixed.** `internal/config` returns no warning when
+  `ListenPort(addr)` is empty or `443`, and `ListenPort("0.0.0.0:443")` is
+  `"443"` — so the page's advice is now what the code does. Verified by reading
+  both, 2026-09-03.
 - `docs/TESTING.md` §10's acceptance-suite inventory disagrees with ci.yml's
   matrix in three places.
 - `docs/DEPENDENCIES.md` states an `@types/node` invariant the lockfile does
