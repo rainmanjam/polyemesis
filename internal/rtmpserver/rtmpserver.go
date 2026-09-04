@@ -50,6 +50,8 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -229,6 +231,31 @@ func (sub *subscriber) watchPeer() {
 // second close panicked. Nothing in this package recovers, so that panic took
 // the daemon down and ended every live broadcast on the install at once, which
 // for a completed broadcast is unrecoverable. See #496.
+// endSubscribers ends every consumer of a stream whose publish has finished,
+// and reports how many. Extracted so a test can call the REAL teardown: an
+// inline copy of this loop in a test stayed green when the close was deleted
+// from the shipped path, which is the same defect this teardown exists to fix.
+//
+// Collected under the stream's lock and closed after it is released --
+// sub.close() is idempotent (see #496) but it also closes a socket, which is
+// not work for a lock every publisher and subscriber contends on. A nil stream
+// is ordinary: the publisher may have been the last thing holding it.
+func endSubscribers(st *stream) int {
+	if st == nil {
+		return 0
+	}
+	st.mu.Lock()
+	ending := make([]*subscriber, 0, len(st.subs))
+	for sub := range st.subs {
+		ending = append(ending, sub)
+	}
+	st.mu.Unlock()
+	for _, sub := range ending {
+		sub.close()
+	}
+	return len(ending)
+}
+
 func (sub *subscriber) close() {
 	sub.closeOnce.Do(func() {
 		close(sub.done)
@@ -660,7 +687,36 @@ func (s *Server) admitSession(sc *gortmplib.ServerConn, target Target, peer, str
 			delete(s.streams, sess.key)
 		}
 	}
+	// EVERY SUBSCRIBER IS ENDED WITH THE PUBLISH. #674
+	//
+	// Nothing used to tell them. A subscriber stayed attached to a stream that
+	// would never produce another byte, and the engine's ingest child -- which
+	// is exactly such a subscriber -- sat there reading nothing. Measured on the
+	// acceptance rig: its out_time froze at 40021ms, the publisher's own
+	// duration, and it wrote ZERO bytes for the next eighty seconds while its
+	// reported speed decayed 0.98 -> 0.36 as wall clock ran on against a stopped
+	// stream clock. The relay hub it feeds went to ~6 packets/second, every
+	// destination subscribed to that hub starved together, and a destination
+	// created in that window probed a stream carrying almost nothing and could
+	// not characterise its audio. That is #674.
+	//
+	// engine.go states the intended behaviour in as many words: "The ingest
+	// listener is expected to exit whenever the streamer stops, so it must come
+	// back fast rather than backing off toward 30s." It could not exit, because
+	// the end of the publish was never delivered to it. Ending the subscribers
+	// here is what makes that sentence true -- AutoRestart with a 500ms floor
+	// then has it back before the next publish.
+	//
+	// Collected under s.mu and closed after it is released: sub.close() is
+	// idempotent (see #496, where a double close panicked and took the daemon
+	// down), but it also closes a socket, which is not work for a lock that
+	// every publisher and subscriber contends on.
+	st := s.streams[sess.key]
 	s.mu.Unlock()
+	if n := endSubscribers(st); n > 0 {
+		s.log.Info("rtmp subscribers ended with the publish", "component", "rtmp-ingest",
+			"subscribers", n)
+	}
 
 	s.log.Info("rtmp publisher disconnected", "component", "rtmp-ingest",
 		"source", target.Name, "role", role(target.Backup), "peer", peer,
@@ -863,6 +919,25 @@ func (s *Server) pump(sc *gortmplib.ServerConn, key PublisherKey) error {
 				case sub.ch <- msg:
 				default:
 					sub.dropped++
+					// THE SILENT COUNTER, MADE AUDIBLE ON REQUEST.
+					//
+					// sub.dropped is otherwise reported ONLY in the deferred
+					// cleanup when a subscriber disconnects, so a run that is
+					// shedding messages for its whole life says nothing until
+					// teardown -- and by then the stream nobody could decode is
+					// gone. This is the counter that would have shown, in the
+					// first minute, that audio was being dropped.
+					// `== 1 % dropLogEvery`, NOT `== 1`. The natural setting for
+					// "tell me about every drop" is 1, and dropped%1 is always
+					// 0, so `== 1` made POLYEMESIS_RTMP_DROP_LOG=1 the one value
+					// that logs NOTHING. That produced a clean "0 drops" during
+					// #674 which read as "the server dropped nothing" when it
+					// meant "the counter cannot fire". 1%N is 1 for every N>1,
+					// so the every-Nth behaviour is unchanged.
+					if shouldLogDrop(sub.dropped, dropLogEvery) {
+						s.log.Warn("rtmp subscriber dropping messages LIVE",
+							"component", "rtmp-ingest", "dropped", sub.dropped)
+					}
 				}
 			}
 			st.mu.Unlock()
@@ -1072,3 +1147,28 @@ func (s *Server) PublishingRole(sourceID int64, backup bool) bool {
 	_, ok := s.live[PublisherKey{SourceID: sourceID, Backup: backup}]
 	return ok
 }
+
+// dropLogEvery makes the silent drop counter audible, every Nth drop, when
+// POLYEMESIS_RTMP_DROP_LOG is set. Zero -- the default -- logs nothing, so
+// this costs one integer compare per dropped message and nothing otherwise.
+// shouldLogDrop is the sampling gate for the drop counter, extracted so a test
+// can call the REAL predicate.
+//
+// `dropped%every == 1%every`, NOT `== 1`. The natural setting for "tell me
+// about every drop" is 1, and dropped%1 is always 0, so `== 1` made
+// POLYEMESIS_RTMP_DROP_LOG=1 the single value that logs NOTHING. During #674
+// that produced a clean "0 drops" which read as "the server dropped nothing"
+// when it meant "the counter cannot fire". 1%N is 1 for every N>1, so the
+// every-Nth sampling is unchanged.
+func shouldLogDrop(dropped, every int) bool {
+	return every > 0 && dropped%every == 1%every
+}
+
+var dropLogEvery = func() int {
+	if v := os.Getenv("POLYEMESIS_RTMP_DROP_LOG"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return 0
+}()

@@ -147,6 +147,13 @@ export interface AudioMeterProps {
   className?: string;
 }
 
+/** "has never clipped", and NOT 0. clipAt is compared against
+ *  performance.now(), which counts from page load, so a zero sentinel means
+ *  "clipped at navigation start" — and CLIP_LATCH_MS is 1.5s, which is inside
+ *  the window where these meters usually mount. Every channel raised a CLIP
+ *  flag for the first second and a half of the page's life, on silence. */
+const NEVER = Number.NEGATIVE_INFINITY;
+
 interface ChannelState {
   holdDb: number;
   holdSetAt: number;
@@ -202,7 +209,7 @@ export function AudioMeter({
       ctx.clearRect(0, 0, cssWidth, cssHeight);
 
       while (stateRef.current.length < channels) {
-        stateRef.current.push({ holdDb: MIN_DB, holdSetAt: 0, clipAt: 0 });
+        stateRef.current.push({ holdDb: MIN_DB, holdSetAt: 0, clipAt: NEVER });
       }
 
       const gradient = buildGradient(ctx, cssWidth, p);

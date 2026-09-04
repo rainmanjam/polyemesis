@@ -127,3 +127,7 @@ docs/investigations/youtube-chat-capture-flow-and-cost.md
 docs/investigations/youtube-chat-quota-and-oauth-proxy.md
 docs/investigations/youtube-limits-own-dev-account.md
 .serena/
+
+# graphify build products. The graph is derived from the source and is rebuilt
+# on demand; committing it would put a large generated artifact in every diff.
+graphify-out/

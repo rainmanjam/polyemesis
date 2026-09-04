@@ -1,7 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+
+import { ingestChipReading } from "@/lib/ingestChip";
 import { NavLink, Outlet, useLocation } from "react-router";
 
 import { UpdateBanner } from "./UpdateBanner";
+import { VersionTag } from "./VersionTag";
+
+import type { VersionInfo } from "@/lib/types";
 import { TourOffer } from "./Tour";
 import { BrandMark } from "./BrandMark";
 import {
@@ -43,6 +48,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/signature/StatusDot";
+import { ProgrammeSwitcher } from "@/components/ProgrammeSwitcher";
 import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
 import { useNavCollapsed } from "@/hooks/useNavCollapsed";
 import { toneForState } from "@/lib/signal";
@@ -102,6 +108,42 @@ export function AppLayout({
   const { status, connected, frameError } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
+
+  // WHICH RAIL TOOLTIP IS OPEN, held here rather than by Radix.
+  //
+  // Radix opens a Tooltip.Root on hover whether or not it has any content to
+  // show. The expanded nav renders no TooltipContent -- the label is already on
+  // screen -- so every link the pointer crossed while expanded left its Root
+  // sitting in the open state, invisibly and with nothing to indicate it.
+  // Collapsing mounts the content, and every one of those Roots painted at
+  // once: a column of labels over the page for exactly the links that had been
+  // hovered, and none for the ones that had not.
+  //
+  // Controlling `open` fixes it at the source. While expanded the expression
+  // below is false for every link, so no amount of hovering can leave anything
+  // to resurface.
+  const [openRailTip, setOpenRailTip] = useState<string | null>(null);
+
+  // Adjusting state during render rather than in an effect, deliberately: an
+  // effect runs after the browser has had a frame to paint, and that frame is
+  // the exact bug this prevents. React documents this pattern; the previous
+  // value is held in state rather than a ref because a ref read during render
+  // is the thing the linter objects to, correctly.
+  const [railWasCollapsed, setRailWasCollapsed] = useState(navCollapsed);
+  if (railWasCollapsed !== navCollapsed) {
+    setRailWasCollapsed(navCollapsed);
+    setOpenRailTip(null);
+  }
+
+  // Held here so the chrome can show the running version without a second
+  // /version call: that endpoint surveys the on-air state fresh on every
+  // request, so two callers means two surveys per page load. UpdateBanner
+  // fetches it once and hands it over. #660.
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+  // useCallback because UpdateBanner's fetch effect depends on this; a new
+  // function each render would refetch on every render, which is the bug this
+  // arrangement exists to avoid.
+  const onVersionInfo = useCallback((v: VersionInfo) => setVersionInfo(v), []);
   const location = useLocation();
   const t = useT();
   const stateLabel = useStateLabel();
@@ -152,7 +194,7 @@ export function AppLayout({
   return (
     <div className="flex h-dvh flex-col bg-surface">
       {/* ---- top bar: the always-visible answer to "am I on air?" ---- */}
-      <UpdateBanner />
+      <UpdateBanner onInfo={onVersionInfo} />
       {/* An OFFER, not a launch. It renders nothing once the tour has been
           taken or dismissed, and nothing at all until the server has said
           which. Above the header and outside <main> so it pushes the console
@@ -180,6 +222,11 @@ export function AppLayout({
           <span className="text-[13px] font-semibold tracking-tight">polyemesis</span>
         </div>
 
+        {/* #638: which programme everything on screen is describing, and the
+            control to change it. Renders nothing at all on a single-programme
+            install, which is most of them. */}
+        <ProgrammeSwitcher />
+
         <div className="ml-2 hidden items-center gap-2 sm:flex">
           <StatusDot tone={ingestTone} />
           <span className="text-[11px] text-muted-foreground">{t("chrome.ingest")}</span>
@@ -193,11 +240,17 @@ export function AppLayout({
                 state otherwise. An SRT source is live without a child, so it
                 has no bitrate to show here — saying "Running" is the honest
                 answer rather than printing 0 kbps at a stream that is fine. */}
-            {ingest?.state === "running"
-              ? kbps(ingest.progress?.bitrateKbps ?? 0)
-              : ingestLive
-                ? stateLabel("running")
-                : stateLabel(ingest?.state)}
+            {/* `?? 0` used to sit on that bitrate, and it is the same mistake
+                the paragraph above rejects, arriving by a different route: a
+                child that has started but not yet reported progress has NO
+                bitrate, and printing 0 kbps for it beside a live dot tells an
+                operator mid-broadcast that their stream is running at zero.
+                Absent is not a reading. Fall back to the state, exactly as the
+                SRT case does. #663. */}
+            {(() => {
+              const r = ingestChipReading(ingest, ingestLive);
+              return r.kind === "bitrate" ? kbps(r.kbps) : stateLabel(r.state);
+            })()}
           </span>
         </div>
 
@@ -236,6 +289,10 @@ export function AppLayout({
             </Badge>
           )}
           <span className="hidden text-[11px] text-muted-foreground lg:inline">{username}</span>
+
+          {/* Between the username and the language button -- the slot the
+              layout density toggle vacated in c1c9c514. */}
+          <VersionTag info={versionInfo} />
 
           {/* Sits in the chrome rather than on Settings: the operator who needs
               it cannot necessarily read the nav item that would lead there. */}
@@ -351,7 +408,18 @@ export function AppLayout({
               // constant across the toggle is what lets React diff instead of
               // replace, so focus survives.
               return (
-                <Tooltip key={to}>
+                <Tooltip
+                  key={to}
+                  open={navCollapsed && openRailTip === to}
+                  // Only clear when the link closing is the one recorded. Radix
+                  // reports the outgoing tooltip's close AFTER the incoming
+                  // one's open when a pointer moves between two triggers, so an
+                  // unconditional null here would immediately shut the tooltip
+                  // that had just legitimately opened.
+                  onOpenChange={(open) =>
+                    setOpenRailTip((prev) => (open ? to : prev === to ? null : prev))
+                  }
+                >
                   <TooltipTrigger asChild>
                     <NavLink
                       key={to}

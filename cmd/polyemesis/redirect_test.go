@@ -216,3 +216,37 @@ func TestPlausibleHost(t *testing.T) {
 		}
 	}
 }
+
+// THE REFLECTED BRANCH'S OWN no-store, WHICH NOTHING ABOVE ACTUALLY PINNED.
+//
+// The header of this file says each mitigation fails if its guard is removed.
+// That was true of two of the three. Deleting `Cache-Control: no-store` and
+// `Vary: Host` from the UNCONFIGURED branch left every test here green, because
+// they all request /some/path?a=1 -- and a query string triggers the *other*
+// no-store, the one added for watch tokens. Two independent mitigations, one
+// test path, and only one of them was really being measured.
+//
+// This asks for a path with no query and no watch prefix, so the token rule
+// cannot fire and the reflected-host rule is the only thing that can set the
+// header. Mutation-tested: removing either line from that branch turns this red
+// while leaving the rest of the file green, which is what the older tests could
+// not do.
+func TestAReflectedHostIsUncacheableEvenWithNothingToLeak(t *testing.T) {
+	w := doRedirectTo(t, "", "evil.attacker.test", http.MethodGet, "/")
+
+	if got := w.Header().Get("Location"); !strings.HasPrefix(got, "https://evil.attacker.test") {
+		t.Fatalf("the positive control failed: Location %q does not reflect the sent "+
+			"Host, so asserting anything about its cacheability proves nothing", got)
+	}
+	if got := w.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store. A stranger chose this Location; "+
+			"a cache that stores it replays a redirect nobody configured to every "+
+			"later client. The query-string rule cannot cover this -- there is no "+
+			"query here.", got)
+	}
+	if got := w.Header().Values("Vary"); len(got) == 0 || !strings.Contains(strings.Join(got, ","), "Host") {
+		t.Errorf("Vary = %v, want it to include Host. Without it a cache may serve "+
+			"one client's reflected Location to a client that asked for a different "+
+			"authority.", got)
+	}
+}

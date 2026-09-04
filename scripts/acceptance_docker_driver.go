@@ -74,6 +74,12 @@ func main() {
 	case "tracks":
 		login()
 		tracks()
+	case "layout":
+		login()
+		layout()
+	case "relaystats":
+		login()
+		relayStats()
 	case "count":
 		login()
 		count()
@@ -556,4 +562,61 @@ func setMode(mode string) {
 func die(msg string) {
 	fmt.Fprintln(os.Stderr, "driver: "+msg)
 	os.Exit(1)
+}
+
+// layout prints what the engine believes each ingest track IS, rather than how
+// many there are.
+//
+// tracks() answers a count, and a count cannot distinguish "three tracks, each
+// stereo AAC" from "three tracks with no channel configuration at all" -- which
+// is the difference between a working install and #674, where every destination
+// that encodes audio fails on "Neither number of channels nor channel layout
+// specified" while the count still reads 3.
+func layout() {
+	_, out := do(http.MethodGet, "/source", nil)
+	var src struct {
+		Probed bool `json:"probed"`
+		Tracks []struct {
+			Index    int    `json:"index"`
+			Channels int    `json:"channels"`
+			Codec    string `json:"codec"`
+			Layout   string `json:"layout"`
+		} `json:"tracks"`
+	}
+	_ = json.Unmarshal(out, &src)
+	if !src.Probed {
+		fmt.Println("unprobed")
+		return
+	}
+	for _, t := range src.Tracks {
+		fmt.Printf("a:%d ch=%d codec=%s layout=%s\n", t.Index, t.Channels, t.Codec, t.Layout)
+	}
+}
+
+// relayStats prints what the relay hub has actually carried.
+//
+// The hub already counts continuity loss on the stream the ingest feeds it --
+// tsLost, discontinuities, lossPercent -- and nothing in the acceptance suite
+// has ever looked. A destination that cannot resolve its audio's codec
+// parameters on a stream the engine describes correctly is exactly the case
+// where "how much of it arrived" is the question. #674.
+func relayStats() {
+	_, out := do(http.MethodGet, "/stats", nil)
+	var st struct {
+		Relay struct {
+			Subscribers     []string `json:"subscribers"`
+			RxPackets       uint64   `json:"rxPackets"`
+			TxPackets       uint64   `json:"txPackets"`
+			Dropped         uint64   `json:"dropped"`
+			TSPackets       uint64   `json:"tsPackets"`
+			TSLost          uint64   `json:"tsLost"`
+			Discontinuities uint64   `json:"discontinuities"`
+			LossPercent     float64  `json:"lossPercent"`
+		} `json:"relay"`
+	}
+	_ = json.Unmarshal(out, &st)
+	r := st.Relay
+	fmt.Printf("rx=%d tx=%d dropped=%d tsPackets=%d tsLost=%d discos=%d loss=%.3f%% subs=%d%v\n",
+		r.RxPackets, r.TxPackets, r.Dropped, r.TSPackets, r.TSLost,
+		r.Discontinuities, r.LossPercent, len(r.Subscribers), r.Subscribers)
 }
