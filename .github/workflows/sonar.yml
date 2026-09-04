@@ -288,6 +288,14 @@ jobs:
           SONAR_API: https://sonarcloud.io
           SONAR_PROJECT: rainmanjam_polyemesis
           BRANCH: ${{ github.head_ref || github.ref_name }}
+          # A pull request is not a branch as far as this API is concerned.
+          # component_tree answered 404 four times on every PR run -- once per
+          # retry -- so the per-file list, the whole reason that call exists,
+          # has never once appeared on a pull request, which is the only place
+          # anybody is going to act on it. The gate verdict itself was right
+          # throughout, which is why this went unnoticed: the step failed
+          # correctly and silently withheld the list that says what to fix.
+          PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           # RUNNER_TEMP, not the workspace and not bare mktemp: the runner clears
@@ -383,7 +391,11 @@ jobs:
           # token is here. Printing the ten worst turns a percentage into a list
           # of files, which is the difference between a number and a task.
           if jq -e '.projectStatus.conditions[]? | select(.metricKey=="new_coverage" and .status=="ERROR")' "$gate" >/dev/null; then
-            if api "$SONAR_API/api/measures/component_tree?component=$SONAR_PROJECT&branch=$BRANCH&metricKeys=new_uncovered_lines,new_lines_to_cover&qualifiers=FIL&ps=100&s=metric&metricSort=new_uncovered_lines&asc=false" "$gate.files"; then
+            # pullRequest= on a PR, branch= on a push. Getting this wrong is a
+            # 404, not an empty list, so it reads as "the API is down" rather
+            # than "you asked for the wrong thing".
+            if [ -n "${PR:-}" ]; then scope="pullRequest=$PR"; else scope="branch=$BRANCH"; fi
+            if api "$SONAR_API/api/measures/component_tree?component=$SONAR_PROJECT&$scope&metricKeys=new_uncovered_lines,new_lines_to_cover&qualifiers=FIL&ps=100&s=metric&metricSort=new_uncovered_lines&asc=false" "$gate.files"; then
               echo
               # SORTED HERE, not by the API. The request asks for
               # metricSort=new_uncovered_lines&asc=false and SonarCloud ignores it
