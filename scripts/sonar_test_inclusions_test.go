@@ -396,3 +396,52 @@ func TestTheBraceExpanderActuallyDiscriminates(t *testing.T) {
 		}
 	}
 }
+
+// The fourth way the measurement understated work that had already been done,
+// and the only one that is a command-line flag rather than a glob.
+//
+// `go test ./...` instruments only the package under test, so a function
+// exercised solely through ANOTHER package's tests records zero hits. That is
+// not a rare shape in this repo -- internal/db is driven almost entirely
+// through internal/api's handler tests. db.DeleteAllAPITokens is the case that
+// found it: internal/api/password_change_tokens_test.go drives it through the
+// password-change handler, which is the only way it is ever called, and the
+// profile said 0.0%. With -coverpkg it says 71.4%, and the repo total moves
+// 85.6% -> 87.4%.
+//
+// Dropping the flag would not break anything, fail anything, or look wrong in
+// review. It would quietly take back about a point and a half of a gate that
+// sits two points above its threshold, and the next person would go looking for
+// the missing coverage in the code.
+func TestTheGoCoverageProfileIsBuiltAcrossPackages(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), ".github/workflows/sonar.yml"))
+	if err != nil {
+		t.Fatalf("read sonar.yml: %v", err)
+	}
+	body := string(raw)
+
+	const step = "Go coverage for the scanner"
+	i := strings.Index(body, step)
+	if i < 0 {
+		t.Fatalf("sonar.yml has no %q step, so nothing produces the Go profile the "+
+			"scanner is pointed at and every Go file reads as 0%% covered", step)
+	}
+	// Just this step, not the file: the point is that THIS command carries the
+	// flag, and a mention anywhere else -- a comment, another job -- must not
+	// satisfy it.
+	end := strings.Index(body[i:], "\n      - name:")
+	if end < 0 {
+		end = len(body) - i
+	}
+	block := body[i : i+end]
+
+	if !strings.Contains(block, "go test") || !strings.Contains(block, "-coverprofile=coverage.out") {
+		t.Fatalf("the %q step no longer writes coverage.out, which is the path "+
+			"sonar.go.coverage.reportPaths names:\n%s", step, block)
+	}
+	if !strings.Contains(block, "-coverpkg=./...") {
+		t.Fatalf("the %q step has lost -coverpkg=./..., so any function exercised "+
+			"only through another package's tests will record zero hits and read as "+
+			"untested. Worth about 1.5 points of new_coverage, silently.\n%s", step, block)
+	}
+}
