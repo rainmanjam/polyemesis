@@ -716,7 +716,10 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 
 // Playout exposes the public origin so the API can mount its media handler and
 // render its status.
-func (e *Engine) Playout() *playout.Manager { return e.play }
+func (e *Engine) Playout() *playout.Manager {
+	e.requireEngine("Playout")
+	return e.play
+}
 
 // playoutProc is a supervised child the playout manager owns, registered with
 // the engine for the lifetime the manager runs it.
@@ -751,7 +754,47 @@ func (p *playoutProc) Stop(ctx context.Context) error {
 }
 
 // Hub exposes the relay for the monitoring endpoint.
-func (e *Engine) Hub() *relay.Hub { return e.hub }
+// requireEngine is how the refusing half of the nil-receiver contract says no.
+//
+// #440. These methods must panic on a nil receiver -- see nilEngineAnswers in
+// nil_receiver_reads_test.go for why each one refuses rather than answers --
+// and until now they did it by DEREFERENCING the nil, which on amd64 is a
+// hardware fault rather than a Go panic.
+//
+// On Windows that is not equivalent. A hardware nil check raises a real
+// EXCEPTION_ACCESS_VIOLATION, and Go's recovery from one writes below the
+// goroutine's stack into the adjacent heap span: golang/go#81238, open, filed
+// 2026-08-31. Windows dispatches the exception on the goroutine's own stack,
+// the kernel CONTEXT is about 11.5 kB on Intel AMX hosts against 3.4 kB on AMD,
+// and the runtime reserves stackSystem = 4096. The corruption surfaces later,
+// somewhere unrelated, as `found pointer to free object` or `s.allocCount !=
+// s.nelems` or a fault inside the collector -- fifteen times in 1,607 Windows
+// CI runs, always in this package, never on Unix, because Unix delivers signals
+// on a signal stack and never on the goroutine's.
+//
+// TestANilEngineAnswersTheReadsAndRefusesEverythingElse calls all 21 of these
+// on a nil receiver through reflect and recovers, so CI took the fault on every
+// run and the host lottery decided whether it corrupted anything.
+//
+// An explicit panic is a SOFTWARE panic: no exception, no dispatch, nothing to
+// recover badly. The contract is unchanged -- the same methods refuse, with the
+// same recover() behaviour at every call site -- and this is worth doing on its
+// own merits regardless of the upstream fix, because a nil receiver that names
+// itself beats one that segfaults.
+//
+// CALLED, NOT INLINED AS 21 COPIES OF AN if. A method call on a nil pointer
+// receiver is legal Go; only touching a field faults. So this runs before any
+// dereference in each caller.
+func (e *Engine) requireEngine(method string) {
+	if e == nil {
+		panic("engine: " + method + " called on a nil *Engine; this install has no programme")
+	}
+}
+
+func (e *Engine) Hub() *relay.Hub {
+	e.requireEngine("Hub")
+	return e.hub
+}
 
 // BackupHub is the failover backup's relay, or nil when no backup is running.
 //
@@ -760,6 +803,7 @@ func (e *Engine) Hub() *relay.Hub { return e.hub }
 // backup encoder addresses `<token>.backup`, so the manager needs somewhere to
 // put those datagrams.
 func (e *Engine) BackupHub() *relay.Hub {
+	e.requireEngine("BackupHub")
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if e.backup == nil {
@@ -769,7 +813,10 @@ func (e *Engine) BackupHub() *relay.Hub {
 }
 
 // Monitor exposes host/bitrate stats.
-func (e *Engine) Monitor() *stats.Monitor { return e.mon }
+func (e *Engine) Monitor() *stats.Monitor {
+	e.requireEngine("Monitor")
+	return e.mon
+}
 
 // ingestLiveGrace is how long after the last non-zero bitrate sample the ingest
 // is still called live. The monitor samples once a second, so this is two
@@ -788,7 +835,10 @@ const ingestLiveGrace = 3 * time.Second
 //
 // The monitor already samples the hub at 1 Hz for the bitrate graph; nothing
 // here adds a second sampler.
-func (e *Engine) IngestLive() bool { return ingestLive(e.mon.Bitrate(), time.Now()) }
+func (e *Engine) IngestLive() bool {
+	e.requireEngine("IngestLive")
+	return ingestLive(e.mon.Bitrate(), time.Now())
+}
 
 // ingestLive is the decision on its own, so every boundary of it is a table
 // test rather than a two-second sleep against a real monitor.
@@ -823,7 +873,10 @@ func gpuBusy(rends []RenditionStatus) bool {
 }
 
 // Recordings exposes the recording manager.
-func (e *Engine) Recordings() *recording.Manager { return e.recman }
+func (e *Engine) Recordings() *recording.Manager {
+	e.requireEngine("Recordings")
+	return e.recman
+}
 
 // Tools exposes the detected FFmpeg.
 //
@@ -831,7 +884,10 @@ func (e *Engine) Recordings() *recording.Manager { return e.recman }
 // every engine was handed the same pointer, so asking an engine for it meant a
 // build without one could not answer a question that has nothing to do with a
 // programme.
-func (e *Engine) Tools() *ffmpeg.Tools { return e.tools }
+func (e *Engine) Tools() *ffmpeg.Tools {
+	e.requireEngine("Tools")
+	return e.tools
+}
 
 // hostSystem is the box's resource snapshot, taken from the sampler the
 // manager owns. An engine built outside a manager has none and publishes an
@@ -897,6 +953,7 @@ func (e *Engine) Start(ctx context.Context) error {
 // StopWithin and share one context, or the per-engine budgets add up past
 // what systemd allows. See shutdown_budget.go. #645.
 func (e *Engine) Stop() {
+	e.requireEngine("Stop")
 	ctx, cancel := context.WithTimeout(context.Background(), ShutdownBudget)
 	defer cancel()
 	e.StopWithin(ctx)
@@ -1058,6 +1115,7 @@ func (e *Engine) currentRecordingSettings() db.RecordingSettings {
 
 // Settings returns the live settings snapshot.
 func (e *Engine) Settings() db.Settings {
+	e.requireEngine("Settings")
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.settings
@@ -1202,6 +1260,7 @@ func (e *Engine) SourceID() int64 {
 // stable human-readable handle: an id is meaningless in an MQTT topic or on a
 // Home Assistant entity, and the id is the only thing Status carried before.
 func (e *Engine) SourceName() string {
+	e.requireEngine("SourceName")
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.sourceName
@@ -1215,6 +1274,7 @@ func (e *Engine) SourceName() string {
 // callers can both observe a destination as missing and both start it, and the
 // first of the two becomes an FFmpeg nothing can find or stop.
 func (e *Engine) Reconcile() error {
+	e.requireEngine("Reconcile")
 	e.reconcileMu.Lock()
 	defer e.reconcileMu.Unlock()
 	e.reconciles.Add(1)
@@ -1796,6 +1856,7 @@ func (e *Engine) reconcilePreview(s db.Settings) {
 // load, so the player recovers on its own once the first segment lands, a
 // second or two later.
 func (e *Engine) PreviewRequested() {
+	e.requireEngine("PreviewRequested")
 	now := time.Now()
 
 	e.mu.Lock()
@@ -1896,7 +1957,10 @@ func (e *Engine) sweepPreview(now time.Time) {
 // with no source, and there is no pipeline to report on: answering false would
 // invent a fact about a programme that does not exist. Every caller reaches this
 // through Manager.Engines(), which yields real engines.
-func (e *Engine) OutputLive() bool { return e.previewFlowing(time.Now()) }
+func (e *Engine) OutputLive() bool {
+	e.requireEngine("OutputLive")
+	return e.previewFlowing(time.Now())
+}
 
 // previewFlowing reports whether the hub the preview would read has carried
 // anything RECENTLY.
@@ -3400,6 +3464,7 @@ func (e *Engine) annotate(src routing.Source) routing.Source {
 // that compile a graph must see the same layout the engine compiles against, or
 // the routing editor and the running destination disagree.
 func (e *Engine) Source() routing.Source {
+	e.requireEngine("Source")
 	return e.effectiveSource()
 }
 
@@ -3984,10 +4049,14 @@ func (e *Engine) Clip(seconds int) (clips.Clip, error) {
 //
 // It reads the directory rather than the running buffer, so clips survive the
 // buffer being switched off — the recordings they are stored beside do.
-func (e *Engine) Clips() ([]clips.Clip, error) { return clips.List(e.clipDir()) }
+func (e *Engine) Clips() ([]clips.Clip, error) {
+	e.requireEngine("Clips")
+	return clips.List(e.clipDir())
+}
 
 // ClipUsage reports what the clips directory holds against its retention.
 func (e *Engine) ClipUsage() (clips.Usage, error) {
+	e.requireEngine("ClipUsage")
 	if c, err := e.clipCapturer(); err == nil {
 		return c.Usage()
 	}
@@ -4145,6 +4214,7 @@ func (e *Engine) SetLiveCaptions(cfg transcribe.LiveConfig) error {
 
 // LiveCaptions reports the captioner's state for the dashboard and the API.
 func (e *Engine) LiveCaptions() CaptionStatus {
+	e.requireEngine("LiveCaptions")
 	e.mu.RLock()
 	capt, on, cfg, warn, w := e.capt, e.captOn, e.captCfg, e.captWarn, e.whisper
 	vtt := e.captVTT
@@ -4418,7 +4488,10 @@ func (e *Engine) Alerts() *alerts.Notifier {
 
 // Hooks exposes the dispatcher so the API can report its counters, list recent
 // deliveries and send a test. Nil when no dispatcher was wired.
-func (e *Engine) Hooks() *hooks.Dispatcher { return e.hooks }
+func (e *Engine) Hooks() *hooks.Dispatcher {
+	e.requireEngine("Hooks")
+	return e.hooks
+}
 
 // SetHooks attaches the shared dispatcher.
 //
