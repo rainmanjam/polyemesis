@@ -1706,31 +1706,39 @@ jobs:
       # A vulnerable direct dependency should fail the build, not sit in a
       # report nobody opens. --audit-level=high so a low-severity transitive
       # advisory does not block a hotfix.
-      # ONE CALL, GENEROUSLY BOUNDED. npm ALREADY RETRIES -- see the long note on
-      # the matching step in security.yml. Briefly: this was three attempts each
-      # killed at 90s, written for a failure mode that turned out not to be the
-      # one happening. The endpoint does not reject, it is intermittently SLOW --
-      # measured at 137s, 149s, 111s and 159s on 2026-09-04, every one exiting 0
-      # with zero vulnerabilities, against nine seconds on a good day. The outer
-      # deadline was killing calls that would have succeeded, and cancelling npm's
-      # own `fetch-retries=2` / `fetch-timeout=300000` while doing it.
+      # THE ADVISORY SOURCE THAT ANSWERS -- see the long note on the matching
+      # job in security.yml. Briefly: `npm audit` POSTs the tree to npm's bulk
+      # advisories endpoint, which returned 503 for hours on 2026-09-04 while
+      # npm's status page called it operational. osv-scanner reads OSV.dev and
+      # answers in a second from the lockfile alone, with no install and no
+      # registry round trip.
+      #
+      # The positive control lives in security.yml, which owns dependency
+      # auditing for BOTH projects. This step exists because ui/ is built here
+      # and a build that ships known-vulnerable dependencies should fail where
+      # the build is, not only in another workflow.
       - if: needs.changes.outputs.code == 'true'
         name: npm audit (ui)
+        working-directory: ${{ github.workspace }}
         run: |
           set -uo pipefail
-          out=$(timeout 360 npm audit --audit-level=high 2>&1) && exit 0
-          rc=$?
+          curl -sSfL --proto '=https' --tlsv1.2 --retry 3 --retry-all-errors \
+            --retry-delay 5 --max-time 120 -o /tmp/osv-scanner \
+            "https://github.com/google/osv-scanner/releases/download/v2.5.1/osv-scanner_linux_amd64"
+          echo "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be  /tmp/osv-scanner" | sha256sum -c -
+          chmod +x /tmp/osv-scanner
+          out=$(/tmp/osv-scanner scan source --lockfile ui/package-lock.json 2>&1); rc=$?
           printf '%s\n' "$out"
-          if [ "$rc" -eq 124 ]; then
-            echo "::error title=Registry unreachable::npm did not answer in 360s, having retried twice itself. ui was NOT audited -- an outage, not a clean bill of health."
+          # osv-scanner exits 0 on a path it cannot resolve, so a typo would
+          # otherwise pass as a clean audit. The count is read back.
+          if ! printf '%s' "$out" | grep -qE 'Scanned .*package-lock\.json file and found [1-9][0-9]* packages'; then
+            echo "::error title=Nothing was scanned::osv-scanner did not report reading ui/package-lock.json with packages in it."
             exit 1
           fi
-          if printf '%s' "$out" | grep -q 'audit endpoint returned an error'; then
-            echo "::error title=Registry error::npm's audit endpoint returned an error. ui was NOT audited."
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Vulnerable dependencies::osv-scanner found known vulnerabilities in ui. The advisories and their fixed versions are listed above."
             exit 1
           fi
-          echo "::error title=npm audit::a high-severity advisory was found in ui's dependencies. This is a finding, not a registry problem -- read the output above."
-          exit 1
 
   # THE WORKFLOWS THEMSELVES WERE NEVER CHECKED.
   #
