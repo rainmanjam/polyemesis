@@ -32,6 +32,25 @@ import (
 // language belongs in both this list and sonar.test.inclusions.
 var testFileSuffixes = []string{"_test.go", ".test.ts", ".test.tsx"}
 
+// isTestPath reports whether a repo-relative path is test code. A suffix is one
+// way; sitting under testdata/ is the other, and it is not a special case --
+// internal/api/testdata/faketool/main.go is 117 lines of real Go that the Go
+// tool refuses to compile into any coverage profile, because it ignores
+// testdata/ entirely. SonarCloud has no such rule, so the file was analysed as
+// production source that no test could ever reach. Same class as the two globs
+// above: fixture code scored as the thing it is a fixture for.
+func isTestPath(rel string) bool {
+	if strings.HasPrefix(rel, "testdata/") || strings.Contains(rel, "/testdata/") {
+		return true
+	}
+	for _, suffix := range testFileSuffixes {
+		if strings.HasSuffix(rel, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // skipDirs are trees SonarCloud never sees, so a test file inside one is not
 // evidence of a hole in the property.
 var skipDirs = map[string]bool{
@@ -113,21 +132,14 @@ func TestEveryTestFileIsDeclaredAsATest(t *testing.T) {
 			}
 			return nil
 		}
-		isTest := false
-		for _, suffix := range testFileSuffixes {
-			if strings.HasSuffix(d.Name(), suffix) {
-				isTest = true
-				break
-			}
-		}
-		if !isTest {
-			return nil
-		}
 		rel, rerr := filepath.Rel(root, path)
 		if rerr != nil {
 			return rerr
 		}
 		rel = filepath.ToSlash(rel)
+		if !isTestPath(rel) {
+			return nil
+		}
 		for _, g := range globs {
 			if matchesGlob(strings.TrimSpace(g), rel) {
 				return nil
@@ -169,6 +181,22 @@ func TestTheInclusionMatcherActuallyDiscriminates(t *testing.T) {
 		{"ui/e2e/**", "ui/e2e/smoke.spec.ts", true, "a trailing ** matches below it"},
 		{"scripts/**", "internal/scripts/x_test.go", false, "a leading segment is anchored"},
 		{"*.test.ts", "web/src/x.test.ts", false, "a single * does not span directories"},
+		{"**/testdata/**", "internal/api/testdata/faketool/main.go", true, "a fixture binary is test code"},
+		{"**/testdata/**", "internal/api/handlers.go", false, "and an ordinary file is not"},
+	}
+	for _, c := range []struct {
+		path string
+		want bool
+	}{
+		{"internal/api/testdata/faketool/main.go", true},
+		{"testdata/x.go", true},
+		{"internal/db/db_test.go", true},
+		{"internal/db/db.go", false},
+		{"internal/api/handlers.go", false},
+	} {
+		if got := isTestPath(c.path); got != c.want {
+			t.Errorf("isTestPath(%q) = %v, want %v", c.path, got, c.want)
+		}
 	}
 	for _, c := range cases {
 		if got := matchesGlob(c.pattern, c.path); got != c.want {
