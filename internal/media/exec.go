@@ -109,23 +109,42 @@ func Exec(ctx context.Context, cmd Command, sink Sink) error {
 			}
 		})
 	}()
-	// c.Wait FIRST, then the readers. Waiting on the readers first is what
-	// killGrace was written to prevent, and it disabled it.
+	// DRAIN FIRST, BUT ON A LEASH. Both orderings of these two lines have now
+	// been wrong, in opposite directions, and the bound is what reconciles them.
 	//
-	// WaitDelay only has effect INSIDE Cmd.Wait: it is the bound on how long
-	// Wait spends on the I/O pipes after the process has exited, after which it
-	// closes them itself. Blocking on the reader goroutines beforehand meant
-	// that when a grandchild held the pipes open -- the exact case killGrace's
-	// comment names, "x265 and SVT-AV1 both do" -- the readers never saw EOF,
-	// wg.Wait never returned, and c.Wait was never reached to apply the delay.
-	// The worker sat there for ever and, in that comment's own words, "the
-	// queue's cancellation would be a lie".
+	// wg.Wait() unconditionally first -- the original -- hangs forever when a
+	// grandchild holds the pipes open, which killGrace's own comment says x265
+	// and SVT-AV1 both do: the readers never see EOF, so c.Wait is never reached
+	// and WaitDelay, which only has effect INSIDE Wait, never applies. The
+	// worker sits there and the queue's cancellation is a lie.
 	//
-	// Draining after Wait is safe in the other direction: Wait closes the pipes,
-	// so the scanners end. wg.Wait still precedes the read of tail, so the
-	// quoted reason is complete and the mutex is uncontended by then.
+	// c.Wait() first -- the fix for that -- LOSES OUTPUT, and Go says so
+	// outright: "it is thus incorrect to call Wait before all reads from the
+	// pipe have completed" (os/exec, StderrPipe). Wait closes the pipes, and
+	// whatever the scanner had not read yet goes with them. The comment here
+	// used to claim the opposite was safe. CI disproved it: a child that writes
+	// 100 lines and exits was seen delivering 83, and the assertion that every
+	// line reaches the job log failed on the 17 that did not.
+	//
+	// So: wait for the readers, but no longer than killGrace. The normal case
+	// drains completely, because the child has exited and closed its ends. The
+	// grandchild case gives up on the tail after the same grace the kill gets,
+	// falls through to Wait, and WaitDelay closes the pipes from under the
+	// readers -- which is the outcome that ordering was reaching for, now
+	// reached without paying for it on every ordinary run.
+	drained := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(killGrace):
+		// The readers are still blocked on a pipe something else is holding.
+		// c.Wait below, bounded by WaitDelay, is what frees them.
+	}
+
 	err = c.Wait()
-	wg.Wait()
 
 	if err != nil {
 		mu.Lock()
