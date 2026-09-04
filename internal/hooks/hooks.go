@@ -211,7 +211,47 @@ type Hook struct {
 	// hook to hit something on their own LAN sets this explicitly; a refusal
 	// with no escape hatch would just get the whole feature disabled instead.
 	AllowPrivateTarget bool `json:"allowPrivateTarget"`
+	// SecretUnreadable is the reason this hook's stored signing secret could
+	// not be decrypted on this machine, empty for every hook whose secret was
+	// read normally -- which is all of them on a healthy install. #715.
+	//
+	// It is set by db.scanHook and NEVER by a column: it is a fact about this
+	// process's key file, not about the row, so it is recomputed on every read
+	// rather than remembered. Restore the right key file and it goes away by
+	// itself, with no repair step and nothing to un-set. The same shape, and
+	// for the same reasons, as db.Destination.KeyUnreadable.
+	//
+	// WHEN IT IS SET, Secret IS EMPTY AND NOTHING IS DELIVERED. That is the
+	// whole point. The old behaviour was to load the row with an empty secret
+	// and go on posting, which signs with nothing and sends the delivery
+	// UNSIGNED -- and at the far end an unsigned delivery is indistinguishable
+	// from a forgery. The signing secret was the only thing that made the
+	// webhook trustworthy, and its absence is invisible to the receiver.
+	//
+	// The row itself is not touched. enabled is still 1 in the database, so
+	// this is reversible by restoring the key file rather than by re-enabling
+	// every hook by hand.
+	SecretUnreadable string `json:"secretUnreadable,omitempty"`
 }
+
+// secretUnreadableReason is what the operator is shown. It names the fix,
+// because "decryption failed" tells somebody staring at a hook that has stopped
+// firing nothing they can act on, and the fix really is this small.
+const secretUnreadableReason = "the signing secret could not be read on this machine — " +
+	"re-enter it to enable this hook"
+
+// SecretUnreadableReason is secretUnreadableReason for the storage layer, which
+// is what discovers the condition and therefore what has to set it.
+func SecretUnreadableReason() string { return secretUnreadableReason }
+
+// ErrSecretUnreadable is the sentinel behind Hook.SecretUnreadable.
+//
+// Deliberately never returned by the load path: a hook whose secret will not
+// open must still appear in the list, with its name and endpoint intact, or an
+// operator whose key file went missing opens the hooks page to an empty one and
+// has nothing to act on. It is an error only so Validate has something to
+// return and attempt has something to match on.
+var ErrSecretUnreadable = errors.New(secretUnreadableReason)
 
 // RedactedURL is what a response or a log line may show.
 func (h Hook) RedactedURL() string { return alerts.RedactWebhookURL(h.URL) }
@@ -292,6 +332,17 @@ func (h Hook) Normalized() Hook {
 // the secret lives, and an error message is the first thing an operator pastes
 // into a bug report.
 func (h Hook) Validate() error {
+	// FIRST, and before the name check, because it is the one refusal here that
+	// is about the MACHINE rather than about what the operator typed. #715.
+	//
+	// reload() starts a worker only for a hook that validates, so this is what
+	// keeps an unsigned delivery from having a queue to sit in at all. The
+	// refusal at the moment of signing (Dispatcher.attempt) is the one that
+	// makes it unreachable; this one is what makes it VISIBLE, in the list and
+	// in the log, rather than a hook that quietly stopped firing.
+	if h.SecretUnreadable != "" {
+		return fmt.Errorf("hook %q: %w", h.Name, ErrSecretUnreadable)
+	}
 	if h.Name == "" {
 		return fmt.Errorf("hook needs a name")
 	}
