@@ -215,14 +215,31 @@ jobs:
       - name: npm audit (production dependencies)
         run: |
           set -uo pipefail
+          # EACH ATTEMPT IS BOUNDED, because the first version of this was not
+          # and that is worse than no retry at all. npm does its own internal
+          # retrying against the registry, so a single unwell `npm audit` can sit
+          # for minutes; three of those in a row exceeded this job's
+          # timeout-minutes and the runner CANCELLED it. A cancelled job is not a
+          # pass and not a failure -- it names nothing, which is the state this
+          # whole change exists to abolish. Observed: npm-audit (ui) cancelled at
+          # exactly 5 minutes on run 33822493761 while (web) passed beside it.
+          #
+          # 90s x 3 attempts plus two 15s gaps is 300s, comfortably inside the
+          # ceiling. `timeout` exits 124, which is a registry problem by any
+          # other name and is treated as one.
           for attempt in 1 2 3; do
-            out=$(npm audit --omit=dev --audit-level=high 2>&1) && exit 0
+            out=$(timeout 90 npm audit --omit=dev --audit-level=high 2>&1) && exit 0
+            rc=$?
             printf '%s\n' "$out"
-            if ! printf '%s' "$out" | grep -q 'audit endpoint returned an error'; then
+            if [ "$rc" -ne 124 ] && ! printf '%s' "$out" | grep -q 'audit endpoint returned an error'; then
               echo "::error title=npm audit::a high-severity advisory was found in ${{ matrix.project }}'s production dependencies. This is a finding, not a registry problem -- read the output above."
               exit 1
             fi
-            echo "::warning title=Registry unavailable::attempt $attempt of 3 could not reach npm's audit endpoint; retrying."
+            if [ "$rc" -eq 124 ]; then
+              echo "::warning title=Registry slow::attempt $attempt of 3 exceeded 90s and was killed; retrying."
+            else
+              echo "::warning title=Registry unavailable::attempt $attempt of 3 could not reach npm's audit endpoint; retrying."
+            fi
             sleep 15
           done
           echo "::error title=Registry unavailable::npm's audit endpoint failed three times, so ${{ matrix.project }} was NOT audited. This is an outage, not a clean bill of health -- the job stays red so nobody reads it as one."
