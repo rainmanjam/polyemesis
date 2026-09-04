@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -443,5 +444,77 @@ func TestTheGoCoverageProfileIsBuiltAcrossPackages(t *testing.T) {
 		t.Fatalf("the %q step has lost -coverpkg=./..., so any function exercised "+
 			"only through another package's tests will record zero hits and read as "+
 			"untested. Worth about 1.5 points of new_coverage, silently.\n%s", step, block)
+	}
+}
+
+// An informational step that can spend the whole job budget is not
+// informational.
+//
+// "Report what the smoke run executed in cmd/polyemesis" says so three times --
+// if: always(), "does not fail the job", "informational only" -- and then hung
+// inside `go tool covdata` on windows-latest and took the job to its 35-minute
+// ceiling. Twice in one afternoon, on #694 and #696. The runner CANCELS at the
+// ceiling, `gh pr checks` renders a cancelled job as a failure naming nothing,
+// and the required-check rule refuses the merge. Normal cost of that step on
+// the same runner: one to three seconds.
+//
+// This counts the shape rather than that one step: a step that runs on
+// always(), executes a script, and has no timeout-minutes can convert any hang
+// into a job-wide cancellation, whatever it says about itself. There is exactly
+// one such step today and it is the one being fixed, so this starts life at
+// zero and stays there.
+func TestNoAlwaysStepCanSpendTheWholeJobBudget(t *testing.T) {
+	root := repoRoot(t)
+	files, err := filepath.Glob(filepath.Join(root, ".github/workflows/*.yml"))
+	if err != nil {
+		t.Fatalf("glob workflows: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("no workflows found, so this guard is counting nothing")
+	}
+
+	var bare []string
+	seen := 0
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		lines := strings.Split(string(raw), "\n")
+		for i, l := range lines {
+			if !strings.HasPrefix(strings.TrimSpace(l), "- name:") {
+				continue
+			}
+			// The step's own block: up to the next `- name:` at the same indent.
+			indent := strings.Index(l, "- name:")
+			end := len(lines)
+			for j := i + 1; j < len(lines); j++ {
+				if strings.HasPrefix(lines[j], strings.Repeat(" ", indent)+"- name:") {
+					end = j
+					break
+				}
+			}
+			block := strings.Join(lines[i:end], "\n")
+			if !strings.Contains(block, "always()") || !strings.Contains(block, "run:") {
+				continue
+			}
+			seen++
+			if !strings.Contains(block, "timeout-minutes:") {
+				bare = append(bare, fmt.Sprintf("  %s:%d  %s",
+					filepath.Base(f), i+1, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "- name:"))))
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("found no always() run-steps at all; the block-splitting below has " +
+			"stopped matching and this guard is now counting nothing")
+	}
+	if len(bare) > 0 {
+		t.Fatalf("%d always() step(s) run a script with no timeout-minutes:\n%s\n\n"+
+			"A step that runs on always() runs after a failure, when the job is "+
+			"already short of budget, and an unbounded one converts any hang into a "+
+			"CANCELLED job -- which `gh pr checks` shows as a failure naming nothing "+
+			"and which the required-check rule then refuses to merge past. Give it a "+
+			"timeout generous against its normal cost.", len(bare), strings.Join(bare, "\n"))
 	}
 }
