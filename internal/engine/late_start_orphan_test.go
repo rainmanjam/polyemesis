@@ -3,6 +3,7 @@ package engine
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/relay"
@@ -109,21 +110,66 @@ func TestAMetersReconcileThatPublishesIntoAShutdownStartsNothing(t *testing.T) {
 	}
 }
 
-// The preview has NO direct test here, deliberately, and this comment is the
-// record of why rather than an omission.
-//
-// startPreviewLocked does read e.stopped -- but early, then it drops e.mu, does
-// a mkdir, allocates a port and subscribes a hub, and publishes under a FRESH
-// acquisition. So the check does not cover the publish, which is the whole of
-// what reconcileRecorder's comment is about. The window is narrower than the
-// meters one, not absent.
-//
-// Reaching it from a test needs the preview to be flowing (previewFlowing gates
-// the start on real relay activity) and needs e.stopped to become true between
-// the early read and the publish -- a seam this package does not have and that
-// is not worth adding on the way past. It is covered by the counter below,
-// which reads the shape rather than executing it, and the guard added to it
-// makes the publish refuse regardless of what the early check saw.
+// The preview needs the seam, because it is the one site whose window cannot be
+// reached by setting e.stopped up front: it reads the flag early and returns
+// there, never arriving at the publish this is about. beforePublish sits in the
+// gap -- the same technique, and the same justification, as afterPublish in the
+// destination path: the window is a few instructions wide and no timing test
+// could sit in it reliably.
+func TestAPreviewStartThatPublishesIntoAShutdownStartsNothing(t *testing.T) {
+	e, _ := storeEngine(t)
+	e.alloc = relay.NewPortAllocator(freeUDPPort(t), 4)
+
+	// Flowing, or startPreviewLocked refuses before it reaches anything this
+	// test is about: previewFlowing gates the encoder on the relay having
+	// actually advanced, which is what stops an ffmpeg blocking for ever in
+	// avformat_open_input on a quiet socket.
+	hub := e.downstreamHub()
+	if hub == nil {
+		t.Skip("no downstream hub on this fixture")
+	}
+	e.mu.Lock()
+	e.previewRxHub = hub
+	e.previewRxBytes = hub.RxBytes()
+	e.previewRxAt = time.Now()
+	e.stopped = false
+	e.mu.Unlock()
+
+	free := portsFree(t, e.alloc)
+
+	// The shutdown lands in the window: after the early read said "running",
+	// before the publish.
+	fired := false
+	e.beforePublish = func() {
+		fired = true
+		e.mu.Lock()
+		e.stopped = true
+		e.mu.Unlock()
+	}
+
+	e.previewMu.Lock()
+	e.startPreviewLocked(db.DefaultSettings())
+	e.previewMu.Unlock()
+
+	if !fired {
+		t.Fatal("the seam never ran, so this test never entered the window it is " +
+			"named after -- previewFlowing or an earlier refusal took the call first")
+	}
+	e.mu.RLock()
+	published := e.preview
+	e.mu.RUnlock()
+	if published != nil {
+		t.Fatal("startPreviewLocked published a preview encoder into an engine that " +
+			"stopped after its early check. The preview is started ON DEMAND from a " +
+			"request handler, the path least synchronised with a shutdown, and the " +
+			"early read answers whether the engine was running when the request " +
+			"arrived rather than whether it is running now.")
+	}
+	if got := portsFree(t, e.alloc); got != free {
+		t.Errorf("the relay pool went from %d free to %d: a publish that refuses must "+
+			"give the port back", free, got)
+	}
+}
 
 func TestAnIngestReconcileThatPublishesIntoAShutdownStartsNothing(t *testing.T) {
 	e := stoppedSpawner(t, 2)

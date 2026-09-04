@@ -489,7 +489,7 @@ func run(h *hooks) error {
 	srv.DrainLifecycleWithin(shutdownCtx)
 	eng.StopWithin(shutdownCtx)
 	warnIfShutdownOverran(shutdownCtx, log)
-	reportSurvivingChildren(log)
+	reportSurvivingChildren(log, supervisor.Live())
 	log.Info("goodbye")
 	return nil
 }
@@ -1020,8 +1020,9 @@ func verifyBackup(dir string, out io.Writer) error {
 // by a route nobody has thought of. Deliberately at the very end, after
 // StopWithin has finished waiting, so anything still counted here has outlived
 // the whole budget rather than merely being slow.
-func reportSurvivingChildren(log *slog.Logger) {
-	live := supervisor.Live()
+// Takes the census rather than reading it, so the reporting can be tested
+// without spawning a process to be reported ON.
+func reportSurvivingChildren(log *slog.Logger, live []supervisor.Child) {
 	if len(live) == 0 {
 		return
 	}

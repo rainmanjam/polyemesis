@@ -503,6 +503,18 @@ type Engine struct {
 	// start.
 	afterPublish func()
 
+	// beforePublish, when set, runs immediately before a sidecar takes e.mu to
+	// publish itself -- the window in which a Stop can land between an earlier
+	// e.stopped read and the assignment that would orphan the process.
+	//
+	// Same argument as afterPublish above: the window is a few instructions
+	// wide and no timing test could sit in it reliably. Used only by
+	// startPreviewLocked, which is the one guarded site whose window cannot be
+	// reached by setting e.stopped up front -- it reads the flag early, and an
+	// engine already stopped returns there instead of reaching the publish.
+	// Nil in production, one nil check per preview start.
+	beforePublish func()
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -2003,6 +2015,9 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
 	})
 
+	if e.beforePublish != nil {
+		e.beforePublish()
+	}
 	e.mu.Lock()
 	// #631, and re-checked HERE rather than trusting the read at the top of this
 	// function. That one happens before a mkdir, a port allocation and a hub
