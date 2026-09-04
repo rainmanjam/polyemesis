@@ -855,6 +855,11 @@ func (p *Process) runOnce(ctx context.Context) error {
 	// assumption they were the same instant.
 	if startErr == nil {
 		p.log.Info("child exec", "process", p.spec.Name, "kind", p.spec.Kind, "pid", cmd.Process.Pid)
+		// HERE, and not in Start(), for the reason census.go gives at length: an
+		// entry keyed on a pid survives its Process being dropped on the floor,
+		// and an entry keyed on the Process would not. This line and the
+		// discharge after cmd.Wait() are the census's only two writers.
+		enrol(cmd.Process.Pid, p.spec.Name, p.spec.Kind)
 	}
 	// The parent's copies of the write ends, closed unconditionally: the child
 	// has inherited its own, and while the parent holds one the pipe cannot reach
@@ -968,6 +973,10 @@ func (p *Process) runOnce(ctx context.Context) error {
 	// copying goroutine to join and no descriptor of ours to close. Whatever is
 	// still holding stdout open cannot delay this.
 	waitErr := cmd.Wait()
+	// Reaped, so the census is now wrong until this line runs. Paired with the
+	// enrol after cmd.Start(); deliberately NOT in the drain below, which waits
+	// on descendants this process never started and can outlive the child.
+	discharge(cmd.Process.Pid)
 	// Announce the reap before the drain, because that is what terminate()'s
 	// escalation is asking about: a child that has been reaped needs no SIGKILL,
 	// whether or not its grandchild is still writing.
