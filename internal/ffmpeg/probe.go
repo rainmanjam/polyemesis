@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -365,10 +366,33 @@ func probeFile(ctx context.Context, bins Bins, path string, stdoutCap int) (*Pro
 	err := cmd.Run()
 	if err != nil {
 		stderr := strings.TrimSpace(stderrBuf.buf.String())
-		// %w on both branches. The caller has to be able to tell an interrupted
-		// probe from a file ffprobe disliked -- one of those must not delete the
-		// operator's upload -- and flattening the error with %s took that
-		// distinction away. The stderr branch keeps ffprobe's words AND the
+		// THE CONTEXT ERROR FIRST, and this branch did not have it while the
+		// comment below claimed the property it provides.
+		//
+		// %w on the run error was supposed to let a caller "tell an interrupted
+		// probe from a file ffprobe disliked". It cannot: killing a child
+		// through CommandContext yields a plain *exec.ExitError saying "signal:
+		// killed" and carrying NO context error to match on -- which the count
+		// branch further down measured and says so in its own comment, and
+		// which this branch then did not act on. So an interruption HERE
+		// arrived as an unrecognisable exec failure.
+		//
+		// The consequence is the same one the count branch spells out: a probe
+		// that was cut short is not a verdict about the file. It is milder here
+		// only because a bare *exec.ExitError matches none of Refused's
+		// sentinels, so the upload survives -- the caller simply cannot tell
+		// why the probe ended, and neither can a log reader.
+		//
+		// Found as an intermittent macOS CI failure in
+		// TestACountThatWasCutShortIsNotAVerdictAboutTheFile: that test cancels
+		// at 200ms intending to land inside the count, and on a loaded runner
+		// ffprobe is still going, so the cancellation landed here instead and
+		// the assertion about the chain failed against the wrong branch.
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("reading %q was cut short: %w (%v)",
+				filepath.Base(path), ctx.Err(), err)
+		}
+		// %w on both branches. The stderr branch keeps ffprobe's words AND the
 		// chain that says why the process ended.
 		if stderr != "" {
 			return nil, fmt.Errorf("%s: %w", truncate(stderr, 300), err)

@@ -406,7 +406,35 @@ jobs:
           # unauthenticated caller, so nobody outside CI can look them up. The
           # token is here. Printing the ten worst turns a percentage into a list
           # of files, which is the difference between a number and a task.
-          if jq -e '.projectStatus.conditions[]? | select(.metricKey=="new_coverage" and .status=="ERROR")' "$gate" >/dev/null; then
+          #
+          # PRINTED WHEN THE MARGIN IS THIN, NOT ONLY WHEN IT IS GONE. This block
+          # used to run only on ERROR, which meant the list appeared exactly
+          # once -- on the run that was already too late to act on -- and a gate
+          # sitting at 80.1 looked identical to one sitting at 96. A buffer you
+          # cannot see is not a buffer you can hold: the first file somebody
+          # adds without a test eats it, and the first anybody hears about it is
+          # a red build. So the list also prints while new_coverage is within
+          # COVERAGE_MARGIN of its threshold, as a warning rather than an error.
+          # That is the difference between a gate that stops you and one that
+          # tells you where you are standing.
+          COVERAGE_MARGIN=5
+          cov=$(jq -r '.projectStatus.conditions[]? | select(.metricKey=="new_coverage")
+                       | "\(.status) \(.actualValue) \(.errorThreshold)"' "$gate")
+          # Word splitting is the point here -- three fields out of one line --
+          # so the expansion is deliberately unquoted.
+          # shellcheck disable=SC2086
+          set -- ${cov:-NONE 0 0}
+          cov_status=$1 cov_actual=$2 cov_threshold=$3
+          thin=0
+          if [ "$cov_status" = "ERROR" ]; then
+            thin=1
+          elif [ "$cov_status" = "OK" ] && awk -v a="$cov_actual" -v t="$cov_threshold" -v m="$COVERAGE_MARGIN" \
+                 'BEGIN{exit !(a - t < m)}'; then
+            thin=1
+            echo "::warning title=Coverage margin::new_coverage is $cov_actual against a threshold of $cov_threshold -- under $COVERAGE_MARGIN points of room. The files below are where the margin is."
+          fi
+
+          if [ "$thin" = 1 ]; then
             # pullRequest= on a PR, branch= on a push. Getting this wrong is a
             # 404, not an empty list, so it reads as "the API is down" rather
             # than "you asked for the wrong thing".

@@ -687,3 +687,68 @@ func countReason(msg string) string {
 	}
 	return strings.TrimSpace(rest)
 }
+
+// The sibling of TestACountThatWasCutShortIsNotAVerdictAboutTheFile, for the
+// step BEFORE the count.
+//
+// That test cancels at 200ms meaning to land inside the counting branch, and on
+// a loaded runner ffprobe has not finished by then -- so the cancellation lands
+// in the header read instead and the assertion runs against a branch that had
+// no context error to find. It failed exactly that way on macos-latest while
+// this was being written, on a pull request that changed nothing but a
+// JavaScript dependency.
+//
+// So this one is deterministic about WHICH branch it exercises: the context is
+// already cancelled before ProbeFile is called, so ffprobe cannot get far
+// enough to matter and the header read is guaranteed to be the step that ends.
+func TestAProbeCutShortInTheHeaderReadIsNotAVerdictEither(t *testing.T) {
+	// POSIX-only for the same reason its sibling is, and missed on the first
+	// push: the stand-in below is a shell script. The branch it pins is not
+	// platform-specific; the stand-in is.
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in binary this needs is a POSIX shell script")
+	}
+	bins := bothBins(t)
+	dir := t.TempDir()
+	path := buildRawStream(t, filepath.Join(dir, "dump.h264"), "h264", "libx264", "30", "1")
+
+	// A SLOW STAND-IN FFPROBE, and cancelled while it runs -- not a context
+	// cancelled up front. The difference is the whole test: exec.Cmd.Start
+	// returns ctx.Err() directly when the context is ALREADY done, so a
+	// pre-cancelled context puts context.Canceled in the chain no matter what
+	// this code does. The first version of this test did exactly that and
+	// passed against the bug it was written for; a mutation that wrapped the
+	// run error instead of ctx.Err() left it green.
+	//
+	// Killed mid-flight is the real shape, and it yields a plain
+	// *exec.ExitError saying "signal: killed" with no context error anywhere in
+	// it -- which is what the counting branch measured and what this branch has
+	// to fold ctx.Err() in to survive.
+	slow := filepath.Join(dir, "slow-ffprobe")
+	if err := os.WriteFile(slow, []byte("#!/bin/sh\nexec sleep 60\n"), 0o755); err != nil {
+		t.Fatalf("write stand-in ffprobe: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		cancel()
+	}()
+	_, err := ProbeFile(ctx, Bins{FFprobe: slow, FFmpeg: bins.FFmpeg}, path)
+	if err == nil {
+		t.Fatal("a probe cut short in the header read reported success")
+	}
+	if Refused(err) {
+		t.Fatalf("Refused(%v) = true. internal/api DELETES the operator's completed "+
+			"upload for a verdict, so an interruption that reads as one hands a "+
+			"remote caller a way to destroy an accepted file by disconnecting", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled in the chain. Killing a child "+
+			"through CommandContext yields a plain *exec.ExitError saying \"signal: "+
+			"killed\" carrying no context error, so this branch has to fold ctx.Err() "+
+			"in the way the counting branch already does -- otherwise the caller "+
+			"cannot tell an interrupted probe from a file ffprobe disliked, which is "+
+			"the distinction its own comment claims to provide", err)
+	}
+}

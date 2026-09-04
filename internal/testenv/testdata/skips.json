@@ -48,6 +48,15 @@
         "internal/rtmpserver": "10 -> 14"
       },
       "why": "FOUR sites, all in one helper. #674's reproductions need the SHIPPED FFmpeg: requireShippedFFmpeg(t) in internal/rtmpserver skips on -short, on ffmpeg or ffprobe being absent, and on a major version other than 8. The version gate is the load-bearing one -- a developer machine on 9.x runs these green while exercising nothing, which is a pass asserting something it never tested, and the bug they cover only occurs on the pinned 8.1.2. These four replace TWENTY-FOUR: the same preamble was written out in each of six reproductions before being collapsed into one helper, which is why this raise is +4 and not +28. The container suite runs every one of them on 8.1.2, so nothing here is skipped where it matters."
+    },
+    {
+      "pr": 696,
+      "from": 100,
+      "to": 101,
+      "packages": {
+        "internal/ffmpeg": "24 -> 25"
+      },
+      "why": "TestAProbeCutShortInTheHeaderReadIsNotAVerdictEither needs a stand-in ffprobe that sleeps until it is killed, so the cancellation lands inside the header read rather than racing a real ffprobe's exit. The stand-in is a #!/bin/sh script and Windows will not execute it. Environmental, and the SAME skip its sibling TestACountThatWasCutShortIsNotAVerdictAboutTheFile already carries for the same stand-in: 'the branch it pins is not platform-specific; the stand-in is.' Issue #190 is the real fix for this family -- a small helper binary built by the test instead of a shell script -- and would take this one back out along with the two it already names."
     }
   ],
   "loweredBy": [
@@ -79,7 +88,7 @@
       "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
     }
   ],
-  "total": 100,
+  "total": 101,
   "byPackage": {
     "cmd/polyemesis": 1,
     "internal/api": 7,
@@ -88,7 +97,7 @@
     "internal/config": 1,
     "internal/db": 3,
     "internal/engine": 6,
-    "internal/ffmpeg": 24,
+    "internal/ffmpeg": 25,
     "internal/media": 5,
     "internal/meters": 3,
     "internal/playlistmedia": 5,

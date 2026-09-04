@@ -503,6 +503,18 @@ type Engine struct {
 	// start.
 	afterPublish func()
 
+	// beforePublish, when set, runs immediately before a sidecar takes e.mu to
+	// publish itself -- the window in which a Stop can land between an earlier
+	// e.stopped read and the assignment that would orphan the process.
+	//
+	// Same argument as afterPublish above: the window is a few instructions
+	// wide and no timing test could sit in it reliably. Used only by
+	// startPreviewLocked, which is the one guarded site whose window cannot be
+	// reached by setting e.stopped up front -- it reads the flag early, and an
+	// engine already stopped returns there instead of reaching the publish.
+	// Nil in production, one nil check per preview start.
+	beforePublish func()
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -1412,6 +1424,14 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	})
 
 	e.mu.Lock()
+	// #631. This one binds nothing itself -- the listener is a Go server owned
+	// by the engine -- but its child DIALS that listener, so an orphaned ingest
+	// goes on feeding a relay whose engine is gone, and the next start of the
+	// same source meets a publisher it did not spawn.
+	if e.stopped {
+		e.mu.Unlock()
+		return
+	}
 	e.ingest = proc
 	e.ingestSig = sig
 	// A new ingest means the previous layout is stale. One of two places the
@@ -1995,7 +2015,22 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
 	})
 
+	if e.beforePublish != nil {
+		e.beforePublish()
+	}
 	e.mu.Lock()
+	// #631, and re-checked HERE rather than trusting the read at the top of this
+	// function. That one happens before a mkdir, a port allocation and a hub
+	// subscribe, and drops e.mu in between -- so it answers whether the engine
+	// was running when the request arrived, not whether it is running now. The
+	// preview is started on demand from a request handler, which is the path
+	// least synchronised with a shutdown of any of them.
+	if e.stopped {
+		e.mu.Unlock()
+		hub.Unsubscribe("preview")
+		e.alloc.Release(port)
+		return
+	}
 	e.preview = proc
 	e.previewPort = port
 	e.previewSig = previewSig(s)
@@ -2148,6 +2183,19 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	})
 
 	e.mu.Lock()
+	// #631. Shutdown may have run since the checks above: Stop waits on the
+	// probe loop rather than preceding it, and probeLoop's settle path reaches
+	// here directly. Stop collects e.meters under this same lock, so a publish
+	// that lands after it has collected is a child NOTHING will ever signal --
+	// absent from every map, every status page and every log line, and present
+	// only in the process table with its ppid pointing at the live server.
+	// Same guard, same reason, as reconcileRecorder's.
+	if e.stopped {
+		e.mu.Unlock()
+		meterHub.Unsubscribe("meters")
+		e.alloc.Release(port)
+		return
+	}
 	e.meters = proc
 	e.metersPort = port
 	e.metersSig = sig
