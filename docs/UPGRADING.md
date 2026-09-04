@@ -7,11 +7,13 @@ is: stop, replace the binary or pull the image, start.
 
 **Back up `<dataDir>` first, and check that the backup contains `secret.key`.**
 Migrations run forward only — there is no downgrade path, and a backup is the
-only way back. Once 0.7.0 ships *(not yet released — see the
-[CHANGELOG](../CHANGELOG.md))*, a backup without that one file will not be a
-backup; see
+only way back. **From 0.7.0 onward a backup without that one file is not a
+backup**, because the stream keys in the database are sealed with it and nothing
+else can open them. 0.7.0 (2026-08-28) and 0.8.0 (2026-09-01) are both released,
+so this applies to you now; see
 [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back)
-before you start.
+before you start, including its **mandatory** remediation if you have already
+upgraded.
 
 **`install.sh` writes a guarded `update.sh` that does all of this for you** — it
 takes the backup, refuses to proceed if the archive is empty or missing
@@ -19,6 +21,12 @@ takes the backup, refuses to proceed if the archive is empty or missing
 `<installDir>/update.sh` rather than the manual steps below. Operators who
 installed before 0.7.0 do not have it: re-run `install.sh` to regenerate it, or
 follow the manual procedure and do the `secret.key` check by hand.
+
+> This page had said 0.7.0 was *"not yet released"* here while saying seventy
+> lines further down that it was tagged and that its remediation was mandatory.
+> An operator who read only the summary above concluded the `secret.key`
+> requirement was not theirs yet. Corrected 2026-09-03; the version-specific
+> notes below have been the authority throughout.
 
 ```sh
 # Binary
