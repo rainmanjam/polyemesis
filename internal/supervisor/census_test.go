@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -201,5 +202,34 @@ func TestTheOldestSurvivorIsReportedFirst(t *testing.T) {
 	}
 	if len(names) != 2 || names[0] != "older" {
 		t.Fatalf("Live() ordered the survivors %v; oldest must come first", names)
+	}
+}
+
+func TestASpawnThatFailedEnrolsNothing(t *testing.T) {
+	// The one way this census could report a child that never existed, and the
+	// reason enrol sits inside `if startErr == nil` rather than after it.
+	//
+	// It matters more than a stray map entry: cmd/polyemesis prints the census
+	// at the end of every shutdown, so a phantom here is a warning line naming
+	// a pid that was never a process -- on the very report whose job is to be
+	// believed the one time it fires.
+	before := LiveCount()
+	p := testProcess(t, fake{bin: filepath.Join(t.TempDir(), "no-such-binary")},
+		Spec{Name: "ghost", Kind: "ghost"})
+	p.Start()
+
+	// Asserted as "never rises" rather than "is right once", because the failure
+	// this guards against is a transient entry that a single later look would
+	// miss -- and the shutdown report reads the census at one arbitrary moment.
+	// AutoRestart is off in this Spec, so there is no second attempt to race.
+	deadline := time.Now().Add(750 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if got := LiveCount(); got > before {
+			for _, c := range Live() {
+				t.Logf("  census entry: %s", c)
+			}
+			t.Fatalf("a spawn that never happened put the census at %d, was %d", got, before)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
