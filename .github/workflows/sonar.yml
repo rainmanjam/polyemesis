@@ -387,12 +387,27 @@ jobs:
               echo
               echo "Files carrying the most uncovered new lines:"
               { printf 'uncovered\tof-new\tfile\n'
-                jq -r '.components[]?
-                     | (reduce (.measures[]? | select(.value != null)) as $m ({}; .[$m.metric] = $m.value)) as $v
+                # `.value // .period.value // .periods[0].value`, and the last two
+              # are the reason this printed a header and no rows on its first
+              # real failure. component_tree returns NEW-CODE measures under a
+              # period rather than a bare value, so filtering on `.value != null`
+              # skipped every row -- and the output then read as "no file has
+              # uncovered new lines" beside a new_coverage of 79.3. A reporter
+              # that answers confidently with nothing is worse than one that does
+              # not run, which is the defect this whole step exists to remove.
+              jq -r '.components[]?
+                     | (reduce (.measures[]?) as $m ({};
+                         .[$m.metric] = ($m.value // $m.period.value // ($m.periods[0]?.value)))) as $v
                      | select(($v.new_uncovered_lines // "0") != "0")
                      | "\($v.new_uncovered_lines)\t\($v.new_lines_to_cover)\t\(.path)"' "$gate.files" \
                   | head -10
               } | column -t -s "$(printf '\t')"
+              if ! jq -e '[.components[]? | .measures[]?
+                           | select(.metric == "new_uncovered_lines")
+                           | (.value // .period.value // (.periods[0]?.value) // "0")
+                           | select(. != "0" and . != 0)] | length > 0' "$gate.files" >/dev/null; then
+                echo "  (the API returned no per-file uncovered-line counts -- the list above is empty because nothing came back, NOT because every file is covered)"
+              fi
             fi
             rm -f "$gate.files"
           fi
