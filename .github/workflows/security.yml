@@ -197,67 +197,50 @@ jobs:
       # dependency does not ship to anybody, and treating it as urgent is how a
       # team learns to pass --force.
       #
-      # RETRIED, BECAUSE THE REGISTRY IS NOT THIS REPOSITORY. `npm audit` asks
-      # npmjs.com to score the tree, and when that endpoint is unwell it answers
+      # ONE CALL, GENEROUSLY BOUNDED. npm ALREADY RETRIES.
       #
-      #     npm error audit endpoint returned an error
+      # This was a hand-rolled retry loop -- three attempts, each killed at 45s --
+      # and it was wrong about the failure it was written for. The endpoint does
+      # not reject; it is intermittently SLOW. Measured on 2026-09-04 while CI was
+      # red: four consecutive runs took 137s, 149s, 111s and 159s, and every one
+      # exited 0 with zero vulnerabilities. On a good day the same call answers in
+      # nine seconds.
       #
-      # which npm reports as exit 1 -- identical, to this job and to the checks
-      # list, to "a high-severity advisory was found". It happened on run
-      # 33816210312: web failed, ui passed on the same run, same lockfiles. A
-      # security gate that goes red for an outage somewhere else is one people
-      # learn to re-run without reading, and then re-run past a real advisory.
+      # So `timeout 45` was killing calls that would have succeeded, three times
+      # in a row, and then reporting an outage that was never happening. npm's own
+      # status page said Security Audit was operational the whole time, and it was
+      # right.
       #
-      # So: three attempts with a gap, and the failure message says which of the
-      # two things happened. The gitleaks job below already downloads this way,
-      # for the same reason.
+      # Worse, the loop was fighting a client that already does this:
       #
-      # NOT a retry loop around a genuine finding: an advisory is deterministic,
-      # so a real one fails all three attempts and the job still goes red. Only
-      # the transport is retried.
+      #     fetch-timeout           300000   (5 minutes per request)
+      #     fetch-retries           2        (with backoff)
+      #     fetch-retry-maxtimeout  60000
+      #
+      # A 45-second outer deadline cancels npm's own retry before it can finish.
+      # The wrapper made the command strictly less reliable than calling it plainly.
+      #
+      # 360s: comfortably past the observed worst case, after npm has already
+      # retried twice inside it. Reaching that bound means the registry did not
+      # answer in six minutes with three tries, which is a real "could not audit"
+      # rather than an impatient one. The job ceiling above is 15 minutes, so a
+      # five-minute `npm ci` plus this still finishes and REPORTS, which is the
+      # only property that ever mattered.
       - name: npm audit (production dependencies)
         run: |
           set -uo pipefail
-          # EACH ATTEMPT IS BOUNDED, because the first version of this was not
-          # and that is worse than no retry at all. npm does its own internal
-          # retrying against the registry, so a single unwell `npm audit` can sit
-          # for minutes; three of those in a row exceeded this job's
-          # timeout-minutes and the runner CANCELLED it. A cancelled job is not a
-          # pass and not a failure -- it names nothing, which is the state this
-          # whole change exists to abolish. Observed: npm-audit (ui) cancelled at
-          # exactly 5 minutes on run 33822493761 while (web) passed beside it.
-          #
-          # 45s x 3 attempts plus two 10s gaps is 155s. It was 90s x 3 plus two
-          # 15s gaps -- 300s -- and that was too long, for a reason only a real
-          # outage showed: `npm ci` TALKS TO THE SAME REGISTRY. On a healthy day
-          # it takes seconds; during the outage of 2026-09-04 it took 5m01s, and
-          # 5m01s + 5m00s overran this job's ceiling. The runner then CANCELLED
-          # the job, which names nothing at all -- the precise failure this retry
-          # was written to abolish, reintroduced by the retry's own duration.
-          #
-          # So the audit's worst case now fits in what a slow install leaves,
-          # and timeout-minutes below has headroom besides. The point is not to
-          # outlast an outage -- nothing can audit during one -- it is to always
-          # reach the line that SAYS so.
-          #
-          # `timeout` exits 124, which is a registry problem by any other name
-          # and is treated as one.
-          for attempt in 1 2 3; do
-            out=$(timeout 45 npm audit --omit=dev --audit-level=high 2>&1) && exit 0
-            rc=$?
-            printf '%s\n' "$out"
-            if [ "$rc" -ne 124 ] && ! printf '%s' "$out" | grep -q 'audit endpoint returned an error'; then
-              echo "::error title=npm audit::a high-severity advisory was found in ${{ matrix.project }}'s production dependencies. This is a finding, not a registry problem -- read the output above."
-              exit 1
-            fi
-            if [ "$rc" -eq 124 ]; then
-              echo "::warning title=Registry slow::attempt $attempt of 3 exceeded 45s and was killed; retrying."
-            else
-              echo "::warning title=Registry unavailable::attempt $attempt of 3 could not reach npm's audit endpoint; retrying."
-            fi
-            sleep 10
-          done
-          echo "::error title=Registry unavailable::npm's audit endpoint failed three times, so ${{ matrix.project }} was NOT audited. This is an outage, not a clean bill of health -- the job stays red so nobody reads it as one."
+          out=$(timeout 360 npm audit --omit=dev --audit-level=high 2>&1) && exit 0
+          rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -eq 124 ]; then
+            echo "::error title=Registry unreachable::npm did not answer in 360s, having retried twice itself. ${{ matrix.project }} was NOT audited -- an outage, not a clean bill of health, so this job stays red rather than letting it read as one."
+            exit 1
+          fi
+          if printf '%s' "$out" | grep -q 'audit endpoint returned an error'; then
+            echo "::error title=Registry error::npm's audit endpoint returned an error for ${{ matrix.project }}. NOT audited."
+            exit 1
+          fi
+          echo "::error title=npm audit::a high-severity advisory was found in ${{ matrix.project }}'s production dependencies. This is a finding, not a registry problem -- read the output above."
           exit 1
 
   # THE CONTEXT BRANCH PROTECTION ASKS FOR, WHICH THE MATRIX STOPPED PRODUCING.
