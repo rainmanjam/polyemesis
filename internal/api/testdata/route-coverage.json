@@ -12,8 +12,8 @@
   "guardedFloor": 22,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 228,
-    "swept": 66,
+    "methodPatternPairs": 229,
+    "swept": 67,
     "excused": 50,
     "denied": 112,
     "nonTrieProbes": 12,
@@ -22,7 +22,7 @@
   },
   "partition": {
     "differential": 8,
-    "invariant": 53,
+    "invariant": 54,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 1,
     "unstable": 4
@@ -953,6 +953,12 @@
       "zeroSource": "guarded"
     },
     {
+      "method": "GET",
+      "pattern": "/api/v1/renditions/{id}/concerns",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
       "method": "POST",
       "pattern": "/api/v1/renditions/{id}/restart",
       "coverage": "denied-by-method",
@@ -1448,7 +1454,7 @@
       "class": "invariant"
     },
     {
-      "path": "/api/v1/chat/users?platform=twitch&authorId=1",
+      "path": "/api/v1/chat/users?platform=twitch\u0026authorId=1",
       "pattern": "GET /api/v1/chat/users",
       "class": "invariant"
     },
@@ -1683,6 +1689,11 @@
     {
       "path": "/api/v1/renditions/1",
       "pattern": "GET /api/v1/renditions/{id}",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/renditions/1/concerns?platform=youtube",
+      "pattern": "GET /api/v1/renditions/{id}/concerns",
       "class": "invariant"
     },
     {

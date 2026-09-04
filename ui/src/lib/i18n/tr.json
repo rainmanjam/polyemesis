@@ -441,6 +441,7 @@
   "dest.restarts.hint": "Bu hedefin kodlayıcısının kaç kez yeniden başlatıldığı. Sıfırın üstü, düştüğü ve geri getirildiği anlamına gelir.",
   "dest.retryAfter": "Şu kadar sonra yeniden dene (saniye)",
   "dest.sharedEncodeAria": "Paylaşılan video kodlaması",
+  "dest.renditionConcerns": "Bu platformun yayımladığı değerlerin dışında",
   "dest.socketTimeout": "Soket zaman aşımı (saniye)",
   "dest.source": "Kaynak",
   "dest.sourcePlaceholder": "Bir program seçin",

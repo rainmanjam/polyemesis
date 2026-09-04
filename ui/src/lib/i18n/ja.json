@@ -441,6 +441,7 @@
   "dest.restarts.hint": "この配信先のエンコーダーが再起動された回数。ゼロより大きければ、落ちて復帰したということです。",
   "dest.retryAfter": "再試行までの待ち時間 (秒)",
   "dest.sharedEncodeAria": "共有映像エンコード",
+  "dest.renditionConcerns": "このプラットフォームが公開している範囲外です",
   "dest.socketTimeout": "ソケットタイムアウト (秒)",
   "dest.source": "ソース",
   "dest.sourcePlaceholder": "番組を選択",

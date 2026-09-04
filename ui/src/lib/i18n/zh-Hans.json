@@ -441,6 +441,7 @@
   "dest.restarts.hint": "此目标的编码器被重启的次数。大于零说明它曾经挂掉并被恢复。",
   "dest.retryAfter": "重试间隔 (秒)",
   "dest.sharedEncodeAria": "共享视频编码",
+  "dest.renditionConcerns": "超出该平台公布的范围",
   "dest.socketTimeout": "套接字超时 (秒)",
   "dest.source": "信号源",
   "dest.sourcePlaceholder": "选择一个节目",

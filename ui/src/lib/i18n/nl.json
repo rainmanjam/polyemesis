@@ -441,6 +441,7 @@
   "dest.restarts.hint": "Hoe vaak de encoder van deze bestemming opnieuw is gestart. Boven nul betekent dat hij is uitgevallen en hersteld.",
   "dest.retryAfter": "Opnieuw proberen na (seconden)",
   "dest.sharedEncodeAria": "Gedeelde video-encode",
+  "dest.renditionConcerns": "Buiten wat dit platform publiceert",
   "dest.socketTimeout": "Socket-time-out (seconden)",
   "dest.source": "Bron",
   "dest.sourcePlaceholder": "Kies een programma",

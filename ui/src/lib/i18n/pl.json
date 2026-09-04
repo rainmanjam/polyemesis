@@ -441,6 +441,7 @@
   "dest.restarts.hint": "Ile razy koder tego celu był restartowany. Powyżej zera oznacza, że padł i został przywrócony.",
   "dest.retryAfter": "Ponów po (sekundy)",
   "dest.sharedEncodeAria": "Współdzielone kodowanie wideo",
+  "dest.renditionConcerns": "Poza tym, co publikuje ta platforma",
   "dest.socketTimeout": "Limit czasu gniazda (sekundy)",
   "dest.source": "Źródło",
   "dest.sourcePlaceholder": "Wybierz program",

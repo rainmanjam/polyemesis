@@ -457,7 +457,21 @@ result would start, without starting it.
 | `GET` | `/renditions/presets` |
 | `GET` `PUT` `DELETE` | `/renditions/{id}` |
 | `POST` | `/renditions/{id}/restart` |
+| `GET` | `/renditions/{id}/concerns` |
 | `GET` | `/encoders` |
+
+`GET /renditions/{id}/concerns?platform=<id>` compares a rendition against that
+platform's published figures from `internal/db/platforms.go` and returns one
+entry per concern, each carrying the `detail`, the documentation `source` and the
+date it was `checked`. An unknown or empty platform is an empty list, not an
+error: a custom RTMP destination has nothing published to be outside of, and the
+console asks the same question either way.
+
+The comparison lives here rather than in the browser on purpose. Its whole value
+is that it reads researched, dated figures out of one committed file, and a
+second copy in TypeScript would drift from that file exactly as hand-copied
+numbers on the marketing site once did — which is why a guard now asserts those
+against `platforms.go` too. The console asks; it does not derive.
 
 `POST /routing/compile` returns the filter graph a profile would produce,
 without saving anything. Useful for understanding what a selection actually

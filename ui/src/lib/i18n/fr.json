@@ -441,6 +441,7 @@
   "dest.restarts.hint": "Combien de fois l'encodeur de cette destination a été redémarré. Au-dessus de zéro signifie qu'il a échoué et a été relancé.",
   "dest.retryAfter": "Réessayer après (secondes)",
   "dest.sharedEncodeAria": "Encodage vidéo partagé",
+  "dest.renditionConcerns": "En dehors de ce que publie cette plateforme",
   "dest.socketTimeout": "Délai du socket (secondes)",
   "dest.source": "Source",
   "dest.sourcePlaceholder": "Choisissez un programme",

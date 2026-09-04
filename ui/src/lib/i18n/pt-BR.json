@@ -441,6 +441,7 @@
   "dest.restarts.hint": "Quantas vezes o codificador deste destino foi reiniciado. Acima de zero significa que ele falhou e foi restabelecido.",
   "dest.retryAfter": "Tentar novamente após (segundos)",
   "dest.sharedEncodeAria": "Codificação de vídeo compartilhada",
+  "dest.renditionConcerns": "Fora do que esta plataforma publica",
   "dest.socketTimeout": "Tempo limite do socket (segundos)",
   "dest.source": "Fonte",
   "dest.sourcePlaceholder": "Escolha um programa",
