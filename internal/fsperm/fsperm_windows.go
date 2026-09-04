@@ -5,6 +5,7 @@ package fsperm
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -56,6 +57,27 @@ func restrict(path string, container bool) error {
 	if container {
 		inherit = windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT
 	}
+	// PINNED FOR THE LIFETIME OF THE TRUSTEE VALUES. #705.
+	//
+	// TrusteeValueFromSID converts a *windows.SID to a uintptr, and x/sys says
+	// in as many words: "The caller must pin sid using a runtime.Pinner for the
+	// lifetime of the TrusteeValue." After the conversion the EXPLICIT_ACCESS
+	// holds an integer and nothing holds the object -- both SIDs here are
+	// Go-allocated (one from the security descriptor, one from
+	// CreateWellKnownSid), so both are collectable.
+	//
+	// Taken HERE rather than inside grantFull, which is the version that looks
+	// correct and is not: a pinner there unpins on return, before ACLFromEntries
+	// ever reads the trustee.
+	//
+	// The consequence is a wrong DACL rather than heap corruption -- the kernel
+	// reads through the pointer, it does not write Go memory -- on the files
+	// that hold every destination's stream key.
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	pinner.Pin(owner)
+	pinner.Pin(system)
+
 	entries := []windows.EXPLICIT_ACCESS{grantFull(owner, windows.TRUSTEE_IS_USER, inherit)}
 	// Running as a service means the owner ALREADY is SYSTEM. A second identical
 	// ACE would be harmless but makes the ACL confusing to anyone auditing it

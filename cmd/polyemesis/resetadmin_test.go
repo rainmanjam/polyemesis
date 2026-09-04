@@ -40,7 +40,7 @@ func TestResetAdminNeverLeavesTheInstallUnowned(t *testing.T) {
 
 	var out bytes.Buffer
 	in := strings.NewReader("a-brand-new-password\na-brand-new-password\n")
-	if err := resetAdmin(cfg, in, &out); err != nil {
+	if err := resetAdmin(cfg, in, &out, false); err != nil {
 		t.Fatalf("resetAdmin: %v", err)
 	}
 
@@ -72,7 +72,7 @@ func TestResetAdminChangesThePassword(t *testing.T) {
 	store.Close()
 
 	var out bytes.Buffer
-	if err := resetAdmin(cfg, strings.NewReader("a-brand-new-password\na-brand-new-password\n"), &out); err != nil {
+	if err := resetAdmin(cfg, strings.NewReader("a-brand-new-password\na-brand-new-password\n"), &out, false); err != nil {
 		t.Fatalf("resetAdmin: %v", err)
 	}
 
@@ -121,7 +121,7 @@ func TestResetAdminRefusals(t *testing.T) {
 			store.Close()
 
 			var out bytes.Buffer
-			err := resetAdmin(cfg, strings.NewReader(tc.input), &out)
+			err := resetAdmin(cfg, strings.NewReader(tc.input), &out, false)
 			if err == nil {
 				t.Fatalf("expected a refusal, got success")
 			}
@@ -162,4 +162,82 @@ func readSource(t *testing.T, name string) (string, error) {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(".", name))
 	return string(b), err
+}
+
+// A PASSWORD CHANGE DOES NOT END API TOKENS, AND THE OPERATOR IS TOLD SO. #718.
+//
+// This command is the one an operator reaches for when they cannot sign in,
+// which is the compromise case. It printed "every existing session has been
+// signed out" and stopped there -- true, and incomplete: bumping token_epoch
+// ends SESSIONS, while API tokens are resolved by hash alone, carry no epoch,
+// and live on. Nothing listed them, so the sentence read as "access has ended"
+// when it had not.
+//
+// The HTTP handler for the same gesture already reads the surviving tokens back
+// and discloses them. This pins that the CLI does too.
+func TestResetAdminNamesTheTokensThatSurviveIt(t *testing.T) {
+	cfg, store := resetFixture(t)
+	if _, err := store.CreateUser("admin", "the-old-password"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, _, err := store.CreateAPIToken("ci-runner", string(db.ScopeAdmin)); err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+	store.Close()
+
+	var out bytes.Buffer
+	in := strings.NewReader("a-brand-new-password\na-brand-new-password\n")
+	if err := resetAdmin(cfg, in, &out, false); err != nil {
+		t.Fatalf("resetAdmin: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "ci-runner") {
+		t.Errorf("the surviving token is not named in the output, so an operator who "+
+			"has just locked out an intruder is not told what still reaches the "+
+			"install:\n%s", got)
+	}
+	if !strings.Contains(got, "STILL WORK") {
+		t.Errorf("the output does not say the tokens still work. Naming them is only "+
+			"half of it -- the sentence above them says sessions were signed out, and "+
+			"a list under that reads as a list of things that were ended:\n%s", got)
+	}
+	if !strings.Contains(got, "--revoke-api-tokens") {
+		t.Errorf("the output does not say how to end them. An operator told there is a "+
+			"problem and not told the remedy is worse off than one told nothing:\n%s", got)
+	}
+}
+
+// And the flag actually revokes, or the sentence above is advice that does not work.
+func TestResetAdminCanRevokeTheTokensItWarnsAbout(t *testing.T) {
+	cfg, store := resetFixture(t)
+	if _, err := store.CreateUser("admin", "the-old-password"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, _, err := store.CreateAPIToken("ci-runner", string(db.ScopeAdmin)); err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+	store.Close()
+
+	var out bytes.Buffer
+	in := strings.NewReader("a-brand-new-password\na-brand-new-password\n")
+	if err := resetAdmin(cfg, in, &out, true); err != nil {
+		t.Fatalf("resetAdmin: %v", err)
+	}
+
+	reopened, err := db.Open(cfg.DBPath())
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer reopened.Close()
+	tokens, err := reopened.ListAPITokens()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(tokens) != 0 {
+		t.Errorf("--revoke-api-tokens left %d token(s) in the database", len(tokens))
+	}
+	if got := out.String(); !strings.Contains(got, "1 API token(s) revoked") {
+		t.Errorf("the output does not report what was revoked:\n%s", got)
+	}
 }

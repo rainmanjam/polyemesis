@@ -37,7 +37,7 @@ import (
 // a security operation rather than a convenience. Someone resetting a forgotten
 // password may be locking an intruder out, and leaving that intruder's existing
 // session valid would defeat the whole exercise.
-func resetAdmin(cfg config.Config, in io.Reader, out io.Writer) error {
+func resetAdmin(cfg config.Config, in io.Reader, out io.Writer, revokeTokens bool) error {
 	store, err := db.Open(cfg.DBPath())
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
@@ -68,7 +68,48 @@ func resetAdmin(cfg config.Config, in io.Reader, out io.Writer) error {
 		return fmt.Errorf("password changed, but existing sessions could not be invalidated: %w", err)
 	}
 
+	// WHAT SURVIVES, ALWAYS, AND NOT ONLY WHEN IT IS EMPTY. #718.
+	//
+	// This printed "every existing session has been signed out" and stopped
+	// there. That sentence is true and incomplete: bumping the epoch ends
+	// SESSIONS, and API tokens are resolved by hash alone and carry no epoch, so
+	// they live on. An operator reaching for this command is usually locked out,
+	// which is the compromise case -- and this is the one path that could not
+	// tell them what still has access.
+	//
+	// The HTTP handler for the same gesture reads the surviving tokens back and
+	// discloses them. Mirroring that here is the device: the operator is told,
+	// every time, rather than left to assume. Deliberately NOT a forced revoke,
+	// for the reason that handler's own comment gives -- routine rotation is the
+	// common case, and destroying every integration's credential is the wrong
+	// default for it. --revoke-api-tokens is the explicit ask.
 	fmt.Fprintf(out, "password reset for %q; every existing session has been signed out\n", user.Username)
+
+	if revokeTokens {
+		n, rerr := store.DeleteAllAPITokens()
+		if rerr != nil {
+			fmt.Fprintf(out, "WARNING: the password changed, but the API tokens could not be\n"+
+				"  revoked (%v). They still work.\n", rerr)
+		} else {
+			fmt.Fprintf(out, "%d API token(s) revoked.\n", n)
+		}
+	}
+
+	tokens, terr := store.ListAPITokens()
+	switch {
+	case terr != nil:
+		fmt.Fprintf(out, "WARNING: could not read the API token list (%v). Tokens are NOT\n"+
+			"  ended by a password change, and this command could not tell you what survives.\n", terr)
+	case len(tokens) == 0:
+		fmt.Fprintln(out, "no API tokens exist, so nothing else can reach this install.")
+	default:
+		fmt.Fprintf(out, "\n%d API TOKEN(S) STILL WORK. A password change does not end them:\n", len(tokens))
+		for _, t := range tokens {
+			fmt.Fprintf(out, "  - %s (%s, created %s)\n", t.Name, t.Scope, t.CreatedAt.Format("2006-01-02"))
+		}
+		fmt.Fprintln(out, "Re-run with --revoke-api-tokens to delete them, or revoke them\n"+
+			"individually in Settings once you can sign in.")
+	}
 	return nil
 }
 

@@ -696,8 +696,25 @@ func destWritesAFile(row *db.Destination) bool {
 		return true
 	case db.DestAudio:
 		return !strings.Contains(row.URL, "://")
-	default:
+	case db.DestRTMP, db.DestSRT:
+		// Named rather than left to the default, so the exhaustiveness is
+		// visible here and a linter can check it.
 		return false
+	default:
+		// FAIL CLOSED ON A KIND THIS BUILD DOES NOT KNOW. #712.
+		//
+		// db.DestKind and ffmpeg.DestKind are declared independently and joined
+		// by ffmpeg.DestKind(row.Kind), which compiles for any string -- so a
+		// fifth kind added to db reaches here. Returning false was the wrong
+		// default for exactly the reason the comment above states: without the
+		// confinement an audio file target is written relative to the process
+		// working directory, outside the directory every other file destination
+		// is held to.
+		//
+		// Confinement is cheap; the alternative is an arbitrary-file-write
+		// primitive available to whoever adds the next kind. So an unknown kind
+		// is treated as a file writer and confined.
+		return true
 	}
 }
 

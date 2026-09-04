@@ -116,6 +116,13 @@ func run(h *hooks) error {
 		logLevel    = flag.String("log", "info", "log level: debug, info, warn, error")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 		resetPass   = flag.Bool("reset-admin", false, "set a new admin password and sign out every session, then exit")
+		// #718. A password change ends SESSIONS; API tokens carry no epoch and
+		// survive it. The command now always says which tokens survive, and
+		// this is how an operator who has decided they are compromised ends
+		// them from a shell they can reach. Opt-in rather than implied: routine
+		// rotation is the common case and destroying every integration's
+		// credential is the wrong default for it.
+		resetRevoke = flag.Bool("revoke-api-tokens", false, "with -reset-admin, also delete every API token")
 		verifyBak   = flag.String("verify-backup", "", "check that a backup directory holds a database that opens, then exit")
 	)
 	flag.Parse()
@@ -183,7 +190,7 @@ func run(h *hooks) error {
 	}
 
 	if *resetPass {
-		return resetAdmin(cfg, os.Stdin, os.Stdout)
+		return resetAdmin(cfg, os.Stdin, os.Stdout, *resetRevoke)
 	}
 	// Text overlays need a font FILE, and the image polyemesis ships has no
 	// system fonts at all -- fontconfig is installed and finds nothing. The
