@@ -636,7 +636,7 @@ func TestADestinationRidesAPrimaryDownSlateBackCycleWithoutRestarting(t *testing
 	if err != nil {
 		t.Fatalf("allocate: %v", err)
 	}
-	hub.Subscribe("dest:1", port)
+	mustSubscribe(t, hub, "dest:1", port)
 	dest := &destination{
 		row: &db.Destination{ID: 1, Name: "twitch"}, proc: proc,
 		port: port, subName: "dest:1", hub: hub, spec: "unchanged",

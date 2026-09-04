@@ -251,7 +251,7 @@ func TestAStartedRenditionPublishesTheWiringItsTeardownNeeds(t *testing.T) {
 		t.Fatal("the fixture did not put a silence tier between the ingest and the renditions")
 	}
 	// A decoy of the name the rendition will use, on the hub it must NOT touch.
-	e.hub.Subscribe("rendition:1", freeUDPPort(t))
+	mustSubscribe(t, e.hub, "rendition:1", freeUDPPort(t))
 
 	e.startRendition(lifeRendition(1, db.EncoderX264), "spec-a", 30, 2)
 
@@ -308,11 +308,11 @@ func TestTeardownUnsubscribesFromTheHubTheEncodeActuallyRead(t *testing.T) {
 	upstream := lifeHub(t) // stands in for the silence or selector tier's relay
 
 	port := enginePort(t, e, "reserving the rendition's port")
-	upstream.Subscribe("rendition:1", port)
+	mustSubscribe(t, upstream, "rendition:1", port)
 	// A decoy of the SAME NAME on the ingest hub. If teardown unsubscribes from
 	// e.hub it will look like it worked unless something is watching that name
 	// on both relays.
-	e.hub.Subscribe("rendition:1", port)
+	mustSubscribe(t, e.hub, "rendition:1", port)
 
 	own := lifeHub(t)
 	e.teardownRendition(&rendition{
@@ -389,7 +389,7 @@ func TestATeardownWithNoRecordedUpstreamFallsBackToTheIngestRatherThanPanicking(
 		e := lifeEngine(t)
 		e.alloc = oneSlotAllocator(t)
 		port := enginePort(t, e, "reserving the rendition's port")
-		e.hub.Subscribe("rendition:1", port)
+		mustSubscribe(t, e.hub, "rendition:1", port)
 
 		e.teardownRendition(&rendition{
 			row: lifeRendition(1, db.EncoderX264), port: port, subName: "rendition:1",
@@ -406,7 +406,7 @@ func TestATeardownWithNoRecordedUpstreamFallsBackToTheIngestRatherThanPanicking(
 		e := lifeEngine(t)
 		e.alloc = oneSlotAllocator(t)
 		port := enginePort(t, e, "reserving the analyser's port")
-		e.hub.Subscribe(loudnessSubPrefix+"7", port)
+		mustSubscribe(t, e.hub, loudnessSubPrefix+"7", port)
 
 		e.teardownLoudness(&loudnessMon{port: port, subName: loudnessSubPrefix + "7"})
 
@@ -478,7 +478,7 @@ func TestStoppingOneAuxiliaryChildClearsOnlyItsOwnPortAndSignature(t *testing.T)
 			ports := map[string]int{}
 			for _, s := range slots {
 				ports[s.aux.name] = enginePort(t, e, "reserving "+s.aux.name+"'s port")
-				e.hub.Subscribe(s.aux.name, ports[s.aux.name])
+				mustSubscribe(t, e.hub, s.aux.name, ports[s.aux.name])
 			}
 			e.recorder, e.preview, e.meters = loudTestProc(), loudTestProc(), loudTestProc()
 			e.recorderPort, e.previewPort, e.metersPort = ports["recorder"], ports["preview"], ports["meters"]
@@ -541,8 +541,8 @@ func TestTheMetersSidecarIsUnsubscribedFromTheHubItSubscribedTo(t *testing.T) {
 	silenceHub := lifeHub(t)
 
 	port := enginePort(t, e, "reserving the sidecar's port")
-	silenceHub.Subscribe("meters", port)
-	e.hub.Subscribe("meters", port) // decoy of the same name on the ingest
+	mustSubscribe(t, silenceHub, "meters", port)
+	mustSubscribe(t, e.hub, "meters", port) // decoy of the same name on the ingest
 	e.meters, e.metersPort, e.metersSig, e.metersHub = loudTestProc(), port, "met-sig", silenceHub
 
 	e.stopAux(auxMeters)
@@ -912,7 +912,7 @@ func TestALoudnessMonitorRoundTripsItsPortAndSubscription(t *testing.T) {
 	}
 	// A decoy of the same name on the ingest hub, so unsubscribing from the
 	// wrong relay cannot look like success.
-	e.hub.Subscribe(m.subName, m.port)
+	mustSubscribe(t, e.hub, m.subName, m.port)
 
 	e.teardownLoudness(m)
 
@@ -924,4 +924,16 @@ func TestALoudnessMonitorRoundTripsItsPortAndSubscription(t *testing.T) {
 		t.Error("teardown unsubscribed from the ingest hub, which this analyser never read")
 	}
 	enginePort(t, e, "after an analyser was torn down")
+}
+
+// mustSubscribe is Subscribe for a test that is not about the refusal. #711
+// made an occupied name an error, and a fixture that drops it would be
+// asserting against a hub that never registered the consumer.
+func mustSubscribe(t testing.TB, h *relay.Hub, name string, port int) string {
+	t.Helper()
+	url, err := h.Subscribe(name, port)
+	if err != nil {
+		t.Fatalf("Subscribe(%q, %d): %v", name, port, err)
+	}
+	return url
 }

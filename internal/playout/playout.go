@@ -67,7 +67,7 @@ func DirIn(dataDir string) string { return filepath.Join(dataDir, DirName) }
 // somewhere to stop. Narrow because a variant may read the ingest hub or a
 // rendition's, and the manager must not care which.
 type Hub interface {
-	Subscribe(name string, port int) string
+	Subscribe(name string, port int) (string, error)
 	Unsubscribe(name string)
 }
 
@@ -384,7 +384,19 @@ func (m *Manager) start(s db.PlayoutSettings, v *variant) {
 	}
 
 	v.subName = "playout:" + v.cfg.Name
-	url := v.hub.Subscribe(v.subName, port)
+	url, err := v.hub.Subscribe(v.subName, port)
+	if err != nil {
+		// SAME SHAPE AS THE PORT REFUSAL ABOVE. #711. A name already registered
+		// means another consumer holds it; taking it would leave that one
+		// running and receiving nothing, which is invisible from its process,
+		// its command line and its card.
+		m.ports.Release(port)
+		v.subName = ""
+		v.spec, v.err = "", err.Error()
+		record()
+		m.log.Error("playout: relay subscription refused", "variant", v.cfg.Name, "err", err)
+		return
+	}
 	args := VariantArgs(VariantSpec{
 		Name:             v.cfg.Name,
 		RelayURL:         url,

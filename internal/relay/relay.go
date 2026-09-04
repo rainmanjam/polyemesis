@@ -22,6 +22,7 @@
 package relay
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -223,21 +224,52 @@ func (h *Hub) InputURL() string {
 	return udpURL(h.advertise, h.port)
 }
 
+// ErrSubscriberExists is returned when a name is already registered on this hub.
+//
+// #711. THE MAP ASSIGNMENT USED TO BE BARE. `h.subs[name] = ...` REPLACES the
+// existing entry: the first consumer keeps running, keeps a correct command
+// line and keeps a green card on the monitoring page -- and receives nothing.
+// Worse, the hub logged "relay subscriber added" either way, so the log
+// positively confirmed the wrong thing.
+//
+// Three devices already existed to avoid the collision and all three were rung
+// zero: a naming convention in destinations.go, a lock in engine.go, and a
+// comment in setup.go. It had bitten twice. The sink itself now refuses.
+var ErrSubscriberExists = errors.New("a relay subscriber with that name is already registered on this hub")
+
 // Subscribe registers a consumer and returns the URL it should read from.
 //
 // The consumer binds that port itself (FFmpeg does this when given a udp://
 // input); the hub only sends to it. Subscribing before the consumer starts is
 // fine — datagrams to an unbound port are simply discarded by the kernel.
-func (h *Hub) Subscribe(name string, port int) string {
+//
+// REFUSES AN OCCUPIED NAME (ErrSubscriberExists). Every caller already has a
+// release-and-bail path for the allocator refusing a port, which is the same
+// shape, and a caller that ignores this error is back to the silent replacement
+// the error exists to prevent.
+func (h *Hub) Subscribe(name string, port int) (string, error) {
 	return h.SubscribeAddr(name, h.advertise, port)
 }
 
 // SubscribeAddr registers a consumer at an explicit address, for the case where
 // it is not on this host. The caller resolves any hostname itself so that
 // registration cannot block the engine on DNS.
-func (h *Hub) SubscribeAddr(name string, ip net.IP, port int) string {
+func (h *Hub) SubscribeAddr(name string, ip net.IP, port int) (string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if prev, taken := h.subs[name]; taken {
+		// AT ERROR AND BEFORE THE STORE, so the log says what happened rather
+		// than confirming an add that is not going to happen. Both addresses go
+		// in the line: the whole difficulty of the old failure was that
+		// everything downstream looked healthy, so the one place it can be seen
+		// is here, naming the consumer that would have been cut off.
+		h.log.Error("refusing a relay subscription: that name is already registered on "+
+			"this hub, and taking it would leave the consumer holding it running and "+
+			"receiving nothing",
+			"name", name, "hubPort", h.port,
+			"heldBy", prev.addr.String(), "refused", (&net.UDPAddr{IP: ip, Port: port}).String())
+		return "", fmt.Errorf("%q on hub port %d: %w", name, h.port, ErrSubscriberExists)
+	}
 	h.subs[name] = &subscriber{
 		name: name,
 		addr: &net.UDPAddr{IP: ip, Port: port},
@@ -253,13 +285,28 @@ func (h *Hub) SubscribeAddr(name string, ip net.IP, port int) string {
 	// said nothing, because the acceptance suite never shows Debug.
 	h.log.Info("relay subscriber added", "name", name, "hubPort", h.port,
 		"subscriberPort", port, "total", len(h.subs))
-	return udpURL(ip, port)
+	return udpURL(ip, port), nil
 }
 
 // Unsubscribe removes a consumer.
 func (h *Hub) Unsubscribe(name string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	// THE MIRROR OF THE COLLISION, and it was silent in the same way. #711.
+	// delete() on an absent key is a no-op, and the line below said "removed"
+	// regardless -- so a mismatched name removed nothing and reported success,
+	// which is exactly how a subscription outlives the process that owned it.
+	//
+	// Not an error return: every caller is a teardown path, and a teardown that
+	// has to branch on this would either ignore it or abandon the rest of its
+	// cleanup. Reported instead, at the level that gets read.
+	if _, had := h.subs[name]; !had {
+		h.log.Error("asked to remove a relay subscriber this hub does not have; "+
+			"nothing was removed. A teardown naming the wrong subscriber leaves the "+
+			"real one forwarding into a process that is gone",
+			"name", name, "hubPort", h.port, "total", len(h.subs))
+		return
+	}
 	delete(h.subs, name)
 	h.rebuildTargets()
 	// AT INFO, for the same reason as "added". #674: a destination subscribed at

@@ -39,15 +39,15 @@ func TestStopReturnsEveryPortTheAuxChildrenTook(t *testing.T) {
 	e.recorderPort = enginePort(t, e, "recorder")
 	e.previewPort = enginePort(t, e, "preview")
 	e.metersPort = enginePort(t, e, "meters")
-	e.hub.Subscribe("recorder", e.recorderPort)
-	e.hub.Subscribe("preview", e.previewPort)
-	e.hub.Subscribe("meters", e.metersPort)
+	mustSubscribe(t, e.hub, "recorder", e.recorderPort)
+	mustSubscribe(t, e.hub, "preview", e.previewPort)
+	mustSubscribe(t, e.hub, "meters", e.metersPort)
 
 	rp := enginePort(t, e, "rendition")
 	e.rends = map[int64]*rendition{1: {
 		proc: loudTestProc(), port: rp, subName: "rend:1", in: e.hub,
 	}}
-	e.hub.Subscribe("rend:1", rp)
+	mustSubscribe(t, e.hub, "rend:1", rp)
 	e.mu.Unlock()
 
 	if got := e.heldPortCount(); got != span {

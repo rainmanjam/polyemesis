@@ -217,7 +217,13 @@ func (e *Engine) startSilence(spec string) {
 		return
 	}
 
-	in := e.hub.Subscribe(silenceSubName, port)
+	in, err := e.hub.Subscribe(silenceSubName, port)
+	if err != nil {
+		e.releasePort(port)
+		_ = hub.Close()
+		fail(err)
+		return
+	}
 	args := ffmpeg.SilenceArgs(ffmpeg.SilenceSpec{
 		InRelayURL:  in,
 		OutRelayURL: hub.InputURL(),

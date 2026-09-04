@@ -36,7 +36,7 @@ func TestASubscriberReceivesEveryByteTheHubReceived(t *testing.T) {
 	}
 	defer sub.Close()
 	subPort := sub.LocalAddr().(*net.UDPAddr).Port
-	h.Subscribe("test-dest", subPort)
+	mustSubscribe(t, h, "test-dest", subPort)
 
 	// Datagrams shaped like the relay's: 1316 bytes, seven 188-byte TS packets,
 	// each carrying a recognisable PID so a dropped or reordered one shows.
@@ -206,7 +206,7 @@ func TestFirstDeliveryIsLoggedOncePerSubscriber(t *testing.T) {
 		t.Fatalf("subscriber socket: %v", err)
 	}
 	defer sub.Close()
-	h.Subscribe("dest:1", sub.LocalAddr().(*net.UDPAddr).Port)
+	mustSubscribe(t, h, "dest:1", sub.LocalAddr().(*net.UDPAddr).Port)
 
 	pkt := make([]byte, 188)
 	pkt[0] = 0x47
@@ -241,7 +241,7 @@ func TestASendToADepartedConsumerIsCounted(t *testing.T) {
 	}
 	port := gone.LocalAddr().(*net.UDPAddr).Port
 	_ = gone.Close()
-	h.Subscribe("departed", port)
+	mustSubscribe(t, h, "departed", port)
 
 	pkt := make([]byte, 188)
 	pkt[0] = 0x47

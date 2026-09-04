@@ -202,7 +202,7 @@ func runJoinHop(t *testing.T, ffmpegBin string, hub *relay.Hub, dir string, h *j
 	}()
 
 	subPort := freeUDPPort(t)
-	args := relayFeedArgs(hub.Subscribe(h.name, subPort),
+	args := relayFeedArgs(mustSubscribe(t, hub, h.name, subPort),
 		"udp://127.0.0.1:"+strconv.Itoa(sinkPort), h.offset)
 	feed := exec.Command(ffmpegBin, args...)
 	var feedErr strings.Builder

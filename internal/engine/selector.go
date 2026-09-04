@@ -1552,8 +1552,16 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 		if err != nil {
 			return fail(err)
 		}
+		url, serr := in.Subscribe(selectorSubName, port)
+		if serr != nil {
+			// #711. BEFORE feed.subName is recorded, so the teardown below does
+			// not unsubscribe a name this feed never took -- which would cut off
+			// whoever actually holds it.
+			e.releasePort(port)
+			return fail(serr)
+		}
 		feed.in, feed.port, feed.subName = in, port, selectorSubName
-		args = relayFeedArgs(in.Subscribe(selectorSubName, port), out, offset)
+		args = relayFeedArgs(url, out, offset)
 	default:
 		// A fifth kind lands here, and lands here VISIBLY: nothing is started
 		// and nothing is recorded as active, because a feed that cannot be built

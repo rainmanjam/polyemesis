@@ -1814,7 +1814,15 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		e.log.Error("recorder: no relay port", "err", err)
 		return
 	}
-	url := e.hub.Subscribe("recorder", port)
+	url, err := e.hub.Subscribe("recorder", port)
+	if err != nil {
+		// #711. Same release-and-bail as the port refusal above. An occupied
+		// name means another consumer is reading under it, and taking it would
+		// leave that one running and receiving nothing.
+		e.releasePort(port)
+		e.log.Error("recorder: relay subscription refused", "err", err)
+		return
+	}
 
 	pattern := filepath.Join(e.cfg.RecordingsDir(), "rec-%Y%m%d-%H%M%S.mkv")
 	rs := ffmpeg.RecorderSpec{
@@ -2123,7 +2131,17 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	e.mu.Lock()
 	e.previewHub = hub
 	e.mu.Unlock()
-	url := hub.Subscribe("preview", port)
+	url, err := hub.Subscribe("preview", port)
+	if err != nil {
+		// #711. previewHub is cleared with it, or a later sweep unsubscribes a
+		// name this preview never took -- cutting off whoever actually holds it.
+		e.mu.Lock()
+		e.previewHub = nil
+		e.mu.Unlock()
+		e.releasePort(port)
+		e.log.Error("preview: relay subscription refused", "err", err)
+		return
+	}
 
 	args := ffmpeg.PreviewArgs(ffmpeg.PreviewSpec{
 		RelayURL:       url,
@@ -2275,7 +2293,12 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 		return
 	}
 	meterHub := e.downstreamHub()
-	url := meterHub.Subscribe("meters", port)
+	url, err := meterHub.Subscribe("meters", port)
+	if err != nil {
+		e.releasePort(port)
+		e.log.Error("meters: relay subscription refused", "err", err)
+		return
+	}
 
 	args := ffmpeg.MetersArgs(ffmpeg.MetersSpec{RelayURL: url, TrackChannels: channels})
 
@@ -3020,7 +3043,13 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	}
 
 	subName := fmt.Sprintf("rendition:%d", row.ID)
-	in := upstream.Subscribe(subName, port)
+	in, err := upstream.Subscribe(subName, port)
+	if err != nil {
+		e.releasePort(port)
+		_ = hub.Close()
+		fail(err)
+		return
+	}
 	rspec := renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row), e.cfg.DataDir)
 	// An FFmpeg with no drawtext filter must not be handed one.
 	//
@@ -3498,7 +3527,16 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	defer e.releasePort(port)
 
 	name := "probe"
-	url := e.hub.Subscribe(name, port)
+	url, err := e.hub.Subscribe(name, port)
+	if err != nil {
+		// #711. Counted like an ffprobe failure, for the reason the port
+		// refusal above states: no layout was measured, and the reason is not
+		// something waiting longer will change. The deferred Unsubscribe is
+		// NOT armed, because this probe holds no subscription to remove and
+		// removing the name would cut off whoever does.
+		e.probeFailedNow(fmt.Errorf("the probe's relay name is already in use: %w", err))
+		return false
+	}
 	defer e.hub.Unsubscribe(name)
 
 	// Captured BEFORE the read, checked before the write. Everything between is
@@ -3956,7 +3994,12 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 		return
 	}
 	subName := loudnessSubPrefix + strconv.FormatInt(p.id, 10)
-	url := p.hub.Subscribe(subName, port)
+	url, err := p.hub.Subscribe(subName, port)
+	if err != nil {
+		e.releasePort(port)
+		fail(err)
+		return
+	}
 
 	args := meters.Args(meters.Spec{
 		RelayURL:      url,
@@ -4154,7 +4197,12 @@ func (e *Engine) reconcileClips() {
 		return
 	}
 	hub := e.downstreamHub()
-	url := hub.Subscribe(clipSubName, port)
+	url, err := hub.Subscribe(clipSubName, port)
+	if err != nil {
+		e.releasePort(port)
+		e.log.Error("clip buffer: relay subscription refused", "err", err)
+		return
+	}
 
 	capt, err := clips.Open(e.log, cfg, url, func() {
 		e.bus.Publish(events.TypeClips, nil)
@@ -4509,7 +4557,12 @@ func (e *Engine) reconcileCaptions() {
 		return
 	}
 	hub := e.downstreamHub()
-	url := hub.Subscribe(captSubName, port)
+	url, err := hub.Subscribe(captSubName, port)
+	if err != nil {
+		e.releasePort(port)
+		e.captionsFailed(fmt.Sprintf("live captions could not subscribe to the relay: %v", err))
+		return
+	}
 
 	// The sidecar lands in the playout directory by default so it sits beside
 	// the HLS window it describes. It is a growing WebVTT file, not a

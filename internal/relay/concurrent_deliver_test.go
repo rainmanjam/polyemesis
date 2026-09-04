@@ -34,7 +34,7 @@ func TestConcurrentDeliverIsRaceFree(t *testing.T) {
 	// A subscriber nothing is listening on, so every send fails and the
 	// sendErrors counter -- the other unsynchronised write -- is exercised too.
 	_, port := boundSubscriber(t)
-	h.Subscribe("ghost", port)
+	mustSubscribe(t, h, "ghost", port)
 
 	var wg sync.WaitGroup
 	for g := 0; g < 8; g++ {

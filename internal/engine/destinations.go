@@ -872,7 +872,14 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		return err
 	}
 	subName := destSubName(row.ID, "")
-	url := hub.Subscribe(subName, port)
+	url, err := hub.Subscribe(subName, port)
+	if err != nil {
+		// #711. An occupied name means another consumer is reading under it;
+		// taking it would leave that one running, correct-looking and receiving
+		// nothing. Same release-and-bail shape as the port refusal above.
+		e.releasePort(port)
+		return err
+	}
 
 	target := row.Target()
 	if mt.Use {
@@ -1314,7 +1321,16 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 		return
 	}
 	sub := destSubName(d.row.ID, destRoleBackup)
-	url := hub.Subscribe(sub, port)
+	url, err := hub.Subscribe(sub, port)
+	if err != nil {
+		// #711. Quietly, with a reason, exactly as the port refusal above does:
+		// the backup feed is the optional half and the primary is unaffected.
+		e.releasePort(port)
+		d.backupErr = "the backup feed's relay name is already in use"
+		e.log.Error("backup ingest could not subscribe; the primary is unaffected",
+			"dest", d.row.Name, "err", err)
+		return
+	}
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name:        sub,
