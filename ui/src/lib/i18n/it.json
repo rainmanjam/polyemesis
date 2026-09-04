@@ -1440,5 +1440,7 @@
   "tour.routingNav.body": "Una destinazione senza profilo di routing è semplice ritrasmissione, che è quello che fa qualunque altro strumento. Un profilo decide quali tracce audio in ingresso raggiungono quale destinazione e come vengono miscelate: un microfono di commento che abbassa un tappeto musicale per una piattaforma, la musica esclusa del tutto per un'altra, ognuna con il proprio obiettivo di loudness. Si imposta per destinazione, così uno stesso flusso in ingresso può uscire come programmi diversi.",
   "tour.routingNav.title": "Il routing è la parte che non è ritrasmissione",
   "tour.sourcesNav.body": "Una sorgente è un flusso in ingresso, e questa pagina è dove stanno il suo indirizzo di pubblicazione e il suo token. install.sh li ha stampati una volta sola, quando è stato eseguito; se quel terminale è stato chiuso, è qui che si ritrovano. Ogni sorgente porta il proprio token, così più encoder possono pubblicare su una sola installazione restando separati.",
-  "tour.sourcesNav.title": "Sorgenti: dove si collega un encoder"
+  "tour.sourcesNav.title": "Sorgenti: dove si collega un encoder",
+  "chrome.programme": "Programma",
+  "chrome.programmeHint": "La console segue un programma alla volta. Tutto ciò che vedi descrive questo."
 }

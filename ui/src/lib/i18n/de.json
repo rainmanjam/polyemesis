@@ -1440,5 +1440,7 @@
   "tour.routingNav.body": "Ein Ziel ohne Routing-Profil ist einfaches Weiterleiten, wie es jedes andere Werkzeug auch kann. Ein Profil entscheidet, welche eingehenden Audiospuren welches Ziel erreichen und wie sie gemischt werden: ein Kommentarmikrofon, das für eine Plattform das Musikbett absenkt, während die Musik für eine andere ganz wegbleibt, jeweils mit eigenem Lautheitsziel. Das wird pro Ziel eingestellt, sodass ein eingehender Feed als mehrere unterschiedliche Programme hinausgeht.",
   "tour.routingNav.title": "Routing ist der Teil, der kein Weiterleiten ist",
   "tour.sourcesNav.body": "Eine Quelle ist ein eingehender Feed, und auf dieser Seite stehen ihre Publish-Adresse und ihr Token. install.sh hat beides beim Ausführen genau einmal ausgegeben; wenn das Terminal geschlossen wurde, sind sie hier wiederzufinden. Jede Quelle hat ihr eigenes Token, sodass mehrere Encoder auf eine Installation senden und trotzdem getrennt bleiben.",
-  "tour.sourcesNav.title": "Quellen: wo ein Encoder sich verbindet"
+  "tour.sourcesNav.title": "Quellen: wo ein Encoder sich verbindet",
+  "chrome.programme": "Programm",
+  "chrome.programmeHint": "Die Konsole folgt jeweils einem Programm. Alles auf dem Bildschirm beschreibt dieses."
 }

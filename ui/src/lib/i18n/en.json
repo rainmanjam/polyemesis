@@ -1440,5 +1440,7 @@
   "tour.routingNav.body": "A destination with no routing profile is plain restreaming, which every other tool does. A profile decides which incoming audio tracks reach which destination and how they are mixed: a commentary mic ducking a music bed for one platform, the music left out entirely for another, each with its own loudness target. It is set per destination, so one incoming feed can leave as several different programmes.",
   "tour.routingNav.title": "Routing is the part that is not restreaming",
   "tour.sourcesNav.body": "A source is one incoming feed, and this page is where its publish address and its token live. install.sh printed them once, when it ran; if that terminal has been closed, this is where to find them again. Each source carries its own token, so several encoders can publish to one install and stay apart.",
-  "tour.sourcesNav.title": "Sources: where an encoder connects"
+  "tour.sourcesNav.title": "Sources: where an encoder connects",
+  "chrome.programme": "Programme",
+  "chrome.programmeHint": "The console follows one programme at a time. Everything on screen describes this one."
 }

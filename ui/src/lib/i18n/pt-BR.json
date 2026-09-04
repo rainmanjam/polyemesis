@@ -1440,5 +1440,7 @@
   "tour.routingNav.body": "Um destino sem perfil de roteamento é retransmissão pura, que é o que qualquer outra ferramenta faz. Um perfil decide quais faixas de áudio que chegam alcançam qual destino e como elas são mixadas: um microfone de comentário abaixando a cama musical para uma plataforma, a música excluída por completo em outra, cada uma com seu próprio alvo de loudness. É definido por destino, então um mesmo feed de entrada pode sair como vários programas diferentes.",
   "tour.routingNav.title": "Roteamento é a parte que não é retransmissão",
   "tour.sourcesNav.body": "Uma fonte é um feed que chega, e nesta página ficam o endereço de publicação e o token dela. O install.sh imprimiu os dois uma única vez, quando rodou; se aquele terminal foi fechado, é aqui que se encontra de novo. Cada fonte tem seu próprio token, então vários codificadores podem publicar em uma instalação e continuar separados.",
-  "tour.sourcesNav.title": "Fontes: onde um codificador se conecta"
+  "tour.sourcesNav.title": "Fontes: onde um codificador se conecta",
+  "chrome.programme": "Programa",
+  "chrome.programmeHint": "O console acompanha um programa por vez. Tudo na tela descreve este."
 }

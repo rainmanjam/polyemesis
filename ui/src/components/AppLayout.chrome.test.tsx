@@ -32,6 +32,14 @@ vi.mock("@/hooks/useLiveData", () => ({
     programmeKnown: true,
     snapshotKnown: true,
     sourceCount: 0,
+    // #638. This mock stands in for the whole LiveData contract, and it is a
+    // plain object literal rather than a typed one -- so a field added to the
+    // interface does not fail the typecheck here, it fails at runtime as
+    // `undefined.length` in whatever consumes it. That is what happened when
+    // the programme switcher landed. Kept as an object literal (rewriting it is
+    // a bigger change than this) with the omission recorded instead.
+    programmes: [],
+    selectProgramme: () => {},
     recordingsRevision: 0,
   }),
   useIngestLive: () => false,

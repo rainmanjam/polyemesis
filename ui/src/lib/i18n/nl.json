@@ -1440,5 +1440,7 @@
   "tour.routingNav.body": "Een bestemming zonder routingprofiel is gewoon doorsturen, wat elk ander gereedschap ook doet. Een profiel bepaalt welke binnenkomende audiosporen welke bestemming bereiken en hoe ze worden gemengd: een commentaarmicrofoon die een muziekbed wegdrukt voor het ene platform, de muziek volledig weggelaten voor het andere, elk met een eigen luidheidsdoel. Het wordt per bestemming ingesteld, zodat één binnenkomende feed als meerdere verschillende programma's naar buiten gaat.",
   "tour.routingNav.title": "Routing is het deel dat geen doorsturen is",
   "tour.sourcesNav.body": "Een bron is één binnenkomende feed, en op deze pagina staan het publicatieadres en het token ervan. install.sh drukte ze één keer af, tijdens het uitvoeren; is die terminal gesloten, dan vind je ze hier terug. Elke bron draagt een eigen token, zodat meerdere encoders naar één installatie kunnen publiceren en toch gescheiden blijven.",
-  "tour.sourcesNav.title": "Bronnen: waar een encoder verbinding maakt"
+  "tour.sourcesNav.title": "Bronnen: waar een encoder verbinding maakt",
+  "chrome.programme": "Programma",
+  "chrome.programmeHint": "De console volgt één programma tegelijk. Alles op het scherm beschrijft dit programma."
 }
