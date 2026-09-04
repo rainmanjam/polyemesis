@@ -1412,6 +1412,14 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	})
 
 	e.mu.Lock()
+	// #631. This one binds nothing itself -- the listener is a Go server owned
+	// by the engine -- but its child DIALS that listener, so an orphaned ingest
+	// goes on feeding a relay whose engine is gone, and the next start of the
+	// same source meets a publisher it did not spawn.
+	if e.stopped {
+		e.mu.Unlock()
+		return
+	}
 	e.ingest = proc
 	e.ingestSig = sig
 	// A new ingest means the previous layout is stale. One of two places the
@@ -1996,6 +2004,18 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	})
 
 	e.mu.Lock()
+	// #631, and re-checked HERE rather than trusting the read at the top of this
+	// function. That one happens before a mkdir, a port allocation and a hub
+	// subscribe, and drops e.mu in between -- so it answers whether the engine
+	// was running when the request arrived, not whether it is running now. The
+	// preview is started on demand from a request handler, which is the path
+	// least synchronised with a shutdown of any of them.
+	if e.stopped {
+		e.mu.Unlock()
+		hub.Unsubscribe("preview")
+		e.alloc.Release(port)
+		return
+	}
 	e.preview = proc
 	e.previewPort = port
 	e.previewSig = previewSig(s)
@@ -2148,6 +2168,19 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	})
 
 	e.mu.Lock()
+	// #631. Shutdown may have run since the checks above: Stop waits on the
+	// probe loop rather than preceding it, and probeLoop's settle path reaches
+	// here directly. Stop collects e.meters under this same lock, so a publish
+	// that lands after it has collected is a child NOTHING will ever signal --
+	// absent from every map, every status page and every log line, and present
+	// only in the process table with its ppid pointing at the live server.
+	// Same guard, same reason, as reconcileRecorder's.
+	if e.stopped {
+		e.mu.Unlock()
+		meterHub.Unsubscribe("meters")
+		e.alloc.Release(port)
+		return
+	}
 	e.meters = proc
 	e.metersPort = port
 	e.metersSig = sig

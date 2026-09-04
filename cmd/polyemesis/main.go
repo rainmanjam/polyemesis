@@ -27,6 +27,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/logtz"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
@@ -488,6 +489,7 @@ func run(h *hooks) error {
 	srv.DrainLifecycleWithin(shutdownCtx)
 	eng.StopWithin(shutdownCtx)
 	warnIfShutdownOverran(shutdownCtx, log)
+	reportSurvivingChildren(log)
 	log.Info("goodbye")
 	return nil
 }
@@ -1004,6 +1006,34 @@ func verifyBackup(dir string, out io.Writer) error {
 // A function rather than an inline block so the branch can be tested. The
 // whole value of the line is that it appears on the bad day, and a line nobody
 // has watched appear is a line nobody should rely on. #645.
+// reportSurvivingChildren says so when the teardown left something running.
+//
+// #631 was found on a production host by somebody running `ps` and noticing an
+// ffmpeg whose ppid was the live server -- three weeks and 53 escalations after
+// it started happening. Nothing inside the program could see it: a child whose
+// handle has been lost is absent from every map, every status page and every
+// log line, and present only in the process table.
+//
+// So this is the line that would have said it on the first occurrence. It is
+// DETECTION, not control: the guards in internal/engine are what stop the
+// orphan being created, and this is what makes it audible if one ever is again
+// by a route nobody has thought of. Deliberately at the very end, after
+// StopWithin has finished waiting, so anything still counted here has outlived
+// the whole budget rather than merely being slow.
+func reportSurvivingChildren(log *slog.Logger) {
+	live := supervisor.Live()
+	if len(live) == 0 {
+		return
+	}
+	// Warn rather than Error: on a SIGKILLed child the census clears when the
+	// reap lands, and a shutdown that ran out of budget has already said so on
+	// the line above. What this adds is WHICH ones, by name.
+	for _, c := range live {
+		log.Warn("child outlived the shutdown; nothing in polyemesis will signal it again",
+			"process", c.Name, "kind", c.Kind, "pid", c.PID, "up", time.Since(c.Since).String())
+	}
+}
+
 func warnIfShutdownOverran(ctx context.Context, log *slog.Logger) {
 	if ctx.Err() == nil {
 		return
