@@ -1,0 +1,175 @@
+# Catch #440 in the act.
+#
+# `test: windows-latest` aborts with a Go RUNTIME error -- `found pointer to
+# free object`, `fault`, `s.allocCount != s.nelems` -- at a measured rate of
+# 14 in 1,319 job executions that ran the suite. That is 1.06%, about 1 in 94.
+# The census is on the issue.
+#
+# WHY A SOAK AND NOT A FIX. There is no code fix left to apply: the unsafe
+# Pointer->uintptr conversion the issue suspected was real, was fixed in #475
+# with a //go:uintptrescapes wrapper, and the crash OUTLIVED it -- 6 aborts in
+# 318 executions afterwards, against 8 in 623 before. Nothing has moved the
+# rate. Fixing a bug nobody can reproduce is guessing, and this repository has
+# spent enough rounds on remedies that fit the symptom.
+#
+# WHY THIS SHAPE. At 1% per full-suite run, an occurrence arrives every few
+# days, on somebody else's pull request, in a job whose logs expire. Every one
+# of the 14 dumps names the same two packages and the same goroutine
+# population: 9 to 11 internal/relay.(*Hub).run blocked in net.(*conn).Read,
+# plus one internal/supervisor.(*Process).waitBackoff. So this runs THOSE
+# packages, in a loop, with the detectors on -- which is the difference between
+# waiting a month for a dump and getting one in an afternoon.
+#
+# -race is what turns "the heap is corrupt" into "this goroutine wrote it", and
+# it is supported on windows/amd64 -- checked, because the soak would be
+# pointless otherwise. It also IMPLIES -d=checkptr: cmd/compile's flag.go says
+# "-race, -msan and -asan imply -d=checkptr for now", and the same file says the
+# runtime cannot use checkptr at all. So the explicit -gcflags=all=-d=checkptr
+# this started with was redundant at best and applied to a package that refuses
+# it at worst. Dropped rather than left in as decoration.
+#
+# NOT IN THE MAIN CI PATH, deliberately. It is minutes of Windows runner per
+# invocation and it is a diagnostic, not a gate: a green soak proves nothing
+# and must never be read as "fixed". A red one is the artefact this issue has
+# been missing since August.
+name: windows heap soak (#440)
+
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: "Max times to run the two packages (time budget may stop it sooner)"
+        required: false
+        default: "25"
+      packages:
+        description: "Packages to soak"
+        required: false
+        default: "./internal/engine ./internal/relay"
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    name: "windows heap soak"
+    runs-on: windows-latest
+    # Six hours is GitHub's default and is not a budget, it is an accident.
+    #
+    # MEASURED: one iteration of these two packages under -race is 72s on an
+    # Apple-silicon laptop (engine 68.6s, relay 2.8s). Windows runners are
+    # slower at this, so budget 2-3 minutes an iteration there. The loop bounds
+    # itself on TIME as well as count for that reason -- see SOAK_BUDGET_SECS
+    # below -- so this ceiling is a backstop rather than the thing that stops
+    # it. A job cancelled at its ceiling loses the dumps, which is the only
+    # reason to have run it.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Record the runner image
+        # The image was the leading hypothesis for the 2026-08-17 onset and was
+        # REFUTED -- win25-vs2026/20260810.198 is the image on both sides of it.
+        # Recorded anyway, because the next person to read a dump will want to
+        # know what it ran on without going back to the API for it.
+        shell: bash
+        run: |
+          echo "image:      ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+          go version
+          go env GOARCH GOOS
+
+      - name: Soak internal/engine and internal/relay
+        shell: bash
+        env:
+          ITERATIONS: ${{ inputs.iterations || '40' }}
+          PKGS: ${{ inputs.packages || './internal/engine ./internal/relay' }}
+        run: |
+          set -uo pipefail
+          # VALIDATED BEFORE USE. $PKGS is expanded UNQUOTED below, because
+          # several packages have to word-split into go test's argv -- and an
+          # unquoted expansion of an input is a command injection whatever the
+          # trigger is. workflow_dispatch needs write access, so this is not the
+          # dangerous case; it is the shape that becomes dangerous the day
+          # somebody adds a second trigger. Refusing anything but Go package
+          # paths costs four lines now and removes the question entirely.
+          case "$PKGS" in
+            *[!a-zA-Z0-9./_\ -]*)
+              echo "::error title=Refused::packages input may contain only Go package paths"
+              exit 1 ;;
+          esac
+          case "$ITERATIONS" in
+            ''|*[!0-9]*)
+              echo "::error title=Refused::iterations must be a positive integer"
+              exit 1 ;;
+          esac
+
+          # NOT `set -e`. The whole point is to keep going after a failure that
+          # is not the one being hunted -- an ordinary flaky assertion must not
+          # end a soak that has not yet caught the abort.
+          # BOUNDED ON TIME, NOT ONLY ON COUNT, and this is the lesson from #698
+          # applied before it costs anything: a job cancelled at its ceiling
+          # does not reach its upload step, so a soak that overruns loses the
+          # one artefact it exists to produce. 70 minutes leaves 20 of the 90
+          # for checkout, toolchain and the upload.
+          SOAK_BUDGET_SECS=4200
+          aborts=0
+          fails=0
+          ran=0
+          for i in $(seq 1 "$ITERATIONS"); do
+            if [ "$SECONDS" -ge "$SOAK_BUDGET_SECS" ]; then
+              echo "stopping after $ran iteration(s): ${SECONDS}s spent against a"
+              echo "${SOAK_BUDGET_SECS}s budget, leaving room to upload the dumps."
+              break
+            fi
+            ran=$((ran+1))
+            echo "::group::iteration $i of $ITERATIONS (${SECONDS}s elapsed)"
+            # -count=1 defeats the test cache, or every iteration after the
+            # first would prove nothing at all. Output is kept per iteration so
+            # a dump can be read whole rather than interleaved.
+            out="iter-$i.log"
+            # shellcheck disable=SC2086  # deliberate split; validated above
+            go test -race -count=1 -timeout 15m $PKGS >"$out" 2>&1
+            rc=$?
+            # A Go RUNTIME abort is the thing being hunted, and it is NOT the
+            # same event as a test failure. `fatal error:` is the runtime; a
+            # failed assertion prints `--- FAIL`. Counting them together would
+            # bury one occurrence in a hundred ordinary flakes -- which is
+            # exactly how this went eleven occurrences without being noticed.
+            if grep -qE '^fatal error:|^unexpected fault address|^runtime: ' "$out"; then
+              aborts=$((aborts+1))
+              echo "::error title=Heap abort caught (#440)::iteration $i aborted in the runtime"
+              sed -n '1,120p' "$out"
+            elif [ "$rc" -ne 0 ]; then
+              fails=$((fails+1))
+              echo "iteration $i failed rc=$rc (ordinary failure, not a runtime abort)"
+              grep -E '^--- FAIL|^FAIL' "$out" | head -5
+            fi
+            echo "::endgroup::"
+          done
+
+          echo
+          echo "soak complete: $ran of $ITERATIONS iteration(s) in ${SECONDS}s, $aborts runtime abort(s), $fails ordinary failure(s)"
+          echo "SOAK_ABORTS=$aborts" >> "$GITHUB_ENV"
+          # A soak that caught nothing EXITS 0 and proves nothing. Saying so
+          # here rather than in a comment somewhere, because the failure mode of
+          # a diagnostic is somebody reading its green as an all-clear -- and at
+          # a 1% per-run rate, forty iterations that catch nothing is the
+          # expected outcome roughly two times in three.
+          if [ "$aborts" -eq 0 ]; then
+            echo "::notice title=No abort in this run::At the measured 1.06% per-suite rate, a"
+            echo "clean soak is the ordinary result and is NOT evidence the bug is gone."
+            echo "25 iterations at that rate catch one about a quarter of the time."
+          fi
+
+      - name: Keep the dumps
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-heap-soak-logs
+          path: iter-*.log
+          retention-days: 30
+          if-no-files-found: warn
