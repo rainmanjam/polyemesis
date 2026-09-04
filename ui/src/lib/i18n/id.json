@@ -158,6 +158,7 @@
   "chrome.language": "Bahasa",
   "chrome.liveCount": "{count} aktif",
   "chrome.releaseNotes": "Catatan rilis",
+  "chrome.runningVersion": "Menjalankan polyemesis {version}",
   "chrome.signOut": "Keluar",
   "chrome.socketOffline": "offline",
   "chrome.socketOfflineHint": "Pembaruan langsung terputus; mencoba lagi",
@@ -339,6 +340,7 @@
   "dash.laneNoPreview": "Belum ada pratinjau — mulai encoder untuk program ini.",
   "dash.leaveUnchanged": "Biarkan tidak berubah",
   "dash.leaveUnchangedNote": "“Biarkan tidak berubah” sama sekali tidak mengirim apa pun, jadi platform mempertahankan nilai yang sudah ada. Memilih Aktif atau Mati akan menuliskan nilai itu.",
+  "dash.loadingDestinations": "Memeriksa apa yang telah dikonfigurasi pada instalasi ini…",
   "dash.metaCategory": "Kategori",
   "dash.metaDescription": "Deskripsi",
   "dash.metaTags": "Tag",
@@ -439,6 +441,7 @@
   "dest.restarts.hint": "Berapa kali encoder tujuan ini dinyalakan ulang. Di atas nol berarti ia gagal lalu dipulihkan.",
   "dest.retryAfter": "Coba lagi setelah (detik)",
   "dest.sharedEncodeAria": "Enkode video bersama",
+  "dest.renditionConcerns": "Di luar yang dipublikasikan platform ini",
   "dest.socketTimeout": "Batas waktu soket (detik)",
   "dest.source": "Sumber",
   "dest.sourcePlaceholder": "Pilih sebuah program",
@@ -1438,5 +1441,7 @@
   "tour.routingNav.body": "Tujuan tanpa profil perutean hanyalah penyiaran ulang biasa, yang juga dilakukan setiap perkakas lain. Sebuah profil menentukan trek audio masuk mana yang sampai ke tujuan mana dan bagaimana semuanya dicampur: mikrofon komentar yang menekan latar musik untuk satu platform, musik yang dihilangkan sepenuhnya untuk platform lain, masing-masing dengan target kenyaringannya sendiri. Diatur per tujuan, sehingga satu umpan masuk bisa keluar sebagai beberapa program berbeda.",
   "tour.routingNav.title": "Perutean adalah bagian yang bukan penyiaran ulang",
   "tour.sourcesNav.body": "Sumber adalah satu umpan masuk, dan di halaman inilah alamat publikasi serta tokennya berada. install.sh mencetak keduanya sekali saja, ketika dijalankan; jika terminal itu sudah ditutup, di sinilah keduanya dapat ditemukan lagi. Setiap sumber membawa tokennya sendiri, sehingga beberapa encoder dapat mengirim ke satu instalasi dan tetap terpisah.",
-  "tour.sourcesNav.title": "Sumber: tempat sebuah encoder terhubung"
+  "tour.sourcesNav.title": "Sumber: tempat sebuah encoder terhubung",
+  "chrome.programme": "Program",
+  "chrome.programmeHint": "Konsol mengikuti satu program pada satu waktu. Semua yang tampil menjelaskan program ini."
 }

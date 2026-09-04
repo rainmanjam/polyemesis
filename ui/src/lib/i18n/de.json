@@ -158,6 +158,7 @@
   "chrome.language": "Sprache",
   "chrome.liveCount": "{count} live",
   "chrome.releaseNotes": "Versionshinweise",
+  "chrome.runningVersion": "polyemesis {version} läuft",
   "chrome.signOut": "Abmelden",
   "chrome.socketOffline": "offline",
   "chrome.socketOfflineHint": "Live-Aktualisierung getrennt, Verbindung wird wiederhergestellt",
@@ -339,6 +340,7 @@
   "dash.laneNoPreview": "Noch keine Vorschau — starten Sie Ihren Encoder für dieses Programm.",
   "dash.leaveUnchanged": "Unverändert lassen",
   "dash.leaveUnchangedNote": "„Unverändert lassen“ sendet überhaupt nichts, die Plattform behält also, was sie hat. Die Wahl von An oder Aus schreibt diesen Wert.",
+  "dash.loadingDestinations": "Prüfe, was in dieser Installation konfiguriert ist …",
   "dash.metaCategory": "Kategorie",
   "dash.metaDescription": "Beschreibung",
   "dash.metaTags": "Tags",
@@ -439,6 +441,7 @@
   "dest.restarts.hint": "Wie oft der Encoder dieses Ziels neu gestartet wurde. Über null heißt: er ist ausgefallen und wurde wiederhergestellt.",
   "dest.retryAfter": "Erneut versuchen nach (Sekunden)",
   "dest.sharedEncodeAria": "Gemeinsame Videokodierung",
+  "dest.renditionConcerns": "Außerhalb dessen, was diese Plattform veröffentlicht",
   "dest.socketTimeout": "Socket-Timeout (Sekunden)",
   "dest.source": "Quelle",
   "dest.sourcePlaceholder": "Programm auswählen",
@@ -1438,5 +1441,7 @@
   "tour.routingNav.body": "Ein Ziel ohne Routing-Profil ist einfaches Weiterleiten, wie es jedes andere Werkzeug auch kann. Ein Profil entscheidet, welche eingehenden Audiospuren welches Ziel erreichen und wie sie gemischt werden: ein Kommentarmikrofon, das für eine Plattform das Musikbett absenkt, während die Musik für eine andere ganz wegbleibt, jeweils mit eigenem Lautheitsziel. Das wird pro Ziel eingestellt, sodass ein eingehender Feed als mehrere unterschiedliche Programme hinausgeht.",
   "tour.routingNav.title": "Routing ist der Teil, der kein Weiterleiten ist",
   "tour.sourcesNav.body": "Eine Quelle ist ein eingehender Feed, und auf dieser Seite stehen ihre Publish-Adresse und ihr Token. install.sh hat beides beim Ausführen genau einmal ausgegeben; wenn das Terminal geschlossen wurde, sind sie hier wiederzufinden. Jede Quelle hat ihr eigenes Token, sodass mehrere Encoder auf eine Installation senden und trotzdem getrennt bleiben.",
-  "tour.sourcesNav.title": "Quellen: wo ein Encoder sich verbindet"
+  "tour.sourcesNav.title": "Quellen: wo ein Encoder sich verbindet",
+  "chrome.programme": "Programm",
+  "chrome.programmeHint": "Die Konsole folgt jeweils einem Programm. Alles auf dem Bildschirm beschreibt dieses."
 }

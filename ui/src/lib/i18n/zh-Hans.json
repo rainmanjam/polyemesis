@@ -158,6 +158,7 @@
   "chrome.language": "语言",
   "chrome.liveCount": "{count} 个直播",
   "chrome.releaseNotes": "发行说明",
+  "chrome.runningVersion": "正在运行 polyemesis {version}",
   "chrome.signOut": "注销",
   "chrome.socketOffline": "离线",
   "chrome.socketOfflineHint": "直播更新已断开；正在重试",
@@ -339,6 +340,7 @@
   "dash.laneNoPreview": "暂无预览 — 请为此节目启动编码器。",
   "dash.leaveUnchanged": "保持不变",
   "dash.leaveUnchangedNote": "“保持不变”完全不发送任何内容，因此平台会沿用它已有的值。选择“开”或“关”则会写入该值。",
+  "dash.loadingDestinations": "正在检查此安装已配置的内容…",
   "dash.metaCategory": "分类",
   "dash.metaDescription": "简介",
   "dash.metaTags": "标签",
@@ -439,6 +441,7 @@
   "dest.restarts.hint": "此目标的编码器被重启的次数。大于零说明它曾经挂掉并被恢复。",
   "dest.retryAfter": "重试间隔 (秒)",
   "dest.sharedEncodeAria": "共享视频编码",
+  "dest.renditionConcerns": "超出该平台公布的范围",
   "dest.socketTimeout": "套接字超时 (秒)",
   "dest.source": "信号源",
   "dest.sourcePlaceholder": "选择一个节目",
@@ -1438,5 +1441,7 @@
   "tour.routingNav.body": "没有路由配置的目标就是纯粹的转推，任何别的工具都能做到。配置决定哪些输入音轨到达哪个目标、又如何混合：为某个平台让解说麦克风压低背景音乐，为另一个平台把音乐整段去掉，各自带着自己的响度目标。它按目标分别设置，于是同一路输入可以作为几套不同的节目播出去。",
   "tour.routingNav.title": "路由才是那个不只是转推的部分",
   "tour.sourcesNav.body": "来源就是一路输入流，它的发布地址和令牌都在这个页面上。 install.sh 在运行时只打印过一次；如果那个终端已经关掉，这里就是重新找回它们的地方。每个来源都带有自己的令牌，因此多个编码器可以推向同一个安装而彼此不混。",
-  "tour.sourcesNav.title": "来源：编码器连接的地方"
+  "tour.sourcesNav.title": "来源：编码器连接的地方",
+  "chrome.programme": "节目",
+  "chrome.programmeHint": "控制台一次只跟踪一个节目。屏幕上的所有内容都描述该节目。"
 }

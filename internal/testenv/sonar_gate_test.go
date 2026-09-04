@@ -87,3 +87,121 @@ func TestSonarWaitsForItsQualityGate(t *testing.T) {
 			pollSec, preScanAllowanceSec, pollSec+preScanAllowanceSec, jobSec)
 	}
 }
+
+// AND WHEN IT FAILS, IT HAS TO SAY WHICH CONDITION.
+//
+// `sonar.qualitygate.wait=true` bought a red job. It did not buy a reason: the
+// scanner's whole failure message is
+//
+//	ERROR QUALITY GATE STATUS: FAILED - View details on https://sonarcloud.io/...
+//
+// a verdict and a link. main's gate was red on four consecutive analyses and
+// nobody reading those logs could name the metric, because the only place it is
+// rendered is a browser -- an unauthenticated read of the gate API returns
+// status NONE for a branch, which is indistinguishable from a gate that was
+// never computed. A guard that fires without saying what it caught is most of
+// the way back to no guard at all: what people do with it is re-run and hope.
+//
+// So sonar.yml reads the verdict back with the token it already holds and
+// prints every condition, passing ones included -- and then FAILS on a verdict
+// that is not OK, which the first version did not: ::error annotations do not
+// fail a step, so it printed `Quality gate: ERROR` and exited 0.
+//
+// A correction to what this comment used to say. It claimed continue-on-error
+// here could turn a red job green. It could not -- the scan step has already
+// failed by then and no later step un-fails a job. The assertion is still worth
+// having, for the narrower reason that a broken reporter should fail visibly.
+func TestSonarNamesTheConditionThatFailed(t *testing.T) {
+	root := repoRootFromTest(t)
+	wf := mustReadRepoFile(t, root, ".github/workflows/sonar.yml")
+
+	step := strings.Index(wf, "- name: Which quality gate conditions were evaluated")
+	if step < 0 {
+		t.Fatal("sonar.yml has no step that reads the quality gate verdict back.\n\n" +
+			"Without it a failure prints `QUALITY GATE STATUS: FAILED` and a URL, and the " +
+			"log cannot answer which metric, what it measured, or what the threshold was. " +
+			"That is a gate people re-run rather than act on.")
+	}
+	body := wf[step:]
+	if end := strings.Index(body, "\n      - name:"); end > 0 {
+		body = body[:end]
+	}
+	// The assertions below must see the SCRIPT, not the prose around it. This
+	// file is heavily commented, and every string checked for here appears in
+	// those comments -- so matching the whole step would let someone delete the
+	// reporting and keep the test green by leaving the explanation behind.
+	script := body
+	if r := strings.Index(script, "\n        run: |"); r >= 0 {
+		script = script[r:]
+	}
+	var code strings.Builder
+	for _, line := range strings.Split(script, "\n") {
+		if t := strings.TrimSpace(line); !strings.HasPrefix(t, "#") {
+			code.WriteString(line)
+			code.WriteString("\n")
+		}
+	}
+	run := code.String()
+
+	// It must run on the failing path.
+	if !strings.Contains(body, "!cancelled()") && !strings.Contains(body, "failure()") {
+		t.Fatalf("the gate-reporting step does not run when the scan fails:\n\n%s\n\n"+
+			"A step that explains failures has to execute on the failing path.", body)
+	}
+
+	// It must not be able to mask its own failure -- from the outside...
+	if strings.Contains(body, "continue-on-error") {
+		t.Fatalf("the gate-reporting step is continue-on-error:\n\n%s\n\n"+
+			"A step whose only job is to explain a failure must not be able to hide "+
+			"that it could not do so.", body)
+	}
+	// ...or from the inside. `exit 0` on the error paths is the same masking by
+	// another route, and the version this replaced had three of them: an invalid
+	// token spun for 150s, blamed a slow analysis, and passed.
+	if n := strings.Count(run, "exit 0"); n > 1 {
+		t.Fatalf("the gate-reporting script has %d `exit 0` paths:\n\n%s\n\n"+
+			"Exactly one is legitimate -- a scan that died before submitting an "+
+			"analysis, where the scan step is already red and there is no verdict in "+
+			"existence. Every other early return is a gate left unread and reported "+
+			"as success.", n, run)
+	}
+
+	// The point of the step is the numbers.
+	for _, want := range []string{"actualValue", "errorThreshold", "metricKey"} {
+		if !strings.Contains(run, want) {
+			t.Fatalf("the gate-reporting script never reads %s:\n\n%s\n\n"+
+				"Naming the metric without its measurement and its threshold leaves the "+
+				"reader in the same place the scanner left them.", want, run)
+		}
+	}
+
+	// And having read them, it has to act on them. Annotations do not fail a step.
+	if !strings.Contains(run, `!= "OK"`) || !strings.Contains(run, "exit 1") {
+		t.Fatalf("the gate-reporting script never fails on a bad verdict:\n\n%s\n\n"+
+			"::error annotations do not fail a step. Without an explicit exit it "+
+			"prints `Quality gate: ERROR` and returns 0 -- a reporter for a gate, "+
+			"that does not gate.", run)
+	}
+
+	// Every HTTP call has to fail loudly and be bounded. Without -f an HTTP error
+	// is a zero exit and a body jq mis-parses; without --max-time a hung
+	// connection eats the job ceiling and reports "cancelled", naming nothing.
+	for _, want := range []string{"-sSf", "--max-time"} {
+		if !strings.Contains(run, want) {
+			t.Fatalf("the gate-reporting script's curl lacks %s:\n\n%s", want, run)
+		}
+	}
+
+	// The endpoint is a constant. Reading it from .scannerwork/report-task.txt
+	// let a pull request that edits sonar.host.url redirect this job's live
+	// SONAR_TOKEN to a host of its choosing.
+	if strings.Contains(run, "serverUrl") {
+		t.Fatalf("the gate-reporting script reads its endpoint out of the scanner "+
+			"report:\n\n%s\n\nThat file is written from sonar.host.url, which a pull "+
+			"request can set. The Authorization header carries a live token; the host "+
+			"must be a literal.", run)
+	}
+	if !strings.Contains(body, "SONAR_API: https://sonarcloud.io") {
+		t.Fatalf("the gate-reporting step does not pin its API host:\n\n%s", body)
+	}
+}

@@ -142,17 +142,7 @@ func run(h *hooks) error {
 	// default name still defaults so a fresh box boots. flag.Visit reports
 	// only flags that were actually set, which is the one signal that tells
 	// the two apart. #644.
-	configExplicit := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "config" {
-			configExplicit = true
-		}
-	})
-	loadConfig := config.Load
-	if configExplicit {
-		loadConfig = config.LoadRequired
-	}
-	cfg, err := loadConfig(*configPath)
+	cfg, err := configLoaderFor(flag.Visit)(*configPath)
 	if err != nil {
 		return err
 	}
@@ -1020,4 +1010,38 @@ func warnIfShutdownOverran(ctx context.Context, log *slog.Logger) {
 	}
 	log.Warn("shutdown ran out of its budget; some children may have been killed rather than finishing",
 		"budget", engine.ShutdownBudget.String())
+}
+
+// configLoaderFor decides whether an absent config file is fatal, which is the
+// whole of #644.
+//
+// A --config path that does not exist used to fall back to defaults, and the
+// defaults are not a smaller version of the operator's install -- they are a
+// DIFFERENT one: a new secret.key, an empty database, plaintext on :8080 and an
+// unauthenticated /setup reopened. A single typo therefore booted a working
+// server that shared nothing with the one the operator meant to start, and
+// nothing about it looked wrong.
+//
+// The signal that separates a typo from a fresh box is not the path's contents
+// but whether the flag was PASSED AT ALL: an explicit --config is a claim that
+// the file exists, while the default name is only a place to look. flag.Visit
+// reports exactly the flags that were set, which is why the decision hangs on
+// it rather than on comparing the path against the default string -- an
+// operator who passes the default name explicitly means it just as much.
+//
+// Taking Visit as a parameter is what makes the decision testable without
+// starting a server; run() passes the real flag.Visit. The alternative was
+// leaving the one rule that stands between a typo and an empty install
+// exercised only by a subprocess test.
+func configLoaderFor(visit func(func(*flag.Flag))) func(string) (config.Config, error) {
+	explicit := false
+	visit(func(f *flag.Flag) {
+		if f.Name == "config" {
+			explicit = true
+		}
+	})
+	if explicit {
+		return config.LoadRequired
+	}
+	return config.Load
 }

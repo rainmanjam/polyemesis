@@ -688,3 +688,43 @@ func (s *Server) handleRestartRendition(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restarting"})
 }
+
+// THE COMPARISON THE OPERATOR NEVER SAW.
+//
+// #661 asked for a warning "at the point of choosing" -- where the rendition is
+// attached -- and what shipped first was a log line at stream start. The
+// comparison was right and arrived in the wrong place and at the wrong time: an
+// operator attaching a 4K60 rendition at 40 Mbps to an X destination saw no
+// objection in the console, and found out from a log after starting.
+//
+// ONE IMPLEMENTATION, DELIBERATELY. The obvious alternative is to compare in
+// TypeScript, since the dialog already holds the rendition. That would be a
+// second copy of a comparison whose whole value is that it reads researched,
+// dated figures out of platforms.go -- and this repository already carries a
+// guard asserting the marketing site's figures match that file, because
+// hand-copied numbers drift. A second comparison would drift the same way and
+// nothing would notice, so the browser asks and does not derive.
+func (s *Server) handleRenditionConcerns(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	row, err := s.store.GetRendition(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	// The platform is a query parameter rather than a lookup because the dialog
+	// asks BEFORE the destination is saved: the operator is choosing a platform
+	// and a rendition together, and neither exists in the database yet.
+	platform := db.Platform(strings.TrimSpace(r.URL.Query().Get("platform")))
+	concerns := db.RenditionConcerns(row, platform)
+	if concerns == nil {
+		// A JSON null here would make the browser check for one; an empty list
+		// says "compared, nothing to say" in the same shape as "compared, here
+		// is what to say".
+		concerns = []db.RenditionConcern{}
+	}
+	writeJSON(w, http.StatusOK, concerns)
+}

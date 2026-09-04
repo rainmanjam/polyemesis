@@ -1676,6 +1676,60 @@ DATA_DIR="$DATA_DIR"
 BIN_PATH="$BIN_PATH"
 SERVICE_NAME="$SERVICE_NAME"
 
+FORCE=false
+while [ \$# -gt 0 ]; do
+	case "\$1" in
+		--force) FORCE=true; shift ;;
+		-h|--help)
+			echo "usage: update.sh [--force]"
+			echo "  --force  do not refuse while a broadcast is on air"
+			exit 0 ;;
+		*) echo "unknown option: \$1" >&2; exit 2 ;;
+	esac
+done
+
+# IS ANYTHING ON AIR? The compose updater has refused this since it was written;
+# the binary one did not, so the SAME operation was safe in one install mode and
+# would silently cut a live stream in the other. This script stops the service
+# to take a consistent copy of a WAL database, and a broadcast that ends cannot
+# be resumed.
+#
+# ASKED OF THE UNIT'S OWN CGROUP, which is the binary-mode equivalent of the
+# compose version's \`compose top\`: every process systemd started for this
+# service is listed there and nothing else is, so an ffmpeg belonging to another
+# install -- or to the operator's own terminal -- is not mistaken for this one.
+# A plain \`pgrep ffmpeg\` would have been the untested probe this deliberately
+# is not.
+#
+# Silent when the cgroup is not readable: cgroup v1, a container, an unusual
+# systemd layout. An upgrade that cannot answer the question proceeds exactly as
+# it did before this existed rather than refusing on a guess -- the guard is
+# here to catch the case it can see, not to invent certainty it does not have.
+publishing_now() {
+	local cg procs cmd
+	cg="/sys/fs/cgroup/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
+	[ -r "\$cg" ] || return 1
+	procs=\$(cat "\$cg" 2>/dev/null) || return 1
+	for pid in \$procs; do
+		[ -r "/proc/\$pid/cmdline" ] || continue
+		cmd=\$(tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null) || continue
+		case "\$cmd" in
+			*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+				echo "\$cmd" | cut -c1-160 >&2
+				return 0 ;;
+		esac
+	done
+	return 1
+}
+
+if [ "\$FORCE" != true ] && publishing_now; then
+	echo >&2
+	echo "REFUSING: this install is publishing right now (listed above)." >&2
+	echo "Upgrading stops the service, and a live broadcast that ends cannot be resumed." >&2
+	echo "Wait for the broadcast to end, or pass --force if you mean to end it." >&2
+	exit 1
+fi
+
 stamp="\$(date +%F-%H%M)"
 dest="\${DATA_DIR}.bak-\${stamp}"
 

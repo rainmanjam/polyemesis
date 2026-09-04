@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -174,5 +175,46 @@ func TestCommandStringIsReadableInAJobLog(t *testing.T) {
 	got := Command{Name: "/usr/bin/ffmpeg", Args: []string{"-i", "in.mkv", "out.mp4"}}.String()
 	if got != "/usr/bin/ffmpeg -i in.mkv out.mp4" {
 		t.Fatalf("String = %q", got)
+	}
+}
+
+// A SLOW READER IS WHAT MAKES THE RACE DETERMINISTIC.
+//
+// The chatty test above is timing-dependent: whether the scanner drains before
+// Wait closes the pipe depends on pipe buffering, which differs between macOS
+// and the Linux runners. It passed here 30 times and failed in CI at 83 lines
+// of 100.
+//
+// This removes the timing. The sink deliberately takes its time, so the reader
+// is guaranteed to still be working when the child has already exited. If Wait
+// runs first and closes the pipe out from under it, the remaining lines are
+// gone -- which is precisely what os/exec documents: "it is thus incorrect to
+// call Wait before all reads from the pipe have completed."
+//
+// Every line that a child wrote before it died has to reach the sink, because
+// the sink is the job log and the last thing a failing encoder says is usually
+// the reason it failed.
+func TestEveryLineAChildWroteReachesTheSinkEvenWhenTheSinkIsSlow(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		lines []string
+	)
+	err := Exec(context.Background(), helper("chatty"), Sink{Line: func(l string) {
+		// Slower than the child, which writes 100 lines and exits at once.
+		time.Sleep(time.Millisecond)
+		mu.Lock()
+		lines = append(lines, l)
+		mu.Unlock()
+	}})
+	if err == nil {
+		t.Fatal("Exec hid a non-zero exit")
+	}
+	mu.Lock()
+	got := len(lines)
+	mu.Unlock()
+	if got != 100 {
+		t.Fatalf("the sink saw %d lines of 100. Wait closed the pipe before the "+
+			"reader had finished, and the tail of a failing child's output -- "+
+			"usually the reason it failed -- was discarded.", got)
 	}
 }

@@ -294,6 +294,7 @@ func TestEveryRenditionRouteIsRegisteredAndRequiresAuth(t *testing.T) {
 		{name: "update", method: http.MethodPut, path: "/api/v1/renditions/1"},
 		{name: "delete", method: http.MethodDelete, path: "/api/v1/renditions/1"},
 		{name: "restart", method: http.MethodPost, path: "/api/v1/renditions/1/restart"},
+		{name: "concerns", method: http.MethodGet, path: "/api/v1/renditions/1/concerns"},
 		{name: "encoders", method: http.MethodGet, path: "/api/v1/encoders"},
 	}
 	for _, tt := range tests {
@@ -789,4 +790,91 @@ func withOnlySource(t *testing.T, h http.Handler, sign func(*http.Request), body
 		return
 	}
 	body["sourceId"] = onlySourceID(t, h, sign)
+}
+
+// #661'S POINT WAS NEVER THE COMPARISON. IT WAS WHERE THE OPERATOR SEES IT.
+//
+// db.RenditionConcerns shipped correct and unreachable: the only caller logged
+// at stream start, so attaching a 4K60 rendition at 40 Mbps to an X destination
+// showed nothing in the console and produced a log line after the operator had
+// already committed. These tests pin the endpoint the dialog reads, because a
+// warning the browser cannot fetch is the same defect one layer up.
+func TestTheConsoleCanAskWhetherARenditionSuitsAPlatform(t *testing.T) {
+	h, store, sign := renditionServer(t, defaultTools())
+
+	// A rendition that is plainly outside every platform's published figures.
+	over := &db.Rendition{
+		Name: "far too much", Width: 3840, Height: 2160, FPS: 60,
+		VideoBitrate: 40000, GOPSeconds: 2,
+	}
+	created, err := store.CreateRendition(over)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created.ID
+
+	// Find a platform the catalogue actually publishes video guidance for, so
+	// the assertion below is about the endpoint rather than about which preset
+	// happened to be picked.
+	var platform string
+	for _, p := range db.DestinationPresets() {
+		if p.Video != nil && p.Video.KbpsMax > 0 && p.Video.KbpsMax < 40000 {
+			platform = string(p.Platform)
+			break
+		}
+	}
+	if platform == "" {
+		t.Fatal("no preset publishes a bitrate ceiling below 40000, so this test " +
+			"cannot produce a concern. platforms.go is committed data: check the " +
+			"catalogue rather than weakening this.")
+	}
+
+	var concerns []db.RenditionConcern
+	decodeInto(t, send(t, h, sign, http.MethodGet,
+		"/api/v1/renditions/"+strconv.FormatInt(id, 10)+"/concerns?platform="+platform,
+		nil, http.StatusOK), &concerns)
+
+	if len(concerns) == 0 {
+		t.Fatalf("a 3840x2160p60 rendition at 40000 kbps raised no concern against %s, "+
+			"whose published ceiling is lower. The endpoint is the console's only "+
+			"way to ask, so an empty answer here is the defect #661 filed.", platform)
+	}
+	// The issue asked for the figure, the source and the date, so the operator
+	// can judge which is stale -- the catalogue or their choice. A concern
+	// without them is an assertion the operator has to take on faith.
+	for _, c := range concerns {
+		if c.Detail == "" || c.Source == "" || c.Checked == "" {
+			t.Errorf("concern %+v is missing detail, source or checked date. #661 asks "+
+				"for the figure, the source URL and the Checked date precisely so a "+
+				"dated snapshot of someone else's documentation can be argued with.", c)
+		}
+	}
+}
+
+func TestAnUnknownPlatformIsAnEmptyAnswerAndNotAnError(t *testing.T) {
+	h, store, sign := renditionServer(t, defaultTools())
+	created, err := store.CreateRendition(&db.Rendition{
+		Name: "modest", Width: 1280, Height: 720, FPS: 30, VideoBitrate: 2500, GOPSeconds: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created.ID
+	// A custom RTMP destination has no catalogue entry, and the dialog asks
+	// anyway. Answering 4xx would make the console show an error where the
+	// honest answer is "nothing published to compare against".
+	var concerns []db.RenditionConcern
+	body := send(t, h, sign, http.MethodGet,
+		"/api/v1/renditions/"+strconv.FormatInt(id, 10)+"/concerns?platform=no-such-platform",
+		nil, http.StatusOK)
+	decodeInto(t, body, &concerns)
+	if len(concerns) != 0 {
+		t.Fatalf("an unknown platform produced %d concern(s); it has no published "+
+			"figures to be outside of", len(concerns))
+	}
+	// An empty LIST, not null: the browser should not have to tell the two apart.
+	if s := strings.TrimSpace(string(body)); s == "null" {
+		t.Error("the endpoint answered `null` rather than `[]`, so every caller has " +
+			"to check for it before iterating")
+	}
 }

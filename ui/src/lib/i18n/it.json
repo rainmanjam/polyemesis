@@ -158,6 +158,7 @@
   "chrome.language": "Lingua",
   "chrome.liveCount": "{count} in diretta",
   "chrome.releaseNotes": "Note di rilascio",
+  "chrome.runningVersion": "In esecuzione polyemesis {version}",
   "chrome.signOut": "Disconnetti",
   "chrome.socketOffline": "Offline",
   "chrome.socketOfflineHint": "Aggiornamenti in diretta disconnessi; riprova",
@@ -339,6 +340,7 @@
   "dash.laneNoPreview": "Nessuna anteprima — avvia il tuo encoder per questo programma.",
   "dash.leaveUnchanged": "Lascia invariato",
   "dash.leaveUnchangedNote": "«Lascia invariato» non invia proprio nulla, quindi la piattaforma mantiene ciò che ha. Scegliere On o Off scrive quel valore.",
+  "dash.loadingDestinations": "Controllo di cosa è configurato in questa installazione…",
   "dash.metaCategory": "Categoria",
   "dash.metaDescription": "Descrizione",
   "dash.metaTags": "Tag",
@@ -439,6 +441,7 @@
   "dest.restarts.hint": "Quante volte l'encoder di questa destinazione è stato riavviato. Sopra zero significa che è caduto ed è stato ripristinato.",
   "dest.retryAfter": "Riprova dopo (secondi)",
   "dest.sharedEncodeAria": "Codifica video condivisa",
+  "dest.renditionConcerns": "Fuori da ciò che questa piattaforma pubblica",
   "dest.socketTimeout": "Timeout del socket (secondi)",
   "dest.source": "Sorgente",
   "dest.sourcePlaceholder": "Scegli un programma",
@@ -1438,5 +1441,7 @@
   "tour.routingNav.body": "Una destinazione senza profilo di routing è semplice ritrasmissione, che è quello che fa qualunque altro strumento. Un profilo decide quali tracce audio in ingresso raggiungono quale destinazione e come vengono miscelate: un microfono di commento che abbassa un tappeto musicale per una piattaforma, la musica esclusa del tutto per un'altra, ognuna con il proprio obiettivo di loudness. Si imposta per destinazione, così uno stesso flusso in ingresso può uscire come programmi diversi.",
   "tour.routingNav.title": "Il routing è la parte che non è ritrasmissione",
   "tour.sourcesNav.body": "Una sorgente è un flusso in ingresso, e questa pagina è dove stanno il suo indirizzo di pubblicazione e il suo token. install.sh li ha stampati una volta sola, quando è stato eseguito; se quel terminale è stato chiuso, è qui che si ritrovano. Ogni sorgente porta il proprio token, così più encoder possono pubblicare su una sola installazione restando separati.",
-  "tour.sourcesNav.title": "Sorgenti: dove si collega un encoder"
+  "tour.sourcesNav.title": "Sorgenti: dove si collega un encoder",
+  "chrome.programme": "Programma",
+  "chrome.programmeHint": "La console segue un programma alla volta. Tutto ciò che vedi descrive questo."
 }

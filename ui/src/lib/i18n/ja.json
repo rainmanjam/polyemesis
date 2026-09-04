@@ -158,6 +158,7 @@
   "chrome.language": "言語",
   "chrome.liveCount": "{count} 件ライブ中",
   "chrome.releaseNotes": "リリースノート",
+  "chrome.runningVersion": "polyemesis {version} を実行中",
   "chrome.signOut": "サインアウト",
   "chrome.socketOffline": "オフライン",
   "chrome.socketOfflineHint": "ライブ更新が切断されました。再試行します。",
@@ -339,6 +340,7 @@
   "dash.laneNoPreview": "プレビューはまだありません。この番組のエンコーダーを開始してください。",
   "dash.leaveUnchanged": "変更しない",
   "dash.leaveUnchangedNote": "「変更しない」は何も送らないため、プラットフォームは現在の値を保ちます。オンまたはオフを選ぶと、その値が書き込まれます。",
+  "dash.loadingDestinations": "このインストールの設定を確認しています…",
   "dash.metaCategory": "カテゴリー",
   "dash.metaDescription": "説明",
   "dash.metaTags": "タグ",
@@ -439,6 +441,7 @@
   "dest.restarts.hint": "この配信先のエンコーダーが再起動された回数。ゼロより大きければ、落ちて復帰したということです。",
   "dest.retryAfter": "再試行までの待ち時間 (秒)",
   "dest.sharedEncodeAria": "共有映像エンコード",
+  "dest.renditionConcerns": "このプラットフォームが公開している範囲外です",
   "dest.socketTimeout": "ソケットタイムアウト (秒)",
   "dest.source": "ソース",
   "dest.sourcePlaceholder": "番組を選択",
@@ -1438,5 +1441,7 @@
   "tour.routingNav.body": "ルーティングプロファイルのない配信先は、ただの再配信であり、他のどのツールでもできることです。プロファイルは、入力の音声トラックのどれがどの配信先へ届き、どのように混ぜられるかを決めます。あるプラットフォーム向けには実況マイクが音楽ベッドを抑え、別のプラットフォーム向けには音楽を完全に外し、それぞれに固有のラウドネス目標を持たせられます。配信先ごとに設定するので、ひとつの入力フィードが複数の異なる番組として出ていきます。",
   "tour.routingNav.title": "ルーティングこそ、単なる再配信ではない部分",
   "tour.sourcesNav.body": "ソースとは入力フィードひとつのことで、その公開アドレスとトークンはこのページにあります。 install.sh は実行時に一度だけそれらを表示しました。その端末を閉じてしまったなら、探し直す場所はここです。ソースごとに固有のトークンを持つため、複数のエンコーダーがひとつのインストールへ送出しても互いに混ざりません。",
-  "tour.sourcesNav.title": "ソース: エンコーダーが接続する場所"
+  "tour.sourcesNav.title": "ソース: エンコーダーが接続する場所",
+  "chrome.programme": "番組",
+  "chrome.programmeHint": "コンソールは一度に1つの番組のみを追跡します。画面上のすべてはこの番組を表しています。"
 }
