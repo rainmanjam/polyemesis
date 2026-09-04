@@ -22,7 +22,7 @@
     "mermaid": "^11.16.1",
     "motion": "^13.0.0",
     "tailwindcss": "^4.1.18",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.10",
