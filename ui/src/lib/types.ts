@@ -214,6 +214,13 @@ export interface SourceInfo {
   name: string;
   probed: boolean;
   tracks: SourceTrack[] | null;
+  /** How many trailing tracks the metering process could not cover — amerge
+   *  refuses past 64 channels, so a very wide ingest is metered as a prefix.
+   *
+   *  Absent on the common payload and on any server that predates it. Rendered
+   *  because an unmetered track and a silent track draw identically, and the
+   *  meters page exists to tell those apart. */
+  metersDropped?: number;
   video?: VideoStream | null;
   /** `tracks` describes the silence tier's synthetic output rather than the
    *  ingest's, because the ingest carries no audio at all. */
@@ -3181,4 +3188,23 @@ export interface HookCreated {
   hook: Hook;
   secret: string;
   secretNote: string;
+}
+
+/** One way a rendition sits outside what a platform publishes.
+ *
+ *  Derived on the server, never here. The comparison reads researched, dated
+ *  figures out of internal/db/platforms.go, and a second copy in TypeScript
+ *  would drift from that file exactly as the marketing site's hand-copied
+ *  numbers once did — which is why a guard now asserts those against it too.
+ *
+ *  `source` and `checked` are not decoration. The catalogue is a snapshot of
+ *  someone else's documentation and can be the stale half: X's own two pages
+ *  disagree materially. An operator who knows better has to be able to see
+ *  which figure they are arguing with, and when it was last read.
+ */
+export interface RenditionConcern {
+  field: string;
+  detail: string;
+  source: string;
+  checked: string;
 }

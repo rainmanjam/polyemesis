@@ -201,8 +201,13 @@ func TestLoadWithNoFileDefaultsToTLSOff(t *testing.T) {
 	if cfg.TLS.Mode != ModeOff {
 		t.Errorf("mode = %q, want %q", cfg.TLS.Mode, ModeOff)
 	}
-	if cfg.Addr != ":8080" || cfg.DataDir != "./data" {
-		t.Errorf("defaults = %q/%q", cfg.Addr, cfg.DataDir)
+	// Loopback, not ":8080": the do-nothing configuration must not put a
+	// plaintext login form on every interface. See DefaultAddr.
+	if cfg.Addr != DefaultAddr || cfg.DataDir != "./data" {
+		t.Errorf("defaults = %q/%q, want %q/%q", cfg.Addr, cfg.DataDir, DefaultAddr, "./data")
+	}
+	if !cfg.AddrDefaulted {
+		t.Error("AddrDefaulted is false after loading nothing at all")
 	}
 }
 
@@ -221,6 +226,35 @@ func TestShippedExampleConfigParsesAndResolvesAsDocumented(t *testing.T) {
 	}
 	if got := cfg.ResolvedTLSMode(); got != ModeSelfSigned {
 		t.Errorf("unedited example resolves to %q, want %q", got, ModeSelfSigned)
+	}
+}
+
+// COPYING THE EXAMPLE MUST NOT UNDO DefaultAddr.
+//
+// DefaultAddr is 127.0.0.1:8080 because a shipped ":8080" served a login form
+// and its session cookie in cleartext to the whole network on an install that
+// did nothing. But a new install's config comes from COPYING THIS FILE, and the
+// example carried `addr: ":8080"` -- so the hardening held for the binary and
+// not for the operator, which is the only one of the two that matters.
+//
+// An operator who wants every interface still types it: "0.0.0.0:8080" here, or
+// --addr :8080. This asserts only that they have to.
+func TestTheShippedExampleDoesNotBindEveryInterface(t *testing.T) {
+	cfg, err := Load(filepath.Join("..", "..", "config.example.yaml"))
+	if err != nil {
+		t.Fatalf("config.example.yaml does not load: %v", err)
+	}
+	host, _, found := strings.Cut(cfg.Addr, ":")
+	if !found {
+		t.Fatalf("example addr %q has no host:port form", cfg.Addr)
+	}
+	if host == "" || host == "0.0.0.0" || host == "[::]" {
+		t.Errorf("the shipped example binds %q, which is every interface.\n\n"+
+			"Copying this file is how a new install gets its config, so this is the "+
+			"exposure DefaultAddr (127.0.0.1:8080) exists to prevent -- reached by doing "+
+			"the documented thing rather than by choosing it. An operator who wants it "+
+			"types 0.0.0.0:8080 and keeps the warning; nobody should arrive there by "+
+			"copying the example.", cfg.Addr)
 	}
 }
 

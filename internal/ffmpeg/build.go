@@ -3,15 +3,19 @@ package ffmpeg
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/netguard"
 )
 
 // commonArgs are the flags every polyemesis child gets.
@@ -21,7 +25,15 @@ import (
 //     input and silently pause itself
 //   - -loglevel      : warning keeps the log tail useful rather than a firehose
 func commonArgs() []string {
-	return []string{"-hide_banner", "-nostdin", "-loglevel", "warning"}
+	lvl := "warning"
+	// Every child's own log level, raisable without a rebuild. At `debug` the demuxer
+	// reports its PID and PES parsing decisions -- which streams it saw, how
+	// many frames per PID, and why it gave up resolving codec parameters.
+	// Nothing has ever asked the demuxer for its own account of the failure.
+	if v := os.Getenv("POLYEMESIS_FFMPEG_LOGLEVEL"); v != "" {
+		lvl = v
+	}
+	return []string{"-hide_banner", "-nostdin", "-loglevel", lvl}
 }
 
 // progressArgs routes machine-readable stats to stdout, leaving stderr as a
@@ -193,8 +205,12 @@ func pullSource(raw, baseDir string) (string, pullFamily, error) {
 		// Split on "://" rather than url.Parse because file:// paths are not
 		// URLs in any useful sense; everything else still gets parsed so a
 		// mangled URL is reported here rather than by the child process.
-		if _, err := url.Parse(raw); err != nil {
+		u, err := url.Parse(raw)
+		if err != nil {
 			return "", fam, fmt.Errorf("malformed pull source URL: %w", err)
+		}
+		if err := checkPullHost(u.Hostname()); err != nil {
+			return "", fam, err
 		}
 		return raw, fam, nil
 	}
@@ -212,6 +228,52 @@ func pullSource(raw, baseDir string) (string, pullFamily, error) {
 	// ("data/2026:01.ts") is re-read by FFmpeg as a protocol name, and the
 	// prefix pins it to the file protocol whatever the name looks like.
 	return "file:" + p, fam, nil
+}
+
+// checkPullHost refuses a pull source aimed at the machine polyemesis is
+// running on. It is the SSRF guard webhooks already had, applied to the other
+// operator-supplied URL this product dials.
+//
+// WHAT IT WAS BEFORE. A pull source was checked for its SCHEME and nothing
+// else, so `http://169.254.169.254/latest/meta-data/iam/security-credentials/`
+// was a valid ingest: saved through the settings API, dialled by the child
+// process, and its response reported back through the ingest's own error and
+// probe surfaces. internal/netguard existed the whole time and was imported by
+// exactly two packages, alerts and hooks -- the two that already had a guard.
+// This is the third caller it was written for (#607's whole argument was that
+// the list must have one home), which is why the range list is not copied here.
+//
+// IT IS netguard.IsHostLocalAddr AND NOT IsPublicAddr, deliberately. A webhook
+// may refuse RFC1918 outright; a pull ingest may not, because the single most
+// common pull source in this product is an RTSP camera on 192.168.1.50. A guard
+// that refused it would not be strict, it would be a guard that gets turned
+// off. So the line is drawn at the host and its link: loopback (polyemesis's
+// own admin API, and the loopback RTMP listener whose stream key is a publish
+// credential), the unspecified address, multicast, and link-local -- which is
+// exactly where the cloud metadata service lives.
+//
+// LITERAL ADDRESSES ONLY, and that bound is real. A hostname is not resolved
+// here: the child process does its own DNS and dials its own socket, so there
+// is no DialContext to install the way alerts and hooks install one, and a
+// name that resolves to 169.254.169.254 still gets through. Resolving at save
+// time would not close it either -- the answer is not binding by the time
+// FFmpeg dials -- and it would put a DNS lookup inside settings validation,
+// which runs on the reconcile path. This is a Control for the literal form and
+// nothing at all for the resolved one; see SECURITY.md, which says so plainly.
+func checkPullHost(host string) error {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		// Not a literal address. A name is the caller's business and the
+		// paragraph above is why.
+		return nil
+	}
+	if netguard.IsHostLocalAddr(ip) {
+		return fmt.Errorf("pull source may not dial %s: that address is this machine itself or "+
+			"its link-local range, which is where a cloud instance's metadata service (and its "+
+			"credentials) answers. Point the pull at the camera, server or CDN it should read. "+
+			"A source on the local network -- an RTSP camera on 192.168.x.x, say -- is still fine", ip)
+	}
+	return nil
 }
 
 // pullFileRel is the ONE normalisation of a file:// pull source's path half:
@@ -286,6 +348,43 @@ func PullFilePath(raw string) (string, bool) {
 	return filepath.ToSlash(strings.TrimPrefix(src, "file:")), true
 }
 
+// httpPullProtocols bounds what an HTTP-family pull may OPEN, so a playlist
+// fetched from a remote server cannot name a protocol the operator did not ask
+// for. `file` is the one deliberately absent: an HTTP pull never needs it, and
+// it is the one that would turn a manifest into a local-file read.
+//
+// THE EXPLOIT THIS GUARDS DID NOT REPRODUCE, and this comment exists so nobody
+// later mistakes the flag for evidence that it did. Measured on FFmpeg 9.0.1,
+// serving an m3u8 over HTTP whose only segment was `file:///tmp/canary.ts`:
+//
+//	no flag                                -> segment never opened at all
+//	                                          ("failed too many times"; no
+//	                                          "Opening 'file://'" line anywhere)
+//	-protocol_whitelist file,http,https,…  -> "Opening 'file:///tmp/canary.ts'
+//	                                          for reading", 20 bytes read
+//
+// So FFmpeg's OWN default whitelist for an http input already excludes file,
+// and the audit's local-file-read claim is refuted on this build. The second
+// line is the point: `file` in the list is what opens the file, which means the
+// property being relied on is a default, and a default is something a build
+// option, a future release, or an operator's own ffmpeg wrapper can change
+// without telling anyone. The flag makes it a property of our command line
+// instead. Defence in depth, priced at one flag pair.
+//
+// SCOPED TO THE HTTP FAMILY, like the `file` whitelist on the file family
+// above and for the same reason: -protocol_whitelist applies to the input
+// AVFormatContext, so putting this list on an rtsp, srt or rtmp pull would
+// refuse the very protocol that source is made of.
+//
+// The list is what an HTTP-family pull actually uses and nothing else: http and
+// https for the manifest and its segments, tcp and tls underneath them, crypto
+// for AES-128 HLS, data for a manifest that inlines an init segment. Measured
+// on 9.0.1: a plain MPEG-TS-over-HTTP pull and an HLS VOD pull both play with
+// this list in place.
+func httpPullProtocols() []string {
+	return []string{"-protocol_whitelist", "http,https,tcp,tls,crypto,data"}
+}
+
 // pullInputArgs are the input-side flags a pull source needs to survive its
 // first hiccup. They must precede -i or FFmpeg applies them to nothing.
 func (s IngestSpec) pullInputArgs() []string {
@@ -299,14 +398,14 @@ func (s IngestSpec) pullInputArgs() []string {
 		if delay <= 0 {
 			delay = DefaultPullReconnectDelayMax
 		}
-		return []string{
+		return append(httpPullProtocols(), []string{
 			"-reconnect", "1",
 			// -reconnect alone only retries seekable inputs. A live HTTP-TS or
 			// HLS source is not seekable, so without -reconnect_streamed the
 			// first dropped connection ends the ingest for good.
 			"-reconnect_streamed", "1",
 			"-reconnect_delay_max", strconv.Itoa(delay),
-		}
+		}...)
 	case pullRTSP:
 		transport := s.PullRTSPTransport
 		if transport == "" {
@@ -537,9 +636,39 @@ func IngestArgs(s IngestSpec) []string {
 		"-f", "mpegts",
 		// Without flush_packets the muxer holds partial TS packets, adding
 		// unnecessary latency to a loopback hop that has none to spare.
+		//
+		// IT IS NOT ENOUGH ON ITS OWN, and believing it was cost #674 a long
+		// investigation. flush_packets flushes the AVIO buffer. It does NOT
+		// touch the INTERLEAVER, which sits in front of it:
+		// av_interleaved_write_frame holds every packet until it has one for
+		// each stream, or until the muxing queue spans max_interleave_delta.
+		// A multitrack FLV ingest whose audio tracks resolve late therefore
+		// writes NOTHING -- video included -- for up to the default 10s, while
+		// out_time climbs and total_size stays at 0. Measured exactly that way
+		// in internal/rtmpserver/ingest_remux_test.go.
+		//
+		// 100ms, NOT 0. Zero is the trap: max_interleave_delta=0 means "buffer
+		// until there is a packet for EVERY stream, however long that takes",
+		// which is the opposite of flushing early and would make the stall
+		// permanent instead of ten seconds. The default is 10000000 (10s); a
+		// small positive value is what forces output regardless. On a loopback
+		// relay 100ms of interleave buffering is already generous.
+		"-max_interleave_delta", "100000",
+		// No initial mux buffering either, for the same loopback reason.
+		"-muxdelay", "0",
+		"-muxpreload", "0",
 		"-flush_packets", "1",
 		RelayOutputURL(s.RelayURL),
 	)
+	// AN IDENTICAL SECOND OUTPUT, TO A FILE, WHEN ASKED FOR.
+	//
+	// Off unless POLYEMESIS_INGEST_CAPTURE names a path. It carries the identical stream to a file, so the bytes the
+	// relay fans out can be examined directly instead of approximated. The hub
+	// copies datagrams verbatim (internal/relay/relay.go fanout), so this file
+	// IS what every destination receives.
+	if dir := os.Getenv("POLYEMESIS_INGEST_CAPTURE"); dir != "" {
+		args = append(args, "-map", "0", "-c", "copy", "-f", "mpegts", dir)
+	}
 	return args
 }
 
@@ -623,12 +752,34 @@ const relayFIFOPackets = 32768
 // memory during a start that would otherwise have failed.
 //
 // 32 MB covers one 2-second GOP -- what OBS ships by default -- up to about
-// 128 Mbit/s, and a 10-second GOP at a comfortable broadcast rate. 15 seconds
-// covers a GOP far longer than anything this product produces.
+// 128 Mbit/s, and a 10-second GOP at a comfortable broadcast rate.
+//
+// 15 seconds covers a GOP far longer than anything this product produces.
+//
+// RAISING THIS DOES NOT FIX #674, and was tried. A destination whose audio the
+// demuxer cannot characterise reports
+//
+//	Could not find codec parameters for stream 1
+//	(Audio: aac ([15][0][0][0] / 0x000F), 0 channels): unspecified sample format
+//
+// at 45s and 32MB exactly as it does at 15s: the parameters are not late, they
+// are absent, so a larger ceiling only buys a longer wait for the same answer.
+// It also REGRESSED a passing case -- acceptance 4d, which publishes fine at
+// 15s, failed at 45s because every destination now spent three times as long
+// probing before giving up, past what the step allows. Left at 15s.
 const (
 	relayProbeSize   = 32 << 20
 	relayProbeWindow = 15 * 1000000 // microseconds
 )
+
+// RelayProbeWindow is relayProbeWindow as a Duration, exported because another
+// package's timer has to outlast it. engine.silentPublishBudget restarts a
+// destination that has published nothing; a destination still inside its own
+// probe has published nothing YET, so a budget at or below this window would
+// make the watchdog kill exactly the starts it exists to rescue. Exported as
+// the number itself so the relationship is asserted rather than restated --
+// see engine.TestTheSilentPublishBudgetOutlastsTheProbeWindow.
+const RelayProbeWindow = relayProbeWindow * time.Microsecond
 
 // RelayInputArgs are the input options every relay consumer needs, and they must
 // come BEFORE the -i they belong to.

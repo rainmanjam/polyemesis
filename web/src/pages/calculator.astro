@@ -1,0 +1,706 @@
+---
+import Base from "../layouts/Base.astro";
+
+/* A BANDWIDTH CALCULATOR THAT MODELS THIS PRODUCT, NOT MULTISTREAMING IN GENERAL.
+ *
+ * Every other calculator of this kind multiplies one bitrate by the number of
+ * platforms. That is the right answer for a tool that re-encodes per
+ * destination and the wrong one here, in two ways that matter:
+ *
+ *   1. Video is stream-copied. The SAME bitstream goes to every destination
+ *      without a rendition, so the video half of the sum is one number reused,
+ *      not N independent ones -- and it cannot differ per platform.
+ *   2. Which means ONE video bitrate has to suit every destination receiving
+ *      it, and the useful reference point is the LOWEST figure among the ones
+ *      they publish. Twitch recommending 6000 alongside YouTube's 12000 is not
+ *      "send each what it wants"; it is "send 6000, or add a rendition and pay
+ *      for the encode". That constraint is the single most useful thing this
+ *      page can tell somebody, and a generic calculator cannot express it.
+ *
+ * THE TWO LEGS ARE DIFFERENT CONNECTIONS, which is why they are reported apart.
+ * The ingest leg runs from the encoder to polyemesis and is usually a home or
+ * studio upstream. The egress leg runs from polyemesis to the platforms and is
+ * usually a VPS. Conflating them into one "bandwidth needed" figure is how
+ * somebody provisions a server that is fine and a router that is not.
+ *
+ * THE PLATFORM NUMBERS ARE PUBLISHED RECOMMENDATIONS, NOT LIMITS ANYTHING
+ * ENFORCES, and they are dated. internal/db/platforms.go carries a
+ * VideoGuidance per preset with a Source URL and a Checked date; these are
+ * those figures, transcribed. That type says of itself "ADVISORY, ALWAYS ...
+ * it must never hide an option, refuse a value, or block a save", and no code
+ * in this repository reads KbpsMin or KbpsMax to decide anything -- the only
+ * Go that mentions them outside the catalogue is a test asserting the ranges
+ * are not inverted. So this page must not tell an operator that a figure it
+ * shows is a limit they will be stopped at. Several of them are explicitly not:
+ * YouTube's 12000 is annotated "not a ceiling" against OBS's 51000, and X
+ * offers no maximum at all until two of its own published pages agree.
+ *
+ * What the page CAN say honestly is "this is above what the platform
+ * recommends, and the copied bitstream is shared", which is advice, not a
+ * refusal -- so it is rendered as advice.
+ *
+ * Where a platform publishes one figure rather than a range, min and max are
+ * equal here because they are equal there. scripts/check-build.mjs re-reads
+ * platforms.go against the built page so a transcription cannot drift.
+ */
+
+/** Sourced from internal/db/platforms.go, all checked 2026-08-06. */
+const PLATFORMS = [
+  { id: "youtube", name: "YouTube Live", min: 12000, max: 12000, w: 1920, h: 1080, fps: 60 },
+  { id: "twitch", name: "Twitch", min: 6000, max: 6000, w: 1920, h: 1080, fps: 60 },
+  { id: "kick", name: "Kick", min: 1000, max: 8000, w: 1920, h: 1080, fps: 60 },
+  { id: "facebook", name: "Facebook Live", min: 4500, max: 9000, w: 1920, h: 1080, fps: 60 },
+  { id: "x", name: "X (Twitter) Live", min: 12000, max: 12000, w: 1920, h: 1080, fps: 60 },
+  { id: "linkedin", name: "LinkedIn Live", min: 3500, max: 6000, w: 1280, h: 720, fps: 30 },
+  { id: "trovo", name: "Trovo", min: 4000, max: 6000, w: 1920, h: 1080, fps: 30 },
+  { id: "rumble", name: "Rumble", min: 4000, max: 6000, w: 1920, h: 1080, fps: 60 },
+  { id: "dailymotion", name: "Dailymotion", min: 10000, max: 10000, w: 1920, h: 1080, fps: 60 },
+  { id: "owncast", name: "Owncast", min: 5000, max: 5000, w: 1920, h: 1080, fps: 60 },
+];
+
+const CHECKED = "2026-08-06";
+---
+
+<Base
+  title="Bandwidth calculator for multistreaming — polyemesis"
+  description="Work out the upstream and server bandwidth a multistream actually needs, and the data it moves per day, week and month. Models stream-copied video, so the numbers match what a self-hosted restreamer really sends."
+  path="/calculator"
+>
+  <section class="wrap py-14 sm:py-18">
+    <p class="eyebrow rise">Bandwidth</p>
+    <h1 class="rise rise-1 mt-2 max-w-3xl text-3xl font-semibold leading-tight sm:text-4xl">
+      What a multistream actually costs your connection
+    </h1>
+    <p class="rise rise-2 mt-4 max-w-2xl leading-relaxed text-subtle">
+      Two different connections carry two different loads. Your encoder's upstream
+      carries <em>one</em> stream. The server's uplink carries one per destination —
+      but because polyemesis copies the video rather than re-encoding it, the video
+      half is the same bitstream repeated, and it has to satisfy the strictest
+      platform you send it to.
+    </p>
+
+    <!-- MODE -->
+    <div class="rise rise-3 mt-8 flex flex-wrap items-center gap-2">
+      <button id="mode-simple" type="button" class="btn btn-primary text-sm" aria-pressed="true">
+        Simple
+      </button>
+      <button id="mode-verbose" type="button" class="btn btn-ghost text-sm" aria-pressed="false">
+        Verbose
+      </button>
+      <span class="ml-1 text-xs text-muted">
+        Verbose adds per-destination bitrates, audio tracks, overhead and headroom.
+      </span>
+    </div>
+
+    <div class="mt-8 grid gap-6 lg:grid-cols-[1fr_22rem] lg:items-start">
+      <!-- ------------------------------------------------------- INPUTS -->
+      <div class="flex flex-col gap-6">
+        <div class="card p-5">
+          <h2 class="text-sm font-semibold text-fg">How often/much do you stream</h2>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            <label class="flex flex-col gap-1">
+              <span class="text-xs text-muted">Hours per stream</span>
+              <input
+                id="hours"
+                type="number"
+                min="0.5"
+                step="0.5"
+                value="4"
+                class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
+              />
+            </label>
+            <label class="flex flex-col gap-1">
+              <span class="text-xs text-muted">Streams per week</span>
+              <input
+                id="per-week"
+                type="number"
+                min="1"
+                max="21"
+                value="4"
+                class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div class="card p-5">
+          <h2 class="text-sm font-semibold text-fg">Destinations</h2>
+          <p class="mt-1 text-xs text-muted">
+            These are the bitrates each platform <em>recommends</em>, checked {CHECKED}.
+            polyemesis ships the same figures as guidance and does not enforce them —
+            nothing here refuses a value, and some platforms publish a higher maximum
+            than the figure they recommend.
+          </p>
+          {/* THE OPTIONS LIVE ON THE DESTINATION THEY CONFIGURE. A separate
+              table below meant reading a name in one place and setting its
+              bitrate in another, with nothing tying the two rows together but
+              their order. Each destination now carries its own controls and
+              reveals them when it is switched on, so the thing being configured
+              and the thing configuring it are never more than a line apart.
+
+              The grid collapses to one column in verbose mode: two columns of
+              expanded rows leaves the selects too narrow to read. */}
+          <div id="platforms" class="mt-4 grid gap-2 sm:grid-cols-2">
+            {
+              PLATFORMS.map((p) => (
+                <div
+                  class="rounded-md border border-line transition-colors hover:border-line-strong"
+                  data-platform={p.id}
+                >
+                  <label class="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      class="dest-on accent-[var(--color-primary)]"
+                      data-id={p.id}
+                      data-min={p.min}
+                      data-max={p.max}
+                      checked={p.id === "youtube" || p.id === "twitch"}
+                    />
+                    <span class="flex-1">
+                      <span class="text-fg">{p.name}</span>
+                      <span class="ml-2 font-mono text-[11px] text-muted">
+                        {p.min === p.max ? `${p.min}` : `${p.min}–${p.max}`} kbps
+                      </span>
+                    </span>
+                  </label>
+                  <div class="dest-opts border-t border-line px-3 py-2" data-opts-for={p.id} hidden />
+                </div>
+              ))
+            }
+          </div>
+
+          <!-- CUSTOM ENDPOINTS. The presets are a floor, not a ceiling: anything
+               speaking RTMP or SRT is a destination, so a calculator that only
+               counts the ten it knows about understates every real setup. -->
+          <div class="mt-5 border-t border-line pt-4">
+            <h3 class="text-xs font-semibold text-fg">Other RTMP or SRT endpoints</h3>
+            <p class="mt-1 text-xs text-muted">
+              A company CDN, a second polyemesis, an nginx-rtmp box — anything with a URL.
+            </p>
+            <div id="custom-list" class="mt-3 flex flex-col gap-2"></div>
+            <div class="mt-3 flex flex-wrap items-end gap-2">
+              <label class="flex flex-col gap-1">
+                <span class="text-[11px] text-muted">Name</span>
+                <input
+                  id="custom-name"
+                  type="text"
+                  placeholder="Company CDN"
+                  class="w-44 rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
+                />
+              </label>
+              <label class="flex flex-col gap-1">
+                <span class="text-[11px] text-muted">Limit (kbps)</span>
+                <input
+                  id="custom-kbps"
+                  type="number"
+                  min="100"
+                  step="100"
+                  placeholder="6000"
+                  class="w-32 rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
+                />
+              </label>
+              <button id="custom-add" type="button" class="btn btn-ghost text-sm">Add</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card p-5">
+          <h2 class="text-sm font-semibold text-fg">What you are sending</h2>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            <label class="flex flex-col gap-1">
+              <span class="text-xs text-muted">Video from your encoder (kbps)</span>
+              <input
+                id="video-kbps"
+                type="number"
+                min="100"
+                step="100"
+                value="6000"
+                class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
+              />
+              <span id="video-hint" class="text-[11px] text-muted"></span>
+            </label>
+            <label class="flex flex-col gap-1">
+              <span class="text-xs text-muted">Audio per destination (kbps)</span>
+              <input
+                id="audio-kbps"
+                type="number"
+                min="32"
+                step="32"
+                value="160"
+                class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
+              />
+            </label>
+          </div>
+
+          <div class="verbose-only mt-4 grid gap-4 sm:grid-cols-2" hidden>
+            <label class="flex flex-col gap-1">
+              <span class="text-xs text-muted">Audio tracks from your encoder</span>
+              <input
+                id="tracks"
+                type="number"
+                min="1"
+                max="6"
+                value="1"
+                class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
+              />
+              <span class="text-[11px] text-muted">
+                Six is what OBS sends. Each one rides the ingest leg only.
+              </span>
+            </label>
+            <label class="flex flex-col gap-1">
+              <span class="text-xs text-muted">Protocol overhead (%)</span>
+              <input
+                id="overhead"
+                type="number"
+                min="0"
+                max="30"
+                step="1"
+                value="5"
+                class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
+              />
+              <span class="text-[11px] text-muted">
+                RTMP framing plus TCP/IP. An estimate, not a measurement.
+              </span>
+            </label>
+            <label class="flex flex-col gap-1">
+              <span class="text-xs text-muted">Headroom (%)</span>
+              <input
+                id="headroom"
+                type="number"
+                min="0"
+                max="100"
+                step="5"
+                value="20"
+                class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
+              />
+              <span class="text-[11px] text-muted">
+                A link run at its rated speed drops frames on the first burst.
+              </span>
+            </label>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ------------------------------------------------------ RESULTS -->
+      <aside class="card p-5 lg:sticky lg:top-24">
+        <h2 class="text-sm font-semibold text-fg">What you need</h2>
+
+        <div class="mt-4">
+          <p class="text-xs text-muted">Encoder upstream — your home or studio</p>
+          <p id="r-ingest" class="mt-1 font-mono text-2xl text-fg">—</p>
+          <p id="r-ingest-note" class="mt-1 text-[11px] text-muted"></p>
+        </div>
+
+        <div class="mt-5 border-t border-line pt-4">
+          <p class="text-xs text-muted">Server uplink — where polyemesis runs</p>
+          <p id="r-egress" class="mt-1 font-mono text-2xl text-fg">—</p>
+          <p id="r-egress-note" class="mt-1 text-[11px] text-muted"></p>
+        </div>
+
+        <div class="mt-5 border-t border-line pt-4">
+          <p class="text-xs text-muted">Data moved from the server</p>
+          <dl class="mt-2 grid grid-cols-2 gap-y-1 text-sm">
+            <dt class="text-muted">Per stream</dt>
+            <dd id="r-per" class="text-right font-mono text-fg">—</dd>
+            <dt class="text-muted">Per week</dt>
+            <dd id="r-week" class="text-right font-mono text-fg">—</dd>
+            <dt class="text-muted">Per month</dt>
+            <dd id="r-month" class="text-right font-mono text-fg">—</dd>
+          </dl>
+          <p class="mt-2 text-[11px] text-muted">
+            A month is 4.35 weeks. Check it against your host's transfer allowance —
+            that is the number a VPS bills on, not the bitrate.
+          </p>
+        </div>
+
+        <div id="warnings" class="mt-5 flex flex-col gap-2"></div>
+      </aside>
+    </div>
+
+    <!-- The arithmetic, written out. A calculator that will not show its
+         working is asking to be trusted about someone's uplink bill. -->
+    <div class="rise mt-10 max-w-3xl">
+      <h2 class="text-sm font-semibold text-fg">How this is worked out</h2>
+      <ul class="mt-3 flex flex-col gap-2 text-sm leading-relaxed text-subtle">
+        <li>
+          <span class="text-fg">Encoder upstream</span> = video + (audio × tracks). One
+          stream leaves your encoder however many platforms you are sending to. That is
+          the whole point of a restreamer.
+        </li>
+        <li>
+          <span class="text-fg">Server uplink</span> = the sum of what each destination
+          actually sends. In simple mode every one takes the copied bitstream, so that
+          is (video + audio) × destinations. Give one a rendition and it sends its own
+          video instead, and the sum stops being a multiplication.
+        </li>
+        <li>
+          <span class="text-fg">The recommendation that binds</span> is the lowest among
+          the destinations still taking the <em>copied</em> stream, because that is one
+          bitstream they all share. A destination on a rendition is exempt — that is
+          what the rendition bought. It binds your <em>choice</em>, not the software:
+          nothing here or in polyemesis refuses a bitrate above it.
+        </li>
+        <li>
+          <span class="text-fg">Renditions are shared, not per-destination.</span> Two
+          destinations asking for the same bitrate cost one encode on the server and two
+          uploads. A rendition re-encodes video only; audio is routed and encoded per
+          destination either way.
+        </li>
+        <li>
+          <span class="text-fg">Data</span> = Mbps × 450 MB per hour, times your hours.
+          Overhead and headroom are applied to the bandwidth figures; the data figures
+          use overhead but not headroom, because headroom is capacity you provision and
+          not bytes you send.
+        </li>
+      </ul>
+      <p class="mt-4 text-xs text-muted">
+        Platform figures are the bitrates each platform recommends, transcribed from the
+        server's own preset table and checked {CHECKED}. They are advisory there too —
+        polyemesis never refuses a value for being above one, and some platforms accept
+        more than they recommend. Protocol overhead is an estimate and varies with
+        resolution, keyframe interval and network path.
+      </p>
+    </div>
+  </section>
+</Base>
+
+<script>
+  /* Plain DOM, matching MixMatrix: a framework for one form would outweigh the
+     page it sits on. */
+
+  const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
+    document.getElementById(id) as T | null;
+
+  const num = (id: string, fallback = 0) => {
+    const el = $<HTMLInputElement>(id);
+    const v = el ? parseFloat(el.value) : NaN;
+    return Number.isFinite(v) ? v : fallback;
+  };
+
+  type Dest = { key: string; name: string; max: number };
+
+  /** Endpoints the visitor added. The presets are a floor, not a ceiling. */
+  const custom: Dest[] = [];
+
+  /** Per-destination overrides, keyed by dest key. video === null means COPY.
+      Kept outside the DOM so a row rebuilt on re-render keeps its values. */
+  const perDest = new Map<string, { video: number | null; audio: number | null }>();
+
+  let verbose = false;
+
+  function selected(): Dest[] {
+    const out: Dest[] = [];
+    document.querySelectorAll<HTMLInputElement>(".dest-on:checked").forEach((cb) => {
+      const label = cb.closest("[data-platform]");
+      const key = cb.dataset.id ?? "?";
+      out.push({
+        key,
+        name: label?.querySelector("span span")?.textContent?.trim() ?? key,
+        max: parseInt(cb.dataset.max ?? "0", 10),
+      });
+    });
+    return out.concat(custom);
+  }
+
+  const mbps = (kbps: number) => kbps / 1000;
+  const fmtRate = (k: number) => `${mbps(k).toFixed(1)} Mbps`;
+  /* Decimal GB -- the unit hosts bill in. 1 Mbps for 1 hour is 450 MB:
+     1e6 bits/s x 3600 s / 8 = 450e6 bytes. */
+  const gbFor = (k: number, hours: number) => (mbps(k) * 450 * hours) / 1000;
+  const fmtData = (gb: number) =>
+    gb >= 1000 ? `${(gb / 1000).toFixed(2)} TB` : `${gb.toFixed(1)} GB`;
+
+  function warn(kind: "hard" | "soft", text: string) {
+    const box = $("warnings");
+    if (!box) return;
+    const el = document.createElement("p");
+    el.className =
+      "rounded-md border px-3 py-2 text-[11px] leading-relaxed " +
+      (kind === "hard"
+        ? "border-[var(--color-down)] text-[var(--color-down)]"
+        : "border-line text-muted");
+    el.textContent = text;
+    box.appendChild(el);
+  }
+
+  /** The rate this destination actually sends: its own if it has a rendition,
+      the copied ingest bitstream otherwise. */
+  function ratesFor(d: Dest, sharedVideo: number, sharedAudio: number) {
+    const o = perDest.get(d.key);
+    const video = verbose && o && o.video !== null ? o.video : sharedVideo;
+    const audio = verbose && o && o.audio !== null ? o.audio : sharedAudio;
+    return { video, audio, copied: !(verbose && o && o.video !== null) };
+  }
+
+  /** Build the option controls for one destination, once, into its own row.
+      Returns the node so a custom endpoint can host the same controls a preset
+      does -- one code path, so the two cannot drift apart. */
+  function buildOpts(d: Dest, host: HTMLElement) {
+    if (host.dataset.built === "1") return;
+    host.dataset.built = "1";
+    host.innerHTML = "";
+
+    const wrap = document.createElement("div");
+    wrap.className = "flex flex-wrap items-center gap-x-3 gap-y-2";
+
+    const vLabel = document.createElement("span");
+    vLabel.className = "text-[11px] text-muted";
+    vLabel.textContent = "video";
+
+    const vSel = document.createElement("select");
+    vSel.className = "rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
+    vSel.innerHTML = `<option value="copy">Copy</option><option value="rendition">Rendition</option>`;
+
+    const vNum = document.createElement("input");
+    vNum.type = "number";
+    vNum.min = "100";
+    vNum.step = "100";
+    vNum.className = "w-24 rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
+    vNum.hidden = true;
+
+    const aLabel = document.createElement("span");
+    aLabel.className = "ml-1 text-[11px] text-muted";
+    aLabel.textContent = "audio";
+
+    const aNum = document.createElement("input");
+    aNum.type = "number";
+    aNum.min = "32";
+    aNum.step = "32";
+    aNum.className = "w-20 rounded-md border border-line bg-transparent px-2 py-1 text-xs text-fg";
+
+    const cur = () => perDest.get(d.key) ?? { video: null, audio: null };
+
+    vSel.addEventListener("change", () => {
+      const c = cur();
+      const rendition = vSel.value !== "copy";
+      c.video = rendition ? parseFloat(vNum.value) || num("video-kbps", 6000) : null;
+      perDest.set(d.key, c);
+      // Toggled here rather than by a rebuild: these controls are built once
+      // and never replaced, so nothing else would reveal the field just asked
+      // for -- and rebuilding on input is what drops focus mid-keystroke.
+      vNum.hidden = !rendition;
+      if (rendition) {
+        vNum.value = String(c.video);
+        vNum.focus();
+      }
+      render();
+    });
+    vNum.addEventListener("input", () => {
+      const c = cur();
+      c.video = parseFloat(vNum.value);
+      perDest.set(d.key, c);
+      render();
+    });
+    aNum.addEventListener("input", () => {
+      const c = cur();
+      c.audio = parseFloat(aNum.value);
+      perDest.set(d.key, c);
+      render();
+    });
+
+    wrap.append(vLabel, vSel, vNum, aLabel, aNum);
+    host.appendChild(wrap);
+    host.dataset.role = "opts";
+    (host as any)._sync = (sharedVideo: number, sharedAudio: number) => {
+      const c = cur();
+      vSel.value = c.video === null ? "copy" : "rendition";
+      vNum.hidden = c.video === null;
+      // Only write a value the operator is not currently editing.
+      if (document.activeElement !== vNum) vNum.value = String(c.video ?? sharedVideo);
+      if (document.activeElement !== aNum) aNum.value = String(c.audio ?? sharedAudio);
+    };
+  }
+
+  /** Show or hide each destination's controls, and keep them in step with the
+      shared defaults while they are untouched. */
+  function syncOpts(sharedVideo: number, sharedAudio: number) {
+    const on = new Map(selected().map((d) => [d.key, d]));
+    document.querySelectorAll<HTMLElement>(".dest-opts").forEach((host) => {
+      const key = host.dataset.optsFor ?? "";
+      const d = on.get(key);
+      const show = Boolean(d) && verbose;
+      host.hidden = !show;
+      if (!show || !d) return;
+      buildOpts(d, host);
+      (host as any)._sync?.(sharedVideo, sharedAudio);
+    });
+  }
+
+  function render() {
+    const dests = selected();
+    const sharedVideo = num("video-kbps", 6000);
+    const sharedAudio = num("audio-kbps", 160);
+    const tracks = Math.max(1, num("tracks", 1));
+    const overhead = 1 + num("overhead", 5) / 100;
+    const headroom = 1 + num("headroom", 20) / 100;
+    const hours = Math.max(0, num("hours", 4));
+    const perWeek = Math.max(0, num("per-week", 4));
+
+    const box = $("warnings");
+    if (box) box.innerHTML = "";
+
+    // Egress is the sum of what each destination actually sends -- not a single
+    // bitrate multiplied by a count, once any of them has a rendition.
+    let egressRaw = 0;
+    const renditionRates = new Set<number>();
+    const copied: Dest[] = [];
+    for (const d of dests) {
+      const r = ratesFor(d, sharedVideo, sharedAudio);
+      egressRaw += r.video + r.audio;
+      if (r.copied) copied.push(d);
+      else renditionRates.add(r.video);
+      if (!r.copied && r.video > d.max) {
+        warn(
+          "soft",
+          `${d.name}: its rendition is ${r.video} kbps, above the ${d.max} kbps ` +
+            `${d.key.startsWith("custom-") ? "limit you set" : "figure the platform recommends"}. ` +
+            `Nothing here or on the server refuses it — check what the platform accepts.`,
+        );
+      }
+    }
+
+    const ingestRaw = sharedVideo + sharedAudio * tracks;
+    $("r-ingest")!.textContent = fmtRate(ingestRaw * overhead * headroom);
+    $("r-egress")!.textContent = fmtRate(egressRaw * overhead * headroom);
+    $("r-ingest-note")!.textContent =
+      `${fmtRate(ingestRaw)} of media${tracks > 1 ? ` across ${tracks} tracks` : ""}, ` +
+      `plus overhead and headroom.`;
+    $("r-egress-note")!.textContent = dests.length
+      ? `${dests.length} destination${dests.length === 1 ? "" : "s"}, ` +
+        `${fmtRate(egressRaw)} of media, plus overhead and headroom.`
+      : "No destinations selected.";
+
+    // Data uses overhead but not headroom: headroom is capacity you provision,
+    // not bytes you send, and billing one as the other overstates the invoice.
+    const perStream = gbFor(egressRaw * overhead, hours);
+    $("r-per")!.textContent = fmtData(perStream);
+    $("r-week")!.textContent = fmtData(perStream * perWeek);
+    $("r-month")!.textContent = fmtData(perStream * perWeek * 4.35);
+
+    // The copied bitstream is ONE stream, so the binding recommendation is the
+    // strictest of the destinations still taking it. Destinations on a
+    // rendition are exempt: that is precisely what the rendition bought.
+    // Advisory, so this is a soft warning -- see the header comment.
+    const hint = $("video-hint");
+    if (copied.length) {
+      const tightest = copied.reduce((a, b) => (b.max < a.max ? b : a));
+      if (hint)
+        hint.textContent =
+          `Lowest recommendation among the destinations taking the copied stream: ` +
+          `${tightest.max} kbps (${tightest.name}).`;
+      if (sharedVideo > tightest.max) {
+        warn(
+          "soft",
+          `${sharedVideo} kbps is above the ${tightest.max} kbps ${tightest.name} recommends, ` +
+            `and ${copied.length === 1 ? "it is" : `${copied.length} destinations are`} taking ` +
+            `the copied stream. That is a recommendation, not a limit — polyemesis will send ` +
+            `it, and several platforms accept more than they recommend. If that one does not, ` +
+            `lower the bitrate, drop the destination, or give it a rendition.`,
+        );
+      }
+    } else if (hint) {
+      hint.textContent = dests.length
+        ? "No destination is taking the copied stream — every one has a rendition."
+        : "";
+    }
+
+    // Renditions are SHARED: two destinations asking the same bitrate are one
+    // encode. Counting them per-destination would overstate the CPU.
+    if (renditionRates.size) {
+      warn(
+        "soft",
+        `${renditionRates.size} rendition${renditionRates.size === 1 ? "" : "s"} ` +
+          `(${[...renditionRates].sort((a, b) => a - b).join(", ")} kbps). Each is one video ` +
+          `encode on the server, shared by every destination asking for that bitrate — so this ` +
+          `costs CPU that a copied stream does not. Audio is unaffected: a rendition re-encodes ` +
+          `video only.`,
+      );
+    }
+
+    syncOpts(sharedVideo, sharedAudio);
+  }
+
+  function addCustom() {
+    const nameEl = $<HTMLInputElement>("custom-name");
+    const kbpsEl = $<HTMLInputElement>("custom-kbps");
+    const list = $("custom-list");
+    if (!nameEl || !kbpsEl || !list) return;
+
+    const name = nameEl.value.trim() || "Custom endpoint";
+    const max = parseInt(kbpsEl.value, 10);
+    if (!Number.isFinite(max) || max <= 0) {
+      kbpsEl.focus();
+      return;
+    }
+
+    const dest: Dest = { key: `custom-${Date.now()}-${custom.length}`, name, max };
+    custom.push(dest);
+
+    const row = document.createElement("div");
+    row.className = "flex items-center gap-3 rounded-md border border-line px-3 py-2 text-sm";
+    row.innerHTML =
+      `<span class="flex-1 text-fg"></span>` +
+      `<span class="font-mono text-[11px] text-muted"></span>` +
+      `<button type="button" class="text-[11px] text-muted hover:text-fg">Remove</button>`;
+    // textContent, not interpolation: the name is whatever was typed.
+    row.children[0].textContent = name;
+    row.children[1].textContent = `${max} kbps`;
+    row.children[2].addEventListener("click", () => {
+      const i = custom.indexOf(dest);
+      if (i >= 0) custom.splice(i, 1);
+      perDest.delete(dest.key);
+      wrapper.remove();
+      render();
+    });
+
+    // A custom endpoint hosts the same controls a preset does, through the same
+    // builder. Two code paths here would drift, and the one nobody uses would
+    // be the one that breaks.
+    const wrapper = document.createElement("div");
+    wrapper.className = "rounded-md border border-line";
+    row.className = "flex items-center gap-3 px-3 py-2 text-sm";
+    const opts = document.createElement("div");
+    opts.className = "dest-opts border-t border-line px-3 py-2";
+    opts.dataset.optsFor = dest.key;
+    opts.hidden = true;
+    wrapper.append(row, opts);
+    list.appendChild(wrapper);
+
+    nameEl.value = "";
+    kbpsEl.value = "";
+    render();
+  }
+
+  function setMode(v: boolean) {
+    verbose = v;
+    document.querySelectorAll<HTMLElement>(".verbose-only").forEach((el) => {
+      el.hidden = !v;
+    });
+    const s = $("mode-simple");
+    const b = $("mode-verbose");
+    s?.setAttribute("aria-pressed", String(!v));
+    b?.setAttribute("aria-pressed", String(v));
+    s?.classList.toggle("btn-primary", !v);
+    s?.classList.toggle("btn-ghost", v);
+    b?.classList.toggle("btn-primary", v);
+    b?.classList.toggle("btn-ghost", !v);
+    render();
+  }
+
+  document.addEventListener("input", (e) => {
+    // Rows handle their own inputs and call render themselves; re-rendering
+    // from the delegated listener too would rebuild the row under the cursor
+    // and drop focus mid-keystroke.
+    if ((e.target as HTMLElement)?.closest(".dest-opts")) return;
+    render();
+  });
+  document.addEventListener("change", (e) => {
+    if ((e.target as HTMLElement)?.closest(".dest-opts")) return;
+    render();
+  });
+  $("custom-add")?.addEventListener("click", addCustom);
+  $("mode-simple")?.addEventListener("click", () => setMode(false));
+  $("mode-verbose")?.addEventListener("click", () => setMode(true));
+  render();
+</script>

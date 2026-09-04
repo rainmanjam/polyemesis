@@ -8,7 +8,314 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Security
+
+- **The server no longer listens on every interface in the clear by default.**
+  With no `config.yaml` and no `--addr`, the default is now `127.0.0.1:8080`.
+  An explicit address still binds where it is told, with the existing warning.
+  Every shipped launch path — the systemd unit, `install.sh`, all three
+  Dockerfiles and `config.example.yaml` — passes an address explicitly and is
+  unaffected.
+- **Pull-source URLs go through the same address guard as webhooks.** They were
+  scheme-checked only, so a pull of `http://169.254.169.254/` was dialled.
+  Loopback and link-local are now refused. **Cost:** pulling from a service on
+  the same box is refused with no per-source opt-in yet; LAN and RFC1918
+  sources are still allowed. **Bound, and stated in code:** literal addresses
+  only — FFmpeg resolves its own names, so a hostname pointing at a private
+  address still passes.
+- **HTTP and HLS pulls carry `-protocol_whitelist`** without `file`. Defence in
+  depth: measured on FFmpeg 9.0.1, the local-file read the audit suspected did
+  **not** reproduce — the refusal was already FFmpeg's default. This makes it
+  ours rather than a dependency's.
+- **Changing the admin password can revoke API tokens, and always says what
+  survived.** The password change killed sessions and left `api_tokens`
+  untouched, so a leaked admin token outlived the operator's incident-response
+  gesture. Revocation is opt-in because a password change cannot tell a routine
+  rotation from a compromise; the disclosure is unconditional.
+- **`POST /setup` is throttled** per address, on its own counter, so first boot
+  is no longer an unlimited race.
+
+### Fixed
+
+- **A data race between clip planning and encoder re-detection.**
+  `internal/api/clips.go` read `tools.HWEncoders` unlocked while
+  `RefreshEncoderCapabilities` rewrote it — a read the neighbouring
+  `renditions.go` documents as unsafe and avoids.
+- **`/api/v1/health` reports something that can be false.** It was a constant
+  three mechanisms treated as proof. It now reads a real database page, checks
+  the engine, and reports the recording floor. A halted recorder is `degraded`
+  with 200, not 503: a restart adds no disk and would drop live video.
+  **Behaviour change:** an install with sources and no engine now fails its
+  container HEALTHCHECK where it used to pass.
+- **A restored data directory with no `secret.key` no longer mints one
+  silently.** Boot now names how many destinations cannot be read and why.
+- **The Start/Stop flip guard never lifted itself** — it armed for elapsed
+  rather than remaining time, and its test was green only because fake timers
+  advanced the clock before React flushed.
+- **A held stop is no longer discarded on unmount**; leaving the page now sends
+  the stop it owed.
+- **The one confirmation dialog fronting every destructive action was
+  untranslated.** Four English literals `i18n.test.ts` structurally could not
+  see are now keys in all 15 catalogues.
+- **Clips and Recordings claimed "none" for reads that failed** — the exact
+  bug `lib/readState.ts` exists to forbid.
+- **Playout link rotation and clip-history purge now confirm before acting**,
+  naming the viewers dropped and the files deleted.
+- **`update.sh` refuses to restart a container that is publishing**, matching
+  the guard `uninstall.sh` already had. Docker installs also gained log
+  rotation.
+- **The generated helper scripts no longer splice an empty compose command into
+  command position** (#658), and backticks in a generated comment no longer
+  execute at write time.
+
+### Changed
+
+- **`make check` runs what CI runs** — `POLYEMESIS_LEDGER=strict`, `-race`, and
+  the Windows vet leg — and its parity guard compares the invocation rather
+  than a substring. **Cost:** the local loop goes from about four minutes to
+  about twenty-five, and needs a C toolchain.
+- **Lint can fail the build.** `react-hooks/exhaustive-deps` and
+  `no-unused-vars` are errors; the three violations that surfaced are fixed
+  with no suppressions.
+- **SonarCloud waits for its quality gate**, `web/`'s lockfile is watched by
+  dependabot and audited, every shell script is parsed by `make sh-syntax`, and
+  the installer suite refuses to report PASS when a step did not run (#657).
+- **The website says what the server actually does.** Platform figures are
+  recommendations, not enforced ceilings — and the build now asserts them
+  against `internal/db/platforms.go`, so the page cannot drift from the code.
+  A stale "YouTube is capped at 3 destinations" warning that fired with no
+  YouTube selected is gone.
+- **Eight documentation contradictions corrected**, including `UPGRADING.md`
+  telling an operator mid-migration that a CI-tested feature does not work, and
+  `MODULES.md` naming a base image and Go version no Dockerfile uses.
+
+
+### Added
+
+- **The meters page says when tracks are not being metered, and which programme
+  it is showing.** One metering process merges every track, and amerge refuses
+  past 64 channels, so a very wide ingest was measured as a prefix while the
+  remaining tracks drew flat bars — indistinguishable from silence, on the one
+  page whose whole job is telling those apart. The server had counted the
+  dropped tracks since the limit existed and the number reached nothing:
+  `ffmpeg.MetersDropped` says in as many words that it exists "so a wide ingest
+  degrades visibly", and then no caller carried it out of the package. It now
+  rides on the source payload and renders as a warning that says *unmeasured,
+  not silent*. Absent when nothing is dropped, which is every install anyone is
+  likely to run.
+
+  The page also names its programme when the install has more than one. The
+  console follows a single programme, resolved to whichever source is first when
+  nothing is remembered, and there is still no switcher — so this does not fix
+  multi-source metering, it stops the page reporting a slice of the install as
+  though it were all of it. See #638 for the switcher.
+
+### Removed
+
+- **The compact/comfortable layout density toggle**, which sat in the console
+  header between the username and the language switcher. It rescaled Tailwind's
+  `--spacing` inside `<main>` to pack more onto the screen, and remembered the
+  choice per browser.
+
+  Removed whole rather than hidden. The preference was applied on mount from
+  `localStorage`, so deleting only the button would have left anyone already
+  switched to compact stuck there with nothing to switch back — a setting with
+  no control is worse than no setting. Gone with it: the `useDensity` hook, the
+  `DENSITY` block in `index.css`, and the `dense-grid` opt-in that gave the
+  dashboard a fourth column above 1280px.
+
+  `Button`'s `min-h`/`min-w` floors and its `rem`-spelled icon size stay. They
+  were written to stop compact from shrinking a control carrying Start and Stop
+  below a reliable target, and at a single density they are no-ops — but a
+  minimum target size is worth asserting on its own terms rather than left to
+  whatever the spacing scale produces.
+
+### Fixed
+
+- **A `--config` path that did not exist booted a different, empty install.**
+  `config.Load` returned defaults on a missing file, which is right for the
+  implicit `config.yaml` and wrong for a path the operator typed: a typo
+  created `./data`, minted a **new `secret.key`**, opened an empty database,
+  bound `:8080` in the clear and reopened unauthenticated `POST /setup` — the
+  window `-reset-admin` exists to close — while looking healthy. An explicit
+  `--config` that is absent now refuses to start, naming the path; the
+  implicit default still defaults. (#644)
+- **Login throttling could be bypassed behind the reverse proxy the docs tell
+  you to deploy.** `deploy/nginx.conf.example` shipped
+  `$proxy_add_x_forwarded_for`, which appends to whatever the client sent, and
+  the server read the *leftmost* `X-Forwarded-For` hop — the client's own bytes.
+  Rotating that header minted a fresh throttle key per request, so the
+  5-attempt policy never fired: unlimited online guessing at the single admin
+  password, with attacker-chosen addresses in the audit log. The server now
+  reads the **rightmost** hop, the one the proxy appended, which is correct
+  whether a proxy appends or overwrites; the shipped nginx example overwrites.
+  A chain of several trusted proxies now keys everyone behind the last one
+  together, which throttles too much rather than too little. (#647)
+- **The documentation-drift guards never ran on the pull requests that drift
+  the documentation.** The guards are Go tests — `platforms_doc_drift_test.go`
+  reads `docs/PLATFORMS.md`, `api_docs_route_table_test.go` reads
+  `docs/API.md` — and every Go step in CI is gated on the change touching
+  code, so a documentation-only pull request ran none of them and reported
+  green as "did no work". That is how `docs/UPGRADING.md` came to tell an
+  operator, mid-migration, that a CI-tested feature does not work, and how
+  `docs/MODULES.md` came to name a base image and a Go version no Dockerfile
+  uses. The docs-only path now discovers the packages whose tests read
+  `docs/*.md` and runs them; it costs seconds, because those tests read
+  markdown and need no ffmpeg, database or network. It also counts what ran
+  and fails on a low count, since `go test -run` matching nothing exits 0.
+  (#651)
+- **Shutdown had no single deadline, so a stop could outlast the one systemd
+  waits for.** `TimeoutStopSec=45` sat above four budgets chosen separately and
+  added together by the order they ran in: 20s for the HTTP servers, 5s for the
+  lifecycle drain, then **30 seconds per engine, stopped one after another**,
+  plus a captioner wait that took no context at all. On a two-programme install
+  one wedged child passed 45s without anything in the process believing it had
+  overrun; systemd then SIGKILLed the cgroup, and a recorder killed mid-write
+  leaves a Matroska file with no trailer at exactly the size a reader would
+  call plausible. The process now has one budget
+  (`engine.ShutdownBudget`, 35s) that every phase draws from, engines are
+  stopped concurrently so sharing a deadline does not mean dividing it, and
+  running out of it is logged rather than left to systemd to reveal. A test
+  pins the budget below the `TimeoutStopSec` in both the shipped unit and the
+  one `install.sh` writes. (#645)
+- **The console resolved its programme once per page load.** `/sources` was
+  read in an effect that never re-ran, so creating a second source during
+  first-run setup — or deleting the one being followed — left the whole
+  console pointed at a stale answer until someone reloaded: Meters read "NOT
+  UPDATING", Monitoring's process list died, Clips showed "No clips yet.", all
+  against a healthy server. Every one of those is a plausible idle state,
+  which is why it was never reported as a bug. The Sources page now asks for a
+  re-resolve after a create or delete, and the provider re-resolves on its own
+  when the status socket names a programme it has not seen — which covers the
+  changes made in another tab, by another operator, or straight through the
+  API. An operator already on a programme that still exists stays on it.
+  (#646)
+- **`install.sh --tls acme` uninstalled the working server it had just
+  installed.** `verify()` probed `https://127.0.0.1:PORT` with `-k` in every
+  TLS mode. That connection carries no SNI, and the ACME path sets only
+  `GetCertificate` — no `Certificates` fallback, unlike selfsigned, whose leaf
+  carries `127.0.0.1` — so autocert had no name to look up and the handshake
+  aborted before any HTTP happened. `-k` skips *verifying* a certificate; it
+  cannot invent one. `verify()` then returned 1 before `INSTALL_COMPLETE` was
+  set, and the EXIT trap disabled the unit, removed the binary,
+  `/etc/polyemesis`, `/opt/polyemesis` and the service account, then printed
+  that nothing was left running. In acme mode the installer now asks the
+  question that has an answer on loopback — the `:80` redirect listener acme
+  mode binds — and the failure trap refuses to remove a service that is
+  `active`, saying so and pointing at `uninstall.sh`. (#642)
+- **`update.sh` backed up a live database and never checked the copy opened.**
+  Both generated scripts copied the data directory while the server was still
+  running — `cp -a` for binary installs, `docker run … tar czf` for compose —
+  and stopped the service afterwards. The guard checked that `polyemesis.db`
+  and `secret.key` *existed*, then printed "backup verified". Migrations run
+  forward only, so that copy is the only way back from an upgrade, and every
+  way it can exist without being usable leaves a file of plausible size. Both
+  scripts now stop the service **before** copying, and the copy is opened,
+  walked with `integrity_check` and checked for this server's schema by the
+  installed binary itself (`polyemesis -verify-backup`), which runs no
+  migration. The binary install also keeps the running executable as
+  `polyemesis.previous`, since the rollback instructions said "reinstall the
+  previous binary" without keeping one. (#643)
+- **The console printed credentials as readable text in five places.** The
+  Sources page showed the publish token twice — once as `STREAMKEY`, once as
+  `TOKEN` — in plain text on the page an operator opens while someone is
+  helping them get a broadcast up. 0.8.0 masked the stream key *input*; it did
+  not touch these, because they are not inputs. Also fixed: the webhook signing
+  secret shown after creating a hook, the API token shown after minting one,
+  and the ingest URL on the dashboard and in Settings, which embeds the SRT
+  passphrase in cleartext for an admin (the server masks it only for a
+  read-scope principal).
+
+  All now render through a new `SecretCode`: masked to a fixed width, with a
+  deliberate reveal. **Copy still works while masked** — moving a secret to the
+  clipboard never required putting it on the screen. The webhook secret gained
+  a Copy button it never had, so reading it off the screen is no longer the
+  only way to get it.
+
+  Not masked, deliberately: the RTMP address beside the stream key, and an
+  ingest URL with no credential in it. Masking those would train an operator to
+  press reveal on everything, which is how a mask stops meaning anything.
+
+  `secret-fields.test.ts` grew the check that would have caught this. It asked
+  whether any `<Input>` was bound to a credential — a question no `<code>` block
+  can fail. It now also asks whether one is printed into element text, and it
+  strips comments first, because the first version failed on the docstring
+  explaining the bug.
+
+## [0.8.0] — 2026-09-01
+
+### Changed
+
+- **`uptimeSec` now counts from the first media, not from the spawn.** An ingest
+  is started *listening*, so the old figure included however long it sat waiting
+  for an encoder to connect: arming a source in the morning and going live at
+  noon reported four hours of uptime for a stream that had been on air for none.
+  A process that is running but has seen no media reports `uptimeSec: 0`, which
+  is what it is doing. `startedAt` is unchanged and still reports the spawn.
+  **This changes the meaning of a published MQTT field** — see `docs/MQTT.md`.
+- **Processes with nothing to flush now get a 1-second shutdown grace instead of
+  8.** `meters`, `loudness` and `silence` write nothing a reader will ever look
+  at — `-f null` for the first two, an mpegts stream to a UDP relay for the
+  third — so waiting eight seconds to kill them cost that long on every ingest
+  switch and stop, and the waits stack serially. Every other kind keeps the full
+  window: an unlisted kind defaults to 8 seconds, so forgetting to classify a new
+  process costs latency and never a truncated recording.
+
+### Added
+
+- **A warning when the ingest's video codec is copied to an RTMP destination that
+  may refuse it.** Selecting HEVC or AV1 in OBS produces Enhanced RTMP, which
+  polyemesis ingests; video is then stream-copied, so that bitstream reaches the
+  platform verbatim. FFmpeg muxes HEVC into FLV happily and the platform drops the
+  stream — a failure that looks correct everywhere the operator can see. The
+  destination card now says so. It suggests and never refuses: a custom endpoint
+  that does accept HEVC is a real setup.
+- **A bandwidth calculator on the website**, at `/calculator`. It models a
+  stream-copying restreamer rather than multistreaming in general: because video
+  is copied and not re-encoded, the video half of the sum is one bitstream
+  repeated, and it is bounded by the lowest ceiling among the destinations
+  receiving it — so sending 6000 to Twitch and 12000 to YouTube is not a choice
+  the operator has without a rendition. It reports the encoder's upstream and the
+  server's uplink separately, because those are different connections, and
+  converts both into data per stream, week and month, which is what a host bills
+  on. Platform ceilings are the server's own figures from `internal/db/platforms.go`,
+  dated on the page. Custom RTMP and SRT endpoints can be added by name. A
+  verbose mode adds overhead, headroom and audio-track inputs, and gives each
+  selected destination its own video mode, rendition bitrate and audio bitrate
+  in that destination's own row — the case where one platform's ceiling forces
+  a rendition and the others keep the copy.
+- **Structured data binding the name, the site and the repository.** "polyemesis"
+  is a coined word, which helps ranking and hurts identity: nothing told a search
+  or answer engine that the name, this site and the GitHub repository were one
+  thing rather than three strings that happen to co-occur. The site now emits a
+  `SoftwareApplication` node with `sameAs` pointing at the repository, and a
+  `WebSite` node for the site as an entity distinct from the software it
+  documents. Both assert only what is already true and independently checkable.
+  Deliberately absent, and recorded in the layout as a rule rather than an
+  omission: no `FAQPage`, no `ItemList` over the comparison pages, and no
+  `dateModified` — structured data detaches a figure from the "checked" date
+  beside it on the page, and a competitor's price reproduced in a result card
+  without that stamp is a stale claim we published.
+
+- **A teardown counter with a denominator.** The supervisor now counts clean and
+  killed teardowns per process kind. Previously only kills were recorded, in a
+  log line, and a clean teardown wrote nothing at all — `supervise()` returns on
+  context cancellation before reaching the exit log — so there was no ratio to be
+  alarmed by and no way to see an exceptional path becoming the normal one.
+
+### Fixed
+
+- **The RTMP ingest stream key was rendered in plain text.** Settings drew it
+  with an ordinary text input, so the credential OBS authenticates with was
+  readable on screen with nothing marking it as a secret — during exactly the
+  activity that puts a screen in front of an audience.
+- **Secret fields had no way to reveal what was typed.** The SRT passphrases,
+  the MQTT password, the OAuth client secret and the destination stream key were
+  masked but had no toggle, so checking a pasted key meant saving and reopening.
+  All six now use the existing `SecretInput`, which masks by default and reveals
+  only on an explicit press. A test now fails if any input bound to a credential
+  is not one, because the component already existed and nothing required it.
+- The reveal control is now translated rather than hardcoded English.
 
 ## [0.7.0] — 2026-08-28
 
@@ -3516,7 +3823,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/rainmanjam/polyemesis/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rainmanjam/polyemesis/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rainmanjam/polyemesis/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rainmanjam/polyemesis/compare/v0.4.0...v0.5.0

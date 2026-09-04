@@ -192,6 +192,36 @@ cleanup_on_failure() {
   [ "$INSTALL_COMPLETE" = true ] && exit 0
   [ "$code" -eq 0 ] && exit 0
 
+  # A RUNNING SERVER IS NEVER TORN DOWN BY A FAILED CHECK.
+  #
+  # Everything below removes what the install created. That is right when the
+  # install genuinely failed, and catastrophic when only the last CHECK failed:
+  # #642 was verify() probing loopback TLS in acme mode, where no certificate
+  # can exist yet, so a perfectly good server was uninstalled and the operator
+  # was told nothing was left running.
+  #
+  # The check is deliberately the service's own state rather than a flag this
+  # script sets: a flag records what we believe we did, and the question here
+  # is what is actually true on the host right now. Docker installs keep the
+  # existing behaviour -- CONTAINER_STARTED already distinguishes a container
+  # this run created from one that predates it.
+  if [ "$MODE" != docker ] && [ -n "${SERVICE_NAME:-}" ] \
+     && systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    echo
+    warn "install reported a failure (exit $code), but $SERVICE_NAME is RUNNING."
+    warn "Leaving it alone: removing a working server because a check failed is"
+    warn "worse than the failed check. Investigate with:"
+    if [ "$TLS_MODE" = acme ]; then
+      echo "     journalctl -u $SERVICE_NAME -n 50 --no-pager" >&2
+      echo "     (acme mode issues its certificate on the first request for" >&2
+      echo "      $DOMAIN_NAME, not on loopback -- see the note on verify())" >&2
+    else
+      echo "     journalctl -u $SERVICE_NAME -n 50 --no-pager" >&2
+    fi
+    echo "     To remove it deliberately: $INSTALL_DIR/uninstall.sh" >&2
+    exit "$code"
+  fi
+
   echo
   warn "install failed (exit $code) — undoing what it had already done"
 
@@ -1307,6 +1337,26 @@ install_docker_mode() {
     # whatever was being written, so this matches the project's own compose file.
     printf '    stop_grace_period: 30s\n'
 
+    # LOGS HAVE NO CEILING UNLESS ONE IS WRITTEN HERE. Docker's default
+    # json-file driver keeps every line the container ever wrote, forever, in
+    # /var/lib/docker/containers/<id>/*-json.log. polyemesis logs per request
+    # and per encoder tick, and a 24/7 broadcast box is exactly the install
+    # that never restarts, so the file only grows. When it fills the disk the
+    # symptom is not "logs are large": SQLite cannot write, recordings stop
+    # finalising, and the container starts failing in ways that look like a
+    # bug in the server.
+    #
+    # 10m x 3 is a ceiling of 30 MB per container -- enough to hold the last
+    # several hours of a busy stream, which is the window an operator actually
+    # reads after an incident, and small enough that it can never be the
+    # reason a box runs out of space. The systemd path already has this:
+    # journald applies SystemMaxUse. Only docker installs were unbounded.
+    printf '    logging:\n'
+    printf '      driver: "json-file"\n'
+    printf '      options:\n'
+    printf '        max-size: "10m"\n'
+    printf '        max-file: "3"\n'
+
     # The image bakes in `wget -qO- http://127.0.0.1:8080/api/v1/health`, and
     # both halves of that are assumptions this installer is free to break.
     #
@@ -1626,6 +1676,60 @@ DATA_DIR="$DATA_DIR"
 BIN_PATH="$BIN_PATH"
 SERVICE_NAME="$SERVICE_NAME"
 
+FORCE=false
+while [ \$# -gt 0 ]; do
+	case "\$1" in
+		--force) FORCE=true; shift ;;
+		-h|--help)
+			echo "usage: update.sh [--force]"
+			echo "  --force  do not refuse while a broadcast is on air"
+			exit 0 ;;
+		*) echo "unknown option: \$1" >&2; exit 2 ;;
+	esac
+done
+
+# IS ANYTHING ON AIR? The compose updater has refused this since it was written;
+# the binary one did not, so the SAME operation was safe in one install mode and
+# would silently cut a live stream in the other. This script stops the service
+# to take a consistent copy of a WAL database, and a broadcast that ends cannot
+# be resumed.
+#
+# ASKED OF THE UNIT'S OWN CGROUP, which is the binary-mode equivalent of the
+# compose version's \`compose top\`: every process systemd started for this
+# service is listed there and nothing else is, so an ffmpeg belonging to another
+# install -- or to the operator's own terminal -- is not mistaken for this one.
+# A plain \`pgrep ffmpeg\` would have been the untested probe this deliberately
+# is not.
+#
+# Silent when the cgroup is not readable: cgroup v1, a container, an unusual
+# systemd layout. An upgrade that cannot answer the question proceeds exactly as
+# it did before this existed rather than refusing on a guess -- the guard is
+# here to catch the case it can see, not to invent certainty it does not have.
+publishing_now() {
+	local cg procs cmd
+	cg="/sys/fs/cgroup/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
+	[ -r "\$cg" ] || return 1
+	procs=\$(cat "\$cg" 2>/dev/null) || return 1
+	for pid in \$procs; do
+		[ -r "/proc/\$pid/cmdline" ] || continue
+		cmd=\$(tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null) || continue
+		case "\$cmd" in
+			*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+				echo "\$cmd" | cut -c1-160 >&2
+				return 0 ;;
+		esac
+	done
+	return 1
+}
+
+if [ "\$FORCE" != true ] && publishing_now; then
+	echo >&2
+	echo "REFUSING: this install is publishing right now (listed above)." >&2
+	echo "Upgrading stops the service, and a live broadcast that ends cannot be resumed." >&2
+	echo "Wait for the broadcast to end, or pass --force if you mean to end it." >&2
+	exit 1
+fi
+
 stamp="\$(date +%F-%H%M)"
 dest="\${DATA_DIR}.bak-\${stamp}"
 
@@ -1647,8 +1751,35 @@ if [ -e "\$dest" ]; then
   exit 1
 fi
 
+# STOP BEFORE COPYING. cp -a of a live WAL database copies a moving target:
+# the main file, the -wal and the -shm are read at three different instants, so
+# the result can hold a torn transaction and is not guaranteed to open. It is
+# also the ONLY way back from an upgrade, because migrations run forward only.
+# The service has to stop for the upgrade anyway -- stopping here costs the
+# same downtime and makes the copy consistent.
+# Only if there is something to stop. A box where the unit is not running --
+# a first upgrade before enabling it, or a restore rehearsal -- has a
+# consistent data directory already, and an unconditional stop would abort
+# this script under set -e before a single check had run.
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "\$SERVICE_NAME" 2>/dev/null; then
+  echo "stopping \$SERVICE_NAME so the copy is consistent"
+  sudo systemctl stop "\$SERVICE_NAME"
+  STOPPED_BY_US=true
+else
+  echo "\$SERVICE_NAME is not running; nothing to stop"
+  STOPPED_BY_US=false
+fi
+
 echo "backing up \$DATA_DIR to \$dest"
 cp -a "\$DATA_DIR" "\$dest"
+
+# KEEP THE BINARY THAT WORKS. This script has always told the operator to
+# "reinstall the previous binary" on rollback without keeping one, so the way
+# back required finding the old release by hand while the server was down.
+if [ -x "\$BIN_PATH" ]; then
+  cp -a "\$BIN_PATH" "\$dest/polyemesis.previous"
+  echo "kept the running binary at \$dest/polyemesis.previous"
+fi
 
 # THE CHECK THAT MATTERS. Not "is there a backup" but "does the backup hold the
 # file that makes the database usable". Without secret.key every destination
@@ -1665,11 +1796,37 @@ if [ ! -f "\$dest/polyemesis.db" ]; then
   exit 1
 fi
 
-echo "backup verified: database and secret.key both present"
+# EXISTENCE IS NOT THE PROPERTY THAT MATTERS. The two checks above say the
+# files are there; they cannot say the database opens. A copy taken from a
+# live server, a truncated file, a full disk that stopped the copy halfway --
+# each leaves a file of plausible size, and none is noticed until the restore.
+# The server binary carries the same SQLite driver it runs on, so it can answer
+# for real: open the file, walk it, read the schema, run no migration.
+# The check is not optional. If the binary that would answer is missing, that
+# is a refusal, not a reason to skip: printing "verified" without opening the
+# copy is the exact failure this replaced.
+if [ ! -x "\$BIN_PATH" ]; then
+  echo "ERROR: cannot verify the backup -- no executable at \$BIN_PATH." >&2
+  echo "Refusing to upgrade: an unverified backup is the thing this check exists to prevent." >&2
+  exit 1
+fi
+
+echo "checking the backup opens..."
+if ! "\$BIN_PATH" -verify-backup "\$dest"; then
+  echo "ERROR: the backup at \$dest is not usable. Refusing to upgrade." >&2
+  echo "The service is still stopped; start it with:" >&2
+  echo "    sudo systemctl start \$SERVICE_NAME" >&2
+  exit 1
+fi
+
+echo "backup verified: it opens, passes integrity_check and holds the schema"
 echo
-echo "Now replace \$BIN_PATH with the new binary and restart:"
+if [ "\$STOPPED_BY_US" = true ]; then
+  echo "The service is STOPPED. Replace the binary and start it:"
+else
+  echo "The service was not running. Replace the binary and start it:"
+fi
 echo
-echo "    sudo systemctl stop \$SERVICE_NAME"
 echo "    sudo install -m 0755 ./polyemesis \$BIN_PATH"
 echo "    sudo systemctl start \$SERVICE_NAME"
 echo
@@ -1677,7 +1834,8 @@ echo "If the upgrade goes wrong, the way back is:"
 echo
 echo "    sudo systemctl stop \$SERVICE_NAME"
 echo "    sudo rm -rf \$DATA_DIR && sudo cp -a \$dest \$DATA_DIR"
-echo "    (then reinstall the previous binary)"
+echo "    sudo install -m 0755 \$dest/polyemesis.previous \$BIN_PATH"
+echo "    sudo systemctl start \$SERVICE_NAME"
 EOF
   chmod +x "$INSTALL_DIR/update.sh"
 }
@@ -1863,6 +2021,67 @@ write_helper_scripts() {
 # no downgrade path. The backup is the only way back.
 set -euo pipefail
 cd "$INSTALL_DIR"
+
+# THE COMPOSE COMMAND IS DATA, NOT A SPLICE INTO COMMAND POSITION.
+#
+# Every use below used to be written \`\$COMPOSE_CMD pull\` INSIDE this
+# unquoted heredoc, so it was expanded while the file was being GENERATED and
+# the value was pasted into the script. When install.sh reached here with the
+# variable empty -- any path that writes the helpers without having run
+# install_docker -- the generated file got the bare line \`pull\`, and \`up -d\`,
+# and (in uninstall.sh) \`down --remove-orphans\`. Those are not errors an
+# operator can read: \`pull: command not found\` on the upgrade path, after the
+# container has already been stopped. Baking the value into one assignment and
+# referencing it at RUN time makes an empty value a refusal instead of three
+# mangled command lines. #658.
+#
+# Unquoted on use, deliberately: the value is two words for the compose plugin
+# ("docker compose") and one for the standalone binary, and it must split.
+COMPOSE_CMD="$COMPOSE_CMD"
+if [ -z "\$COMPOSE_CMD" ]; then
+  echo "ERROR: this update.sh was generated without a compose command." >&2
+  echo "It cannot stop, pull or start anything. Re-run install.sh to regenerate it." >&2
+  exit 1
+fi
+
+FORCE=false
+for arg in "\$@"; do
+	case "\$arg" in
+		--force|-f) FORCE=true ;;
+		-h|--help)
+			echo "usage: update.sh [--force]"
+			echo
+			echo "  --force  do not refuse while a broadcast is on air"
+			exit 0 ;;
+		*) echo "unknown option: \$arg" >&2; exit 2 ;;
+	esac
+done
+
+# IS ANYTHING ON AIR? Same question uninstall.sh asks, and for the same reason:
+# this script STOPS the container -- to take a consistent archive, and again to
+# swap the image -- and a live broadcast that ends cannot be resumed. uninstall
+# refused; update did not, so the safer-sounding operation was the one that
+# would silently cut a stream mid-show. Asked of the container's own process
+# table, so an ffmpeg elsewhere on the host is not mistaken for this install's.
+publishing_now() {
+	local out
+	out=\$(\$COMPOSE_CMD top 2>/dev/null || true)
+	case "\$out" in
+		*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+			echo "\$out" | grep -E 'ffmpeg.*(rtmp|srt):' | head -3 >&2
+			return 0 ;;
+	esac
+	return 1
+}
+
+if [ "\$FORCE" != true ] && publishing_now; then
+	echo >&2
+	echo "REFUSING: this install is publishing right now (listed above)." >&2
+	echo "Upgrading stops the container, and a live broadcast that ends cannot be resumed." >&2
+	echo "Wait for the broadcast to end, or pass --force if you mean to end it." >&2
+	exit 1
+fi
+
 stamp="\$(date +%F-%H%M)"
 dest="$INSTALL_DIR/backup-\${stamp}.tar.gz"
 echo "backing up to \$dest"
@@ -1887,6 +2106,18 @@ docker volume inspect polyemesis-data >/dev/null 2>&1 || {
   docker volume ls >&2
   exit 1
 }
+
+# STOP BEFORE ARCHIVING. tar of a live WAL database reads the main file, the
+# -wal and the -shm at three different instants, so the archive can hold a torn
+# transaction and is not guaranteed to open -- and it is the ONLY way back,
+# because migrations run forward only. The container has to stop for the
+# upgrade anyway, so stopping here costs the same downtime and makes the
+# archive consistent.
+#
+# \`stop\`, not \`down\`: down removes the container, and the operator may want it
+# back untouched if the checks below refuse the upgrade.
+echo "stopping the container so the archive is consistent"
+\$COMPOSE_CMD stop
 
 docker run --rm -v polyemesis-data:/data -v "$INSTALL_DIR:/backup" alpine \\
   tar czf "/backup/backup-\${stamp}.tar.gz" -C /data .
@@ -1925,10 +2156,30 @@ if ! grep -q "secret\.key" <<<"\$listing"; then
   echo "every destination disabled. Refusing to upgrade." >&2
   exit 1
 fi
-echo "backup verified: \${entries} entries"
-$COMPOSE_CMD pull
-$COMPOSE_CMD up -d
-echo "updated. Watch the first minute: $COMPOSE_CMD logs -f"
+# ENTRIES AND A FILENAME ARE NOT "IT OPENS". The checks above say the archive
+# is non-empty and names secret.key; neither can say the database inside will
+# open. Unpack it somewhere disposable and ask the image's own binary, which
+# carries the same SQLite driver the server runs on. It opens the file, walks
+# it and reads the schema; it runs no migration, because migrating the backup
+# would move the copy forward to the schema being kept a way back from. #643.
+echo "checking the backup opens..."
+verify_dir="\$(mktemp -d)"
+trap 'rm -rf "\$verify_dir"' EXIT
+if ! tar xzf "\$dest" -C "\$verify_dir"; then
+  echo "ERROR: the backup archive will not unpack. Refusing to upgrade." >&2
+  exit 1
+fi
+if ! docker run --rm -v "\$verify_dir:/backup:ro" "$IMAGE" -verify-backup /backup; then
+  echo "ERROR: the backup at \$dest is not usable. Refusing to upgrade." >&2
+  echo "The container is still stopped; bring it back with:" >&2
+  echo "    \$COMPOSE_CMD start" >&2
+  exit 1
+fi
+
+echo "backup verified: \${entries} entries, and the database opens"
+\$COMPOSE_CMD pull
+\$COMPOSE_CMD up -d
+echo "updated. Watch the first minute: \$COMPOSE_CMD logs -f"
 EOF
   chmod +x "$INSTALL_DIR/update.sh"
 
@@ -1936,6 +2187,17 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$INSTALL_DIR"
+
+# Baked in as data and referenced at run time -- see the same note in update.sh.
+# Spliced at generation time, an empty value left this file with the bare line
+# \`down --remove-orphans\`, on the script whose whole job is to remove things.
+COMPOSE_CMD="$COMPOSE_CMD"
+if [ -z "\$COMPOSE_CMD" ]; then
+  echo "ERROR: this uninstall.sh was generated without a compose command." >&2
+  echo "It cannot tell whether anything is on air, let alone stop it safely." >&2
+  echo "Remove the container by hand, or re-run install.sh to regenerate this script." >&2
+  exit 1
+fi
 
 REMOVE_DATA=false
 FORCE=false
@@ -1959,7 +2221,7 @@ done
 # mistaken for this install's broadcast.
 publishing_now() {
 	local out
-	out=\$($COMPOSE_CMD top 2>/dev/null || true)
+	out=\$(\$COMPOSE_CMD top 2>/dev/null || true)
 	case "\$out" in
 		*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
 			echo "\$out" | grep -E 'ffmpeg.*(rtmp|srt):' | head -3 >&2
@@ -1986,7 +2248,7 @@ if [ "\$FORCE" != true ]; then
 	[ "\$reply" = "remove" ] || { echo "Not confirmed; nothing was changed." >&2; exit 1; }
 fi
 
-$COMPOSE_CMD down --remove-orphans
+\$COMPOSE_CMD down --remove-orphans
 echo
 echo "Stopped and removed the container."
 
@@ -2010,6 +2272,32 @@ EOF
 
 verify() {
   local scheme="http" url deadline
+
+  # ACME CANNOT BE PROBED ON 127.0.0.1, AND TRYING TO UNINSTALLED THE SERVER.
+  #
+  # This asked https://127.0.0.1:PORT/health with -k in every mode. In acme
+  # mode that connection carries no SNI, and internal/tlsx's acme path sets
+  # only conf.GetCertificate -- there is no conf.Certificates fallback the way
+  # selfsigned has, whose leaf carries 127.0.0.1 in its SANs. autocert has no
+  # name to look up, so the handshake aborts before any HTTP happens, and -k
+  # cannot help: -k skips VERIFYING a certificate, it cannot invent one.
+  # hostPolicy would refuse the bare IP even if SNI were sent, and on a fresh
+  # install no certificate has been issued yet regardless.
+  #
+  # verify() returning 1 made the caller exit non-zero BEFORE INSTALL_COMPLETE
+  # was set, so the EXIT trap tore down a server that was working: unit
+  # disabled, binary removed, /etc/polyemesis and /opt/polyemesis deleted,
+  # service account dropped -- then it printed "nothing was left running".
+  #
+  # So in acme mode, ask the question that HAS an answer on loopback: the
+  # redirect listener on :80, which acme mode binds for the challenge. A
+  # response of any status proves the server is up, which is all this check
+  # was ever for. #642.
+  if [ "$TLS_MODE" = acme ]; then
+    verify_acme_redirect
+    return $?
+  fi
+
   [ "$TLS_MODE" = "off" ] || scheme="https"
   url="${scheme}://127.0.0.1:${HTTP_PORT}/api/v1/health"
 
@@ -2026,6 +2314,34 @@ verify() {
   done
 
   err "the server did not answer within 60s."
+  if [ "$MODE" = docker ]; then
+    echo "     logs: cd $INSTALL_DIR && $COMPOSE_CMD logs --tail 50"
+  else
+    echo "     logs: journalctl -u $SERVICE_NAME -n 50 --no-pager"
+  fi
+  return 1
+}
+
+# verify_acme_redirect proves the server is up without needing a certificate.
+#
+# acme mode binds :80 for the ACME challenge and to redirect browsers, so a
+# plain HTTP request there is answered by polyemesis itself. Any status counts:
+# a 301 to https is the redirect doing its job, and this is a liveness check,
+# not an authorization one.
+verify_acme_redirect() {
+  local deadline code
+  info "waiting for the server to answer on :80 (acme mode; loopback TLS has no certificate yet)"
+  deadline=$(( $(date +%s) + 60 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:80/" 2>/dev/null || true)"
+    if [ -n "$code" ] && [ "$code" != "000" ]; then
+      ok "server is up (:80 answered $code)"
+      return 0
+    fi
+    sleep 2
+  done
+
+  err "the server did not answer on :80 within 60s."
   if [ "$MODE" = docker ]; then
     echo "     logs: cd $INSTALL_DIR && $COMPOSE_CMD logs --tail 50"
   else

@@ -45,8 +45,12 @@ import { SecretInput } from "@/components/SecretInput";
 import { PullIngestFields } from "@/components/PullIngestFields";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
-import { useT, type Translator, type TranslationKey } from "@/lib/i18n";
+import { useT, type TranslationKey } from "@/lib/i18n";
 import { InfoHint } from "@/components/InfoHint";
+import { SecretCode } from "@/components/SecretCode";
+import { useLiveData } from "@/hooks/useLiveData";
+import { copyToClipboard as copy } from "@/lib/clipboard";
+import { urlCarriesCredential } from "@/lib/credential-url";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
 import { publishRows } from "@/lib/publish-url";
@@ -68,15 +72,10 @@ import type { Source, SourceId, SourceView } from "@/lib/types";
    let an operator believe rotating a token protected something.
    =========================================================================== */
 
-function copy(t: Translator, text: string, what: string) {
-  void navigator.clipboard
-    ?.writeText(text)
-    .then(() => toast.success(t("sources.copied", { what })))
-    .catch(() => toast.error(t("sources.copyFailed", { what: what.toLowerCase() })));
-}
 
 export function SourcesPage() {
   const t = useT();
+  const { refreshSources } = useLiveData();
   const [sources, setSources] = useState<SourceView[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -114,6 +113,10 @@ export function SourcesPage() {
       setNewName("");
       toast.success(t("sources.added", { name }));
       await load();
+      // The console follows ONE programme, resolved from /sources. Adding a
+      // source changes that answer -- on a first-run install it changes it
+      // from "none" to this one -- and nothing else re-asks. #646.
+      await refreshSources();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("sources.addFailed"));
     }
@@ -179,6 +182,10 @@ export function SourcesPage() {
       toast.success(t(wasOnly ? "sources.deletedLast" : "sources.deleted", { name: deleting.name }));
       setDeleting(null);
       await load();
+      // Deleting the programme the console is following leaves every other
+      // page pointed at a source that no longer exists, rendering plausible
+      // idle states against a healthy server. #646.
+      await refreshSources();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("sources.deleteFailed"));
     } finally {
@@ -511,9 +518,8 @@ export function SourceCard({
                   {t("sources.passphrase")}
                   <InfoHint body="sources.help.passphrase" title="sources.passphrase" />
                 </Label>
-                <Input
+                <SecretInput
                   className="h-7 text-[11px]"
-                  type="password"
                   value={ing.srt.passphrase}
                   placeholder={t("sources.passphrasePlaceholder")}
                   onChange={(e) => setIngest({ srt: { ...ing.srt, passphrase: e.target.value } })}
@@ -601,9 +607,22 @@ export function SourceCard({
               <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
                 {proto}
               </span>
-              <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-[10px]">
-                {url}
-              </code>
+              {/* Gated on what the string CARRIES, not on the row's label.
+                  In RTMP mode the token is split out as the streamKey row and
+                  the address beside it is a plain host, which stays readable:
+                  an operator checks it at a glance, and masking it would train
+                  them to hit reveal on everything. In SRT mode there is no
+                  split -- publishURLs in internal/api/sources.go welds
+                  passphrase and streamid INTO the srt row -- and a version of
+                  this that keyed on the label alone printed both in plain text
+                  on every SRT install. */}
+              {proto === "streamKey" || urlCarriesCredential(url) ? (
+                <SecretCode value={url} />
+              ) : (
+                <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-[10px]">
+                  {url}
+                </code>
+              )}
               <Button
                 size="icon"
                 variant="ghost"
@@ -638,9 +657,7 @@ export function SourceCard({
             <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
               {t("sources.token")}
             </span>
-            <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-[10px]">
-              {source.token}
-            </code>
+            <SecretCode value={source.token} />
             <Button
               size="icon"
               variant="ghost"

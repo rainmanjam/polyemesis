@@ -1,4 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { urlCarriesCredential } from "@/lib/credential-url";
+import { SecretCode } from "@/components/SecretCode";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -832,7 +834,7 @@ function SideColumn({ stacked, children }: { stacked: boolean; children: ReactNo
 export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
-  const { status, bitrate } = useLiveData();
+  const { status, bitrate, snapshotKnown } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
   /* The failover settings, for the exposure line above the destinations. Null
@@ -1338,9 +1340,13 @@ export function Dashboard() {
 
               <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
                 <Radio className="h-3 w-3 shrink-0 text-muted-foreground" />
-                <code className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
-                  {system?.ingestUrl ?? "…"}
-                </code>
+                {urlCarriesCredential(system?.ingestUrl ?? "") ? (
+                  <SecretCode value={system?.ingestUrl ?? ""} />
+                ) : (
+                  <code className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
+                    {system?.ingestUrl ?? "…"}
+                  </code>
+                )}
                 <Button variant="ghost" size="icon-sm" onClick={copyIngest} aria-label={t("dash.copyIngestUrl")}>
                   <Copy />
                 </Button>
@@ -1412,7 +1418,10 @@ export function Dashboard() {
               <div className="mt-1 flex items-center justify-between border-t border-border pt-1.5">
                 <span className="text-[11px] text-muted-foreground">{t("dash.relaySubscribers")}</span>
                 <span className="tnum font-mono text-[10px]">
-                  {status?.relay.subscribers?.length ?? 0}
+                  {/* Not `?? 0`: before the first snapshot there is no
+                      subscriber count, and zero subscribers is a meaningful,
+                      alarming number to show someone who is broadcasting. #663. */}
+                  {snapshotKnown ? (status?.relay.subscribers?.length ?? 0) : "—"}
                 </span>
               </div>
 
@@ -1501,7 +1510,21 @@ export function Dashboard() {
             construction: a held pass plans no destination at all. */}
         <DestinationHoldNote hold={status?.destinationHold} />
 
-        {destinations.length === 0 ? (
+        {/* snapshotKnown, not `destinations.length === 0` alone. Before the
+            first snapshot arrives the list is empty because nothing has been
+            said yet, and this card states the opposite: that the install HAS
+            no destinations, with a button to add one. An operator refreshing
+            during a slow connect saw that page, then saw the hold note replace
+            it -- two different answers to "what is configured here" seconds
+            apart. Waiting is the honest render; it is a fact we do not have
+            yet, not a fact that is empty. #663. */}
+        {!snapshotKnown ? (
+          <Card>
+            <CardContent className="py-8 text-center">
+              <p className="text-[12px] text-muted-foreground">{t("dash.loadingDestinations")}</p>
+            </CardContent>
+          </Card>
+        ) : destinations.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
               <p className="text-[12px] text-muted-foreground">
@@ -1573,7 +1596,7 @@ export function Dashboard() {
                 </section>
               ))
             ) : (
-              <div className="dense-grid grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {destinations.map((d, i) => renderDestination(d, i))}
               </div>
             )}
@@ -1584,7 +1607,7 @@ export function Dashboard() {
                  still be running, and this is the only screen that lists it. */
               <section className="flex flex-col gap-2">
                 <p className="text-[11px] text-warn">{t("dash.destOrphaned")}</p>
-                <div className="dense-grid grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {lanes.orphans.map((d) => renderDestination(d, destinations.indexOf(d)))}
                 </div>
               </section>

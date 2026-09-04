@@ -505,6 +505,19 @@ func (e *Engine) Status() Status {
 			if row.KeyUnreadable != "" {
 				ds.Warnings = append(slices.Clip(ds.Warnings), row.KeyUnreadable)
 			}
+			// Same Clip discipline as above, and for the same reason: ds.Warnings
+			// may still be routing's shared compiled slice.
+			//
+			// source.Video, NOT e.videoInfo. The lock this function takes is
+			// released ~150 lines above, so reading the engine field here would
+			// be an unsynchronised read of something commitProbe writes under
+			// e.mu -- a data race, and the race detector said so. `source` is
+			// the snapshot taken inside that lock, which is also the coherent
+			// one: the warning then describes the same instant as the rest of
+			// the payload rather than a codec from a later probe.
+			if w := passthroughCodecWarning(row.Kind, row.Platform, row.RenditionID, source.Video); w != "" {
+				ds.Warnings = append(slices.Clip(ds.Warnings), w)
+			}
 			st.Destinations = append(st.Destinations, ds)
 		}
 	}

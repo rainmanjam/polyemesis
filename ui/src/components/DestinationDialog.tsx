@@ -15,6 +15,7 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/SecretInput";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -60,6 +61,7 @@ import type {
   ServiceInfo,
   RenditionView,
   SourceView,
+  RenditionConcern,
 } from "@/lib/types";
 
 /** The transport a preset's ingest is reached over. Finer-grained than DestKind
@@ -667,6 +669,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // picking an encode starts a new one or joins a running one. That fact is
   // the entire argument for renditions existing, and the UI could not state it.
   const [renditions, setRenditions] = useState<RenditionView[]>([]);
+  /** #661: how the chosen rendition sits against the chosen platform's published
+   *  figures. Fetched rather than computed — the comparison reads researched,
+   *  dated numbers out of internal/db/platforms.go, and a second copy here would
+   *  drift from that file exactly as the marketing site's hand-copied figures
+   *  once did. */
+  const [concerns, setConcerns] = useState<RenditionConcern[]>([]);
   const [sources, setSources] = useState<SourceView[]>([]);
   // Which programme this destination carries. A string because that is what the
   // Select speaks; "" means nobody has chosen yet, which is a state the save
@@ -838,6 +846,40 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     [renditions, renditionId],
   );
   const selectedRendition = selectedView?.rendition ?? null;
+
+  /** Ask on every change of EITHER half. The pair is what is being judged, so a
+   *  platform switch with the rendition unchanged has to re-ask — that is the
+   *  case the whole warning exists for, an operator moving a working encode to
+   *  a destination that will not take it.
+   *
+   *  A failed request clears rather than keeps: a stale concern shown against a
+   *  platform the operator has already moved away from is worse than silence,
+   *  because it is confidently about the wrong thing. */
+  // Keyed on the ID and the platform, not on the rendition OBJECT. selectedView
+  // is a useMemo over a list this dialog refetches, so the object's identity
+  // changes on reloads that changed nothing -- which both refetches for no
+  // reason and, worse, hides whether `platform` is really a dependency at all.
+  // Mutation-tested: with the object in the deps, deleting `platform` from them
+  // broke no test, because identity churn was doing the work by accident.
+  const concernRenditionId = selectedRendition?.id ?? 0;
+  useEffect(() => {
+    if (!concernRenditionId) {
+      setConcerns([]);
+      return;
+    }
+    let live = true;
+    api
+      .renditionConcerns(concernRenditionId, platform)
+      .then((c) => {
+        if (live) setConcerns(c ?? []);
+      })
+      .catch(() => {
+        if (live) setConcerns([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [concernRenditionId, platform]);
 
   /** What the encode this destination is LEAVING will do once it has gone.
    *
@@ -1367,9 +1409,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           {kind === "rtmp" && (
             <div className="flex flex-col gap-1">
               <Label htmlFor="dest-key">{t("dest.streamKeyLabel")}</Label>
-              <Input
+              <SecretInput
                 id="dest-key"
-                type="password"
                 value={streamKey}
                 onChange={(e) => setStreamKey(e.target.value)}
                 className="font-mono"
@@ -1501,6 +1542,39 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 )}
                 {selectedRendition?.note && (
                   <span className="text-[10px] text-muted-foreground">{selectedRendition.note}</span>
+                )}
+
+                {/* #661. The catalogue knew this all along and nothing read it
+                    at the moment a figure is chosen; the only caller logged at
+                    stream start, after the operator had committed.
+
+                    Not a block on saving, deliberately. The catalogue is a
+                    snapshot of someone else's documentation and can be the stale
+                    half — X's own two pages disagree materially — so the source
+                    and the date it was checked are shown WITH the objection, and
+                    an operator who knows better can proceed. */}
+                {concerns.length > 0 && (
+                  <div
+                    data-testid="rendition-concerns"
+                    className="flex flex-col gap-1 rounded-md border border-warn/40 bg-warn/10 px-2 py-1.5"
+                  >
+                    <span className="text-[10px] font-medium text-warn">
+                      {t("dest.renditionConcerns")}
+                    </span>
+                    {concerns.map((c) => (
+                      <span key={c.field} className="text-[10px] text-muted-foreground">
+                        {c.detail}{" "}
+                        <a
+                          href={c.source}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="underline underline-offset-2"
+                        >
+                          {c.checked}
+                        </a>
+                      </span>
+                    ))}
+                  </div>
                 )}
 
                 {/* Advanced: make a variant.

@@ -39,16 +39,12 @@ const dialTimeout = 10 * time.Second
 // back for anything malformed -- reads as non-public, so a caller that passes
 // ParseIP's result straight through fails closed.
 func IsPublicAddr(ip net.IP) bool {
-	if ip == nil {
+	// Host-local is the strictest half of the same list, so it is asked first
+	// and it is the half that handles nil.
+	if IsHostLocalAddr(ip) {
 		return false
 	}
-	switch {
-	case ip.IsLoopback(),
-		ip.IsLinkLocalUnicast(),
-		ip.IsLinkLocalMulticast(),
-		ip.IsPrivate(),
-		ip.IsUnspecified(),
-		ip.IsMulticast():
+	if ip.IsPrivate() {
 		return false
 	}
 	// net.IP.IsPrivate is RFC1918 and IPv6 ULA and NOTHING ELSE, which leaves
@@ -63,6 +59,41 @@ func IsPublicAddr(ip net.IP) bool {
 		}
 	}
 	return true
+}
+
+// IsHostLocalAddr reports whether ip names the machine polyemesis itself is
+// running on, or the link it is attached to: loopback, the unspecified address,
+// multicast, and link-local -- which is where 169.254.169.254, the cloud
+// instance metadata service, lives.
+//
+// IT IS A SEPARATE, SMALLER LIST THAN IsPublicAddr BECAUSE ONE CALLER CANNOT
+// USE THE WHOLE ONE. A webhook has no business reaching any non-public address,
+// so it gets IsPublicAddr and the RFC1918 refusal that comes with it. A pull
+// INGEST is not the same question: an RTSP camera on 192.168.1.50 is the
+// ordinary, intended case, and refusing RFC1918 there would delete the feature
+// rather than guard it. What a pull source must never be allowed to reach is
+// the host itself -- polyemesis's own admin API on 127.0.0.1, the loopback RTMP
+// listener a stream key is the credential for -- and the metadata endpoint that
+// hands out cloud credentials to anything that asks.
+//
+// It lives HERE, beside IsPublicAddr, rather than in internal/ffmpeg where its
+// caller is, for the reason this package's doc comment gives: a second address
+// list somewhere else is the one that never learns about the next range.
+// IsPublicAddr is defined in terms of it, so the two cannot disagree about
+// loopback or about link-local.
+//
+// A nil ip -- what net.ParseIP returns for anything malformed -- reads as
+// host-local, so a caller that passes ParseIP's result straight through fails
+// closed.
+func IsHostLocalAddr(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsLoopback() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() ||
+		ip.IsMulticast()
 }
 
 // nonPublicRanges are reachable-but-not-globally-routable networks that

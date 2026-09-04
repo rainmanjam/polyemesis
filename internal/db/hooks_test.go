@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -149,5 +150,94 @@ func TestHookValidationRunsOnWrite(t *testing.T) {
 	bad.URL = "ftp://example.com/x"
 	if _, _, err := d.CreateHook(box, bad); err == nil {
 		t.Fatal("CreateHook accepted an ftp endpoint")
+	}
+}
+
+// DELETING A HOOK, AND SAYING SO WHEN THERE WAS NOTHING TO DELETE.
+//
+// DeleteHook was at 0% coverage while every other operation on the table was
+// tested. Both halves matter to a caller: the row has to actually go, and an id
+// that names nothing has to come back as ErrNotFound rather than as success --
+// the API turns that distinction into 404 versus 204, and an operator who
+// deletes a hook twice should be told the second one was not there rather than
+// believing they removed a delivery that is still firing.
+func TestDeletingAHookRemovesItAndSaysSoWhenThereWasNothingToRemove(t *testing.T) {
+	d := testDB(t)
+	box := testBox(t)
+
+	created, _, err := d.CreateHook(box, validHook())
+	if err != nil {
+		t.Fatalf("CreateHook: %v", err)
+	}
+	if err := d.DeleteHook(created.ID); err != nil {
+		t.Fatalf("DeleteHook: %v", err)
+	}
+	if _, err := d.GetHook(box, created.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("after delete, GetHook = %v, want ErrNotFound -- the row is still there", err)
+	}
+
+	// The same id again. A delete that reports success for a row it did not
+	// touch tells an operator a delivery has stopped when it has not.
+	if err := d.DeleteHook(created.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleting a hook twice returned %v, want ErrNotFound", err)
+	}
+	if err := d.DeleteHook(999999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleting an id that never existed returned %v, want ErrNotFound", err)
+	}
+}
+
+// AN UPDATE THAT COLLIDES WITH ANOTHER HOOK'S NAME IS REFUSED, FOLDED.
+//
+// UpdateHook checks this in Go rather than with a UNIQUE index, deliberately:
+// the comparison is case- and space-folded, because "Disk " and "disk" are
+// indistinguishable on screen and that is the whole harm, while SQLite's NOCASE
+// collation is ASCII-only. A test that only tried an exact duplicate would pass
+// against a plain unique index and prove nothing about the folding.
+func TestRenamingAHookOntoAnothersNameIsRefusedEvenWhenOnlyCaseOrSpaceDiffers(t *testing.T) {
+	d := testDB(t)
+	box := testBox(t)
+
+	first, _, err := d.CreateHook(box, validHook())
+	if err != nil {
+		t.Fatalf("CreateHook: %v", err)
+	}
+	second := validHook()
+	second.Name = "alerts"
+	created, _, err := d.CreateHook(box, second)
+	if err != nil {
+		t.Fatalf("CreateHook second: %v", err)
+	}
+
+	for _, name := range []string{first.Name, strings.ToUpper(first.Name), " " + first.Name + " "} {
+		attempt := validHook()
+		attempt.ID = created.ID
+		attempt.Name = name
+		if _, err := d.UpdateHook(box, attempt); err == nil {
+			t.Errorf("renaming to %q was allowed; the list is the only thing telling two "+
+				"hooks apart, and the one an operator disables may not be the one that "+
+				"has been firing", name)
+		}
+	}
+
+	// And its own name is not a collision with itself.
+	keep := validHook()
+	keep.ID = created.ID
+	keep.Name = second.Name
+	if _, err := d.UpdateHook(box, keep); err != nil {
+		t.Fatalf("a hook could not keep its own name: %v", err)
+	}
+}
+
+// UPDATING A HOOK THAT IS NOT THERE IS ErrNotFound, NOT A SILENT NO-OP.
+func TestUpdatingAHookThatDoesNotExistIsNotFound(t *testing.T) {
+	d := testDB(t)
+	box := testBox(t)
+
+	h := validHook()
+	h.ID = 4242
+	if _, err := d.UpdateHook(box, h); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateHook on a missing row = %v, want ErrNotFound. A caller told "+
+			"the update succeeded believes a delivery was reconfigured when nothing "+
+			"was written.", err)
 	}
 }

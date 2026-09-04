@@ -48,8 +48,14 @@ concurrency:
   group: ci-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+# LEAST PRIVILEGE, PER JOB. This was `contents: read` at the workflow level,
+# which grants it to every job whether or not the job reads the repository --
+# Sonar's githubactions:S8264. `{}` here means a job that declares nothing gets
+# NOTHING, so a new job cannot inherit a token by being added; it has to ask.
+# Each job below states what it needs, and `contents: read` is all any of them
+# needs: nothing in this file writes to the repository, opens an issue, or
+# pushes a package.
+permissions: {}
 
 jobs:
   # Does this pull request contain anything any suite in here could break?
@@ -112,6 +118,8 @@ jobs:
   # gives about itself: a change to how the suites run must run the suites.
   changes:
     name: which changes
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -146,14 +154,41 @@ jobs:
 
   go:
     name: go build, vet, test
+    permissions:
+      contents: read
     # The documentation gate, #378. On every STEP below, never on this job --
     # see the `changes` job for why that distinction is load-bearing and for
     # what it cost the one time it was got wrong.
     needs: changes
     runs-on: ubuntu-latest
-    # Above the 15m per-package go test timeout below, so Go's diagnostic
-    # panic wins the race against this.
-    timeout-minutes: 25
+    # THE COMPARISON IS AGAINST START-OF-STEP, NOT START-OF-JOB, AND THAT IS
+    # WHAT WAS WRONG HERE.
+    #
+    # The intent has always been right: keep this ceiling above the `go test
+    # -timeout` below, so a hung test dies by Go's clock and leaves a goroutine
+    # dump rather than by GitHub's, which leaves a bare "cancelled" and nothing
+    # to read. What the old value compared was 25 against 20 and called it five
+    # minutes of headroom.
+    #
+    # It is not, because `go test` does not start when the job does. gofmt,
+    # build, vet, the Windows vet, the route-coverage preflight and the
+    # internal/api coverage run first and take between six and seven minutes.
+    # So the test step had 25 - 6.5 = 18.5 minutes of wall clock to spend
+    # against its own 20-minute deadline: THIS ceiling always fired first, the
+    # diagnostic could never be produced, and the invariant the comment
+    # asserted had been false for as long as the preflights existed.
+    #
+    # Observed rather than theorised: three runs on 2026-09-01 died at 25m16s,
+    # 25m17s and 25m20s. The suite is not flaky, it is over budget -- the job
+    # sat on its ceiling and a few seconds of runner variance decided each one.
+    #
+    # So the value is now derived rather than picked: the steps before the test
+    # (~7m) plus the test's own deadline (20m) plus headroom for the runner to
+    # act on it (~8m). Raise it by the same arithmetic when a preflight is added
+    # -- and note the instruction below still stands, that raising `-timeout`
+    # itself means splitting the package first. ci-timeout_test.go fails if this
+    # number ever drops back under the sum.
+    timeout-minutes: 35
     env:
       # #187. The comment below the checkout has said since the beginning that a
       # missing FFmpeg makes those tests SKIP, "which is worse, because the run
@@ -172,10 +207,56 @@ jobs:
     steps:
       # Says out loud why a green check did no work, so a reader of the
       # checks list is never left guessing whether this ran or no-opped.
-      - name: Documentation-only change, so this job did no work
+      # THE DOCS-ONLY PATH IS NOT A NO-OP ANY MORE, AND THAT WAS A REAL HOLE.
+      #
+      # The guards that check documentation against code are Go tests --
+      # internal/oauth/platforms_doc_drift_test.go reads docs/PLATFORMS.md,
+      # internal/api/api_docs_route_table_test.go reads docs/API.md, and so on.
+      # Every Go step below is gated on `code == 'true'`, so the ONE class of
+      # pull request that can drift the docs was the one class on which the
+      # drift guards never ran. That is how docs/UPGRADING.md came to tell an
+      # operator mid-migration that a CI-tested feature does not work, and how
+      # docs/MODULES.md came to name a base image and a Go version that no
+      # Dockerfile uses. #651.
+      #
+      # These tests read markdown and compare it to Go declarations. They need
+      # no ffmpeg, no database and no network, so they cost seconds -- which is
+      # why the docs-only path can afford to run them and could never afford
+      # the full suite.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.code != 'true'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        if: needs.changes.outputs.code != 'true'
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Documentation-only change, so only the doc-drift guards ran
         if: needs.changes.outputs.code != 'true'
         run: |
-          echo "::notice title=go build, vet, test::this check did no work -- every changed path was documentation. See the 'which changes' job."
+          set -euo pipefail
+
+          # Discovered, not listed. A hardcoded package list is a second thing
+          # to keep in step with the tests, and the failure mode of letting it
+          # fall behind is silence -- exactly the shape of the bug this step
+          # exists to close. internal/testenv/docdrift_packages_test.go asserts
+          # this grep and the one it runs stay the same.
+          pkgs="$(grep -rlE 'docs/[A-Z][A-Za-z-]*\.md' --include='*_test.go' internal \
+                  | xargs -n1 dirname | sort -u | sed 's|^|./|' | tr '\n' ' ')"
+          echo "doc-drift packages: ${pkgs}"
+          if [ -z "${pkgs// /}" ]; then
+            echo "::error::found no test package reading docs/*.md; the discovery grep has gone stale and this check would pass having run nothing"
+            exit 1
+          fi
+
+          # -run matching NOTHING exits 0, so counting what actually ran is the
+          # difference between a check and a green tick.
+          go test ${pkgs} -run 'Doc|Drift|Documented|Matches|Agrees|Restate' -v 2>&1 | tee /tmp/drift.log
+          ran="$(grep -c '^=== RUN' /tmp/drift.log || true)"
+          echo "doc-drift tests executed: ${ran}"
+          if [ "${ran:-0}" -lt 5 ]; then
+            echo "::error::only ${ran} doc-drift tests ran; the -run pattern no longer matches the guards, so this check is passing by finding nothing"
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.code == 'true'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -342,6 +423,36 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: GOOS=windows go vet ./...
 
+      # EVERY SHELL SCRIPT PARSES, which was true of none of them as far as CI
+      # was concerned.
+      #
+      # This repository has 44 files under scripts/*.sh and 25 of them are
+      # acceptance suites that run only in the acceptance matrix, on dispatch,
+      # or not at all. scripts/acceptance-multistream.sh is the extreme case:
+      # 70 KB, run NOWHERE in CI by deliberate decision (docs/TESTING.md
+      # explains it -- with credentials it publishes to a real account), and yet
+      # three Go tests cite its behaviour as the thing they are keeping in step
+      # with. A syntax error in it would have been found by whoever next ran it
+      # by hand, which is a schedule nobody controls.
+      #
+      # `bash -n` is the cheapest possible half of that: it parses without
+      # executing, so it needs no FFmpeg, no ports, no credentials and no
+      # network, and the whole directory finishes in well under a second. It
+      # cannot tell you the script is CORRECT -- only that it is not garbage --
+      # and that is exactly the class of breakage an unrun script accumulates,
+      # because nothing else looks at it at all.
+      #
+      # release.yml already did this for two scripts by name. Naming scripts is
+      # how you end up covering the two somebody remembered; the glob covers the
+      # ones nobody did.
+      #
+      # `make sh-syntax` rather than an inline loop, so `make check` runs the
+      # same thing -- see internal/testenv/checkparity_invocation_test.go.
+      - name: Every shell script parses
+        if: needs.changes.outputs.code == 'true'
+        timeout-minutes: 2
+        run: make sh-syntax
+
       # THE PREFLIGHT'S OWN LIVENESS, and it runs HERE because it was not
       # running anywhere.
       #
@@ -391,7 +502,7 @@ jobs:
       # 14 rather than something tighter, so the ordering the file argues for
       # everywhere else holds: three probes at -timeout 4m is 12m of worst case,
       # and Go has to be able to win that race and print the goroutine dump
-      # before this fires. Below the job's 25 either way, which is the property
+      # before this fires. Below the job's 35 either way, which is the property
       # being claimed.
       - name: internal/api coverage measures the tests, not the preflight
         if: needs.changes.outputs.code == 'true'
@@ -423,7 +534,7 @@ jobs:
         #
         # internal/api hit the 15m wall on 2026-08-16 and reported 900.034s. The
         # panic named the test that was running, which is exactly why Go's
-        # timeout is kept below this job's timeout-minutes: 25, and it read
+        # timeout is kept below this job's timeout-minutes: 35, and it read
         #
         #     running tests:
         #       TestAMutationReconcilesEveryProgrammeRatherThanTheDefault (0s)
@@ -439,7 +550,7 @@ jobs:
         # is the part that should have been unnecessary; this is the part that
         # was overdue.
         #
-        # Still five minutes below the job's own timeout, so Go keeps its
+        # Still fifteen minutes below the job's own timeout, so Go keeps its
         # goroutine dump. If this needs raising again, split the package first.
         run: POLYEMESIS_LEDGER=strict go test -race -timeout 20m ./...
 
@@ -458,7 +569,7 @@ jobs:
       # :327-334 and :393-396 give for the two smoke steps: a job timeout names
       # nothing, a step timeout names the step. Each of these four runs a shell
       # harness that starts and kills processes, so each can hang exactly the way
-      # #179 hung, and behind this job's timeout-minutes: 25 a hang here costs 25
+      # #179 hung, and behind this job's timeout-minutes: 35 a hang here costs 35
       # minutes and reports "the job was cancelled".
       #
       # HONEST ABOUT THE NUMBERS: only one of the four has a measurement --
@@ -467,7 +578,7 @@ jobs:
       # teardown harnesses on a shared developer machine kills processes
       # belonging to whatever else is running on it. So these are blast-radius
       # ceilings, not fitted bounds: sized to be unreachable by a healthy run and
-      # far below the job's 25, which is the only property being claimed.
+      # far below the job's 35, which is the only property being claimed.
       - if: needs.changes.outputs.code == 'true'
         run: ./scripts/test-lib-observe.sh
         timeout-minutes: 6
@@ -590,6 +701,8 @@ jobs:
   # platforms.
   crossplatform:
     name: "test: ${{ matrix.os }}"
+    permissions:
+      contents: read
     # The documentation gate, #378. On every STEP below, never on this job --
     # see the `changes` job for why that distinction is load-bearing and for
     # what it cost the one time it was got wrong.
@@ -1548,6 +1661,8 @@ jobs:
 
   ui:
     name: ui typecheck, lint, build
+    permissions:
+      contents: read
     # The documentation gate, #378. On every STEP below, never on this job --
     # see the `changes` job for why that distinction is load-bearing and for
     # what it cost the one time it was got wrong.
@@ -1591,11 +1706,136 @@ jobs:
       # A vulnerable direct dependency should fail the build, not sit in a
       # report nobody opens. --audit-level=high so a low-severity transitive
       # advisory does not block a hotfix.
+      # THE ADVISORY SOURCE THAT ANSWERS -- see the long note on the matching
+      # job in security.yml. Briefly: `npm audit` POSTs the tree to npm's bulk
+      # advisories endpoint, which returned 503 for hours on 2026-09-04 while
+      # npm's status page called it operational. osv-scanner reads OSV.dev and
+      # answers in a second from the lockfile alone, with no install and no
+      # registry round trip.
+      #
+      # The positive control lives in security.yml, which owns dependency
+      # auditing for BOTH projects. This step exists because ui/ is built here
+      # and a build that ships known-vulnerable dependencies should fail where
+      # the build is, not only in another workflow.
       - if: needs.changes.outputs.code == 'true'
-        run: npm audit --audit-level=high
+        name: npm audit (ui)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -uo pipefail
+          curl -sSfL --proto '=https' --tlsv1.2 --retry 3 --retry-all-errors \
+            --retry-delay 5 --max-time 120 -o /tmp/osv-scanner \
+            "https://github.com/google/osv-scanner/releases/download/v2.5.1/osv-scanner_linux_amd64"
+          echo "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be  /tmp/osv-scanner" | sha256sum -c -
+          chmod +x /tmp/osv-scanner
+          out=$(/tmp/osv-scanner scan source --lockfile ui/package-lock.json 2>&1); rc=$?
+          printf '%s\n' "$out"
+          # osv-scanner exits 0 on a path it cannot resolve, so a typo would
+          # otherwise pass as a clean audit. The count is read back.
+          if ! printf '%s' "$out" | grep -qE 'Scanned .*package-lock\.json file and found [1-9][0-9]* packages'; then
+            echo "::error title=Nothing was scanned::osv-scanner did not report reading ui/package-lock.json with packages in it."
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Vulnerable dependencies::osv-scanner found known vulnerabilities in ui. The advisories and their fixed versions are listed above."
+            exit 1
+          fi
+
+  # THE WORKFLOWS THEMSELVES WERE NEVER CHECKED.
+  #
+  # An invalid workflow file does not fail a job -- it prevents the job from
+  # existing. Run 33791030925 produced ZERO jobs and the entire report was
+  # "This run likely failed because of a workflow file issue", with no line, no
+  # file and no message. The cause was one pair of expression delimiters written
+  # inside a `run:` block, in a shell COMMENT, by a comment that was explaining
+  # why not to use them: Actions expands that syntax anywhere in a run block, an
+  # empty pair is a parse error, and GitHub then refuses the file whole.
+  #
+  # Nothing in this repository ran actionlint, so the first and only signal was a
+  # push that silently produced nothing. That is the same defect this branch is
+  # fixing one workflow at a time -- a red verdict that will not say what it
+  # caught -- and it belongs at the Control rung: a workflow that cannot parse
+  # should not be mergeable.
+  #
+  # Deliberately NOT gated on the `changes` job. Workflow files are exactly what
+  # this checks, a documentation-only pull request can still edit one, and the
+  # job costs about fifteen seconds. Gating it would reintroduce the hole for the
+  # one change most likely to fall into it.
+  #
+  # A pinned release binary rather than a third-party action: the version and its
+  # checksum are visible in the diff, and it adds no action to review for
+  # supply-chain risk. This comment used to describe a `go run ...@version` step
+  # and outlived it by one commit -- Sonar's S8545 failed that step for resolving
+  # the tool's own dependencies fresh every run, the step became the curl below,
+  # and the comment stayed. Left recorded rather than quietly rewritten, because
+  # a stale comment is the failure this repository audits for.
+  actionlint:
+    name: workflow lint
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # PINNED BY CHECKSUM, and not `go install ...@version`. Sonar's S8545
+      # failed the first version of this job for exactly that: `go install`
+      # resolves the tool's own dependency graph fresh on every run, with no lock
+      # file, so the bytes that lint this repository's workflows are not the same
+      # bytes twice. It is the same argument the gitleaks step in security.yml
+      # already makes, so this follows that step's shape -- pinned URL, landed to
+      # a file before extracting, and a version assertion afterwards -- and adds
+      # the checksum, because this one is cheap to have and the finding was fair.
+      #
+      # 1.7.12 rather than 1.7.7 for a reason worth recording: actionlint checks
+      # runner labels against a list baked into its own release, and 1.7.7 does
+      # not know macos-26-intel, so it failed srt-probe.yml over a runner that
+      # demonstrably works -- run 32892220990 has a green job named
+      # "macos-26-intel (macOS 26 x64)". The first fix was a .github/actionlint.yaml
+      # declaring the label under `self-hosted-runner`, which is the only hook
+      # actionlint offers and is a misnomer for a GitHub-hosted runner. Pinning
+      # the version that already knows the label is one moving part instead of
+      # two, and it matches what `brew install actionlint` puts on a developer's
+      # PATH -- which is how the stale list went unnoticed locally in the first
+      # place: 1.7.12 here, 1.7.7 in CI, and only CI complained.
+      #
+      # --proto '=https' because -L follows redirects: without it a redirect to
+      # http:// silently downgrades the transport for a binary about to run.
+      - name: install actionlint (pinned)
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          curl -sSfL --proto '=https' --tlsv1.2 \
+            --retry 3 --retry-all-errors --retry-delay 5 --max-time 120 \
+            -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          sudo tar -xz -C /usr/local/bin -f actionlint.tar.gz actionlint
+          rm -f actionlint.tar.gz
+          installed="$(actionlint -version | head -1)"
+          echo "actionlint $installed"
+          if [ "$installed" != "$ACTIONLINT_VERSION" ]; then
+            echo "::error::expected actionlint $ACTIONLINT_VERSION, got $installed"
+            exit 1
+          fi
+      # -shellcheck= and -pyflakes= disable those two integrations, and the
+      # reason belongs here rather than hidden in a flag. With shellcheck on,
+      # this job reports 38 findings on its first run, nearly all of them
+      # shellcheck failing to parse a run block that contains an Actions
+      # expression -- it reads the expansion as broken shell. A guard that fires
+      # 38 times on the day it is installed is one somebody turns off, and it
+      # would bury the class of finding this job exists for.
+      #
+      # What stays on is the part that matters: workflow schema, job and step
+      # keys, `needs` references, matrix shapes, action input names, and the
+      # expression parser -- which is exactly what rejected sonar.yml and left a
+      # run with no jobs and no message.
+      - run: actionlint -color -shellcheck= -pyflakes=
 
   cross:
     name: cross-compile all release targets
+    permissions:
+      contents: read
     # The documentation gate, #378. On every STEP below, never on this job --
     # see the `changes` job for why that distinction is load-bearing and for
     # what it cost the one time it was got wrong.
@@ -1641,10 +1881,13 @@ jobs:
   # image and publish real streams.
   container-suites:
     name: "which container suites"
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       suites: ${{ steps.pick.outputs.suites }}
+      skipped: ${{ steps.pick.outputs.skipped }}
     steps:
       # Full history: the diff below needs both endpoints of the PR, and the
       # default shallow fetch has neither.
@@ -1663,12 +1906,39 @@ jobs:
           set -euo pipefail
           ALL='["acceptance-docker","acceptance-multisource","acceptance-browser"]'
 
+          # ONE WRITER FOR BOTH OUTPUTS, so `suites` and `skipped` cannot drift
+          # apart. A suite that appears in neither list produces no check of
+          # that name at all -- and `container: acceptance-docker` and
+          # `container: acceptance-multisource` are REQUIRED contexts on main.
+          # A required check that never reports leaves the pull request blocked
+          # forever with nothing red to point at, which is how #650, #656 and
+          # #659 came to sit unmergeable behind a wall of green checks. The
+          # skipped list is what the shim job reports, so the context is always
+          # answered: either the suite ran, or it says why it did not.
+          emit() {
+            SEL="$1"; WHY="$2"
+            SKIP="$(jq -cn --argjson all "$ALL" --argjson sel "$SEL" '$all - $sel')"
+            # Fixed-value check: the two lists must reconstitute the full set.
+            # Getting this wrong reintroduces the exact bug above, silently.
+            N_ALL="$(jq -n --argjson a "$ALL" '$a|length')"
+            N_SEL="$(jq -n --argjson a "$SEL" '$a|length')"
+            N_SKIP="$(jq -n --argjson a "$SKIP" '$a|length')"
+            if [ "$((N_SEL + N_SKIP))" -ne "$N_ALL" ]; then
+              echo "::error::suite partition lost a suite: selected=$SEL skipped=$SKIP of $ALL"
+              exit 1
+            fi
+            {
+              echo "suites=$SEL"
+              echo "skipped=$SKIP"
+            } >> "$GITHUB_OUTPUT"
+            echo "$WHY"
+            exit 0
+          }
+
           # main and the weekly schedule keep the full set. This job changes
           # what PRs get, and takes nothing away from anywhere else.
           if [ "$EVENT" = "schedule" ] || [ "$REF" = "refs/heads/main" ]; then
-            echo "suites=$ALL" >> "$GITHUB_OUTPUT"
-            echo "full set: main or schedule"
-            exit 0
+            emit "$ALL" "full set: main or schedule"
           fi
 
           # A PR that touches ui/ gets the browser suite and only the browser
@@ -1714,20 +1984,15 @@ jobs:
             # sourced by all three, and working out which suite a shared
             # library can break is exactly the reasoning that produced the gap.
             if grep -qE '^scripts/(acceptance-(docker|multisource|browser)\.sh|lib-[a-z-]+\.sh)$' <<<"$CHANGED"; then
-              echo "suites=$ALL" >> "$GITHUB_OUTPUT"
-              echo "full set: this PR changes a container suite's own script or a library it sources"
-              exit 0
+              emit "$ALL" "full set: this PR changes a container suite's own script or a library it sources"
             fi
 
             if grep -qE '^(ui/|\.github/workflows/ci\.yml$)' <<<"$CHANGED"; then
-              echo 'suites=["acceptance-browser"]' >> "$GITHUB_OUTPUT"
-              echo "browser: this PR touches ui/ or this workflow"
-              exit 0
+              emit '["acceptance-browser"]' "browser: this PR touches ui/ or this workflow"
             fi
           fi
 
-          echo 'suites=[]' >> "$GITHUB_OUTPUT"
-          echo "none: this PR touches neither ui/ nor this workflow nor a container suite's script"
+          emit '[]' "none: this PR touches neither ui/ nor this workflow nor a container suite's script"
 
   # The suites that need the shipped IMAGE rather than a host binary: SRT ingest
   # (Ubuntu's FFmpeg may lack libsrt, the image never does), the one-port
@@ -1742,8 +2007,54 @@ jobs:
   # accessible names, and a toggle that destroyed keyboard focus. Every one of
   # those guards contributed NOTHING to that PR's status, because this job only
   # ran after the merge. Tests that cannot fail before you merge are not a gate.
+  # THE SHIM THAT ANSWERS A REQUIRED CHECK THE SUITE DID NOT RUN.
+  #
+  # `container: acceptance-docker` and `container: acceptance-multisource` are
+  # required contexts on main, and the job above deliberately does not run them
+  # on most pull requests -- they assert routing and token handling that a UI
+  # change cannot reach, and each costs an image build.
+  #
+  # Those two facts contradicted each other for as long as they both existed. A
+  # skipped job reports NOTHING, not success, so branch protection waited on a
+  # check that was never going to arrive: #659 sat at 40 of 40 green and
+  # unmergeable, #656 and #650 the same, and nothing anywhere was red. The
+  # failure had no symptom to search for, which is what made it expensive.
+  #
+  # So the contexts are always answered. Either the suite ran and reported its
+  # real result, or this job reports that it was not applicable and says why.
+  # The two matrices are disjoint by construction -- `emit` above computes
+  # skipped as ALL minus selected and refuses to write a partition that lost a
+  # suite -- so exactly one of them reports each name.
+  #
+  # WHAT THIS DOES NOT DO, deliberately: it does not make the suite's absence
+  # invisible. The reason is printed and appears in the check's own log, so
+  # "this passed" and "this did not run" remain distinguishable to a reader who
+  # looks. What it removes is only the state where nobody can merge and nothing
+  # can be pointed at.
+  container-not-applicable:
+    name: "container: ${{ matrix.suite }}"
+    permissions:
+      contents: read
+    needs: container-suites
+    if: needs.container-suites.outputs.skipped != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.container-suites.outputs.skipped) }}
+    steps:
+      - name: Not applicable to this pull request
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          echo "::notice title=${SUITE} did not run::This pull request changes nothing the suite covers, so it was not built. It runs in full on main and on the weekly schedule. See the container-suites job for the rule that decided this."
+          echo "${SUITE}: not applicable to this pull request; runs on main and on schedule."
+
   container:
     name: "container: ${{ matrix.suite }}"
+    permissions:
+      contents: read
     needs: container-suites
     if: needs.container-suites.outputs.suites != '[]'
     runs-on: ubuntu-latest
@@ -1896,6 +2207,8 @@ jobs:
   # buried in a combined log.
   acceptance:
     name: "acceptance: ${{ matrix.suite }}"
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     # NO JOB-LEVEL `if:` HERE, DELIBERATELY, and #351 is why. These are required
     # checks. A skipped matrix job never expands its matrix,

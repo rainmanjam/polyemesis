@@ -220,15 +220,42 @@ func auditLoginSucceeded(address string, failuresBefore int) alerts.Event {
 }
 
 // auditPasswordChanged reports a replaced admin password.
-func auditPasswordChanged(address string) alerts.Event {
+//
+// IT NAMES THE API TOKENS, because this message goes to the reader who did NOT
+// change the password, and for them the whole question is what is still open.
+// A password change ends every SESSION; API tokens are matched by hash and
+// carry no epoch, so an admin token copied out of this install before an
+// incident goes on working unless the operator asked for it to be revoked. A
+// message that stopped at "you are already signed out" would be telling that
+// reader the response was complete when it was not.
+func auditPasswordChanged(address string, revoked, surviving int) alerts.Event {
+	text := "The admin password was replaced. Every session issued before this " +
+		"moment has been refused, so if this was not you, you are already " +
+		"signed out."
+	switch {
+	case revoked > 0 && surviving == 0:
+		text += fmt.Sprintf(" %s also revoked, so nothing minted before this moment still works.",
+			plural(revoked, "API token was", "API tokens were"))
+	case surviving > 0:
+		text += fmt.Sprintf(" %s NOT revoked and can still reach this API; "+
+			"revoke them from Settings if this was not you.",
+			plural(surviving, "API token was", "API tokens were"))
+	}
 	return alerts.Event{
 		Type:     alerts.TypePasswordChanged,
 		Severity: alerts.SeverityCritical,
 		Title:    "Admin password changed",
-		Text: "The admin password was replaced. Every session issued before this " +
-			"moment has been refused, so if this was not you, you are already " +
-			"signed out.",
+		Text:     text,
 	}.WithField(fieldAddress, address)
+}
+
+// plural renders a count with the right verb, so the sentences above read as
+// English rather than as "1 API tokens were".
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 // auditAPITokenCreated reports a minted API token.

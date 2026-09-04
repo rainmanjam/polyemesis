@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -114,6 +115,7 @@ func run(h *hooks) error {
 		logLevel    = flag.String("log", "info", "log level: debug, info, warn, error")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 		resetPass   = flag.Bool("reset-admin", false, "set a new admin password and sign out every session, then exit")
+		verifyBak   = flag.String("verify-backup", "", "check that a backup directory holds a database that opens, then exit")
 	)
 	flag.Parse()
 
@@ -136,7 +138,11 @@ func run(h *hooks) error {
 	log := h.debugLogger(*logLevel, diagSwitch, diagRecorder)
 
 	h.progress("loading the configuration")
-	cfg, err := config.Load(*configPath)
+	// An explicit --config that is absent refuses to start; the implicit
+	// default name still defaults so a fresh box boots. flag.Visit reports
+	// only flags that were actually set, which is the one signal that tells
+	// the two apart. #644.
+	cfg, err := configLoaderFor(flag.Visit)(*configPath)
 	if err != nil {
 		return err
 	}
@@ -166,6 +172,15 @@ func run(h *hooks) error {
 	// this is run on a box where the real server is usually already running, and
 	// a second instance racing it for the listener would fail for a reason that
 	// has nothing to do with the password.
+	// Before anything else that touches state. update.sh calls this on the copy
+	// it just took, and the whole point is that it answers about THAT
+	// directory: it opens the file, walks it, and reads the schema, without
+	// running a migration -- migrating the backup would move the copy forward
+	// to the schema the operator is keeping a way back from. #643.
+	if *verifyBak != "" {
+		return verifyBackup(*verifyBak, os.Stdout)
+	}
+
 	if *resetPass {
 		return resetAdmin(cfg, os.Stdin, os.Stdout)
 	}
@@ -436,7 +451,20 @@ func run(h *hooks) error {
 
 	h.stopping()
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	// ONE DEADLINE FOR EVERY PHASE BELOW.
+	//
+	// This was 20 seconds for the HTTP servers, and each phase after it owned
+	// a constant of its own: a 5s lifecycle drain, then 30 seconds PER ENGINE
+	// stopped one after another. Nothing added them up, and their sum passes
+	// TimeoutStopSec=45 on an install with two programmes. systemd then
+	// SIGKILLs the cgroup, which truncates whatever was being recorded --
+	// silently, at exactly the right file size. See
+	// internal/engine/shutdown_budget.go. #645.
+	//
+	// Every phase now draws from this one context, so a slow HTTP shutdown
+	// leaves less for the engines rather than adding to them, and the total
+	// cannot exceed what systemd is waiting for.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), engine.ShutdownBudget)
 	defer shutdownCancel()
 	if redirectServer != nil {
 		// The redirect helper holds nothing a client can be mid-transfer on,
@@ -457,8 +485,9 @@ func run(h *hooks) error {
 	// a broadcast live. An unclean shutdown -- a kill, a power cut -- is covered
 	// instead by the platform's enableAutoStop plus the boot reconciliation the
 	// next start performs before its first tick.
-	srv.DrainLifecycle()
-	eng.Stop()
+	srv.DrainLifecycleWithin(shutdownCtx)
+	eng.StopWithin(shutdownCtx)
+	warnIfShutdownOverran(shutdownCtx, log)
 	log.Info("goodbye")
 	return nil
 }
@@ -950,4 +979,69 @@ func parseLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// verifyBackup answers whether a backup directory can be restored from.
+//
+// A function rather than a block inside run() so it can be tested: the whole
+// point of this flag is that it says no when the copy is unusable, and a check
+// nobody has watched say no is a check nobody should trust. #643.
+func verifyBackup(dir string, out io.Writer) error {
+	if err := db.VerifyBackup(dir); err != nil {
+		return fmt.Errorf("backup at %s is not usable: %w", dir, err)
+	}
+	fmt.Fprintf(out, "backup at %s opens, passes integrity_check and holds this server's schema\n", dir)
+	return nil
+}
+
+// warnIfShutdownOverran says out loud that the shutdown budget was spent.
+//
+// The alternative is systemd killing the process and the operator finding a
+// truncated recording with nothing in the log connecting the two. If this
+// fires, a child did not answer SIGTERM inside engine.ShutdownBudget -- see
+// #628 and #631.
+//
+// A function rather than an inline block so the branch can be tested. The
+// whole value of the line is that it appears on the bad day, and a line nobody
+// has watched appear is a line nobody should rely on. #645.
+func warnIfShutdownOverran(ctx context.Context, log *slog.Logger) {
+	if ctx.Err() == nil {
+		return
+	}
+	log.Warn("shutdown ran out of its budget; some children may have been killed rather than finishing",
+		"budget", engine.ShutdownBudget.String())
+}
+
+// configLoaderFor decides whether an absent config file is fatal, which is the
+// whole of #644.
+//
+// A --config path that does not exist used to fall back to defaults, and the
+// defaults are not a smaller version of the operator's install -- they are a
+// DIFFERENT one: a new secret.key, an empty database, plaintext on :8080 and an
+// unauthenticated /setup reopened. A single typo therefore booted a working
+// server that shared nothing with the one the operator meant to start, and
+// nothing about it looked wrong.
+//
+// The signal that separates a typo from a fresh box is not the path's contents
+// but whether the flag was PASSED AT ALL: an explicit --config is a claim that
+// the file exists, while the default name is only a place to look. flag.Visit
+// reports exactly the flags that were set, which is why the decision hangs on
+// it rather than on comparing the path against the default string -- an
+// operator who passes the default name explicitly means it just as much.
+//
+// Taking Visit as a parameter is what makes the decision testable without
+// starting a server; run() passes the real flag.Visit. The alternative was
+// leaving the one rule that stands between a typo and an empty install
+// exercised only by a subprocess test.
+func configLoaderFor(visit func(func(*flag.Flag))) func(string) (config.Config, error) {
+	explicit := false
+	visit(func(f *flag.Flag) {
+		if f.Name == "config" {
+			explicit = true
+		}
+	})
+	if explicit {
+		return config.LoadRequired
+	}
+	return config.Load
 }

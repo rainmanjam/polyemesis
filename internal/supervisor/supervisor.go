@@ -228,6 +228,17 @@ type Process struct {
 	pid       int
 	restarts  int
 	startedAt time.Time
+	// mediaAt is when this run first carried media, which is what uptime
+	// reports. It is NOT startedAt: an ingest is spawned listening, so the
+	// process exists and is Running from the moment it can accept a connection,
+	// and the interval before OBS actually connects is waiting, not uptime.
+	// Counting it told an operator their stream had been up for twenty minutes
+	// when it had been live for two.
+	//
+	// Zero while a spawned process has not yet seen media. Reset on every
+	// respawn, because a reconnect starts a new stream from the platform's
+	// point of view and continuing the old total would hide the gap.
+	mediaAt   time.Time
 	lastErr   string
 	nextRetry time.Time
 	progress  ffmpeg.Progress
@@ -326,7 +337,7 @@ func New(log *slog.Logger, spec Spec) *Process {
 		state:   StateStopped,
 		logs:    newRing(logRingSize),
 		secrets: alerts.NewSecretSet(log, spec.Secrets...),
-		grace:   shutdownGrace,
+		grace:   graceFor(spec.Kind),
 		drain:   drainGrace,
 	}
 }
@@ -582,6 +593,16 @@ func (p *Process) Restart(ctx context.Context) {
 // yet", and that has a different answer from any other stop failure.
 var ErrStopDeadline = errors.New("process did not exit before the stop deadline")
 
+// Retired reports whether this process has been Stopped for good. A watchdog
+// running alongside a child needs it to know when to stand down: without it
+// the goroutine outlives the process it was watching and keeps evaluating a
+// destination that no longer exists.
+func (p *Process) Retired() bool {
+	p.runMu.Lock()
+	defer p.runMu.Unlock()
+	return p.retired
+}
+
 func (p *Process) stop(ctx context.Context, retire bool) error {
 	p.runMu.Lock()
 	if retire {
@@ -824,6 +845,17 @@ func (p *Process) runOnce(ctx context.Context) error {
 	cmd.Stdout, cmd.Stderr = stdoutW, stderrW
 
 	startErr := cmd.Start()
+	// WHEN THE CHILD ACTUALLY EXECS. #674
+	//
+	// Every timing conclusion in that investigation was drawn from the engine's
+	// "destination starting", which is logged after Process.Start() RETURNS --
+	// it says a supervise goroutine exists, not that a process is reading. A
+	// 73-second gap between those two was measured and could not be attributed
+	// without this line, and one hypothesis was falsely falsified on the
+	// assumption they were the same instant.
+	if startErr == nil {
+		p.log.Info("child exec", "process", p.spec.Name, "kind", p.spec.Kind, "pid", cmd.Process.Pid)
+	}
 	// The parent's copies of the write ends, closed unconditionally: the child
 	// has inherited its own, and while the parent holds one the pipe cannot reach
 	// EOF even when every descendant has gone.
@@ -881,6 +913,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	p.mu.Lock()
 	p.pid = cmd.Process.Pid
 	p.startedAt = time.Now()
+	p.mediaAt = time.Time{}
 	p.progress = ffmpeg.Progress{}
 	p.mu.Unlock()
 	p.setState(StateRunning, "")
@@ -991,11 +1024,28 @@ func (p *Process) runOnce(ctx context.Context) error {
 	return waitErr
 }
 
+// noteProgress records one progress block and, the first time that block shows
+// media actually moving, starts the uptime clock.
+//
+// OutTimeMS is the output timestamp, so it advances for audio-only destinations
+// where Frame never leaves zero, and it stays at zero while FFmpeg is bound and
+// waiting rather than reading. That makes it the one field meaning "media has
+// moved" for every kind of process here.
+//
+// Only the FIRST such block counts. Restamping on every block would peg uptime
+// near zero forever, which reads as a stream that never stays up.
+func (p *Process) noteProgress(pr ffmpeg.Progress) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.progress = pr
+	if p.mediaAt.IsZero() && pr.OutTimeMS > 0 {
+		p.mediaAt = time.Now()
+	}
+}
+
 func (p *Process) defaultStdout(r io.Reader) error {
 	return ffmpeg.ParseProgress(r, func(pr ffmpeg.Progress) {
-		p.mu.Lock()
-		p.progress = pr
-		p.mu.Unlock()
+		p.noteProgress(pr)
 		if p.spec.OnProgress != nil {
 			p.spec.OnProgress(pr)
 		}
@@ -1036,13 +1086,23 @@ func (p *Process) terminate() {
 		defer p.escalators.Done()
 		t := time.NewTimer(p.grace)
 		defer t.Stop()
+		// BOTH OUTCOMES ARE COUNTED HERE, in the one select that decides which
+		// happened. Counting them at separate call sites is how a denominator
+		// quietly stops matching its numerator -- and an absent denominator is
+		// why this escalation ran unnoticed for weeks. See teardown_stats.go.
 		select {
 		case <-exited:
 			// Reaped inside the grace period. There is nothing to escalate to,
 			// and killGroup on a reaped pid is a signal to whoever holds that
 			// number now.
+			noteTeardown(p.spec.Kind, false)
 		case <-t.C:
+			// KEEP THIS STRING. scripts/acceptance-recording-stop.sh greps for
+			// it verbatim as a required CI gate, and nothing links the two at
+			// compile time -- rewording it silently disarms that check.
+			// grace_string_test.go pins it.
 			p.log.Warn("process did not exit after grace period; killing group")
+			noteTeardown(p.spec.Kind, true)
 			killGroup(cmd)
 		}
 	}()
@@ -1139,7 +1199,14 @@ func (p *Process) Status() Status {
 	if p.state == StateRunning && !p.startedAt.IsZero() {
 		t := p.startedAt
 		st.StartedAt = &t
-		st.UptimeSec = time.Since(p.startedAt).Seconds()
+		// StartedAt stays the spawn -- it answers "since when has this process
+		// existed", which is the right question for a restart count beside it.
+		// UptimeSec answers a different one, "how long has this been on air",
+		// and stays 0 until media arrives. A listening ingest reports Running
+		// with no uptime, which is exactly what it is doing.
+		if !p.mediaAt.IsZero() {
+			st.UptimeSec = time.Since(p.mediaAt).Seconds()
+		}
 	}
 	if p.state == StateReconnecting && !p.nextRetry.IsZero() {
 		if d := time.Until(p.nextRetry).Seconds(); d > 0 {

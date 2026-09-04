@@ -16,7 +16,6 @@ import {
   EMPTY,
   OUT,
   calm,
-  dismissBanners,
   populated,
   settle,
   shoot,

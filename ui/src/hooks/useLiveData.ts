@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type {
   BitrateSample,
   Levels,
@@ -49,6 +49,55 @@ export interface LiveData {
    *  reappearing after the client was fixed. Gate the control on this, not on
    *  the id. */
   programmeKnown: boolean;
+  /** Whether the FIRST status snapshot has arrived from the socket.
+   *
+   *  Distinct from `status != null` in exactly the way programmeKnown above is
+   *  distinct from `programme != null`, and for the same reason: every consumer
+   *  reads status through `?.`, and `?.` on a null status is indistinguishable
+   *  from a loaded status that holds nothing. A page that draws a CONCLUSION
+   *  from that -- "no destinations yet", "0 kbps", "OFF AIR" -- states as fact
+   *  something it has not been told, and states the opposite a second later
+   *  when the snapshot lands.
+   *
+   *  Gate any decided empty state or zero measurement on this. Chrome, nav and
+   *  anything else known without the server may render immediately; it is only
+   *  claims about the install that have to wait. #663. */
+  snapshotKnown: boolean;
+  /** How many programmes this install has.
+   *
+   *  The console follows ONE at a time and has no switcher, so a page that
+   *  shows programme-scoped figures cannot say whether it is showing the
+   *  install or a slice of it. This is what lets a page label itself only when
+   *  the label carries information — on the single-source install that is the
+   *  overwhelming majority, a name that never varies is furniture. */
+  sourceCount: number;
+  /** Every programme the server lists, id and name, in the server's display
+   *  order — which is the order resolveProgramme's fallback picks from.
+   *
+   *  #638: sourceCount alone could say "there is more than one" and nothing
+   *  could say WHICH ones, so a switcher was unbuildable without a second
+   *  /sources call and a second copy of the resolution rule. One list, one
+   *  rule, one place.
+   *
+   *  Empty on a fresh install, and empty is not the same as "not yet read" —
+   *  gate on programmeKnown for that, exactly as with programme itself. */
+  programmes: { id: number; name: string }[];
+  /** Follow a different programme, and remember it across reloads.
+   *
+   *  #638: rememberProgramme existed and was called from exactly one place,
+   *  with the value the resolver had just picked — so the console remembered
+   *  its own default forever and an operator had no way to say otherwise. This
+   *  is the missing half. An id the server does not list is ignored rather
+   *  than stored: a remembered ghost produces a 409 on every poll and a dead
+   *  console with nothing to explain it. */
+  selectProgramme: (id: number) => void;
+  /** Re-read /sources and re-resolve the programme.
+   *
+   *  Call after creating or deleting a source. The provider also re-resolves
+   *  on its own when the status socket names a programme it has not seen --
+   *  that covers the changes this tab did not make; this is the fast path for
+   *  the ones it did. #646. */
+  refreshSources: () => Promise<void>;
   connected: boolean;
   status: Status | null;
   source: SourceInfo | null;
@@ -118,9 +167,18 @@ export function useIngestLive(): boolean {
  *  that is merely slow is not a poll that is broken. */
 export function useStaleTracker(threshold = 3) {
   const [failures, setFailures] = useState(0);
+  /* STABLE IDENTITIES, because every caller puts these inside a polling
+   * effect. Fresh closures each render made the effect's dependency list
+   * unsatisfiable: naming `freshness` restarted the poll on every render, so
+   * both callers left it out and took an exhaustive-deps warning instead --
+   * and a suppressed dependency warning on a polling effect is precisely the
+   * stale-closure shape that made #606 and #612 possible. Memoised, the
+   * honest dependency list is also the correct one. */
+  const ok = useCallback(() => setFailures(0), []);
+  const failed = useCallback(() => setFailures((n) => n + 1), []);
   return {
-    ok: () => setFailures(0),
-    failed: () => setFailures((n) => n + 1),
+    ok,
+    failed,
     /** True once the data on screen should no longer be trusted as current. */
     stale: failures >= threshold,
     failures,

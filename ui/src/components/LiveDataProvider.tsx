@@ -42,6 +42,30 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
   const [frameError, setFrameError] = useState(false);
+
+  // WHETHER THE FIRST STATUS SNAPSHOT HAS ARRIVED, derived rather than tracked.
+  //
+  // Every consumer reaches `status` through optional chaining, and `?.` on a
+  // null status yields undefined -- identical, to the code reading it, to a
+  // loaded status that genuinely holds nothing. So the dashboard printed "No
+  // destinations yet" with an Add button while the first snapshot was still in
+  // flight, then swapped it for the hold note when the snapshot landed. #663.
+  //
+  // DERIVED, and that is the correction rather than the design. This was first
+  // written as its own useState set inside the socket's `status` case -- which
+  // made it true of the SOCKET, not of the status. Status also arrives over
+  // REST, from the api.status() bootstrap below, and on any load where that
+  // wins the race or the socket is blocked by a proxy, the flag stayed false
+  // while status was perfectly well known. The dashboard then hid real
+  // destinations behind a loading card indefinitely: worse than the bug it was
+  // fixing. The browser suite caught it, on three tests that mute the socket
+  // on purpose.
+  //
+  // `status !== null` is the whole fact and cannot drift from it, because
+  // there is no second thing to keep in step. A flag tracking what a value
+  // already says is a second source of truth for one fact, which is the shape
+  // this audit keeps finding.
+
   /* Which programme every request below names.
    *
    * NULL UNTIL THE SOURCE LIST LANDS, AND NOTHING WAITS FOR IT. An earlier
@@ -57,6 +81,15 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
    * programme resolves -- one extra round trip on a multi-source install,
    * against never rendering at all. */
   const [programme, setProgramme] = useState<number | null>(null);
+  /* Set from the same /sources response that resolves the programme, so the
+     count and the choice can never describe different lists. */
+  const [sourceCount, setSourceCount] = useState(0);
+  /* #638: the list, not just the count. A switcher needs names, and fetching
+     them separately would mean a second copy of the resolution rule. */
+  const [programmes, setProgrammes] = useState<{ id: number; name: string }[]>([]);
+  /* The ids the last /sources answer carried, so the socket effect can tell
+     "a programme we have never seen" from "the one we are already on". */
+  const knownIds = useRef<number[]>([]);
   /* Whether the programme question has been ANSWERED -- including the answer
      "there is none", which is legitimate. See the effect below for why this is
      a gate WITH A DEADLINE rather than either extreme. */
@@ -219,26 +252,62 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
   // single-source install, and which on a multi-source one produces the same
   // 400 as before but only in the case where the alternative was a blank
   // console forever.
+  /* RESOLVED MORE THAN ONCE, BECAUSE THE ANSWER CHANGES.
+
+     This ran in an effect with [] deps and nothing ever re-ran it. Creating a
+     second source during setup -- or deleting the current one -- left the
+     console pointed at a programme that was no longer the right answer, or no
+     longer existed: Meters read "NOT UPDATING", Monitoring's process list
+     died, Clips showed "No clips yet.", all against a healthy server, until
+     someone reloaded the page. Every one of those is a plausible idle state,
+     which is why it was never reported as a bug. #646. */
+  const resolveSources = useCallback(async () => {
+    try {
+      const rows = await api.listSources();
+      const ids = rows.map((r) => r.id);
+      knownIds.current = ids;
+      setSourceCount(ids.length);
+      setProgrammes(rows.map((r) => ({ id: r.id, name: r.name })));
+      setProgramme((current) => {
+        // Keep the operator on their programme while it still exists.
+        // Re-resolving from scratch every time would drag a two-programme
+        // install back to the first source whenever any source was touched.
+        const remembered =
+          current != null && ids.some((id) => id === current) ? current : rememberedProgramme();
+        const picked = resolveProgramme(ids, remembered);
+        rememberProgramme(picked);
+        return picked;
+      });
+    } catch {
+      // A console that will not render because it could not list sources is
+      // worse than one showing the install's only programme.
+      setProgramme(null);
+    } finally {
+      setProgrammeKnown(true);
+    }
+  }, []);
+
+  /* #638: THE HALF THAT WAS MISSING.
+   *
+   * rememberProgramme was called from exactly one place, with the value the
+   * resolver had just picked — so the console faithfully remembered its own
+   * default and nothing could ever tell it otherwise. An operator with a
+   * horizontal and a vertical programme watched one of them, permanently.
+   *
+   * An id the server does not list is IGNORED rather than stored. Storing one
+   * would survive the reload and produce a 409 on every poll, which reads as a
+   * dead console with nothing on screen to explain it — the same failure
+   * resolveProgramme already discards a stale remembered id to avoid. */
+  const selectProgramme = useCallback((id: number) => {
+    if (!knownIds.current.includes(id)) return;
+    rememberProgramme(id);
+    setProgramme(id);
+  }, []);
+
   useEffect(() => {
     let live = true;
     let cleanupTimer: number | undefined;
-    api
-      .listSources()
-      .then((rows) => {
-        if (!live) return;
-        const ids = rows.map((r) => r.id);
-        const picked = resolveProgramme(ids, rememberedProgramme());
-        setProgramme(picked);
-        rememberProgramme(picked);
-      })
-      .catch(() => {
-        // A console that will not render because it could not list sources is
-        // worse than one showing the install's only programme.
-        if (live) setProgramme(null);
-      })
-      .finally(() => {
-        if (live) setProgrammeKnown(true);
-      });
+    void resolveSources();
 
     // THE DEADLINE. Two seconds is longer than any healthy /sources and shorter
     // than an operator's patience with a blank screen. Without it a request
@@ -251,7 +320,21 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       live = false;
       if (cleanupTimer !== undefined) window.clearTimeout(cleanupTimer);
     };
-  }, []);
+  }, [resolveSources]);
+
+  /* SELF-HEALING, for the changes this tab did not make.
+
+     A source created or deleted in another tab, by another operator, or
+     straight through the API never passes through refreshSources(). The status
+     socket is install-wide and every snapshot names the programme it belongs
+     to, so a snapshot naming a source we have never heard of is proof our list
+     is stale. One /sources call, only when that happens. */
+  useEffect(() => {
+    if (!programmeKnown || source == null) return;
+    if (programme != null && source.id === programme) return;
+    if (knownIds.current.includes(source.id)) return;
+    void resolveSources();
+  }, [source, programme, programmeKnown, resolveSources]);
 
   // Seed from REST so the first paint is populated even if the socket is slow,
   // and so a browser that cannot open a WebSocket still shows something real.
@@ -272,7 +355,12 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
     () => ({
       programme,
       programmeKnown,
+      sourceCount,
+      programmes,
+      selectProgramme,
+      refreshSources: resolveSources,
       connected,
+      snapshotKnown: status !== null,
       status,
       source,
       levels,
@@ -286,7 +374,12 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
     [
       programme,
       programmeKnown,
+      sourceCount,
+      programmes,
+      selectProgramme,
+      resolveSources,
       connected,
+
       status,
       source,
       levels,

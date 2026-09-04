@@ -7,11 +7,13 @@ is: stop, replace the binary or pull the image, start.
 
 **Back up `<dataDir>` first, and check that the backup contains `secret.key`.**
 Migrations run forward only — there is no downgrade path, and a backup is the
-only way back. Once 0.7.0 ships *(not yet released — see the
-[CHANGELOG](../CHANGELOG.md))*, a backup without that one file will not be a
-backup; see
+only way back. **From 0.7.0 onward a backup without that one file is not a
+backup**, because the stream keys in the database are sealed with it and nothing
+else can open them. 0.7.0 (2026-08-28) and 0.8.0 (2026-09-01) are both released,
+so this applies to you now; see
 [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back)
-before you start.
+before you start, including its **mandatory** remediation if you have already
+upgraded.
 
 **`install.sh` writes a guarded `update.sh` that does all of this for you** — it
 takes the backup, refuses to proceed if the archive is empty or missing
@@ -19,6 +21,12 @@ takes the backup, refuses to proceed if the archive is empty or missing
 `<installDir>/update.sh` rather than the manual steps below. Operators who
 installed before 0.7.0 do not have it: re-run `install.sh` to regenerate it, or
 follow the manual procedure and do the `secret.key` check by hand.
+
+> This page had said 0.7.0 was *"not yet released"* here while saying seventy
+> lines further down that it was tagged and that its remediation was mandatory.
+> An operator who read only the summary above concluded the `secret.key`
+> requirement was not theirs yet. Corrected 2026-09-03; the version-specific
+> notes below have been the authority throughout.
 
 ```sh
 # Binary
@@ -80,15 +88,13 @@ instead.
 
 ## Version-specific notes
 
-> **0.7.0 has not been released.** No `v0.7.0` tag exists in git, on GitHub
-> Releases, or on Docker Hub as of this writing — every install path still
-> delivers 0.6.0. The rest of this section documents what 0.7.0 will do once
-> it is tagged, written in advance so it ships with the release rather than
-> after it; nothing below applies to a build you can install today.
-> `.github/workflows/release.yml`'s changelog-gate refuses to let a tag
-> publish unless [CHANGELOG.md](../CHANGELOG.md)'s top dated heading agrees
-> with it, which is what keeps this note itself from going stale the way the
-> changelog heading did (RB-5, #499).
+> **Everything in this section is released and applies to you.** `v0.7.0`
+> (2026-08-28) and `v0.8.0` (2026-09-01) are both tagged; the newest heading in
+> [CHANGELOG.md](../CHANGELOG.md) is the authority on what a tag contains, and
+> `.github/workflows/release.yml`'s changelog-gate refuses to let a tag publish
+> unless that heading agrees with it. If you are coming from 0.6.0 or earlier,
+> the 0.7.0 note below — including its **mandatory** remediation — is work you
+> still have to do.
 
 ### Upgrading to 0.7.0: sealed stream keys — **breaking to roll back**
 
@@ -263,9 +269,9 @@ What changes:
   and the slate stays on air — until every item's job has finished. Like all
   background work it yields to a live stream, so an item added while you are
   broadcasting normalises when the stream ends. Watch it on the Jobs page.
-- Today the list may hold several items but only the **first** one plays.
-  Sequencing is a later change; the list is stored, validated and normalised in
-  full now so that nothing has to be re-entered when it arrives.
+- **Every entry plays**, in the order the list gives them, and the list repeats
+  from the top when it reaches the end. The lap boundary is not a clean cut —
+  see [SCHEDULED-BROADCAST.md](SCHEDULED-BROADCAST.md) for the measured seam.
 
 ### `tls.enabled` → `tls.mode`
 

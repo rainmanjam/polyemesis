@@ -101,7 +101,7 @@ function signed(v: number): string {
  *  way to be certain before going live, so it gets the whole width. */
 export function MetersPage() {
   const t = useT();
-  const { levels, source, status, programme, programmeKnown } = useLiveData();
+  const { levels, source, status, programme, programmeKnown, sourceCount } = useLiveData();
   const tracks = useSourceTracks();
   const probed = source?.probed ?? false;
   const metersRunning = status?.meters?.state === "running";
@@ -135,6 +135,12 @@ export function MetersPage() {
      re-checked against Date.now() here: `at` is the server's clock, and a
      browser an hour out of step would blank every verdict on the page. */
   const freshness = useStaleTracker();
+  /* Destructured, so the poll below can name what it actually uses. The two
+     callbacks are stable (useCallback in useStaleTracker); the OBJECT is not,
+     because `failures` changes -- and naming the object in the dependency list
+     would restart the interval on every failure, which is an immediate retry
+     loop against a server that is already down. */
+  const { ok: freshOk, failed: freshFailed } = freshness;
 
   // Polled rather than pushed: the analyser publishes once a second, and a
   // second socket subscription for one card is not worth the wiring.
@@ -146,9 +152,9 @@ export function MetersPage() {
         .then((v) => {
           setLoudness(v);
           if (!toggling.current) setMonitorOn(v.enabled ?? null);
-          freshness.ok();
+          freshOk();
         })
-        .catch(freshness.failed);
+        .catch(freshFailed);
     void read();
     const t = window.setInterval(read, 2000);
     return () => window.clearInterval(t);
@@ -167,7 +173,7 @@ export function MetersPage() {
     // "no sources exist", which the route accepts, OR "not resolved yet",
     // which it refuses. Only the second is a bug, and only this tells them
     // apart.
-  }, [programme, programmeKnown]);
+  }, [programme, programmeKnown, freshOk, freshFailed]);
 
   const reports = loudness?.reports ?? [];
 
@@ -190,12 +196,37 @@ export function MetersPage() {
         title={t("meters.title")}
         subtitle={t("meters.subtitle")}
         actions={
-          <Badge
-            variant={metersRunning ? "live" : "outline"}
-            title={t("meters.metering.hint")}
-          >
-            {metersRunning ? t("meters.metering") : t("dash.idle")}
-          </Badge>
+          <div className="flex items-center gap-2">
+            {/* WHICH PROGRAMME THESE BARS BELONG TO.
+                The console follows one programme at a time -- resolveProgramme
+                picks the remembered id, else the first source -- and there is
+                no switcher, so on a multi-source install this page silently
+                showed source[0] and named nothing. An operator with a
+                horizontal and a vertical then reads one set of meters as
+                though it covered the install.
+
+                Naming it does not fix that; a switcher does, and that is the
+                other half of the issue. But an unlabelled reading and a
+                labelled partial one are different kinds of wrong, and only one
+                of them misleads. SourceInfo has carried id and name for exactly
+                this -- its own comment says the point is to let a page name
+                what it is showing. Shown only when there is more than one
+                programme: a label that never varies is furniture. */}
+            {sourceCount > 1 && source?.name && (
+              <Badge
+                variant="outline"
+                title="These meters describe this programme only. The console follows one at a time."
+              >
+                {source.name}
+              </Badge>
+            )}
+            <Badge
+              variant={metersRunning ? "live" : "outline"}
+              title={t("meters.metering.hint")}
+            >
+              {metersRunning ? t("meters.metering") : t("dash.idle")}
+            </Badge>
+          </div>
         }
       />
 
@@ -268,6 +299,32 @@ export function MetersPage() {
           </p>
         </CardContent>
       </Card>
+
+      {/* AN UNMETERED TRACK AND A SILENT TRACK DRAW THE SAME BAR.
+          amerge refuses past 64 channels, so a very wide ingest is metered as a
+          prefix and the rest render flat -- on the page whose whole job is
+          "play the music, watch track 1 move and track 2 stay flat". The server
+          has counted these since the limit existed; nothing carried the number
+          out of internal/ffmpeg until now. Zero for any ingest anyone is likely
+          to send, so this row is normally absent rather than reassuring. */}
+      {(source?.metersDropped ?? 0) > 0 && (
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-md border border-warn/50 bg-warn/5 px-3 py-2 text-[11px]"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
+          <span>
+            <strong className="font-semibold">
+              The last {source?.metersDropped} track
+              {(source?.metersDropped ?? 0) === 1 ? " is" : "s are"} not being metered.
+            </strong>{" "}
+            This ingest is wider than the 64 channels one metering process can merge, so
+            only the leading tracks are measured. The bars below for the remaining tracks
+            are <em>unmeasured, not silent</em> — do not read them as proof of a clean
+            track.
+          </span>
+        </div>
+      )}
 
       <div className="grid gap-3 xl:grid-cols-2">
         {tracks.map((track) => {

@@ -65,11 +65,25 @@ func (s *Server) LifecycleLoop(ctx context.Context) {
 // It takes its own context because the caller's has usually just been cancelled:
 // shutdown cancels the loops first, and a drain that inherited that context
 // would do nothing at all while looking like it had run.
+// DrainLifecycle drains within lifecycleDrainBudget.
+//
+// Kept for callers with no deadline of their own. Process shutdown must use
+// DrainLifecycleWithin so this phase draws from the same budget as the rest --
+// see internal/engine/shutdown_budget.go. #645.
 func (s *Server) DrainLifecycle() {
+	ctx, cancel := context.WithTimeout(context.Background(), lifecycleDrainBudget)
+	defer cancel()
+	s.DrainLifecycleWithin(ctx)
+}
+
+// DrainLifecycleWithin drains inside the caller's deadline, or
+// lifecycleDrainBudget, whichever expires first: a drain that outlived its own
+// budget would eat the engines' share of the shutdown.
+func (s *Server) DrainLifecycleWithin(parent context.Context) {
 	if s.lifecycle == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), lifecycleDrainBudget)
+	ctx, cancel := context.WithTimeout(parent, lifecycleDrainBudget)
 	defer cancel()
 	s.lifecycle.drain(ctx)
 }

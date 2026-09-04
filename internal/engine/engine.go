@@ -519,6 +519,11 @@ type destination struct {
 	// passthrough destination, its rendition's own hub otherwise. Held so
 	// teardown unsubscribes from the same hub it subscribed to.
 	hub *relay.Hub
+	// watch says whether media has ever moved through this child. Read by the
+	// #674 re-probe: a destination that has NEVER published is the one that may
+	// have characterised its input before the ingest carried audio. One that
+	// has published is riding a switch and must not be disturbed.
+	watch *destWatch
 	// spec is a hash of everything that would require a restart. Comparing it
 	// is what keeps an unrelated edit from cycling a healthy stream.
 	spec string
@@ -873,13 +878,27 @@ func (e *Engine) Start(ctx context.Context) error {
 }
 
 // Stop tears every child down in dependency order and closes the relay.
+// Stop tears the engine down within ShutdownBudget.
+//
+// Kept for callers that have no deadline of their own -- tests, and the
+// single-engine paths in Manager. Anything shutting the PROCESS down must use
+// StopWithin and share one context, or the per-engine budgets add up past
+// what systemd allows. See shutdown_budget.go. #645.
 func (e *Engine) Stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), ShutdownBudget)
+	defer cancel()
+	e.StopWithin(ctx)
+}
+
+// StopWithin tears the engine down inside the caller's deadline.
+//
+// The context is the WHOLE process's remaining shutdown time, not this
+// engine's share of it. Engines are stopped concurrently precisely so that
+// sharing one deadline does not mean dividing it.
+func (e *Engine) StopWithin(ctx context.Context) {
 	if e.cancel != nil {
 		e.cancel()
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 
 	// Consumers first, then the renditions they read, then the ingest. Stopping
 	// an upstream first would make everything below it log a spurious "input
@@ -1378,6 +1397,15 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		// leaving the next session waiting.
 		MinBackoff: 500 * time.Millisecond,
 		MaxBackoff: 5 * time.Second,
+		// THE INGEST'S OWN OUTPUT RATE. #674
+		//
+		// The relay hub receives ~6 packets/second for 81 seconds and then
+		// ~135, with consumers subscribed throughout, so it is INPUT-starved
+		// rather than failing to deliver. The ingest is the only thing that
+		// feeds it and it execs once for the whole run -- it is alive and
+		// producing almost nothing. This is its own account of how much it has
+		// written, which nothing has ever recorded.
+		OnProgress: e.ingestProgressLogger(),
 		OnLog:      e.onLog,
 		OnState:    e.onState,
 		LogSink:    logSink{e},
@@ -3259,6 +3287,21 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	if changed {
 		e.log.Info("ingest layout probed", "audioTracks", len(src.Tracks))
 		e.bus.Publish(events.TypeSource, e.SourceInfo())
+		// #674: any destination started before this moment characterised an
+		// input that did not yet carry audio, and FFmpeg never re-probes. This
+		// is the earliest instant a fresh probe would succeed.
+		if len(src.Tracks) > 0 {
+			e.reprobeDestinationsThatNeverPublished("ingest layout probed")
+		}
+		// #627: the video codec is the ENCODER's choice and is only knowable
+		// here, so this is the first moment an operator can be told that an
+		// HEVC or AV1 ingest will be rejected by a named destination -- rather
+		// than learning it from the platform.
+		if res.Video != nil {
+			if rows, derr := e.store.ListDestinationsBySource(e.sourceID); derr == nil {
+				e.warnVideoCodec(res.Video.Codec, rows)
+			}
+		}
 	}
 	return changed
 }
@@ -3360,6 +3403,20 @@ type SourceInfo struct {
 	// install that has never opened the roles editor sends the payload it
 	// always did.
 	Annotations []routing.TrackAnnotation `json:"annotations,omitempty"`
+	// MetersDropped is how many TRAILING tracks the metering process could not
+	// cover, because amerge refuses past 64 channels.
+	//
+	// ffmpeg.MetersDropped has computed this since the limit was introduced,
+	// and its comment says why: so a wide ingest "degrades visibly instead of
+	// silently metering a prefix and letting an operator believe a track is
+	// silent when it is merely unmeasured". Nothing carried it out of that
+	// package, so the degradation was not visible anywhere and the meters page
+	// drew flat bars indistinguishable from real silence -- on the one page
+	// whose entire job is telling those two apart.
+	//
+	// Zero for every ingest anyone is likely to send: 32 stereo tracks fit. It
+	// is omitempty for exactly that reason, so the common payload is unchanged.
+	MetersDropped int `json:"metersDropped,omitempty"`
 }
 
 // SourceInfo returns the layout downstream graphs are compiled against, which
@@ -3396,10 +3453,19 @@ func (e *Engine) sourceInfoLocked() SourceInfo {
 	if synthetic {
 		src = synthTrack()
 	}
+	// Computed from the SAME track list this snapshot reports, not from what
+	// the running meters process happens to have been started with. Those can
+	// differ for one reconcile, and the number an operator reads must describe
+	// the layout beside it rather than a previous one.
+	chans := make([]int, 0, len(src.Tracks))
+	for _, t := range src.Tracks {
+		chans = append(chans, t.Channels)
+	}
 	return SourceInfo{
 		ID: e.sourceID, Name: e.sourceName,
 		Probed: e.probed, Tracks: src.Tracks, Video: video, Synthetic: synthetic,
-		Annotations: e.settings.Ingest.Annotations,
+		Annotations:   e.settings.Ingest.Annotations,
+		MetersDropped: ffmpeg.MetersDropped(chans),
 	}
 }
 

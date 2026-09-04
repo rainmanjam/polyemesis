@@ -1,5 +1,6 @@
 import { setDisplayTimeZone } from "@/lib/format";
 import type {
+  RenditionConcern,
   AccountStats,
   AcmePreflight,
   ApiToken,
@@ -641,6 +642,11 @@ export const api = {
     get<{ provenance: string; services: ServiceInfo[] }>("/services"),
   listRenditions: () => get<RenditionView[]>("/renditions"),
   getRendition: (id: number) => get<RenditionView>(`/renditions/${id}`),
+  /** #661: what this rendition would be doing wrong on that platform.
+   *  An unknown platform answers [], because a custom RTMP destination has
+   *  nothing published to be outside of. */
+  renditionConcerns: (id: number, platform: string) =>
+    get<RenditionConcern[]>(`/renditions/${id}/concerns?platform=${encodeURIComponent(platform)}`),
   createRendition: (r: Partial<Rendition>) =>
     post<{ rendition: Rendition }>("/renditions", r),
   updateRendition: (id: number, r: Partial<Rendition>) =>

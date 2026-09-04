@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { urlCarriesCredential } from "@/lib/credential-url";
+import { SecretCode } from "@/components/SecretCode";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
@@ -20,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/SecretInput";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useIngestLive } from "@/hooks/useLiveData";
@@ -451,9 +454,8 @@ function IngestSettings({
               </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="srt-pass">{t("set.passphrase")}</Label>
-                <Input
+                <SecretInput
                   id="srt-pass"
-                  type="password"
                   value={draft.ingest.srt.passphrase}
                   placeholder={t("set.passphrasePlaceholder")}
                   onChange={(e) =>
@@ -491,7 +493,7 @@ function IngestSettings({
               </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="rtmp-key">{t("set.streamKey")}</Label>
-                <Input
+                <SecretInput
                   id="rtmp-key"
                   value={draft.ingest.rtmp.streamKey}
                   onChange={(e) =>
@@ -542,9 +544,13 @@ function IngestSettings({
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
-            <code className="min-w-0 flex-1 break-all font-mono text-[10px] text-muted-foreground">
-              {system?.ingestUrl ?? "…"}
-            </code>
+            {urlCarriesCredential(system?.ingestUrl ?? "") ? (
+              <SecretCode value={system?.ingestUrl ?? ""} />
+            ) : (
+              <code className="min-w-0 flex-1 break-all font-mono text-[10px] text-muted-foreground">
+                {system?.ingestUrl ?? "…"}
+              </code>
+            )}
             <Button variant="ghost" size="icon-sm" onClick={copyUrl} aria-label={t("set.copy")}>
               <Copy />
             </Button>
@@ -1235,9 +1241,8 @@ function PipelineSettings({
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="mq-pw">{t("set.password")}</Label>
-                  <Input
+                  <SecretInput
                     id="mq-pw"
-                    type="password"
                     value={mqttPassword}
                     placeholder={draft.mqtt?.hasPassword ? "(unchanged)" : ""}
                     onChange={(e) => setMqttPassword(e.target.value)}
@@ -2052,9 +2057,8 @@ function PlatformCredCard({
               </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor={`cs-${guide.platform}`}>{t("set.clientSecret")}</Label>
-                <Input
+                <SecretInput
                   id={`cs-${guide.platform}`}
-                  type="password"
                   value={clientSecret}
                   placeholder={creds?.hasSecret ? "•••••••• (stored, encrypted)" : ""}
                   onChange={(e) => setClientSecret(e.target.value)}
@@ -2846,9 +2850,7 @@ function ApiTokens() {
               Copy {minted.token.name} now — it is never shown again.
             </span>
             <div className="flex items-center gap-1.5">
-              <code className="min-w-0 flex-1 overflow-x-auto rounded border border-border bg-background px-2 py-1 font-mono text-[11px]">
-                {minted.plaintext}
-              </code>
+              <SecretCode value={minted.plaintext} />
               <Button size="sm" variant="outline" onClick={copy}>
                 {copied ? <Check /> : <Copy />} {copied ? t("clipedit.copied") : t("common.copy")}
               </Button>

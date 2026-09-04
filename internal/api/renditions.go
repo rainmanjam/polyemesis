@@ -545,6 +545,52 @@ func isHardwareEncoder(e db.VideoEncoder) bool {
 	return e != db.EncoderX264 && e != db.EncoderX265
 }
 
+// hardwareFallbackOrder is the usable hardware encoders, for a caller that
+// needs the list rather than the single default.
+//
+// IT EXISTS BECAUSE ffmpeg.Tools.HWEncoders IS NOT A FIELD A HANDLER MAY READ.
+// RefreshEncoderCapabilities rewrites that slice under Tools' own mutex while
+// the server is running -- the encoder list a few screens up has said so in a
+// comment since it was written, and derives its own answer instead -- but
+// clipRequest read it bare, which is a genuine data race and not a theoretical
+// one: `go test -race` flags it. This is that same derivation, written once so
+// the next caller reaches for a function rather than the field.
+//
+// Every read below goes through a Tools method that takes the read lock, so
+// the result is a snapshot of one moment rather than a slice another goroutine
+// is in the middle of rebuilding.
+//
+// PROBED AND UNPROBED ARE DIFFERENT QUESTIONS, and this keeps the distinction
+// HWEncoders itself keeps. Once the probe has run, only an encoder that
+// demonstrably encoded a frame is offered. Before it has run there is nothing
+// to have demonstrated, so the build's own hardware list stands in -- a hint,
+// exactly as the field's doc comment says, and the same hint the field held.
+//
+// The order is db.KnownEncoders', which is the order the encoder endpoint
+// already reports its "hardware" list in. It differs from detection's internal
+// preference order only on a machine where two vendors' blocks both encode,
+// and there either answer is a correct one.
+func hardwareFallbackOrder(tools *ffmpeg.Tools) []string {
+	if tools == nil {
+		return nil
+	}
+	probed := len(tools.Capabilities()) > 0
+	var out []string
+	for _, e := range db.KnownEncoders {
+		if !isHardwareEncoder(e) || !tools.HasEncoder(string(e)) {
+			continue
+		}
+		if probed {
+			c, ok := tools.Capability(string(e))
+			if !ok || !c.Works {
+				continue
+			}
+		}
+		out = append(out, string(e))
+	}
+	return out
+}
+
 // ------------------------------------------------------------ hardware scan
 
 // hardware caches the GPU enumeration.
@@ -641,4 +687,44 @@ func (s *Server) handleRestartRendition(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restarting"})
+}
+
+// THE COMPARISON THE OPERATOR NEVER SAW.
+//
+// #661 asked for a warning "at the point of choosing" -- where the rendition is
+// attached -- and what shipped first was a log line at stream start. The
+// comparison was right and arrived in the wrong place and at the wrong time: an
+// operator attaching a 4K60 rendition at 40 Mbps to an X destination saw no
+// objection in the console, and found out from a log after starting.
+//
+// ONE IMPLEMENTATION, DELIBERATELY. The obvious alternative is to compare in
+// TypeScript, since the dialog already holds the rendition. That would be a
+// second copy of a comparison whose whole value is that it reads researched,
+// dated figures out of platforms.go -- and this repository already carries a
+// guard asserting the marketing site's figures match that file, because
+// hand-copied numbers drift. A second comparison would drift the same way and
+// nothing would notice, so the browser asks and does not derive.
+func (s *Server) handleRenditionConcerns(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	row, err := s.store.GetRendition(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	// The platform is a query parameter rather than a lookup because the dialog
+	// asks BEFORE the destination is saved: the operator is choosing a platform
+	// and a rendition together, and neither exists in the database yet.
+	platform := db.Platform(strings.TrimSpace(r.URL.Query().Get("platform")))
+	concerns := db.RenditionConcerns(row, platform)
+	if concerns == nil {
+		// A JSON null here would make the browser check for one; an empty list
+		// says "compared, nothing to say" in the same shape as "compared, here
+		// is what to say".
+		concerns = []db.RenditionConcern{}
+	}
+	writeJSON(w, http.StatusOK, concerns)
 }

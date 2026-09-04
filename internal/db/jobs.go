@@ -134,20 +134,16 @@ func (d *DB) ListJobs(f jobs.Filter) ([]jobs.Job, error) {
 		args  []any
 	)
 	if len(f.States) > 0 {
-		ph := make([]string, len(f.States))
-		for i, s := range f.States {
-			ph[i] = "?"
+		for _, s := range f.States {
 			args = append(args, string(s))
 		}
-		where = append(where, `state IN (`+strings.Join(ph, ",")+`)`)
+		where = append(where, `state IN (`+placeholders(len(f.States))+`)`)
 	}
 	if len(f.Kinds) > 0 {
-		ph := make([]string, len(f.Kinds))
-		for i, k := range f.Kinds {
-			ph[i] = "?"
+		for _, k := range f.Kinds {
 			args = append(args, string(k))
 		}
-		where = append(where, `kind IN (`+strings.Join(ph, ",")+`)`)
+		where = append(where, `kind IN (`+placeholders(len(f.Kinds))+`)`)
 	}
 	if f.Target != "" {
 		where = append(where, `target = ?`)
@@ -212,10 +208,8 @@ func (d *DB) ClaimJob(kinds []jobs.Kind, now time.Time) (*jobs.Job, error) {
 	if len(kinds) == 0 {
 		return nil, nil
 	}
-	ph := make([]string, len(kinds))
 	args := []any{now.Unix()}
-	for i, k := range kinds {
-		ph[i] = "?"
+	for _, k := range kinds {
 		args = append(args, string(k))
 	}
 
@@ -231,7 +225,7 @@ func (d *DB) ClaimJob(kinds []jobs.Kind, now time.Time) (*jobs.Job, error) {
 	// nothing but "?" and commas — ph is filled with the literal "?" above,
 	// one per kind, and the kinds themselves go into args as bound parameters.
 	j, err := scanJob(tx.QueryRow(`SELECT `+jobColumns+` FROM jobs
-		WHERE state IN `+claimableStates+` AND available_at <= ? AND kind IN (`+strings.Join(ph, ",")+`)
+		WHERE state IN `+claimableStates+` AND available_at <= ? AND kind IN (`+placeholders(len(kinds))+`)
 		ORDER BY priority DESC, created_at ASC, id ASC LIMIT 1`, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		// An idle queue is the normal case and must not look like a fault.

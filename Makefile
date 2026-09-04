@@ -79,9 +79,42 @@ dev: build-go ## Run the backend only (pair with `make ui-dev`)
 
 # -------------------------------------------------------------------- test
 
+# WHAT CI RUNS, VERBATIM, and it did not used to be.
+#
+# This target ran `go test ./...`. CI runs
+# `POLYEMESIS_LEDGER=strict go test -race -timeout 20m ./...`, and the two
+# differ in ways that decide whether a class of defect can be seen locally AT
+# ALL:
+#
+#   POLYEMESIS_LEDGER=strict  makes internal/api's route-coverage ledger run its
+#                             counterpart proofs, and the LiveTools shape
+#                             inspectors with them. Without it those never
+#                             executed on any developer machine -- the ledger's
+#                             whole claim is that an excuse cannot discharge on
+#                             a test NAME, and that claim was only ever tested
+#                             in CI.
+#   -race                     the engine reconciles from several goroutines. A
+#                             data race here is a stream that stops for one
+#                             viewer, and nothing local looked for one.
+#
+# The parity guard certified this target as CI-equivalent for as long as it was
+# not, because it matched the substring `go test` and stopped there. A guard
+# that reads a command NAME and not its flags is the same mistake as a ledger
+# that reads a test name: internal/testenv/checkparity_invocation_test.go now
+# compares the environment and the flags.
+#
+# WHAT IT COSTS, out loud. `make check` was about four minutes and is now about
+# twenty-five, because the race detector multiplies the largest suite in the
+# tree. That is the real price of the gate telling the truth; `go test ./...`
+# is still one command away for anybody who wants the fast, weaker answer and
+# knows that is what they are getting. -race also needs a C toolchain, so this
+# target now fails on a machine with Go and no cc, where it used to pass.
 .PHONY: test
-test: preflight-guard ## Run the Go test suite
+test: preflight-guard ## Run the Go suite the fast way -- the loop you run before every commit
 	go test ./...
+
+test-ci: preflight-guard ## Run the Go suite EXACTLY as CI does: strict ledger, -race, 20m
+	POLYEMESIS_LEDGER=strict go test -race -timeout 20m ./...
 
 .PHONY: preflight-guard
 preflight-guard: ## Prove the route-coverage preflight survives -run, -skip and -count=0
@@ -152,9 +185,14 @@ cover: ## Run tests with a coverage summary
 typecheck: $(UI_DIR)/node_modules ## Typecheck the frontend without emitting
 	cd $(UI_DIR) && npx tsc -b --noEmit
 
+# BOTH VETS, because CI runs both. The Windows leg catches a _windows.go file
+# that no build on this machine compiles -- internal/supervisor has one, and a
+# vet failure there costs the whole `go build, vet, test` job and a round trip.
+# Seconds; it type-checks, it does not build.
 .PHONY: vet
-vet: ## Run go vet
+vet: ## Run go vet, for this platform and for the Windows build
 	go vet ./...
+	GOOS=windows go vet ./...
 
 .PHONY: fmt
 fmt: ## Format Go sources
@@ -168,6 +206,37 @@ fmtcheck: ## Fail if any Go source needs formatting (what CI actually gates on)
 .PHONY: lint
 lint: $(UI_DIR)/node_modules ## Lint the frontend
 	cd $(UI_DIR) && npm run lint
+
+# THE SCRIPTS NOTHING RUNS STILL HAVE TO PARSE.
+#
+# 44 files under scripts/, and 25 of them are acceptance suites that run only in
+# the acceptance matrix, on dispatch, or not at all.
+# scripts/acceptance-multistream.sh is 70 KB, runs NOWHERE in CI on purpose --
+# with credentials it publishes to a real account, which docs/TESTING.md
+# explains -- and three Go tests nonetheless cite its behaviour as the thing
+# they are keeping in step with. Nothing parsed it. A syntax error would have
+# been found by whoever next ran it by hand, on a schedule nobody controls.
+#
+# `bash -n` parses without executing: no FFmpeg, no ports, no credentials, no
+# network, under a second for the whole directory. It cannot say a script is
+# CORRECT, only that it is not garbage -- which is the class of breakage an
+# unrun script accumulates, because nothing else looks at it at all.
+#
+# GLOBBED, NOT LISTED. release.yml already did this for install.sh and
+# acceptance-install.sh by name, and naming scripts is how you cover the two
+# somebody remembered.
+.PHONY: sh-syntax
+sh-syntax: ## bash -n every scripts/*.sh, including the ones nothing runs
+	@n=0; for f in scripts/*.sh scripts/*/*.sh; do \
+	  [ -e "$$f" ] || continue; \
+	  bash -n "$$f" || exit 1; \
+	  n=$$((n+1)); \
+	done; \
+	if [ "$$n" -lt 20 ]; then \
+	  echo "sh-syntax: only $$n scripts parsed; the glob has gone stale and this target is passing having checked almost nothing"; \
+	  exit 1; \
+	fi; \
+	echo "sh-syntax: $$n shell scripts parse"
 
 # ------------------------------------------------------------------- gate
 
@@ -240,8 +309,28 @@ endif
 #
 # `ui` rebuilds internal/web/dist, so `check` leaves build output in the tree.
 # That is what CI gates on and `make clean` puts it back.
+# AND THE GO HALF FELL BEHIND THE SAME WAY, which is the third time. CI's `go
+# build, vet, test` job grew `make coverage-instrument-guard` -- the probe that
+# proves `-cover` on internal/api measures the selection and not the forced
+# preflight, the #217 defect where zero tests, one test and the whole suite all
+# reported 22.0% -- and nothing reachable from `check` ran it. The parity guard
+# did not notice because it only ever compared the `ui` job.
 .PHONY: check
-check: fmtcheck vet test typecheck lint ui-test ui ## gofmt, vet, go test, tsc, oxlint, vitest, ui build -- no Docker
+# TWO TARGETS, BECAUSE ONE CANNOT BE BOTH FAST AND CI.
+#
+# `check` was made to run CI's exact go test -- strict ledger, -race, 20m --
+# because its parity guard was certifying a parity it did not have. That closed
+# the false claim and bought a four-minute loop turning into a twenty-five
+# minute one, which is how a pre-commit check stops being run at all. A gate
+# people route around is back to rung zero, which is where this started.
+#
+# So: `check` is the loop, `check-ci` is the parity, and the guard in
+# internal/testenv/checkparity_invocation_test.go compares CHECK-CI against
+# ci.yml. Neither target claims to be the other. `check`'s help line says
+# "fast", so nobody reads it as a promise about CI.
+check: fmtcheck vet test coverage-instrument-guard sh-syntax typecheck lint ui-test ui ## FAST pre-commit loop: gofmt, both vets, plain go test, coverage probe, bash -n, tsc, oxlint, vitest, ui build
+
+check-ci: fmtcheck vet test-ci coverage-instrument-guard sh-syntax typecheck lint ui-test ui ## Everything `check` runs, but with CI's exact go test (strict ledger, -race). Slow; needs a C toolchain
 
 # NOT IN `check`, ON PURPOSE. Everything above runs on a bare checkout with Go
 # and Node and nothing else, and that property is worth keeping: the moment the

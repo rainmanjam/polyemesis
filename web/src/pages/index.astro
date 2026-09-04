@@ -94,7 +94,29 @@ const features = [
             it into a terminal, and a command that half-works is worse than none:
             the container it creates has fixed port mappings and has to be
             destroyed to fix them. */}
-        <div class="rise rise-4 mt-8">
+        {/* ABOVE THE COMMAND, and only just. The command is still the hero's
+            primary control -- this ships as a container and that is what a
+            visitor is about to paste. But "how much bandwidth does this need"
+            is the question asked before the install, not after it, and a
+            visitor who cannot answer it does not run the command at all. So it
+            sits directly above, as a link rather than a second button
+            competing with the copy control. */}
+        <div class="rise rise-3 mt-8">
+          <a href="/calculator" class="btn btn-ghost text-sm">
+            Bandwidth calculator
+          </a>
+          {/* Under the button, not beside it. Inline, the sentence wrapped
+              around the button's right edge at every width between a phone and
+              a wide desktop -- a ragged second line starting under the middle
+              of a control reads as a caption that lost its anchor. Below it,
+              the line breaks where the column does, like every other paragraph
+              on the page. */}
+          <p class="mt-3 max-w-md text-sm leading-relaxed text-subtle">
+            What one stream to several platforms costs your uplink, per month.
+          </p>
+        </div>
+
+        <div class="rise rise-4 mt-6">
           <CodeBlock
             label="docker"
             code={`docker run -d --name polyemesis \\
