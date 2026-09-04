@@ -18,10 +18,19 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text-summary", "lcov"],
-      include: ["src/lib/**/*.mjs", "src/scripts/mermaid-render.ts"],
-      // The build guard is the harness for the other two; only the plugin with
-      // its own tests is measured here, so the percentage means something.
-      exclude: ["src/lib/**/*.test.*"],
+      // NAMED BY SHAPE, NOT ONE FILE AT A TIME. This used to read
+      // "src/scripts/mermaid-render.ts", so the day code-copy.ts got its first
+      // test the module still produced no lcov entry -- and a source file with
+      // no coverage data is not "unmeasured" to SonarCloud, it is UNCOVERED.
+      // The test was written, it passed, and the quality gate got worse. An
+      // allow-list of individual paths is exactly the thing that goes stale
+      // without anyone being told; see TestEveryTestedModuleIsMeasured.
+      include: ["src/lib/**/*.{mjs,ts}", "src/scripts/**/*.ts"],
+      // The build guard, scripts/check-build.mjs, is still the harness for the
+      // .astro components -- those stay out, because a report that swept them
+      // in would read 2% and be the number that makes people stop reading
+      // reports.
+      exclude: ["src/**/*.test.*"],
     },
   },
 });

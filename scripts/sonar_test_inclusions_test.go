@@ -176,3 +176,195 @@ func TestTheInclusionMatcherActuallyDiscriminates(t *testing.T) {
 		}
 	}
 }
+
+// The second way the coverage plumbing lied, found the same afternoon as the
+// first and with the same shape.
+//
+// web/vitest.config.ts pins coverage.include to an allow-list -- deliberately,
+// because the default glob would sweep in every .astro component and report 2%,
+// which is the number that makes people stop reading reports. But the list named
+// individual files. So when src/scripts/code-copy.ts got its first test, the
+// test ran, it passed, and the module still produced no lcov entry.
+//
+// A source file with no coverage data is not "unmeasured" to SonarCloud. It is
+// UNCOVERED: its lines count toward new_lines_to_cover and none of them count as
+// covered. Writing the test made the quality gate WORSE, silently, for the second
+// time in one afternoon and by a different mechanism.
+//
+// So this guard is about the class rather than the instance: wherever a vitest
+// config pins coverage.include, every module that HAS a sibling test must be
+// matched by it. A module somebody bothered to test is a module whose coverage
+// has to be reported.
+
+// vitestConfigs are the configs that pin a coverage allow-list, with the
+// directory each one's globs are relative to.
+var vitestConfigs = []string{"web/vitest.config.ts", "ui/vitest.config.ts"}
+
+// coverageInclude pulls the include: [...] array out of a vitest config's
+// coverage block. Returns nil when the config pins no allow-list, which is not
+// a finding: the default glob measures everything imported.
+func coverageInclude(t *testing.T, path string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	body := string(raw)
+	cov := strings.Index(body, "coverage:")
+	if cov < 0 {
+		return nil
+	}
+	inc := strings.Index(body[cov:], "include:")
+	if inc < 0 {
+		return nil
+	}
+	rest := body[cov+inc:]
+	open := strings.IndexByte(rest, '[')
+	close := strings.IndexByte(rest, ']')
+	if open < 0 || close < open {
+		t.Fatalf("%s: coverage.include is not a bracketed list", path)
+	}
+	var globs []string
+	// Split on commas at brace depth zero. A naive strings.Split cuts
+	// "src/**/*.{ts,tsx}" in half and yields two globs that match nothing,
+	// which would make this guard report every tested file in the repo -- a
+	// check that cries wolf is one people switch off.
+	for _, part := range splitTopLevel(rest[open+1 : close]) {
+		g := strings.Trim(strings.TrimSpace(part), `"'`)
+		if g != "" {
+			globs = append(globs, g)
+		}
+	}
+	if len(globs) == 0 {
+		t.Fatalf("%s: coverage.include is empty, so nothing is measured at all", path)
+	}
+	return globs
+}
+
+// splitTopLevel splits a comma-separated list, ignoring commas inside braces.
+func splitTopLevel(s string) []string {
+	var out []string
+	depth, start := 0, 0
+	for i, r := range s {
+		switch r {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		case ',':
+			if depth == 0 {
+				out = append(out, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(out, s[start:])
+}
+
+// braceGlob expands one level of {a,b} alternation, which vitest accepts and
+// filepath.Match does not, then matches Ant-style.
+func braceGlob(pattern, path string) bool {
+	open := strings.IndexByte(pattern, '{')
+	if open < 0 {
+		return matchesGlob(pattern, path)
+	}
+	close := strings.IndexByte(pattern[open:], '}')
+	if close < 0 {
+		return matchesGlob(pattern, path)
+	}
+	close += open
+	for _, alt := range strings.Split(pattern[open+1:close], ",") {
+		if braceGlob(pattern[:open]+strings.TrimSpace(alt)+pattern[close+1:], path) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestEveryTestedModuleIsMeasured(t *testing.T) {
+	root := repoRoot(t)
+
+	for _, cfg := range vitestConfigs {
+		dir := filepath.Dir(filepath.Join(root, cfg))
+		globs := coverageInclude(t, filepath.Join(root, cfg))
+		if globs == nil {
+			continue // no allow-list pinned, so nothing can go stale
+		}
+
+		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if skipDirs[d.Name()] {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			// Find the module a test file is the test FOR: foo.test.ts -> foo.ts.
+			name := d.Name()
+			var stem string
+			for _, mid := range []string{".test."} {
+				if i := strings.Index(name, mid); i >= 0 {
+					stem = name[:i]
+				}
+			}
+			if stem == "" {
+				return nil
+			}
+			ext := filepath.Ext(name)
+			module := filepath.Join(filepath.Dir(path), stem+ext)
+			if _, serr := os.Stat(module); serr != nil {
+				// A test with no same-named sibling tests something else --
+				// an .astro page, a whole pipeline. Nothing to measure here.
+				return nil
+			}
+			rel, rerr := filepath.Rel(dir, module)
+			if rerr != nil {
+				return rerr
+			}
+			rel = filepath.ToSlash(rel)
+			for _, g := range globs {
+				if braceGlob(g, rel) {
+					return nil
+				}
+			}
+			t.Errorf("%s: coverage.include does not match %s, which has a test.\n"+
+				"    The test will run and pass, the module will produce no lcov entry, "+
+				"and SonarCloud counts a source file with no coverage data as UNCOVERED "+
+				"-- so writing that test made new_coverage worse. Widen the glob "+
+				"(include is %v).", cfg, rel, globs)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", dir, err)
+		}
+	}
+}
+
+func TestTheBraceExpanderActuallyDiscriminates(t *testing.T) {
+	cases := []struct {
+		pattern, path string
+		want          bool
+	}{
+		{"src/lib/**/*.{mjs,ts}", "src/lib/hast-mermaid.mjs", true},
+		{"src/lib/**/*.{mjs,ts}", "src/lib/features-shots.ts", true},
+		{"src/lib/**/*.mjs", "src/lib/features-shots.ts", false},
+		{"src/scripts/**/*.ts", "src/scripts/code-copy.ts", true},
+		{"src/scripts/mermaid-render.ts", "src/scripts/code-copy.ts", false},
+		{"src/**/*.{ts,tsx}", "src/components/signature/AudioMeter.tsx", true},
+		{"src/lib/**/*.{mjs,ts}", "src/scripts/code-copy.ts", false},
+	}
+	// The list splitter is the part that failed first: it cut
+	// "src/**/*.{ts,tsx}" at the comma inside the braces and produced two
+	// globs that match nothing, so the guard reported every tested file in the
+	// repo as unmeasured. A check that cries wolf gets switched off.
+	if got := splitTopLevel(`"src/lib/**/*.{mjs,ts}", "src/scripts/**/*.ts"`); len(got) != 2 {
+		t.Fatalf("splitTopLevel returned %d globs, want 2: %q", len(got), got)
+	}
+	for _, c := range cases {
+		if got := braceGlob(c.pattern, c.path); got != c.want {
+			t.Errorf("braceGlob(%q, %q) = %v, want %v", c.pattern, c.path, got, c.want)
+		}
+	}
+}
