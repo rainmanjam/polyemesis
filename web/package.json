@@ -28,6 +28,6 @@
     "@vitest/coverage-v8": "^4.1.10",
     "jsdom": "^30.0.1",
     "vitest": "^4.1.10",
-    "wrangler": "4.121.0"
+    "wrangler": "4.127.1"
   }
 }
