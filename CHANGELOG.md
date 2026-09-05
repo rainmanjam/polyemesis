@@ -93,6 +93,17 @@ its first tagged release.
 
 ### Fixed
 
+- **A raised YouTube API quota was never paced against.**
+  `YouTubeConfig.QuotaUnits` existed and its own comment invited operators who
+  had been granted more to say so — and nothing set it. An install granted a
+  larger allowance after a YouTube API Services audit polled chat at the default
+  ten thousand units, roughly a hundred times slower than it was entitled to,
+  with nothing on screen saying so. The allowance and the send reserve are now
+  settings, validated, and pushed into a chat connection that is already up, so
+  the change takes effect on save rather than at the next restart. That second
+  half was found by the hot-reload table: every settings leaf has to say what
+  happens when it changes mid-stream, and the only honest answer for a value
+  read once at adapter construction was "nothing until you restart".
 - **A data race between clip planning and encoder re-detection.**
   `internal/api/clips.go` read `tools.HWEncoders` unlocked while
   `RefreshEncoderCapabilities` rewrote it — a read the neighbouring

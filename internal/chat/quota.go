@@ -102,10 +102,14 @@ type budget struct {
 	paused   bool
 }
 
-func newBudget(limit, reserve int, now func() time.Time) *budget {
-	if now == nil {
-		now = time.Now
-	}
+// clampQuota is the ONE spelling of what an acceptable allowance is, shared by
+// construction and by setLimits.
+//
+// It is a function rather than two copies because the two callers must agree:
+// an operator who saves a reserve larger than their allowance would otherwise
+// get "no reserve" at boot and "chat paused forever" after a save, from the
+// same two numbers. The refusals below are each a decision, not a default.
+func clampQuota(limit, reserve int) (int, int) {
 	if limit <= 0 {
 		limit = DefaultQuotaUnits
 	}
@@ -118,9 +122,35 @@ func newBudget(limit, reserve int, now func() time.Time) *budget {
 		// reserve rather than as if there is no chat.
 		reserve = 0
 	}
+	return limit, reserve
+}
+
+func newBudget(limit, reserve int, now func() time.Time) *budget {
+	if now == nil {
+		now = time.Now
+	}
+	limit, reserve = clampQuota(limit, reserve)
 	b := &budget{limit: limit, reserve: reserve, now: now}
 	b.resetAt = quotaResetAfter(now())
 	return b
+}
+
+// setLimits replaces the allowance on a budget that is already spending against
+// it, so a settings save reaches a chat connection that has been up for hours.
+//
+// USED IS DELIBERATELY NOT RESET. The units already spent today were spent
+// against YouTube's counter, not against this struct, and YouTube will not
+// forget them because polyemesis was reconfigured. Clearing it here would let
+// an operator mint themselves a fresh allowance by saving the settings page,
+// and the first thing they would learn is that the real quota ran out anyway --
+// at which point reads stop with no warning, which is the failure the reserve
+// exists to prevent.
+func (b *budget) setLimits(limit, reserve int) {
+	limit, reserve = clampQuota(limit, reserve)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.limit = limit
+	b.reserve = reserve
 }
 
 // spend records units and rolls the day over when the reset has passed.

@@ -626,3 +626,24 @@ func (y *YouTubeAdapter) classify(err error) error {
 	}
 	return err
 }
+
+// SetQuota replaces the daily allowance this adapter paces against, without
+// dropping the connection.
+//
+// #732 wired the operator's number into NewYouTube, which answered the question
+// only for a process that had not started yet: chatAdapter runs once, from
+// StartChat, from main. An operator granted a larger quota by a YouTube API
+// Services audit would set it, be told it was saved, and go on polling at the
+// default rate until the next restart -- which is the same defect #732 was
+// filed for, moved one step later.
+//
+// The reload table would not let that ship. Every leaf in db.Settings has to
+// name what happens when it changes mid-stream, and the honest answer without
+// this method was ClassNextStart, a class whose own documentation calls it an
+// admission rather than a design.
+func (y *YouTubeAdapter) SetQuota(units, reserve int) {
+	if y == nil || y.budget == nil {
+		return
+	}
+	y.budget.setLimits(units, reserve)
+}

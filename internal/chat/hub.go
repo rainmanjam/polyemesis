@@ -1276,3 +1276,51 @@ func (h *Hub) UpdateChatSettings(ctx context.Context, p db.Platform, account str
 	defer cancel()
 	return w.UpdateChatSettings(ctx, s)
 }
+
+// quotaPacer is an adapter that meters itself against a daily API allowance the
+// operator can change.
+//
+// AN INTERFACE RATHER THAN A *YouTubeAdapter type assertion, because YouTube is
+// not going to be the only one. Every platform here polls or is pushed to, and
+// the ones that poll have a budget; declaring the capability means the next one
+// is wired by implementing a method rather than by remembering to add a case to
+// a switch in this file. A switch is a place to forget; a method set is not.
+type quotaPacer interface {
+	SetQuota(units, reserve int)
+}
+
+// SetQuota pushes a changed API allowance into every attached adapter that
+// paces against one, and reports how many took it.
+//
+// Adapters that do not implement quotaPacer are skipped and are not an error:
+// an IRC connection has no daily allowance to spend, so having nothing to say
+// about one is the correct answer rather than a missing case.
+//
+// The count is returned rather than logged here so the caller can say something
+// truthful in the one place that knows whether the operator was watching -- a
+// settings save that reaches zero connections is worth a different line from
+// one that reaches three.
+func (h *Hub) SetQuota(units, reserve int) int {
+	if h == nil {
+		return 0
+	}
+	// SNAPSHOT UNDER THE LOCK, PUSH OUTSIDE IT, the shape Send above uses: each
+	// adapter takes its own mutex, and holding the Hub's across a call into one
+	// would order the two locks here and the other way round anywhere an
+	// adapter calls back into the Hub.
+	h.mu.Lock()
+	rs := make([]*runner, 0, len(h.runners))
+	for _, r := range h.runners {
+		rs = append(rs, r)
+	}
+	h.mu.Unlock()
+
+	applied := 0
+	for _, r := range rs {
+		if p, ok := r.adapter.(quotaPacer); ok {
+			p.SetQuota(units, reserve)
+			applied++
+		}
+	}
+	return applied
+}

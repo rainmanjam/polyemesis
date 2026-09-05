@@ -181,9 +181,12 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		// default ten thousand -- polling roughly a hundred times slower than
 		// it was entitled to, with nothing saying so.
 		//
-		// Read at ADAPTER CONSTRUCTION rather than cached, because this whole
-		// function runs again when chat is rewired, which is what makes a
-		// settings change take effect without a restart.
+		// This is the STARTUP half of the answer only. chatAdapter runs once
+		// per process -- from StartChat, from main -- so a value read here and
+		// held would be a value a settings save could not change until a
+		// restart. ApplyYouTubeQuota is the other half, pushing a saved
+		// allowance into the adapter this built; settingsReload records the
+		// pair as ClassLive on the strength of it.
 		cs := s.youtubeQuota()
 		return chat.NewYouTube(chat.YouTubeConfig{
 			AccountRef:   a.AccountRef,
