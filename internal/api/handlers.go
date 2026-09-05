@@ -2194,6 +2194,22 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		warnings = append(warnings, w.Detail)
 	}
 
+	// THE BACKUP TOGGLE, TURNED ON AFTER THE BROADCAST EXISTS. #727.
+	//
+	// enable_backup_ingest is a CREATE parameter, so before this the only route
+	// to a backup endpoint was Refresh key -- which starts a new live video and
+	// discards the one this destination is configured against, with its comment
+	// thread and its title. The remedy cost more than the problem.
+	//
+	// Runs BEFORE the store write so the endpoint it obtains is saved with the
+	// rest of the change, rather than needing a second update the caller cannot
+	// see. Its failure is a warning and never a refusal: a redundant feed that
+	// could not be added leaves the destination going out on one path instead
+	// of two, which is the state it was already in.
+	if w := s.fillFacebookBackupIngest(r.Context(), existing); w != "" {
+		warnings = append(warnings, w)
+	}
+
 	updated, err := s.store.UpdateDestination(existing)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

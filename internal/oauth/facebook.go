@@ -537,6 +537,73 @@ func (f *Facebook) IngestFor(ctx context.Context, clientID, accessToken, targetR
 	return b, nil
 }
 
+// AddBackupIngest provisions a redundant ingest on a broadcast that ALREADY
+// EXISTS, and returns it. #727.
+//
+// WHAT IT REPLACES. `enable_backup_ingest=true` is a CREATE parameter, so until
+// this existed the only way to obtain a backup endpoint was to create a new
+// live video. An operator who turned the toggle on afterwards had exactly one
+// route: press "Refresh key", which starts a fresh broadcast and discards the
+// one they were configured against -- its comment thread, its title, and
+// anything already pushed to it. The remedy cost more than the problem.
+//
+// `POST /{live_video_id}/input_streams` is Meta's own answer and is in the Live
+// Video API's endpoint list. It creates a LiveVideoInputStream on the existing
+// video; `stream_id` on that node is glossed "0-indexed ID for this ingest
+// stream", which is the `-0-` and `-1-` that distinguish a primary key from its
+// backup.
+//
+// NOT FATAL TO THE CALLER, by construction: it returns the endpoint or an
+// error, and the caller decides. A redundant feed that could not be added is a
+// destination that goes out on one path instead of two, which is the state it
+// was already in.
+func (f *Facebook) AddBackupIngest(ctx context.Context, accessToken, targetRef, liveVideoID string) (*Ingest, error) {
+	if strings.TrimSpace(liveVideoID) == "" {
+		return nil, fmt.Errorf("no live video id, so there is no broadcast to add a backup ingest to")
+	}
+	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
+	if err != nil {
+		return nil, err
+	}
+
+	var created fbLiveVideo
+	if err := f.post(ctx, tgt.token, "/"+liveVideoID+"/input_streams", url.Values{}, &created); err != nil {
+		return nil, fbAdvice(err, "add a backup ingest to this Facebook broadcast",
+			f.publishScopes(tgt.kind))
+	}
+
+	// THE CREATE RESPONSE IS A LiveVideoInputStream, not a LiveVideo, so the
+	// ingest may arrive on the node's own secure_stream_url rather than in the
+	// secondary lists. Both are read, and a follow-up read of the VIDEO fills
+	// the gap when neither is present -- the same shape IngestFor already uses
+	// for a create that came back thin.
+	raw := firstNonEmpty(created.SecureStreamURL, created.StreamURL)
+	if raw == "" {
+		var full fbLiveVideo
+		if err := f.get(ctx, tgt.token, "/"+liveVideoID,
+			url.Values{"fields": {fbLiveVideoFields}}, &full); err != nil {
+			return nil, fbAdvice(err, "read back the backup ingest", f.publishScopes(tgt.kind))
+		}
+		list := full.SecureStreamSecond
+		if len(list) == 0 {
+			list = full.StreamSecondary
+		}
+		if len(list) > 0 {
+			raw = list[len(list)-1]
+		}
+	}
+	if raw == "" {
+		return nil, fmt.Errorf("Facebook accepted the backup ingest for live video %s but "+
+			"returned no URL for it", liveVideoID)
+	}
+
+	server, key, err := splitIngestURL(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &Ingest{URL: server, Key: key}, nil
+}
+
 // fbPrivacyParam is Graph's privacy object, which is a JSON document in a query
 // parameter rather than a bare value.
 func fbPrivacyParam(p db.FacebookPrivacy) string {

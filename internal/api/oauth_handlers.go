@@ -1025,3 +1025,67 @@ func (s *Server) RefreshLoop(ctx context.Context) {
 		}
 	}
 }
+
+// fillFacebookBackupIngest provisions a redundant ingest on the broadcast a
+// Facebook destination is ALREADY publishing to, when the operator has just
+// asked for one and there is none. #727.
+//
+// Returns the warning to attach to the response, empty when there was nothing
+// to do or when it worked.
+//
+// THE FOUR CONDITIONS ARE THE DEVICE. Each one is a reason not to spend a
+// platform call, and getting any of them wrong turns an ordinary destination
+// edit into an unexpected write against somebody's live broadcast:
+//
+//   - the operator wants a backup, and does not have one already;
+//   - the destination is Facebook, because this is Facebook's endpoint;
+//   - it is linked to a connected account, because a hand-pasted key carries no
+//     live-video id and nothing can be added to a broadcast we cannot name;
+//   - its key carries a live-video id, which is what says the broadcast exists
+//     and is ours to modify.
+//
+// A destination failing any of them is left exactly alone.
+func (s *Server) fillFacebookBackupIngest(ctx context.Context, dest *db.Destination) string {
+	if dest == nil || !dest.BackupIngestWanted || dest.BackupURL != "" {
+		return ""
+	}
+	if dest.Platform != db.PlatformFacebook || dest.AccountID == nil {
+		return ""
+	}
+	liveVideoID := oauth.FacebookLiveVideoID(dest.StreamKey)
+	if liveVideoID == "" {
+		// A pasted key. There is a broadcast, but this process cannot name it
+		// from the key, and #725's adoption is deliberately read-only -- adding
+		// an ingest to a broadcast we merely inferred is a write against
+		// something that may not be ours.
+		return "This destination's stream key was pasted rather than fetched, so polyemesis " +
+			"cannot tell Facebook which broadcast to add a redundant feed to. Turn on " +
+			"Backup stream in Live Producer and paste the second key instead."
+	}
+
+	p, err := s.providers.Get(db.PlatformFacebook)
+	if err != nil {
+		return ""
+	}
+	fb, ok := p.(*oauth.Facebook)
+	if !ok || fb == nil {
+		return ""
+	}
+	acct, err := s.tokenFor(ctx, *dest.AccountID)
+	if err != nil {
+		return "The connected Facebook account could not be used to add a redundant feed: " +
+			err.Error() + ". The destination is otherwise saved and will go live normally."
+	}
+
+	ing, err := fb.AddBackupIngest(ctx, acct.AccessToken, acct.AccountRef, liveVideoID)
+	if err != nil {
+		s.log.Warn("could not add a backup ingest to an existing Facebook broadcast",
+			"destination", dest.ID, "liveVideo", liveVideoID, "err", err)
+		return "Facebook would not add a redundant ingest to this broadcast: " + err.Error() +
+			". The destination is otherwise saved and will go live on its primary feed."
+	}
+	dest.BackupURL, dest.BackupStreamKey = ing.URL, ing.Key
+	s.log.Info("added a backup ingest to an existing Facebook broadcast",
+		"destination", dest.ID, "liveVideo", liveVideoID)
+	return ""
+}

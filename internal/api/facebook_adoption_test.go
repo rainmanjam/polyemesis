@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,5 +107,117 @@ func TestAnAdoptionThatCannotAnswerLeavesTheChatPaneAsItWas(t *testing.T) {
 
 	if got := s.facebookLiveVideoID(id); got != "" {
 		t.Errorf("live video id = %q, want empty when the platform refuses", got)
+	}
+}
+
+// TURNING ON BACKUP INGEST NO LONGER COSTS THE BROADCAST. #727.
+//
+// enable_backup_ingest is a CREATE parameter, so the only route to a backup
+// endpoint used to be Refresh key -- which starts a new live video and discards
+// the one the destination is configured against, with its comment thread and
+// its title.
+func TestTurningOnBackupIngestFillsItFromTheExistingBroadcast(t *testing.T) {
+	s, _, store, stub := stubbedServer(t, config.Config{})
+	id := linkFacebookAccount(t, s, store)
+
+	// A FETCHED key: it carries the live-video id, which is what says the
+	// broadcast exists and is ours to modify.
+	dest, err := store.CreateDestination(&db.Destination{
+		Name: "fb", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+		URL: "rtmps://live-api-s.facebook.com:443/rtmp", StreamKey: "778899",
+		Enabled: true, AccountID: &id, BackupIngestWanted: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+
+	if warn := s.fillFacebookBackupIngest(context.Background(), dest); warn != "" {
+		t.Fatalf("unexpected warning: %s", warn)
+	}
+	if dest.BackupURL == "" || dest.BackupStreamKey == "" {
+		t.Fatal("no backup endpoint was filled in, so the operator's only remaining " +
+			"route is Refresh key -- which destroys the broadcast they are configured " +
+			"against")
+	}
+	// AND NOT BY CREATING A NEW BROADCAST, which is the whole point.
+	for _, c := range stub.calls() {
+		if c.Method == "POST" && strings.HasSuffix(c.Path, "/live_videos") {
+			t.Errorf("a new live video was created; the existing one should have been "+
+				"modified in place: %s %s", c.Method, c.Path)
+		}
+	}
+}
+
+// A PASTED KEY IS TOLD WHY, rather than silently getting no redundant feed.
+// #725's adoption is deliberately read-only: adding an ingest to a broadcast
+// this process merely inferred is a write against something that may not be
+// ours.
+func TestAPastedKeyIsToldWhyItCannotGetABackupAdded(t *testing.T) {
+	s, _, store, _ := stubbedServer(t, config.Config{})
+	id := linkFacebookAccount(t, s, store)
+
+	dest, err := store.CreateDestination(&db.Destination{
+		Name: "fb", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+		URL: "rtmps://live-api-s.facebook.com:443/rtmp",
+		// The Live Producer shape: not an id.
+		StreamKey: "FB-10000000000000000-0-AbCdEf",
+		Enabled:   true, AccountID: &id, BackupIngestWanted: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+
+	warn := s.fillFacebookBackupIngest(context.Background(), dest)
+	if warn == "" {
+		t.Fatal("a pasted key got no backup and no explanation, which is the silence " +
+			"this whole change is about")
+	}
+	if !strings.Contains(warn, "Backup stream") {
+		t.Errorf("the warning does not name the remedy the operator actually has "+
+			"(turn on Backup stream in Live Producer and paste the second key): %q", warn)
+	}
+	if dest.BackupURL != "" {
+		t.Errorf("a backup was filled in for a broadcast that could not be named: %q",
+			dest.BackupURL)
+	}
+}
+
+// AND NOTHING IS SPENT WHEN NOTHING WAS ASKED FOR. Each condition is a reason
+// not to make a platform call during an ordinary destination edit.
+func TestNoBackupCallIsMadeForADestinationThatDidNotAskForOne(t *testing.T) {
+	s, _, store, stub := stubbedServer(t, config.Config{})
+	id := linkFacebookAccount(t, s, store)
+
+	for _, tc := range []struct {
+		name string
+		dest *db.Destination
+	}{
+		{"the toggle is off", &db.Destination{
+			Name: "a", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+			URL: "rtmps://x/y", StreamKey: "778899", AccountID: &id,
+		}},
+		{"a backup is already configured", &db.Destination{
+			Name: "b", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+			URL: "rtmps://x/y", StreamKey: "778899", AccountID: &id,
+			BackupIngestWanted: true, BackupURL: "rtmps://x/z", BackupStreamKey: "k",
+		}},
+		{"it is not a Facebook destination", &db.Destination{
+			Name: "c", Kind: db.DestRTMP, Platform: db.PlatformCustom,
+			URL: "rtmp://x/y", StreamKey: "778899", BackupIngestWanted: true,
+		}},
+		{"no account is linked", &db.Destination{
+			Name: "d", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+			URL: "rtmps://x/y", StreamKey: "778899", BackupIngestWanted: true,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := len(stub.calls())
+			if warn := s.fillFacebookBackupIngest(context.Background(), tc.dest); warn != "" {
+				t.Errorf("unexpected warning: %s", warn)
+			}
+			if n := len(stub.calls()) - before; n != 0 {
+				t.Errorf("%d platform call(s) made during an ordinary edit", n)
+			}
+		})
 	}
 }
