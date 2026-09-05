@@ -18,6 +18,8 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+
+	"github.com/rainmanjam/polyemesis/internal/childcensus"
 )
 
 // Realtime captions: the one job in this workstream that deliberately competes
@@ -1022,6 +1024,10 @@ func (w *whisperLive) Transcribe(ctx context.Context, pcm []byte) ([]Segment, er
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("live captions: start whisper: %w", err)
 	}
+	// #717. Runs for the length of a broadcast, so it is exactly the shape that
+	// can outlive a shutdown unseen.
+	childcensus.Enrol(cmd.Process.Pid, "live-captions-whisper", "transcribe")
+	defer childcensus.Discharge(cmd.Process.Pid)
 
 	var (
 		wg    sync.WaitGroup
@@ -1185,6 +1191,7 @@ func (c *LiveCaptioner) Start(ctx context.Context, relayURL, modelPath, workDir 
 		cancel()
 		return fmt.Errorf("live captions: start audio tap: %w", err)
 	}
+	childcensus.Enrol(cmd.Process.Pid, "live-captions-audio-tap", "transcribe") // #717
 
 	tr := &whisperLive{
 		tools:   c.whisper,
@@ -1218,6 +1225,7 @@ func (c *LiveCaptioner) Start(ctx context.Context, relayURL, modelPath, workDir 
 		// captioner that leaves an FFmpeg child behind on every stop would
 		// accumulate one per toggle, each still decoding the relay.
 		_ = cmd.Wait()
+		childcensus.Discharge(cmd.Process.Pid) // #717: paired with the Enrol after Start
 
 		c.mu.Lock()
 		c.last = sess.Stats()

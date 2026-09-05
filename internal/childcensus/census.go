@@ -1,4 +1,20 @@
-package supervisor
+// Package childcensus counts the OS children this process has spawned and not
+// yet reaped.
+//
+// A LEAF PACKAGE ON PURPOSE, and that is the whole of #717. It began inside
+// internal/supervisor with unexported enrol/discharge, which meant exactly one
+// of the roughly twenty spawn sites in this repository could use it -- and
+// internal/ffmpeg could not have used it even if it wanted to, because
+// supervisor imports ffmpeg and the import would have been a cycle. So it lives
+// here, importing nothing from this module, and every spawner can reach it.
+//
+// WHY THE SCOPE MATTERED ENOUGH TO MOVE THE PACKAGE. The report built on this
+// says "nothing outlived the shutdown" by saying nothing at all, and a
+// detection device that under-reports is worse than none, because its green is
+// read as an all-clear. A transcode or a whisper child surviving shutdown
+// produced exactly the silence #631 produced, while the shutdown log actively
+// reported that all was well.
+package childcensus
 
 import (
 	"fmt"
@@ -64,10 +80,15 @@ var census struct {
 	live map[int]Child
 }
 
-// enrol records a child that has just been spawned. Called with the pid from a
+// Enrol records a child that has just been spawned. Called with the pid from a
 // successful cmd.Start(), because before that there is nothing to enrol and
 // after a failed start there never was.
-func enrol(pid int, name, kind string) {
+//
+// EVERY SPAWNER IS EXPECTED TO CALL IT. TestEverySpawnSiteIsAccountedFor makes
+// that a build-time check rather than a habit: a package that calls
+// exec.Command without enrolling, and without a stated reason for not needing
+// to, fails.
+func Enrol(pid int, name, kind string) {
 	if pid <= 0 {
 		return
 	}
@@ -79,10 +100,14 @@ func enrol(pid int, name, kind string) {
 	census.live[pid] = Child{PID: pid, Name: name, Kind: kind, Since: time.Now()}
 }
 
-// discharge records that a child has been reaped. Called where cmd.Wait()
+// Discharge records that a child has been reaped. Called where cmd.Wait()
 // returns, which is the only moment the pid is genuinely gone -- signalling it
 // is not, because a child that ignores SIGTERM is still very much a child.
-func discharge(pid int) {
+//
+// SAFE TO DEFER IMMEDIATELY AFTER Enrol. Discharging a pid that was never
+// enrolled is a no-op, so a spawner that pairs them at the same lexical level
+// cannot leave an entry behind on an early return.
+func Discharge(pid int) {
 	if pid <= 0 {
 		return
 	}

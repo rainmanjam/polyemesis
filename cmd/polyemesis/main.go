@@ -20,6 +20,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/api"
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
+	"github.com/rainmanjam/polyemesis/internal/childcensus"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/diag"
@@ -27,7 +28,6 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/logtz"
-	"github.com/rainmanjam/polyemesis/internal/supervisor"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
@@ -496,7 +496,7 @@ func run(h *hooks) error {
 	srv.DrainLifecycleWithin(shutdownCtx)
 	eng.StopWithin(shutdownCtx)
 	warnIfShutdownOverran(shutdownCtx, log)
-	reportSurvivingChildren(log, supervisor.Live())
+	reportSurvivingChildren(log, childcensus.Live())
 	log.Info("goodbye")
 	return nil
 }
@@ -1029,8 +1029,24 @@ func verifyBackup(dir string, out io.Writer) error {
 // the whole budget rather than merely being slow.
 // Takes the census rather than reading it, so the reporting can be tested
 // without spawning a process to be reported ON.
-func reportSurvivingChildren(log *slog.Logger, live []supervisor.Child) {
+func reportSurvivingChildren(log *slog.Logger, live []childcensus.Child) {
 	if len(live) == 0 {
+		// SAYS SO, RATHER THAN SAYING NOTHING. #717.
+		//
+		// Silence here was read as an all-clear, and for most of this program's
+		// life it could not have been one: the census covered supervisor
+		// children only, so a transcode or a whisper child outliving the
+		// shutdown produced exactly the silence #631 produced -- while this
+		// function said nothing and the operator concluded the teardown was
+		// clean.
+		//
+		// It now covers every spawner that can outlive a call, and
+		// TestEverySpawnSiteIsAccountedFor is what keeps that true: a package
+		// that spawns without enrolling, and without a stated reason, fails the
+		// build. The line below is the claim; that test is what backs it.
+		log.Info("no child outlived the shutdown",
+			"scope", "every OS child this process spawned and enrolled: supervisor "+
+				"children, media transcodes, and the transcription and live-caption workers")
 		return
 	}
 	// Warn rather than Error: on a SIGKILLed child the census clears when the
