@@ -69,9 +69,24 @@ func TestNoGuideClaimsAManualStreamKeyForAPlatformThatFetchesIt(t *testing.T) {
 }
 
 // Facebook is the case that proves the check above is not vacuous: its matrix
-// entry is SupportYes and its guide legitimately explains that the key is
-// per-broadcast. If the phrase list ever grows to swallow that, this fails and
-// says so.
+// entry is SupportYes and its guide legitimately explains a caveat about keys.
+// If the phrase list ever grows to swallow that, this fails and says so.
+//
+// IT IS NOW A TWO-KEY SPECIMEN, WHICH IS A STRONGER CALIBRATION THAN BEFORE.
+// The guide used to say Facebook issues a fresh key per broadcast and "there is
+// no permanent key to reuse". That second half was FALSE: Live Producer has a
+// persistent stream key under Advanced settings, reusable every time you go
+// live. polyemesis cannot read it -- Meta's Graph reference documents no way to
+// -- so the corrected guide describes both: a key this product FETCHES, and a
+// different key the operator PASTES.
+//
+// That is precisely the shape the phrase list must not swallow. "polyemesis
+// cannot read it" is true of the persistent key and says nothing about the
+// fetched one, so a maintainer tempted to add "cannot read" to manualPhrases
+// would break a guide that is correct. The first draft of that list already
+// included "no permanent key" and was caught the same way -- for the opposite
+// reason, as it turns out, since the phrase was not merely over-broad but
+// wrong.
 func TestTheGuideDriftCheckStillAllowsLegitimateCaveats(t *testing.T) {
 	var fb SetupGuide
 	for _, g := range guides() {
@@ -94,7 +109,7 @@ func TestTheGuideDriftCheckStillAllowsLegitimateCaveats(t *testing.T) {
 			"legitimate caveat to be calibrated against and the drift check above is " +
 			"unverified. Pick another specimen or delete both.")
 	}
-	if !strings.Contains(strings.ToLower(fb.Note), "ingest url and key for every broadcast") {
+	if !strings.Contains(strings.ToLower(fb.Note), "the key it fetches belongs to one live video") {
 		t.Fatalf("Facebook's per-broadcast caveat has been reworded, which is the moment "+
 			"the manual-key phrase list needs re-checking rather than the moment to stop "+
 			"looking. Re-read the phrases against the new wording, update this probe, "+

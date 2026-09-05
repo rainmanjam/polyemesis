@@ -5,13 +5,24 @@ package oauth
 // Two things make this provider unlike YouTube and Twitch, and both of them
 // shape everything below.
 //
-//  1. There is no persistent stream key. A Facebook broadcast is a live_video
-//     object, created per go-live, and its ingest dies with it. "Fetch the
-//     key" therefore means "create the broadcast", which is why Ingest here has
-//     a side effect the other providers do not have. The live_video id it
-//     returns is the handle for everything that comes afterwards — ending the
-//     broadcast, editing its title, reading its comments — so it is carried out
-//     of here rather than dropped on the floor. See Broadcast.
+//  1. The key this provider fetches is per-broadcast. A Facebook broadcast is a
+//     live_video object, created per go-live, and the ingest that comes back
+//     with it dies with it. "Fetch the key" therefore means "create the
+//     broadcast", which is why Ingest here has a side effect the other
+//     providers do not have. The live_video id it returns is the handle for
+//     everything that comes afterwards — ending the broadcast, editing its
+//     title, reading its comments — so it is carried out of here rather than
+//     dropped on the floor. See Broadcast.
+//
+//     THIS IS A PROPERTY OF THIS API PATH, NOT OF FACEBOOK. This comment used
+//     to open "there is no persistent stream key", which is false: Live
+//     Producer has a PERSISTENT STREAM KEY toggle under Advanced settings,
+//     described there as reusable every time you go live, with one stated
+//     limitation — you can only broadcast one live video at a time with it.
+//     Meta's Graph reference documents no way to mint or read that key, so
+//     polyemesis cannot fetch it; an operator who wants one copies it from Live
+//     Producer once and pastes it, and it does not go stale. Saying the key
+//     does not exist told that operator not to look for it.
 //
 //  2. One connected login can publish to more than one place: the person's own
 //     profile, or any Page they manage. Those need different permissions
@@ -382,10 +393,14 @@ const fbLiveVideoFields = "id,status,title,stream_url,secure_stream_url," +
 
 // Ingest creates a broadcast on the default target and returns its ingest.
 //
-// Note the side effect, which no other provider has: there is no persistent
-// Facebook stream key, so every call here creates a new live_video. Pressing
-// "refresh key" on a Facebook destination starts a new broadcast object rather
-// than re-reading an existing one. The Provider interface has nowhere to put
+// Note the side effect, which no other provider has: the Graph API exposes no
+// way to read a reusable key, so every call here creates a new live_video.
+// Pressing "refresh key" on a Facebook destination starts a new broadcast
+// object rather than re-reading an existing one.
+//
+// A PERSISTENT KEY EXISTS AND IS NOT THIS. Live Producer can issue one that is
+// reusable across broadcasts; it is pasted by hand and this path never sees it.
+// See the package comment. The Provider interface has nowhere to put
 // the resulting id, which is why IngestFor exists and why a caller that wants
 // to end the broadcast or push metadata to it should use that instead.
 func (f *Facebook) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error) {

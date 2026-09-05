@@ -200,7 +200,7 @@ const PRESETS: DestPreset[] = [
     separateKey: true,
     helpUrl: "https://www.facebook.com/live/producer",
     notes:
-      "Connect a Facebook account in Settings → Platform credentials and polyemesis creates the broadcast and fills in both the ingest URL and the key. Note that Facebook issues them per broadcast, so each refresh starts a new live video rather than re-reading an existing one. Registering the Meta app is the slow part — it needs App Review before anyone but you can connect. To do it by hand instead, copy the server URL and key from Live Producer. Facebook requires RTMPS; plain RTMP is refused.",
+      "Connect a Facebook account in Settings → Platform credentials and polyemesis creates the broadcast and fills in both the ingest URL and the key. The key it fetches belongs to one live video, so each refresh starts a new one. Registering the Meta app is the slow part — it needs App Review before anyone but you can connect. By hand instead: Live Producer → Advanced settings → Persistent stream key gives you a key that is reusable every time you go live, so a pasted destination does not go stale. Turn on Backup stream there too and you get the second key the redundant feed publishes to. A persistent key carries one live video at a time, so two destinations cannot share one. A pasted key has no live-video id, so chat, metadata and End broadcast need the connected account. Facebook requires RTMPS; plain RTMP is refused.",
     aliases: ["meta", "fb"],
   },
   {

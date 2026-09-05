@@ -305,7 +305,10 @@ var platformCapabilities = []PlatformCapability{
 			// same automation, and then leave an unattended channel expecting an
 			// end that nothing is going to issue.
 			CapBroadcastLifecycle: "Creating the broadcast and ending it both work, but they are things YOU do — connecting the account creates the live video, and \"End broadcast\" is on the destination menu. Nothing ends a Facebook broadcast on its own, unlike YouTube.",
-			CapStreamKey:          "Facebook issues a fresh ingest and key per broadcast, so connecting the account is what creates the broadcast. There is no permanent key to reuse.",
+			CapStreamKey: "Connecting the account is what creates the broadcast: the key polyemesis fetches belongs to one live video and a refresh starts a new one. " +
+				"Facebook does also offer a PERSISTENT stream key — Live Producer → Advanced settings — which is reusable every time you go live, but Meta's API " +
+				"exposes no way to read it, so that one is copied from Live Producer and pasted here by hand. It does not go stale. Its one limit is Facebook's: " +
+				"a persistent key carries one live video at a time, so two destinations cannot share it.",
 			CapModeration: "Delete a comment, or HIDE one — Facebook is the only platform here that can take a message off " +
 				"the public thread without destroying it, because its live chat is a comment thread. Acting on a " +
 				"Page's comments needs the MODERATE task permission, which is separate from being able to read them, " +

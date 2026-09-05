@@ -67,9 +67,27 @@ tester of your own app, which is all a single-operator setup needs. Publishing
 on anyone else's behalf needs Advanced Access to `publish_video` (profiles) or
 `pages_manage_posts` plus `pages_read_engagement` (Pages). That review is Meta's
 process and yours to complete, not something polyemesis can shorten, and it is
-measured in days. Start it before you need it. Facebook also issues a fresh
-ingest and key per broadcast, so connecting the account is what creates the
-broadcast — there is no permanent key to reuse.
+measured in days. Start it before you need it.
+
+**Two ways to get a Facebook key, and they are not the same key.** Connecting
+the account is what creates the broadcast: the key polyemesis fetches belongs to
+one live video, and pressing *Refresh key* starts a new one. Facebook also
+offers a **persistent stream key** — Live Producer → *Advanced settings* — which
+is reusable every time you go live and therefore does **not** go stale in a
+saved destination. Meta's Graph reference documents no way to mint or read that
+one, so polyemesis cannot fetch it: you copy it from Live Producer once and
+paste it.
+
+Which you want depends on what else you need from the destination:
+
+| | Connected account | Pasted persistent key |
+|---|---|---|
+| Key lifetime | one broadcast; refresh makes a new one | reusable, indefinitely |
+| Backup ingest | requested automatically | turn on *Backup stream* and paste the second key |
+| Title, description, privacy | ✅ | ❌ — no live-video id |
+| Live chat and moderation | ✅ | ❌ |
+| End broadcast | ✅ | ❌ |
+| Simultaneous destinations | one per broadcast object | **one** — Facebook allows a persistent key to carry a single live video at a time |
 
 A destination's saved settings go out on that same create call: the chosen
 audience becomes `privacy`, a saved Crosspost list becomes
@@ -376,10 +394,14 @@ minutes, and start it before you need it.
    the client secret. Paste both into polyemesis.
 4. **Connect account**, then pick your profile or a Page.
 
-Facebook issues a fresh ingest URL and stream key for every broadcast, so
-connecting is what creates the broadcast and there is no permanent key to reuse.
-"Refresh key" on a Facebook destination therefore starts a new live video rather
-than re-reading an existing one.
+The key this fetches belongs to one live video, so *Refresh key* on a Facebook
+destination starts a new broadcast rather than re-reading an existing one.
+
+If you would rather paste a key that lasts, Live Producer → *Advanced settings*
+→ **Persistent stream key** issues one that is reusable every time you go live.
+polyemesis cannot fetch it — Meta's API exposes no way to read it — and a pasted
+key has no live-video id, so title, chat and *End broadcast* stay with the
+connected account. See the table under *Facebook — read this before you start*.
 
 #### What a Facebook destination can be told to do
 
