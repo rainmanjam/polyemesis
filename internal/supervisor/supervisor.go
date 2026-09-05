@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/childcensus"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
@@ -859,7 +860,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 		// entry keyed on a pid survives its Process being dropped on the floor,
 		// and an entry keyed on the Process would not. This line and the
 		// discharge after cmd.Wait() are the census's only two writers.
-		enrol(cmd.Process.Pid, p.spec.Name, p.spec.Kind)
+		childcensus.Enrol(cmd.Process.Pid, p.spec.Name, p.spec.Kind)
 	}
 	// The parent's copies of the write ends, closed unconditionally: the child
 	// has inherited its own, and while the parent holds one the pipe cannot reach
@@ -976,7 +977,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	// Reaped, so the census is now wrong until this line runs. Paired with the
 	// enrol after cmd.Start(); deliberately NOT in the drain below, which waits
 	// on descendants this process never started and can outlive the child.
-	discharge(cmd.Process.Pid)
+	childcensus.Discharge(cmd.Process.Pid)
 	// Announce the reap before the drain, because that is what terminate()'s
 	// escalation is asking about: a child that has been reaped needs no SIGKILL,
 	// whether or not its grandchild is still writing.
@@ -1117,13 +1118,37 @@ func (p *Process) terminate() {
 	}()
 }
 
+// kill sends SIGKILL to the child's whole process group.
+//
+// THE REAPED-CHECK IS THE POINT. #720. killGroup issues a raw
+// syscall.Kill(-pid, SIGKILL), which names a process GROUP BY NUMBER and
+// bypasses Go's ErrProcessDone guard -- so on a reaped pid it can signal a
+// group this supervisor never started.
+//
+// Its two sibling signal sites each already carry a device for this: terminate
+// has the `signalled` latch, and the escalator has a `<-exited` guard. This one
+// had neither, and rested instead on an ordering argument spanning three
+// functions, written as a comment beside the call it protects. The argument was
+// correct; it was not a device, and the family's other two members did not
+// settle for one.
 func (p *Process) kill() {
 	p.cmdMu.Lock()
-	cmd := p.cmd
+	cmd, exited := p.cmd, p.exited
 	p.cmdMu.Unlock()
-	if cmd != nil {
-		killGroup(cmd)
+	if cmd == nil {
+		return
 	}
+	// Non-blocking: `exited` is closed the instant cmd.Wait() returns for this
+	// cmd, so a closed channel means the pid has been reaped and the number is
+	// no longer ours to signal.
+	if exited != nil {
+		select {
+		case <-exited:
+			return
+		default:
+		}
+	}
+	killGroup(cmd)
 }
 
 func (p *Process) setState(s State, errMsg string) {

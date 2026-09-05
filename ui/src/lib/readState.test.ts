@@ -37,7 +37,18 @@ describe("rowsOf / readFailed", () => {
   });
 });
 
-/* AND THAT THE THREE CARDS ACTUALLY ASK. */
+/* AND THAT THE THREE CARDS ACTUALLY ASK.
+ *
+ * THESE ARE PER-CARD ASSERTIONS ABOUT WHAT IS RENDERED, and they are worth
+ * keeping as such: each one names the sentence an operator sees on a failed
+ * read, which no shape rule can check.
+ *
+ * What they are NO LONGER doing is enforcing the rule. #719: a hand-maintained
+ * list of three filenames with specific source strings asserted absent from
+ * each is training, not a device -- it did not know DestinationDialog.tsx
+ * existed, and DestinationDialog.tsx had five instances, two of which drove the
+ * operator to act. readState.shape.test.ts walks every file and matches on the
+ * shape, so the file added tomorrow is covered without being listed. */
 const ROOT = new URL("../../../", import.meta.url).pathname;
 const read = (p: string) => readFileSync(join(ROOT, p), "utf8");
 

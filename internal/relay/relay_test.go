@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -203,24 +204,48 @@ func TestSubscriberBookkeeping(t *testing.T) {
 		{
 			name: "subscribe registers by name",
 			act: func(h *Hub) {
-				h.Subscribe("rec", 5001)
-				h.Subscribe("hls", 5002)
+				mustSubscribe(t, h, "rec", 5001)
+				mustSubscribe(t, h, "hls", 5002)
 			},
 			want: []string{"hls", "rec"},
 		},
 		{
-			name: "re-subscribing the same name replaces rather than duplicates",
+			// THIS CASE USED TO ASSERT THE HAZARD. It read "re-subscribing the
+			// same name replaces rather than duplicates", and replacing is
+			// precisely the failure #711 records: the first consumer keeps
+			// running, keeps a correct command line and keeps a green card, and
+			// receives nothing. The second subscribe is now refused and the
+			// FIRST consumer is the one still registered.
+			name: "a second subscribe under a live name is refused, and the first keeps the name",
 			act: func(h *Hub) {
-				h.Subscribe("rec", 5001)
-				h.Subscribe("rec", 5009)
+				mustSubscribe(t, h, "rec", 5001)
+				if _, err := h.Subscribe("rec", 5009); !errors.Is(err, ErrSubscriberExists) {
+					t.Fatalf("second Subscribe = %v, want ErrSubscriberExists; a bare "+
+						"map assignment here silently cuts off the consumer on 5001", err)
+				}
+				if got := h.subs["rec"].addr.Port; got != 5001 {
+					t.Errorf("the name now points at port %d, want the original 5001: "+
+						"the refusal did not leave the first consumer in place", got)
+				}
+			},
+			want: []string{"rec"},
+		},
+		{
+			// And the name is free again once it is given up, or a restart
+			// would be a permanent refusal.
+			name: "a name released by Unsubscribe can be taken again",
+			act: func(h *Hub) {
+				mustSubscribe(t, h, "rec", 5001)
+				h.Unsubscribe("rec")
+				mustSubscribe(t, h, "rec", 5009)
 			},
 			want: []string{"rec"},
 		},
 		{
 			name: "unsubscribe removes only the named consumer",
 			act: func(h *Hub) {
-				h.Subscribe("rec", 5001)
-				h.Subscribe("hls", 5002)
+				mustSubscribe(t, h, "rec", 5001)
+				mustSubscribe(t, h, "hls", 5002)
 				h.Unsubscribe("rec")
 			},
 			want: []string{"hls"},
@@ -228,7 +253,7 @@ func TestSubscriberBookkeeping(t *testing.T) {
 		{
 			name: "unsubscribing an unknown name is a no-op",
 			act: func(h *Hub) {
-				h.Subscribe("hls", 5002)
+				mustSubscribe(t, h, "hls", 5002)
 				h.Unsubscribe("nobody")
 			},
 			want: []string{"hls"},
@@ -257,7 +282,7 @@ func TestSubscriberBookkeeping(t *testing.T) {
 func TestSubscribeReturnsTheConsumerReadURL(t *testing.T) {
 	h := newTestHub(t)
 
-	if got, want := h.Subscribe("rec", 41234), "udp://127.0.0.1:41234"; got != want {
+	if got, want := mustSubscribe(t, h, "rec", 41234), "udp://127.0.0.1:41234"; got != want {
 		t.Errorf("Subscribe() = %q, want %q", got, want)
 	}
 }
@@ -279,8 +304,8 @@ func TestFanoutDeliversEachDatagramToEverySubscriber(t *testing.T) {
 			h := newTestHub(t)
 			connA, portA := boundSubscriber(t)
 			connB, portB := boundSubscriber(t)
-			h.Subscribe("a", portA)
-			h.Subscribe("b", portB)
+			mustSubscribe(t, h, "a", portA)
+			mustSubscribe(t, h, "b", portB)
 
 			const sends = 3
 			publish(t, h, tt.payload, sends)
@@ -295,8 +320,8 @@ func TestFanoutSkipsAnUnsubscribedConsumer(t *testing.T) {
 	h := newTestHub(t)
 	connA, portA := boundSubscriber(t)
 	connB, portB := boundSubscriber(t)
-	h.Subscribe("a", portA)
-	h.Subscribe("b", portB)
+	mustSubscribe(t, h, "a", portA)
+	mustSubscribe(t, h, "b", portB)
 	h.Unsubscribe("b")
 
 	payload := []byte("only a")
@@ -315,8 +340,8 @@ func TestFanoutSkipsAnUnsubscribedConsumer(t *testing.T) {
 func TestDeadSubscriberDoesNotStarveALiveOne(t *testing.T) {
 	h := newTestHub(t)
 	live, livePort := boundSubscriber(t)
-	h.Subscribe("dead", unboundPort(t))
-	h.Subscribe("live", livePort)
+	mustSubscribe(t, h, "dead", unboundPort(t))
+	mustSubscribe(t, h, "live", livePort)
 
 	payload := tsDatagram(0x22)
 	const sends = 5
@@ -332,8 +357,8 @@ func TestStatsCountsReceiveAndTransmit(t *testing.T) {
 	h := newTestHub(t)
 	connA, portA := boundSubscriber(t)
 	connB, portB := boundSubscriber(t)
-	h.Subscribe("a", portA)
-	h.Subscribe("b", portB)
+	mustSubscribe(t, h, "a", portA)
+	mustSubscribe(t, h, "b", portB)
 
 	payload := tsDatagram(0x33)
 	const sends = 4
@@ -396,7 +421,7 @@ func TestCloseStopsTheReader(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	sub, subPort := boundSubscriber(t)
-	h.Subscribe("a", subPort)
+	mustSubscribe(t, h, "a", subPort)
 	port := h.Port()
 
 	publish(t, h, []byte("before close"), 1)
@@ -534,4 +559,25 @@ func TestPortAllocatorSkipsAPortSomethingElseIsUsing(t *testing.T) {
 	if got != base+1 {
 		t.Errorf("Allocate = %d, want %d (port %d is in use)", got, base+1, base)
 	}
+}
+
+// mustSubscribe is Subscribe for a test that is not about the refusal. #711
+// made an occupied name an error, and a test that drops it would go on
+// asserting fan-out against a hub that never registered the consumer.
+func mustSubscribe(t testing.TB, h *Hub, name string, port int) string {
+	t.Helper()
+	url, err := h.Subscribe(name, port)
+	if err != nil {
+		t.Fatalf("Subscribe(%q, %d): %v", name, port, err)
+	}
+	return url
+}
+
+func mustSubscribeAddr(t testing.TB, h *Hub, name string, ip net.IP, port int) string {
+	t.Helper()
+	url, err := h.SubscribeAddr(name, ip, port)
+	if err != nil {
+		t.Fatalf("SubscribeAddr(%q, %v, %d): %v", name, ip, port, err)
+	}
+	return url
 }

@@ -28,11 +28,16 @@ type fakeHub struct {
 
 func newHub(name string) *fakeHub { return &fakeHub{name: name, subs: map[string]int{}} }
 
-func (h *fakeHub) Subscribe(name string, port int) string {
+// Refuses an occupied name, like the real one. #711. A fake that accepts a
+// collision the production hub refuses is a fake that hides the bug.
+func (h *fakeHub) Subscribe(name string, port int) (string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if _, taken := h.subs[name]; taken {
+		return "", fmt.Errorf("%q: %w", name, relay.ErrSubscriberExists)
+	}
 	h.subs[name] = port
-	return fmt.Sprintf("udp://127.0.0.1:%d", port)
+	return fmt.Sprintf("udp://127.0.0.1:%d", port), nil
 }
 
 func (h *fakeHub) Unsubscribe(name string) {

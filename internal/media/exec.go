@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+
+	"github.com/rainmanjam/polyemesis/internal/childcensus"
 )
 
 // Command is one child process to run.
@@ -76,6 +78,15 @@ func Exec(ctx context.Context, cmd Command, sink Sink) error {
 	if err := c.Start(); err != nil {
 		return fmt.Errorf("start %s: %w", cmd.Name, err)
 	}
+	// ENROLLED FOR AS LONG AS IT RUNS. #717. Before this, the census covered
+	// supervisor children only, and a transcode that outlived the shutdown
+	// produced exactly the silence #631 produced -- while the shutdown log
+	// reported that nothing was wrong.
+	//
+	// Discharged where Wait returns, which is the only moment the pid is
+	// genuinely gone; a child that ignores the kill is still very much a child.
+	childcensus.Enrol(c.Process.Pid, cmd.Name, "media")
+	defer childcensus.Discharge(c.Process.Pid)
 
 	var (
 		mu   sync.Mutex

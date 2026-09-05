@@ -422,7 +422,21 @@ func (d *Dispatcher) reload() {
 	want := make(map[int64]Hook, len(rows))
 	for _, h := range rows {
 		n := h.Normalized()
-		if n.Enabled && n.Validate() == nil {
+		if err := n.Validate(); err != nil {
+			// LOUD FOR THIS ONE, quiet for the rest. #715. An unreadable
+			// signing secret is a fact about the machine that an operator can
+			// fix and would otherwise learn only from a hook that stopped
+			// firing; every other refusal here is something they typed and were
+			// already told about at save time.
+			if n.Enabled && errors.Is(err, ErrSecretUnreadable) {
+				d.log.Error("a hook is not being delivered because its signing secret "+
+					"could not be read on this machine; restore the key file or re-enter "+
+					"the secret. Nothing is being sent unsigned.",
+					"hook", n.ID, "name", n.Name)
+			}
+			continue
+		}
+		if n.Enabled {
 			want[n.ID] = n
 		}
 	}
@@ -587,6 +601,20 @@ func (d *Dispatcher) attempt(ctx context.Context, h Hook, body []byte, env Envel
 	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(h.TimeoutSeconds)*time.Second)
 	defer cancel()
 	reqCtx = withAllowPrivateTarget(reqCtx, h.AllowPrivateTarget)
+
+	// REFUSED HERE, AT THE ONE PLACE THE SIGNATURE IS DECIDED. #715.
+	//
+	// Both delivery paths -- the worker's deliver and the operator's Test --
+	// go through attempt, so this is the point that makes an unsigned delivery
+	// UNREACHABLE rather than merely visible. Validate refuses the same hook
+	// earlier, which is what keeps a worker from existing; this is the guard
+	// under it, at the sink, for a hook that reached here another way.
+	//
+	// retry=false: no number of attempts will make the key file readable, and
+	// a retry loop over it would turn one silent hook into a log full of them.
+	if h.SecretUnreadable != "" {
+		return 0, "", false, fmt.Errorf("%w", ErrSecretUnreadable)
+	}
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, h.URL, bytes.NewReader(body))
 	if err != nil {

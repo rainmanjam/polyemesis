@@ -111,15 +111,126 @@ func (s *Server) engOrNil() *engine.Engine {
 //
 // A nil manager is not an error. Every server in this package's unit tests has
 // one, and the caller's question -- "is what is running what is stored" -- is
-// answered by "nothing is running" rather than by a failure. The callers that
-// only warn keep warning and the callers that return 500 keep returning 500;
-// what changes is which engines were reconciled, not how a failure is
-// reported.
+// answered by "nothing is running" rather than by a failure.
+//
+// ONE CALLER, AND IT IS reconcileNow. #709 collapsed sixteen call sites onto
+// that helper because two spellings of the failure handling lived here side by
+// side; TestReconcileHasOneSpellingAndItsResultCannotBeDropped is what keeps
+// this from growing a second one.
 func (s *Server) reconcile() error {
 	if s.mgr == nil {
 		return nil
 	}
 	return s.mgr.Reconcile()
+}
+
+// reconcileNow is the ONLY spelling of "apply this mutation to the pipeline".
+// It returns the sentence to hand the operator, empty when the reconcile
+// succeeded. #709.
+//
+// THE MISTAKE IT REMOVES. Sixteen handlers called s.reconcile() and two
+// spellings lived in the same package: three turned the error into a 500, and
+// twelve logged it at Warn and returned success. Nothing in the signature said
+// which was right, so a new handler written by copying its nearest neighbour
+// got whichever one that neighbour happened to be.
+//
+// WHY THE SILENT SPELLING IS WORSE THAN IT LOOKS. Engine.Reconcile returns
+// early on a reconcileOutputs error, so preview, clips, captions and loudness
+// are skipped with it; Manager.Reconcile returns firstErr. And reconcile is
+// EVENT-DRIVEN WITH NO TICKER -- engine.go says so in as many words -- so a
+// failure is never retried. Stored state and the running FFmpeg diverge until
+// the next successful mutation or a restart, while the response said 200 and
+// the UI raised a green toast.
+//
+// The worst case is invisible: a destination delete returned {"status":
+// "deleted"}, the row left the list, and the FFmpeg child kept publishing to a
+// destination the console no longer draws.
+//
+// WARNING RATHER THAN CONTROL, deliberately. Refusing the write would be wrong:
+// the row genuinely was saved, and a 500 invites a retry that re-POSTs a
+// destination. The honest ceiling is that the response states what did not
+// happen.
+//
+// AT ERROR, NOT WARN. Nothing retries this, so it is not a transient to be
+// noted -- it is a divergence that persists until somebody acts.
+func (s *Server) reconcileNow(action string) string {
+	err := s.reconcile()
+	if err == nil {
+		return ""
+	}
+	s.log.Error("the pipeline was not reconciled after a change was saved; "+
+		"stored state and the running processes have diverged and nothing retries this",
+		"action", action, "err", err)
+	return action + " was saved, but the running pipeline could not be updated to " +
+		"match it: " + err.Error() + ". Nothing retries this automatically; the change " +
+		"takes effect on the next successful save or a restart."
+}
+
+// writeMutation writes a mutation's response with the reconcile warning folded
+// in, under the key the SPA already reads for a partial success. #709.
+//
+// THROUGH THE MARSHALLED FORM rather than a field on every response type,
+// because the payloads here are a mix of maps and a dozen typed structs and
+// adding a field to each is exactly the per-site decision this is removing.
+// The shape is preserved exactly; one key is added, and only when there is
+// something to say.
+//
+// A payload that is not a JSON object -- an array, a bare string -- cannot
+// carry the key, so it is written unchanged and the warning is logged. No
+// mutation response in this package has that shape today, and the guard test
+// TestEveryReconcileGoesThroughTheHelper is what keeps a new one from arriving
+// unnoticed.
+func writeMutation(w http.ResponseWriter, status int, warning string, v any) {
+	if warning == "" {
+		writeJSON(w, status, v)
+		return
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		writeJSON(w, status, v)
+		return
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+		writeJSON(w, status, v)
+		return
+	}
+	msg, err := json.Marshal([]string{warning})
+	if err != nil {
+		writeJSON(w, status, v)
+		return
+	}
+	// APPENDED TO warnings RATHER THAN A KEY OF ITS OWN, because two handlers
+	// already build that array and the SPA already renders it. A second array
+	// meaning the same thing is a second thing for the next reader to miss.
+	if existing, ok := obj["warnings"]; ok {
+		var list []string
+		if err := json.Unmarshal(existing, &list); err == nil {
+			list = append(list, warning)
+			if merged, err := json.Marshal(list); err == nil {
+				msg = merged
+			}
+		}
+	}
+	obj["warnings"] = msg
+	obj["reconcileFailed"] = json.RawMessage("true")
+	writeJSON(w, status, obj)
+}
+
+// writeMutationNoContent is writeMutation for a handler whose success is 204.
+//
+// A 204 has no body to put a warning in, so a reconcile that failed must change
+// the STATUS: 200 with the warning, rather than a silent 204 that says the
+// whole operation succeeded.
+func writeMutationNoContent(w http.ResponseWriter, warning string) {
+	if warning == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"warnings":        []string{warning},
+		"reconcileFailed": true,
+	})
 }
 
 // tools is the FFmpeg this install detected.
@@ -402,49 +513,13 @@ type Server struct {
 	// for why the state is in memory rather than in a table.
 	devices deviceFlows
 
-	// revokedMu guards revoked and wsPingEvery.
+	// revokedMu guards wsPingEvery.
+	//
+	// It used to guard a `revoked` set as well -- the process-local half of API
+	// token revocation. That set is gone: the /ws tick asks the store directly
+	// (Server.tokenRevoked, #706), so there is no second half to keep in sync
+	// and no deletion path that can forget to write it.
 	revokedMu sync.RWMutex
-	// revoked is the set of api_tokens.id values this process has deleted.
-	//
-	// IT EXISTS FOR ONE READER: the /ws ping tick (#159). A socket's principal
-	// is captured once, at upgrade, and requireAuth never runs again -- so
-	// revoking a token, which is the operator's ONLY lever after a leak, did
-	// not reach a socket that was already open. It stayed open, and it stayed
-	// at the scope it was opened with, until the client went away. Under a
-	// single-administrator product that is defensible; "revoke does not revoke"
-	// is not a sentence to leave in the product.
-	//
-	// IN-PROCESS AND WRITE-ONLY-ON-REVOKE, and the three alternatives were all
-	// worse:
-	//
-	//	Re-looking the token up on each tick (LookupAPIToken) means retaining
-	//	the PLAINTEXT bearer for the life of the socket so there is something
-	//	to look up with, and firing a last_used_at write per socket per minute
-	//	at a single SQLite connection, and adding a database-error path to a
-	//	loop where the only safe answer to an error is "do not close the
-	//	socket" -- which is a branch that must never be got wrong and would
-	//	never be exercised.
-	//
-	//	A process-global epoch counter bumped on every mutation does not
-	//	survive a restart, has to be touched by every future mutation site, and
-	//	invites somebody to treat the counter as the authorisation decision.
-	//
-	//	Broadcasting revocations over a channel couples the socket loop to the
-	//	store's lifecycle for a signal that is one map lookup.
-	//
-	// UNBOUNDED BY DESIGN, and the bound is the process. An entry is ~8 bytes
-	// and is added only when an operator revokes a token by hand; an install
-	// that revoked ten thousand tokens between restarts would be holding 80 kB.
-	// Pruning would need to know that no socket still holds the id, which is
-	// the state this map exists to avoid tracking.
-	//
-	// It is NOT an authorisation source. Absence from this set means "this
-	// process has not seen that token deleted", which is not the same as "the
-	// token is valid" -- a token deleted by another process, or by an operator
-	// editing the database, is absent here. Every REQUEST still goes through
-	// requireAuth, which asks the database. This only ever CLOSES a socket
-	// early; it never keeps one open.
-	revoked map[int64]struct{}
 	// wsPingEvery overrides pingPeriod, and is set only by tests.
 	//
 	// The revocation check rides the existing ping tick, so a test of it has to
@@ -619,7 +694,6 @@ func New(o Options) *Server {
 		logins:        auth.NewThrottle(),
 		setups:        auth.NewThrottle(),
 		kickKeys:      &chat.KickKeyFetcher{},
-		revoked:       map[int64]struct{}{},
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
 			// ServesTLS, not the legacy tls.enabled: an install that writes
@@ -1416,51 +1490,46 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 	})
 }
 
-// markRevoked records that this process deleted an API token, so any /ws socket
-// still holding it can be closed on its next ping tick. See Server.revoked.
+// tokenRevoked reports whether an open socket's API token has been revoked.
 //
-// Called AFTER the delete succeeds, never before: a failed delete leaves the
-// token working, and an entry here would then close a socket whose credential
-// is still valid -- a self-inflicted outage in the one code path an operator
-// reaches for during an incident.
-func (s *Server) markRevoked(id int64) {
-	if s == nil || id == 0 {
-		return
-	}
-	s.revokedMu.Lock()
-	if s.revoked == nil {
-		s.revoked = map[int64]struct{}{}
-	}
-	s.revoked[id] = struct{}{}
-	s.revokedMu.Unlock()
-}
-
-// isRevoked reports whether this process has deleted the given token id.
+// #706. THE STORE IS THE ONE SOURCE OF TRUTH, and it did not used to be.
 //
-// One read-lock and one map lookup, per socket, per ping period. Nothing here
-// touches the database, and it must not start to: see Server.revoked.
-func (s *Server) isRevoked(id int64) bool {
+// Revocation has two halves -- delete the row, and end any socket opened with
+// it -- and the second half used to be an in-process map written by exactly one
+// handler. handleRevokeAPIToken wrote it; handleChangePassword, which calls
+// DeleteAllAPITokens, did not. So a password change removed every token from
+// the database and left their sockets streaming admin-shaped events until the
+// socket or the process died, while the response correctly reported zero
+// surviving tokens.
+//
+// The revoke handler's own comment had predicted exactly this: "a second
+// deletion path that did not do this would be a silent hole."
+//
+// Asking the store instead of a map makes every deletion path -- that handler,
+// the password change, resetadmin (#718), and whatever is added next -- close
+// the socket without being told to. That is the difference between a device and
+// a convention: there is no second half left to forget.
+//
+// FAIL CLOSED on a read error, for the reason sessionEpochChanged below states:
+// an unreachable store is not a reason to keep streaming to a client we can no
+// longer check, and a store this socket cannot read is one requireAuth cannot
+// read either.
+//
+// One indexed read per socket per ping period, the same cost as the session
+// half beside it.
+func (s *Server) tokenRevoked(id int64) bool {
 	if s == nil || id == 0 {
 		return false
 	}
-	s.revokedMu.RLock()
-	_, ok := s.revoked[id]
-	s.revokedMu.RUnlock()
-	return ok
+	exists, err := s.store.APITokenExists(id)
+	if err != nil {
+		s.log.Warn("cannot check whether an open socket's API token survives; closing it",
+			"token", id, "err", err)
+		return true
+	}
+	return !exists
 }
 
-// sessionEpochChanged reports whether a session signed at `was` has since been
-// revoked, which for a session means the user's password was changed.
-//
-// Deliberately NOT modelled on the revoked set above. That set is an in-process
-// note of something this process did, and it is documented as never being an
-// authorisation source; the epoch is the opposite -- the database is the only
-// thing that knows it, a bump can arrive from another process or from sqlite3,
-// and there is nothing in memory that would hear about it. So this reads the
-// store, once per socket per ping period.
-//
-// Fails CLOSED, exactly as auth.(*Manager).checkEpoch does on the request path:
-// a store that cannot answer is not a store that has said yes.
 func (s *Server) sessionEpochChanged(userID, was int64) bool {
 	if s == nil || userID == 0 {
 		return false
@@ -1719,7 +1788,22 @@ var readScopeDeniedPatterns = map[string]bool{
 func (s *Server) requireScope(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principalFrom(r.Context())
-		if !ok || p.token == nil || p.token.Scope == db.ScopeAdmin {
+		// NO PRINCIPAL IS A REFUSAL, not a pass. #710.
+		//
+		// requireSession and requireCSRF both fail closed on !ok; this one
+		// passed, which made "mounted without requireAuth, or after it in the
+		// wrong order" a silent loss of scope enforcement rather than a 401.
+		// Every group carrying this today also carries requireAuth, so this
+		// changes no live behaviour -- it removes the affordance.
+		//
+		// The p.token == nil arm below is a DIFFERENT case and is deliberate:
+		// a session principal is not a scoped token, which is what the comment
+		// above this function says.
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "not signed in")
+			return
+		}
+		if p.token == nil || p.token.Scope == db.ScopeAdmin {
 			next.ServeHTTP(w, r)
 			return
 		}

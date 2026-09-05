@@ -74,7 +74,7 @@ func TestNewBindsTheRequestedFamily(t *testing.T) {
 			if want := fmt.Sprintf("udp://%s:%d", tt.wantHost, h.Port()); h.InputURL() != want {
 				t.Errorf("InputURL() = %q, want %q", h.InputURL(), want)
 			}
-			got := h.Subscribe("sub", 9999)
+			got := mustSubscribe(t, h, "sub", 9999)
 			if want := fmt.Sprintf("udp://%s:9999", tt.wantHost); got != want {
 				t.Errorf("Subscribe() = %q, want %q", got, want)
 			}
@@ -85,10 +85,10 @@ func TestNewBindsTheRequestedFamily(t *testing.T) {
 func TestSubscribeAddrTargetsAnArbitraryHost(t *testing.T) {
 	h := newTestHub(t)
 
-	if got, want := h.SubscribeAddr("remote", net.IPv4(192, 168, 1, 20), 5000), "udp://192.168.1.20:5000"; got != want {
+	if got, want := mustSubscribeAddr(t, h, "remote", net.IPv4(192, 168, 1, 20), 5000), "udp://192.168.1.20:5000"; got != want {
 		t.Errorf("SubscribeAddr() = %q, want %q", got, want)
 	}
-	if got, want := h.SubscribeAddr("remote6", net.ParseIP("2001:db8::1"), 5000), "udp://[2001:db8::1]:5000"; got != want {
+	if got, want := mustSubscribeAddr(t, h, "remote6", net.ParseIP("2001:db8::1"), 5000), "udp://[2001:db8::1]:5000"; got != want {
 		t.Errorf("SubscribeAddr() = %q, want %q", got, want)
 	}
 }
@@ -110,8 +110,8 @@ func TestWildcardHubFansOutAcrossBothFamilies(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sub6.Close() })
 
-	h.SubscribeAddr("v4", net.IPv4(127, 0, 0, 1), port4)
-	h.SubscribeAddr("v6", net.IPv6loopback, sub6.LocalAddr().(*net.UDPAddr).Port)
+	mustSubscribeAddr(t, h, "v4", net.IPv4(127, 0, 0, 1), port4)
+	mustSubscribeAddr(t, h, "v6", net.IPv6loopback, sub6.LocalAddr().(*net.UDPAddr).Port)
 
 	payload := []byte("dual stack")
 	publish(t, h, payload, 3) // publish dials IPv4 loopback

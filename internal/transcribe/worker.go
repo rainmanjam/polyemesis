@@ -19,6 +19,8 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+
+	"github.com/rainmanjam/polyemesis/internal/childcensus"
 )
 
 // The queue processor.
@@ -430,6 +432,9 @@ func (p *Processor) extract(ctx context.Context, spec ExtractSpec, progress func
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
+	// #717. A transcription extract runs for as long as the recording is long.
+	childcensus.Enrol(cmd.Process.Pid, "transcribe-extract", "transcribe")
+	defer childcensus.Discharge(cmd.Process.Pid)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -504,6 +509,9 @@ func (p *Processor) whisperRun(ctx context.Context, spec WhisperSpec, rep jobs.R
 	if err := cmd.Start(); err != nil {
 		return nil, "", fmt.Errorf("start whisper: %w", err)
 	}
+	// #717. Whisper on a long recording runs for minutes to hours.
+	childcensus.Enrol(cmd.Process.Pid, "transcribe-whisper", "transcribe")
+	defer childcensus.Discharge(cmd.Process.Pid)
 
 	err := cmd.Wait()
 	// A child killed mid-line still has something to say, and when the failure

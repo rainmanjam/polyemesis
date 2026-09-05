@@ -216,7 +216,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			// below closes the connection either way; treating the write failure
 			// as a reason not to return would keep the socket that this branch
 			// exists to end.
-			if s.isRevoked(tokenID) {
+			if s.tokenRevoked(tokenID) {
 				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
 				_ = conn.WriteMessage(websocket.CloseMessage,
 					websocket.FormatCloseMessage(websocket.ClosePolicyViolation,

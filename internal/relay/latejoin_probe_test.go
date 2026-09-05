@@ -92,7 +92,7 @@ func TestASubscriberJoiningMidStreamStartsReceivingImmediately(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	sub, port := boundSubscriber(t)
-	h.Subscribe("late", port)
+	mustSubscribe(t, h, "late", port)
 	joined := time.Now()
 
 	var total int

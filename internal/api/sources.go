@@ -469,11 +469,9 @@ func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
 	}
 	// Through the manager: a new source needs an engine built for it, which
 	// only Sync does.
-	if err := s.reconcile(); err != nil {
-		s.log.Warn("reconcile after source create", "err", err)
-	}
+	rw := s.reconcileNow("the programme")
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusCreated, s.viewSource(r, &row, defaultID))
+	writeMutation(w, http.StatusCreated, rw, s.viewSource(r, &row, defaultID))
 }
 
 func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
@@ -506,11 +504,9 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, sourceStatus(err), err.Error())
 		return
 	}
-	if err := s.reconcile(); err != nil {
-		s.log.Warn("reconcile after source update", "err", err)
-	}
+	rw := s.reconcileNow("the programme")
 	defaultID, _ := s.store.DefaultSourceID()
-	writeJSON(w, http.StatusOK, s.viewSource(r, &row, defaultID))
+	writeMutation(w, http.StatusOK, rw, s.viewSource(r, &row, defaultID))
 }
 
 func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
@@ -525,10 +521,7 @@ func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, sourceStatus(err), err.Error())
 		return
 	}
-	if err := s.reconcile(); err != nil {
-		s.log.Warn("reconcile after source delete", "err", err)
-	}
-	w.WriteHeader(http.StatusNoContent)
+	writeMutationNoContent(w, s.reconcileNow("the programme delete"))
 }
 
 // handleRotateSourceToken issues a new publish secret.

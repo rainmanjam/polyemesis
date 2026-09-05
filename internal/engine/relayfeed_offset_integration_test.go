@@ -152,7 +152,7 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 	// The feed reads the hub on a port of its own, exactly as startFeed gives it
 	// one, and writes to the capture socket.
 	subPort := freeUDPPort(t)
-	args := relayFeedArgs(hub.Subscribe("offsetbench", subPort),
+	args := relayFeedArgs(mustSubscribe(t, hub, "offsetbench", subPort),
 		"udp://127.0.0.1:"+strconv.Itoa(sinkPort), offset)
 	feed := exec.Command(ffmpegBin, args...)
 	var feedErr strings.Builder

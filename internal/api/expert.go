@@ -871,12 +871,14 @@ func (s *Server) handlePutExpert(w http.ResponseWriter, r *http.Request) {
 	// running state are never allowed to drift. The arguments ride in the
 	// destination's restart signature, so this is what actually applies them —
 	// the destination is torn down and respawned with the new command line.
-	if err := s.reconcile(); err != nil {
-		s.log.Warn("reconcile after expert args update", "err", err)
-	}
+	rw := s.reconcileNow("the expert arguments")
 
-	// Resolved against the row that was written, so the command shown back is
-	// the one the reconcile above just started.
+	// Resolved against the row that was WRITTEN, which is not necessarily the
+	// row that is RUNNING. #709: the previous comment here said "the command
+	// shown back is the one the reconcile above just started", and on the
+	// branch where the reconcile failed that sentence was false -- while
+	// Applied shipped as a hardcoded `true` and the UI answered "Saved." and
+	// rendered the new command back as though FFmpeg were running it.
 	cmd, cerr := s.resolveExpertCommand(updated, in, out)
 	if cerr != nil {
 		writeExpertCommandError(w, cerr)
@@ -889,7 +891,11 @@ func (s *Server) handlePutExpert(w http.ResponseWriter, r *http.Request) {
 		Command:       cmd,
 		Guards:        guards,
 		Passthrough:   updated.RenditionID == nil,
-		Applied:       true,
+		// APPLIED IS NOW A FACT RATHER THAN A LITERAL. The field's own comment
+		// says it is "true on a read or a successful write"; a write whose
+		// reconcile failed is not a successful one, and Warning says why.
+		Applied: rw == "",
+		Warning: rw,
 	})
 }
 
@@ -906,13 +912,12 @@ func (s *Server) handleDeleteExpert(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.reconcile(); err != nil {
-		s.log.Warn("reconcile after expert args delete", "err", err)
-	}
+	rw := s.reconcileNow("clearing the expert arguments")
 	resp := expertResponse{
 		DestinationID: id,
 		Passthrough:   cleared.RenditionID == nil,
-		Applied:       true,
+		Applied:       rw == "",
+		Warning:       rw,
 	}
 	if cmd, err := s.resolveExpertCommand(cleared, nil, nil); err == nil {
 		resp.Command = cmd

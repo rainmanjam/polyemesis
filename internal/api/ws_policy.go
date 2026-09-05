@@ -118,13 +118,35 @@ func eventView(ev events.Event, readOnly bool) (events.Event, bool) {
 		return events.Event{}, false
 	}
 	switch policy {
+	case wsPassthrough:
+		// EXPLICIT, and it was not before. wsPassthrough is `iota`, so it is the
+		// zero value, and it used to reach the sender through the `default` arm
+		// rather than through a case of its own. Making the default fail closed
+		// therefore dropped every passthrough event -- Log, Status, Levels,
+		// Stats, Loudness -- and the opening burst on a fresh install delivered
+		// nothing. Caught by TestTheWebSocketOpeningBurstSurvivesZeroSources.
+		//
+		// Worth recording because it is the general hazard of tightening a
+		// default: the arm being replaced has to be enumerated first, and a
+		// zero-valued constant is the member most likely to be sitting in it
+		// unnoticed.
+		return ev, true
 	case wsDrop:
 		return events.Event{}, false
 	case wsRedactText:
 		ev.Data = redactEventText(ev.Data)
 		return ev, true
 	default:
-		return ev, true
+		// FAIL CLOSED, for the same reason the !classified arm above does. #716.
+		//
+		// This used to `return ev, true` -- a policy constant added without a
+		// case here would send a read-scoped socket the ADMIN shape of the
+		// event, which is the one direction a widening must never take. The
+		// repo already makes this argument about scopes, in requireScope: "a
+		// value that arrived from a newer schema or a hand-edited row should
+		// narrow what a credential can do, never widen it." The same reasoning
+		// applies to the redaction that scope selects.
+		return events.Event{}, false
 	}
 }
 

@@ -30,17 +30,17 @@ func TestStopTakesTheBackupDownWithTheDestination(t *testing.T) {
 	e.alloc = relay.NewPortAllocator(base, 2)
 
 	row := backupRow()
-	primaryPort, err := e.alloc.Allocate()
+	primaryPort, err := e.allocPort()
 	if err != nil {
 		t.Fatalf("allocate primary: %v", err)
 	}
-	backupPort, err := e.alloc.Allocate()
+	backupPort, err := e.allocPort()
 	if err != nil {
 		t.Fatalf("allocate backup: %v", err)
 	}
 	primarySub, backupSub := destSubName(row.ID, ""), destSubName(row.ID, destRoleBackup)
-	e.hub.Subscribe(primarySub, primaryPort)
-	e.hub.Subscribe(backupSub, backupPort)
+	mustSubscribe(t, e.hub, primarySub, primaryPort)
+	mustSubscribe(t, e.hub, backupSub, backupPort)
 	e.dests[row.ID] = &destination{
 		row: row, hub: e.hub, spec: "spec",
 		port: primaryPort, subName: primarySub,

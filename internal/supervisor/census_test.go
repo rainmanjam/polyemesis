@@ -2,10 +2,15 @@ package supervisor
 
 import (
 	"context"
+	"io"
+	"log/slog"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/childcensus"
 )
 
 /* The census exists because #631 could not be answered from inside the program.
@@ -26,13 +31,13 @@ import (
 // liveByPID finds this test's own child rather than asserting on the global
 // count. The census is package-level by design, and a sibling test's cleanup
 // goroutine may still be reaping when this one starts.
-func liveByPID(pid int) (Child, bool) {
-	for _, c := range Live() {
+func liveByPID(pid int) (childcensus.Child, bool) {
+	for _, c := range childcensus.Live() {
 		if c.PID == pid {
 			return c, true
 		}
 	}
-	return Child{}, false
+	return childcensus.Child{}, false
 }
 
 func TestASpawnedChildIsCountedAndAReapedOneIsNot(t *testing.T) {
@@ -129,13 +134,13 @@ func TestTheCensusCountsReapedRatherThanSignalled(t *testing.T) {
 func TestTheCensusIsNotVacuous(t *testing.T) {
 	// A census that never enrolled anything would pass both tests above by
 	// reporting nothing at every point they look. This one asserts the
-	// positive: with a child up, Live() is non-empty and LiveCount() agrees
+	// positive: with a child up, childcensus.Live() is non-empty and childcensus.LiveCount() agrees
 	// with it.
 	p := testProcess(t, fakeSleep(30*time.Second), Spec{Name: "ingest", Kind: "ingest"})
 	p.Start()
-	waitFor(t, "a non-empty census", func() bool { return LiveCount() > 0 })
-	if n, l := LiveCount(), len(Live()); n != l {
-		t.Fatalf("LiveCount()=%d but len(Live())=%d; the cheap path and the reporting "+
+	waitFor(t, "a non-empty census", func() bool { return childcensus.LiveCount() > 0 })
+	if n, l := childcensus.LiveCount(), len(childcensus.Live()); n != l {
+		t.Fatalf("childcensus.LiveCount()=%d but len(childcensus.Live())=%d; the cheap path and the reporting "+
 			"path disagree, so one of them is lying to somebody", n, l)
 	}
 }
@@ -144,7 +149,7 @@ func TestACensusEntryReadsAsSomethingAnOperatorCanActotOn(t *testing.T) {
 	// The String is what lands in a report, and a report that omits the pid
 	// tells an operator there is a problem without telling them how to find it
 	// -- which is where #631 started, with somebody reading `ps` output by eye.
-	c := Child{PID: 5216, Name: "meters", Kind: "meters", Since: time.Now().Add(-90 * time.Second)}
+	c := childcensus.Child{PID: 5216, Name: "meters", Kind: "meters", Since: time.Now().Add(-90 * time.Second)}
 	got := c.String()
 	for _, want := range []string{"5216", "meters"} {
 		if !strings.Contains(got, want) {
@@ -158,53 +163,6 @@ func TestACensusEntryReadsAsSomethingAnOperatorCanActotOn(t *testing.T) {
 	}
 }
 
-func TestTheCensusRefusesAPIDThatIsNotOne(t *testing.T) {
-	// cmd.Process.Pid is only meaningful after a successful Start. A zero here
-	// would be a permanent entry for a child that never existed, and a census
-	// with a phantom in it is one nobody trusts the rest of.
-	before := LiveCount()
-	enrol(0, "ghost", "ghost")
-	enrol(-1, "ghost", "ghost")
-	if LiveCount() != before {
-		t.Fatalf("a non-pid was enrolled: count went %d -> %d", before, LiveCount())
-	}
-	discharge(0)
-	discharge(-1)
-	if LiveCount() != before {
-		t.Fatalf("discharging a non-pid disturbed the census: %d -> %d", before, LiveCount())
-	}
-}
-
-func TestTheOldestSurvivorIsReportedFirst(t *testing.T) {
-	// A report leads with the child that has been wrong for longest, because
-	// that is the one whose cause is furthest back and least likely to be the
-	// thing the operator is currently looking at.
-	before := len(Live())
-	now := time.Now()
-	census.mu.Lock()
-	if census.live == nil {
-		census.live = map[int]Child{}
-	}
-	census.live[900001] = Child{PID: 900001, Name: "newer", Since: now}
-	census.live[900002] = Child{PID: 900002, Name: "older", Since: now.Add(-time.Hour)}
-	census.mu.Unlock()
-	t.Cleanup(func() { discharge(900001); discharge(900002) })
-
-	got := Live()
-	if len(got) != before+2 {
-		t.Fatalf("expected %d entries, got %d", before+2, len(got))
-	}
-	var names []string
-	for _, c := range got {
-		if c.PID == 900001 || c.PID == 900002 {
-			names = append(names, c.Name)
-		}
-	}
-	if len(names) != 2 || names[0] != "older" {
-		t.Fatalf("Live() ordered the survivors %v; oldest must come first", names)
-	}
-}
-
 func TestASpawnThatFailedEnrolsNothing(t *testing.T) {
 	// The one way this census could report a child that never existed, and the
 	// reason enrol sits inside `if startErr == nil` rather than after it.
@@ -213,7 +171,7 @@ func TestASpawnThatFailedEnrolsNothing(t *testing.T) {
 	// at the end of every shutdown, so a phantom here is a warning line naming
 	// a pid that was never a process -- on the very report whose job is to be
 	// believed the one time it fires.
-	before := LiveCount()
+	before := childcensus.LiveCount()
 	p := testProcess(t, fake{bin: filepath.Join(t.TempDir(), "no-such-binary")},
 		Spec{Name: "ghost", Kind: "ghost"})
 	p.Start()
@@ -224,12 +182,64 @@ func TestASpawnThatFailedEnrolsNothing(t *testing.T) {
 	// AutoRestart is off in this Spec, so there is no second attempt to race.
 	deadline := time.Now().Add(750 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		if got := LiveCount(); got > before {
-			for _, c := range Live() {
+		if got := childcensus.LiveCount(); got > before {
+			for _, c := range childcensus.Live() {
 				t.Logf("  census entry: %s", c)
 			}
 			t.Fatalf("a spawn that never happened put the census at %d, was %d", got, before)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// kill() must not signal a reaped pid. #720.
+//
+// killGroup issues a raw syscall.Kill(-pid, SIGKILL), which names a process
+// GROUP by number and bypasses Go's ErrProcessDone -- so on a reaped pid it can
+// signal a group this supervisor never started. Its two sibling signal sites
+// each carry a guard for this; kill() rested on an ordering argument written as
+// a comment across three functions.
+//
+// TESTED AGAINST THE GUARD DIRECTLY rather than through the supervisor, because
+// the supervisor clears p.exited during teardown -- so waiting for a real reap
+// races the very field the guard reads, and the test would be measuring the
+// teardown rather than the guard. The escalation path on a LIVE child is
+// covered by the stop/kill tests next door; what is missing there, and pinned
+// here, is the reaped one.
+func TestKillIsARefusalOnAReapedChild(t *testing.T) {
+	p := New(slog.New(slog.NewTextHandler(io.Discard, nil)), Spec{Name: "guard", Kind: "test"})
+
+	// A real child, run to completion and reaped, so its pid is a number the
+	// operating system may well have handed to somebody else by now.
+	f := fakeExit(0)
+	cmd := exec.Command(f.bin, f.args...)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	_ = cmd.Wait()
+
+	exited := make(chan struct{})
+	close(exited) // what runOnce does the instant cmd.Wait() returns
+
+	p.cmdMu.Lock()
+	p.cmd, p.exited = cmd, exited
+	p.cmdMu.Unlock()
+
+	// The guard's job: return without reaching killGroup. There is no assertion
+	// available on "no signal was sent" -- the syscall either happened or it did
+	// not -- so what is pinned is that a reaped child with a live cmd handle
+	// takes the early return rather than the signal.
+	done := make(chan struct{})
+	go func() { p.kill(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("kill() blocked on a reaped child")
+	}
+
+	// The other early return: no cmd at all.
+	p.cmdMu.Lock()
+	p.cmd = nil
+	p.cmdMu.Unlock()
+	p.kill()
 }

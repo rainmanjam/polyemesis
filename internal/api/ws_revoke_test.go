@@ -231,14 +231,23 @@ func TestRevokingATokenLeavesASessionSocketAlone(t *testing.T) {
 	}
 }
 
-// TestTheRevokedSetIsNotConsultedForAuthorisation states the limit of the set,
-// so nobody promotes it into an authorisation source.
+// A DELETION MADE ANYWHERE IS SEEN BY AN OPEN SOCKET. #706.
 //
-// Absence from the set means "this process has not seen that token deleted",
-// which is NOT "the token is valid": a token deleted by another process, or by
-// an operator with sqlite3, is absent from it. Every request still asks the
-// database through requireAuth. The set only ever CLOSES a socket early.
-func TestTheRevokedSetIsNotConsultedForAuthorisation(t *testing.T) {
+// This test used to assert the opposite, and was right to: revocation's second
+// half was an in-process set, and absence from it meant only "this process has
+// not seen that token deleted". A deletion by another process, by
+// handleChangePassword's DeleteAllAPITokens, or by an operator with sqlite3 was
+// invisible to it -- so a socket opened with that token kept streaming.
+//
+// The old test closed with "if something else now writes to it, this test's
+// premise is stale". Something else did: the set is gone, and the /ws tick asks
+// the store. So the property inverts, and the stronger one is what is pinned
+// here -- a token deleted BEHIND the handler's back still ends its socket.
+//
+// The second half is unchanged and still matters: requireAuth asks the database
+// on every request, so this check is only ever the thing that closes a socket
+// EARLY. It is not an authorisation source and must not become one.
+func TestADeletionMadeOutsideTheHandlerStillEndsTheSocket(t *testing.T) {
 	h, store, sign := renditionServer(t, defaultTools())
 	s := serverUnderTest(t, h)
 
@@ -246,25 +255,32 @@ func TestTheRevokedSetIsNotConsultedForAuthorisation(t *testing.T) {
 	tok := createScopedToken(t, h, sign, name, db.ScopeAdmin)
 	id := tokenIDByName(t, h, sign, name)
 
-	// Delete through the STORE, bypassing the handler, which is what another
-	// process or a hand-edited database looks like from in here.
+	// Delete through the STORE, bypassing the handler -- which is what another
+	// process, a hand-edited database, or a password change looks like from in
+	// here. The last of those is the one that was silently missed.
 	if err := store.DeleteAPIToken(id); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if s.isRevoked(id) {
-		t.Fatal("the revoked set knows about a deletion that did not go through the " +
-			"handler; if something else now writes to it, this test's premise is stale")
+	if !s.tokenRevoked(id) {
+		t.Fatal("a token deleted outside handleRevokeAPIToken is not seen as revoked, " +
+			"so a socket opened with it would keep streaming. That is #706: the check " +
+			"must read the store, not a set that one handler writes.")
 	}
 
-	// The request is still refused, because requireAuth asks the database and
-	// not the set.
+	// And a token that still exists is NOT reported revoked, or the check would
+	// close every socket and pass this file by being uselessly strict.
+	live := "still-here"
+	createScopedToken(t, h, sign, live, db.ScopeAdmin)
+	if s.tokenRevoked(tokenIDByName(t, h, sign, live)) {
+		t.Error("a live token was reported revoked")
+	}
+
+	// The request is still refused, because requireAuth asks the database.
 	r := jsonRequest(t, http.MethodGet, "/api/v1/status", nil)
 	r.Header.Set("Authorization", "Bearer "+tok)
 	if w := do(t, h, r); w.Code != http.StatusUnauthorized {
-		t.Errorf("GET /api/v1/status with a token deleted outside the handler: status %d, "+
-			"want 401. The revoked set must never become the thing that decides -- it "+
-			"cannot see a deletion it was not told about, so consulting it INSTEAD of the "+
-			"database would turn a missed notification into an authorisation bypass.",
-			w.Code)
+		t.Errorf("GET /api/v1/status with a deleted token: status %d, want 401. This "+
+			"check closes sockets early; it must never become the thing that decides "+
+			"authorisation, which is still requireAuth's job.", w.Code)
 	}
 }

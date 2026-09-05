@@ -696,8 +696,25 @@ func destWritesAFile(row *db.Destination) bool {
 		return true
 	case db.DestAudio:
 		return !strings.Contains(row.URL, "://")
-	default:
+	case db.DestRTMP, db.DestSRT:
+		// Named rather than left to the default, so the exhaustiveness is
+		// visible here and a linter can check it.
 		return false
+	default:
+		// FAIL CLOSED ON A KIND THIS BUILD DOES NOT KNOW. #712.
+		//
+		// db.DestKind and ffmpeg.DestKind are declared independently and joined
+		// by ffmpeg.DestKind(row.Kind), which compiles for any string -- so a
+		// fifth kind added to db reaches here. Returning false was the wrong
+		// default for exactly the reason the comment above states: without the
+		// confinement an audio file target is written relative to the process
+		// working directory, outside the directory every other file destination
+		// is held to.
+		//
+		// Confinement is cheap; the alternative is an arbitrary-file-write
+		// primitive available to whoever adds the next kind. So an unknown kind
+		// is treated as a file writer and confined.
+		return true
 	}
 }
 
@@ -850,12 +867,19 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		vodDropped = noteVODNotNegotiated
 	}
 
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		return err
 	}
 	subName := destSubName(row.ID, "")
-	url := hub.Subscribe(subName, port)
+	url, err := hub.Subscribe(subName, port)
+	if err != nil {
+		// #711. An occupied name means another consumer is reading under it;
+		// taking it would leave that one running, correct-looking and receiving
+		// nothing. Same release-and-bail shape as the port refusal above.
+		e.releasePort(port)
+		return err
+	}
 
 	target := row.Target()
 	if mt.Use {
@@ -881,7 +905,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 			// is reissued and the stale entry blasts transport-stream datagrams
 			// into whatever now owns that socket.
 			hub.Unsubscribe(subName)
-			e.alloc.Release(port)
+			e.releasePort(port)
 			return err
 		}
 		target = resolved
@@ -981,7 +1005,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	if e.stopped {
 		e.mu.Unlock()
 		hub.Unsubscribe(subName)
-		e.alloc.Release(port)
+		e.releasePort(port)
 		return nil
 	}
 	e.dests[row.ID] = &destination{
@@ -1077,7 +1101,7 @@ func (e *Engine) teardownDest(d *destination) {
 		hub.Unsubscribe(d.subName)
 	}
 	if d.port != 0 {
-		e.alloc.Release(d.port)
+		e.releasePort(d.port)
 	}
 	e.stopBackup(d)
 }
@@ -1289,7 +1313,7 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 	if hub == nil {
 		hub = e.hub
 	}
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		d.backupErr = "no relay port is free for the backup feed"
 		e.log.Warn("backup ingest has no relay port; the primary is unaffected",
@@ -1297,7 +1321,16 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 		return
 	}
 	sub := destSubName(d.row.ID, destRoleBackup)
-	url := hub.Subscribe(sub, port)
+	url, err := hub.Subscribe(sub, port)
+	if err != nil {
+		// #711. Quietly, with a reason, exactly as the port refusal above does:
+		// the backup feed is the optional half and the primary is unaffected.
+		e.releasePort(port)
+		d.backupErr = "the backup feed's relay name is already in use"
+		e.log.Error("backup ingest could not subscribe; the primary is unaffected",
+			"dest", d.row.Name, "err", err)
+		return
+	}
 
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name:        sub,
@@ -1350,7 +1383,7 @@ func (e *Engine) stopBackup(d *destination) {
 		hub.Unsubscribe(d.backupSub)
 	}
 	if d.backupPort != 0 {
-		e.alloc.Release(d.backupPort)
+		e.releasePort(d.backupPort)
 	}
 }
 

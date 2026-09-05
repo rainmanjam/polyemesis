@@ -33,6 +33,15 @@ import {
 } from "@/lib/destinationSource";
 import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
 import { useT } from "@/lib/i18n";
+import {
+  failedRead,
+  mayClaim,
+  okRead,
+  pendingRead,
+  readFailed,
+  rowsOf,
+  type ReadState,
+} from "@/lib/readState";
 import { computeLeaving, joinConsequence, leaveConsequence } from "@/lib/rendition-consequence";
 import { Switch } from "@/components/ui/switch";
 // The capability matrix this dialog renders inline. Data, not a component, and
@@ -661,21 +670,37 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // db.Destination.Multitrack.
   const [multitrack, setMultitrack] = useState(false);
   const [accountId, setAccountId] = useState<string>("none");
-  const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
+  // READ STATES, NOT BARE ARRAYS. #719.
+  //
+  // These were `.then(setX).catch(() => setX([]))`, which stores a FAILED read
+  // as the same value as a successful empty one -- and this dialog turns both
+  // into positive claims that drive the operator to act: "No shared encodes
+  // yet. Create one on the Renditions page first." sends them to build a second
+  // real encode they already have, and a missing account list replaces the
+  // picker with "Connect account", a re-authorisation for an account that is
+  // already linked which also discards the half-filled dialog.
+  //
+  // lib/readState exists to make that unwriteable and this file never imported
+  // it. The arrays below are derived with rowsOf, so every consumer that only
+  // wants rows is unchanged; mayClaim guards the two places that say something.
+  const [accountsRead, setAccountsRead] = useState<ReadState<PlatformAccount[]>>(pendingRead);
+  const accounts = rowsOf(accountsRead);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
   // RenditionView, not Rendition. The view carries `destinations` and
   // `enabledDestinations`, and this used to strip them off one line after they
   // arrived — throwing away the only data that can tell an operator whether
   // picking an encode starts a new one or joins a running one. That fact is
   // the entire argument for renditions existing, and the UI could not state it.
-  const [renditions, setRenditions] = useState<RenditionView[]>([]);
+  const [renditionsRead, setRenditionsRead] = useState<ReadState<RenditionView[]>>(pendingRead);
+  const renditions = rowsOf(renditionsRead);
   /** #661: how the chosen rendition sits against the chosen platform's published
    *  figures. Fetched rather than computed — the comparison reads researched,
    *  dated numbers out of internal/db/platforms.go, and a second copy here would
    *  drift from that file exactly as the marketing site's hand-copied figures
    *  once did. */
   const [concerns, setConcerns] = useState<RenditionConcern[]>([]);
-  const [sources, setSources] = useState<SourceView[]>([]);
+  const [sourcesRead, setSourcesRead] = useState<ReadState<SourceView[]>>(pendingRead);
+  const sources = rowsOf(sourcesRead);
   // Which programme this destination carries. A string because that is what the
   // Select speaks; "" means nobody has chosen yet, which is a state the save
   // button reads rather than a value it sends.
@@ -690,8 +715,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     if (!open || choices.length === 0) return;
     setSourceId((current) => (current === "" ? initialSourceValue(destination, choices) : current));
   }, [open, choices, destination]);
-  const [guidance, setGuidance] = useState<PlatformPresetInfo[]>([]);
-  const [services, setServices] = useState<ServiceInfo[]>([]);
+  const [guidanceRead, setGuidanceRead] = useState<ReadState<PlatformPresetInfo[]>>(pendingRead);
+  const guidance = rowsOf(guidanceRead);
+  const [servicesRead, setServicesRead] = useState<ReadState<ServiceInfo[]>>(pendingRead);
+  const services = rowsOf(servicesRead);
 
   /** The registry entry for whatever platform is selected, or null for a
    *  custom destination — which the registry has no opinion about, and must
@@ -724,12 +751,18 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
   useEffect(() => {
     if (!open) return;
-    api.listAccounts().then(setAccounts).catch(() => setAccounts([]));
+    api
+      .listAccounts()
+      .then((r) => setAccountsRead(okRead(r)))
+      .catch(() => setAccountsRead(failedRead()));
     api
       .listRenditions()
-      .then(setRenditions)
-      .catch(() => setRenditions([]));
-    api.listSources().then(setSources).catch(() => setSources([]));
+      .then((r) => setRenditionsRead(okRead(r)))
+      .catch(() => setRenditionsRead(failedRead()));
+    api
+      .listSources()
+      .then((r) => setSourcesRead(okRead(r)))
+      .catch(() => setSourcesRead(failedRead()));
     // Fetched, not mirrored. The UI keeps its own preset list so the picker
     // renders before any request resolves, but the researched numbers carry a
     // source and a date and a second copy of them here would drift silently —
@@ -737,16 +770,16 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     // and nothing surfaced them.
     api
       .platformPresets()
-      .then((r) => setGuidance(r.presets))
-      .catch(() => setGuidance([]));
+      .then((r) => setGuidanceRead(okRead(r.presets)))
+      .catch(() => setGuidanceRead(failedRead()));
     // The ingest servers and the platform's own encoder ceilings. Fetched for
     // the same reason the guidance is: these are other people's published
     // figures and a second copy in the bundle would drift from the one the
     // server serves.
     api
       .listServices()
-      .then((r) => setServices(r.services))
-      .catch(() => setServices([]));
+      .then((r) => setServicesRead(okRead(r.services)))
+      .catch(() => setServicesRead(failedRead()));
 
     setPickerOpen(false);
     setQuery("");
@@ -1287,6 +1320,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           {showOAuth && caps?.connect && (
             <div className="flex flex-col gap-1">
               <Label>{t("dest.connectedAccount")}</Label>
+              {/* #719. A failed listAccounts() used to replace the picker with
+                  "Connect {platform} account", which is a re-authorisation for
+                  an account that is very likely already linked -- and following
+                  it navigates away and discards this half-filled dialog. The
+                  connect path is offered only when the server actually
+                  answered. */}
               {platformAccounts.length > 0 ? (
                 <Select value={accountId} onValueChange={setAccountId}>
                   <SelectTrigger data-testid="connected-account-picker">
@@ -1304,6 +1343,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     ))}
                   </SelectContent>
                 </Select>
+              ) : readFailed(accountsRead) ? (
+                <p className="text-[11px] text-muted-foreground">
+                  The connected accounts could not be read, so this cannot say whether{" "}
+                  {caps.name} is already linked. Reopen this dialog once the connection is
+                  back rather than reconnecting — following that link leaves this form.
+                </p>
+              ) : !mayClaim(accountsRead) ? (
+                <p className="text-[11px] text-muted-foreground">Checking for a linked account…</p>
               ) : (
                 <Button variant="outline" size="sm" asChild>
                   <a href={api.connectUrl(caps.connect)}>
@@ -1486,6 +1533,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     setRenditionId(String(renditions[0].rendition.id));
                   }
                 }}
+                // #719. Disabled when there are none AND when we could not ask.
+                // The old code could not tell those apart, so a failed read
+                // rendered the sentence below as fact.
                 disabled={renditions.length === 0}
                 className={cn(
                   "rounded-md border p-2.5 text-left transition-colors disabled:opacity-50",
@@ -1499,9 +1549,19 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   <span className="text-[13px] font-medium">{t("dest.useSharedEncode")}</span>
                 </span>
                 <span className="mt-1 block text-[10px] text-muted-foreground">
-                  {renditions.length === 0
-                    ? "No shared encodes yet. Create one on the Renditions page first."
-                    : "Changes the picture once and shares it between destinations."}
+                  {/* THREE STATES, NOT TWO. #719. "No shared encodes yet"
+                      is a POSITIVE CLAIM -- it says the server answered and
+                      there are none -- and it sends the operator to the
+                      Renditions page to build a second encode they may already
+                      have. mayClaim is what makes that sentence unreachable
+                      for a read that never landed. */}
+                  {readFailed(renditionsRead)
+                    ? "The shared encodes could not be read. This is not the same as having none — reopen this dialog once the connection is back."
+                    : !mayClaim(renditionsRead)
+                      ? "Checking for shared encodes…"
+                      : renditions.length === 0
+                        ? "No shared encodes yet. Create one on the Renditions page first."
+                        : "Changes the picture once and shares it between destinations."}
                 </span>
               </button>
             </div>
@@ -1700,7 +1760,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                             fps: num(variantFps),
                           } as Partial<Rendition>);
                           const rows = await api.listRenditions();
-                          setRenditions(rows);
+                          setRenditionsRead(okRead(rows));
                           setRenditionId(String(made.rendition.id));
                           setVariantOpen(false);
                         } catch (e) {

@@ -258,7 +258,7 @@ func TestThePreviewRefusesToStartAgainstAQuietRelay(t *testing.T) {
 	if hasSubscriber(e.hub, "preview") {
 		t.Error("a refused start left a subscription on the hub")
 	}
-	mustAllocate(t, e.alloc, "after a preview start that was refused")
+	enginePort(t, e, "after a preview start that was refused")
 }
 
 // A stream that ends stops the encoder without waiting out the idle window.
@@ -296,7 +296,7 @@ func TestASweepStopsThePreviewWhenTheStreamEndsEvenThoughSomebodyIsWatching(t *t
 	if hasSubscriber(e.hub, "preview") {
 		t.Error("the stopped preview is still subscribed to the hub")
 	}
-	mustAllocate(t, e.alloc, "after the sweep stopped a preview whose stream had ended")
+	enginePort(t, e, "after the sweep stopped a preview whose stream had ended")
 }
 
 // The preview reads the tier that is ON AIR, and gives back the hub it joined.
@@ -347,5 +347,5 @@ func TestThePreviewJoinsAndThenLeavesTheHubThatIsOnAir(t *testing.T) {
 		t.Error("the preview was released from some other hub and is still subscribed to " +
 			"the one it joined; that hub is about to close under a live subscription")
 	}
-	mustAllocate(t, e.alloc, "after the preview was stopped")
+	enginePort(t, e, "after the preview was stopped")
 }

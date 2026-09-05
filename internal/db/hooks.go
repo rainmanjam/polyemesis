@@ -49,14 +49,25 @@ func scanHook(box *secrets.Box, s interface{ Scan(...any) error }) (*hooks.Hook,
 	// safeDialContext refuses a hook the operator deliberately allowed -- so
 	// the hook is accepted at create time and then silently never fires.
 	h.AllowPrivateTarget = allowPrivate != 0
-	// A secret that will not open leaves the hook UNSIGNED rather than
-	// unreadable. The alternative -- failing the whole read -- would take every
-	// other hook down with it, and an unsigned delivery that arrives is more
-	// useful to an operator than a signed one that never does. The API reports
-	// hasSecret:false, which is how they find out.
+	// A SECRET THAT WILL NOT OPEN MARKS THE HOOK, IT DOES NOT UNSIGN IT. #715.
+	//
+	// This used to leave h.Secret empty and say nothing, so dispatch.attempt
+	// skipped the signature header and the POST went out UNSIGNED -- and at the
+	// far end an unsigned delivery is indistinguishable from a forgery. The
+	// signing secret was the only thing that made the webhook trustworthy.
+	//
+	// STILL NOT AN ERROR RETURN, for the reason the old comment gave and which
+	// is still right: failing the read would take every other hook down with
+	// it, and an operator whose key file went missing would open the hooks page
+	// to a 500 rather than to a page that says what is wrong. So the row loads
+	// intact and carries the reason, exactly as scanDestination does for a
+	// stream key -- and Validate and attempt both refuse it.
+	secretUnreadable := false
 	if len(sealed) > 0 {
 		if plain, err := box.Open(sealed); err == nil {
 			h.Secret = plain
+		} else {
+			secretUnreadable = true
 		}
 	}
 	if triggersJSON != "" && triggersJSON != "[]" {
@@ -71,6 +82,11 @@ func scanHook(box *secrets.Box, s interface{ Scan(...any) error }) (*hooks.Hook,
 	h.CreatedAt = time.Unix(created, 0)
 	h.UpdatedAt = time.Unix(updated, 0)
 	out := h.Normalized()
+	// AFTER Normalized, which trims and clamps the fields an operator typed and
+	// has no business clearing a fact about this machine's key file.
+	if secretUnreadable {
+		out.SecretUnreadable = hooks.SecretUnreadableReason()
+	}
 	return &out, nil
 }
 

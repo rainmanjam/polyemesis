@@ -1007,8 +1007,8 @@ func (s *Server) handlePutAnnotations(w http.ResponseWriter, r *http.Request) {
 			s.log.Warn("annotations saved to the source but not mirrored to settings", "err", err)
 		}
 	}
-	if err := s.reconcile(); err != nil {
-		writeError(w, http.StatusInternalServerError, "annotations saved but reconcile failed: "+err.Error())
+	if rw := s.reconcileNow("the annotations"); rw != "" {
+		writeError(w, http.StatusInternalServerError, rw)
 		return
 	}
 	writeJSON(w, http.StatusOK, eng.SourceInfo())
@@ -1638,8 +1638,8 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// default engine saved the setting and changed nothing: enabling shared
 	// ingest returned 200 while no listener ever bound, which is exactly the
 	// kind of silent no-op that is worse than an error.
-	if err := s.reconcile(); err != nil {
-		writeError(w, http.StatusInternalServerError, "settings saved but reconcile failed: "+err.Error())
+	if rw := s.reconcileNow("the settings"); rw != "" {
+		writeError(w, http.StatusInternalServerError, rw)
 		return
 	}
 	// Chat retention is not the manager's to reconcile -- the Hub owns it -- and
@@ -2145,14 +2145,12 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		writeCreateError(w, err)
 		return
 	}
-	if err := s.reconcile(); err != nil {
-		s.log.Warn("reconcile after destination create", "err", err)
-	}
+	rw := s.reconcileNow("the destination")
 	resp := map[string]any{"destination": created}
 	if len(warnings) > 0 {
 		resp["warnings"] = warnings
 	}
-	writeJSON(w, http.StatusCreated, resp)
+	writeMutation(w, http.StatusCreated, rw, resp)
 }
 
 func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request) {
@@ -2203,9 +2201,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	}
 	// Reconcile restarts only this destination, and only if the change
 	// actually affects its command line.
-	if err := s.reconcile(); err != nil {
-		s.log.Warn("reconcile after destination update", "err", err)
-	}
+	rw := s.reconcileNow("the destination")
 
 	resp := map[string]any{"destination": updated}
 	updSrc, updKnown := s.sourceForDestination(updated.SourceID)
@@ -2218,7 +2214,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	if len(warnings) > 0 {
 		resp["warnings"] = warnings
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeMutation(w, http.StatusOK, rw, resp)
 }
 
 // handleReorderDestinations persists dashboard order. It deliberately does not
@@ -2267,10 +2263,12 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.reconcile(); err != nil {
-		s.log.Warn("reconcile after destination delete", "err", err)
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	// THE WORST CASE IN #709, and the reason this one is worth reading twice.
+	// The row leaves the list and the response says "deleted" -- while the
+	// FFmpeg child keeps publishing to a destination the console no longer
+	// draws. Nothing else in the product could ever mention it again.
+	rw := s.reconcileNow("the destination delete")
+	writeMutation(w, http.StatusOK, rw, map[string]string{"status": "deleted"})
 }
 
 // destEffect is what one press of start or stop actually did to one row: the
@@ -2323,8 +2321,8 @@ func (s *Server) applyDestinationEnabled(id int64, enabled bool) destControl {
 	if err := s.store.SetDestinationEnabled(id, enabled); err != nil {
 		return destControl{StoreErr: err}
 	}
-	if err := s.reconcile(); err != nil {
-		return destControl{ReconcileErr: err}
+	if rw := s.reconcileNow("the destination"); rw != "" {
+		return destControl{ReconcileErr: errors.New(rw)}
 	}
 	// The EFFECT, not just the intent.
 	//

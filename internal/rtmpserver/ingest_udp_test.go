@@ -487,7 +487,7 @@ func TestTheWholeChainThroughARealHubCarriesTheRoutedAudio(t *testing.T) {
 	}
 	subPort := subPC.LocalAddr().(*net.UDPAddr).Port
 	_ = subPC.Close() // the reader binds it
-	subURL := hub.Subscribe("dest:test", subPort)
+	subURL := mustSubscribe(t, hub, "dest:test", subPort)
 	defer hub.Unsubscribe("dest:test")
 
 	pubCtx, stopPub := context.WithCancel(context.Background())
@@ -664,7 +664,7 @@ func TestAReaderJoiningBetweenTwoPublishesResolvesTheSecondOnesAudio(t *testing.
 	}
 	subPort := subPC.LocalAddr().(*net.UDPAddr).Port
 	_ = subPC.Close()
-	subURL := hub.Subscribe("dest:test", subPort)
+	subURL := mustSubscribe(t, hub, "dest:test", subPort)
 	defer hub.Unsubscribe("dest:test")
 
 	tsPath := filepath.Join(t.TempDir(), "gap.ts")
@@ -821,7 +821,7 @@ func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing
 		op := pc.LocalAddr().(*net.UDPAddr).Port
 		_ = pc.Close()
 		name := fmt.Sprintf("other:%d", i)
-		ou := hub.Subscribe(name, op)
+		ou := mustSubscribe(t, hub, name, op)
 		defer hub.Unsubscribe(name)
 		oa := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 			ffmpeg.RelayInputArgs()...)
@@ -843,7 +843,7 @@ func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing
 	}
 	subPort := subPC.LocalAddr().(*net.UDPAddr).Port
 	_ = subPC.Close()
-	subURL := hub.Subscribe("dest:test", subPort)
+	subURL := mustSubscribe(t, hub, "dest:test", subPort)
 	defer hub.Unsubscribe("dest:test")
 
 	tsPath := filepath.Join(t.TempDir(), "crowded.ts")
@@ -927,4 +927,16 @@ func requireShippedFFmpeg(t *testing.T) (ffmpegBin, ffprobeBin string) {
 		t.Skipf("ffmpeg %d.x; #674 reproduces on the shipped 8.x", major)
 	}
 	return ffmpegBin, ffprobeBin
+}
+
+// mustSubscribe is Subscribe for a test that is not about the refusal. #711
+// made an occupied name an error; dropping it here would leave a test asserting
+// delivery against a consumer the hub never registered.
+func mustSubscribe(t testing.TB, h *relay.Hub, name string, port int) string {
+	t.Helper()
+	url, err := h.Subscribe(name, port)
+	if err != nil {
+		t.Fatalf("Subscribe(%q, %d): %v", name, port, err)
+	}
+	return url
 }

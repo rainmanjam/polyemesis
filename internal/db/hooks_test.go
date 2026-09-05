@@ -1,11 +1,13 @@
 package db
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
 // testBox comes from db_test.go; one per package.
@@ -239,5 +241,79 @@ func TestUpdatingAHookThatDoesNotExistIsNotFound(t *testing.T) {
 		t.Fatalf("UpdateHook on a missing row = %v, want ErrNotFound. A caller told "+
 			"the update succeeded believes a delivery was reconfigured when nothing "+
 			"was written.", err)
+	}
+}
+
+// A KEY FILE THAT NO LONGER OPENS THE SECRET MARKS THE HOOK. #715.
+//
+// The reachable path is ordinary: restore a backup taken on another machine, or
+// rotate secret.key. The database is intact and every hook row is fine; only
+// the sealed secrets are unreadable.
+//
+// This used to load the row with an EMPTY secret and say nothing, and
+// dispatch.attempt skips the signature header on an empty secret -- so the
+// consequence was every webhook silently going out unsigned. At the far end an
+// unsigned delivery is indistinguishable from a forgery.
+func TestAHookSealedWithAnotherKeyLoadsUnreadableRatherThanUnsigned(t *testing.T) {
+	d := testDB(t)
+	created, plaintext, err := d.CreateHook(testBox(t), validHook())
+	if err != nil {
+		t.Fatalf("CreateHook: %v", err)
+	}
+	if plaintext == "" {
+		t.Fatal("no secret was sealed, so this fixture proves nothing")
+	}
+
+	// The same database, a different key file. Nothing else changes.
+	otherBox, err := secrets.New(bytes.Repeat([]byte{0x5b}, 32))
+	if err != nil {
+		t.Fatalf("secrets.New: %v", err)
+	}
+
+	got, err := d.GetHook(otherBox, created.ID)
+	if err != nil {
+		t.Fatalf("GetHook must still return the row -- an operator whose key file "+
+			"went missing needs a hooks page that loads and says what is wrong, "+
+			"not a 500: %v", err)
+	}
+	if got.Name != "deploy" || got.URL == "" {
+		t.Errorf("the row did not survive intact: %+v", got)
+	}
+	if got.Secret != "" {
+		t.Error("a secret was produced from a ciphertext this key cannot open")
+	}
+	if got.SecretUnreadable == "" {
+		t.Fatal("the hook loads with no secret and no reason, which is exactly " +
+			"the state that posts unsigned: dispatch.attempt skips the signature " +
+			"header on an empty secret and the delivery goes out anyway")
+	}
+	if !strings.Contains(got.SecretUnreadable, "re-enter") {
+		t.Errorf("the reason does not name the fix, so an operator staring at a "+
+			"hook that stopped firing has nothing to act on: %q", got.SecretUnreadable)
+	}
+	if err := got.Validate(); !errors.Is(err, hooks.ErrSecretUnreadable) {
+		t.Errorf("Validate = %v, want ErrSecretUnreadable -- this is what keeps "+
+			"the dispatcher from starting a worker for it", err)
+	}
+
+	// And it is a fact about the KEY FILE, not about the row: the right key
+	// still reads it, with no repair step and nothing to un-set.
+	back, err := d.GetHook(testBox(t), created.ID)
+	if err != nil {
+		t.Fatalf("GetHook with the right key: %v", err)
+	}
+	if back.SecretUnreadable != "" || back.Secret != plaintext {
+		t.Errorf("restoring the key file did not restore the hook by itself: "+
+			"unreadable=%q secret ok=%v", back.SecretUnreadable, back.Secret == plaintext)
+	}
+
+	// The list path too, since that is what the hooks page renders and what
+	// Dispatcher.reload reads.
+	all, err := d.ListHooks(otherBox)
+	if err != nil {
+		t.Fatalf("ListHooks: %v", err)
+	}
+	if len(all) != 1 || all[0].SecretUnreadable == "" {
+		t.Errorf("the list path does not carry the reason: %+v", all)
 	}
 }

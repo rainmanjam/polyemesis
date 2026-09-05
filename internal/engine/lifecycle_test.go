@@ -84,6 +84,28 @@ func hasSubscriber(h *relay.Hub, name string) bool {
 
 // mustAllocate fails the test rather than returning, because every caller is
 // asserting that a port came BACK and "it did not" is the defect.
+// enginePort takes a port THROUGH THE ENGINE, the way production does.
+//
+// #707/#708. The engine now keeps a ledger of the ports it holds so StopWithin
+// can assert it gave them all back, and releasePort refuses to hand back one
+// this engine does not hold -- which is what stops a double release from
+// returning a port another engine has since been given.
+//
+// A test that allocates straight off e.alloc therefore sets up a state
+// production cannot reach: a port in the pool but not in the ledger. Teardown
+// then correctly refuses to release it, and the test fails for a reason that is
+// about the fixture rather than the path under test. Going through the engine
+// keeps the fixture honest and exercises the real door.
+func enginePort(t *testing.T, e *Engine, why string) int {
+	t.Helper()
+	p, err := e.allocPort()
+	if err != nil {
+		t.Fatalf("%s: the allocator has no free port left (%v), so the one taken "+
+			"by the path under test was never released", why, err)
+	}
+	return p
+}
+
 func mustAllocate(t *testing.T, a *relay.PortAllocator, why string) int {
 	t.Helper()
 	p, err := a.Allocate()
@@ -187,7 +209,7 @@ func TestARenditionRefusedByABrokenUpstreamTierGivesItsPortBack(t *testing.T) {
 			if !strings.Contains(r.err, tc.names) {
 				t.Errorf("recorded error = %q, want %q named as the cause", r.err, tc.names)
 			}
-			mustAllocate(t, e.alloc, "after a rendition was refused by "+tc.name)
+			enginePort(t, e, "after a rendition was refused by "+tc.name)
 		})
 	}
 }
@@ -209,7 +231,7 @@ func TestARenditionStartingIntoAShutdownEngineLeavesNoOrphan(t *testing.T) {
 	if hasSubscriber(e.hub, "rendition:1") {
 		t.Error("the ingest hub is still forwarding to a rendition that was never started")
 	}
-	mustAllocate(t, e.alloc, "after a rendition start was abandoned at shutdown")
+	enginePort(t, e, "after a rendition start was abandoned at shutdown")
 }
 
 // The success path and its undo, together: what start publishes is exactly what
@@ -229,7 +251,7 @@ func TestAStartedRenditionPublishesTheWiringItsTeardownNeeds(t *testing.T) {
 		t.Fatal("the fixture did not put a silence tier between the ingest and the renditions")
 	}
 	// A decoy of the name the rendition will use, on the hub it must NOT touch.
-	e.hub.Subscribe("rendition:1", freeUDPPort(t))
+	mustSubscribe(t, e.hub, "rendition:1", freeUDPPort(t))
 
 	e.startRendition(lifeRendition(1, db.EncoderX264), "spec-a", 30, 2)
 
@@ -273,7 +295,7 @@ func TestAStartedRenditionPublishesTheWiringItsTeardownNeeds(t *testing.T) {
 		t.Error("teardown removed the ingest hub's own consumer of that name, which this " +
 			"rendition never subscribed to")
 	}
-	mustAllocate(t, e.alloc, "after a rendition was torn down")
+	enginePort(t, e, "after a rendition was torn down")
 }
 
 // The rendition reads the silence tier's hub, not the ingest's, whenever a
@@ -285,12 +307,12 @@ func TestTeardownUnsubscribesFromTheHubTheEncodeActuallyRead(t *testing.T) {
 	e.alloc = oneSlotAllocator(t)
 	upstream := lifeHub(t) // stands in for the silence or selector tier's relay
 
-	port := mustAllocate(t, e.alloc, "reserving the rendition's port")
-	upstream.Subscribe("rendition:1", port)
+	port := enginePort(t, e, "reserving the rendition's port")
+	mustSubscribe(t, upstream, "rendition:1", port)
 	// A decoy of the SAME NAME on the ingest hub. If teardown unsubscribes from
 	// e.hub it will look like it worked unless something is watching that name
 	// on both relays.
-	e.hub.Subscribe("rendition:1", port)
+	mustSubscribe(t, e.hub, "rendition:1", port)
 
 	own := lifeHub(t)
 	e.teardownRendition(&rendition{
@@ -306,7 +328,7 @@ func TestTeardownUnsubscribesFromTheHubTheEncodeActuallyRead(t *testing.T) {
 		t.Error("teardown unsubscribed from the ingest hub, which this rendition never " +
 			"subscribed to -- it removed an unrelated consumer of the same name")
 	}
-	mustAllocate(t, e.alloc, "after a rendition reading a non-ingest hub was torn down")
+	enginePort(t, e, "after a rendition reading a non-ingest hub was torn down")
 }
 
 // A caption must never cost the picture. An FFmpeg built without libfreetype
@@ -366,8 +388,8 @@ func TestATeardownWithNoRecordedUpstreamFallsBackToTheIngestRatherThanPanicking(
 	t.Run("rendition", func(t *testing.T) {
 		e := lifeEngine(t)
 		e.alloc = oneSlotAllocator(t)
-		port := mustAllocate(t, e.alloc, "reserving the rendition's port")
-		e.hub.Subscribe("rendition:1", port)
+		port := enginePort(t, e, "reserving the rendition's port")
+		mustSubscribe(t, e.hub, "rendition:1", port)
 
 		e.teardownRendition(&rendition{
 			row: lifeRendition(1, db.EncoderX264), port: port, subName: "rendition:1",
@@ -377,14 +399,14 @@ func TestATeardownWithNoRecordedUpstreamFallsBackToTheIngestRatherThanPanicking(
 			t.Error("the ingest hub still forwards to a torn-down rendition that never " +
 				"recorded which relay it read")
 		}
-		mustAllocate(t, e.alloc, "after a rendition with no recorded upstream was torn down")
+		enginePort(t, e, "after a rendition with no recorded upstream was torn down")
 	})
 
 	t.Run("loudness monitor", func(t *testing.T) {
 		e := lifeEngine(t)
 		e.alloc = oneSlotAllocator(t)
-		port := mustAllocate(t, e.alloc, "reserving the analyser's port")
-		e.hub.Subscribe(loudnessSubPrefix+"7", port)
+		port := enginePort(t, e, "reserving the analyser's port")
+		mustSubscribe(t, e.hub, loudnessSubPrefix+"7", port)
 
 		e.teardownLoudness(&loudnessMon{port: port, subName: loudnessSubPrefix + "7"})
 
@@ -392,7 +414,7 @@ func TestATeardownWithNoRecordedUpstreamFallsBackToTheIngestRatherThanPanicking(
 			t.Error("the ingest hub still forwards to a torn-down analyser that never " +
 				"recorded which relay it read")
 		}
-		mustAllocate(t, e.alloc, "after an analyser with no recorded upstream was torn down")
+		enginePort(t, e, "after an analyser with no recorded upstream was torn down")
 	})
 }
 
@@ -417,22 +439,25 @@ func TestANilChildEndsOneTeardownRatherThanTheWholeReconcile(t *testing.T) {
 // Clearing the wrong one leaks the right one and cycles a healthy child.
 func TestStoppingOneAuxiliaryChildClearsOnlyItsOwnPortAndSignature(t *testing.T) {
 	type slot struct {
-		name string
-		of   func(*Engine) **supervisor.Process
+		aux  auxSlot
 		port func(*Engine) int
 		sig  func(*Engine) string
 	}
+	// AGAINST THE PRODUCTION SLOTS, not a parallel list. #714.
+	//
+	// This table used to carry its own copy of the recorder/preview/meters
+	// correspondence -- which is the same duplication the production switch
+	// had, and would have gone on passing if the two drifted apart. Naming the
+	// real auxSlot values means a fourth consumer added to production without a
+	// row here is a compile error at `aux`, not a silently unexercised path.
 	slots := []slot{
-		{"recorder", func(e *Engine) **supervisor.Process { return &e.recorder },
-			func(e *Engine) int { return e.recorderPort }, func(e *Engine) string { return e.recorderSig }},
-		{"preview", func(e *Engine) **supervisor.Process { return &e.preview },
-			func(e *Engine) int { return e.previewPort }, func(e *Engine) string { return e.previewSig }},
-		{"meters", func(e *Engine) **supervisor.Process { return &e.meters },
-			func(e *Engine) int { return e.metersPort }, func(e *Engine) string { return e.metersSig }},
+		{auxRecorder, func(e *Engine) int { return e.recorderPort }, func(e *Engine) string { return e.recorderSig }},
+		{auxPreview, func(e *Engine) int { return e.previewPort }, func(e *Engine) string { return e.previewSig }},
+		{auxMeters, func(e *Engine) int { return e.metersPort }, func(e *Engine) string { return e.metersSig }},
 	}
 
 	for _, stopping := range slots {
-		t.Run(stopping.name, func(t *testing.T) {
+		t.Run(stopping.aux.name, func(t *testing.T) {
 			e := lifeEngine(t)
 			// Three ports and no spare: a released port is the ONLY one
 			// Allocate can return afterwards, which is what identifies it.
@@ -452,56 +477,56 @@ func TestStoppingOneAuxiliaryChildClearsOnlyItsOwnPortAndSignature(t *testing.T)
 			e.alloc = relay.NewPortAllocator(base, 3)
 			ports := map[string]int{}
 			for _, s := range slots {
-				ports[s.name] = mustAllocate(t, e.alloc, "reserving "+s.name+"'s port")
-				e.hub.Subscribe(s.name, ports[s.name])
+				ports[s.aux.name] = enginePort(t, e, "reserving "+s.aux.name+"'s port")
+				mustSubscribe(t, e.hub, s.aux.name, ports[s.aux.name])
 			}
 			e.recorder, e.preview, e.meters = loudTestProc(), loudTestProc(), loudTestProc()
 			e.recorderPort, e.previewPort, e.metersPort = ports["recorder"], ports["preview"], ports["meters"]
 			e.recorderSig, e.previewSig, e.metersSig = "rec-sig", "prev-sig", "met-sig"
 
-			e.stopAux(stopping.of(e), stopping.name)
+			e.stopAux(stopping.aux)
 
-			if got := *stopping.of(e); got != nil {
+			if got := *stopping.aux.proc(e); got != nil {
 				t.Error("the slot still holds a process, so the next reconcile believes " +
 					"the child is running and never starts a replacement")
 			}
 			if got := stopping.port(e); got != 0 {
 				t.Errorf("%s port = %d after stopping it, want 0; the engine will try to "+
-					"release it a second time when the next child takes it", stopping.name, got)
+					"release it a second time when the next child takes it", stopping.aux.name, got)
 			}
 			if got := stopping.sig(e); got != "" {
 				t.Errorf("%s signature = %q after stopping it, want empty; a stale signature "+
-					"makes the next reconcile believe the stopped child is up to date", stopping.name, got)
+					"makes the next reconcile believe the stopped child is up to date", stopping.aux.name, got)
 			}
-			if hasSubscriber(e.hub, stopping.name) {
-				t.Errorf("the hub still forwards to %s after it was stopped", stopping.name)
+			if hasSubscriber(e.hub, stopping.aux.name) {
+				t.Errorf("the hub still forwards to %s after it was stopped", stopping.aux.name)
 			}
 
 			for _, other := range slots {
-				if other.name == stopping.name {
+				if other.aux.name == stopping.aux.name {
 					continue
 				}
-				if *other.of(e) == nil {
-					t.Errorf("stopping %s also cleared %s's process slot", stopping.name, other.name)
+				if *other.aux.proc(e) == nil {
+					t.Errorf("stopping %s also cleared %s's process slot", stopping.aux.name, other.aux.name)
 				}
-				if got := other.port(e); got != ports[other.name] {
+				if got := other.port(e); got != ports[other.aux.name] {
 					t.Errorf("stopping %s changed %s's port to %d, want %d; that child's port "+
 						"is now either leaked or about to be released twice",
-						stopping.name, other.name, got, ports[other.name])
+						stopping.aux.name, other.aux.name, got, ports[other.aux.name])
 				}
 				if other.sig(e) == "" {
 					t.Errorf("stopping %s cleared %s's signature, which cycles a healthy child",
-						stopping.name, other.name)
+						stopping.aux.name, other.aux.name)
 				}
-				if !hasSubscriber(e.hub, other.name) {
-					t.Errorf("stopping %s unsubscribed %s from the hub", stopping.name, other.name)
+				if !hasSubscriber(e.hub, other.aux.name) {
+					t.Errorf("stopping %s unsubscribed %s from the hub", stopping.aux.name, other.aux.name)
 				}
 			}
 
 			// The released port is identifiable because nothing else is free.
-			if got := mustAllocate(t, e.alloc, "after stopping "+stopping.name); got != ports[stopping.name] {
+			if got := enginePort(t, e, "after stopping "+stopping.aux.name); got != ports[stopping.aux.name] {
 				t.Errorf("the allocator handed back port %d, want %d: the wrong port was released",
-					got, ports[stopping.name])
+					got, ports[stopping.aux.name])
 			}
 		})
 	}
@@ -515,12 +540,12 @@ func TestTheMetersSidecarIsUnsubscribedFromTheHubItSubscribedTo(t *testing.T) {
 	e.alloc = oneSlotAllocator(t)
 	silenceHub := lifeHub(t)
 
-	port := mustAllocate(t, e.alloc, "reserving the sidecar's port")
-	silenceHub.Subscribe("meters", port)
-	e.hub.Subscribe("meters", port) // decoy of the same name on the ingest
+	port := enginePort(t, e, "reserving the sidecar's port")
+	mustSubscribe(t, silenceHub, "meters", port)
+	mustSubscribe(t, e.hub, "meters", port) // decoy of the same name on the ingest
 	e.meters, e.metersPort, e.metersSig, e.metersHub = loudTestProc(), port, "met-sig", silenceHub
 
-	e.stopAux(&e.meters, "meters")
+	e.stopAux(auxMeters)
 
 	if hasSubscriber(silenceHub, "meters") {
 		t.Error("the sidecar was not unsubscribed from the relay it was actually reading; " +
@@ -533,7 +558,7 @@ func TestTheMetersSidecarIsUnsubscribedFromTheHubItSubscribedTo(t *testing.T) {
 		t.Error("metersHub still points at the old relay, so the next stop unsubscribes " +
 			"from a hub this sidecar never read")
 	}
-	mustAllocate(t, e.alloc, "after the meters sidecar was stopped")
+	enginePort(t, e, "after the meters sidecar was stopped")
 }
 
 // --------------------------------------------------------------------- preview
@@ -702,7 +727,7 @@ func TestAPreviewRequestedDuringShutdownStartsNothing(t *testing.T) {
 	if hasSubscriber(e.hub, "preview") {
 		t.Error("the ingest hub is forwarding to a preview that was never started")
 	}
-	mustAllocate(t, e.alloc, "after a preview start into a stopped engine")
+	enginePort(t, e, "after a preview start into a stopped engine")
 }
 
 // The playlist left behind would be served to the next viewer, pointing at
@@ -736,7 +761,7 @@ func TestStoppingThePreviewRemovesThePlaylistAndReturnsThePort(t *testing.T) {
 	if hasSubscriber(e.hub, "preview") {
 		t.Error("the hub still forwards to a stopped preview encoder")
 	}
-	mustAllocate(t, e.alloc, "after the preview was stopped")
+	enginePort(t, e, "after the preview was stopped")
 }
 
 // The encoder exists to serve a dashboard nobody may be looking at. Both
@@ -780,7 +805,7 @@ func TestSweepPreviewStopsAnIdleEncoderAndKeepsAWatchedOne(t *testing.T) {
 			if hasSubscriber(e.hub, "preview") {
 				t.Error("the idled-out encoder is still subscribed to the ingest")
 			}
-			mustAllocate(t, e.alloc, "after the preview idled out")
+			enginePort(t, e, "after the preview idled out")
 		})
 	}
 }
@@ -856,7 +881,7 @@ func TestALoudnessMonitorStartingIntoAShutdownEngineLeavesNoOrphan(t *testing.T)
 	if hasSubscriber(hub, loudnessSubPrefix+"7") {
 		t.Error("the hub still forwards to an analyser that was never started")
 	}
-	mustAllocate(t, e.alloc, "after an analyser start was abandoned at shutdown")
+	enginePort(t, e, "after an analyser start was abandoned at shutdown")
 }
 
 // The round trip. The analyser reads the destination's own upstream hub, which
@@ -887,7 +912,7 @@ func TestALoudnessMonitorRoundTripsItsPortAndSubscription(t *testing.T) {
 	}
 	// A decoy of the same name on the ingest hub, so unsubscribing from the
 	// wrong relay cannot look like success.
-	e.hub.Subscribe(m.subName, m.port)
+	mustSubscribe(t, e.hub, m.subName, m.port)
 
 	e.teardownLoudness(m)
 
@@ -898,5 +923,17 @@ func TestALoudnessMonitorRoundTripsItsPortAndSubscription(t *testing.T) {
 	if !hasSubscriber(e.hub, m.subName) {
 		t.Error("teardown unsubscribed from the ingest hub, which this analyser never read")
 	}
-	mustAllocate(t, e.alloc, "after an analyser was torn down")
+	enginePort(t, e, "after an analyser was torn down")
+}
+
+// mustSubscribe is Subscribe for a test that is not about the refusal. #711
+// made an occupied name an error, and a fixture that drops it would be
+// asserting against a hub that never registered the consumer.
+func mustSubscribe(t testing.TB, h *relay.Hub, name string, port int) string {
+	t.Helper()
+	url, err := h.Subscribe(name, port)
+	if err != nil {
+		t.Fatalf("Subscribe(%q, %d): %v", name, port, err)
+	}
+	return url
 }

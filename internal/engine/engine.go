@@ -233,6 +233,13 @@ type Engine struct {
 	// to a fresh goroutine rather than calling it inline.
 	reconcileMu sync.Mutex
 
+	// heldMu guards heldPorts. Separate from e.mu because releasePort is called
+	// from teardown paths that already hold it.
+	heldMu sync.Mutex
+	// heldPorts is every relay port this engine has taken and not given back.
+	// See allocPort.
+	heldPorts map[int]struct{}
+
 	// reconciles counts completed Reconcile calls, for tests that need to prove
 	// the work was ATTEMPTED rather than skipped.
 	//
@@ -1008,6 +1015,23 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	silence := e.silence
 	sel, backup, playlist := e.sel, e.backup, e.playlist
 	recorder, preview, meters, ingest := e.recorder, e.preview, e.meters, e.ingest
+	// THEIR PORTS AND HUBS TOO. #707. These three used to be collected as bare
+	// processes and stopped with a helper that only calls Stop, so their relay
+	// ports and hub subscriptions were never given back -- unlike every other
+	// consumer, which goes through a teardown that releases both. Collected
+	// here, under the same lock, and released after the stops below.
+	auxPorts := []int{e.recorderPort, e.previewPort, e.metersPort}
+	auxSubs := []struct {
+		hub  *relay.Hub
+		name string
+	}{
+		{e.hub, "recorder"},
+		{hubOr(e.previewHub, e.hub), "preview"},
+		{hubOr(e.metersHub, e.hub), "meters"},
+	}
+	e.recorderPort, e.previewPort, e.metersPort = 0, 0, 0
+	e.previewHub, e.metersHub = nil, nil
+	e.recorderSig, e.previewSig, e.metersSig = "", "", ""
 	e.dests = map[int64]*destination{}
 	e.rends = map[int64]*rendition{}
 	e.silence = nil
@@ -1071,9 +1095,28 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	}
 	wg.Wait()
 	for _, r := range rends {
+		// #707. The rendition's own subscription and port, which this loop used
+		// to skip: it closed the output hub and stopped the process, and left
+		// the INPUT subscription and the port behind. teardownRendition does
+		// both; this path did not, and renditions are the per-source multiplier
+		// on the leak.
+		if r.subName != "" {
+			in := r.in
+			if in == nil {
+				in = e.hub
+			}
+			in.Unsubscribe(r.subName)
+		}
+		e.releasePort(r.port)
 		if r.hub != nil {
 			_ = r.hub.Close()
 		}
+	}
+	for i, p := range auxPorts {
+		if sub := auxSubs[i]; sub.hub != nil {
+			sub.hub.Unsubscribe(sub.name)
+		}
+		e.releasePort(p)
 	}
 
 	// One more level up. The order here is the same dependency chain the
@@ -1103,6 +1146,22 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	// rather than dropped.
 	if sink := e.sink.Swap(nil); sink != nil {
 		_ = sink.Close()
+	}
+	// THE POST-CONDITION, and it is the device rather than the fix. #707.
+	//
+	// The fix above gives four kinds their ports back. This says so out loud if
+	// a FIFTH is ever added and does not -- which is the mistake that was
+	// available, and the one that produced a silent three-ports-per-delete leak
+	// out of a 500-port pool shared across every engine.
+	//
+	// Reported rather than fatal: a shutdown is the wrong moment to panic, and
+	// a leaked port costs one slot rather than correctness. But it is at Error,
+	// because the alternative is discovering it when Allocate starts failing
+	// everywhere at once and reads as an unrelated fault.
+	if n := e.heldPortCount(); n > 0 {
+		e.log.Error("engine shutdown did not return every relay port it held; "+
+			"the pool is shared across all engines and these are gone until restart",
+			"leaked", n)
 	}
 	e.log.Info("engine stopped")
 }
@@ -1731,7 +1790,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	// about to fill takes the database and the preview down with it.
 	if !s.Recording.Enabled || !e.recman.RecordingAllowed() {
 		if cur != nil {
-			e.stopAux(&e.recorder, "recorder")
+			e.stopAux(auxRecorder)
 		}
 		return
 	}
@@ -1743,19 +1802,27 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		return
 	}
 	if cur != nil {
-		e.stopAux(&e.recorder, "recorder")
+		e.stopAux(auxRecorder)
 	}
 
 	if err := os.MkdirAll(e.cfg.RecordingsDir(), 0o755); err != nil {
 		e.log.Error("cannot create recordings directory", "err", err)
 		return
 	}
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		e.log.Error("recorder: no relay port", "err", err)
 		return
 	}
-	url := e.hub.Subscribe("recorder", port)
+	url, err := e.hub.Subscribe("recorder", port)
+	if err != nil {
+		// #711. Same release-and-bail as the port refusal above. An occupied
+		// name means another consumer is reading under it, and taking it would
+		// leave that one running and receiving nothing.
+		e.releasePort(port)
+		e.log.Error("recorder: relay subscription refused", "err", err)
+		return
+	}
 
 	pattern := filepath.Join(e.cfg.RecordingsDir(), "rec-%Y%m%d-%H%M%S.mkv")
 	rs := ffmpeg.RecorderSpec{
@@ -1792,7 +1859,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	if e.stopped {
 		e.mu.Unlock()
 		e.hub.Unsubscribe("recorder")
-		e.alloc.Release(port)
+		e.releasePort(port)
 		return
 	}
 	e.recorder = proc
@@ -2041,7 +2108,7 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	// player before the new ones appear.
 	clearDir(dir)
 
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		e.log.Error("preview: no relay port", "err", err)
 		return
@@ -2064,7 +2131,17 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	e.mu.Lock()
 	e.previewHub = hub
 	e.mu.Unlock()
-	url := hub.Subscribe("preview", port)
+	url, err := hub.Subscribe("preview", port)
+	if err != nil {
+		// #711. previewHub is cleared with it, or a later sweep unsubscribes a
+		// name this preview never took -- cutting off whoever actually holds it.
+		e.mu.Lock()
+		e.previewHub = nil
+		e.mu.Unlock()
+		e.releasePort(port)
+		e.log.Error("preview: relay subscription refused", "err", err)
+		return
+	}
 
 	args := ffmpeg.PreviewArgs(ffmpeg.PreviewSpec{
 		RelayURL:       url,
@@ -2092,7 +2169,7 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	if e.stopped {
 		e.mu.Unlock()
 		hub.Unsubscribe("preview")
-		e.alloc.Release(port)
+		e.releasePort(port)
 		return
 	}
 	e.preview = proc
@@ -2105,7 +2182,7 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 
 // stopPreviewLocked tears the encoder down. The caller must hold previewMu.
 func (e *Engine) stopPreviewLocked() {
-	e.stopAux(&e.preview, "preview")
+	e.stopAux(auxPreview)
 	// The playlist left behind would be served to the next viewer, pointing at
 	// segments the next start is about to delete. Scoped to THIS source: while
 	// it cleared the shared directory, an engine tearing down took the live
@@ -2189,7 +2266,7 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 
 	if !s.Meters.Enabled || len(src.Tracks) == 0 || !known {
 		if cur != nil {
-			e.stopAux(&e.meters, "meters")
+			e.stopAux(auxMeters)
 		}
 		return
 	}
@@ -2207,16 +2284,21 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 		return
 	}
 	if cur != nil {
-		e.stopAux(&e.meters, "meters")
+		e.stopAux(auxMeters)
 	}
 
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		e.log.Error("meters: no relay port", "err", err)
 		return
 	}
 	meterHub := e.downstreamHub()
-	url := meterHub.Subscribe("meters", port)
+	url, err := meterHub.Subscribe("meters", port)
+	if err != nil {
+		e.releasePort(port)
+		e.log.Error("meters: relay subscription refused", "err", err)
+		return
+	}
 
 	args := ffmpeg.MetersArgs(ffmpeg.MetersSpec{RelayURL: url, TrackChannels: channels})
 
@@ -2257,7 +2339,7 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	if e.stopped {
 		e.mu.Unlock()
 		meterHub.Unsubscribe("meters")
-		e.alloc.Release(port)
+		e.releasePort(port)
 		return
 	}
 	e.meters = proc
@@ -2925,7 +3007,7 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 		return
 	}
 
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		fail(err)
 		return
@@ -2934,7 +3016,7 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	// ingest. Port 0 lets the kernel pick, well clear of the allocator's range.
 	hub, err := relay.New(e.log, 0)
 	if err != nil {
-		e.alloc.Release(port)
+		e.releasePort(port)
 		fail(err)
 		return
 	}
@@ -2946,13 +3028,13 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	upstream := e.selectorHub()
 	if upstream == nil {
 		if err := e.selectorProblem(); err != nil {
-			e.alloc.Release(port)
+			e.releasePort(port)
 			_ = hub.Close()
 			fail(err)
 			return
 		}
 		if err := e.silenceProblem(); err != nil {
-			e.alloc.Release(port)
+			e.releasePort(port)
 			_ = hub.Close()
 			fail(err)
 			return
@@ -2961,7 +3043,13 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	}
 
 	subName := fmt.Sprintf("rendition:%d", row.ID)
-	in := upstream.Subscribe(subName, port)
+	in, err := upstream.Subscribe(subName, port)
+	if err != nil {
+		e.releasePort(port)
+		_ = hub.Close()
+		fail(err)
+		return
+	}
 	rspec := renditionSpecOf(row, in, hub.InputURL(), sourceFPS, e.vaapiDevice(row), e.cfg.DataDir)
 	// An FFmpeg with no drawtext filter must not be handed one.
 	//
@@ -3004,7 +3092,7 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	if e.stopped {
 		e.mu.Unlock()
 		upstream.Unsubscribe(subName)
-		e.alloc.Release(port)
+		e.releasePort(port)
 		_ = hub.Close()
 		return
 	}
@@ -3040,7 +3128,7 @@ func (e *Engine) teardownRendition(r *rendition) {
 		in.Unsubscribe(r.subName)
 	}
 	if r.port != 0 {
-		e.alloc.Release(r.port)
+		e.releasePort(r.port)
 	}
 	// After the process, so the encode is never writing into a closed socket.
 	if r.hub != nil {
@@ -3048,8 +3136,159 @@ func (e *Engine) teardownRendition(r *rendition) {
 	}
 }
 
-func (e *Engine) stopAux(slot **supervisor.Process, name string) {
+// auxSlot names one auxiliary child completely: its process slot, its port, its
+// signature, its hub, and the subscriber name it registered under.
+//
+// #714. stopAux used to take (slot, name) as two arguments and recover the rest
+// from a `switch name`. Two mistakes were available in that shape and both were
+// silent:
+//
+//   - e.stopAux(&e.preview, "recorder") compiles and reads correctly. It stops
+//     the preview, releases the RECORDER's port, unsubscribes "recorder" from
+//     the ingest hub rather than the preview's, and leaks the preview's port
+//     and subscription for ever.
+//   - the switch had no default, so a fourth consumer left port == 0, skipped
+//     the release, never cleared its signature, and left reconcile believing
+//     the child was still running. Nothing failed and nothing logged.
+//
+// One argument means there is no second argument to mismatch, and a value per
+// consumer means there is no switch to fall through. That is the whole device.
+//
+// This also brings the three aux consumers into line with every other
+// subscriber in the package: destinations, renditions, feeds, silence,
+// loudness, clips, captions and playout all store their name at subscribe time
+// and reuse the STORED value at teardown. Recorder, preview and meters were the
+// only three recomputing a bare string literal, and they were exactly the three
+// routed through the switch.
+type auxSlot struct {
+	name string
+	proc func(*Engine) **supervisor.Process
+	port func(*Engine) *int
+	sig  func(*Engine) *string
+	// hub is the consumer's own hub pointer, or nil when it always reads the
+	// ingest hub. The preview and meters read whichever tier is on air, so both
+	// must unsubscribe from the hub they actually JOINED -- unsubscribing from
+	// e.hub instead leaves a live subscription on a selector hub that is about
+	// to close.
+	hub func(*Engine) **relay.Hub
+}
+
+var (
+	auxRecorder = auxSlot{
+		name: "recorder",
+		proc: func(e *Engine) **supervisor.Process { return &e.recorder },
+		port: func(e *Engine) *int { return &e.recorderPort },
+		sig:  func(e *Engine) *string { return &e.recorderSig },
+	}
+	auxPreview = auxSlot{
+		name: "preview",
+		proc: func(e *Engine) **supervisor.Process { return &e.preview },
+		port: func(e *Engine) *int { return &e.previewPort },
+		sig:  func(e *Engine) *string { return &e.previewSig },
+		hub:  func(e *Engine) **relay.Hub { return &e.previewHub },
+	}
+	auxMeters = auxSlot{
+		name: "meters",
+		proc: func(e *Engine) **supervisor.Process { return &e.meters },
+		port: func(e *Engine) *int { return &e.metersPort },
+		sig:  func(e *Engine) *string { return &e.metersSig },
+		hub:  func(e *Engine) **relay.Hub { return &e.metersHub },
+	}
+)
+
+// allocPort and releasePort are the only two ways this engine touches the port
+// pool, and between them they let the engine answer "what am I still holding?".
+//
+// #707/#708. The pool is 500 ports shared across EVERY engine, and Manager.Sync
+// stops an engine on every source delete while the daemon keeps running. So a
+// port an engine fails to give back is gone for the life of the process, and
+// nothing reports it until Allocate starts failing -- at which point it fails
+// everywhere at once and reads as an unrelated fault.
+//
+// StopWithin was giving four kinds back and not the others. Destinations,
+// loudness, clips, captions, feeds, silence, backup and playlist went through a
+// teardown that released; the recorder, preview, meters and renditions went
+// through a bare `stop` helper that only called Stop. Measured: three ports plus
+// one per rendition leaked on every engine shutdown, and the hub kept their
+// subscriptions.
+//
+// A SET RATHER THAN A COUNT, because the point is the post-condition: after
+// StopWithin has run, this engine should hold nothing, and heldPorts is what
+// makes that checkable. A future child kind that takes a port without giving it
+// back fails that check by name instead of silently shrinking the pool.
+//
+// This is not the full lease the issues propose -- Allocate returning a value
+// whose Release is the only spelling, so a stale int cannot be released at all.
+// That reaches Control and touches thirteen sites that store a bare int. This
+// reaches Warning: the mistake is still available, and it announces itself at
+// the moment it happens rather than a fortnight later.
+// hubOr is the consumer's own hub when it joined one, and the ingest otherwise.
+// The preview and meters read whichever tier is on air, so both must
+// unsubscribe from the hub they actually JOINED.
+func hubOr(own, fallback *relay.Hub) *relay.Hub {
+	if own != nil {
+		return own
+	}
+	return fallback
+}
+
+func (e *Engine) allocPort() (int, error) {
+	p, err := e.alloc.Allocate()
+	if err != nil {
+		return 0, err
+	}
+	e.heldMu.Lock()
+	if e.heldPorts == nil {
+		e.heldPorts = map[int]struct{}{}
+	}
+	e.heldPorts[p] = struct{}{}
+	e.heldMu.Unlock()
+	return p, nil
+}
+
+// releasePort gives a port back, and refuses to give back one this engine does
+// not hold.
+//
+// THE REFUSAL IS THE POINT, and it is #708. Release took a bare int and did
+// `delete(a.held, p)`, so releasing a port twice silently un-held a port a
+// DIFFERENT engine had since been given -- two engines pointed at one UDP port,
+// which is precisely what the allocator's bind probe exists to prevent. The
+// probe only masks it while the first owner's child is actually bound; during
+// restart backoff, or between Allocate and Start, it is open.
+//
+// The reachable double-release: stopBackup deliberately does not clear
+// d.backupPort (documented at destinations.go), so the struct still names a
+// released port, and a later teardown releases it again.
+func (e *Engine) releasePort(p int) {
+	if p == 0 {
+		return
+	}
+	e.heldMu.Lock()
+	_, mine := e.heldPorts[p]
+	delete(e.heldPorts, p)
+	e.heldMu.Unlock()
+	if !mine {
+		// Not fatal: the port may legitimately belong to nobody now. What must
+		// not happen silently is handing it back to the pool a second time,
+		// because the pool may already have given it to someone else.
+		e.log.Error("refusing to release a relay port this engine does not hold; "+
+			"releasing it again would hand a port another engine may already own "+
+			"back to the pool", "port", p)
+		return
+	}
+	e.alloc.Release(p)
+}
+
+// heldPortCount is what StopWithin asserts on.
+func (e *Engine) heldPortCount() int {
+	e.heldMu.Lock()
+	defer e.heldMu.Unlock()
+	return len(e.heldPorts)
+}
+
+func (e *Engine) stopAux(a auxSlot) {
 	e.mu.Lock()
+	slot := a.proc(e)
 	proc := *slot
 	*slot = nil
 	var port int
@@ -3058,21 +3297,14 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 	// the hub they actually JOINED -- unsubscribing from e.hub instead leaves a
 	// live subscription on a selector hub that is about to close.
 	hub := e.hub
-	switch name {
-	case "recorder":
-		port, e.recorderPort = e.recorderPort, 0
-		e.recorderSig = ""
-	case "preview":
-		port, e.previewPort = e.previewPort, 0
-		e.previewSig = ""
-		if e.previewHub != nil {
-			hub, e.previewHub = e.previewHub, nil
-		}
-	case "meters":
-		port, e.metersPort = e.metersPort, 0
-		e.metersSig = ""
-		if e.metersHub != nil {
-			hub, e.metersHub = e.metersHub, nil
+	{
+		pp := a.port(e)
+		port, *pp = *pp, 0
+		*a.sig(e) = ""
+		if a.hub != nil {
+			if hp := a.hub(e); *hp != nil {
+				hub, *hp = *hp, nil
+			}
 		}
 	}
 	e.mu.Unlock()
@@ -3082,9 +3314,9 @@ func (e *Engine) stopAux(slot **supervisor.Process, name string) {
 		_ = proc.Stop(ctx)
 		cancel()
 	}
-	hub.Unsubscribe(name)
+	hub.Unsubscribe(a.name)
 	if port != 0 {
-		e.alloc.Release(port)
+		e.releasePort(port)
 	}
 }
 
@@ -3272,7 +3504,7 @@ func (e *Engine) probeFailedNow(err error) {
 }
 
 func (e *Engine) probeOnce(ctx context.Context) bool {
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		// THE THIRD WAY TO MEASURE NOTHING, and it used to be the only one that
 		// said nothing and counted for nothing. Allocate walks the whole range
@@ -3292,10 +3524,19 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 		e.probeFailedNow(fmt.Errorf("no free relay port to probe the ingest: %w", err))
 		return false
 	}
-	defer e.alloc.Release(port)
+	defer e.releasePort(port)
 
 	name := "probe"
-	url := e.hub.Subscribe(name, port)
+	url, err := e.hub.Subscribe(name, port)
+	if err != nil {
+		// #711. Counted like an ffprobe failure, for the reason the port
+		// refusal above states: no layout was measured, and the reason is not
+		// something waiting longer will change. The deferred Unsubscribe is
+		// NOT armed, because this probe holds no subscription to remove and
+		// removing the name would cut off whoever does.
+		e.probeFailedNow(fmt.Errorf("the probe's relay name is already in use: %w", err))
+		return false
+	}
 	defer e.hub.Unsubscribe(name)
 
 	// Captured BEFORE the read, checked before the write. Everything between is
@@ -3747,13 +3988,18 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 		e.log.Warn("loudness monitor cannot run", "dest", p.name, "err", err)
 	}
 
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		fail(err)
 		return
 	}
 	subName := loudnessSubPrefix + strconv.FormatInt(p.id, 10)
-	url := p.hub.Subscribe(subName, port)
+	url, err := p.hub.Subscribe(subName, port)
+	if err != nil {
+		e.releasePort(port)
+		fail(err)
+		return
+	}
 
 	args := meters.Args(meters.Spec{
 		RelayURL:      url,
@@ -3805,7 +4051,7 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 	if e.stopped || !want || cur.sig != p.sig {
 		e.mu.Unlock()
 		p.hub.Unsubscribe(subName)
-		e.alloc.Release(port)
+		e.releasePort(port)
 		return
 	}
 	e.loud[p.id] = &loudnessMon{proc: proc, hub: p.hub, port: port, subName: subName, sig: p.sig}
@@ -3834,7 +4080,7 @@ func (e *Engine) teardownLoudness(m *loudnessMon) {
 		hub.Unsubscribe(m.subName)
 	}
 	if m.port != 0 {
-		e.alloc.Release(m.port)
+		e.releasePort(m.port)
 	}
 }
 
@@ -3945,20 +4191,25 @@ func (e *Engine) reconcileClips() {
 		return
 	}
 
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		e.log.Error("clip buffer: no relay port", "err", err)
 		return
 	}
 	hub := e.downstreamHub()
-	url := hub.Subscribe(clipSubName, port)
+	url, err := hub.Subscribe(clipSubName, port)
+	if err != nil {
+		e.releasePort(port)
+		e.log.Error("clip buffer: relay subscription refused", "err", err)
+		return
+	}
 
 	capt, err := clips.Open(e.log, cfg, url, func() {
 		e.bus.Publish(events.TypeClips, nil)
 	})
 	if err != nil {
 		hub.Unsubscribe(clipSubName)
-		e.alloc.Release(port)
+		e.releasePort(port)
 		e.log.Error("clip buffer", "err", err)
 		return
 	}
@@ -3968,7 +4219,7 @@ func (e *Engine) reconcileClips() {
 		e.mu.Unlock()
 		_ = capt.Close()
 		hub.Unsubscribe(clipSubName)
-		e.alloc.Release(port)
+		e.releasePort(port)
 		return
 	}
 	e.clipCap, e.clipPort, e.clipHub, e.clipSig = capt, port, hub, want
@@ -3990,7 +4241,7 @@ func (e *Engine) teardownClips(c *clips.Capturer, port int, hub *relay.Hub) {
 	hub.Unsubscribe(clipSubName)
 	_ = c.Close()
 	if port != 0 {
-		e.alloc.Release(port)
+		e.releasePort(port)
 	}
 	e.log.Info("clip buffer stopped")
 }
@@ -4300,13 +4551,18 @@ func (e *Engine) reconcileCaptions() {
 		return
 	}
 
-	port, err := e.alloc.Allocate()
+	port, err := e.allocPort()
 	if err != nil {
 		e.captionsFailed(fmt.Sprintf("live captions could not get a relay port: %v", err))
 		return
 	}
 	hub := e.downstreamHub()
-	url := hub.Subscribe(captSubName, port)
+	url, err := hub.Subscribe(captSubName, port)
+	if err != nil {
+		e.releasePort(port)
+		e.captionsFailed(fmt.Sprintf("live captions could not subscribe to the relay: %v", err))
+		return
+	}
 
 	// The sidecar lands in the playout directory by default so it sits beside
 	// the HLS window it describes. It is a growing WebVTT file, not a
@@ -4338,7 +4594,7 @@ func (e *Engine) reconcileCaptions() {
 	)
 	if err != nil {
 		hub.Unsubscribe(captSubName)
-		e.alloc.Release(port)
+		e.releasePort(port)
 		_ = vtt.Close()
 		e.captionsFailed(err.Error())
 		return
@@ -4350,7 +4606,7 @@ func (e *Engine) reconcileCaptions() {
 	}
 	if err := capt.Start(ctx, url, modelPath, transcribe.LiveWorkDir(e.cfg.DataDir)); err != nil {
 		hub.Unsubscribe(captSubName)
-		e.alloc.Release(port)
+		e.releasePort(port)
 		_ = vtt.Close()
 		e.captionsFailed(err.Error())
 		return
@@ -4432,7 +4688,7 @@ func (e *Engine) teardownCaptions(c *transcribe.LiveCaptioner, port int, hub *re
 	c.Stop()
 	_ = vtt.Close()
 	if port != 0 {
-		e.alloc.Release(port)
+		e.releasePort(port)
 	}
 	e.log.Info("live captions stopped")
 }

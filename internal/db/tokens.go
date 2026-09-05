@@ -158,6 +158,32 @@ func (d *DB) ListAPITokens() ([]APIToken, error) {
 }
 
 // DeleteAPIToken revokes a token.
+// APITokenExists reports whether a token row is still there.
+//
+// #706. It exists so a live /ws socket can ask the STORE whether its token
+// survives, rather than consulting an in-process set that only one handler
+// writes to. Revocation had two halves -- delete the row, and mark the id in
+// that set -- and only the single-token path did both, so a password change
+// deleted every token from the database and left their sockets streaming.
+//
+// One indexed read per socket per ping period, which is exactly what the
+// session half beside it (TokenEpoch) already costs and is documented as
+// acceptable there.
+func (d *DB) APITokenExists(id int64) (bool, error) {
+	if id == 0 {
+		return false, nil
+	}
+	var one int
+	err := d.sql.QueryRow(`SELECT 1 FROM api_tokens WHERE id = ?`, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (d *DB) DeleteAPIToken(id int64) error {
 	res, err := d.sql.Exec(`DELETE FROM api_tokens WHERE id = ?`, id)
 	if err != nil {

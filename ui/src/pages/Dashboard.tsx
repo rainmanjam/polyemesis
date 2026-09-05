@@ -213,7 +213,13 @@ function GoLiveComposer() {
           setCategory(data.last.metadata.category);
         }
       })
-      .catch(() => setTargets([]));
+      // NULL, NOT []. #719. `targets` is `MetaTarget[] | null` and null is the
+      // unknown state -- `if (targets === null) return null` hides the composer
+      // entirely. Storing [] here made a failed read render the composer with
+      // ZERO platforms, which is a positive claim: it says the server answered
+      // and this broadcast has nowhere to push metadata. Unknown keeps it
+      // hidden, which is what it was before the request.
+      .catch(() => setTargets(null));
     // What is still editable, read once when the composer opens. Deliberately
     // not polled: each row is a live platform call, and a broadcast that goes
     // live mid-edit is caught by the write's own 403 rather than by a timer.
