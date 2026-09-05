@@ -32,6 +32,7 @@ import (
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
 )
 
@@ -174,6 +175,16 @@ func run(h *hooks) error {
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
 	}
+
+	// BEFORE THE FIRST CHILD OF ANY KIND, which is the whole of #723's Windows
+	// half. The job object that kills every child when polyemesis dies works by
+	// INHERITANCE at CreateProcess time, so it has to exist before anything is
+	// spawned -- and it used to be created lazily on the first SUPERVISOR
+	// spawn, leaving a transcode or a transcription worker on a server that had
+	// not yet gone live permanently outside it. A no-op on Unix, which gets the
+	// equivalent from the children staying in this process's group; the
+	// function says so rather than being an empty body.
+	supervisor.EnsureCrashBackstop()
 
 	// BEFORE anything is started. A reset touches only the database and then
 	// exits, so it must not bind a port, spawn a child or write a log file --

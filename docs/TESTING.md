@@ -458,6 +458,54 @@ mixes survive polyemesis's own RTMP egress and arrive as two different tracks.
 Whether any PLATFORM accepts a second track is still the unanswered half, and
 still needs a real account to answer.
 
+### The three that take time, and what each refuses to believe
+
+`#380` named three gaps that a 75-second suite cannot see by construction:
+duration, concurrency, and a fault arriving mid-stream. Each has a suite now,
+none is in the CI matrix, and all three are run by hand.
+
+```bash
+DURATION_MINUTES=10 ./scripts/acceptance-duration.sh   # memory, disk, churn over a real window
+./scripts/acceptance-concurrency.sh 6                  # what a destination costs, and whether N cost N times it
+./scripts/acceptance-faults.sh                         # a fault arriving into a healthy broadcast
+```
+
+**What makes each of them worth running is what it refuses to believe**, and in
+all three cases that is a lie shaped exactly like the result you want:
+
+- **duration** — every trend it watches reads flat on an idle server. No memory
+  growth, no restarts, no disk growth: a long run against a broadcast that died
+  in its first minute reports perfect health, at length. So delivery is asserted
+  FIRST and every other check is conditional on it, and the byte counter must
+  advance across *every* interval rather than between the endpoints, because a
+  stall in the middle that recovered is the churn being looked for.
+- **concurrency** — a first attempt by hand measured per-destination cost
+  *halving* with every doubling. Beautiful, and an artefact: several FFmpeg
+  readers on one UDP socket compete and all but one die, so the total was one
+  survivor's CPU divided by N. Liveness is asserted before any number is
+  reported. (The measured answer: 2.69% of a core for one, 3.44% each for six,
+  against a published "roughly 4%" — corroborated, not contradicted.)
+- **faults** — the mirror of the other two. A recovery suite whose fault DID NOT
+  LAND reports a perfect recovery with every check green, because nothing was
+  broken so nothing stayed broken. Every injection is therefore a pair: the
+  fault, and a positive control that must fire to prove it reached the product.
+  A run whose control does not fire reports *the fault did not land* and fails;
+  it never reports a recovery it did not observe.
+
+The faults suite is also where a stated principle was caught being broken by its
+own author. Its header says "running is what a destination subscribed to nothing
+also says" — and its first recovery check asserted exactly that, which a mutation
+that never restored the endpoint passed: the supervisor respawns FFmpeg, FFmpeg
+fails to connect and dies, and a sampler catches it in the window where it is
+up. A crash loop reports "running" about as often as a healthy process does.
+Recovery is now asserted on the driver's own sink counting the connection it
+accepted, which nothing but a real reconnection produces.
+
+**On real platforms, note the 8-hour ceiling.** Meta's Live Video API reference
+requires a live video not to exceed 8 hours; Facebook terminates past it. In a
+duration run pointed at a real Facebook destination that is a platform event to
+expect, not a fault to detect.
+
 Two more do **not** drive the built binary and need no `make build`. They drive
 one package against a socket, which is the gap an internal coverage review
 ranks: seventeen suites, and until these were written exactly one of them talked

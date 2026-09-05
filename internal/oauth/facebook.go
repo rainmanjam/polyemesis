@@ -1254,6 +1254,25 @@ func fbLiveRank(status string) int {
 	}
 }
 
+// currentLiveVideo picks the ONE broadcast on this target that a caller holding
+// no id can safely have meant, and REFUSES WHEN THERE IS MORE THAN ONE. #725.
+//
+// It used to take the newest at the best rank. That is right when the target
+// carries a single broadcast and wrong in the way fbLiveRank's own comment
+// worries about -- "editing last week's broadcast because it sorted first is
+// the most embarrassing outcome available here" -- except the remaining case is
+// worse than last week's: two broadcasts live at once, and a title written onto
+// the wrong one is published to somebody's viewers under a heading meant for
+// another stream.
+//
+// A tie at the best rank is not a preference to resolve. It is a question this
+// process cannot answer: nothing on a live_video says polyemesis started it,
+// and a target may perfectly well carry a broadcast some other tool is running.
+// So the tie is reported, with both titles, and the caller is told to address
+// the video directly -- which UpdateLiveVideo exists to do.
+//
+// THE SINGLE-BROADCAST CASE IS UNCHANGED, which is every ordinary install: one
+// live video on the target, one answer, no new refusal.
 func (f *Facebook) currentLiveVideo(ctx context.Context, tgt *fbTarget) (*fbLiveVideo, error) {
 	var list struct {
 		Data []fbLiveVideo `json:"data"`
@@ -1264,24 +1283,72 @@ func (f *Facebook) currentLiveVideo(ctx context.Context, tgt *fbTarget) (*fbLive
 		return nil, fbAdvice(err, "list Facebook broadcasts", f.publishScopes(tgt.kind))
 	}
 
-	// Graph returns this edge newest-first, so the first acceptable entry at the
-	// best rank is the right one.
-	best := -1
-	for i, lv := range list.Data {
+	bestRank := -1
+	var tied []fbLiveVideo
+	for _, lv := range list.Data {
 		r := fbLiveRank(lv.Status)
 		if r < 0 || lv.ID == "" {
 			continue
 		}
-		if best < 0 || r < fbLiveRank(list.Data[best].Status) {
-			best = i
+		switch {
+		case bestRank < 0 || r < bestRank:
+			bestRank, tied = r, []fbLiveVideo{lv}
+		case r == bestRank:
+			tied = append(tied, lv)
 		}
 	}
-	if best < 0 {
+	if len(tied) == 0 {
 		return nil, fmt.Errorf("this Facebook target has no live or staged broadcast to update; " +
 			"start the stream (polyemesis creates the broadcast when it fetches the ingest) and push again")
 	}
-	lv := list.Data[best]
-	return &lv, nil
+	if len(tied) > 1 {
+		return nil, fmt.Errorf("this Facebook target has %d broadcasts at the same status "+
+			"(%s), and nothing on a live video says which one polyemesis is publishing to -- "+
+			"another tool may be running one of them. Refusing rather than guessing: end the "+
+			"one you are not using, or push to this destination while only one is live",
+			len(tied), fbNameList(tied))
+	}
+	return &tied[0], nil
+}
+
+// fbNameList renders the tied broadcasts for the refusal above, so an operator
+// can go and look at the two rather than being told only that there are two.
+func fbNameList(vids []fbLiveVideo) string {
+	names := make([]string, 0, len(vids))
+	for _, v := range vids {
+		names = append(names, firstNonEmpty(v.Title, v.ID))
+	}
+	return strings.Join(names, ", ")
+}
+
+// AdoptLiveVideo finds the broadcast a HAND-PASTED key is publishing to. #725.
+//
+// A destination whose key came from the Facebook API carries the live-video id
+// IN THE KEY -- FacebookLiveVideoID reads it off -- so chat, metadata and End
+// broadcast have an id without asking anybody. A key pasted from Live Producer
+// does not: a persistent key is `FB-<numbers>-<n>-<random>`, which is not an
+// id, so those three features had nothing to attach to and said so.
+//
+// They do not have to. Going live with a persistent key creates a live video on
+// the same target the connected account can see, and currentLiveVideo already
+// knows how to find it. What makes that safe here rather than a guess is
+// Facebook's own limit, stated on the persistent key itself: ONE LIVE VIDEO AT
+// A TIME. So while a persistent key is publishing, "the broadcast on this
+// target" is unambiguous -- and on the occasions it is not, currentLiveVideo
+// now refuses rather than picking.
+//
+// Adoption is therefore exactly as safe as that refusal, which is why the two
+// changes belong in one place.
+func (f *Facebook) AdoptLiveVideo(ctx context.Context, accessToken, targetRef string) (string, error) {
+	tgt, err := f.resolveTarget(ctx, accessToken, targetRef)
+	if err != nil {
+		return "", err
+	}
+	lv, err := f.currentLiveVideo(ctx, tgt)
+	if err != nil {
+		return "", err
+	}
+	return lv.ID, nil
 }
 
 // --------------------------------------------------------------- transport

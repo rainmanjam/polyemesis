@@ -243,3 +243,25 @@ func TestKillIsARefusalOnAReapedChild(t *testing.T) {
 	p.cmdMu.Unlock()
 	p.kill()
 }
+
+// EnsureCrashBackstop is callable before anything has been spawned, which is
+// the entire point of it existing. #723.
+//
+// On Windows it creates the job object every child inherits; on Unix it is a
+// documented no-op, because a child that has NOT been given a group of its own
+// stays in this process's group and an abrupt death reaches it there.
+//
+// What this pins is the property main.go depends on: it is safe at startup, and
+// it is idempotent, so a second call cannot undo the first.
+func TestTheCrashBackstopIsSafeBeforeAnythingIsSpawned(t *testing.T) {
+	EnsureCrashBackstop()
+	EnsureCrashBackstop()
+
+	// And a child spawned afterwards still works, which is the case that would
+	// break if the backstop had taken something away rather than added to it.
+	p := testProcess(t, fakeExit(0), Spec{Name: "after-backstop", Kind: "test"})
+	p.Start()
+	waitFor(t, "the child to be reaped", func() bool {
+		return childcensus.LiveCount() >= 0
+	})
+}

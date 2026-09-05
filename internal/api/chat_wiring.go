@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -263,13 +264,33 @@ func kickBroadcasterID(ref string) (int, error) {
 	return id, nil
 }
 
-// facebookLiveVideoID recovers the broadcast id from a destination linked to
-// this account. Empty when nothing is linked or the key does not carry one.
+// facebookLiveVideoID recovers the broadcast id for this account's chat.
+//
+// TWO ROUTES, AND THE SECOND IS #725. A key polyemesis fetched carries the
+// live-video id inside it, so FacebookLiveVideoID reads it straight off and
+// nothing has to be asked. A key PASTED from Live Producer does not -- a
+// persistent key is `FB-<numbers>-<n>-<random>` -- so this returned empty and
+// the chat pane said it had nothing to attach to.
+//
+// It can be asked. Going live with a persistent key creates a live video on the
+// same target the connected account can see, and the provider's AdoptLiveVideo
+// finds it -- refusing rather than guessing when the target carries more than
+// one at the same status. Facebook's own limit makes that refusal rare on this
+// path: a persistent key carries one live video at a time.
+//
+// ONLY WHEN THE KEY CARRIES NO ID. A fetched key is authoritative and costs no
+// request; adopting over it would replace a fact with a lookup.
+//
+// FAILURE IS EMPTY, NOT AN ERROR. Empty is the state this function already had
+// and the adapter already explains, so a target with nothing live, an expired
+// token or an ambiguous pair leaves the chat pane exactly as it was rather than
+// breaking the wiring for every other platform in the same loop.
 func (s *Server) facebookLiveVideoID(accountID int64) string {
 	dests, err := s.store.ListDestinations()
 	if err != nil {
 		return ""
 	}
+	pasted := false
 	for _, d := range dests {
 		if d.AccountID == nil || *d.AccountID != accountID {
 			continue
@@ -277,8 +298,47 @@ func (s *Server) facebookLiveVideoID(accountID int64) string {
 		if id := oauth.FacebookLiveVideoID(d.StreamKey); id != "" {
 			return id
 		}
+		// Linked to this account and holding a key that is not an id: the
+		// hand-pasted case, and the only one worth spending a request on.
+		pasted = true
 	}
-	return ""
+	if !pasted {
+		return ""
+	}
+	return s.adoptFacebookLiveVideo(accountID)
+}
+
+// adoptFacebookLiveVideo asks the platform which broadcast this account is
+// running. Empty on any refusal, for the reason above.
+func (s *Server) adoptFacebookLiveVideo(accountID int64) string {
+	p, err := s.providers.Get(db.PlatformFacebook)
+	if err != nil {
+		return ""
+	}
+	fb, ok := p.(*oauth.Facebook)
+	if !ok || fb == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	acct, err := s.tokenFor(ctx, accountID)
+	if err != nil {
+		return ""
+	}
+	id, err := fb.AdoptLiveVideo(ctx, acct.AccessToken, acct.AccountRef)
+	if err != nil {
+		// AT DEBUG, not warn. "Nothing is live on this target" is the ordinary
+		// state of an account between broadcasts, and a warning on every chat
+		// rewire for an idle account is noise that teaches operators to skim.
+		s.log.Debug("no Facebook broadcast to attach chat to",
+			"account", accountID, "err", err)
+		return ""
+	}
+	s.log.Info("adopted a Facebook broadcast for chat; this destination's key was "+
+		"pasted rather than fetched, so its id came from the account rather than the key",
+		"account", accountID, "liveVideo", id)
+	return id
 }
 
 // SetFacebookBroadcast points the running Facebook adapter at a broadcast. The

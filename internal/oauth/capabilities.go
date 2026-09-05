@@ -314,7 +314,9 @@ var platformCapabilities = []PlatformCapability{
 				"Page's comments needs the MODERATE task permission, which is separate from being able to read them, " +
 				"so an app that shows you the thread can still be refused when you act on it.",
 			CapMetadata: "Title and description. Facebook removed overlay_url in Graph API v24.0, so there is no overlay field to push.",
-			CapChatRead: "Facebook's live chat is the comment thread on the live video, read over the Graph API. A destination whose key was pasted by hand has no live-video id to attach to, and the chat pane says so.",
+			CapChatRead: "Facebook's live chat is the comment thread on the live video, read over the Graph API. A destination whose key was FETCHED carries the live-video id inside the key. " +
+				"One whose key was PASTED does not, so polyemesis asks the connected account which broadcast it is running — which works because Facebook allows a persistent key one live video at a time. " +
+				"If the account has two at the same status it refuses rather than guessing, names both, and the chat pane says so; attaching to the wrong comment thread is worse than attaching to none.",
 		},
 	},
 	{
