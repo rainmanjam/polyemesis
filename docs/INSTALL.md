@@ -219,6 +219,13 @@ a browser warning until you install that CA — one command on each platform, in
 [TLS.md](TLS.md#trusting-the-self-signed-ca). `acme` is the only mode that needs
 a real certificate, and `auto` will not choose it without a public DNS name.
 
+The installer offers the three in descending order — `acme`, `selfsigned`, `off`
+— and **preselects `acme` only when the name you passed already resolves to this
+machine.** Anything else defaults to `selfsigned`, which needs nothing and always
+works. See [what the installer offers, and in what
+order](TLS.md#what-the-installer-offers-and-in-what-order) for the decision in
+full, including `--check-public-ip` for a box behind NAT.
+
 ### The code-signing certificate: not needed to run
 
 The released binaries are **not signed with a paid certificate** and macOS

@@ -106,6 +106,150 @@ step "6. ACME still opens 80 for the http-01 challenge"
 grep -q '\[ "\$TLS_MODE" = acme \]  && ufw allow 80/tcp' "$INSTALL" \
   && ok "acme opens 80" || bad "acme no longer opens 80; issuance would never complete"
 
+# ------------------------------------------------- acme's two pre-commit facts
+#
+# BOTH OF THESE ARE ABOUT THE MOMENT BEFORE THE OPERATOR COMMITS, which is when
+# an acme mistake is cheapest to fix and most expensive to discover: a failed
+# validation leaves NO certificate -- the self-signed one is not a fallback --
+# and Let's Encrypt allows five failures per hostname per hour.
+
+step "7. The DNS check compares against this host, not just 'does it resolve'"
+# internal/api's acme-preflight answers this in three parts: doesn't resolve,
+# resolves HERE, resolves ELSEWHERE. The installer used to answer only the
+# first, which is the one that catches the rarest mistake -- a record pointing
+# at an old host or a CDN looks identical to no record at all from a check that
+# only asks whether the name resolves.
+# THE CALL, NOT THE WORD. The first version of this grepped for the bare name
+# `local_addresses_include`, which also appears in the helper's own doc comment
+# -- so a mutation that renamed the function and stubbed the branch to `false`
+# left the comment behind and this assertion passed over a script that no longer
+# compared anything. Matching the invocation is what makes it a check.
+grep -qE 'if +local_addresses_include +"\$acme_resolved"' "$INSTALL" \
+  && ok "the resolved address is compared against this machine's own" \
+  || bad "the installer is back to asking only whether the name resolves; a record pointing at the wrong host would install silently"
+grep -q 'not an address this machine holds' "$INSTALL" \
+  && ok "a name resolving elsewhere is reported" \
+  || bad "nothing tells the operator the name went somewhere else"
+# UNKNOWN, NOT FAIL. Behind NAT, a floating IP or a load balancer, a resolved
+# address this box does not hold is exactly correct, so this must never harden
+# into a refusal.
+if grep -qE 'local_addresses_include.*\|\| *die' "$INSTALL"; then
+  bad "a name resolving elsewhere aborts the install; behind NAT that is the correct configuration"
+else
+  ok "resolving elsewhere warns rather than refusing"
+fi
+
+step "8. The TLS menu offers the most secure mode first"
+# EVERY OTHER ORDERING IN THE PRODUCT ALREADY RUNS THIS WAY: tls.mode: auto
+# resolves acme -> selfsigned, TLS.md's worked configurations lead with the
+# public-DNS deployment, and the install-mode menu above leads with the
+# recommendation. This menu led with plain HTTP and buried acme at option 3.
+acme_pos="$(grep -n '1) acme' "$INSTALL" | head -1 | cut -d: -f1)"
+off_pos="$(grep -n '3) off' "$INSTALL" | head -1 | cut -d: -f1)"
+if [ -n "$acme_pos" ] && [ -n "$off_pos" ] && [ "$acme_pos" -lt "$off_pos" ]; then
+  ok "acme is offered before off"
+else
+  bad "the TLS menu no longer leads with the most secure mode"
+fi
+# The numeric aliases have to follow the menu, or 1 and 3 select the opposite
+# of what is printed beside them -- which is worse than either order.
+grep -q '1|acme) TLS_MODE="acme"' "$INSTALL" \
+  && ok "choice 1 selects acme" || bad "choice 1 no longer matches the menu it is printed under"
+grep -q '3|off)  TLS_MODE="off"' "$INSTALL" \
+  && ok "choice 3 selects off" || bad "choice 3 no longer matches the menu it is printed under"
+
+step "9. The interactive default is DECIDED, and only acme when the name already points here"
+# BY INVOCATION, NOT BY GREP. The whole value of suggested_tls_mode is what it
+# returns, and a check that reads the script's text cannot tell a working
+# decision from a comment describing one -- which is exactly how the DNS
+# assertion in step 7 first passed over a script that compared nothing.
+tls_dec="$(mktemp)"
+sed -n '/^local_addresses() {/,/^}/p;/^local_addresses_include() {/,/^}/p;/^resolved_addresses() {/,/^}/p;/^public_ip() {/,/^}/p;/^suggested_tls_mode() {/,/^}/p' "$INSTALL" > "$tls_dec"
+# shellcheck disable=SC1090
+CHECK_PUBLIC_IP=false . "$tls_dec"
+
+expect_mode() { # want, hostname, email, why
+  got="$(CHECK_PUBLIC_IP=false suggested_tls_mode "$2" "$3")"
+  if [ "$got" = "$1" ]; then ok "$4 -> $got"; else bad "$4 -> $got (wanted $1)"; fi
+}
+expect_mode selfsigned ""                      "a@b.com" "no hostname"
+expect_mode selfsigned "stream.example.com"    ""        "no contact address"
+expect_mode selfsigned "polyemesis.local"      "a@b.com" "a .local name Let's Encrypt cannot issue for"
+expect_mode selfsigned "nodots"                "a@b.com" "a name with no dot"
+expect_mode selfsigned "no-such-host.invalid"  "a@b.com" "a name that does not resolve"
+
+# THE TWO THAT DECIDE IT, AND THEY ARE STUBBED ON PURPOSE.
+#
+# The first version of these asked the real resolver about example.com, and on a
+# machine where that does not resolve the function returned selfsigned from the
+# "does not resolve" branch -- one step BEFORE the comparison under test. A
+# mutation that suggested acme unconditionally passed. The case was green for a
+# reason that had nothing to do with what it claimed to check, which is the same
+# masking the VOD fixture in internal/oauth hit and the same lesson: a fixture
+# that can exit early is a fixture that can pass early.
+#
+# Stubbing the lookup is what internal/api's own preflight test does with
+# s.resolver(). The comparison is the thing under test; DNS is not.
+resolved_addresses() { printf '%s' "$STUB_RESOLVES"; }
+
+STUB_RESOLVES="203.0.113.9"
+expect_mode selfsigned "stream.example.com" "a@b.com" "a name resolving somewhere this box does not hold"
+
+# THE POSITIVE CONTROL. Without it every case above passes against a function
+# that always answers selfsigned, and the whole step asserts nothing.
+STUB_RESOLVES="$(local_addresses | head -1)"
+if [ -n "$STUB_RESOLVES" ]; then
+  expect_mode acme "stream.example.com" "a@b.com" "a name resolving to an address this box holds"
+else
+  bad "local_addresses returned nothing, so acme can never be suggested and every case above is vacuous"
+fi
+
+# And the opt-in path: with the flag off, a NAT'd box stays on selfsigned even
+# when the world would see the match.
+STUB_RESOLVES="203.0.113.9"
+public_ip() { printf '203.0.113.9\n'; }
+expect_mode selfsigned "stream.example.com" "a@b.com" "NAT match available but --check-public-ip not passed"
+if [ "$(CHECK_PUBLIC_IP=true suggested_tls_mode "stream.example.com" "a@b.com")" = acme ]; then
+  ok "with --check-public-ip, a NAT'd box whose public address matches is offered acme"
+else
+  bad "the opt-in lookup does not change the answer, so the flag does nothing"
+fi
+rm -f "$tls_dec"
+
+step "10. The public-IP lookup is opt-in and never runs by itself"
+# It is the only check in this installer that tells a third party the install
+# exists. That is the operator's decision, so it must never fire from a default.
+grep -q 'CHECK_PUBLIC_IP=false' "$INSTALL" \
+  && ok "it defaults to off" || bad "the third-party lookup is no longer off by default"
+grep -q -- '--check-public-ip) CHECK_PUBLIC_IP=true' "$INSTALL" \
+  && ok "--check-public-ip is the only way to turn it on" || bad "the opt-in flag is gone"
+if grep -nE '^\s*(pub|[A-Za-z_]+)="?\$\(public_ip' "$INSTALL" | grep -qv 'CHECK_PUBLIC_IP'; then
+  : # checked below against the guard rather than here
+fi
+# The call sits behind the flag, in the same branch, not merely near it.
+awk '/if \[ "\$CHECK_PUBLIC_IP" = true \]/{f=1} f&&/public_ip/{found=1} END{exit !found}' "$INSTALL" \
+  && ok "public_ip is called only inside the opt-in branch" \
+  || bad "public_ip is reachable without the flag that exists to gate it"
+
+step "8. ACME does not turn HSTS on before issuance has ever worked"
+# TLS.md's reasoning, and the UI panel that prints the same snippet already
+# follows it: HSTS has no server-side undo, and install.sh --tls acme is handed
+# to somebody whose FIRST acme restart has not happened yet. If issuance later
+# breaks and they fall back to selfsigned, a browser that received the header
+# refuses the click-through and setting hsts: false does not help.
+# THE COMMENTED FORM CONTAINS THE SAME WORDS, which is how the first version of
+# this check failed against the fixed script: `# hsts: true` matches any pattern
+# looking for `hsts: true`. What separates them is the two spaces of YAML indent
+# immediately before it, with nothing in between.
+if grep -qE "printf 'tls:.*mode: .acme.*\\\\n  hsts: true" "$INSTALL"; then
+  bad "acme writes hsts: true; a first-time issuance failure then locks the browser out of the fallback"
+else
+  ok "acme leaves hsts off until issuance is known to work"
+fi
+grep -q 'no server-side undo' "$INSTALL" \
+  && ok "the config says why hsts is left off" \
+  || bad "hsts is off with no reason recorded, so the next reader will turn it on"
+
 # ------------------------------------------------------------ upgrade guard
 #
 # WHY THIS IS IN THIS FILE. The update.sh install.sh writes is a DECISION the

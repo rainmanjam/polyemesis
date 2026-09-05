@@ -38,6 +38,55 @@ floor** and prefers X25519, then P-256 and P-384. Go's server default already
 floors at 1.2; pinning it means a future toolchain default cannot quietly change
 what this server accepts.
 
+## What the installer offers, and in what order
+
+`install.sh` asks in the same order the rest of this document does — most secure
+first — and **preselects** rather than assuming:
+
+```
+  1) acme       — Let's Encrypt for a public DNS name. Recommended.
+                  Needs the name pointed at this box and inbound port 80.
+  2) selfsigned — encrypted now, browser warning until you install the CA.
+                  Needs nothing, and always works.
+  3) off        — plain HTTP. Only behind a reverse proxy, or over an SSH tunnel.
+```
+
+The default offered is `acme` **only when the name already points here** —
+`--hostname` was given, a contact address was given, and the name resolves to an
+address this machine holds. Everything else defaults to `selfsigned`, because
+pressing Enter into `acme` on a box the name does not reach is the expensive
+mistake: a failed validation leaves **no certificate at all**, and Let's Encrypt
+allows five failures per hostname per hour.
+
+```mermaid
+flowchart TD
+    start(["install.sh --tls not given"]) --> named{"--hostname and --email both given?"}
+    named -- no --> self["default: selfsigned"]
+    named -- yes --> shape{"public FQDN shape?<br/>dotted, not .local/.lan/.internal"}
+    shape -- no --> self
+    shape -- yes --> res{"does it resolve?"}
+    res -- no --> self
+    res -- yes --> mine{"resolves to an address<br/>THIS box holds?"}
+    mine -- yes --> acme["default: acme"]
+    mine -- no --> optin{"--check-public-ip given?"}
+    optin -- no --> self
+    optin -- yes --> pub{"matches the address<br/>a third party sees?"}
+    pub -- yes --> acme
+    pub -- no --> self
+    self --> menu["the menu still offers all three;<br/>only the default changes"]
+    acme --> menu
+```
+
+**Nothing here refuses.** Every branch that lands on `selfsigned` is choosing a
+default, not blocking a choice — an operator who knows their NAT is fine picks
+`1` and carries on.
+
+`--check-public-ip` is off by default and is the only check in the installer
+that involves anybody else: it asks `ifconfig.me`, then `api.ipify.org`, then
+`icanhazip.com`, and accepts a match. That is the only way to settle a NAT'd box
+from the inside, and it tells a third party the install exists — which is the
+operator's decision to make, not a default to inherit.
+
 ## How `auto` decides
 
 At startup, in this order:
@@ -299,6 +348,12 @@ The snippet it prints leaves `hsts` **commented out**, unlike
 above. That example describes a deployment where issuance already works; the
 snippet is handed to someone whose first ACME restart has not happened yet, and
 HSTS has no server-side undo. Turn it on afterwards.
+
+`install.sh --tls acme` leaves it commented for the same reason, and used to set
+it — its audience is the same person, on their first issuance. It also runs the
+DNS comparison described above rather than only asking whether the name
+resolves, so a record left pointing at an old host is reported *before* the
+restart rather than after a failed validation. Both were #730.
 
 ## ACME needs port 80
 
