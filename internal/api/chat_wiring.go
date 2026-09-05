@@ -187,13 +187,13 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		// restart. ApplyYouTubeQuota is the other half, pushing a saved
 		// allowance into the adapter this built; settingsReload records the
 		// pair as ClassLive on the strength of it.
-		cs := s.youtubeQuota()
+		units, reserve := youtubeQuotaPair(s.youtubeQuota())
 		return chat.NewYouTube(chat.YouTubeConfig{
 			AccountRef:   a.AccountRef,
 			Channel:      a.AccountName,
 			Token:        s.chatToken(a.ID),
-			QuotaUnits:   cs.YouTubeQuotaUnits,
-			QuotaReserve: cs.YouTubeQuotaReserve,
+			QuotaUnits:   units,
+			QuotaReserve: reserve,
 		})
 
 	case db.PlatformTwitch:
@@ -293,6 +293,34 @@ func (s *Server) youtubeQuota() db.ChatSettings {
 		cs.YouTubeQuotaReserve = set.Chat.YouTubeQuotaReserve
 	}
 	return cs
+}
+
+// youtubeQuotaPair is the one place the stored allowance stops being two
+// interchangeable ints and becomes the two distinct types the chat package
+// takes.
+//
+// poka-yoke: gives the compiler the only thing it needs to reject a swapped
+// YouTubeConfig literal [control]
+//
+// db.ChatSettings holds both numbers as int, because it is a settings row and
+// every other field in it is a plain scalar too. chat.YouTubeConfig holds them
+// as chat.QuotaUnits and chat.QuotaReserve, because there the two roles are
+// worth telling apart -- a 10,000-unit allowance with a 200 reserve written the
+// wrong way round becomes a 200-unit allowance, the clamp then drops the
+// reserve, and the adapter paces a hundred times too slowly with nothing
+// reporting a problem. That is #732 restored in silence.
+//
+// One conversion has to exist somewhere between an int pair and a typed pair,
+// and this is deliberately it: a single named line whose two halves read
+// Units-to-Units and Reserve-to-Reserve, rather than a conversion at every
+// construction site. It is not itself compiler-proof, which is why
+// TestYouTubeQuotaPairKeepsTheAllowanceAndTheReserveApart asserts it directly.
+//
+// Carrying the two types all the way back into db.ChatSettings would close even
+// that line, and is the right next step; it is not taken here because it lands
+// in internal/db and internal/api/handlers.go, which this change does not own.
+func youtubeQuotaPair(cs db.ChatSettings) (chat.QuotaUnits, chat.QuotaReserve) {
+	return chat.QuotaUnits(cs.YouTubeQuotaUnits), chat.QuotaReserve(cs.YouTubeQuotaReserve)
 }
 
 // kickBroadcasterID turns the stored account ref back into the numeric id Kick

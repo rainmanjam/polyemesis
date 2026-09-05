@@ -1289,6 +1289,21 @@ type quotaPacer interface {
 	SetQuota(units, reserve int)
 }
 
+// poka-yoke: refuses to build if the YouTube adapter ever stops satisfying
+// quotaPacer -- a rename, a changed signature, a method moved to a value
+// receiver [control]
+//
+// A satisfies-by-accident interface has no compiler behind it. The only
+// production implementer is *YouTubeAdapter and the only thing that asserts the
+// relationship is the runtime type switch below, which answers "not a pacer" by
+// silently doing nothing -- so renaming YouTubeAdapter.SetQuota built, vetted
+// and passed chat, api and engine, because the only callers left were two test
+// fakes that had been renamed alongside it. The operator would have been told
+// their raised allowance was saved and the running adapter would never have
+// heard about it: #732 for the third time. This line is what turns that into a
+// compile error, and it costs one line and no runtime.
+var _ quotaPacer = (*YouTubeAdapter)(nil)
+
 // SetQuota pushes a changed API allowance into every attached adapter that
 // paces against one, and reports how many took it.
 //

@@ -93,17 +93,46 @@ its first tagged release.
 
 ### Fixed
 
-- **A raised YouTube API quota was never paced against.**
-  `YouTubeConfig.QuotaUnits` existed and its own comment invited operators who
-  had been granted more to say so — and nothing set it. An install granted a
-  larger allowance after a YouTube API Services audit polled chat at the default
-  ten thousand units, roughly a hundred times slower than it was entitled to,
-  with nothing on screen saying so. The allowance and the send reserve are now
-  settings, validated, and pushed into a chat connection that is already up, so
-  the change takes effect on save rather than at the next restart. That second
-  half was found by the hot-reload table: every settings leaf has to say what
-  happens when it changes mid-stream, and the only honest answer for a value
-  read once at adapter construction was "nothing until you restart".
+- **A raised YouTube API quota was never paced against, and in two of the three
+  places it failed it failed silently.** `YouTubeConfig.QuotaUnits` existed and
+  its own comment invited operators who had been granted more to say so — and
+  nothing set it, so an install granted a larger allowance after a YouTube API
+  Services audit polled chat at the default ten thousand units, roughly a
+  hundred times slower than it was entitled to. The allowance and the send
+  reserve are now settings, validated, and pushed into a chat connection that is
+  already up, so the change takes effect on save rather than at the next
+  restart. That second half was found by the hot-reload table: every settings
+  leaf has to say what happens when it changes mid-stream, and the only honest
+  answer for a value read once at adapter construction was "nothing until you
+  restart".
+
+  Three more failures were found by auditing that fix rather than by anyone
+  hitting them. `budget` stored a `paused` flag beside the numbers that decide
+  whether polling should stop, and `setLimits` wrote the new allowance without
+  touching it — so an operator whose chat ran out at four in the afternoon, who
+  was granted more, came back and pressed Save, watched nothing happen: the
+  status reported `Paused: true` and `Remaining: 990000` in the same breath, and
+  only midnight Pacific cleared it. The flag is gone rather than fixed. Paused
+  is derived from what is affordable at the moment it is reported, and `pause()`
+  pauses by spending the allowance — which is what a `quotaExceeded` from
+  YouTube actually means. A summary recomputed from the numbers it summarises
+  has nothing to desynchronise from.
+
+  Underneath it, `clampQuota` had been written to be the one spelling of an
+  acceptable allowance and a second rule was left upstream of it in
+  `NewYouTube`, so the stored pair `(10000, 0)` — what every settings row
+  written before the reserve field existed holds — meant a 200-unit send reserve
+  at boot and no reserve at all after a save. The operator's ability to say "we
+  are moving to Twitch" on stream disappeared the first time they opened
+  Settings without changing anything. Both rules now live in `clampQuota`.
+
+  The two ways this can come back are closed at compile time rather than by
+  care: `QuotaUnits` and `QuotaReserve` are distinct types, so writing the
+  allowance and the reserve into `YouTubeConfig` the wrong way round — which the
+  clamp would then quietly turn into a 200-unit-a-day budget — does not build;
+  and `var _ quotaPacer = (*YouTubeAdapter)(nil)` means renaming `SetQuota` no
+  longer builds, vets and passes chat, api and engine on the strength of two
+  test fakes.
 - **A data race between clip planning and encoder re-detection.**
   `internal/api/clips.go` read `tools.HWEncoders` unlocked while
   `RefreshEncoderCapabilities` rewrote it — a read the neighbouring

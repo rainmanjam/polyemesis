@@ -197,8 +197,13 @@ func TestASustainableIntervalMayExceedTheIdleCeiling(t *testing.T) {
 	// Very little left, a long time until the reset: the correct answer is to
 	// poll slower than MaxPollInterval rather than to stop.
 	now := atPacific(2026, 3, 1, 1, 0)
-	b := newBudget(1000, 0, fixedClock(now))
-	b.spend(950) // 10 calls left across 23 hours
+	// The reserve is stated rather than left at zero: zero means "unset" to
+	// clampQuota now, exactly as it always has to NewYouTube, so asking for no
+	// reserve at all gets the default. The property under test is the spacing
+	// when very few READS remain, which fifty units of reserve expresses just as
+	// well as none.
+	b := newBudget(1000, 50, fixedClock(now))
+	b.spend(900) // 10 calls left across 23 hours
 
 	got, ok := b.intervalFor(5*time.Second, 1)
 	if !ok {
