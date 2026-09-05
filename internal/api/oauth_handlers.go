@@ -787,6 +787,31 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 				"no redundant feed will be published. The destination is otherwise "+
 				"configured correctly and will go live normally.")
 	}
+
+	// THE LAST DESTINATION WRITER THAT DID NOT REPAIR ON THE WAY PAST, and it
+	// is here for the reason the helper's own comment gives rather than because
+	// this handler can create the mismatch.
+	//
+	// It cannot: nothing above assigns Platform or AccountID. What it does is
+	// WRITE BACK A ROW IT READ, so a destination already carrying a mismatched
+	// account -- from a direct API client, or from a row written before the
+	// check existed -- was saved again unrepaired every time an operator
+	// pressed Refresh stream key. The repair is idempotent and free on a row
+	// that has nothing wrong with it, so the cost of running it here is a
+	// store read on a path that has just made a network round trip to Facebook.
+	//
+	// The alternative was to keep the invariant as a note saying "any new
+	// destination-writing route must call this helper", which is the shape of
+	// thing this whole audit exists to remove: a rule that holds only while
+	// everyone remembers it. With this call there is no destination writer left
+	// that skips the repair, so the note can say something true instead.
+	repairs, err := s.dropUnsendableSettings(dest)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	warnings = append(warnings, repairs...)
+
 	updated, err := s.store.UpdateDestination(dest)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

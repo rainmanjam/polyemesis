@@ -2169,20 +2169,32 @@ func (s *Server) dropUnsendableSettings(row *db.Destination) ([]string, error) {
 	// the URL and stream key already on the row are untouched, so the
 	// destination keeps streaming exactly as it did.
 	//
-	// WHAT RUNG THIS REACHES, stated plainly because the last version of this
-	// comment overclaimed it. This is a check in ONE HELPER, not in the store:
-	// db.CreateDestination and db.UpdateDestination will write the mismatched
-	// pair for anyone who hands it to them. It therefore holds for exactly the
-	// routes that call this function -- handleCreateDestination,
-	// handleUpdateDestination and saveExpertArgs -- and holds by inspection,
-	// not by construction, for the stream-key refresh in oauth_handlers.go,
-	// which writes a destination it re-read and never assigns Platform or
-	// AccountID. ANY NEW ROUTE THAT WRITES A DESTINATION MUST CALL THIS
-	// HELPER; it inherits nothing. Moving the comparison into
-	// db.UpdateDestination is what would make it Control for every route, and
-	// it is the right home for it -- the cost is that the store has no way to
-	// return a warning, so the repair would go silent unless the store grew a
-	// warnings channel of its own.
+	// WHAT RUNG THIS REACHES, stated plainly because two earlier versions of
+	// this comment overclaimed it. This is a check in ONE HELPER, not in the
+	// store: db.CreateDestination and db.UpdateDestination will write the
+	// mismatched pair for anyone who hands it to them.
+	//
+	// All four routes that write a destination call it --
+	// handleCreateDestination, handleUpdateDestination, saveExpertArgs, and the
+	// Facebook stream-key refresh in oauth_handlers.go. The fourth was added
+	// last and is the reason the previous draft said this held "by inspection":
+	// it wrote back a row it had re-read, so a destination already carrying a
+	// mismatched account was saved unrepaired every time somebody pressed
+	// Refresh stream key.
+	//
+	// A FIFTH ROUTE IS REFUSED BY A TEST rather than by a sentence asking
+	// people to remember. TestEveryDestinationWriteIsRepairedFirst walks this
+	// package and fails on a store.CreateDestination or store.UpdateDestination
+	// in a function that does not also call this helper. That makes the
+	// invariant rung 2 -- announced in CI -- where the sentence it replaced was
+	// rung 0.
+	//
+	// Rung 1 means moving the comparison into db.UpdateDestination, so no
+	// caller could express the pair at all. That is the right home for it. The
+	// cost is that the store has no way to return a warning, so the repair
+	// would go silent unless the store grew a warnings channel of its own --
+	// and silent repair is what the comment above spends four paragraphs
+	// arguing against.
 	//
 	// A destination whose account_id names no account is left alone on purpose.
 	// That is not this mismatch, and the foreign key answers it: the store
