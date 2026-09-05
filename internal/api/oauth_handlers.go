@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -152,17 +153,284 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// accountDestination is one destination that a disconnect would cut loose,
+// named so the caller can say WHICH.
+//
+// The list travels on the refusal AND on the success, for the reason
+// handleDeleteRendition returns its counts either way: an operator who
+// confirmed still has to know what they just did, and a client that only ever
+// sees a count cannot render a sentence with a destination's name in it.
+type accountDestination struct {
+	ID       int64       `json:"id"`
+	Name     string      `json:"name"`
+	Platform db.Platform `json:"platform"`
+	// Enabled is the operator's run/stop intent for this destination. It stays
+	// true across the disconnect -- ON DELETE SET NULL clears account_id and
+	// nothing clears this -- so an enabled row goes on being reconciled with no
+	// account behind it.
+	Enabled bool `json:"enabled"`
+	// BroadcastID and Phase are the platform's own handle and word for the
+	// broadcast this destination is driving, read the same way the lifecycle
+	// coordinator reads them (the recorded id first, the announcement mirror
+	// second) so that "this one has something in flight" means here exactly
+	// what it means there.
+	BroadcastID string `json:"broadcastId,omitempty"`
+	Phase       string `json:"phase,omitempty"`
+	// Broadcasting is that judgement, precomputed: there is a broadcast and the
+	// platform has not said it is over.
+	Broadcasting bool `json:"broadcasting"`
+}
+
+// blocks reports whether this destination is one a disconnect must not take by
+// surprise.
+func (a accountDestination) blocks() bool { return a.Enabled || a.Broadcasting }
+
+// accountDeleteRefusal is the 409 body: the sentence, the branch key, and the
+// rows the sentence is about.
+//
+// Shaped after upgradeRefusal for its stated reason -- internal/api's whole
+// error surface is {"error": ...} and the SPA's fetch wrapper reads that field
+// and nothing else, so a refusal that omitted it would reach an operator as
+// "request failed (409)". Everything beside it is what a client needs to build
+// the confirmation for itself.
+type accountDeleteRefusal struct {
+	Error        string               `json:"error"`
+	Code         string               `json:"code"`
+	Destinations []accountDestination `json:"destinations"`
+}
+
+// codeAccountInUse is the branch key for that refusal. A client matches on this
+// rather than on the English, and answers it by re-sending the same request
+// with {"confirm": true}.
+const codeAccountInUse = "account_in_use"
+
+// handleDeleteAccount disconnects a platform account, and refuses to do it
+// blind while destinations are still hanging off it.
+//
+// WHAT AN UNGUARDED DISCONNECT COSTS, which is why this counts first the way
+// handleDeleteRendition does. Deleting the row is not the end of it: the
+// destinations' account_id is ON DELETE SET NULL, so every one of them is
+// rewritten in place, keeps its enabled flag, and becomes a destination with a
+// stream key nothing can refresh and a broadcast nothing can end. The lifecycle
+// coordinator then drops them -- internal/api/lifecycle.go untracks any
+// destination with no AccountID, deliberately, because with no token there is
+// nothing it could send -- so a YouTube broadcast that was mid-flight is never
+// completed. It stays on the channel as a live broadcast with no ingest, and
+// the only remedy left is YouTube Studio.
+//
+// None of that is recoverable by reconnecting: the new account gets a new row
+// id, and the destinations' account_id is already NULL.
+//
+// WHICH RUNG THIS REACHES, PER CASE. One number for the whole route is wrong
+// in either direction, so the two cases are stated separately.
+//
+// THE UNCONFIRMED CASE IS RUNG 1, CONTROL. A request that has not said
+// {"confirm": true} while something is enabled or mid-broadcast deletes
+// NOTHING: the account row is still there, the destinations still point at it,
+// and there is no window in which the delete has happened and the operator is
+// reading a warning about it. The mistake this exists for -- disconnecting an
+// account that is still carrying live destinations, in one unconsidered click
+// -- cannot be made. That is control, not a warning.
+//
+// THE CONFIRMED CASE IS RUNG 2, WARNING, AND DELIBERATELY SO. {"confirm": true}
+// is an operator override: the refusal has already named the destinations and
+// said what disconnecting costs, and the operator has decided anyway. The
+// delete proceeds and the same list comes back in `warnings`, past tense.
+// Control here would mean refusing outright, which is not available: `blocks()`
+// fires on Enabled alone and a normal install leaves its destinations enabled,
+// so an outright refusal would leave most accounts with no way to be
+// disconnected at all -- and an operator who cannot proceed goes around the
+// guard, at which point the product has taught them to.
+//
+// So: rung 1 against the MISTAKE, rung 2 against the DECISION. Calling the
+// route "rung 2 overall" understates the unconfirmed path, which is the one
+// that fires by default; calling it "rung 1" claims a control over a choice
+// that is not a mistake.
+//
+// The dialog in the SPA is not the device and could not be. It is one client;
+// a script, a terminal, or a second UI reaches this route directly, and a
+// confirmation that only exists in one caller protects only that caller. It is
+// still REQUIRED, for the opposite reason: this refusal is the ordinary answer
+// rather than a rare one, so a client with no branch for it has a Disconnect
+// button that does nothing on most accounts. ui/src/pages/SettingsPage.tsx
+// renders the list and re-sends confirmed; ACCOUNT_IN_USE in ui/src/lib/api.ts
+// is the key it matches on, pinned against the constant below by
+// ui/src/lib/account-in-use-code.test.ts.
 func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	confirmed, ok := deleteConfirmed(w, r)
+	if !ok {
+		return
+	}
+	// COUNTED BEFORE THE DELETE, and it has to be: once the row is gone the
+	// destinations no longer point at it, and there is no query left that could
+	// say which ones used to.
+	attached, err := s.accountDestinations(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if blocking := blockingDestinations(attached); len(blocking) > 0 && !confirmed {
+		writeJSON(w, http.StatusConflict, accountDeleteRefusal{
+			Error:        accountDeleteRefusalMessage(blocking),
+			Code:         codeAccountInUse,
+			Destinations: attached,
+		})
+		return
+	}
 	if err := s.store.DeletePlatformAccount(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+	resp := map[string]any{"status": "disconnected", "destinations": attached}
+	if len(attached) > 0 {
+		resp["warnings"] = []string{accountDeleteWarning(attached)}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// deleteConfirmed reads the optional {"confirm": true} body off a DELETE.
+//
+// AN ABSENT BODY IS NOT AN ERROR, which is why this is not decodeJSON: DELETE
+// is routinely sent with no body at all, and every existing caller of this
+// route sends none. Those callers must keep working -- and, being unconfirmed,
+// must be the ones the refusal protects. A body that is present and malformed
+// still fails loudly, because a client that MEANT to confirm and got the shape
+// wrong must not be read as one that did not confirm; DisallowUnknownFields
+// (inside decodeJSONInto) is what makes a typo in the field name land here
+// rather than as a silent false.
+//
+// Returns (confirm, ok); ok is false when a response has already been written.
+func deleteConfirmed(w http.ResponseWriter, r *http.Request) (bool, bool) {
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return false, false
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return false, true
+	}
+	var req struct {
+		Confirm bool `json:"confirm"`
+	}
+	if err := decodeJSONInto(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return false, false
+	}
+	return req.Confirm, true
+}
+
+// accountDestinations lists the destinations linked to one connected account.
+//
+// Read through ListDestinations rather than a query of its own for the reason
+// keyIsSharedWithASibling gives: this layer owns the table and there is exactly
+// one shape a destination is read in.
+func (s *Server) accountDestinations(accountID int64) ([]accountDestination, error) {
+	rows, err := s.store.ListDestinations()
+	if err != nil {
+		return nil, err
+	}
+	out := []accountDestination{}
+	for _, d := range rows {
+		if d == nil || d.AccountID == nil || *d.AccountID != accountID {
+			continue
+		}
+		// The recorded id wins over the announcement mirror, exactly as the
+		// lifecycle coordinator resolves it: the mirror is rewritten whenever a
+		// schedule moves, so it can name a broadcast that is not the one on air.
+		broadcastID := strings.TrimSpace(d.Lifecycle.BroadcastID)
+		if broadcastID == "" {
+			broadcastID = strings.TrimSpace(d.Facebook.BroadcastID)
+		}
+		out = append(out, accountDestination{
+			ID:          d.ID,
+			Name:        d.Name,
+			Platform:    d.Platform,
+			Enabled:     d.Enabled,
+			BroadcastID: broadcastID,
+			Phase:       d.Lifecycle.Phase,
+			// A broadcast the platform has already called complete or revoked
+			// is finished business and blocks nothing -- isTerminalPhase is the
+			// same test the coordinator uses to stop spending quota on it.
+			// An UNRECOGNISED phase counts as in flight, which is the safe
+			// direction: a second platform with its own vocabulary makes this
+			// ask for confirmation rather than assume the show is over.
+			Broadcasting: broadcastID != "" && !isTerminalPhase(d.Lifecycle.Phase),
+		})
+	}
+	return out, nil
+}
+
+// blockingDestinations is the subset that must be confirmed before a disconnect.
+func blockingDestinations(all []accountDestination) []accountDestination {
+	out := []accountDestination{}
+	for _, d := range all {
+		if d.blocks() {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// accountDeleteRefusalMessage says what is in the way and how to proceed anyway.
+//
+// THE SERVER OWNS THE WORDING, for onAirRefusal's reason: the same refusal has
+// to reach a terminal as well as a browser, and two phrasings is how they come
+// to disagree. It names the destinations rather than counting them, because
+// "3 destinations" is not something an operator can act on and "Main YouTube"
+// is.
+func accountDeleteRefusalMessage(blocking []accountDestination) string {
+	msg := fmt.Sprintf("%s still on this connected account: %s.",
+		plural(len(blocking), "destination is", "destinations are"), namesOf(blocking))
+	if n := countBroadcasting(blocking); n > 0 {
+		subject := "One of them is"
+		if n > 1 {
+			subject = fmt.Sprintf("%d of them are", n)
+		}
+		msg += fmt.Sprintf(" %s publishing to a broadcast the platform has not called finished, and "+
+			"disconnecting now leaves it live with nothing able to end it — the remedy after that is the "+
+			"platform's own studio.", subject)
+	}
+	return msg + " Disconnecting unlinks every one of them: they keep their settings and lose the " +
+		"ability to refresh a stream key or end a broadcast, and reconnecting does not link them back. " +
+		`Send this request again with {"confirm": true} to do it anyway.`
+}
+
+// accountDeleteWarning is what a confirmed disconnect reports afterwards. It is
+// past tense and it is not a refusal: the operator has already decided.
+func accountDeleteWarning(attached []accountDestination) string {
+	return fmt.Sprintf("%s no longer linked to a connected account, and can no longer refresh a stream "+
+		"key or end a broadcast: %s. Link them to another connected account, or paste a key by hand.",
+		plural(len(attached), "destination is", "destinations are"), namesOf(attached))
+}
+
+// countBroadcasting is how many of these are mid-broadcast.
+func countBroadcasting(list []accountDestination) int {
+	n := 0
+	for _, d := range list {
+		if d.Broadcasting {
+			n++
+		}
+	}
+	return n
+}
+
+// namesOf renders the destinations for a sentence, capped so that an install
+// with forty destinations on one account produces a sentence rather than a
+// paragraph. The full list is always in the response body beside it.
+func namesOf(list []accountDestination) string {
+	const shown = 3
+	names := make([]string, 0, shown)
+	for i, d := range list {
+		if i == shown {
+			return strings.Join(names, ", ") + fmt.Sprintf(" and %d more", len(list)-shown)
+		}
+		names = append(names, d.Name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // handleOAuthStart redirects the browser to the platform's consent screen.
@@ -895,10 +1163,17 @@ func (s *Server) ingestFor(ctx context.Context, provider oauth.Provider, clientI
 // refreshLocks serializes concurrent token refreshes of the SAME account. The
 // 10-minute RefreshLoop tick and an on-demand tokenFor call (or two on-demand
 // calls from two in-flight publishes) can both see the same account as
-// expired and both call the platform's refresh endpoint; UpsertPlatformAccount
-// has no compare-and-swap, so whichever write lands second overwrites a live
-// token with one the platform may already have invalidated -- a refresh
-// failure mid-broadcast. #6.
+// expired and both call the platform's refresh endpoint; whichever write
+// landed second overwrote a live token with one the platform may already have
+// invalidated -- a refresh failure mid-broadcast. #6.
+//
+// THE LOCK IS NOT THE WHOLE DEVICE AND CANNOT BE, because it only reaches
+// writers that come through here. The connect callback and the device flow
+// write the same row and hold nothing: they key by (platform, account_ref) and,
+// when they are creating the row, have no id to lock on. That interleaving is
+// handled one layer down, by db.UpdatePlatformAccountTokens' compare-and-swap;
+// read the header of internal/db/platform_account_tokens.go for what it costs
+// when it is missing.
 var refreshLocks = newKeyedMutex()
 
 // keyedMutex hands out one *sync.Mutex per key, reference-counted so a key with
@@ -970,6 +1245,11 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 	if !acct.Expired() {
 		return acct, nil
 	}
+	// The row version this refresh is entitled to overwrite, taken HERE --
+	// after the re-read and before the network call below, which is the whole
+	// span a reconnect can slip into. Taking it any later would witness a row
+	// this function never actually reasoned about.
+	seen := acct.Revision()
 	if acct.RefreshToken == "" {
 		return nil, fmt.Errorf("the %s token has expired and there is no refresh token; reconnect the account",
 			acct.Platform)
@@ -988,12 +1268,62 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 	if err != nil {
 		return nil, fmt.Errorf("could not refresh the %s token: %w", acct.Platform, err)
 	}
-	acct.AccessToken = tok.AccessToken
-	if tok.RefreshToken != "" {
-		acct.RefreshToken = tok.RefreshToken
+
+	// THROUGH THE NARROW WRITER, NOT UpsertPlatformAccount. The struct in hand
+	// was read before the platform call and its Scopes, ScopeVer and
+	// AccountName are consent facts a refresh has no standing to restate; the
+	// upsert would write all three back, and if consent landed in the meantime
+	// it would write them back WRONG. UpdatePlatformAccountTokens cannot express
+	// that write at all -- the columns are not in its statement.
+	//
+	// An empty tok.RefreshToken is passed straight through and means "keep the
+	// stored one", which is the same behaviour as before and is now decided by
+	// the statement rather than by this function remembering to check.
+	updated, err := s.store.UpdatePlatformAccountTokens(s.box, acct.ID, seen,
+		tok.AccessToken, tok.RefreshToken, tok.ExpiresAt)
+	if errors.Is(err, db.ErrAccountRewritten) {
+		return s.yieldToTheRowThatWon(acct)
 	}
-	acct.ExpiresAt = tok.ExpiresAt
-	return s.store.UpsertPlatformAccount(s.box, acct)
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+// yieldToTheRowThatWon is what a refresh does when its compare-and-swap finds
+// somebody else has written the account underneath it.
+//
+// THE LOSER DOES NOT RETRY AND DOES NOT WRITE, and that is the decision worth
+// stating rather than the mechanism. A refresh that reaches here has been
+// beaten by the only writers that can beat it: a completed consent, from the
+// connect callback or the device flow. Those writers know strictly more than
+// this one does -- they carry the scopes and the scope version the operator has
+// just granted, and a token minted against that grant -- so writing over them
+// is precisely the defect the swap exists to stop. Retrying is the same defect
+// with an extra platform call in front of it.
+//
+// Nor is it an error to the caller. The point of tokenFor is to hand back a
+// usable token, and the winner's row holds one; the refresh this function is
+// abandoning was work that turned out not to be needed. It is logged at info
+// rather than warn for that reason.
+//
+// The one case that IS reported as a failure is a winning row that is still
+// expired. That is not a consent landing -- consent always produces a live
+// token -- so this process cannot say what wrote it, and handing back an
+// expired token as though it were fresh would move the failure to whichever
+// platform call used it next, with nothing to connect the two.
+func (s *Server) yieldToTheRowThatWon(stale *db.PlatformAccount) (*db.PlatformAccount, error) {
+	winner, err := s.store.GetPlatformAccount(s.box, stale.ID)
+	if err != nil {
+		return nil, err
+	}
+	if winner.Expired() {
+		return nil, fmt.Errorf("the %s account was rewritten while its token was being refreshed, and "+
+			"the token now stored is expired too; try again", stale.Platform)
+	}
+	s.log.Info("a token refresh was overtaken by a reconnect and kept the stored token",
+		"platform", stale.Platform, "account", stale.AccountName)
+	return winner, nil
 }
 
 // RefreshLoop proactively renews tokens that are close to expiring, so a live
