@@ -173,6 +173,41 @@ header()  { echo; echo "${BOLD}$*${NC}"; }
 
 die() { err "$*"; exit 1; }
 
+# local_addresses lists every IP this machine holds, one per line.
+#
+# THREE READERS, BECAUSE THIS SCRIPT RUNS ON WHATEVER IS THERE. `ip` is present
+# on every modern Linux, `hostname -I` on most, `ifconfig` on the older and the
+# BSD-ish. If none of them answers, the caller gets nothing and treats the
+# comparison as unanswerable rather than as a failure -- which is the same thing
+# it does behind NAT, and the honest answer in both cases.
+local_addresses() {
+  if command -v ip >/dev/null 2>&1; then
+    ip -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}'
+  elif command -v hostname >/dev/null 2>&1 && hostname -I >/dev/null 2>&1; then
+    hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$'
+  elif command -v ifconfig >/dev/null 2>&1; then
+    ifconfig 2>/dev/null | awk '/inet /{print $2}' | sed 's/^addr://'
+  fi
+}
+
+# local_addresses_include reports whether ANY address in "$1" (space separated)
+# is one this machine holds.
+#
+# ANY rather than ALL: a name with several A records behind a round-robin is
+# correctly configured when this box is one of them, and demanding all of them
+# would fail the very deployment it is meant to confirm.
+local_addresses_include() {
+  local mine want have
+  mine="$(local_addresses)"
+  [ -n "$mine" ] || return 1
+  for want in $1; do
+    for have in $mine; do
+      [ "$want" = "$have" ] && return 0
+    done
+  done
+  return 1
+}
+
 # ------------------------------------------------------------------- rollback
 
 cleanup_on_failure() {
@@ -1142,15 +1177,53 @@ gather_configuration() {
     #     cannot bind. warn_if_taken covers the ports the operator chose; :80 is
     #     not one of them, it is implied by choosing acme.
     #
-    # DELIBERATELY NOT DONE: comparing the resolved address against this host's
-    # public IP. That needs an external echo service -- a network dependency and
-    # a third party told about this install -- to check something the warning
-    # below already covers.
-    if command -v getent >/dev/null 2>&1 && ! getent hosts "$DOMAIN_NAME" >/dev/null 2>&1; then
-      warn "$DOMAIN_NAME does not resolve from this host."
-      echo "     Let's Encrypt resolves it from the outside, so this is not proof it will"
-      echo "     fail — but a name with no record anywhere cannot be validated. Check the"
-      echo "     DNS before relying on the certificate."
+    # WHAT WAS DELIBERATELY NOT DONE HERE, AND WHY IT IS NOW.
+    #
+    # This checked only whether the name resolved AT ALL, and declined to
+    # compare the answer against this host on the grounds that "comparing the
+    # resolved address against this host's PUBLIC IP needs an external echo
+    # service -- a network dependency and a third party told about this
+    # install."
+    #
+    # That reasoning is sound and answers a different question. Learning the
+    # public IP of a box behind NAT does need somebody outside to tell you.
+    # Comparing the resolved address against the addresses this machine
+    # ACTUALLY HOLDS needs nothing but the local interface list -- and on the
+    # deployment acme mode exists for, a VPS with its public address on its own
+    # interface, that comparison is decisive.
+    #
+    # internal/api's acme-preflight already answers this in three parts --
+    # doesn't resolve / resolves here / resolves elsewhere -- and the installer
+    # was answering only the weakest of them, at the moment it is worth most:
+    # before the operator commits. The two that were missing are the two that
+    # catch the commonest mistake, because a record pointing at an old host or
+    # at a CDN looks identical to no record at all from a check that only asks
+    # "does it resolve".
+    #
+    # STILL NOT DONE, for the original reason: asking anybody outside. A name
+    # resolving somewhere this box does not hold is reported as UNKNOWN rather
+    # than as a failure, because behind NAT, a floating IP or a load balancer
+    # that is exactly correct.
+    if command -v getent >/dev/null 2>&1; then
+      acme_resolved="$(getent ahostsv4 "$DOMAIN_NAME" 2>/dev/null | awk '"'"'{print $1}'"'"' | sort -u | tr '"'"'\n'"'"' '"'"' '"'"')"
+      [ -n "$acme_resolved" ] || acme_resolved="$(getent hosts "$DOMAIN_NAME" 2>/dev/null | awk '"'"'{print $1}'"'"' | sort -u | tr '"'"'\n'"'"' '"'"' '"'"')"
+      acme_resolved="${acme_resolved% }"
+      if [ -z "$acme_resolved" ]; then
+        warn "$DOMAIN_NAME does not resolve from this host."
+        echo "     Let'"'"'s Encrypt resolves it from the outside, so this is not proof it will"
+        echo "     fail — but a name with no record anywhere cannot be validated. Check the"
+        echo "     DNS before relying on the certificate."
+      elif local_addresses_include "$acme_resolved"; then
+        info "$DOMAIN_NAME resolves to ${acme_resolved}, which is an address on this machine."
+      else
+        warn "$DOMAIN_NAME resolves to ${acme_resolved}, which is not an address this machine holds."
+        echo "     Behind NAT, a floating IP or a load balancer that is exactly right, and this"
+        echo "     check cannot tell those apart from a record left pointing at an old host."
+        echo "     This box holds: $(local_addresses | tr '"'"'\n'"'"' '"'"' '"'"')"
+        echo "     If that surprises you, fix the record first: a failed validation leaves NO"
+        echo "     certificate — the self-signed one is not a fallback — and Let'"'"'s Encrypt"
+        echo "     allows five failures per hostname per hour."
+      fi
     fi
     if port_in_use 80 tcp; then
       warn "something is already listening on tcp/80."
@@ -1274,7 +1347,19 @@ ffmpeg_yaml() {
 tls_yaml() {
   case "$TLS_MODE" in
     acme)
-      printf 'tls:\n  mode: "acme"\n  hostname: "%s"\n  acmeEmail: "%s"\n  hsts: true\n' \
+      # HSTS COMMENTED, NOT SET. The Settings panel that prints this same
+      # snippet in the UI already leaves it commented, and TLS.md gives the
+      # reason: it is handed to somebody whose FIRST acme restart has not
+      # happened yet, and HSTS has no server-side undo. An operator running
+      # `install.sh --tls acme` is exactly that person.
+      #
+      # The lockout is concrete rather than theoretical. Issuance succeeds once,
+      # the header goes out, something later breaks, and falling back to
+      # selfsigned meets a browser that now refuses the click-through -- setting
+      # `hsts: false` here does not help, because the browser is the thing
+      # remembering. The selfsigned branch below has said this since it was
+      # written; acme had the same audience and the opposite default.
+      printf 'tls:\n  mode: "acme"\n  hostname: "%s"\n  acmeEmail: "%s"\n  # hsts: true   # turn on once issuance works — no server-side undo\n' \
         "$DOMAIN_NAME" "$ACME_EMAIL" ;;
     selfsigned)
       # hsts stays off, and polyemesis would refuse to send it here anyway: an

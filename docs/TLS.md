@@ -300,6 +300,12 @@ above. That example describes a deployment where issuance already works; the
 snippet is handed to someone whose first ACME restart has not happened yet, and
 HSTS has no server-side undo. Turn it on afterwards.
 
+`install.sh --tls acme` leaves it commented for the same reason, and used to set
+it — its audience is the same person, on their first issuance. It also runs the
+DNS comparison described above rather than only asking whether the name
+resolves, so a record left pointing at an old host is reported *before* the
+restart rather than after a failed validation. Both were #730.
+
 ## ACME needs port 80
 
 Let's Encrypt validates over **HTTP-01**, which means it must reach

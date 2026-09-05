@@ -106,6 +106,58 @@ step "6. ACME still opens 80 for the http-01 challenge"
 grep -q '\[ "\$TLS_MODE" = acme \]  && ufw allow 80/tcp' "$INSTALL" \
   && ok "acme opens 80" || bad "acme no longer opens 80; issuance would never complete"
 
+# ------------------------------------------------- acme's two pre-commit facts
+#
+# BOTH OF THESE ARE ABOUT THE MOMENT BEFORE THE OPERATOR COMMITS, which is when
+# an acme mistake is cheapest to fix and most expensive to discover: a failed
+# validation leaves NO certificate -- the self-signed one is not a fallback --
+# and Let's Encrypt allows five failures per hostname per hour.
+
+step "7. The DNS check compares against this host, not just 'does it resolve'"
+# internal/api's acme-preflight answers this in three parts: doesn't resolve,
+# resolves HERE, resolves ELSEWHERE. The installer used to answer only the
+# first, which is the one that catches the rarest mistake -- a record pointing
+# at an old host or a CDN looks identical to no record at all from a check that
+# only asks whether the name resolves.
+# THE CALL, NOT THE WORD. The first version of this grepped for the bare name
+# `local_addresses_include`, which also appears in the helper's own doc comment
+# -- so a mutation that renamed the function and stubbed the branch to `false`
+# left the comment behind and this assertion passed over a script that no longer
+# compared anything. Matching the invocation is what makes it a check.
+grep -qE 'if +local_addresses_include +"\$acme_resolved"' "$INSTALL" \
+  && ok "the resolved address is compared against this machine's own" \
+  || bad "the installer is back to asking only whether the name resolves; a record pointing at the wrong host would install silently"
+grep -q 'not an address this machine holds' "$INSTALL" \
+  && ok "a name resolving elsewhere is reported" \
+  || bad "nothing tells the operator the name went somewhere else"
+# UNKNOWN, NOT FAIL. Behind NAT, a floating IP or a load balancer, a resolved
+# address this box does not hold is exactly correct, so this must never harden
+# into a refusal.
+if grep -qE 'local_addresses_include.*\|\| *die' "$INSTALL"; then
+  bad "a name resolving elsewhere aborts the install; behind NAT that is the correct configuration"
+else
+  ok "resolving elsewhere warns rather than refusing"
+fi
+
+step "8. ACME does not turn HSTS on before issuance has ever worked"
+# TLS.md's reasoning, and the UI panel that prints the same snippet already
+# follows it: HSTS has no server-side undo, and install.sh --tls acme is handed
+# to somebody whose FIRST acme restart has not happened yet. If issuance later
+# breaks and they fall back to selfsigned, a browser that received the header
+# refuses the click-through and setting hsts: false does not help.
+# THE COMMENTED FORM CONTAINS THE SAME WORDS, which is how the first version of
+# this check failed against the fixed script: `# hsts: true` matches any pattern
+# looking for `hsts: true`. What separates them is the two spaces of YAML indent
+# immediately before it, with nothing in between.
+if grep -qE "printf 'tls:.*mode: .acme.*\\\\n  hsts: true" "$INSTALL"; then
+  bad "acme writes hsts: true; a first-time issuance failure then locks the browser out of the fallback"
+else
+  ok "acme leaves hsts off until issuance is known to work"
+fi
+grep -q 'no server-side undo' "$INSTALL" \
+  && ok "the config says why hsts is left off" \
+  || bad "hsts is off with no reason recorded, so the next reader will turn it on"
+
 # ------------------------------------------------------------ upgrade guard
 #
 # WHY THIS IS IN THIS FILE. The update.sh install.sh writes is a DECISION the
