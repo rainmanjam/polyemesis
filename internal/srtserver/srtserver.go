@@ -125,6 +125,11 @@ type Server struct {
 
 	// srvs are the bound listeners. A wildcard address binds TWO -- one per
 	// address family -- see Start.
+	//
+	// ASSIGNED WHOLE BY A SUCCEEDING Start AND CLEARED BY Stop, never appended
+	// to across calls. An entry surviving from a previous Start is one this
+	// server is already serving, and it makes the next Start's "did anything
+	// bind" question answer about the wrong attempt. See the comment on Start.
 	srvs []*srt.Server
 
 	// report is what Start managed to bind, written once by Start and read by
@@ -137,6 +142,13 @@ type Server struct {
 	mu   sync.Mutex
 	live map[PublisherKey]*session // by (source id, role)
 
+	// started is the lifecycle interlock as well as the "is a Serve error worth
+	// logging" flag. Start claims it with a compare-and-swap before it binds
+	// anything and hands it back if it binds nothing, so it doubles as the
+	// answer to "has this Server already been started", which is the question a
+	// second Start has to be refused on. Stop swaps it back.
+	//
+	// RUNG 2 (warning), not control -- see the ladder note on Start.
 	started atomic.Bool
 
 	// gate throttles a peer that has presented enough wrong tokens to look
@@ -296,11 +308,98 @@ func New(log *slog.Logger, addr string, lookup Lookup) *Server {
 }
 
 // Start binds the port and serves until Stop.
+//
+// ONCE PER Server, AND THE SECOND CALL IS REFUSED RATHER THAN HALF-DONE. That
+// refusal is a device, not tidiness, because the second call used to look like
+// a success while doing something much worse than failing.
+//
+// The shape of it: a wildcard address binds two sockets, one per family (see
+// bindAddrs), and one family failing is survivable on purpose. So a first Start
+// on a host where something else briefly held [::]:P bound 0.0.0.0:P, reported
+// itself degraded, and kept serving. When the hold went away, the obvious
+// operator move -- and the obvious move for any supervisor written later -- is
+// to call Start again on the same Server and pick up the family that was
+// missing. That retry then bound [::]:P and failed on 0.0.0.0:P with
+// EADDRINUSE against THIS SERVER'S OWN SOCKET from the first call, because the
+// first call's listener was still holding it. Every consequence of that was
+// silent:
+//
+//   - The success check read the accumulated field, so it saw the first call's
+//     listener and reported the second call as a clean start.
+//   - A second Serve goroutine was spawned for every socket, including the ones
+//     already being served.
+//   - The report then described 0.0.0.0 as failed -- the family that was
+//     working perfectly, serving publishers, for the whole time the badge said
+//     it was down. familyUnavailable does not classify EADDRINUSE as an absent
+//     family (correctly: a port held by someone else is the operator's to fix),
+//     so Unavailable stayed false and nothing anywhere explained the state.
+//
+// A listener that is up and reports itself down is the failure mode this whole
+// package's bind reporting exists to prevent, and the retry produced it. One
+// compare-and-swap removes the entire class: a Server binds once, and a caller
+// who wants a different port builds another one, which is exactly what
+// reconcileListener in internal/engine already does.
+//
+// THE RUNGS, STATED SO NOBODY ROUNDS UP. Two devices sit in this function and
+// they are not on the same rung, which matters because a rung-1 label tells the
+// next reader not to look:
+//
+//   - THE INTERLOCK BELOW IS RUNG 2 (WARNING), NOT RUNG 1. The mistake is still
+//     expressible -- `s.Start()` compiles on a started Server, and Go lets the
+//     returned error be dropped -- so what the interlock buys is that the
+//     mistake is refused and ANNOUNCED at the moment it is made, not that it
+//     cannot be made. It does hold the damage to nil: nothing rebinds, no
+//     second Serve goroutine spawns, and the report is left alone. That is a
+//     warning that happens to be harmless, which is still a warning.
+//     Rung 1 here means typestate -- New returning an unstarted value that
+//     Start CONSUMES to produce a running one with no Start method on it, so
+//     the second call does not compile. Go cannot move a value out of a
+//     pointer, so that is two exported types, and the cost is not local: the
+//     *srtserver.Server in internal/engine's Manager is read back in ten places
+//     (SRTLinks, Publishing, Report, Stop, the reconcile path), and
+//     reconcileListener is generic over ONE server type shared with
+//     internal/rtmpserver, whose Server is deliberately the same shape. Two
+//     types here forces the same split there and un-shares the generic that
+//     exists to stop the two protocols drifting. Not paid; recorded.
+//
+//   - THE LOCAL-SLICE BIND BELOW IS RUNG 1 (CONTROL). See it there.
+//
+// CompareAndSwap rather than a Load-then-Store, so two goroutines racing into
+// Start cannot both pass the check and both bind. The flag is handed back on
+// the failure path below, because a Start that bound nothing has claimed
+// nothing, and a listener that could not have the port at 09:00 must still be
+// startable at 09:01.
 func (s *Server) Start() error {
 	if s.lookup == nil {
 		return errors.New("srtserver: no lookup configured")
 	}
+	if !s.started.CompareAndSwap(false, true) {
+		return fmt.Errorf("srt listen on %s: Start called on a listener that is already "+
+			"started; a second Start binds against this server's own sockets and reports "+
+			"the families it collides with as down -- Stop this one first, or build a new Server",
+			s.addr)
+	}
 	report := BindReport{Requested: s.bindAddrs()}
+
+	// BOUND INTO A LOCAL SLICE AND PUBLISHED TO s.srvs ONLY ON SUCCESS, so a
+	// Start that does not finish leaves no residue behind for the next one to
+	// mistake for its own work.
+	//
+	// RUNG 1 (CONTROL), and unlike the interlock above that is not a
+	// rounding-up. The old check asked `len(s.srvs) == 0` -- a question about
+	// the FIELD, which any earlier call's listener could answer -- and the fix
+	// is not a test of that answer but the removal of the wrong answer from
+	// scope. `bound` is a local that did not exist when the previous Start ran
+	// and holds only what THIS loop bound, so a Start cannot report another
+	// attempt's work as its own; there is no ordering to get right and no error
+	// to drop. Contact lens: the wrong value no longer fits.
+	//
+	// Kept even though the interlock now makes the public route to this state
+	// unreachable, because the two devices protect different mistakes and are
+	// tested apart -- see restart_test.go. The interlock stops a caller starting
+	// twice; this stops the success check ever answering about the wrong
+	// attempt, which is how a call that bound nothing new could still return nil.
+	var bound []*srt.Server
 	for _, addr := range report.Requested {
 		srv, err := s.listenOn(addr)
 		if err != nil {
@@ -326,7 +425,7 @@ func (s *Server) Start() error {
 			})
 			continue
 		}
-		s.srvs = append(s.srvs, srv)
+		bound = append(bound, srv)
 		report.Bound = append(report.Bound, addr)
 	}
 
@@ -334,12 +433,17 @@ func (s *Server) Start() error {
 	s.report = report
 	s.reportMu.Unlock()
 
-	if len(s.srvs) == 0 {
+	if len(bound) == 0 {
+		// Nothing was bound, so nothing is held and nothing needs closing --
+		// but the started flag was claimed at the top of this function and has
+		// to go back, or the port becoming free later would meet a Server that
+		// refuses to start for the rest of the process's life.
+		s.started.Store(false)
 		return fmt.Errorf("srt listen on %s: no address family could be bound", s.addr)
 	}
 
-	s.started.Store(true)
-	for _, srv := range s.srvs {
+	s.srvs = bound
+	for _, srv := range bound {
 		go func(srv *srt.Server) {
 			if err := srv.Serve(); err != nil && s.started.Load() {
 				s.log.Error("srt server stopped", "err", err)

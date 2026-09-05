@@ -761,7 +761,33 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 	return &r, nil
 }
 
-const renditionColumns = `id, name, width, height, fps, video_bitrate,
+// renditionValueColumns is EVERY rendition column that carries a value out of
+// the struct: everything except id, which the table assigns, and the two
+// timestamps, which the store owns rather than the caller.
+//
+// THIS LIST EXISTS ONCE BECAUSE IT USED TO EXIST FOUR TIMES. A rendition
+// column was written out by hand in the SELECT, in the INSERT's column list,
+// in the INSERT's VALUES, and in the UPDATE's SET clause, and nothing anywhere
+// compared the four. Deleting `pad_color=?` and `r.PadColor` from
+// UpdateRendition alone left the package green: the column still existed, the
+// SELECT still read it, creating a rendition still stored it, and the only
+// symptom was that editing an existing rendition's letterbox colour did
+// nothing at all -- silently, with the form cheerfully showing the value the
+// operator had just typed, because the response is a re-read of a row that was
+// never written.
+//
+// So the four lists are now two -- this one, and renditionValues below, which
+// returns the bound values in exactly this order -- and the remaining pair
+// cannot silently disagree either. A column added here without a value added
+// there makes every INSERT and UPDATE fail at once with a bind-count error,
+// which is why the count is also checked at process start (see the init below)
+// rather than waiting for whichever query runs first.
+//
+// ORDER IS PART OF THE CONTRACT: scanRendition reads positionally, so this
+// list and that function's Scan arguments must stay in step. That pairing is
+// what TestARenditionKeepsEveryFieldThroughCreateUpdateAndGet exists to prove,
+// with a fixture that reflection forces to be complete.
+const renditionValueColumns = `name, width, height, fps, video_bitrate,
 	maxrate_kbps, bufsize_kbps,
 	encoder, preset, gop_seconds, aspect_mode, pad_color, deinterlace,
 	overlay_image, overlay_anchor, overlay_width_pct, overlay_margin_x_pct,
@@ -769,7 +795,9 @@ const renditionColumns = `id, name, width, height, fps, video_bitrate,
 	text_content, text_font, text_anchor, text_size_pct, text_color,
 	text_margin_x_pct, text_margin_y_pct, text_box, text_box_color,
 	text_box_opacity,
-	note, source_id, created_at, updated_at`
+	note, source_id`
+
+const renditionColumns = `id, ` + renditionValueColumns + `, created_at, updated_at`
 
 // The reads below, as whole compile-time constants.
 //
@@ -784,6 +812,85 @@ const (
 	renditionListQuery     = `SELECT ` + renditionColumns + ` FROM renditions ORDER BY id`
 	renditionByIDQuery     = `SELECT ` + renditionColumns + ` FROM renditions WHERE id = ?`
 )
+
+// The writes, derived from the same list rather than restated.
+//
+// Vars rather than consts because neither the run of "?" nor the "col=?" pairs
+// can be written by the compiler, and that is the only reason -- the safety
+// argument the SELECT constants make still holds here in full. Every operand
+// below is either the const above or something generated FROM it: columnCount
+// produces an integer, placeholders produces nothing but "?" and commas, and
+// assignEach produces nothing but the const's own words with "=?" between
+// them. No value from a caller is ever concatenated into either string; every
+// one travels as a bound parameter. Assembled once at package load, so a call
+// costs no more than reading the SELECT constants does.
+var (
+	renditionInsertQuery = `INSERT INTO renditions (` + renditionValueColumns +
+		`, created_at, updated_at) VALUES (` +
+		placeholders(columnCount(renditionValueColumns)+2) + `)`
+
+	renditionUpdateQuery = `UPDATE renditions SET ` + assignEach(renditionValueColumns) +
+		`, updated_at=? WHERE id=?`
+)
+
+// The count check that makes the derivation above load-bearing.
+//
+// renditionValueColumns and renditionValues are two lists that must stay the
+// same length, and Go cannot say so at compile time: a slice literal's length
+// is not something a constant expression can be compared against. Without this
+// the first symptom of a mismatch is "sql: expected 33 arguments, got 32" from
+// whichever query happens to run first, which in a running server is an
+// operator's failed save rather than a developer's failed build.
+//
+// Panicking in init is the closest thing to control available. The binary
+// refuses to start, every test in every package that imports this one fails at
+// once, and the message names both counts -- so the mistake is caught by the
+// person making it, on the machine they are making it on, and can never reach
+// an install.
+func init() {
+	values := len(renditionValues(&Rendition{}))
+	columns := columnCount(renditionValueColumns)
+	if values != columns {
+		panic(fmt.Sprintf("db: renditionValues returns %d values but "+
+			"renditionValueColumns names %d columns. Every rendition column is "+
+			"written out in exactly those two places and they have to match, in "+
+			"length and in order; add the missing one to whichever is short.",
+			values, columns))
+	}
+}
+
+// renditionValues is the bound value for each of renditionValueColumns, in
+// that order. It is the INSERT's VALUES and the UPDATE's right-hand sides at
+// once, so those two can no longer disagree about what a column is set to.
+func renditionValues(r *Rendition) []any {
+	return []any{
+		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
+		r.MaxrateKbps, r.BufsizeKbps,
+		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor, r.Deinterlace,
+		r.Overlay.Image, r.Overlay.Anchor, r.Overlay.WidthPct,
+		r.Overlay.MarginXPct, r.Overlay.MarginYPct, r.Overlay.Opacity,
+		r.Text.Content, r.Text.Font, r.Text.Anchor, r.Text.SizePct, r.Text.Color,
+		r.Text.MarginXPct, r.Text.MarginYPct, r.Text.Box, r.Text.BoxColor,
+		r.Text.BoxOpacity,
+		r.Note, r.SourceID,
+	}
+}
+
+// columnCount reports how many columns a comma-separated column list names.
+// The lists in this package are hand-written constants spread over several
+// lines; nothing in them contains a comma that is not a separator.
+func columnCount(list string) int { return strings.Count(list, ",") + 1 }
+
+// assignEach turns a column list into an UPDATE set clause: "a, b" becomes
+// "a=?, b=?". Deriving the clause rather than writing it out is what stops an
+// UPDATE quietly covering fewer columns than the INSERT.
+func assignEach(list string) string {
+	cols := strings.Split(list, ",")
+	for i, c := range cols {
+		cols[i] = strings.TrimSpace(c) + "=?"
+	}
+	return strings.Join(cols, ", ")
+}
 
 // applyRenditionDefaults fills in the fields an API payload is allowed to
 // omit, so a create request can be as short as {"name","height","videoBitrate"}.
@@ -868,25 +975,8 @@ func (d *DB) CreateRendition(r *Rendition) (*Rendition, error) {
 		r.SourceID = &id
 	}
 	now := time.Now().Unix()
-	res, err := d.sql.Exec(`INSERT INTO renditions
-		(name, width, height, fps, video_bitrate, maxrate_kbps, bufsize_kbps, encoder, preset, gop_seconds,
-		 aspect_mode, pad_color, deinterlace,
-		 overlay_image, overlay_anchor, overlay_width_pct, overlay_margin_x_pct,
-		 overlay_margin_y_pct, overlay_opacity,
-		 text_content, text_font, text_anchor, text_size_pct, text_color,
-		 text_margin_x_pct, text_margin_y_pct, text_box, text_box_color,
-		 text_box_opacity,
-		 note, source_id, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
-		r.MaxrateKbps, r.BufsizeKbps,
-		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor, r.Deinterlace,
-		r.Overlay.Image, r.Overlay.Anchor, r.Overlay.WidthPct,
-		r.Overlay.MarginXPct, r.Overlay.MarginYPct, r.Overlay.Opacity,
-		r.Text.Content, r.Text.Font, r.Text.Anchor, r.Text.SizePct, r.Text.Color,
-		r.Text.MarginXPct, r.Text.MarginYPct, r.Text.Box, r.Text.BoxColor,
-		r.Text.BoxOpacity,
-		r.Note, r.SourceID, now, now)
+	res, err := d.sql.Exec(renditionInsertQuery,
+		append(renditionValues(r), now, now)...)
 	if err != nil {
 		return nil, err
 	}
@@ -902,25 +992,8 @@ func (d *DB) UpdateRendition(r *Rendition) (*Rendition, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
-	res, err := d.sql.Exec(`UPDATE renditions SET
-		name=?, width=?, height=?, fps=?, video_bitrate=?,
-		maxrate_kbps=?, bufsize_kbps=?,
-		encoder=?, preset=?, gop_seconds=?, aspect_mode=?, pad_color=?,
-		deinterlace=?, overlay_image=?, overlay_anchor=?, overlay_width_pct=?,
-		overlay_margin_x_pct=?, overlay_margin_y_pct=?, overlay_opacity=?,
-		text_content=?, text_font=?, text_anchor=?, text_size_pct=?, text_color=?,
-		text_margin_x_pct=?, text_margin_y_pct=?, text_box=?, text_box_color=?,
-		text_box_opacity=?,
-		note=?, source_id=?, updated_at=? WHERE id=?`,
-		r.Name, r.Width, r.Height, r.FPS, r.VideoBitrate,
-		r.MaxrateKbps, r.BufsizeKbps,
-		r.Encoder, r.Preset, r.GOPSeconds, r.AspectMode, r.PadColor,
-		r.Deinterlace, r.Overlay.Image, r.Overlay.Anchor, r.Overlay.WidthPct,
-		r.Overlay.MarginXPct, r.Overlay.MarginYPct, r.Overlay.Opacity,
-		r.Text.Content, r.Text.Font, r.Text.Anchor, r.Text.SizePct, r.Text.Color,
-		r.Text.MarginXPct, r.Text.MarginYPct, r.Text.Box, r.Text.BoxColor,
-		r.Text.BoxOpacity,
-		r.Note, r.SourceID, time.Now().Unix(), r.ID)
+	res, err := d.sql.Exec(renditionUpdateQuery,
+		append(renditionValues(r), time.Now().Unix(), r.ID)...)
 	if err != nil {
 		return nil, err
 	}

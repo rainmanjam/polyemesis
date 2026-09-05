@@ -122,19 +122,42 @@ func clearExpertArgs(row *db.Destination) {
 	row.ExpertAckReencode = false
 }
 
-// saveExpertArgs writes the arguments back through the destination row.
+// saveExpertArgs writes the arguments back through the destination row, and
+// returns whatever dropUnsendableSettings had to repair on the way past.
 //
 // The row is re-read rather than taking the caller's copy, so a concurrent edit
 // to the name or the URL is not silently reverted by an expert-mode save.
-func (s *Server) saveExpertArgs(id int64, e expertArgs) (*db.Destination, error) {
+//
+// IT RUNS dropUnsendableSettings FOR THE SAME REASON THE TWO DESTINATION
+// ROUTES DO. That repair belongs to the write, not to the handler that happened
+// to be written first: the invariant it keeps -- a destination must not hold
+// another platform's account, because the consumers pick the API off the
+// destination and the credential off the account -- is not enforced by the
+// store, so a route that skips this call writes the pairing the check exists to
+// prevent. This route re-reads a stored row, which is precisely where a row
+// mismatched before the check existed still lives.
+//
+// The warnings are RETURNED rather than dropped. A repair the operator is never
+// told about is the silent one dropUnsendableSettings' own comment says it must
+// not be; the expert response carries them so a link that vanishes has a
+// sentence attached saying why the stream key stopped refreshing.
+func (s *Server) saveExpertArgs(id int64, e expertArgs) (*db.Destination, []string, error) {
 	row, err := s.store.GetDestination(id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	row.ExtraInputArgs = e.InputArgs
 	row.ExtraOutputArgs = e.OutputArgs
 	row.ExpertAckReencode = e.AckReencode
-	return s.store.UpdateDestination(row)
+	warnings, err := s.dropUnsendableSettings(row)
+	if err != nil {
+		return nil, nil, err
+	}
+	updated, err := s.store.UpdateDestination(row)
+	if err != nil {
+		return nil, nil, err
+	}
+	return updated, warnings, nil
 }
 
 // --------------------------------------------------------------- validation
@@ -710,6 +733,12 @@ type expertResponse struct {
 	// Warning is set when the saved arguments exist but are not in the running
 	// process. See handleGetExpert.
 	Warning string `json:"warning,omitempty"`
+	// Warnings are repairs dropUnsendableSettings made to the row on the way
+	// through the save -- a connected account unlinked, compliance dropped.
+	// Separate from Warning above rather than folded into it: that one is about
+	// whether the arguments are RUNNING, and these are about what changed on
+	// the destination, and joining them would make either one unreadable.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // parseExpertRequest validates both argument strings and the guards they trip.
@@ -856,7 +885,7 @@ func (s *Server) handlePutExpert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := s.saveExpertArgs(id, expertArgs{
+	updated, repairs, err := s.saveExpertArgs(id, expertArgs{
 		InputArgs:   req.InputArgs,
 		OutputArgs:  req.OutputArgs,
 		AckReencode: req.AckReencode,
@@ -894,8 +923,9 @@ func (s *Server) handlePutExpert(w http.ResponseWriter, r *http.Request) {
 		// APPLIED IS NOW A FACT RATHER THAN A LITERAL. The field's own comment
 		// says it is "true on a read or a successful write"; a write whose
 		// reconcile failed is not a successful one, and Warning says why.
-		Applied: rw == "",
-		Warning: rw,
+		Applied:  rw == "",
+		Warning:  rw,
+		Warnings: repairs,
 	})
 }
 
@@ -907,7 +937,7 @@ func (s *Server) handleDeleteExpert(w http.ResponseWriter, r *http.Request) {
 	}
 	// The acknowledgement goes with them: there is no longer an override to
 	// have agreed to, and leaving it set would silently pre-approve the next one.
-	cleared, err := s.saveExpertArgs(id, expertArgs{})
+	cleared, repairs, err := s.saveExpertArgs(id, expertArgs{})
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -918,6 +948,7 @@ func (s *Server) handleDeleteExpert(w http.ResponseWriter, r *http.Request) {
 		Passthrough:   cleared.RenditionID == nil,
 		Applied:       rw == "",
 		Warning:       rw,
+		Warnings:      repairs,
 	}
 	if cmd, err := s.resolveExpertCommand(cleared, nil, nil); err == nil {
 		resp.Command = cmd

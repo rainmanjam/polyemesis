@@ -337,6 +337,12 @@ type Engine struct {
 	// alertLoop, and the notifier is explicitly non-blocking, which is the
 	// whole reason a slow endpoint cannot reach the reconcile loop.
 	alerter *alerts.Notifier
+	// alertAttempts is the delivery budget the manager pushed in, kept under
+	// e.mu so AlertRetry can answer it. The notifier holds the authoritative
+	// copy; this one exists because that copy is unexported and in another
+	// package, which left no way to see that the push ever landed. Zero means
+	// the operator never chose one. See SetAlertRetry.
+	alertAttempts int
 	// hooks delivers lifecycle webhooks and hookWatch derives their edges.
 	//
 	// The dispatcher is SHARED across every engine -- it is handed in by the
@@ -4740,6 +4746,46 @@ func (e *Engine) Alerts() *alerts.Notifier {
 		return nil
 	}
 	return e.alerter
+}
+
+// SetAlertRetry hands the engine the install-wide alert delivery budget.
+//
+// A setter on the Engine rather than the manager reaching through Alerts() into
+// the notifier, and that is the point rather than tidiness: the manager applies
+// four install-wide settings to an engine and three of them were `eng.SetX`
+// while this one was `eng.Alerts().SetRetry`. The odd one out is the one that
+// gets left out of a list, and a settings push that has to know which of an
+// engine's sub-objects owns which value cannot be written as one uniform block.
+// Now it can. See engineSettings in manager.go.
+//
+// The remembered copy is what AlertRetry answers with. alerts.Notifier keeps
+// the authoritative value -- it is what a delivery actually reads -- but it
+// keeps it unexported and in another package, so without this field there is no
+// way to observe from the outside that the budget ever arrived, and a settings
+// push that silently skipped an engine would look exactly like one that worked.
+//
+// Zero and negative are ignored rather than stored, matching
+// alerts.Notifier.SetRetry: "never set" leaves the alerts package default in
+// place and must not overwrite a budget already applied.
+func (e *Engine) SetAlertRetry(attempts int) {
+	if e == nil || attempts <= 0 {
+		return
+	}
+	e.mu.Lock()
+	e.alertAttempts = attempts
+	e.mu.Unlock()
+	e.Alerts().SetRetry(attempts)
+}
+
+// AlertRetry is the delivery budget this engine was given, or zero when the
+// operator never set one and the alerts package default is in force.
+func (e *Engine) AlertRetry() int {
+	if e == nil {
+		return 0
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.alertAttempts
 }
 
 // Hooks exposes the dispatcher so the API can report its counters, list recent

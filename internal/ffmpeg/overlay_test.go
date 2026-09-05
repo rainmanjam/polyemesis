@@ -161,7 +161,7 @@ func TestOverlayAnchorsCompileToTheRightExpressions(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(string(c.anchor), func(t *testing.T) {
-			x, y := overlayPosition(o(c.anchor), w, h)
+			x, y := overlayPosition(o(c.anchor), frameSize{W: w, H: h})
 			if x != c.x || y != c.y {
 				t.Errorf("position = (%s, %s), want (%s, %s)", x, y, c.x, c.y)
 			}
@@ -178,7 +178,7 @@ func TestOverlayAnchorsCompileToTheRightExpressions(t *testing.T) {
 // written by a newer build must still encode.
 func TestAnUnknownAnchorDegradesRatherThanBreaking(t *testing.T) {
 	o := &OverlaySpec{ImagePath: "/x.png", Anchor: "diagonal", WidthPct: 0.2, MarginXPct: 0.1, MarginYPct: 0.1}
-	x, y := overlayPosition(o, 1000, 500)
+	x, y := overlayPosition(o, frameSize{W: 1000, H: 500})
 	if x != "100" || y != "50" {
 		t.Errorf("an unknown anchor produced (%s, %s), want the top-left margins", x, y)
 	}
@@ -187,24 +187,28 @@ func TestAnUnknownAnchorDegradesRatherThanBreaking(t *testing.T) {
 func TestOverlayWidthIsEvenAndNeverZero(t *testing.T) {
 	// An odd or zero-width scale makes the filter refuse to open, which reaches
 	// the operator as a stream that will not start for no visible reason.
+	// Every canvas below is non-square, and the heights are chosen so that a
+	// body reading out.H instead of out.W would miss `want` on the cases that
+	// are not pinned to the floor. WidthPct is a fraction of the WIDTH.
 	for _, tc := range []struct {
 		pct  float64
-		outW int
+		out  frameSize
 		want int
 	}{
-		{0.12, 1920, 230},   // 230.4 -> 230, already even
-		{0.1201, 1920, 230}, // 230.6 -> 231 -> 230
-		{0.0001, 1920, 2},   // rounds to 0, floored to 2
-		{0, 1920, 2},
-		{-1, 1920, 2},
-		{2, 1920, 1920}, // clamped to 100%
-		{1, 1921, 1920}, // odd canvas, even result
+		{0.12, frameSize{W: 1920, H: 1080}, 230},   // 230.4 -> 230, already even
+		{0.1201, frameSize{W: 1920, H: 1080}, 230}, // 230.6 -> 231 -> 230
+		{0.0001, frameSize{W: 1920, H: 1080}, 2},   // rounds to 0, floored to 2
+		{0, frameSize{W: 1920, H: 1080}, 2},
+		{-1, frameSize{W: 1920, H: 1080}, 2},
+		{2, frameSize{W: 1920, H: 1080}, 1920}, // clamped to 100%
+		{1, frameSize{W: 1921, H: 1080}, 1920}, // odd canvas, even result
 	} {
-		if got := overlayWidthPx(tc.pct, tc.outW); got != tc.want {
-			t.Errorf("overlayWidthPx(%v, %d) = %d, want %d", tc.pct, tc.outW, got, tc.want)
+		if got := overlayWidthPx(tc.pct, tc.out); got != tc.want {
+			t.Errorf("overlayWidthPx(%v, %dx%d) = %d, want %d", tc.pct, tc.out.W, tc.out.H, got, tc.want)
 		}
-		if got := overlayWidthPx(tc.pct, tc.outW); got%2 != 0 || got < 2 {
-			t.Errorf("overlayWidthPx(%v, %d) = %d, which is odd or under 2", tc.pct, tc.outW, got)
+		if got := overlayWidthPx(tc.pct, tc.out); got%2 != 0 || got < 2 {
+			t.Errorf("overlayWidthPx(%v, %dx%d) = %d, which is odd or under 2",
+				tc.pct, tc.out.W, tc.out.H, got)
 		}
 	}
 }
@@ -253,7 +257,7 @@ func magentaBBox(frame []byte, w, h int) bbox {
 // renderOverlay runs a real encode-free render of one frame and returns it.
 func renderOverlay(t *testing.T, ffmpeg string, s RenditionSpec) []byte {
 	t.Helper()
-	graph := overlayGraph(s, encoderProfile{}, s.Width, s.Height)
+	graph := overlayGraph(s, encoderProfile{}, s.outputSize())
 	if graph == "" {
 		t.Fatal("overlayGraph produced nothing")
 	}
@@ -303,7 +307,7 @@ func TestOverlayLandsWhereTheAnchorSaysAcrossCanvasShapes(t *testing.T) {
 					t.Fatal("no magenta in the frame: the overlay was not composited at all")
 				}
 
-				wantW := overlayWidthPx(0.2, canvas.w)
+				wantW := overlayWidthPx(0.2, frameSize{W: canvas.w, H: canvas.h})
 				marginX := int(0.05*float64(canvas.w) + 0.5)
 				marginY := int(0.05*float64(canvas.h) + 0.5)
 				gotW := b.maxX - b.minX + 1
@@ -453,7 +457,7 @@ func TestTheImageIsAnInputNeverAMovieFilter(t *testing.T) {
 	if !found {
 		t.Errorf("the image path is not a standalone argv element: %v", args)
 	}
-	if strings.Contains(overlayGraph(s, encoderProfile{}, s.Width, s.Height), s.Overlay.ImagePath) {
+	if strings.Contains(overlayGraph(s, encoderProfile{}, s.outputSize()), s.Overlay.ImagePath) {
 		t.Error("the image path leaked into the filtergraph, where its separators would be parsed")
 	}
 }

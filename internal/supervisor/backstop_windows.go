@@ -28,4 +28,22 @@ package supervisor
 //
 // Idempotent: the work is behind a sync.Once, so calling it again costs a
 // mutex. Safe to call before anything is spawned, which is the point.
+//
+// WHERE IT IS CALLED FROM, AND WHY THAT MOVED. It is an init() in package main,
+// not a line in run(). Membership of the job is INHERITED at CreateProcess and
+// nothing here enrols a child afterwards -- AssignProcessToJobObject can add a
+// running process to a job, and ensureJob uses it on THIS process, but there is
+// no post-Start hook in os/exec to do it for a child at the right moment, and a
+// late assignment would still miss whatever that child had already spawned. So
+// the call has to precede the first child of any kind -- and while it sat part-way
+// down run() the only thing holding it above the first spawn was the comment
+// over it. An init runs before main's first statement, so the ordering is now
+// structural: nothing can be inserted in front of it by editing run(). This
+// function is written to make that placement possible -- no arguments, no
+// configuration, no logger it has not already got -- and cmd/polyemesis/
+// backstop.go states the whole trade. Its companion guard,
+// TestTheCrashBackstopIsEstablishedBeforeMainRuns, parses package main's
+// non-test sources and fails if this call is written in any function OTHER than
+// an init -- and fails first if package main has stopped calling it at all,
+// since a package with no call satisfies "every call is in an init" perfectly.
 func EnsureCrashBackstop() { ensureJob() }

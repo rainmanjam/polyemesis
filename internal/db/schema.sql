@@ -341,6 +341,26 @@ CREATE TABLE IF NOT EXISTS jobs (
     result        TEXT    NOT NULL DEFAULT '',       -- opaque worker output, JSON
     priority      INTEGER NOT NULL DEFAULT 0,        -- higher first; FIFO within a priority
     state         TEXT    NOT NULL DEFAULT 'queued', -- queued|running|done|failed|cancelled|deferred
+    -- unique_target = 1 means "at most one ACTIVE job for this kind and
+    -- target", and the constraint that enforces it is NOT here. It is a
+    -- partial unique index (idx_jobs_unique_target) over (kind, target) where
+    -- unique_target = 1 AND target <> '' AND the state is queued, running or
+    -- deferred; CREATE TABLE has no syntax for a partial index, and it is
+    -- created by MigrateJobUniqueTarget -- which runs on every open, so fresh
+    -- and upgraded installs get the same rule.
+    --
+    -- Without it the rule was queue.Submit asking FindActiveJob and then
+    -- calling EnqueueJob, with no transaction across the two. db.go's
+    -- SetMaxOpenConns(1) serialises the statements and not the gap between
+    -- them, so two people clicking Transcribe at once both looked, both saw
+    -- nothing, and both inserted: two encodes of one recording, racing each
+    -- other onto the same output path.
+    --
+    -- Do not put a bare CREATE UNIQUE INDEX at the foot of this file: an
+    -- install that already holds a duplicate pair would fail it, and a failure
+    -- in this script aborts the whole schema and stops the server booting.
+    -- The migration folds the duplicates first. sources.token records the same
+    -- reasoning for the same shape of index.
     unique_target INTEGER NOT NULL DEFAULT 0,        -- fold a resubmission into the active job
     attempts      INTEGER NOT NULL DEFAULT 0,        -- starts, not failures
     max_attempts  INTEGER NOT NULL DEFAULT 3,

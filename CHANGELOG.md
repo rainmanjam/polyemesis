@@ -10,6 +10,24 @@ its first tagged release.
 
 ### Security
 
+- **A destination could be linked to an account belonging to a different
+  platform, so a YouTube token was sent to Facebook.** Nothing compared a
+  destination's platform to its account's, and the pre-announce path takes the
+  broadcaster from the destination and the bearer token from the account — so
+  the pairing was expressible and, once written, silently sent credentials to
+  the wrong host. It is refused now, and the one remaining route that writes a
+  destination without going through the repair is named in the comment rather
+  than left to be rediscovered.
+- **A token refresh could overwrite a reconnect, and the account would then ask
+  to be reconnected for ever.** The refresh re-read under a lock keyed by
+  account id and then wrote back the whole row, while the consent callback and
+  the device-flow path held no lock and keyed by platform and account ref. A
+  refresh begun before consent finished put the pre-consent scopes back over
+  the ones consent had just granted, so the install kept saying "reconnect this
+  account" — and reconnecting lost the same race again. Writes are now narrowed
+  to the token columns with a compare-and-swap, so a concurrent write is
+  detected instead of clobbered.
+
 - **A destination's stream key was recoverable from a WebSocket opened with a
   read-scoped token.** `eventView` decided what a read socket may see by looking
   each event type up in a policy table — and both of its unknown cases passed
@@ -92,6 +110,76 @@ its first tagged release.
   is no longer an unlimited race.
 
 ### Fixed
+
+- **A scheduled stop could fire against every destination on the install.**
+  `[null]` in a schedule's `destinationIds` decodes to `[0]`, and the list was
+  normalised — dropping every id at or below zero — *before* it was validated,
+  where an empty list means all of them. So a stop schedule that named three
+  destinations ran unattended against every YouTube broadcast on the box, and
+  stopping a YouTube broadcast completes it permanently. A list that empties in
+  normalisation is refused now.
+- **Retrying a failed job could answer 500 with the name of a database index,
+  and rescheduling one could lose the outcome entirely.** A new unique index
+  stops the same target being queued twice — but three writers move a row into
+  the index's reach, and only one of them had been given the refusal to match.
+  Retry answers 409 naming the job in the way. Reschedule and requeue carry the
+  same branch, which matters more than it sounds: nothing returns their error to
+  a person, so the failure there was a job stuck cancelled for ever with a
+  worker's result thrown away and nothing on screen.
+- **Two guards had been passing for the wrong reason.** The previous-release
+  schema test compared column *names* only, so a migration whose DEFAULT
+  diverged from `schema.sql` was invisible — and the divergence that motivates
+  it, a `scope_ver` that never triggers re-consent, would have reached upgraded
+  installs alone. And its own positive control had a floor of four against a
+  measured fourteen, so a pattern change that dropped ten of them still passed.
+  Both compare what they claim to compare now.
+- **A rendition column dropped from one of four hand-written lists was stored
+  nowhere, and the round-trip test did not notice.** Removing a column from the
+  update statement left the package green, because the test compared nine fields
+  by hand. An operator set a pad colour, was told it was saved, and it was not.
+  The write lists come from one declaration now, and the round trip fills every
+  field by reflection so the next column added is covered without anyone
+  remembering to add it.
+- **Two settings saved at once could leave an engine holding a value nobody
+  saved.** Routing every install-wide setting through a single push meant each
+  setter re-applied all of them, so one that read the block before a sibling's
+  write landed rolled that sibling back — silently, with the manager still
+  reporting it set. It is a lost update rather than a data race, which is why
+  the race detector never saw it. A save is serialised end to end now and
+  publishes one consistent snapshot.
+- **An archive could be written at a quality that destroys the master.** The
+  recording name and the codec family were validated and the quality was not, so
+  any positive number reached the encoder verbatim. A CRF in the high thirties
+  encodes cleanly, copies every audio track bit-for-bit and shrinks enormously —
+  so verification, which compares containers, streams and durations and has no
+  opinion about the picture, passed it and the replace renamed a smeared copy
+  over a bit-exact original. It is bounded now, and the bound says why it is
+  that number. Note on upgrade: a job already queued past the bound will fail on
+  its next attempt, with an error that names the bound.
+- **A second `Start` on the SRT listener reported the first one's success.**
+  Listeners accumulated across calls, so on a second start every bind failed
+  against the server's own sockets while the success check saw the previous
+  call's listeners — spawning a duplicate serve loop per listener and reporting
+  working address families as down, with nothing explaining why. A failed start
+  leaves no residue now, and a second one is refused.
+- **The crash backstop's ordering was enforced by a comment.** It has to run
+  before the first child of any kind, because Windows fixes job membership at
+  process creation and cannot apply it afterwards — so a probe added above it
+  would leave a process outside the job, surviving a crash as an orphan holding
+  a port. Nothing failed when the call was moved, and because the Unix side is a
+  no-op it showed up on nobody's machine. The ordering is structural now and a
+  guard refuses a spawn site that precedes it.
+- **Disconnecting a platform account untied live destinations without saying
+  so.** The delete succeeded, the foreign key quietly nulled the destination
+  rows, the lifecycle coordinator stopped tracking them, and a broadcast still
+  running was never completed. Disconnect now names the destinations it will
+  affect and asks first.
+- **Width and height were interchangeable numbers in the filter builder.**
+  Transposing them at either of two call sites compiled and passed the whole
+  package, because the assertions named no pixel count and the fixtures could
+  not see a transposition. What that produces is not a crash: it is a logo
+  scaled off the wrong edge, or a caption past the bottom of the frame, on air.
+  They travel as one value now, so the transposition does not build.
 
 - **A raised YouTube API quota was never paced against, and in two of the three
   places it failed it failed silently.** `YouTubeConfig.QuotaUnits` existed and
