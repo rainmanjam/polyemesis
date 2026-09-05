@@ -2103,7 +2103,11 @@ func (s *Server) refuseIfSilent(w http.ResponseWriter, sourceID *int64, profile 
 //
 // Clearing is therefore the repair, and the warning is what keeps it from
 // being a silent one. Nothing here refuses a write.
-func (s *Server) dropUnsendableSettings(row *db.Destination) []string {
+//
+// IT RETURNS AN ERROR because the account clause below has to READ the store,
+// and a repair that cannot run is not a repair that may be skipped. Failing
+// open on that one would leave the exact pairing it exists to make unstorable.
+func (s *Server) dropUnsendableSettings(row *db.Destination) ([]string, error) {
 	var warnings []string
 
 	// Discovered through ComplianceFor, never a list of platform names: the
@@ -2134,7 +2138,113 @@ func (s *Server) dropUnsendableSettings(row *db.Destination) []string {
 			row.Platform))
 	}
 
-	return warnings
+	// THE CONNECTED ACCOUNT, AND WHOSE API ITS TOKEN IS SENT TO.
+	//
+	// account_id and platform are two independent columns and nothing compared
+	// them. The pairing is not decorative: the consumers pick the API off the
+	// DESTINATION's platform and the credential off the destination's account.
+	// preannounce.go resolves ScheduledBroadcastsFor(d.Platform) and then calls
+	// it with tokenFor(*d.AccountID).AccessToken; lifecycle.go tracks the same
+	// two fields side by side and does the same thing. So a row saying
+	// "platform: facebook, account: <a YouTube account>" sends a Google OAuth
+	// bearer token to graph.facebook.com -- a live credential for one company
+	// handed to another, in a header, unprompted, by a background sweep.
+	//
+	// WHERE THE PAIRING COMES FROM, WHICH IS NOT THE DIALOG. applyPreset in
+	// ui/src/components/DestinationDialog.tsx calls setAccountId("none")
+	// unconditionally on every preset change, and the picker offers an explicit
+	// "Not linked" item, so the current dialog cannot produce this pairing at
+	// all. What reaches here is a body from a direct API client -- which has no
+	// dialog, no picker and no preset -- and a row already in the database,
+	// written before anything compared the two columns.
+	//
+	// CLEARING RATHER THAN REFUSING, for the reason recorded at the top of this
+	// function and one more of its own: the rows already mismatched in the
+	// database would become permanently uneditable under a 400. Every PUT
+	// decodes over the stored row, so the mismatch arrives at the write whether
+	// or not the client mentioned it -- a rename would be refused, and there is
+	// no request an operator could send that repairs the row instead. Clearing
+	// is the only edit that ends the state. The warning is what stops it being
+	// silent, and unlinking costs the operator only the automatic key refresh;
+	// the URL and stream key already on the row are untouched, so the
+	// destination keeps streaming exactly as it did.
+	//
+	// WHAT RUNG THIS REACHES, stated plainly because the last version of this
+	// comment overclaimed it. This is a check in ONE HELPER, not in the store:
+	// db.CreateDestination and db.UpdateDestination will write the mismatched
+	// pair for anyone who hands it to them. It therefore holds for exactly the
+	// routes that call this function -- handleCreateDestination,
+	// handleUpdateDestination and saveExpertArgs -- and holds by inspection,
+	// not by construction, for the stream-key refresh in oauth_handlers.go,
+	// which writes a destination it re-read and never assigns Platform or
+	// AccountID. ANY NEW ROUTE THAT WRITES A DESTINATION MUST CALL THIS
+	// HELPER; it inherits nothing. Moving the comparison into
+	// db.UpdateDestination is what would make it Control for every route, and
+	// it is the right home for it -- the cost is that the store has no way to
+	// return a warning, so the repair would go silent unless the store grew a
+	// warnings channel of its own.
+	//
+	// A destination whose account_id names no account is left alone on purpose.
+	// That is not this mismatch, and the foreign key answers it: the store
+	// refuses the write, and inventing a second answer here would only disagree
+	// with it.
+	if row.AccountID != nil {
+		accts, err := s.store.ListPlatformAccounts()
+		if err != nil {
+			return nil, err
+		}
+		// The whole list rather than GetPlatformAccount, because this question
+		// is about the account's PLATFORM and nothing else. ListPlatformAccounts
+		// returns rows with no token material on them, so the check that exists
+		// to keep a token off the wrong wire never decrypts one itself.
+		for _, a := range accts {
+			if a.ID != *row.AccountID {
+				continue
+			}
+			// An empty platform is read as custom, which is what the store is
+			// about to default it to (CreateDestination and UpdateDestination
+			// both do). Comparing the undefaulted value would make "" look like
+			// a platform of its own in the sentence below.
+			want := row.Platform
+			if want == "" {
+				want = db.PlatformCustom
+			}
+			// CUSTOM IS NOT A MISMATCH, and treating it as one would break the
+			// only thing the link still does there.
+			//
+			// Nothing resolves a platform API off a custom destination. Every
+			// capability lookup in oauth.Set keys on the platform and there is
+			// no custom entry -- ScheduledBroadcastsFor, LifecycleFor and Get
+			// all answer false -- so preannounce.go:107 and lifecycle.go:539
+			// skip the row entirely and no token is ever sent anywhere on its
+			// behalf. The leak this clause exists to stop cannot happen here.
+			//
+			// The link, meanwhile, is load-bearing: handleRefreshStreamKey
+			// picks the provider off acct.Platform, NOT off dest.Platform, so
+			// "custom endpoint holding a YouTube account" is exactly the shape
+			// that fetches a key for an ingest URL the operator pasted by hand.
+			// All but four of the preset catalogue's entries save as custom, so
+			// unlinking here would be the common case, not the corner one.
+			if want == db.PlatformCustom {
+				break
+			}
+			if a.Platform == want {
+				break
+			}
+			row.AccountID = nil
+			warnings = append(warnings, fmt.Sprintf(
+				"The connected account was unlinked: %q is a %s account and this "+
+					"destination publishes to %s. The link decides which platform's API "+
+					"receives that account's access token, so keeping it would send %s "+
+					"credentials to %s. The URL and stream key already on this destination "+
+					"are untouched; link a %s account if you want its key refreshed "+
+					"automatically.",
+				a.AccountName, a.Platform, want, a.Platform, want, want))
+			break
+		}
+	}
+
+	return warnings, nil
 }
 
 func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request) {
@@ -2155,7 +2265,11 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// Before the write, so what is stored is what the response describes.
-	warnings := s.dropUnsendableSettings(&row)
+	warnings, err := s.dropUnsendableSettings(&row)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	// What the platform registry knows and this destination contradicts --
 	// most often an RTMP URL with no application path, which the far end
 	// refuses by dropping the connection rather than by saying anything. The
@@ -2213,7 +2327,11 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// ends up on a platform that cannot send what it is holding without the
 	// client ever mentioning compliance. Checking the request body instead of
 	// the merged row would see nothing at all.
-	warnings := s.dropUnsendableSettings(existing)
+	warnings, err := s.dropUnsendableSettings(existing)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	// Same registry check create does. An edit is the more likely place for a
 	// URL to acquire this problem, not the less: creation usually starts from
 	// a preset, and editing is where somebody pastes a fresh address in.
