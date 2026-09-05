@@ -137,3 +137,24 @@ func TestAdoptionSaysSoWhenNothingIsLive(t *testing.T) {
 		t.Errorf("the message does not say the target is idle: %v", err)
 	}
 }
+
+// A TARGET THAT WILL NOT RESOLVE IS REPORTED AS SUCH, not as an empty result.
+// Adoption asks two questions of the platform and the first one can fail on its
+// own -- a revoked token, a Page the account no longer manages -- and "there is
+// no broadcast" would be the wrong answer to give for it.
+func TestAdoptionReportsATargetItCannotResolve(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"Invalid OAuth access token","code":190}}`))
+	}))
+	t.Cleanup(srv.Close)
+	f := &Facebook{endpoints: newEndpoints([]ProviderOption{WithBaseURL(srv.URL)})}
+
+	id, err := f.AdoptLiveVideo(context.Background(), "stale", "1234")
+	if err == nil {
+		t.Fatal("a target that could not be resolved reported success")
+	}
+	if id != "" {
+		t.Errorf("an id came back from a failed resolve: %q", id)
+	}
+}
