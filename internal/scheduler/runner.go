@@ -52,6 +52,13 @@ type Result struct {
 	Reason  string    `json:"reason"`
 	Targets []int64   `json:"targets,omitempty"`
 	Err     string    `json:"error,omitempty"`
+	// ReconcileErr is set when the schedule fired and was saved but the
+	// pipeline could not be brought into line with it. #709.
+	//
+	// SEPARATE FROM Err, which is this schedule's own failure to act. This one
+	// says the action succeeded and did not take effect -- a different fact,
+	// and the one that used to exist only in a log line nothing reads.
+	ReconcileErr string `json:"reconcileError,omitempty"`
 }
 
 // Option configures a Runner.
@@ -241,8 +248,26 @@ func (r *Runner) Tick(now time.Time) []Result {
 	}
 
 	if changed {
+		// #709. A schedule that fired, wrote its intent and could not reconcile
+		// has changed the database and not the running pipeline -- and nothing
+		// retries it, because Reconcile is event-driven with no ticker. The log
+		// line alone left /schedules reporting every occurrence as fired.
+		//
+		// The reason rides on EVERY result in this sweep, because the reconcile
+		// is one call for the whole batch: it is not knowable which of the
+		// schedules that fired took effect, and saying so on each is honest
+		// where attributing it to one would not be.
 		if err := r.act.Reconcile(); err != nil {
-			r.log.Error("schedule reconcile failed", "err", err)
+			r.log.Error("a schedule fired but the pipeline was not reconciled; "+
+				"the stored intent and the running processes have diverged and "+
+				"nothing retries this", "err", err)
+			for i := range out {
+				if !out[i].Fired {
+					continue
+				}
+				out[i].ReconcileErr = "the schedule fired and was saved, but the running " +
+					"pipeline could not be updated to match it: " + err.Error()
+			}
 		}
 	}
 	if len(out) > 0 {

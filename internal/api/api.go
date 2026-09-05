@@ -111,15 +111,126 @@ func (s *Server) engOrNil() *engine.Engine {
 //
 // A nil manager is not an error. Every server in this package's unit tests has
 // one, and the caller's question -- "is what is running what is stored" -- is
-// answered by "nothing is running" rather than by a failure. The callers that
-// only warn keep warning and the callers that return 500 keep returning 500;
-// what changes is which engines were reconciled, not how a failure is
-// reported.
+// answered by "nothing is running" rather than by a failure.
+//
+// ONE CALLER, AND IT IS reconcileNow. #709 collapsed sixteen call sites onto
+// that helper because two spellings of the failure handling lived here side by
+// side; TestReconcileHasOneSpellingAndItsResultCannotBeDropped is what keeps
+// this from growing a second one.
 func (s *Server) reconcile() error {
 	if s.mgr == nil {
 		return nil
 	}
 	return s.mgr.Reconcile()
+}
+
+// reconcileNow is the ONLY spelling of "apply this mutation to the pipeline".
+// It returns the sentence to hand the operator, empty when the reconcile
+// succeeded. #709.
+//
+// THE MISTAKE IT REMOVES. Sixteen handlers called s.reconcile() and two
+// spellings lived in the same package: three turned the error into a 500, and
+// twelve logged it at Warn and returned success. Nothing in the signature said
+// which was right, so a new handler written by copying its nearest neighbour
+// got whichever one that neighbour happened to be.
+//
+// WHY THE SILENT SPELLING IS WORSE THAN IT LOOKS. Engine.Reconcile returns
+// early on a reconcileOutputs error, so preview, clips, captions and loudness
+// are skipped with it; Manager.Reconcile returns firstErr. And reconcile is
+// EVENT-DRIVEN WITH NO TICKER -- engine.go says so in as many words -- so a
+// failure is never retried. Stored state and the running FFmpeg diverge until
+// the next successful mutation or a restart, while the response said 200 and
+// the UI raised a green toast.
+//
+// The worst case is invisible: a destination delete returned {"status":
+// "deleted"}, the row left the list, and the FFmpeg child kept publishing to a
+// destination the console no longer draws.
+//
+// WARNING RATHER THAN CONTROL, deliberately. Refusing the write would be wrong:
+// the row genuinely was saved, and a 500 invites a retry that re-POSTs a
+// destination. The honest ceiling is that the response states what did not
+// happen.
+//
+// AT ERROR, NOT WARN. Nothing retries this, so it is not a transient to be
+// noted -- it is a divergence that persists until somebody acts.
+func (s *Server) reconcileNow(action string) string {
+	err := s.reconcile()
+	if err == nil {
+		return ""
+	}
+	s.log.Error("the pipeline was not reconciled after a change was saved; "+
+		"stored state and the running processes have diverged and nothing retries this",
+		"action", action, "err", err)
+	return action + " was saved, but the running pipeline could not be updated to " +
+		"match it: " + err.Error() + ". Nothing retries this automatically; the change " +
+		"takes effect on the next successful save or a restart."
+}
+
+// writeMutation writes a mutation's response with the reconcile warning folded
+// in, under the key the SPA already reads for a partial success. #709.
+//
+// THROUGH THE MARSHALLED FORM rather than a field on every response type,
+// because the payloads here are a mix of maps and a dozen typed structs and
+// adding a field to each is exactly the per-site decision this is removing.
+// The shape is preserved exactly; one key is added, and only when there is
+// something to say.
+//
+// A payload that is not a JSON object -- an array, a bare string -- cannot
+// carry the key, so it is written unchanged and the warning is logged. No
+// mutation response in this package has that shape today, and the guard test
+// TestEveryReconcileGoesThroughTheHelper is what keeps a new one from arriving
+// unnoticed.
+func writeMutation(w http.ResponseWriter, status int, warning string, v any) {
+	if warning == "" {
+		writeJSON(w, status, v)
+		return
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		writeJSON(w, status, v)
+		return
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+		writeJSON(w, status, v)
+		return
+	}
+	msg, err := json.Marshal([]string{warning})
+	if err != nil {
+		writeJSON(w, status, v)
+		return
+	}
+	// APPENDED TO warnings RATHER THAN A KEY OF ITS OWN, because two handlers
+	// already build that array and the SPA already renders it. A second array
+	// meaning the same thing is a second thing for the next reader to miss.
+	if existing, ok := obj["warnings"]; ok {
+		var list []string
+		if err := json.Unmarshal(existing, &list); err == nil {
+			list = append(list, warning)
+			if merged, err := json.Marshal(list); err == nil {
+				msg = merged
+			}
+		}
+	}
+	obj["warnings"] = msg
+	obj["reconcileFailed"] = json.RawMessage("true")
+	writeJSON(w, status, obj)
+}
+
+// writeMutationNoContent is writeMutation for a handler whose success is 204.
+//
+// A 204 has no body to put a warning in, so a reconcile that failed must change
+// the STATUS: 200 with the warning, rather than a silent 204 that says the
+// whole operation succeeded.
+func writeMutationNoContent(w http.ResponseWriter, warning string) {
+	if warning == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"warnings":        []string{warning},
+		"reconcileFailed": true,
+	})
 }
 
 // tools is the FFmpeg this install detected.

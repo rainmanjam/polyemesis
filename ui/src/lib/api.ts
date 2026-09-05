@@ -185,7 +185,40 @@ async function request<T>(
         : "";
     throw new ApiError(resp.status, msg, code);
   }
+  reportReconcileFailure(body);
   return body as T;
+}
+
+/** Raise the amber toast for a mutation the server saved but could not apply.
+ *
+ *  #709. Sixteen handlers used to log a failed reconcile and answer 200, so the
+ *  dashboard raised a green toast for a change that had not taken effect —
+ *  worst of all on a destination delete, where the row left the list while the
+ *  FFmpeg child kept publishing. The server now says `reconcileFailed: true`
+ *  and puts the sentence in `warnings`.
+ *
+ *  IN THE TRANSPORT, NOT AT THE CALL SITES, and that is the point. The
+ *  alternative is fifteen call sites each deciding whether to read the flag,
+ *  which is the same per-site choice the server change removed — and the next
+ *  mutation added would get whichever one its neighbour happened to be. Here it
+ *  is one decision, and a route added tomorrow is covered without being told.
+ *
+ *  A DestinationDialog-style caller that already renders `warnings` itself
+ *  keeps doing so; the flag is what this reads, so a warning the server
+ *  attached for another reason is not doubled. */
+function reportReconcileFailure(body: unknown): void {
+  if (!body || typeof body !== "object") return;
+  const b = body as { reconcileFailed?: unknown; warnings?: unknown };
+  if (b.reconcileFailed !== true) return;
+  const lines = Array.isArray(b.warnings) ? b.warnings.filter((w) => typeof w === "string") : [];
+  const msg =
+    lines.length > 0
+      ? (lines[lines.length - 1] as string)
+      : "The change was saved but the running pipeline could not be updated to match it.";
+  // Long, because this one is not a status update: nothing retries the
+  // reconcile, so an operator who misses it is looking at a console that
+  // disagrees with the processes until the next successful save or a restart.
+  void import("sonner").then(({ toast }) => toast.warning(msg, { duration: 15000 }));
 }
 
 const get = <T,>(p: string) => request<T>(p);

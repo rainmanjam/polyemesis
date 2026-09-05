@@ -524,14 +524,12 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.reconcile(); err != nil {
-		s.log.Warn("reconcile after key refresh", "err", err)
-	}
+	rw := s.reconcileNow("the refreshed stream key")
 	resp := map[string]any{"destination": updated}
 	if len(warnings) > 0 {
 		resp["warnings"] = warnings
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeMutation(w, http.StatusOK, rw, resp)
 }
 
 // firstBackup is the secondary ingest a destination will publish to, or empty.

@@ -657,8 +657,8 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 	// file (see testServer's comment). A running server always has one, and the
 	// nil-manager check that used to stand here is inside Server.reconcile now,
 	// where every caller gets it.
-	if err := s.reconcile(); err != nil {
-		writeError(w, http.StatusInternalServerError, "media deleted but reconcile failed: "+err.Error())
+	if rw := s.reconcileNow("the media delete"); rw != "" {
+		writeError(w, http.StatusInternalServerError, rw)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
