@@ -53,6 +53,13 @@ export const LIMITS = {
    *  the ceiling is memory reserved, not a limit on what may accumulate. */
   chatHistoryMessages: { min: 1, max: 50_000 } as Bound,
 
+  /** The YouTube Data API allowance, mirroring db.MaxYouTubeQuotaUnits. Ten
+   *  million is two orders above the largest allowance anyone reports being
+   *  granted, so a typo is caught while a real audit outcome is not. The
+   *  minimum is 1 rather than 0 because the server refuses a zero: too low only
+   *  makes chat slow, too high makes it die mid-broadcast. */
+  youtubeQuotaUnits: { min: 1, max: 10_000_000 } as Bound,
+
   /** Alert delivery attempts, first try included. Ten is already several
    *  minutes of chasing one dead endpoint, because the backoff behind it
    *  climbs to a 30s ceiling. */

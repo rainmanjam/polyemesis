@@ -1443,5 +1443,7 @@
   "tour.sourcesNav.body": "来源就是一路输入流，它的发布地址和令牌都在这个页面上。 install.sh 在运行时只打印过一次；如果那个终端已经关掉，这里就是重新找回它们的地方。每个来源都带有自己的令牌，因此多个编码器可以推向同一个安装而彼此不混。",
   "tour.sourcesNav.title": "来源：编码器连接的地方",
   "chrome.programme": "节目",
-  "chrome.programmeHint": "控制台一次只跟踪一个节目。屏幕上的所有内容都描述该节目。"
+  "chrome.programmeHint": "控制台一次只跟踪一个节目。屏幕上的所有内容都描述该节目。",
+  "set.chatYouTubeQuota": "YouTube 每日 API 配额",
+  "set.chatYouTubeQuotaNote": "本安装所用 Google Cloud 项目每天可用的配额单位。默认项目为 10,000；只有在 YouTube API Services 审核为你提高额度后才调高此值。设得太低只会让聊天变慢，设得太高会让聊天在直播中途停止，并且要等到太平洋时间午夜才恢复。"
 }

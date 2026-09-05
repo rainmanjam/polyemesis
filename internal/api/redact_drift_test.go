@@ -210,12 +210,19 @@ var leafSensitivity = map[string]sensitivity{
 	// An IANA zone name. It says how times are WRITTEN DOWN and reveals
 	// nothing about the install beyond roughly where its operator sits, which
 	// the destinations already say louder.
-	"settings.display.timeZone":       sPublic,
-	"settings.chat.historyMessages":   sPublic,
-	"settings.chat.keepMessages":      sPublic,
-	"settings.chat.purgeMinutes":      sPublic,
-	"settings.chat.retentionHours":    sPublic,
-	"settings.destinations.staggerMs": sPublic,
+	"settings.display.timeZone":     sPublic,
+	"settings.chat.historyMessages": sPublic,
+	"settings.chat.keepMessages":    sPublic,
+	"settings.chat.purgeMinutes":    sPublic,
+	"settings.chat.retentionHours":  sPublic,
+	// A quota is an allowance, not a credential. It says how many API units
+	// this install's Google Cloud project has per day -- a number the operator
+	// was told by Google and that reveals nothing about who they are or how to
+	// act as them. The project's client id and secret ARE credentials and live
+	// in platform_creds, classified there.
+	"settings.chat.youtubeQuotaUnits":   sPublic,
+	"settings.chat.youtubeQuotaReserve": sPublic,
+	"settings.destinations.staggerMs":   sPublic,
 	// The declared GPU inventory. PUBLIC, every field, and deliberately: it is
 	// a description of the machine's hardware, which is the same class of fact
 	// as ffmpeg.GPUInfo -- already served in full by GET

@@ -1276,6 +1276,25 @@ export interface ChatRetentionSettings {
    *
    *  Optional so a client that predates it can still PUT settings. */
   historyMessages?: number;
+  /** The daily YouTube Data API allowance this install's Google Cloud project
+   *  actually has, and how much of it the pacer holds back so that reading can
+   *  never make sending impossible.
+   *
+   *  YouTube chat is polled, not pushed, and every poll is billed — so this
+   *  number is the denominator of every pacing decision the server makes. A
+   *  default project gets 10,000 units a day; an operator who has been granted
+   *  more by a YouTube API Services audit says so here, and until they can the
+   *  pacer polls as slowly as the default demands however much they were
+   *  granted.
+   *
+   *  Wrong in the two directions is not symmetric. Too low only makes chat
+   *  slow. Too high makes it die mid-broadcast and stay dead until midnight
+   *  Pacific, which is the failure the pacer exists to prevent — so the server
+   *  refuses a zero rather than defaulting quietly.
+   *
+   *  Optional so a client that predates it can still PUT settings. */
+  youtubeQuotaUnits?: number;
+  youtubeQuotaReserve?: number;
 }
 
 /** Install-wide alert delivery policy. Per-rule matching lives on the rule. */

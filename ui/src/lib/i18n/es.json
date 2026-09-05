@@ -1443,5 +1443,7 @@
   "tour.sourcesNav.body": "Una fuente es un feed entrante, y esta página es donde están su dirección de publicación y su token. install.sh los imprimió una sola vez, al ejecutarse; si esa terminal se cerró, aquí es donde volver a encontrarlos. Cada fuente lleva su propio token, de modo que varios codificadores pueden publicar en una instalación y seguir separados.",
   "tour.sourcesNav.title": "Fuentes: donde se conecta un codificador",
   "chrome.programme": "Programa",
-  "chrome.programmeHint": "La consola sigue un programa a la vez. Todo lo que ves describe este."
+  "chrome.programmeHint": "La consola sigue un programa a la vez. Todo lo que ves describe este.",
+  "set.chatYouTubeQuota": "Cuota diaria de la API de YouTube",
+  "set.chatYouTubeQuotaNote": "Unidades por día para el proyecto de Google Cloud de esta instalación. Un proyecto predeterminado recibe 10 000; auméntalo solo si una auditoría de YouTube API Services te ha concedido más. Un valor bajo solo ralentiza el chat; uno demasiado alto lo detiene a mitad de emisión hasta la medianoche del Pacífico."
 }

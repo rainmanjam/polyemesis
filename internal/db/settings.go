@@ -1759,6 +1759,30 @@ type ChatSettings struct {
 	// This ring is allocated in full at construction, so the number is memory
 	// reserved on a silent channel exactly as on a busy one.
 	HistoryMessages int `json:"historyMessages"`
+	// YouTubeQuotaUnits is the daily YouTube Data API allowance this install's
+	// Google Cloud project actually has, and YouTubeQuotaReserve is what the
+	// pacer holds back so that reading can never make sending impossible.
+	//
+	// SETTABLE BECAUSE IT IS THE OPERATOR'S FACT, NOT OURS. internal/chat's
+	// pacer is "time-until-reset divided by calls-still-affordable", so the
+	// allowance is the denominator of every decision it makes -- and its own
+	// comment has always said "operators who have been granted more should say
+	// so here". Nothing could: the field existed and no caller set it, so an
+	// install granted a million units after a YouTube API Services audit was
+	// paced against ten thousand, polling roughly a hundred times slower than
+	// it was entitled to, silently.
+	//
+	// THE TWO DIRECTIONS OF BEING WRONG ARE NOT SYMMETRIC, which is why the
+	// validator below refuses a zero rather than falling back to the default.
+	// Too LOW only makes chat slow, and the operator can see that. Too HIGH
+	// makes chat die early and stay dead until midnight Pacific, which is the
+	// exact failure the pacer exists to prevent -- so a value that arrived by
+	// accident must be refused where it is entered, not absorbed.
+	//
+	// It is still an ESTIMATE and the payload says so: QuotaStatus.Estimated is
+	// always true, because nothing here can ask Google what the allowance is.
+	YouTubeQuotaUnits   int `json:"youtubeQuotaUnits"`
+	YouTubeQuotaReserve int `json:"youtubeQuotaReserve"`
 }
 
 // ChatSettings bounds, chosen to be generous rather than tidy. The cost of the
@@ -1781,6 +1805,17 @@ const (
 	// reads on the page as chat being broken, and the operator has no way to
 	// tell those apart.
 	MinChatHistoryMessages = 1
+	// MaxYouTubeQuotaUnits is ten million: two orders above the largest
+	// allowance anyone reports being granted, so a typo is caught while a real
+	// audit outcome is not. There is no minimum beyond "positive" -- a project
+	// with a tiny allowance is a real thing and the pacer handles it by
+	// polling slowly, which is the correct answer rather than a refusal.
+	MaxYouTubeQuotaUnits = 10_000_000
+	// MaxYouTubeQuotaReserveFraction bounds the reserve against the allowance
+	// rather than absolutely. A reserve at or above the whole budget leaves
+	// nothing to read with, so chat would pause the moment it started and the
+	// quota panel would show a full tank -- a refusal that looks like a bug.
+	MaxYouTubeQuotaReserveFraction = 2 // reserve may not exceed limit/2
 )
 
 func (c ChatSettings) problems() []string {
@@ -1793,6 +1828,26 @@ func (c ChatSettings) problems() []string {
 	if c.KeepMessages < 0 || c.KeepMessages > MaxChatKeepMessages {
 		probs = append(probs, fmt.Sprintf(
 			"chat keep %d messages out of range (0-%d)", c.KeepMessages, MaxChatKeepMessages))
+	}
+	// REFUSED RATHER THAN DEFAULTED, for the reason on the field: a wrong
+	// allowance in the generous direction kills chat mid-broadcast and leaves it
+	// dead until midnight Pacific.
+	if c.YouTubeQuotaUnits < 1 || c.YouTubeQuotaUnits > MaxYouTubeQuotaUnits {
+		probs = append(probs, fmt.Sprintf(
+			"youtube quota %d units out of range (1-%d). This is the allowance your "+
+				"Google Cloud project actually has; the default project is 10000",
+			c.YouTubeQuotaUnits, MaxYouTubeQuotaUnits))
+	}
+	if c.YouTubeQuotaReserve < 0 {
+		probs = append(probs, fmt.Sprintf(
+			"youtube quota reserve %d cannot be negative", c.YouTubeQuotaReserve))
+	} else if c.YouTubeQuotaUnits > 0 &&
+		c.YouTubeQuotaReserve > c.YouTubeQuotaUnits/MaxYouTubeQuotaReserveFraction {
+		probs = append(probs, fmt.Sprintf(
+			"youtube quota reserve %d is more than half the %d-unit allowance, which "+
+				"would leave too little to read chat with; the reserve exists only so "+
+				"that sending stays possible after reading",
+			c.YouTubeQuotaReserve, c.YouTubeQuotaUnits))
 	}
 	// Zero would be a sweep every tick. Bounded below rather than defaulted
 	// silently, because a 0 here is far more likely to be a mistake than a wish.
@@ -1997,6 +2052,11 @@ func DefaultSettings() Settings {
 			// before this was reachable, so making it settable does not also
 			// change it -- pinned by TestChatDefaultsMatchTheChatPackage.
 			HistoryMessages: 500,
+			// chat.DefaultQuotaUnits and chat.DefaultQuotaReserve. Same rule as
+			// HistoryMessages above: exposing a knob is not an occasion to move
+			// it, and TestYouTubeQuotaDefaultsMatchTheChatPackage pins that.
+			YouTubeQuotaUnits:   10000,
+			YouTubeQuotaReserve: 200,
 		},
 		// alerts' own defaultAttempts, for the same reason: exposing a knob is
 		// not an occasion to move it. Pinned by

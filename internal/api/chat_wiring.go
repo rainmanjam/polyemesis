@@ -174,10 +174,26 @@ func (s *Server) chatToken(id int64) chat.TokenFunc {
 func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Adapter, error) {
 	switch a.Platform {
 	case db.PlatformYouTube:
+		// THE ALLOWANCE IS THE DENOMINATOR OF EVERY PACING DECISION, so it has
+		// to come from the operator rather than from a constant. #732: the
+		// field existed and nothing set it, so an install granted a larger
+		// quota after a YouTube API Services audit was paced against the
+		// default ten thousand -- polling roughly a hundred times slower than
+		// it was entitled to, with nothing saying so.
+		//
+		// This is the STARTUP half of the answer only. chatAdapter runs once
+		// per process -- from StartChat, from main -- so a value read here and
+		// held would be a value a settings save could not change until a
+		// restart. ApplyYouTubeQuota is the other half, pushing a saved
+		// allowance into the adapter this built; settingsReload records the
+		// pair as ClassLive on the strength of it.
+		units, reserve := youtubeQuotaPair(s.youtubeQuota())
 		return chat.NewYouTube(chat.YouTubeConfig{
-			AccountRef: a.AccountRef,
-			Channel:    a.AccountName,
-			Token:      s.chatToken(a.ID),
+			AccountRef:   a.AccountRef,
+			Channel:      a.AccountName,
+			Token:        s.chatToken(a.ID),
+			QuotaUnits:   units,
+			QuotaReserve: reserve,
 		})
 
 	case db.PlatformTwitch:
@@ -251,6 +267,60 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		})
 	}
 	return nil, fmt.Errorf("polyemesis has no chat adapter for %s", a.Platform)
+}
+
+// youtubeQuota is the operator's stated YouTube allowance, falling back to the
+// package defaults when settings cannot be read. #732.
+//
+// FALLING BACK RATHER THAN FAILING, and only for an unreadable store: a chat
+// adapter that refused to start because the settings table hiccupped would take
+// chat down for a reason unrelated to chat. The defaults are the same numbers
+// NewYouTube would have used anyway, so this degrades to the old behaviour
+// rather than to something new.
+//
+// A stored ZERO cannot arrive here -- ChatSettings.problems refuses it on the
+// way in, for the reason on the field: too high kills chat mid-broadcast, so a
+// value that arrived by accident is refused where it is entered. The guard
+// below is for a row written before this field existed.
+func (s *Server) youtubeQuota() db.ChatSettings {
+	cs := db.DefaultSettings().Chat
+	set, err := s.store.GetSettings()
+	if err != nil {
+		return cs
+	}
+	if set.Chat.YouTubeQuotaUnits > 0 {
+		cs.YouTubeQuotaUnits = set.Chat.YouTubeQuotaUnits
+		cs.YouTubeQuotaReserve = set.Chat.YouTubeQuotaReserve
+	}
+	return cs
+}
+
+// youtubeQuotaPair is the one place the stored allowance stops being two
+// interchangeable ints and becomes the two distinct types the chat package
+// takes.
+//
+// poka-yoke: gives the compiler the only thing it needs to reject a swapped
+// YouTubeConfig literal [control]
+//
+// db.ChatSettings holds both numbers as int, because it is a settings row and
+// every other field in it is a plain scalar too. chat.YouTubeConfig holds them
+// as chat.QuotaUnits and chat.QuotaReserve, because there the two roles are
+// worth telling apart -- a 10,000-unit allowance with a 200 reserve written the
+// wrong way round becomes a 200-unit allowance, the clamp then drops the
+// reserve, and the adapter paces a hundred times too slowly with nothing
+// reporting a problem. That is #732 restored in silence.
+//
+// One conversion has to exist somewhere between an int pair and a typed pair,
+// and this is deliberately it: a single named line whose two halves read
+// Units-to-Units and Reserve-to-Reserve, rather than a conversion at every
+// construction site. It is not itself compiler-proof, which is why
+// TestYouTubeQuotaPairKeepsTheAllowanceAndTheReserveApart asserts it directly.
+//
+// Carrying the two types all the way back into db.ChatSettings would close even
+// that line, and is the right next step; it is not taken here because it lands
+// in internal/db and internal/api/handlers.go, which this change does not own.
+func youtubeQuotaPair(cs db.ChatSettings) (chat.QuotaUnits, chat.QuotaReserve) {
+	return chat.QuotaUnits(cs.YouTubeQuotaUnits), chat.QuotaReserve(cs.YouTubeQuotaReserve)
 }
 
 // kickBroadcasterID turns the stored account ref back into the numeric id Kick

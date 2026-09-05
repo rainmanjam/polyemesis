@@ -244,6 +244,15 @@ var settingsReload = map[string]ReloadRule{
 	"chat.keepMessages":   {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
 	"chat.purgeMinutes":   {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
 
+	// THIS TABLE IS WHY THESE TWO ARE LIVE. #732 wired the operator's allowance
+	// into NewYouTube, which is read once per adapter, and chatAdapter runs once
+	// per process -- so the honest answer here was ClassNextStart: saved, shown
+	// as saved, and not paced against until a restart. Writing that down made it
+	// obviously the same defect #732 was filed for, one step later, and pushing
+	// it into the running adapter was smaller than the admission would have been.
+	"chat.youtubeQuotaUnits":   {ClassLive, "ApplyYouTubeQuota", "pushed into every attached adapter that paces against an allowance; today that is YouTube"},
+	"chat.youtubeQuotaReserve": {ClassLive, "ApplyYouTubeQuota", "the floor held back for sends, pushed with the allowance so the two can never disagree"},
+
 	"automod.enabled":              {ClassLive, "ApplyAutomod", "rebuilds the automod engine out of band"},
 	"automod.platformEnabled":      {ClassLive, "ApplyAutomod", "rebuilds the automod engine"},
 	"automod.on":                   {ClassLive, "ApplyAutomod", "rebuilds the matrix"},

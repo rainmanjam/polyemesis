@@ -1443,5 +1443,7 @@
   "tour.sourcesNav.body": "Una sorgente è un flusso in ingresso, e questa pagina è dove stanno il suo indirizzo di pubblicazione e il suo token. install.sh li ha stampati una volta sola, quando è stato eseguito; se quel terminale è stato chiuso, è qui che si ritrovano. Ogni sorgente porta il proprio token, così più encoder possono pubblicare su una sola installazione restando separati.",
   "tour.sourcesNav.title": "Sorgenti: dove si collega un encoder",
   "chrome.programme": "Programma",
-  "chrome.programmeHint": "La console segue un programma alla volta. Tutto ciò che vedi descrive questo."
+  "chrome.programmeHint": "La console segue un programma alla volta. Tutto ciò che vedi descrive questo.",
+  "set.chatYouTubeQuota": "Quota giornaliera dell'API YouTube",
+  "set.chatYouTubeQuotaNote": "Unità al giorno per il progetto Google Cloud di questa installazione. Un progetto predefinito ne riceve 10.000; aumentala solo se un audit di YouTube API Services te ne ha concesse di più. Troppo bassa rallenta soltanto la chat, troppo alta la interrompe a metà diretta fino a mezzanotte del Pacifico."
 }

@@ -81,15 +81,53 @@ type QuotaStatus struct {
 	// IntervalMS is the poll spacing currently in force, so "chat is a bit
 	// behind" has a visible cause.
 	IntervalMS int64 `json:"intervalMs"`
-	// Paused is set when polling has stopped until the reset.
+	// Paused reports that polling has stopped until the reset. It is DERIVED
+	// from the other fields every time this struct is built rather than stored
+	// on the budget, so it cannot outlive the condition that caused it — see
+	// the note on budget.
 	Paused bool `json:"paused,omitempty"`
 	// Estimated is always true, and is in the payload so the UI can say so
 	// rather than presenting an inference as a measurement.
 	Estimated bool `json:"estimated"`
 }
 
+// QuotaUnits is a whole daily allowance and QuotaReserve is the slice of it
+// held back for sends. They are two named types rather than two ints because
+// they are the same shape, they travel together, and getting them the wrong way
+// round is silent.
+//
+// poka-yoke: makes passing the reserve where the allowance belongs a compile
+// error rather than a hundredfold pacing error [control]
+//
+// The mistake this blocks is concrete. #732 was an install with a raised quota
+// that polled as though it had the default; the fix routed the operator's two
+// numbers from settings into YouTubeConfig, where they sit as adjacent fields
+// of identical type. Swapping them there — 10,000 units and a 200 reserve
+// becoming a 200 allowance with a 10,000 reserve — compiles, passes every test
+// that does not read the pacing, and then loses the reserve to the clamp below
+// and paces against 200 units a day. That is #732 again, silently, from a
+// two-line edit. With distinct types the swapped literal does not build.
+//
+// They are ints under the hood, and clampQuota is deliberately where they stop
+// being distinct: inside the budget both are just units of the same currency
+// and arithmetic between them is the point, so keeping the types past the
+// boundary would buy conversions rather than safety.
+type (
+	QuotaUnits   int
+	QuotaReserve int
+)
+
 // budget tracks unit spend against a daily allowance that resets at midnight
 // Pacific.
+//
+// THERE IS NO paused FIELD, and that is the design rather than an omission.
+// Whether polling has stopped is not a fact of its own: it is entirely decided
+// by whether anything is still affordable, so storing it would create a second
+// copy of an answer the numbers already give — one that can be set true by the
+// path that noticed and then never cleared by the path that fixed it. That is
+// exactly what happened: setLimits raised the allowance, left the flag standing,
+// and chat stayed paused until midnight Pacific with 990,000 units to spend.
+// status derives it instead, and a derived answer cannot disagree with itself.
 type budget struct {
 	mu      sync.Mutex
 	limit   int
@@ -99,28 +137,87 @@ type budget struct {
 	now     func() time.Time
 	// interval is the last computed spacing, kept only for reporting.
 	interval time.Duration
-	paused   bool
 }
 
-func newBudget(limit, reserve int, now func() time.Time) *budget {
+// clampQuota is the ONE spelling of what an acceptable allowance is, shared by
+// construction and by setLimits.
+//
+// poka-yoke: keeps construction and a settings save from reading the same two
+// stored numbers differently [control]
+//
+// It is a function rather than two copies because the two callers must agree:
+// an operator who saves a reserve larger than their allowance would otherwise
+// get "no reserve" at boot and "chat paused forever" after a save, from the
+// same two numbers. The refusals below are each a decision, not a default.
+//
+// EVERY rule about an acceptable pair belongs in here, including the two that
+// used to sit upstream in NewYouTube. Those were the same defect one level up:
+// NewYouTube mapped a zero reserve to DefaultQuotaReserve before calling
+// newBudget, and setLimits went straight to this function, which kept the zero
+// — so the stored pair (10,000, 0) meant a 200-unit reserve at boot and no
+// reserve at all after a save, and the operator's ability to reply to chat
+// quietly disappeared the first time they pressed Save. A rule that lives
+// outside the one function named for the rule is a rule with a second, silent
+// spelling.
+//
+// It takes the two distinct types and returns plain ints because this is the
+// boundary: past here they are the same currency and are added and subtracted
+// against each other.
+func clampQuota(limit QuotaUnits, reserve QuotaReserve) (int, int) {
+	l, r := int(limit), int(reserve)
+	if l <= 0 {
+		l = DefaultQuotaUnits
+	}
+	if r <= 0 {
+		// Zero means "unset", not "spend everything on reading". A row written
+		// before the reserve field existed reads as zero, and honouring that
+		// literally would take away the operator's ability to say anything on
+		// stream at the exact moment they most need to.
+		r = DefaultQuotaReserve
+	}
+	if r >= l {
+		// A reserve that swallows the whole allowance would pause reading
+		// permanently. Something is misconfigured; behave as if there is no
+		// reserve rather than as if there is no chat. This is checked AFTER the
+		// default above so that a small allowance is not handed a 200-unit
+		// reserve it cannot afford.
+		r = 0
+	}
+	return l, r
+}
+
+func newBudget(limit QuotaUnits, reserve QuotaReserve, now func() time.Time) *budget {
 	if now == nil {
 		now = time.Now
 	}
-	if limit <= 0 {
-		limit = DefaultQuotaUnits
-	}
-	if reserve < 0 {
-		reserve = 0
-	}
-	if reserve >= limit {
-		// A reserve that swallows the whole allowance would pause reading
-		// permanently. Something is misconfigured; behave as if there is no
-		// reserve rather than as if there is no chat.
-		reserve = 0
-	}
-	b := &budget{limit: limit, reserve: reserve, now: now}
+	l, r := clampQuota(limit, reserve)
+	b := &budget{limit: l, reserve: r, now: now}
 	b.resetAt = quotaResetAfter(now())
 	return b
+}
+
+// setLimits replaces the allowance on a budget that is already spending against
+// it, so a settings save reaches a chat connection that has been up for hours.
+//
+// USED IS DELIBERATELY NOT RESET. The units already spent today were spent
+// against YouTube's counter, not against this struct, and YouTube will not
+// forget them because polyemesis was reconfigured. Clearing it here would let
+// an operator mint themselves a fresh allowance by saving the settings page,
+// and the first thing they would learn is that the real quota ran out anyway --
+// at which point reads stop with no warning, which is the failure the reserve
+// exists to prevent.
+//
+// NOTHING HERE CLEARS A PAUSE, because there is nothing to clear: status derives
+// the pause from what is affordable, so raising the allowance on a budget that
+// stopped at 4pm resumes it by arithmetic. The version of this function that
+// shipped with a stored flag did not, and the operator who raised their quota
+// and pressed Save got a chat that stayed dark until midnight Pacific.
+func (b *budget) setLimits(limit QuotaUnits, reserve QuotaReserve) {
+	l, r := clampQuota(limit, reserve)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.limit = l
+	b.reserve = r
 }
 
 // spend records units and rolls the day over when the reset has passed.
@@ -138,7 +235,6 @@ func (b *budget) rollLocked() {
 		return
 	}
 	b.used = 0
-	b.paused = false
 	b.resetAt = quotaResetAfter(now)
 }
 
@@ -169,11 +265,12 @@ func (b *budget) intervalFor(apiInterval time.Duration, idle float64) (time.Dura
 
 	calls := b.affordable(QuotaCostListMessages)
 	if calls <= 0 {
-		b.paused = true
+		// The zero interval is a report, not a state: status says "paused" by
+		// asking the same question this line just asked, so there is nothing
+		// here to set and nothing anywhere else to remember to clear.
 		b.interval = 0
 		return 0, false
 	}
-	b.paused = false
 
 	d := MinPollInterval
 	if apiInterval > d {
@@ -214,10 +311,15 @@ func (b *budget) allow(cost int) bool {
 // pause stops polling until the reset, which is what a quotaExceeded response
 // means whatever our own tally said. The platform is the authority; this is
 // where our estimate gets corrected by it.
+//
+// It pauses by SPENDING rather than by raising a flag: writing the whole
+// allowance to used is what "the platform says there is nothing left" actually
+// means, and it is the same fact status reads. A flag alongside it would be a
+// second copy that setLimits could not fix, which is the bug this shape exists
+// to make unwritable.
 func (b *budget) pause() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.paused = true
 	b.used = b.limit
 }
 
@@ -235,8 +337,14 @@ func (b *budget) status() QuotaStatus {
 		Remaining:  remaining,
 		ResetAt:    b.resetAt,
 		IntervalMS: b.interval.Milliseconds(),
-		Paused:     b.paused,
-		Estimated:  true,
+		// DERIVED, NEVER STORED. "Paused" is precisely "there is not one more
+		// read left in the budget", so it is computed from the numbers in the
+		// same breath they are reported. The version that stored it could
+		// answer Paused=true and Remaining=990,000 at the same time, which is
+		// how an operator who raised their quota at 4pm and pressed Save got a
+		// chat that stayed dark until midnight Pacific.
+		Paused:    b.affordable(QuotaCostListMessages) <= 0,
+		Estimated: true,
 	}
 }
 

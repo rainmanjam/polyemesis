@@ -1443,5 +1443,7 @@
   "tour.sourcesNav.body": "Een bron is één binnenkomende feed, en op deze pagina staan het publicatieadres en het token ervan. install.sh drukte ze één keer af, tijdens het uitvoeren; is die terminal gesloten, dan vind je ze hier terug. Elke bron draagt een eigen token, zodat meerdere encoders naar één installatie kunnen publiceren en toch gescheiden blijven.",
   "tour.sourcesNav.title": "Bronnen: waar een encoder verbinding maakt",
   "chrome.programme": "Programma",
-  "chrome.programmeHint": "De console volgt één programma tegelijk. Alles op het scherm beschrijft dit programma."
+  "chrome.programmeHint": "De console volgt één programma tegelijk. Alles op het scherm beschrijft dit programma.",
+  "set.chatYouTubeQuota": "Dagelijks YouTube API-quotum",
+  "set.chatYouTubeQuotaNote": "Eenheden per dag voor het Google Cloud-project van deze installatie. Een standaardproject krijgt er 10.000; verhoog dit alleen als een YouTube API Services-audit u meer heeft toegekend. Te laag maakt de chat alleen trager — te hoog laat hem middenin een uitzending stoppen tot middernacht Pacific-tijd."
 }

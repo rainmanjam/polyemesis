@@ -1654,6 +1654,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// just reconfigured.
 	logtz.Set(displayLocation(settings.Display.TimeZone))
 	ApplyChatRetention(s.chat, settings.Chat)
+	ApplyYouTubeQuota(s.chat, settings.Chat)
 	// Same argument for automod: a matrix that stores, returns 200 and keeps
 	// deciding on the old cells is the silent no-op this file already warns
 	// about twice. Rebuilding the engine here is also what recompiles a changed
@@ -1732,6 +1733,32 @@ func ApplyChatRetention(hub *chat.Hub, c db.ChatSettings) {
 	// here for the same reason: it decides what a browser connecting one second
 	// after the save receives.
 	hub.SetHistory(c.HistoryMessages)
+}
+
+// ApplyYouTubeQuota pushes the operator's stated daily allowance into every
+// chat connection that paces against one.
+//
+// NOT SHARED WITH STARTUP, which is where it differs from ApplyChatRetention
+// next door. That one configures the Hub itself, which exists before anything
+// is attached to it; this one pushes into adapters, and at the point main
+// applies chat settings there are none -- StartChat runs sixty-odd lines later.
+// A call there would read as though it did something and would apply to zero
+// connections every time. The startup path is already covered, by chatAdapter
+// reading the stored allowance when it constructs the adapter; this method is
+// what the SAVE path needs, and only that.
+//
+// WHY THIS IS NOT SIMPLY READ WHEN NEEDED. The allowance is the denominator of
+// the pacing calculation, and the thing that spends against it is a budget that
+// also carries today's tally and reset time. Re-reading settings per poll would
+// mean rebuilding that, losing the tally, and handing the operator a fresh
+// allowance every time -- so the number is pushed and the spend is kept.
+func ApplyYouTubeQuota(hub *chat.Hub, c db.ChatSettings) {
+	// NO NIL CHECK HERE, unlike ApplyChatRetention above, and that asymmetry is
+	// deliberate rather than an omission: Hub.SetQuota answers a nil receiver
+	// itself, and a test in internal/chat pins that it does. A second check
+	// here would be a line no test can fail -- mutating it away changed nothing,
+	// which is the definition of a guard nobody is watching.
+	hub.SetQuota(c.YouTubeQuotaUnits, c.YouTubeQuotaReserve)
 }
 
 // ApplyAlertSettings pushes the stored delivery policy into the running engines.

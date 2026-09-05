@@ -56,9 +56,18 @@ type YouTubeConfig struct {
 	LiveChatID string
 	// QuotaUnits is the project's daily allowance. Operators who have been
 	// granted more should say so here; the pacer is only as good as this
-	// number.
-	QuotaUnits   int
-	QuotaReserve int
+	// number. QuotaReserve is the slice of it held back for sends.
+	//
+	// poka-yoke: the two distinct types make writing them into this literal the
+	// wrong way round a compile error [control]
+	//
+	// They are adjacent, they are both counts of quota units, and a swap turns
+	// a 10,000-unit allowance with a 200 reserve into a 200-unit allowance --
+	// which clampQuota then strips the reserve from, leaving chat pacing a
+	// hundred times too slowly with nothing anywhere saying so. That is #732,
+	// reachable from a two-line edit. See QuotaUnits in quota.go.
+	QuotaUnits   QuotaUnits
+	QuotaReserve QuotaReserve
 	// Backfill bounds the first poll's history.
 	Backfill time.Duration
 
@@ -96,12 +105,16 @@ func NewYouTube(cfg YouTubeConfig) (*YouTubeAdapter, error) {
 	if cfg.Backfill <= 0 {
 		cfg.Backfill = ytDefaultBackfill
 	}
-	if cfg.QuotaUnits <= 0 {
-		cfg.QuotaUnits = DefaultQuotaUnits
-	}
-	if cfg.QuotaReserve <= 0 {
-		cfg.QuotaReserve = DefaultQuotaReserve
-	}
+	// THE QUOTA PAIR IS NOT NORMALISED HERE. It used to be -- an unset
+	// allowance became DefaultQuotaUnits and an unset reserve became
+	// DefaultQuotaReserve on the way past -- and that was a second, quieter
+	// copy of clampQuota sitting upstream of the real one. The two disagreed:
+	// the stored pair (10,000, 0) got a 200-unit reserve through this
+	// constructor and no reserve at all through setLimits, so an operator's
+	// ability to reply on stream vanished the first time they pressed Save
+	// without changing anything. clampQuota is now the only place that decides
+	// what an acceptable pair is, and newBudget below is how this constructor
+	// asks it.
 	return &YouTubeAdapter{
 		cfg:    cfg,
 		budget: newBudget(cfg.QuotaUnits, cfg.QuotaReserve, cfg.Now),
@@ -625,4 +638,33 @@ func (y *YouTubeAdapter) classify(err error) error {
 		return Fatal(fmt.Errorf("youtube rejected the access token; reconnect the YouTube account in Settings → Platforms"))
 	}
 	return err
+}
+
+// SetQuota replaces the daily allowance this adapter paces against, without
+// dropping the connection.
+//
+// #732 wired the operator's number into NewYouTube, which answered the question
+// only for a process that had not started yet: chatAdapter runs once, from
+// StartChat, from main. An operator granted a larger quota by a YouTube API
+// Services audit would set it, be told it was saved, and go on polling at the
+// default rate until the next restart -- which is the same defect #732 was
+// filed for, moved one step later.
+//
+// The reload table would not let that ship. Every leaf in db.Settings has to
+// name what happens when it changes mid-stream, and the honest answer without
+// this method was ClassNextStart, a class whose own documentation calls it an
+// admission rather than a design.
+//
+// The parameters are plain ints because this method IS the quotaPacer
+// interface, whose whole point is that a platform package can declare the
+// capability without importing anything of ours -- see hub.go. The two named
+// types start one line down, at the call into setLimits, which is the last
+// place the pair can be got the wrong way round; that line is covered by
+// TestSetQuotaReachesTheRealYouTubeAdapterAndItsReportedQuota, which pushes a
+// distinguishable pair through a real adapter and reads back what it reports.
+func (y *YouTubeAdapter) SetQuota(units, reserve int) {
+	if y == nil || y.budget == nil {
+		return
+	}
+	y.budget.setLimits(QuotaUnits(units), QuotaReserve(reserve))
 }

@@ -41,6 +41,29 @@ func TestChatDefaultsMatchTheChatPackage(t *testing.T) {
 	}
 }
 
+// The YouTube quota defaults are the pacer's own, for the same reason as the
+// two above: making a knob reachable is not an occasion to move it. #732.
+//
+// This one matters more than the parity itself. The allowance is the
+// denominator of every pacing decision internal/chat makes, so a default here
+// that disagreed with the package would change how fast an install polls the
+// first time anybody saved the settings form -- for a field they never touched,
+// on the one platform that bills per poll.
+func TestYouTubeQuotaDefaultsMatchTheChatPackage(t *testing.T) {
+	got := db.DefaultSettings().Chat
+
+	if got.YouTubeQuotaUnits != chat.DefaultQuotaUnits {
+		t.Errorf("db default chat.youtubeQuotaUnits = %d, chat.DefaultQuotaUnits = %d",
+			got.YouTubeQuotaUnits, chat.DefaultQuotaUnits)
+	}
+	if got.YouTubeQuotaReserve != chat.DefaultQuotaReserve {
+		t.Errorf("db default chat.youtubeQuotaReserve = %d, chat.DefaultQuotaReserve = %d -- "+
+			"the reserve is what keeps sending possible after reading has spent the day, "+
+			"so a disagreement here is four messages an operator thought they had",
+			got.YouTubeQuotaReserve, chat.DefaultQuotaReserve)
+	}
+}
+
 func TestAlertDefaultsMatchTheAlertsPackage(t *testing.T) {
 	got := db.DefaultSettings().Alerts
 
