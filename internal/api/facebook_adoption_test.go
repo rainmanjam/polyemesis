@@ -221,3 +221,84 @@ func TestNoBackupCallIsMadeForADestinationThatDidNotAskForOne(t *testing.T) {
 		})
 	}
 }
+
+// A PLATFORM THAT REFUSES THE BACKUP IS REPORTED, NOT SWALLOWED. #727.
+//
+// The destination is otherwise saved and goes live on its primary feed, so this
+// must never be a refusal of the whole edit -- but it must not be silence
+// either. A redundant feed that simply never appears is the failure the whole
+// change exists to end.
+func TestABackupFacebookRefusesIsReportedAsAWarning(t *testing.T) {
+	s, _, store, stub := stubbedServer(t, config.Config{})
+	id := linkFacebookAccount(t, s, store)
+
+	dest, err := store.CreateDestination(&db.Destination{
+		Name: "fb", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+		URL: "rtmps://live-api-s.facebook.com:443/rtmp", StreamKey: "778899",
+		Enabled: true, AccountID: &id, BackupIngestWanted: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+	stub.setReject(func(c stubCall) string {
+		if strings.HasSuffix(c.Path, "/input_streams") {
+			return "Backup streams cannot be added once live"
+		}
+		return ""
+	})
+
+	warn := s.fillFacebookBackupIngest(context.Background(), dest)
+	if warn == "" {
+		t.Fatal("Facebook refused the backup and the operator was told nothing; the " +
+			"destination goes live on one path while the toggle says two")
+	}
+	if !strings.Contains(warn, "otherwise saved") {
+		t.Errorf("the warning does not say the destination is still fine, so it reads "+
+			"as a failed save: %q", warn)
+	}
+	if dest.BackupURL != "" {
+		t.Errorf("a backup endpoint was stored despite the refusal: %q", dest.BackupURL)
+	}
+}
+
+// tokenFor failing is its own arm: the account row is unreadable or its token
+// cannot be refreshed. The destination is still saved -- it goes live on its
+// primary feed -- so this is a warning naming the account, not a refusal.
+func TestABackupIsWarnedAboutWhenTheAccountCannotBeRead(t *testing.T) {
+	s, _, store, stub := stubbedServer(t, config.Config{})
+
+	// AN EXPIRED ACCOUNT WHOSE REFRESH IS REFUSED. tokenFor hands back a valid
+	// account or refreshes it; a refresh the platform rejects is the ordinary
+	// way this fails, and it is the state an operator sits in after revoking
+	// the app.
+	acct, err := store.UpsertPlatformAccount(s.box, &db.PlatformAccount{
+		Platform: db.PlatformFacebook, AccountName: "A Profile", AccountRef: "",
+		AccessToken: "stale", RefreshToken: "also-stale",
+		ExpiresAt: time.Now().Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("UpsertPlatformAccount: %v", err)
+	}
+	stub.setReject(func(stubCall) string { return "the app no longer has access" })
+
+	dest, err := store.CreateDestination(&db.Destination{
+		Name: "fb", Kind: db.DestRTMP, Platform: db.PlatformFacebook,
+		URL: "rtmps://live-api-s.facebook.com:443/rtmp", StreamKey: "778899",
+		Enabled: true, AccountID: &acct.ID, BackupIngestWanted: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateDestination: %v", err)
+	}
+
+	warn := s.fillFacebookBackupIngest(context.Background(), dest)
+	if warn == "" {
+		t.Fatal("the account could not be read and nothing was said, so the toggle " +
+			"reads as accepted and no redundant feed ever appears")
+	}
+	if !strings.Contains(warn, "otherwise saved") {
+		t.Errorf("the warning does not say the destination is still fine: %q", warn)
+	}
+	if dest.BackupURL != "" {
+		t.Errorf("a backup was stored without an account to ask: %q", dest.BackupURL)
+	}
+}

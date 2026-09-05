@@ -155,3 +155,116 @@ func TestABackupThatFacebookRefusesIsReported(t *testing.T) {
 		t.Fatal("a refused backup reported success")
 	}
 }
+
+// The refusal arms, each of which is a different thing going wrong and a
+// different sentence the operator ends up reading. They are here because a
+// backup that silently does not appear is the failure #727 exists to end, and
+// every one of these is a route to exactly that.
+func TestTheBackupIngestRefusalsAreDistinct(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// serve is the whole stub: each case breaks a different step.
+		serve func(w http.ResponseWriter, r *http.Request)
+		// target is the Page ref, empty for the profile.
+		target string
+		want   string
+	}{
+		{
+			// THE TARGET ITSELF. A revoked token or a Page the account no
+			// longer manages fails before the backup is ever requested.
+			name:   "the target will not resolve",
+			target: "1234",
+			serve: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"Invalid OAuth access token","code":190}}`))
+			},
+			want: "",
+		},
+		{
+			// THE CREATE SUCCEEDS AND SAYS NOTHING, and the follow-up read of
+			// the video fails too. Both halves have to fail for this arm.
+			name: "the create is thin and the video cannot be read back",
+			serve: func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/input_streams"):
+					writeJSONFor(w, map[string]any{"id": "77-1"})
+				case strings.HasSuffix(r.URL.Path, "/me"),
+					strings.HasSuffix(r.URL.Path, "/accounts"):
+					writeJSONFor(w, map[string]any{"id": "9001", "name": "A Profile"})
+				default:
+					w.WriteHeader(http.StatusInternalServerError)
+					_, _ = w.Write([]byte(`{"error":{"message":"temporarily unavailable","code":2}}`))
+				}
+			},
+			// NO WORDING ASSERTED. fbAdvice passes a 5xx through unwrapped --
+			// its added context is for the refusals it can recognise -- so what
+			// reaches the operator here is the transport error naming the
+			// endpoint and the status. That is informative and is not this
+			// test's to change; what matters is that the step fails rather than
+			// producing a silent half-configured backup.
+			want: "",
+		},
+		{
+			// BOTH READS SUCCEED AND NEITHER CARRIES AN INGEST. Facebook
+			// accepted the request and produced nothing usable, which is not
+			// an error anywhere in the transport and must not read as success.
+			name: "nothing anywhere carries an ingest url",
+			serve: func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/input_streams"):
+					writeJSONFor(w, map[string]any{"id": "77-1"})
+				case strings.HasSuffix(r.URL.Path, "/accounts"):
+					writeJSONFor(w, map[string]any{"data": []any{}})
+				case strings.HasSuffix(r.URL.Path, "/me"):
+					writeJSONFor(w, map[string]any{"id": "9001", "name": "A Profile"})
+				default:
+					writeJSONFor(w, map[string]any{"id": "77"})
+				}
+			},
+			want: "returned no URL",
+		},
+		{
+			// AN INGEST THAT WILL NOT SPLIT. Destination.Target() joins the
+			// server and key back with a single slash, so a URL this cannot
+			// split reversibly must be refused rather than stored in halves
+			// that do not reassemble.
+			name: "the ingest url cannot be split into server and key",
+			serve: func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/input_streams"):
+					writeJSONFor(w, map[string]any{"id": "77-1", "secure_stream_url": "not-a-url"})
+				default:
+					writeJSONFor(w, map[string]any{"id": "9001", "name": "A Profile"})
+				}
+			},
+			want: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(tc.serve))
+			t.Cleanup(srv.Close)
+			f := &Facebook{endpoints: newEndpoints([]ProviderOption{WithBaseURL(srv.URL)})}
+
+			// A NAMED TARGET (a Page) rather than the profile, so the resolve
+			// is a real read that can fail on its own. With an empty ref the
+			// profile is assumed without asking anybody, and the first case
+			// below would fail one step later than it means to.
+			ing, err := f.AddBackupIngest(context.Background(), "tok", tc.target, "77")
+			if err == nil {
+				t.Fatalf("reported success; a backup that silently does not appear is the "+
+					"failure this exists to end (got %+v)", ing)
+			}
+			if ing != nil {
+				t.Errorf("an ingest came back alongside the error: %+v", ing)
+			}
+			if tc.want != "" && !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the error does not say which step failed (want %q): %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func writeJSONFor(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
