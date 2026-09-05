@@ -756,8 +756,11 @@ func guides() []SetupGuide {
 				"self-hosted setup normally needs — but if anyone else is going to connect their account here, " +
 				"the app has to be submitted for Advanced Access to publish_video (profiles) or " +
 				"pages_manage_posts (Pages) first. Budget days, not minutes, and start it before you need it. " +
-				"Facebook also issues a new ingest URL and key for every broadcast, so connecting the account " +
-				"creates the broadcast: there is no permanent key to reuse.",
+				"Connecting the account is also what CREATES each broadcast: the key it fetches belongs to one " +
+				"live video, and refreshing starts a new one. If you want a key that lasts, Live Producer → " +
+				"Advanced settings → Persistent stream key issues one — polyemesis cannot read it, so you paste " +
+				"it, and it does not go stale. A pasted key has no live-video id, so chat, metadata and " +
+				"End broadcast still need the connected account.",
 			Steps: []string{
 				"Before anything else: decide who will connect accounts. Only people listed under Roles → Roles " +
 					"(admins, developers, testers) can use an app in development mode. Anyone else requires App Review, " +
