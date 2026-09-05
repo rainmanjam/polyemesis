@@ -10,6 +10,62 @@ its first tagged release.
 
 ### Security
 
+- **A destination's stream key was recoverable from a WebSocket opened with a
+  read-scoped token.** `eventView` decided what a read socket may see by looking
+  each event type up in a policy table — and both of its unknown cases passed
+  the event through untouched. An event type this build did not classify, or a
+  policy constant added without a case, sent the admin shape of the payload.
+  Both now fail closed. That change also caused, and caught, a regression worth
+  recording: making the default fail closed silently dropped **every** ordinary
+  event — Log, Status, Levels, Stats, Loudness — because `wsPassthrough` is
+  `iota`, the zero value, and had always reached the sender through the `default`
+  arm being replaced. The general hazard is now a comment at the case: *the arm
+  being replaced has to be enumerated first, and a zero-valued constant is the
+  member most likely to be sitting in it unnoticed.* (#716)
+- **A password change deleted every API token and left their sockets
+  streaming.** Revocation had two halves — delete the row, and mark the id in an
+  in-process set the `/ws` tick consults. `handleRevokeAPIToken` did both;
+  `handleChangePassword`, which calls `DeleteAllAPITokens`, marked nothing, so a
+  socket opened with an admin token kept receiving admin-shaped events until it
+  or the process died, while the response correctly reported zero surviving
+  tokens. The set is gone: the tick asks the store, the way the session half
+  beside it already asks for `users.token_epoch`, and fails closed on a read
+  error. Every deletion path — that handler, the password change, `resetadmin`,
+  and whatever is added next — is now honoured without being told to be. (#706)
+- **`requireScope` passed a request carrying no principal.** Its siblings
+  `requireSession` and `requireCSRF` both fail closed on the same condition.
+  Every route group carrying it also carries `requireAuth` today, so no shipped
+  behaviour changes — what is gone is the affordance of mounting them apart or
+  in the wrong order and losing scope enforcement silently. (#710)
+- **A hook secret that would not decrypt degraded to an unsigned delivery.**
+  Restore a backup taken on another machine, or rotate `secret.key`, and the
+  row loaded with an empty secret — and the dispatcher skips the signature
+  header on an empty secret, so every webhook went out **unsigned**. At the far
+  end that is indistinguishable from a forgery. `Hook.SecretUnreadable` is now
+  the same device `Destination.KeyUnreadable` already was: the row still loads
+  intact, and three places refuse to deliver it. (#715)
+- **An unknown destination kind was written outside the data directory.**
+  `db.DestKind` and `ffmpeg.DestKind` are declared independently and joined by a
+  conversion that compiles for any string, so a fifth kind reached a `default`
+  that answered "this does not write a file" — and without the confinement an
+  audio file target is written relative to the process working directory. The
+  default now fails closed and treats an unknown kind as a file writer. (#712)
+- **The Windows ACL builder stored SIDs as unpinned integers.**
+  `TrusteeValueFromSID` converts a `*windows.SID` to a `uintptr`, and `x/sys`
+  documents that the caller must pin it for the lifetime of the trustee. Both
+  SIDs were Go-allocated and collectable while the `EXPLICIT_ACCESS` outlived
+  the call. The consequence was a wrong DACL, on the files holding every stream
+  key. (#705)
+- **The security gate's 32 open findings are closed** — two fixed and six
+  suppressed with guards, each verdict checked against the code rather than
+  taken from the rule id. `web/Dockerfile` installed with npm lifecycle scripts
+  enabled while CI passed `--ignore-scripts` everywhere else, so the hardening
+  stopped at the edge of the container; and `contents: read` sat at workflow
+  level, granting it to every job whether or not the job reads the repository.
+  Both workflows now start from `permissions: {}` with each job declaring its
+  own, so a job added later that forgets gets nothing and fails at checkout
+  rather than inheriting quietly. (#681, #690)
+
 - **The server no longer listens on every interface in the clear by default.**
   With no `config.yaml` and no `--addr`, the default is now `127.0.0.1:8080`.
   An explicit address still binds where it is told, with the existing warning.
@@ -68,69 +124,91 @@ its first tagged release.
   command position** (#658), and backticks in a generated comment no longer
   execute at write time.
 
-### Changed
-
-- **`make check` runs what CI runs** — `POLYEMESIS_LEDGER=strict`, `-race`, and
-  the Windows vet leg — and its parity guard compares the invocation rather
-  than a substring. **Cost:** the local loop goes from about four minutes to
-  about twenty-five, and needs a C toolchain.
-- **Lint can fail the build.** `react-hooks/exhaustive-deps` and
-  `no-unused-vars` are errors; the three violations that surfaced are fixed
-  with no suppressions.
-- **SonarCloud waits for its quality gate**, `web/`'s lockfile is watched by
-  dependabot and audited, every shell script is parsed by `make sh-syntax`, and
-  the installer suite refuses to report PASS when a step did not run (#657).
-- **The website says what the server actually does.** Platform figures are
-  recommendations, not enforced ceilings — and the build now asserts them
-  against `internal/db/platforms.go`, so the page cannot drift from the code.
-  A stale "YouTube is capped at 3 destinations" warning that fired with no
-  YouTube selected is gone.
-- **Eight documentation contradictions corrected**, including `UPGRADING.md`
-  telling an operator mid-migration that a CI-tested feature does not work, and
-  `MODULES.md` naming a base image and Go version no Dockerfile uses.
-
-
-### Added
-
-- **The meters page says when tracks are not being metered, and which programme
-  it is showing.** One metering process merges every track, and amerge refuses
-  past 64 channels, so a very wide ingest was measured as a prefix while the
-  remaining tracks drew flat bars — indistinguishable from silence, on the one
-  page whose whole job is telling those apart. The server had counted the
-  dropped tracks since the limit existed and the number reached nothing:
-  `ffmpeg.MetersDropped` says in as many words that it exists "so a wide ingest
-  degrades visibly", and then no caller carried it out of the package. It now
-  rides on the source payload and renders as a warning that says *unmeasured,
-  not silent*. Absent when nothing is dropped, which is every install anyone is
-  likely to run.
-
-  The page also names its programme when the install has more than one. The
-  console follows a single programme, resolved to whichever source is first when
-  nothing is remembered, and there is still no switcher — so this does not fix
-  multi-source metering, it stops the page reporting a slice of the install as
-  though it were all of it. See #638 for the switcher.
-
-### Removed
-
-- **The compact/comfortable layout density toggle**, which sat in the console
-  header between the username and the language switcher. It rescaled Tailwind's
-  `--spacing` inside `<main>` to pack more onto the screen, and remembered the
-  choice per browser.
-
-  Removed whole rather than hidden. The preference was applied on mount from
-  `localStorage`, so deleting only the button would have left anyone already
-  switched to compact stuck there with nothing to switch back — a setting with
-  no control is worse than no setting. Gone with it: the `useDensity` hook, the
-  `DENSITY` block in `index.css`, and the `dense-grid` opt-in that gave the
-  dashboard a fourth column above 1280px.
-
-  `Button`'s `min-h`/`min-w` floors and its `rem`-spelled icon size stay. They
-  were written to stop compact from shrinking a control carrying Start and Stop
-  below a reliable target, and at a single density they are no-ops — but a
-  minimum target size is worth asserting on its own terms rather than left to
-  whatever the spacing scale produces.
-
-### Fixed
+- **Windows CI aborted the Go runtime, fifteen times in 1,607 job runs.** Traced
+  to a mechanism rather than patched at the symptom: 21 engine methods refused a
+  nil receiver by *dereferencing* it, which on amd64 is a hardware nil check
+  rather than a Go panic — and on Windows those are not equivalent. A hardware
+  nil check raises a real `EXCEPTION_ACCESS_VIOLATION`, and Go's recovery from
+  one writes below the goroutine stack into the adjacent heap span
+  (golang/go#81238, open). Every one of the 21 now refuses with an explicit
+  check, which is the upstream reporter's own negative control. (#440)
+- **A destination starved by the relay reported itself healthy.** The failure
+  dump said only that the sink recorded no bytes, which is compatible with every
+  fault a sender can have and pointed squarely at the sink, which was innocent —
+  three plausible fixes were verified against real runs and all three were
+  wrong. The destination's own stderr had named it in one line the whole time,
+  in `data/logs/process.log`. (#674, #675)
+- **Three sidecars could be published into an engine that had already
+  stopped**, leaving a child nothing in the program could signal, report or
+  count — the exact shape of an FFmpeg found on a production host with its ppid
+  pointing at the live server and no escalation anywhere in the log. A
+  process census now counts what the operating system counts rather than what
+  the program still holds a handle to. (#631)
+- **Stopping an engine leaked a relay port and a hub subscription per auxiliary
+  child.** The pool is 500 ports shared across every engine and `Manager.Sync`
+  stops one on every source delete, so each delete burned three ports plus one
+  per rendition, permanently, until `Allocate` began failing everywhere at once
+  and read as an unrelated fault. Measured before the fix. Releasing a port now
+  also requires holding it, so a stale integer cannot hand back a port the pool
+  has since reassigned to another engine. (#707, #708)
+- **A relay subscriber name collision silently replaced one consumer.** The hub
+  registered by bare map assignment, so a second consumer under an existing name
+  replaced the first — which kept running, kept a correct command line, kept a
+  green card, and received nothing. The hub logged *"relay subscriber added"*
+  either way, so the log positively confirmed the wrong thing. An occupied name
+  is now refused, and `Unsubscribe` no longer reports removing something it did
+  not have. (#711)
+- **Twelve mutation handlers reported success for a reconcile that failed.** Two
+  spellings lived side by side in one package — three turned the error into a
+  500, twelve logged it and returned 200 — and nothing in the signature said
+  which was right. `Engine.Reconcile` is event-driven with no ticker, so a
+  failure is never retried: stored state and the running FFmpeg diverged until
+  the next successful mutation or a restart, while the console showed a green
+  toast. The worst case was invisible — a destination delete returned
+  `{"status":"deleted"}`, the row left the list, and the child kept publishing.
+  There is now one spelling, the response carries what did not happen, and the
+  console raises the warning from the transport rather than at fifteen call
+  sites. (#709)
+- **The console reported a failed read as an empty result, and the empty result
+  gave advice.** A failed `listRenditions()` rendered *"No shared encodes yet.
+  Create one on the Renditions page first"* and a failed `listAccounts()`
+  replaced the account picker with **Connect account** — sending an operator to
+  build an encode they already had, or to re-authorise an account already
+  linked, discarding a half-filled dialog on the way. Nine further instances
+  were found by the rule that replaced the old hand-maintained filename list,
+  one of them a real bug: the metadata composer hides itself on `null` but its
+  catch stored `[]`, so a failed read rendered it with zero platforms. (#719)
+- **`kill()` was the one of three signal sites without a reaped-check**, so it
+  could signal a process group by number after the pid had been reaped and
+  possibly reissued. (#720)
+- **`stopAux` took a slot and a name that had to correspond**, with nothing
+  linking them: `e.stopAux(&e.preview, "recorder")` compiled and read correctly
+  while releasing the wrong port. One value per consumer now. (#714)
+- **An interrupted header read arrived as an unrecognisable exec failure.**
+  `ProbeFile`'s count branch folded `ctx.Err()` into its error and explained at
+  length why it had to; the header read did not, while its own comment claimed
+  the property. The caller could not tell an interrupted probe from a file
+  ffprobe disliked — and one of those must not delete the operator's upload.
+  (#696)
+- **Backup ingest could only be requested when the broadcast was created.**
+  `enable_backup_ingest` is a create parameter, so an operator turning the
+  toggle on afterwards had one route: press **Refresh key**, which starts a
+  fresh Facebook broadcast and discards the one they were configured against,
+  with its comment thread and its title. The ingest is now added to the existing
+  broadcast. (#727)
+- **Two sort calls with no comparator.** `Array.prototype.sort` has none by
+  default and compares UTF-16 code units, so the monitoring page's process
+  filter put every capital before every lowercase — `Recorder` above
+  `dest:studio-a`, regardless of the alphabet. The jobs page's weekday sort was
+  the same call on numbers and happens to be harmless at 0–6; it is fixed
+  anyway, because the fault is latent rather than absent.
+- **The clip editor's shuttle badge decided nothing** — both branches of its
+  conditional rendered the same string, so reverse read `-2x` from the negative
+  number while forward read a bare `2x`. Shuttle runs both ways and direction is
+  what the badge is for.
+- **The clip editor's transcript lines were reachable by pointer only.** Each
+  seeks the player on click and had no keyboard route at all, on the fastest way
+  to navigate a long recording.
 
 - **A `--config` path that did not exist booted a different, empty install.**
   `config.Load` returned defaults on a missing file, which is right for the
@@ -241,6 +319,138 @@ its first tagged release.
   can fail. It now also asks whether one is printed into element text, and it
   strips comments first, because the first version failed on the docstring
   explaining the bug.
+
+### Changed
+
+- **`make check` runs what CI runs** — `POLYEMESIS_LEDGER=strict`, `-race`, and
+  the Windows vet leg — and its parity guard compares the invocation rather
+  than a substring. **Cost:** the local loop goes from about four minutes to
+  about twenty-five, and needs a C toolchain.
+- **Lint can fail the build.** `react-hooks/exhaustive-deps` and
+  `no-unused-vars` are errors; the three violations that surfaced are fixed
+  with no suppressions.
+- **SonarCloud waits for its quality gate**, `web/`'s lockfile is watched by
+  dependabot and audited, every shell script is parsed by `make sh-syntax`, and
+  the installer suite refuses to report PASS when a step did not run (#657).
+- **The website says what the server actually does.** Platform figures are
+  recommendations, not enforced ceilings — and the build now asserts them
+  against `internal/db/platforms.go`, so the page cannot drift from the code.
+  A stale "YouTube is capped at 3 destinations" warning that fired with no
+  YouTube selected is gone.
+- **Eight documentation contradictions corrected**, including `UPGRADING.md`
+  telling an operator mid-migration that a CI-tested feature does not work, and
+  `MODULES.md` naming a base image and Go version no Dockerfile uses.
+
+
+- **Facebook does have a persistent stream key, and the product said it did
+  not.** Eight places — two of them operator-facing copy — stated that Facebook
+  issues a fresh key per broadcast and that there is *"no permanent key to
+  reuse"*. That is true of the key polyemesis fetches and false of Facebook:
+  Live Producer offers a persistent key under *Advanced settings*, reusable
+  every time you go live, with one stated limit of one live video at a time.
+  Meta's Graph reference documents no way to mint or read it — checked against
+  the complete endpoint list and the complete create-parameter table — so
+  polyemesis cannot fetch it, but an operator can paste it once and it does not
+  go stale. Saying the key did not exist told them not to look for it. (#724)
+
+### Added
+
+- **The meters page says when tracks are not being metered, and which programme
+  it is showing.** One metering process merges every track, and amerge refuses
+  past 64 channels, so a very wide ingest was measured as a prefix while the
+  remaining tracks drew flat bars — indistinguishable from silence, on the one
+  page whose whole job is telling those apart. The server had counted the
+  dropped tracks since the limit existed and the number reached nothing:
+  `ffmpeg.MetersDropped` says in as many words that it exists "so a wide ingest
+  degrades visibly", and then no caller carried it out of the package. It now
+  rides on the source payload and renders as a warning that says *unmeasured,
+  not silent*. Absent when nothing is dropped, which is every install anyone is
+  likely to run.
+
+  The page also names its programme when the install has more than one. The
+  console follows a single programme, resolved to whichever source is first when
+  nothing is remembered, and there is still no switcher — so this does not fix
+  multi-source metering, it stops the page reporting a slice of the install as
+  though it were all of it. See #638 for the switcher.
+
+- **A programme switcher.** `rememberProgramme` had existed since #606 and was
+  called from exactly one place, with the value the resolver had just picked —
+  so the persistence worked perfectly and only ever persisted the fallback. No
+  screen offered a way to say otherwise, and an operator running a horizontal
+  and a vertical programme watched one of them for the life of the install while
+  the other ran unwatched. (#638)
+- **The platform warning, where the rendition is actually chosen.** The
+  comparison shipped earlier as a log line at stream start: correct, and
+  unreachable. Attaching a 4K60 rendition at 40 Mbps to an X destination showed
+  nothing in the console and the operator found out from a log after committing.
+  One implementation, deliberately — the browser asks and does not derive,
+  because a second copy of a comparison whose whole value is researched, dated
+  figures in one committed file would drift the same way hand-copied numbers
+  always do. (#661)
+- **A hand-pasted Facebook key can use the broadcast its account is running.**
+  A key polyemesis fetched carries the live-video id inside it; a persistent key
+  pasted from Live Producer does not, so chat, metadata and *End broadcast* had
+  nothing to attach to. Facebook allows a persistent key one live video at a
+  time, which is what makes asking the account a fact rather than a guess — and
+  where it is not, polyemesis now refuses and names both broadcasts rather than
+  editing whichever sorted first. (#725)
+
+### Removed
+
+- **The compact/comfortable layout density toggle**, which sat in the console
+  header between the username and the language switcher. It rescaled Tailwind's
+  `--spacing` inside `<main>` to pack more onto the screen, and remembered the
+  choice per browser.
+
+  Removed whole rather than hidden. The preference was applied on mount from
+  `localStorage`, so deleting only the button would have left anyone already
+  switched to compact stuck there with nothing to switch back — a setting with
+  no control is worse than no setting. Gone with it: the `useDensity` hook, the
+  `DENSITY` block in `index.css`, and the `dense-grid` opt-in that gave the
+  dashboard a fourth column above 1280px.
+
+  `Button`'s `min-h`/`min-w` floors and its `rem`-spelled icon size stay. They
+  were written to stop compact from shrinking a control carrying Start and Stop
+  below a reliable target, and at a single density they are no-ops — but a
+  minimum target size is worth asserting on its own terms rather than left to
+  whatever the spacing scale produces.
+
+### Testing
+
+- **Three suites for the faults a 75-second run cannot see.** `#380` named
+  duration, concurrency and mid-stream failure; all three exist now, none is in
+  the CI matrix, and each refuses to believe a lie shaped like the result you
+  want. The duration suite asserts delivery *first*, because every trend it
+  watches reads flat on an idle server — a long run against a broadcast that
+  died in its first minute would otherwise report perfect health, at length. The
+  concurrency suite asserts liveness before any number, because a first attempt
+  by hand measured per-destination cost halving with every doubling: an artefact
+  of several FFmpeg readers competing on one socket until all but one died. It
+  measures **2.69% of a core for one destination and 3.44% each for six**,
+  against a published "roughly 4%" — corroborated, not contradicted. The
+  fault-injection suite pairs every injection with a positive control that must
+  fire, because a recovery suite whose fault did not land reports a perfect
+  recovery with every check green. (#380)
+- **A soak that can catch #440**, and a raised default now the runner has been
+  measured. (#700, #701)
+- **Seventeen build-time guards from a poka-yoke audit.** Each one converts a
+  decision somebody would otherwise have to remember into something the build
+  refuses: every spawn site is enrolled in the process census or carries a
+  stated reason it needs no enrolment; every spawner says whether its children
+  get a process group of their own, and the claim is checked against the code;
+  every platform either has a routing policy row or an opt-out with a reason;
+  the two RTMP switches over one closed type set are compared; and the UI's
+  read-state rule is enforced by walking every file rather than by a
+  hand-maintained list of three filenames — which is what let a dialog with five
+  instances go unnoticed. (#705–#721, #723)
+- **Guards are mutation-tested before they are trusted.** Every device above was
+  watched failing — the guard removed, the test red, the guard restored — on the
+  principle that a guard nobody has watched fail is a guard nobody should trust.
+  Three of those runs found the *test* wrong rather than the code: a recovery
+  check asserting `running`, which the driver's own header calls meaningless
+  because a crash-looping process reports it too; a fixture whose second entry
+  let an ambiguity check mask the exclusion under test; and a resolve-failure
+  case that used the profile, so it failed one step later than it meant to.
 
 ## [0.8.0] — 2026-09-01
 
