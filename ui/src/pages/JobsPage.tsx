@@ -1093,7 +1093,15 @@ function WindowEditor({
 
   const toggleDay = (i: number, day: number) => {
     const days = windows[i].days ?? [];
-    const next = days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort();
+    // NUMERIC COMPARATOR, because Array.prototype.sort has none by default: it
+    // coerces to string, so [1, 10, 2] stays in that order. Weekdays are 0-6
+    // and single digits happen to sort identically either way, so nothing was
+    // visibly wrong -- which is exactly why this is worth fixing rather than
+    // suppressing. The bug is latent until the day somebody stores a value
+    // above 9 here, and then it is a sorting fault nobody looks for.
+    const next = days.includes(day)
+      ? days.filter((d) => d !== day)
+      : [...days, day].sort((a, b) => a - b);
     set(i, { days: next });
   };
 

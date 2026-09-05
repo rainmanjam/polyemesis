@@ -731,7 +731,14 @@ export function ClipEditor() {
                 </Button>
                 {shuttle !== 0 && (
                   <Badge variant="outline" className="tnum font-mono">
-                    {shuttle > 0 ? `${shuttle}x` : `${shuttle}x`}
+                    {/* A SIGN ON THE FORWARD SPEED. Both branches of this used
+                        to be `${shuttle}x`, so the conditional decided nothing:
+                        reverse already reads "-2x" from the negative number and
+                        forward read a bare "2x", which is the same badge the
+                        pause state would show if it were rendered. Shuttle runs
+                        both ways and the direction is the thing the badge is
+                        for. */}
+                    {shuttle > 0 ? `+${shuttle}x` : `${shuttle}x`}
                   </Badge>
                 )}
 
@@ -1235,6 +1242,29 @@ function TranscriptRow({
         selected ? "bg-primary-dim" : "hover:bg-card-raised",
       )}
       onClick={onSeek}
+      // A KEYBOARD ROUTE TO THE SAME ACTION. This row seeks the player on
+      // click and had no keyboard equivalent at all, so the transcript --
+      // which is the fastest way to navigate a long recording -- was reachable
+      // by pointer only. The same pattern MediaUploads.tsx already uses for its
+      // drop zone: role, tab stop, and Enter/Space.
+      //
+      // The Scissors button inside stops propagation on its own click, so it
+      // keeps its own behaviour and its own tab stop rather than being
+      // swallowed by this one.
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSeek();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      // NO aria-label ON PURPOSE. The row already contains its timecode, its
+      // speaker and its text, so the accessible name computed from its content
+      // is the line itself -- which is what somebody navigating the transcript
+      // wants read out. A synthetic label would REPLACE that with something
+      // shorter and less useful, and would need translating into twelve
+      // locales to say less.
     >
       <span className="tnum shrink-0 font-mono text-[10px] text-subtle-foreground">
         {timecode(line.startMs).slice(0, 8)}

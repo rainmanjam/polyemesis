@@ -532,8 +532,16 @@ export function MonitoringPage() {
     [bitrate],
   );
 
+  // localeCompare, not the default sort. Array.prototype.sort compares UTF-16
+  // code units, which puts every capital before every lowercase: a filter list
+  // holding "Recorder" and "dest:studio-a" orders the capital first regardless
+  // of the alphabet, and an operator scanning for a name does not find it where
+  // they look.
   const processNames = useMemo(
-    () => Array.from(new Set(processes.map((p) => p.status.name))).sort(),
+    () =>
+      Array.from(new Set(processes.map((p) => p.status.name))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
     [processes],
   );
 
