@@ -424,10 +424,16 @@ func TestRealArchiveWorkerRefusesToReplaceAnOriginalItCannotVerify(t *testing.T)
 		return s, nil
 	}
 
+	// Quality 28 rather than the 34 this test used to reach for to go faster:
+	// with ReplaceOriginal set, 34 is now refused before the encode starts, and
+	// it is worth noticing that the number was picked here for speed by someone
+	// who was not thinking about the picture at all — which is the whole
+	// mechanism of the mistake the bound exists to stop. The speed comes from
+	// the ultrafast preset, which costs nothing anybody cares about.
 	job := mustJob(NewArchiveJob(1, ArchiveParams{
 		Recording: filepath.Base(master), DurationMS: 20000,
 		RecordedAtUnix: 1, AcknowledgeLossy: true, ReplaceOriginal: true,
-		Preset: "ultrafast", Quality: 34,
+		Preset: "ultrafast", Quality: 28,
 	}))
 	// RecordedAtUnix 1 is 1970, comfortably past any archive age.
 	err = proc.RunArchive(context.Background(), job, &fakeReporter{})
