@@ -1443,5 +1443,7 @@
   "tour.sourcesNav.body": "소스는 들어오는 피드 하나이고, 그 발행 주소와 토큰은 이 페이지에 있습니다. install.sh는 실행될 때 딱 한 번 그것들을 출력했습니다. 그 터미널을 닫았다면 다시 찾을 곳이 여기입니다. 소스마다 고유한 토큰을 가지므로, 여러 인코더가 하나의 설치본으로 송출하면서도 서로 섞이지 않습니다.",
   "tour.sourcesNav.title": "소스: 인코더가 접속하는 곳",
   "chrome.programme": "프로그램",
-  "chrome.programmeHint": "콘솔은 한 번에 하나의 프로그램만 따릅니다. 화면의 모든 내용은 이 프로그램에 대한 것입니다."
+  "chrome.programmeHint": "콘솔은 한 번에 하나의 프로그램만 따릅니다. 화면의 모든 내용은 이 프로그램에 대한 것입니다.",
+  "set.chatYouTubeQuota": "YouTube 일일 API 할당량",
+  "set.chatYouTubeQuotaNote": "이 설치의 Google Cloud 프로젝트가 하루에 사용할 수 있는 단위입니다. 기본 프로젝트는 10,000단위를 받습니다. YouTube API Services 심사에서 더 많이 승인받은 경우에만 늘리십시오. 너무 낮으면 채팅이 느려질 뿐이지만, 너무 높으면 방송 도중 멈춰 태평양 표준시 자정까지 복구되지 않습니다."
 }

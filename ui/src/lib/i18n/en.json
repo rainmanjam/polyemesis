@@ -1443,5 +1443,7 @@
   "tour.sourcesNav.body": "A source is one incoming feed, and this page is where its publish address and its token live. install.sh printed them once, when it ran; if that terminal has been closed, this is where to find them again. Each source carries its own token, so several encoders can publish to one install and stay apart.",
   "tour.sourcesNav.title": "Sources: where an encoder connects",
   "chrome.programme": "Programme",
-  "chrome.programmeHint": "The console follows one programme at a time. Everything on screen describes this one."
+  "chrome.programmeHint": "The console follows one programme at a time. Everything on screen describes this one.",
+  "set.chatYouTubeQuota": "YouTube daily API quota",
+  "set.chatYouTubeQuotaNote": "Units per day for this install's Google Cloud project. A default project gets 10,000; raise this only if a YouTube API Services audit granted you more. Too low just slows chat — too high makes it stop mid-broadcast until midnight Pacific."
 }

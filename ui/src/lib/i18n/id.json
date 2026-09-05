@@ -1443,5 +1443,7 @@
   "tour.sourcesNav.body": "Sumber adalah satu umpan masuk, dan di halaman inilah alamat publikasi serta tokennya berada. install.sh mencetak keduanya sekali saja, ketika dijalankan; jika terminal itu sudah ditutup, di sinilah keduanya dapat ditemukan lagi. Setiap sumber membawa tokennya sendiri, sehingga beberapa encoder dapat mengirim ke satu instalasi dan tetap terpisah.",
   "tour.sourcesNav.title": "Sumber: tempat sebuah encoder terhubung",
   "chrome.programme": "Program",
-  "chrome.programmeHint": "Konsol mengikuti satu program pada satu waktu. Semua yang tampil menjelaskan program ini."
+  "chrome.programmeHint": "Konsol mengikuti satu program pada satu waktu. Semua yang tampil menjelaskan program ini.",
+  "set.chatYouTubeQuota": "Kuota harian API YouTube",
+  "set.chatYouTubeQuotaNote": "Unit per hari untuk proyek Google Cloud instalasi ini. Proyek bawaan mendapat 10.000; naikkan hanya jika audit YouTube API Services memberi Anda lebih. Terlalu rendah hanya memperlambat obrolan — terlalu tinggi menghentikannya di tengah siaran hingga tengah malam waktu Pasifik."
 }

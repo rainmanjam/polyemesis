@@ -1443,5 +1443,7 @@
   "tour.sourcesNav.body": "Une source est un flux entrant, et cette page est l'endroit où vivent son adresse de publication et son jeton. install.sh les a affichés une seule fois, à son exécution ; si ce terminal a été fermé, c'est ici qu'on les retrouve. Chaque source porte son propre jeton, de sorte que plusieurs encodeurs peuvent diffuser vers une même installation en restant distincts.",
   "tour.sourcesNav.title": "Sources : là où un encodeur se connecte",
   "chrome.programme": "Programme",
-  "chrome.programmeHint": "La console suit un programme à la fois. Tout ce qui est affiché décrit celui-ci."
+  "chrome.programmeHint": "La console suit un programme à la fois. Tout ce qui est affiché décrit celui-ci.",
+  "set.chatYouTubeQuota": "Quota quotidien de l'API YouTube",
+  "set.chatYouTubeQuotaNote": "Unités par jour pour le projet Google Cloud de cette installation. Un projet par défaut en reçoit 10 000 ; ne l'augmentez que si un audit YouTube API Services vous en a accordé davantage. Trop bas ralentit simplement le chat ; trop haut l'interrompt en pleine diffusion jusqu'à minuit, heure du Pacifique."
 }

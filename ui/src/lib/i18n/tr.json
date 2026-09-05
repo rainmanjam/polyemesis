@@ -1443,5 +1443,7 @@
   "tour.sourcesNav.body": "Kaynak, gelen tek bir yayındır ve yayın adresi ile belirteci bu sayfada durur. install.sh bunları çalışırken yalnızca bir kez yazdırdı; o terminal kapatıldıysa yeniden bulunacakları yer burasıdır. Her kaynak kendi belirtecini taşır, böylece birden çok kodlayıcı tek bir kuruluma yayın gönderip yine de birbirinden ayrı kalabilir.",
   "tour.sourcesNav.title": "Kaynaklar: bir kodlayıcının bağlandığı yer",
   "chrome.programme": "Program",
-  "chrome.programmeHint": "Konsol aynı anda tek bir programı izler. Ekrandaki her şey bu programı anlatır."
+  "chrome.programmeHint": "Konsol aynı anda tek bir programı izler. Ekrandaki her şey bu programı anlatır.",
+  "set.chatYouTubeQuota": "YouTube günlük API kotası",
+  "set.chatYouTubeQuotaNote": "Bu kurulumun Google Cloud projesi için günlük birim sayısı. Varsayılan bir proje 10.000 birim alır; bunu yalnızca bir YouTube API Services denetimi size daha fazlasını verdiyse yükseltin. Çok düşük olması sohbeti yalnızca yavaşlatır; çok yüksek olması yayın ortasında durdurur ve Pasifik saatiyle gece yarısına kadar geri gelmez."
 }

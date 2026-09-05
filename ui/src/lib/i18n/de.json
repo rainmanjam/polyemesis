@@ -1443,5 +1443,7 @@
   "tour.sourcesNav.body": "Eine Quelle ist ein eingehender Feed, und auf dieser Seite stehen ihre Publish-Adresse und ihr Token. install.sh hat beides beim Ausführen genau einmal ausgegeben; wenn das Terminal geschlossen wurde, sind sie hier wiederzufinden. Jede Quelle hat ihr eigenes Token, sodass mehrere Encoder auf eine Installation senden und trotzdem getrennt bleiben.",
   "tour.sourcesNav.title": "Quellen: wo ein Encoder sich verbindet",
   "chrome.programme": "Programm",
-  "chrome.programmeHint": "Die Konsole folgt jeweils einem Programm. Alles auf dem Bildschirm beschreibt dieses."
+  "chrome.programmeHint": "Die Konsole folgt jeweils einem Programm. Alles auf dem Bildschirm beschreibt dieses.",
+  "set.chatYouTubeQuota": "YouTube-Tageskontingent (API)",
+  "set.chatYouTubeQuotaNote": "Einheiten pro Tag für das Google-Cloud-Projekt dieser Installation. Ein Standardprojekt erhält 10.000; erhöhen Sie diesen Wert nur, wenn ein YouTube-API-Services-Audit Ihnen mehr gewährt hat. Zu niedrig verlangsamt nur den Chat — zu hoch lässt ihn mitten in der Übertragung bis Mitternacht (Pazifik) aussetzen."
 }

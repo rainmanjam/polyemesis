@@ -174,10 +174,23 @@ func (s *Server) chatToken(id int64) chat.TokenFunc {
 func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Adapter, error) {
 	switch a.Platform {
 	case db.PlatformYouTube:
+		// THE ALLOWANCE IS THE DENOMINATOR OF EVERY PACING DECISION, so it has
+		// to come from the operator rather than from a constant. #732: the
+		// field existed and nothing set it, so an install granted a larger
+		// quota after a YouTube API Services audit was paced against the
+		// default ten thousand -- polling roughly a hundred times slower than
+		// it was entitled to, with nothing saying so.
+		//
+		// Read at ADAPTER CONSTRUCTION rather than cached, because this whole
+		// function runs again when chat is rewired, which is what makes a
+		// settings change take effect without a restart.
+		cs := s.youtubeQuota()
 		return chat.NewYouTube(chat.YouTubeConfig{
-			AccountRef: a.AccountRef,
-			Channel:    a.AccountName,
-			Token:      s.chatToken(a.ID),
+			AccountRef:   a.AccountRef,
+			Channel:      a.AccountName,
+			Token:        s.chatToken(a.ID),
+			QuotaUnits:   cs.YouTubeQuotaUnits,
+			QuotaReserve: cs.YouTubeQuotaReserve,
 		})
 
 	case db.PlatformTwitch:
@@ -251,6 +264,32 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		})
 	}
 	return nil, fmt.Errorf("polyemesis has no chat adapter for %s", a.Platform)
+}
+
+// youtubeQuota is the operator's stated YouTube allowance, falling back to the
+// package defaults when settings cannot be read. #732.
+//
+// FALLING BACK RATHER THAN FAILING, and only for an unreadable store: a chat
+// adapter that refused to start because the settings table hiccupped would take
+// chat down for a reason unrelated to chat. The defaults are the same numbers
+// NewYouTube would have used anyway, so this degrades to the old behaviour
+// rather than to something new.
+//
+// A stored ZERO cannot arrive here -- ChatSettings.problems refuses it on the
+// way in, for the reason on the field: too high kills chat mid-broadcast, so a
+// value that arrived by accident is refused where it is entered. The guard
+// below is for a row written before this field existed.
+func (s *Server) youtubeQuota() db.ChatSettings {
+	cs := db.DefaultSettings().Chat
+	set, err := s.store.GetSettings()
+	if err != nil {
+		return cs
+	}
+	if set.Chat.YouTubeQuotaUnits > 0 {
+		cs.YouTubeQuotaUnits = set.Chat.YouTubeQuotaUnits
+		cs.YouTubeQuotaReserve = set.Chat.YouTubeQuotaReserve
+	}
+	return cs
 }
 
 // kickBroadcasterID turns the stored account ref back into the numeric id Kick

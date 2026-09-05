@@ -1443,5 +1443,7 @@
   "tour.sourcesNav.body": "Źródło to jeden przychodzący sygnał, a na tej stronie znajdują się jego adres publikacji i token. install.sh wypisał je dokładnie raz, przy uruchomieniu; jeśli tamten terminal został zamknięty, tutaj można je znaleźć ponownie. Każde źródło ma własny token, więc kilka koderów może publikować do jednej instalacji i pozostać oddzielone.",
   "tour.sourcesNav.title": "Źródła: tutaj łączy się koder",
   "chrome.programme": "Program",
-  "chrome.programmeHint": "Konsola śledzi jeden program naraz. Wszystko na ekranie dotyczy tego programu."
+  "chrome.programmeHint": "Konsola śledzi jeden program naraz. Wszystko na ekranie dotyczy tego programu.",
+  "set.chatYouTubeQuota": "Dzienny limit API YouTube",
+  "set.chatYouTubeQuotaNote": "Jednostki na dobę dla projektu Google Cloud tej instalacji. Domyślny projekt otrzymuje 10 000; zwiększ tę wartość tylko wtedy, gdy audyt YouTube API Services przyznał Ci więcej. Zbyt niska jedynie spowalnia czat — zbyt wysoka zatrzymuje go w trakcie transmisji aż do północy czasu pacyficznego."
 }

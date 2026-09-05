@@ -754,6 +754,8 @@ function chatFrom(draft: Settings): Required<ChatRetentionSettings> {
     keepMessages: draft.chat?.keepMessages ?? 2000,
     purgeMinutes: draft.chat?.purgeMinutes ?? 5,
     historyMessages: draft.chat?.historyMessages ?? 500,
+    youtubeQuotaUnits: draft.chat?.youtubeQuotaUnits ?? 10000,
+    youtubeQuotaReserve: draft.chat?.youtubeQuotaReserve ?? 200,
   };
 }
 
@@ -924,6 +926,33 @@ function PipelineSettings({
                 className="w-32"
               />
               <span className="text-[10px] text-muted-foreground">{t("set.chatSendNote")}</span>
+            </div>
+
+            {/* YOUTUBE IS THE ONLY PLATFORM HERE THAT BILLS FOR CHAT. Twitch is
+                an IRC socket and Kick posts webhooks; both are free and
+                real-time. YouTube is polled and every poll costs 5 of a daily
+                10,000, so this number is the denominator of every pacing
+                decision the server makes — and until #732 nothing could tell it
+                the operator had been granted more. */}
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="chat-yt-quota">{t("set.chatYouTubeQuota")}</Label>
+              <Input
+                id="chat-yt-quota"
+                type="number"
+                min={LIMITS.youtubeQuotaUnits.min}
+                max={LIMITS.youtubeQuotaUnits.max}
+                value={draft.chat?.youtubeQuotaUnits ?? 10000}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    chat: { ...chatFrom(draft), youtubeQuotaUnits: Number(e.target.value) },
+                  })
+                }
+                className="w-32"
+              />
+              <span className="text-[10px] text-muted-foreground">
+                {t("set.chatYouTubeQuotaNote")}
+              </span>
             </div>
           </div>
 
