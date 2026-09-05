@@ -53,6 +53,7 @@ RTMP_PORT=1935
 
 MODE=""            # docker | binary
 TLS_MODE="off"     # off | selfsigned | acme
+CHECK_PUBLIC_IP=false  # --check-public-ip: ask a third party what the world sees
 DOMAIN_NAME=""
 ACME_EMAIL=""
 # Both ingest ports are published by default, matching what the server now
@@ -188,6 +189,99 @@ local_addresses() {
   elif command -v ifconfig >/dev/null 2>&1; then
     ifconfig 2>/dev/null | awk '/inet /{print $2}' | sed 's/^addr://'
   fi
+}
+
+# public_ip asks a third party what address the world sees this box as.
+#
+# OPT-IN ONLY, behind --check-public-ip, and that is the whole design. Every
+# other check in this installer is answerable from the machine itself; this one
+# is not, and it cannot be made so. A box behind NAT holds 192.168.x.y on its
+# interface while the A record correctly points at the WAN address, and nothing
+# local can tell that apart from a record left pointing at an old host.
+#
+# THE COST IS NOT BANDWIDTH. It is that a third party is told this install
+# exists, from this address, at this moment. That is a small thing and it is
+# still somebody else's log, so it is the operator's decision rather than the
+# default -- which is the same reason the resolved-address comparison reports
+# UNKNOWN instead of asking anybody.
+#
+# Three services, first answer wins, five seconds each. Silence is not a
+# failure: the caller falls back to the local comparison.
+public_ip() {
+  command -v curl >/dev/null 2>&1 || return 1
+  local ip svc
+  for svc in https://ifconfig.me https://api.ipify.org https://icanhazip.com; do
+    ip="$(curl -s -4 --max-time 5 "$svc" 2>/dev/null | tr -d "[:space:]")"
+    case "$ip" in
+      *[!0-9.]*|"") continue ;;
+      *) printf '%s\n' "$ip"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# suggested_tls_mode is the interactive default, decided rather than assumed.
+#
+# IT MIRRORS tls.mode: auto, which internal/config resolves as: a public FQDN
+# plus a contact address means acme, and anything else means selfsigned. The
+# installer used to default to selfsigned unconditionally, so the operator who
+# had already done the DNS work -- the one case where acme is both correct and
+# free -- still had to go and find it at option 3.
+#
+# ACME IS SUGGESTED ONLY WHEN THE NAME ALREADY POINTS HERE. Pressing Enter into
+# acme on a box the name does not reach is the expensive mistake in this whole
+# script: a failed validation leaves NO certificate, the self-signed one is not
+# a fallback, and Let's Encrypt allows five failures per hostname per hour. So a
+# name that resolves elsewhere, or not at all, or that this box cannot check,
+# falls to selfsigned -- which needs nothing and always works.
+#
+# Echoes the mode; the reason goes to stderr so a caller can capture one without
+# the other.
+suggested_tls_mode() {
+  local name="$1" email="$2" resolved pub
+
+  if [ -z "$name" ] || [ -z "$email" ]; then
+    echo "selfsigned"; return
+  fi
+  case "$name" in
+    *.local|*.internal|*.lan|*.home|*.arpa|localhost) echo "selfsigned"; return ;;
+    *.*) : ;;
+    *) echo "selfsigned"; return ;;
+  esac
+  # HOW THE NAME IS LOOKED UP IS NOT THIS FUNCTION'S BUSINESS, and that is not
+  # tidiness. The getent probe used to live here, so on a host without getent
+  # this returned two steps before the comparison it exists to make -- and a
+  # test that stubbed the lookup still took the early return, which masked a
+  # mutation that suggested acme unconditionally. resolved_addresses answers
+  # "nothing" when it cannot look up, which is the same answer as "no record",
+  # and both mean the same thing here: do not offer acme.
+  resolved="$(resolved_addresses "$name")"
+  [ -n "$resolved" ] || { echo "selfsigned"; return; }
+
+  if local_addresses_include "$resolved"; then
+    echo "acme"; return
+  fi
+  # NAT: only a third party can settle it, and only when asked to.
+  if [ "$CHECK_PUBLIC_IP" = true ]; then
+    pub="$(public_ip || true)"
+    if [ -n "$pub" ]; then
+      case " $resolved " in
+        *" $pub "*) echo "acme"; return ;;
+      esac
+    fi
+  fi
+  echo "selfsigned"
+}
+
+# resolved_addresses prints every A record for "$1", one per line, space-joined
+# by the caller. Split out because two callers need the same answer and a second
+# spelling of the same getent chain is how two checks come to disagree.
+resolved_addresses() {
+  local out
+  command -v getent >/dev/null 2>&1 || return 0
+  out="$(getent ahostsv4 "$1" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+  [ -n "$out" ] || out="$(getent hosts "$1" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+  printf '%s' "${out% }"
 }
 
 # local_addresses_include reports whether ANY address in "$1" (space separated)
@@ -1120,18 +1214,35 @@ gather_configuration() {
   echo "  Plain HTTP sends the login form and session cookie in clear text."
   echo "  On anything but loopback that is the biggest exposure this product has."
   echo
-  echo "  1) off        — plain HTTP. Fine behind a reverse proxy, or over an SSH tunnel."
+  # MOST SECURE FIRST, which is the order the rest of this product already uses
+  # and the only one this menu did not. tls.mode: auto resolves acme -> selfsigned
+  # (off only when a proxy owns TLS); TLS.md's worked configurations lead with
+  # "Public server with a DNS name -- the recommended deployment"; and the
+  # install-mode menu above leads with "docker -- Recommended". This menu led
+  # with plain HTTP and buried the recommended deployment at option 3.
+  echo "  1) acme       — Let's Encrypt for a public DNS name. Recommended."
+  echo "                  Needs the name pointed at this box and inbound port 80."
   echo "  2) selfsigned — encrypted now, browser warning until you install the CA."
-  echo "  3) acme       — Let's Encrypt. Needs a public DNS name and inbound port 80."
+  echo "                  Needs nothing, and always works."
+  echo "  3) off        — plain HTTP. Only behind a reverse proxy, or over an SSH tunnel."
   echo
   if [ "$TLS_SET" = true ]; then
     info "TLS mode given on the command line; not asking"
   else
-    local tls_choice
-    ask "Choose 1, 2 or 3" "2" tls_choice
+    # THE DEFAULT IS DECIDED, NOT ASSUMED. suggested_tls_mode offers acme only
+    # when the name already resolves to this box, because pressing Enter into
+    # acme on a box the name does not reach is the expensive mistake here.
+    local tls_choice tls_default
+    tls_default="$(suggested_tls_mode "$DOMAIN_NAME" "$ACME_EMAIL")"
+    if [ "$tls_default" = acme ]; then
+      info "$DOMAIN_NAME already resolves to this machine and a contact address is set, so acme is offered as the default."
+      ask "Choose 1, 2 or 3" "1" tls_choice
+    else
+      ask "Choose 1, 2 or 3" "2" tls_choice
+    fi
     case "$tls_choice" in
-      1|off)  TLS_MODE="off" ;;
-      3|acme) TLS_MODE="acme" ;;
+      3|off)  TLS_MODE="off" ;;
+      1|acme) TLS_MODE="acme" ;;
       *)      TLS_MODE="selfsigned" ;;
     esac
   fi
@@ -1205,12 +1316,13 @@ gather_configuration() {
     # than as a failure, because behind NAT, a floating IP or a load balancer
     # that is exactly correct.
     if command -v getent >/dev/null 2>&1; then
-      acme_resolved="$(getent ahostsv4 "$DOMAIN_NAME" 2>/dev/null | awk '"'"'{print $1}'"'"' | sort -u | tr '"'"'\n'"'"' '"'"' '"'"')"
-      [ -n "$acme_resolved" ] || acme_resolved="$(getent hosts "$DOMAIN_NAME" 2>/dev/null | awk '"'"'{print $1}'"'"' | sort -u | tr '"'"'\n'"'"' '"'"' '"'"')"
-      acme_resolved="${acme_resolved% }"
+      # ONE SPELLING OF THE LOOKUP, shared with suggested_tls_mode above. Two
+      # copies of the same getent chain is how two checks come to disagree
+      # about what a name resolves to.
+      acme_resolved="$(resolved_addresses "$DOMAIN_NAME")"
       if [ -z "$acme_resolved" ]; then
         warn "$DOMAIN_NAME does not resolve from this host."
-        echo "     Let'"'"'s Encrypt resolves it from the outside, so this is not proof it will"
+        echo "     Let's Encrypt resolves it from the outside, so this is not proof it will"
         echo "     fail — but a name with no record anywhere cannot be validated. Check the"
         echo "     DNS before relying on the certificate."
       elif local_addresses_include "$acme_resolved"; then
@@ -1219,9 +1331,9 @@ gather_configuration() {
         warn "$DOMAIN_NAME resolves to ${acme_resolved}, which is not an address this machine holds."
         echo "     Behind NAT, a floating IP or a load balancer that is exactly right, and this"
         echo "     check cannot tell those apart from a record left pointing at an old host."
-        echo "     This box holds: $(local_addresses | tr '"'"'\n'"'"' '"'"' '"'"')"
+        echo "     This box holds: $(local_addresses | tr '\n' ' ')"
         echo "     If that surprises you, fix the record first: a failed validation leaves NO"
-        echo "     certificate — the self-signed one is not a fallback — and Let'"'"'s Encrypt"
+        echo "     certificate — the self-signed one is not a fallback — and Let's Encrypt"
         echo "     allows five failures per hostname per hour."
       fi
     fi
@@ -2522,6 +2634,11 @@ Options:
                          Pass --tls off explicitly if that is what you want.
   --hostname NAME        hostname for acme (sets DOMAIN_NAME)
   --email ADDR           contact address for acme
+  --check-public-ip      when --hostname resolves somewhere this box does not
+                         hold, ask ifconfig.me / ipify / icanhazip what address
+                         the world sees, and accept a match. For a NAT'd box,
+                         where no local check can settle it. Off by default:
+                         it tells a third party this install exists.
   --ffmpeg MODE          ask (default), skip, or force installing FFmpeg 8.x to
                          /usr/local/bin when the host's is older than the
                          container's, below the 6.0 floor, or missing entirely.
@@ -2572,6 +2689,7 @@ parse_args() {
       --tls)        [ $# -ge 2 ] || die "missing value for --tls"; TLS_MODE="$2"; TLS_SET=true; shift 2 ;;
       --tls=*)      TLS_MODE="${1#*=}"; TLS_SET=true; shift ;;
       --hostname)   [ $# -ge 2 ] || die "missing value for --hostname"; DOMAIN_NAME="$2"; shift 2 ;;
+      --check-public-ip) CHECK_PUBLIC_IP=true; shift ;;
       --hostname=*) DOMAIN_NAME="${1#*=}"; shift ;;
       --email)      [ $# -ge 2 ] || die "missing value for --email"; ACME_EMAIL="$2"; shift 2 ;;
       --email=*)    ACME_EMAIL="${1#*=}"; shift ;;
