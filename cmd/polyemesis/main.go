@@ -32,7 +32,6 @@ import (
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
-	"github.com/rainmanjam/polyemesis/internal/supervisor"
 	"github.com/rainmanjam/polyemesis/internal/tlsx"
 )
 
@@ -176,15 +175,21 @@ func run(h *hooks) error {
 		return err
 	}
 
-	// BEFORE THE FIRST CHILD OF ANY KIND, which is the whole of #723's Windows
-	// half. The job object that kills every child when polyemesis dies works by
-	// INHERITANCE at CreateProcess time, so it has to exist before anything is
-	// spawned -- and it used to be created lazily on the first SUPERVISOR
-	// spawn, leaving a transcode or a transcription worker on a server that had
-	// not yet gone live permanently outside it. A no-op on Unix, which gets the
-	// equivalent from the children staying in this process's group; the
-	// function says so rather than being an empty body.
-	supervisor.EnsureCrashBackstop()
+	// THE CRASH BACKSTOP IS NOT ESTABLISHED HERE, AND MUST NOT BE PUT BACK.
+	// #723's Windows half needs the job object to exist before the first child
+	// of ANY kind, because a child INHERITS job membership at CreateProcess and
+	// polyemesis never enrols one afterwards -- and while the call sat at this
+	// point in run(), the only thing keeping it above the first spawn was the
+	// comment above it, on a platform whose local implementation is a no-op and
+	// reports nothing when the order is wrong. It is an init() in backstop.go
+	// now, which runs before main's first statement; that file carries the
+	// reasoning.
+	//
+	// Nothing in the compiler stops the call being written here again -- a line
+	// in run() still compiles and still runs. What refuses it is
+	// TestTheCrashBackstopIsEstablishedBeforeMainRuns in backstop_order_test.go,
+	// which reads this package's sources and names the file and line of any call
+	// that is not inside an init.
 
 	// BEFORE anything is started. A reset touches only the database and then
 	// exits, so it must not bind a port, spawn a child or write a log file --
