@@ -1171,10 +1171,11 @@ func (e *Engine) noteRollover(row *db.Destination, actual string) {
 		"dest", row.Name, "configured", want, "writing", actual,
 		"why", "the configured file already holds footage and is never overwritten")
 
-	// Nil-safe by the same discipline as e.hooks elsewhere: an install with no
-	// hooks configured still gets the log line and the status field.
-	if e.hooks != nil {
-		e.hooks.Publish(hooks.Event{
+	// Nil-safe by the same discipline as e.Hooks() elsewhere: an install with no
+	// hooks configured still gets the log line and the status field. Read through
+	// the accessor, which is what holds the lock against SetHooks.
+	if dispatcher := e.Hooks(); dispatcher != nil {
+		dispatcher.Publish(hooks.Event{
 			Trigger: hooks.TriggerDestinationRolledOver,
 			At:      time.Now(),
 			Source:  hooks.SourceRef{ID: e.sourceID, Name: e.SourceName()},

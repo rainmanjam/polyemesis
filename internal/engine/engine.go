@@ -4790,8 +4790,21 @@ func (e *Engine) AlertRetry() int {
 
 // Hooks exposes the dispatcher so the API can report its counters, list recent
 // deliveries and send a test. Nil when no dispatcher was wired.
+//
+// IT TAKES THE LOCK, and every read of e.hooks goes through it. SetHooks writes
+// under e.mu and three readers did not take it -- observeLoop twice and
+// destinations.go once -- which the race detector caught the moment
+// Manager.applyEngineSettings started pushing settings to RUNNING engines
+// rather than only to ones being created. The write was always guarded; the
+// reads were always not, and nothing exercised them concurrently before.
+//
+// A field read directly in one place and through an accessor in another is the
+// shape that produced this: the accessor is where somebody would add the lock,
+// so the direct reads never got it. There is one spelling now.
 func (e *Engine) Hooks() *hooks.Dispatcher {
 	e.requireEngine("Hooks")
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	return e.hooks
 }
 
@@ -5048,7 +5061,7 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			// e.hooks may be nil; HasHooks is nil-safe, the same discipline
 			// alerts.Notifier and transcribe.Tools use. Guarding at the call
 			// site instead is what makes the two diverge.
-			if !observeWanted(e.alerter.HasRules(), e.hooks.HasHooks(), e.lifecycleWanted()) {
+			if !observeWanted(e.alerter.HasRules(), e.Hooks().HasHooks(), e.lifecycleWanted()) {
 				haveDisk = false
 				continue
 			}
@@ -5076,8 +5089,13 @@ func (e *Engine) observeLoop(ctx context.Context) {
 				// or did it crash", which is the difference between ending a
 				// broadcast and leaving it alone.
 				lc := e.lifecycleObserver()
+				// Read ONCE for the whole batch rather than per event: a
+				// SetHooks landing mid-loop would otherwise publish some of one
+				// Observe's events to the old dispatcher and some to the new,
+				// which is a split nobody could explain from the delivery log.
+				dispatcher := e.Hooks()
 				for _, ev := range e.hookWatch.Observe(snap) {
-					e.hooks.Publish(ev)
+					dispatcher.Publish(ev)
 					if lc != nil {
 						// Contractually non-blocking; see LifecycleObserver.
 						lc.Observe(ev)
