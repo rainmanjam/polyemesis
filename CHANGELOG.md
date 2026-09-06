@@ -8,6 +8,8 @@ its first tagged release.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-09-06
+
 ### Security
 
 - **A destination could be linked to an account belonging to a different
@@ -4195,7 +4197,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/rainmanjam/polyemesis/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/rainmanjam/polyemesis/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rainmanjam/polyemesis/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rainmanjam/polyemesis/compare/v0.5.0...v0.6.0

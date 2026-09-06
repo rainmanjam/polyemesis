@@ -104,28 +104,30 @@ web/.astro/
 # swallowing docs/media, which is committed on purpose.
 /video/
 
-# Session investigation notes, excluded by name rather than by pattern.
+# Session investigation notes: the whole directory is ignored.
 #
-# docs/investigations/ IS tracked -- its README states the point of the place:
-# "a negative result is a result and re-deriving one costs the same as deriving
-# it the first time." A wildcard here would silently exclude the next
-# investigation somebody meant to keep, and negating the tracked files back in
-# would leave a rule nobody can read. So: an explicit list, which stays honest
-# by being annoying to extend.
+# THIS REPLACES AN EXPLICIT SEVEN-FILE LIST, and the reason that list existed is
+# worth keeping, because it is the cost of this rule. That comment argued a
+# wildcard "would silently exclude the next investigation somebody meant to
+# keep", and it was right -- that is exactly what this now does. The list was
+# dropped because it had to be edited by hand every time a note was written, and
+# a rule people edit reluctantly is a rule that goes stale.
 #
-# These seven are chat/SEO/launch research notes from 2026-08-27 and -28. They
-# are kept locally because several carry claims marked unverified in the text --
-# the YouTube per-call quota costs are estimates the documents say so about, and
-# the launch plan's subreddit rules were asserted by an assistant and never
-# checked against the subreddits themselves. This directory's promise is evidence
-# a reader can re-run, not notes a reader has to grade.
-docs/investigations/chat-platform-limits.md
-docs/investigations/launch-promotion-plan.md
-docs/investigations/site-seo-ai-search-review.md
-docs/investigations/social-stream-ninja-chat-source.md
-docs/investigations/youtube-chat-capture-flow-and-cost.md
-docs/investigations/youtube-chat-quota-and-oauth-proxy.md
-docs/investigations/youtube-limits-own-dev-account.md
+# WHAT THIS DOES NOT DO: untrack anything. Git applies ignore rules only to files
+# it is not already tracking, so docs/investigations/README.md, the four 398-*.sh
+# reproduction scripts and ffmpeg-9-upgrade-risk.md stay versioned and keep
+# working exactly as before. Only NEW files are affected.
+#
+# TO KEEP A NEW ONE: `git add -f docs/investigations/<file>`. Once added it is
+# tracked and this rule stops applying to it. That is the whole escape hatch, and
+# it is one command rather than a pull request against this file.
+#
+# The directory's promise is unchanged, and its README states it: "a negative
+# result is a result and re-deriving one costs the same as deriving it the first
+# time." What is kept here is evidence a reader can re-run -- not notes a reader
+# has to grade. Several of the notes this rule now covers carry claims their own
+# text marks unverified, which is why they were excluded by name first.
+docs/investigations/
 .serena/
 
 # graphify build products. The graph is derived from the source and is rebuilt
