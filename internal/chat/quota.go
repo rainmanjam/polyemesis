@@ -21,10 +21,7 @@ import (
 	"time"
 )
 
-// Quota unit costs. These are Google's published costs for the YouTube Data
-// API at the time of writing and are ESTIMATES as far as this code is
-// concerned — Google can change them, and a project on a raised quota has a
-// different denominator entirely.
+// Quota unit costs, and NOT ALL OF THEM ARE SOURCED THE SAME WAY. #735.
 //
 // Being wrong here changes only the pacing and the number shown to the
 // operator, never whether polling is attempted: the API's own 403 remains the
@@ -32,8 +29,37 @@ import (
 // budget that refused to poll because its arithmetic said so would be a check
 // wrong in the restrictive direction, and this codebase has learned what that
 // costs.
+//
+// THE COSTS BELOW COME FROM TWO DIFFERENT PLACES and an earlier version of this
+// comment described them as one, which made a guess look like a citation:
+//
+//   - listMessages, send, delete and ban are in Google's published quota table.
+//     They can change, but somebody wrote them down.
+//   - listBroadcasts is NOT. Google's quota calculator omits the Live Streaming
+//     endpoints entirely, so this number has no source at all. One is the value
+//     list operations historically carried, which is why it is the guess; it is
+//     still a guess, and no amount of reading settles it. It needs one measured
+//     call against a real project.
+//
+// WHY THAT PARTICULAR UNKNOWN MATTERS MORE THAN IT LOOKS. listBroadcasts is not
+// paid once. It is paid on every pass of the discovery loop in youtube.go's
+// Run, which is what an idle install does all night while it waits for a
+// broadcast that has not started. At the ytBroadcastPollMax ceiling that is 288
+// looks a day:
+//
+//	 1 unit each →    288 units/day,   2.9% of a default 10,000 allowance
+//	 5 units each →  1,440 units/day,  14.4%
+//	50 units each → 14,400 units/day, 144% — the whole day, spent on nobody
+//
+// So the comment on ytBroadcastPoll, which says a machine left connected
+// overnight must not spend the morning's quota discovering that nobody is live,
+// is an argument that rests entirely on this unverified 1.
+// TestIdleDiscoveryCannotEatTheDay pins that arithmetic so the claim and the
+// constants cannot drift apart in silence.
 const (
-	QuotaCostListMessages   = 5
+	QuotaCostListMessages = 5
+	// QuotaCostListBroadcasts is UNVERIFIED. See the note above before relying
+	// on it, and before changing the poll interval that multiplies it.
 	QuotaCostListBroadcasts = 1
 	QuotaCostSendMessage    = 50
 	// Moderation writes. Charged like any other write, but NEVER refused for

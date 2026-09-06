@@ -260,15 +260,56 @@ exact redirect URI to whitelist. In summary:
 1. <https://console.cloud.google.com/apis/credentials> — create or pick a project.
 2. **APIs & Services → Library** → enable **YouTube Data API v3**.
 3. **OAuth consent screen** → External; add your own Google account under
-   *Test users*. You do not need to publish the app.
-4. **Credentials → Create Credentials → OAuth client ID → Web application.**
-5. Add the redirect URI shown on the credentials page, exactly:
+   *Test users*.
+4. Still on the OAuth consent screen: set the **publishing status to
+   In production**, unless you are only trying polyemesis out. See the warning
+   below — left in *Testing*, this connection stops working after seven days.
+5. **Credentials → Create Credentials → OAuth client ID → Web application.**
+6. Add the redirect URI shown on the credentials page, exactly:
    `https://YOUR_HOST/api/v1/oauth/youtube/callback`
-6. Paste the client ID and secret into polyemesis, then **Connect account**.
+7. Paste the client ID and secret into polyemesis, then **Connect account**.
 
 Scope requested: `https://www.googleapis.com/auth/youtube`. Write access is
 needed because polyemesis creates a reusable ingest stream if your channel has
 none.
+
+**An app left in *Testing* disconnects itself every seven days.** Google issues
+a refresh token that expires after a week to any External app whose publishing
+status is Testing — unless the only scopes it requests are name, email address
+and user profile. polyemesis requests the `youtube` scope, so it is not exempt.
+The connection stops working on the eighth day, every time, and reconnecting
+resets the same clock.
+
+Setting the publishing status to *In production* is what removes the expiry.
+An app **only you** sign in to does not need to pass Google's verification
+review to do that: verification is what Google asks for before *other people*
+can grant it access. A self-hosted install with one operator is the case that
+does not need it.
+
+### What YouTube chat costs
+
+Unlike every other platform here, YouTube chat is **metered**. Twitch is an IRC
+socket and Kick posts webhooks — both free and real-time. YouTube is polled, and
+every poll spends from a daily allowance:
+
+| Call | Units | When |
+|---|---|---|
+| `liveChatMessages.list` | 5 | every chat poll while a broadcast is live |
+| Looking for a broadcast to attach to | 1 | every 30s when nothing is live, backing off to every 5 minutes |
+| Sending, deleting or banning | 50 | per action |
+
+A Google Cloud project starts with **10,000 units a day**, resetting at midnight
+Pacific. That is roughly 1,960 chat polls — so polyemesis paces itself across
+the broadcast rather than spending the day's allowance by mid-afternoon, and
+slows down while chat is quiet.
+
+The allowance is **per project, not per channel**. That is why you create your
+own rather than signing in to a shared polyemesis app: a shared client would put
+every install on one 10,000-unit pool.
+
+If a YouTube API Services audit grants you more, tell polyemesis in
+`Settings → Chat → YouTube daily API quota`. It paces on that number and has no
+way to discover it by itself.
 
 **How many YouTube destinations can be live at once depends on their stream
 keys.** Since February 2026 YouTube applies two concurrency limits together:
