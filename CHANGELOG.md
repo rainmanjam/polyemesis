@@ -15,9 +15,16 @@ its first tagged release.
   destination's platform to its account's, and the pre-announce path takes the
   broadcaster from the destination and the bearer token from the account — so
   the pairing was expressible and, once written, silently sent credentials to
-  the wrong host. It is refused now, and the one remaining route that writes a
-  destination without going through the repair is named in the comment rather
-  than left to be rediscovered.
+  the wrong host.
+
+  It is refused now on every route that writes a destination, and refused by a
+  test rather than by a request to remember. The first version of this fix
+  repaired two routes and left a sentence saying any new one must call the same
+  helper; two routes were already skipping it, and one of them — the Facebook
+  stream-key refresh — saved an unrepaired row every time an operator pressed
+  Refresh. All four writers repair, and a build-time guard fails on a fifth that
+  does not. It also refuses to pass over fewer than four write sites, because a
+  walk that matches nothing would otherwise report success.
 - **A token refresh could overwrite a reconnect, and the account would then ask
   to be reconnected for ever.** The refresh re-read under a lock keyed by
   account id and then wrote back the whole row, while the consent callback and
@@ -147,6 +154,17 @@ its first tagged release.
   reporting it set. It is a lost update rather than a data race, which is why
   the race detector never saw it. A save is serialised end to end now and
   publishes one consistent snapshot.
+- **The webhook dispatcher could be read while it was being replaced.** Setting
+  it took the engine's lock and three of the four places that read it did not —
+  including the loop that decides, several times a minute, whether a programme
+  needs observing at all. Both halves are older than this release; what changed
+  is that install-wide settings are now pushed to *running* engines rather than
+  only to ones being created, so the write lands beside a live reader often
+  enough to matter. Every read goes through the accessor that holds the lock,
+  and the publish loop reads once per batch rather than once per event — a
+  replacement landing mid-loop would otherwise deliver part of one observation
+  to the old dispatcher and part to the new, which is a split nobody could
+  reconstruct from a delivery log.
 - **An archive could be written at a quality that destroys the master.** The
   recording name and the codec family were validated and the quality was not, so
   any positive number reached the encoder verbatim. A CRF in the high thirties
