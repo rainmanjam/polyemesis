@@ -119,7 +119,24 @@ for f in "$spdx" "$cdx"; do
 		if [ "$n" -lt "$floor" ]; then
 			note "$(basename "$f") has $n $eco packages, below the floor of $floor -- a manifest was probably not scanned"
 		fi
-		if ! printf '%s\n' "$all" | grep -q "^pkg:${eco}/.*${anchor}"; then
+		# A HERE-STRING, NOT A PIPE, and the difference is the whole bug.
+		#
+		# This was `printf ... | grep -q`, which fails EXACTLY WHEN THE ANCHOR
+		# IS FOUND. grep -q exits on the first match, printf then writes to a
+		# closed pipe and dies of SIGPIPE, and `set -o pipefail` (line 55) makes
+		# the pipeline's status that failure rather than grep's success. The `!`
+		# inverts it and the guard reports the anchor missing.
+		#
+		# It went unnoticed because it depends on WHERE the match lands: an
+		# anchor late in the stream lets printf finish before grep exits, and no
+		# SIGPIPE happens. v0.9.0's npm list reached 630 packages, the position
+		# moved, and the release failed with "npm=630 ... the npm manifest was
+		# not scanned at all" -- a sentence that contradicts the count printed
+		# immediately above it, which is what gave the bug away.
+		#
+		# A here-string has no second process to kill, so grep's status is the
+		# pipeline's status and -q keeps its early exit.
+		if ! grep -q "^pkg:${eco}/.*${anchor}" <<<"$all"; then
 			note "$(basename "$f") has no $anchor -- the $eco manifest was not scanned at all"
 		fi
 	done

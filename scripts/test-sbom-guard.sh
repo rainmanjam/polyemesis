@@ -209,5 +209,65 @@ else
 		bad "rejected, but not with a message naming the malformed document"; cat "$d/out"; }
 fi
 
+# ------------------------------------------------- a document larger than a pipe
+
+# THE CASE THAT LET v0.9.0's RELEASE FAIL. #440-adjacent, found while tagging.
+#
+# The anchor check was `printf '%s\n' "$all" | grep -q ...`, and it fails
+# EXACTLY WHEN THE ANCHOR IS FOUND, once the document is big enough. grep -q
+# exits on the first match, printf then writes into a closed pipe and dies of
+# SIGPIPE, and `set -o pipefail` makes that the pipeline's status rather than
+# grep's success. The `!` inverts it and the guard reports the anchor missing.
+#
+# WHY EVERY CASE ABOVE MISSED IT. They are all built by build_healthy, whose
+# purls are short -- "pkg:npm/filler-437@1.0.0" -- so the whole list is about
+# 22 kB and fits inside the 64 kB pipe buffer. printf never blocks, never gets
+# SIGPIPE, and the bug cannot happen. The fixtures were sized for the SHAPE the
+# other cases test and the shape is right; this bug is a reaction to SIZE, and
+# no fixture that fits in a pipe can reach it.
+#
+# Measured: the inversion appears between 59,872 and 120,872 bytes on Linux,
+# which is the buffer boundary. The real v0.9.0 SBOM crossed it because purls
+# are long -- a golang purl carries a whole module path -- and $all holds every
+# ecosystem, not only the three that are counted.
+#
+# So this fixture is deliberately over the line, and the anchor is FIRST, which
+# is what makes grep exit while printf still has most of the list to write.
+step "An SBOM too large to fit in a pipe still finds its anchors"
+d="$work/large"
+mkdir -p "$d"
+{
+	echo '{"packages":['
+	first=1
+	emit_l() {
+		[ $first -eq 1 ] || echo ','
+		first=0
+		printf '{"externalRefs":[{"referenceType":"purl","referenceLocator":"%s"}]}' "$1"
+	}
+	# Anchors first, so a match happens while there is still a great deal left
+	# to write. Last would let printf finish and the bug would hide again.
+	emit_l "pkg:npm/%40radix-ui/react-dialog@1.1.23"
+	emit_l "pkg:golang/modernc.org/sqlite@v1.55.0"
+	emit_l "pkg:github/actions/checkout@v7.0.1"
+	for i in $(seq 4 700); do emit_l "pkg:npm/%40scope/a-realistically-long-package-name-$i@1.0.0"; done
+	for i in $(seq 2 400); do emit_l "pkg:golang/github.com/an/organisation/with-a-long-module-path/v2/pkg-$i@v2.1.0"; done
+	for i in $(seq 2 60); do emit_l "pkg:github/an-organisation/an-action-with-a-long-name-$i@v4.1.2"; done
+	echo ']}'
+} > "$d/polyemesis-sbom.spdx.json"
+jq '{components: [.packages[] | {purl: .externalRefs[0].referenceLocator}]}' \
+	"$d/polyemesis-sbom.spdx.json" > "$d/polyemesis-sbom.cdx.json"
+
+# Sanity: the fixture has to be over the buffer or this case proves nothing.
+bytes=$(jq -r '.packages[].externalRefs[0].referenceLocator' "$d/polyemesis-sbom.spdx.json" | wc -c)
+if [ "$bytes" -lt 65536 ]; then
+	bad "the large fixture is only $bytes bytes, under the 64 kB pipe buffer -- it cannot reach the bug it exists for"
+else
+	if run_guard "$d"; then
+		ok "a $(( bytes / 1024 )) kB document passes (anchors found despite the size)"
+	else
+		bad "guard failed on a healthy document larger than a pipe buffer"; cat "$d/out"
+	fi
+fi
+
 printf "\n%d passed, %d failed\n" "$pass" "$fail"
 [ "$fail" -eq 0 ]
