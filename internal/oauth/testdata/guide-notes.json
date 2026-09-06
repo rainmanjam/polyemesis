@@ -59,11 +59,12 @@
   },
   {
     "platform": "youtube",
-    "note": "",
+    "note": "Read this first: an app left in Testing disconnects itself every 7 days. Google issues a refresh token that expires after a week to any External app whose publishing status is Testing, unless the only scopes it asks for are name, email and profile. polyemesis asks for the youtube scope, so it is not exempt — the connection below will stop working on the eighth day, every time, and reconnecting resets the same clock. That is fine for trying it out. For a channel you actually broadcast on, set the publishing status to In production on the OAuth consent screen. An app that only you sign in to does not need to pass verification to do that; verification is what Google asks for before OTHER people can grant it access.",
     "steps": [
       "Open the Google Cloud Console and create a project (or pick an existing one).",
       "In APIs \u0026 Services → Library, enable the “YouTube Data API v3”.",
-      "In APIs \u0026 Services → OAuth consent screen, choose External, fill in the app name and your email, and add your own Google account under Test users. You do not need to publish the app.",
+      "In APIs \u0026 Services → OAuth consent screen, choose External, fill in the app name and your email, and add your own Google account under Test users.",
+      "Still on the OAuth consent screen: set the publishing status to In production, unless you only want to try polyemesis out. Left in Testing, the connection expires after 7 days — see the note above.",
       "In APIs \u0026 Services → Credentials, click Create Credentials → OAuth client ID → Web application.",
       "Under “Authorised redirect URIs”, add exactly the redirect URI shown below.",
       "Copy the Client ID and Client secret into the fields on this page and save.",

@@ -124,3 +124,124 @@ func TestTheGuideDriftCheckStillAllowsLegitimateCaveats(t *testing.T) {
 		}
 	}
 }
+
+// A GOOGLE GUIDE MAY NOT SAY PUBLISHING IS OPTIONAL. #734.
+//
+// The YouTube guide told operators "You do not need to publish the app" for
+// months, in both this file and docs/PLATFORMS.md. It is false in the way that
+// matters: Google issues a refresh token expiring in SEVEN DAYS to any External
+// app whose publishing status is Testing, unless the only scopes it requests
+// are a subset of name, email address and user profile. polyemesis requests
+// https://www.googleapis.com/auth/youtube, which is not in that set.
+//
+// So every install that followed the guide lost its YouTube connection weekly,
+// the guide did not say so, and reconnecting restarted the same clock. The
+// operator's evidence is an integration that breaks every Monday for no visible
+// reason -- the worst shape a documentation bug can take, because the thing it
+// misleads you about is invisible until it fires and looks like a different
+// fault when it does.
+//
+// WHY A TEST AND NOT A CORRECTED SENTENCE. The sentence was corrected; this is
+// what stops the next person restoring it. It is easy to restore in good faith,
+// because for a Google app requesting only profile scopes it would be TRUE, and
+// that is the version of this advice everywhere on the internet. The check is
+// therefore on the pairing -- the claim AND the scopes -- rather than on the
+// words alone.
+//
+// Rung 2: it announces in CI rather than making the sentence unwritable.
+// Control would mean the guide deriving this line from the scope list instead
+// of stating it in prose, which is more machinery than one sentence deserves.
+func TestNoGoogleGuideSaysPublishingIsUnnecessaryWhileAskingForASensitiveScope(t *testing.T) {
+	// Google's own exemption, quoted from the OAuth documentation: a Testing
+	// app's refresh token does NOT expire when the requested scopes are a
+	// subset of these three.
+	exempt := map[string]bool{
+		"https://www.googleapis.com/auth/userinfo.email":   true,
+		"https://www.googleapis.com/auth/userinfo.profile": true,
+		"openid":  true,
+		"email":   true,
+		"profile": true,
+	}
+	// Ways a guide can tell somebody publishing is optional. Each has to mean
+	// "you can leave it in Testing", not merely mention publishing.
+	claims := []string{
+		"do not need to publish",
+		"don't need to publish",
+		"no need to publish",
+		"without publishing",
+		"publishing is optional",
+	}
+
+	checked := 0
+	for _, g := range guides() {
+		google := false
+		sensitive := false
+		for _, sc := range g.Scopes {
+			if strings.Contains(sc, "googleapis.com") {
+				google = true
+			}
+			if !exempt[sc] {
+				sensitive = true
+			}
+		}
+		if !google {
+			continue
+		}
+		checked++
+		if !sensitive {
+			// A Google guide asking only for exempt scopes MAY say publishing
+			// is unnecessary, because there it is true.
+			continue
+		}
+		hay := strings.ToLower(g.Note + " " + strings.Join(g.Steps, " "))
+		for _, claim := range claims {
+			if strings.Contains(hay, claim) {
+				t.Errorf("the %s guide says %q while requesting %v.\n"+
+					"An External Google app left in Testing issues refresh tokens that expire "+
+					"after 7 days unless its scopes are a subset of name, email and profile. "+
+					"This app is not exempt, so the connection breaks weekly and the guide "+
+					"does not warn anybody. Either say the publishing status must be In "+
+					"production, or explain the seven-day expiry where the operator will read "+
+					"it before choosing.", g.Platform, claim, g.Scopes)
+			}
+		}
+	}
+
+	// POSITIVE CONTROL. Everything above passes if guides() returns nothing
+	// Google-shaped -- a renamed scope constant, a reordered slice, a guide
+	// moved elsewhere -- and a green run over zero guides asserts nothing.
+	if checked == 0 {
+		t.Fatal("no Google guide was examined; guides() returned nothing with a " +
+			"googleapis.com scope. The walk is broken, so this test is asserting " +
+			"nothing about the claim it exists to catch.")
+	}
+}
+
+// The correction has to actually be present, not merely the false claim absent.
+// Deleting the sentence would satisfy the test above and leave an operator with
+// no way to know -- which is the state #734 was filed about.
+//
+// IT CHECKS THE WHOLE GUIDE, NOT THE Note FIELD, and that is deliberate rather
+// than lax. Deleting the Note alone leaves the warning in the step beside it and
+// this test passes -- an EQUIVALENT MUTANT, recorded as one: the guide still
+// warns, less prominently, and no assertion about prominence would survive
+// somebody legitimately restructuring the guide. Removing it from both places
+// fails, which was measured, and is the outcome that matters.
+func TestTheYouTubeGuideWarnsAboutTheSevenDayExpiry(t *testing.T) {
+	for _, g := range guides() {
+		if g.Platform != db.PlatformYouTube {
+			continue
+		}
+		hay := strings.ToLower(g.Note + " " + strings.Join(g.Steps, " "))
+		for _, want := range []string{"7 days", "testing", "in production"} {
+			if !strings.Contains(hay, want) {
+				t.Errorf("the YouTube guide does not mention %q.\n"+
+					"An operator choosing a publishing status has to be told that Testing "+
+					"expires the connection weekly and that In production is what stops it. "+
+					"Removing the warning is the defect #734 recorded, not a tidy-up.", want)
+			}
+		}
+		return
+	}
+	t.Fatal("no YouTube guide found; the walk is broken")
+}
