@@ -313,6 +313,14 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// The partial unique index that makes two active jobs for one unique target
+	// impossible. A migration rather than a line in schema.sql because the rule
+	// is partial and because an install that already holds a duplicate pair
+	// needs them folded before the index can exist -- see MigrateJobUniqueTarget.
+	if err := d.MigrateJobUniqueTarget(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// Last, because it reads settings and writes to destinations, renditions
 	// and recordings: every column those tables are going to have must already
 	// be there. It also creates the first source from the existing ingest

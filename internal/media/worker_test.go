@@ -237,6 +237,209 @@ func TestJobBuildersRefuseParamsNoWorkerCouldActOn(t *testing.T) {
 	}
 }
 
+// The quality knob is the one field on this payload that VerifyArchive cannot
+// check after the fact. It compares containers, durations, audio tracks and
+// decode errors, and a CRF of 45 passes every one of them while looking nothing
+// like the master — so with ReplaceOriginal set, a green job renames a smeared
+// copy over a bit-exact multitrack original. The refusal has to happen here,
+// before the encode, where the number is still a submission someone can fix.
+func TestArchiveJobRefusesAQualityThatWouldDegradeTheMasterItReplaces(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*ArchiveParams)
+		wantErr bool
+	}{
+		{"the destroying band with hevc and replacement", func(p *ArchiveParams) {
+			p.Quality, p.ReplaceOriginal = 40, true
+		}, true},
+		// One point past the profile default is already outside the region that
+		// default's own comment describes, and this job deletes the original.
+		{"one point worse than the default, replacing", func(p *ArchiveParams) {
+			p.Quality, p.ReplaceOriginal = 29, true
+		}, true},
+		{"av1 one point worse than its default, replacing", func(p *ArchiveParams) {
+			p.Codec, p.Quality, p.ReplaceOriginal = ArchiveAV1, 33, true
+		}, true},
+		// Nothing is destroyed without ReplaceOriginal, but there is still a
+		// point past which the file is a second proxy rather than an archive.
+		{"past the alongside ceiling", func(p *ArchiveParams) { p.Quality = 35 }, true},
+		{"the top of ffmpeg's own scale", func(p *ArchiveParams) { p.Quality = 51 }, true},
+		// A negative today silently becomes the profile default, which is how a
+		// typo turns into an encode nobody asked for.
+		{"a negative number", func(p *ArchiveParams) { p.Quality = -5 }, true},
+
+		// Positive controls. A Validate that refused every quality it was given
+		// would satisfy every row above; these are the rows that catch it.
+		{"unset, meaning the profile default", func(p *ArchiveParams) { p.Quality = 0 }, false},
+		{"exactly the default, replacing", func(p *ArchiveParams) {
+			p.Quality, p.ReplaceOriginal = 28, true
+		}, false},
+		{"better than the default, replacing", func(p *ArchiveParams) {
+			p.Quality, p.ReplaceOriginal = 18, true
+		}, false},
+		{"av1 at its own default, replacing", func(p *ArchiveParams) {
+			p.Codec, p.Quality, p.ReplaceOriginal = ArchiveAV1, 32, true
+		}, false},
+		{"exactly on the alongside ceiling", func(p *ArchiveParams) { p.Quality = 34 }, false},
+		{"av1 alongside, on its wider ceiling", func(p *ArchiveParams) {
+			p.Codec, p.Quality = ArchiveAV1, 38
+		}, false},
+		// The encoder is the more specific fact: an SVT-AV1 encode asked for
+		// under the HEVC label must still be bounded by SVT-AV1's scale.
+		{"a named av1 encoder widens a hevc-labelled job", func(p *ArchiveParams) {
+			p.Encoder, p.Quality, p.ReplaceOriginal = "libsvtav1", 32, true
+		}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := ArchiveParams{Recording: "rec-20240115-143000.mkv", AcknowledgeLossy: true}
+			tc.mutate(&p)
+			_, err := NewArchiveJob(1, p)
+			if tc.wantErr && err == nil {
+				t.Fatalf("quality %d (replace=%v) was accepted", p.Quality, p.ReplaceOriginal)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("quality %d (replace=%v) was refused: %v", p.Quality, p.ReplaceOriginal, err)
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), "archive quality") {
+				t.Fatalf("the refusal does not say what is wrong: %v", err)
+			}
+		})
+	}
+}
+
+// The refusal is read in two places by the same person: as a 400 from the API
+// when they submit, and as the Error text on a job row when a payload queued
+// before this bound existed comes back around. In neither place is there
+// anything else to read, so the message has to carry the ceiling that was
+// applied, which way the scale runs, what number to use instead, and the fact
+// that no footage has been touched. "Invalid quality" would satisfy the table
+// above and tell an operator staring at a failed overnight job nothing at all.
+func TestTheQualityRefusalCarriesTheCeilingTheReasonAndTheWayOut(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*ArchiveParams)
+		want   []string
+	}{
+		{"replacing the original", func(p *ArchiveParams) {
+			p.Quality, p.ReplaceOriginal = 40, true
+		}, []string{
+			"archive quality 40",   // the number that was refused
+			"1-28",                 // the bound it was measured against
+			"worse picture",        // which way the scale runs
+			"replaces the origina", // which of the two acts was being bounded
+			"Resubmit at 28 or lower",
+			// The looser ceiling is the other way out, and an operator cannot
+			// guess that giving up the replacement buys six more points.
+			"leave the original in place and resubmit at 34 or lower",
+			"nothing has been deleted",
+			"queued before this limit existed",
+		}},
+		{"written alongside", func(p *ArchiveParams) { p.Quality = 44 }, []string{
+			"archive quality 44",
+			"1-34",
+			"beside the original",
+			"Resubmit at 34 or lower",
+			"nothing has been deleted",
+		}},
+		{"av1 keeps its own numbers", func(p *ArchiveParams) {
+			p.Codec, p.Quality, p.ReplaceOriginal = ArchiveAV1, 40, true
+		}, []string{"1-32", "Resubmit at 32 or lower", "resubmit at 38 or lower"}},
+		// A number below the floor is a different mistake, and the ceiling's
+		// sentence is actively wrong for it: "a higher number is a worse
+		// picture" sends someone who typed -5 further the wrong way.
+		{"below the floor", func(p *ArchiveParams) { p.Quality = -5 }, []string{
+			"archive quality -5 is below 1",
+			"a lower number is a better picture",
+			"0 already means take the codec's own default",
+			"Resubmit at 0 for the default, or between 1 and 34",
+			"nothing has been deleted",
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := ArchiveParams{Recording: "rec-20240115-143000.mkv", AcknowledgeLossy: true}
+			tc.mutate(&p)
+			err := p.Validate()
+			if err == nil {
+				t.Fatalf("quality %d was accepted", p.Quality)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("the refusal never says %q:\n%v", want, err)
+				}
+			}
+		})
+	}
+
+	// Negative controls, because every row above is a substring match and a
+	// message that said everything at once would satisfy all of them.
+	//
+	// The alongside refusal must not offer "leave the original in place" as a
+	// remedy, because the original is already staying.
+	p := ArchiveParams{Recording: "rec-20240115-143000.mkv", AcknowledgeLossy: true, Quality: 44}
+	if err := p.Validate(); err == nil || strings.Contains(err.Error(), "leave the original in place") {
+		t.Fatalf("a job that destroys nothing was told to stop destroying things: %v", err)
+	}
+	// And the floor refusal must not tell someone who went too low that a
+	// higher number is worse.
+	p.Quality = -5
+	if err := p.Validate(); err == nil || strings.Contains(err.Error(), "higher number is a worse picture") {
+		t.Fatalf("the floor was explained with the ceiling's sentence: %v", err)
+	}
+}
+
+// THE UPGRADE CASE. A payload queued by a build that had no quality bound is
+// never re-submitted through NewArchiveJob; RunArchive is the only thing that
+// ever looks at it again. This is what the operator who upgrades on Friday and
+// reads the job list on Monday actually meets, and the two facts that matter
+// are that it stops before the encode and that it stops for good rather than
+// retrying an unencodable payload until the attempt ceiling.
+func TestAnArchiveQueuedBeforeTheBoundFailsPermanentlyAndExplainsItself(t *testing.T) {
+	src, out := goodPair()
+	rig := archiveRig(t, Config{ArchiveAllowReplace: true}, src, out, nil)
+
+	// Marshalled directly, exactly as the queue holds a row written by the
+	// older build. Going through NewArchiveJob would be testing the submission
+	// path a second time and would never produce this payload at all.
+	raw, err := json.Marshal(ArchiveParams{
+		Recording:        "rec-20240115-143000.mkv",
+		DurationMS:       3600000,
+		RecordedAtUnix:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+		AcknowledgeLossy: true,
+		ReplaceOriginal:  true,
+		Quality:          40,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := jobs.Job{
+		Kind:   KindArchive,
+		Target: jobs.RecordingTarget(1),
+		Params: raw,
+	}.Normalized()
+
+	runErr := rig.proc.RunArchive(context.Background(), job, rig.rep)
+	if runErr == nil {
+		t.Fatal("the pre-upgrade payload encoded and replaced the master")
+	}
+	if !jobs.IsPermanent(runErr) {
+		t.Fatalf("a payload no attempt can fix was left retryable: %v", runErr)
+	}
+	for _, want := range []string{"archive quality 40", "1-28", "Resubmit at 28 or lower",
+		"nothing has been deleted", "queued before this limit existed"} {
+		if !strings.Contains(runErr.Error(), want) {
+			t.Fatalf("the failed row never says %q:\n%v", want, runErr)
+		}
+	}
+	if rig.exec.count() != 0 {
+		t.Fatalf("FFmpeg ran %d times before the refusal", rig.exec.count())
+	}
+	if info, err := os.Stat(rig.master); err != nil || info.Size() != 1<<20 {
+		t.Fatalf("the master was touched by a job that was refused: %v", err)
+	}
+}
+
 func TestRegisterWiresAllThreeKindsExactlyOnce(t *testing.T) {
 	seen := map[jobs.Kind]int{}
 	reg := registryFunc(func(k jobs.Kind, limit int, w jobs.Worker) error {

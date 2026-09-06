@@ -85,6 +85,22 @@ func scanJob(s interface{ Scan(...any) error }) (*jobs.Job, error) {
 }
 
 // EnqueueJob stores a new job.
+//
+// A unique job whose active twin already exists is NOT stored twice and is not
+// an error: the twin is returned, which is what the caller wanted -- one job
+// doing that work, and its id. queue.Submit asks FindActiveJob first and only
+// reaches here when it found nothing, so this path is the race it cannot
+// close, not the ordinary duplicate.
+//
+// WHY THE RACE EXISTS AT ALL. Submit does FindActiveJob, then EnqueueJob, with
+// no transaction spanning the two. db.go's SetMaxOpenConns(1) serialises the
+// STATEMENTS but not the GAP between them: two HTTP handlers both search, both
+// find nothing, and both then insert. Two identical transcriptions of one
+// recording start, burn CPU against each other, and write over one another's
+// output. The partial unique index MigrateJobUniqueTarget installs is what
+// makes the second insert impossible rather than merely unlikely; this
+// function is what turns the refusal into an answer instead of a 400 whose
+// text is the name of an index.
 func (d *DB) EnqueueJob(j jobs.Job) (*jobs.Job, error) {
 	n := j.Normalized()
 	if err := n.Validate(); err != nil {
@@ -109,13 +125,219 @@ func (d *DB) EnqueueJob(j jobs.Job) (*jobs.Job, error) {
 		logJSON, n.Error, created, unixOrZero(n.AvailableAt),
 		unixOrZero(n.StartedAt), unixOrZero(n.FinishedAt), now)
 	if err != nil {
-		return nil, err
+		if !isJobUniqueTargetViolation(err) {
+			return nil, err
+		}
+		// The index refused it, so an active job with this kind and target is
+		// already there. Hand back the one that won.
+		existing, findErr := d.FindActiveJob(n.Kind, n.Target)
+		if findErr != nil {
+			return nil, findErr
+		}
+		if existing == nil {
+			// Only reachable if the winner reached a terminal state between
+			// the refusal and this read. Returning the original violation is
+			// honest: there is no job to point the caller at, and inventing
+			// one would be worse than saying so.
+			return nil, err
+		}
+		return existing, nil
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
 		return nil, err
 	}
 	return d.GetJob(id)
+}
+
+// jobUniqueTargetIndex is the partial unique index that makes two active jobs
+// for one unique target impossible. Named here because three things have to
+// agree about it: the migration that creates it, the guard that checks whether
+// it is already there, and the error matcher below.
+const jobUniqueTargetIndex = "idx_jobs_unique_target"
+
+// isJobUniqueTargetViolation reports whether err is SQLite refusing a second
+// active job for a unique target.
+//
+// Matched on the index and on the columns, never on "UNIQUE constraint failed"
+// alone: any other unique violation on this table is a different bug and must
+// not be quietly rewritten into "here is your existing job", which would hide
+// it behind a successful-looking response. Both spellings are checked for the
+// reason asTokenTaken records -- SQLite names the columns in some versions and
+// the index in others, and a message that changes shape must not silently stop
+// matching.
+func isJobUniqueTargetViolation(err error) bool {
+	if err == nil || !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, jobUniqueTargetIndex) ||
+		(strings.Contains(msg, "jobs.kind") && strings.Contains(msg, "jobs.target"))
+}
+
+// MigrateJobUniqueTarget creates the partial unique index that stops two
+// active jobs existing for one unique target, folding any duplicates already
+// there into the job the queue already considers canonical.
+//
+// WHY IT IS NOT IN schema.sql, which is where a reader will look for it: the
+// rule is partial -- it applies only to rows with unique_target = 1, a
+// non-empty target and an unfinished state -- and CREATE TABLE has no syntax
+// for that. A bare CREATE UNIQUE INDEX at the foot of that file would run on
+// every open of every install, including one whose jobs table already holds a
+// pair from the old race, where it would fail and abort the whole script; the
+// operator would get "apply schema: UNIQUE constraint failed" and a server
+// that will not boot. MigrateSourceTokenUnique carries the same reasoning for
+// the same shape of index one table over. This runs on every open, fresh
+// installs included, so both populations end up with the same rule.
+//
+// EVERY WRITER THAT CAN BE REFUSED BY THIS INDEX, enumerated because getting
+// this list wrong is how #746 shipped: the first draft of this analysis named
+// EnqueueJob's INSERT and reasoned that RescheduleJob was the only UPDATE worth
+// a second look. It is not, and it is not even one of the risky ones.
+//
+// The test is not "does this statement write state" but "can it move a row from
+// OUTSIDE the predicate to INSIDE it", because only such a row is new to the
+// index. That splits the writers cleanly:
+//
+//   - Arriving from outside, by their own WHERE: EnqueueJob (INSERT,
+//     state='queued') and RetryJob (WHERE state IN ('done','failed','cancelled')
+//     -> 'queued'). Both handle the refusal — EnqueueJob folds to the active
+//     twin, RetryJob answers ErrStateConflict naming it.
+//
+//   - Already inside BY CALLER CONVENTION, which is a weaker thing and is why
+//     they are no longer listed as safe: ClaimJob (queued/deferred -> running)
+//     and DeferJob (queued/deferred -> deferred) are guarded by their own WHERE
+//     and genuinely cannot collide. RescheduleJob and RequeueJob are not:
+//     nothing in their UPDATE restricts the row's state, and an earlier draft
+//     of this comment said they were "reached only with a running job" and
+//     therefore safe. That is a property of their callers, not of them, and the
+//     callers have a hole.
+//
+//     THE HOLE, because a reviewer found it by probing rather than reading:
+//     dispatchOnce calls ClaimJob (row -> running) and only then does q.start
+//     register the job in q.running (internal/jobs/queue.go:376-383).
+//     Queue.Cancel checks q.running, so inside that window it takes the
+//     !running branch and calls CancelJob, which accepts a running row. The row
+//     is now cancelled with a live worker still on it, its target is free, a
+//     resubmission is accepted — and when the worker returns a retryable error,
+//     finish reaches RescheduleJob with a TERMINAL row and an active twin.
+//     Which is to say: from outside the predicate. The same window reaches
+//     RequeueJob through start's unregistered-kind branch.
+//
+//     Worse than #746 when it fires, because finish only logs the error
+//     (q.log.Error("cannot write job outcome")) — the job stays cancelled
+//     forever, the worker's outcome is discarded, and nothing appears on
+//     screen. So both now carry the same violation branch RetryJob has. It
+//     cannot change an accepted write; it converts the one reachable collision
+//     from a swallowed driver string into ErrStateConflict.
+//
+//   - Already inside and incapable of colliding: RequeueRunningJobs (WHERE
+//     state='running'). Its (kind, target) is already the entry the index
+//     holds; moving between the three covered states changes nothing it
+//     indexes on.
+//
+//   - Leaving: FinishJob, CancelJob, and the fold below. These free an entry.
+//
+// A future writer belongs in the first group if its WHERE can select a terminal
+// row, or if it sets state to one of the three covered ones from a row that was
+// not already covered. Such a writer needs the same treatment RetryJob has.
+//
+// THE PREDICATE IS EXACTLY THE QUEUE'S OWN RULE, deliberately not one grain
+// stricter. queue.Submit folds a submission only when `j.Unique &&
+// j.Target != ""`, and FindActiveJob looks only at queued, running and
+// deferred -- so those three conditions are the index's WHERE. A job with
+// unique_target = 0 is a job somebody asked to be able to run twice (two clips
+// out of one recording, say); an empty target is not a thing two jobs can
+// share; a finished job is history. Widening the index past any of those would
+// refuse work the product is supposed to accept.
+//
+// FOLDING RATHER THAN REFUSING TO START, which is the opposite of what
+// MigrateSourceTokenUnique does with duplicate source tokens, and the
+// difference is what the rows are. A duplicate publish token is operator
+// configuration, and picking which source keeps it decides which programme a
+// live encoder is admitted into -- a judgement no migration can make. Two
+// active jobs for one target are not configuration; they are the defect this
+// index exists to remove, already in the table, and the queue itself has
+// always had an answer for which of them is the real one: FindActiveJob orders
+// by id and takes the first. So the lowest id survives and its twins are
+// cancelled with a last_error saying why. Nothing is deleted, the cancellation
+// is visible in the jobs list, and a worker still running a cancelled twin is
+// left entirely alone -- its terminal write lands on the row by id and simply
+// moves it from cancelled to done or failed, which the index does not cover
+// either way.
+func (d *DB) MigrateJobUniqueTarget() error {
+	// Checked before anything is written, and outside any transaction, for the
+	// reason MigrateSourceTokenUnique records: db.go sets SetMaxOpenConns(1),
+	// so a read issued while a transaction holds the one connection waits for
+	// a connection that transaction will not release, and startup hangs for
+	// ever rather than failing.
+	has, err := indexExists(d.sql, jobUniqueTargetIndex)
+	if err != nil {
+		return fmt.Errorf("inspect jobs indexes: %w", err)
+	}
+	if has {
+		return nil
+	}
+
+	superseded, err := supersededUniqueJobs(d.sql)
+	if err != nil {
+		return fmt.Errorf("check for duplicate active jobs: %w", err)
+	}
+	if len(superseded) > 0 {
+		now := time.Now().Unix()
+		args := []any{
+			"cancelled as a duplicate: another job was already active for this " +
+				"target when this one was submitted",
+			now, now,
+		}
+		args = append(args, int64Args(superseded)...)
+		if _, err := d.sql.Exec(`UPDATE jobs
+			SET state = 'cancelled', last_error = ?, finished_at = ?, updated_at = ?
+			WHERE id IN (`+placeholders(len(superseded))+`)`, args...); err != nil {
+			return fmt.Errorf("fold duplicate active jobs: %w", err)
+		}
+	}
+
+	if _, err := d.sql.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS ` + jobUniqueTargetIndex +
+			` ON jobs(kind, target)
+			 WHERE unique_target = 1 AND target <> ''
+			   AND state IN ('queued','running','deferred')`,
+	); err != nil {
+		return fmt.Errorf("create %s: %w", jobUniqueTargetIndex, err)
+	}
+	return nil
+}
+
+// supersededUniqueJobs is every active unique job that is NOT the lowest-id one
+// for its kind and target -- that is, every row the index is about to refuse.
+//
+// Lowest id, because that is the one FindActiveJob returns (`ORDER BY id LIMIT
+// 1`): the queue has always treated it as the job that represents this target,
+// every caller that asked before this migration was handed that one, and
+// keeping any other would retroactively change which job an operator is
+// already watching.
+func supersededUniqueJobs(sqldb *sql.DB) ([]int64, error) {
+	const active = `unique_target = 1 AND target <> '' AND
+		state IN ('queued','running','deferred')`
+	rows, err := sqldb.Query(`SELECT id FROM jobs WHERE ` + active + `
+		AND id NOT IN (SELECT MIN(id) FROM jobs WHERE ` + active + `
+			GROUP BY kind, target)
+		ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // GetJob loads one job.
@@ -192,7 +414,17 @@ func (d *DB) ListJobs(f jobs.Filter) ([]jobs.Job, error) {
 // (nil, nil) when there is none. It is what stops a second click from starting
 // a second transcription of the same recording.
 func (d *DB) FindActiveJob(kind jobs.Kind, target string) (*jobs.Job, error) {
-	j, err := scanJob(d.sql.QueryRow(jobActiveQuery, string(kind), target))
+	return activeJobFor(d.sql, string(kind), target)
+}
+
+// activeJobFor is FindActiveJob's body, taken out so the error paths below can
+// reach it through whatever handle they already hold. It takes a rowQuerier for
+// the reason that interface exists at all: a helper reached from inside a
+// transaction must use the transaction's handle, because db.go's
+// SetMaxOpenConns(1) turns a read issued on d.sql while a transaction holds the
+// one connection into a deadlock rather than an error.
+func activeJobFor(q rowQuerier, kind, target string) (*jobs.Job, error) {
+	j, err := scanJob(q.QueryRow(jobActiveQuery, kind, target))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -345,6 +577,19 @@ func (d *DB) RescheduleJob(id int64, availableAt time.Time, errText string, now 
 		finished_at=0, updated_at=? WHERE id=?`,
 		unixOrZero(availableAt), errText, now.Unix(), id)
 	if err != nil {
+		// DEFENCE IN DEPTH, and the comment above says why it is needed.
+		//
+		// This branch cannot change an accepted write: a reschedule that does
+		// not collide never reaches it. What it changes is the ONE reachable
+		// collision -- a terminal row reached through the claim-to-register
+		// window in Queue.Cancel -- which without it returns the driver's
+		// "UNIQUE constraint failed: jobs.kind, jobs.target (2067)" to
+		// jobs.finish, which only LOGS it. The job then stays cancelled
+		// forever with a live worker's outcome thrown away and nothing on
+		// screen, which is a worse ending than #746's 500.
+		if isJobUniqueTargetViolation(err) {
+			return jobUniqueTargetConflict(d.sql, id, "reschedule", err)
+		}
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
@@ -359,6 +604,28 @@ func (d *DB) RescheduleJob(id int64, availableAt time.Time, errText string, now 
 // correct when the queue knows the attempt never got a fair run — its own clean
 // shutdown, or a kind whose processor had not registered yet. A failure must
 // never come through here, or the attempt ceiling stops meaning anything.
+//
+// THE UPDATE HAS NO STATE GUARD, and this was documented as not needing one on
+// the strength of a caller-side invariant that turns out to have a hole. See
+// the claim-to-register window described in the writer inventory above. It
+// carries the same violation branch RetryJob does.
+//
+// The index covers queued, running and deferred. A row that is ALREADY in one
+// of those states cannot collide by moving to another of them: its (kind,
+// target) is already the one the index holds, and the index does not care which
+// of the three it is. Only a row arriving from OUTSIDE the predicate can
+// collide — that is RetryJob's whole problem, and it is the only writer here
+// whose WHERE selects terminal rows.
+//
+// Both of this function's callers pass a job the queue itself just claimed:
+// queue.start, when no worker is registered for the kind, and queue.finish, on
+// the server's own shutdown. ClaimJob sets state='running' before either can
+// run, so the row is running when it gets here. Same for RescheduleJob (called
+// only from queue.finish on a retryable failure) and RequeueRunningJobs (whose
+// WHERE is state='running'). Adding a guard would therefore change nothing
+// about which writes are accepted, and would turn the shutdown path — where the
+// alternative to requeuing is losing a four-hour transcode — into one with a
+// new way to silently do nothing.
 func (d *DB) RequeueJob(id int64, availableAt time.Time, reason string, now time.Time) error {
 	tx, err := d.sql.Begin()
 	if err != nil {
@@ -385,6 +652,23 @@ func (d *DB) RequeueJob(id int64, availableAt time.Time, reason string, now time
 			unixOrZero(availableAt), now.Unix(), id)
 	}
 	if err != nil {
+		// The same defence RescheduleJob carries, for the same window and for
+		// the same reason.
+		//
+		// READ ON tx, NOT ON d.sql, and this is not a preference. The pool is
+		// SetMaxOpenConns(1): this transaction holds the only connection, so a
+		// query issued on d.sql from in here waits for a connection that cannot
+		// be released until this function returns, and the call hangs for ever
+		// rather than failing. The first draft of this branch did exactly that
+		// and deadlocked the test that covers it.
+		//
+		// tx can answer, because the row that won was committed BEFORE this
+		// transaction began -- that is what made this UPDATE collide -- so it
+		// is visible from inside. And SQLite does not abort a transaction on a
+		// constraint violation, so the handle is still usable for a read.
+		if isJobUniqueTargetViolation(err) {
+			return jobUniqueTargetConflict(tx, id, "requeue", err)
+		}
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
@@ -489,12 +773,44 @@ func (d *DB) DeferJob(id int64, at time.Time, reason string, now time.Time) erro
 // RetryJob re-arms a terminal job with a fresh attempt budget. It is the
 // operator saying "the disk is fixed now, try again", so the attempt counter
 // starts over rather than resuming against a ceiling already reached.
+//
+// THE ONE WRITER THAT MOVES A ROW INTO idx_jobs_unique_target FROM OUTSIDE IT.
+// Its WHERE names the three terminal states, all of which the index's predicate
+// excludes, and it sets state='queued', which the predicate includes. So a
+// retry is an insert as far as that index is concerned, and it can be refused
+// exactly as EnqueueJob's INSERT can -- when a SECOND job for the same kind and
+// target became active while this one sat terminal. Two ordinary ways for that
+// to happen, both measured (#746):
+//
+//   - a unique job fails, the operator resubmits (which is allowed: 'failed' is
+//     outside the predicate, so the new job is not a duplicate), and then clicks
+//     Retry on the old one;
+//   - a twin that MigrateJobUniqueTarget itself cancelled sits beside its
+//     survivor, carrying a last_error explaining that it was cancelled as a
+//     duplicate -- which is an explanation that invites a Retry click, on the
+//     path most likely to be taken right after the upgrade.
+//
+// Unhandled, the driver's violation walks out of the store and reaches
+// internal/api's writeStoreError as an unrecognised error, which answers 500
+// with "UNIQUE constraint failed: jobs.kind, jobs.target (2067)" as the body:
+// precisely the outcome EnqueueJob's comment says must not happen -- an
+// operator told the server is broken, in the vocabulary of an index.
+//
+// So the violation is matched and turned into ErrStateConflict, which
+// writeStoreError already maps to 409, with a sentence naming the job that is
+// already active. It is NOT folded the way EnqueueJob folds one: folding means
+// "here is the job doing that work", and this signature returns only an error,
+// so a nil would claim a re-arm that did not happen. 409 with the winner's id
+// is the honest answer, and it is the one the operator can act on.
 func (d *DB) RetryJob(id int64, now time.Time) error {
 	ts := now.Unix()
 	res, err := d.sql.Exec(`UPDATE jobs SET state='queued', attempts=0, progress=0,
 		available_at=?, last_error='', started_at=0, finished_at=0, updated_at=?
 		WHERE id=? AND state IN ('done','failed','cancelled')`, ts, ts, id)
 	if err != nil {
+		if isJobUniqueTargetViolation(err) {
+			return jobUniqueTargetConflict(d.sql, id, "retry", err)
+		}
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
@@ -668,6 +984,44 @@ func jobStateConflict(q rowQuerier, id int64, verb string) error {
 		return err
 	}
 	return fmt.Errorf("%w: cannot %s job %d: it is %s", ErrStateConflict, verb, id, state)
+}
+
+// jobUniqueTargetConflict turns idx_jobs_unique_target refusing a state change
+// into the same KIND of answer jobStateConflict gives: ErrStateConflict, which
+// writeStoreError maps to 409.
+//
+// It is the sibling of the fold in EnqueueJob and exists for the same reason --
+// the index's refusal is information the operator can use, and the driver's
+// rendering of it is not. The sentence names the job that is already active,
+// because "you cannot retry this" without saying what is in the way leaves the
+// operator with nothing to click.
+//
+// cause is carried only so a read that fails on the way to the better sentence
+// can hand back the original violation rather than an invented one; it is never
+// wrapped into the conflict, which would put the index's name back in the body.
+func jobUniqueTargetConflict(q rowQuerier, id int64, verb string, cause error) error {
+	var kind, target string
+	err := q.QueryRow(`SELECT kind, target FROM jobs WHERE id = ?`, id).Scan(&kind, &target)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return cause
+	}
+
+	active, findErr := activeJobFor(q, kind, target)
+	if findErr != nil || active == nil {
+		// Either the read failed, or the winner reached a terminal state
+		// between the refusal and this line -- in which case the retry would
+		// succeed if asked again. Both get the conflict rather than the raw
+		// violation: 409 is still the right code (the request was inapplicable
+		// when it ran, not the server failing), and a retriable one is exactly
+		// what a caller should do with it.
+		return fmt.Errorf("%w: cannot %s job %d: another %s job for %s was already active",
+			ErrStateConflict, verb, id, kind, target)
+	}
+	return fmt.Errorf("%w: cannot %s job %d: job %d is already active for %s of %s",
+		ErrStateConflict, verb, id, active.ID, kind, target)
 }
 
 func timeOrZero(unix int64) time.Time {

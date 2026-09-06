@@ -532,3 +532,81 @@ func TestVerifyArchiveReportsEveryReasonNotJustTheFirst(t *testing.T) {
 		t.Fatalf("only %d reasons reported: %v", len(v.Reasons), v.Reasons)
 	}
 }
+
+// ------------------------------------------------------------ quality bounds
+
+// The ceilings are derived from archiveProfiles rather than written down a
+// second time, so this test is really asking whether the derivation still
+// tracks the table: the HEVC encoders all default to 28 and the AV1 encoders to
+// 32, and one halving of bitrate past those is 34 and 38.
+func TestArchiveQualityCeilingsAreDerivedFromTheProfileDefaults(t *testing.T) {
+	tests := []struct {
+		name          string
+		codec         ArchiveCodec
+		encoder       string
+		wantReplace   int
+		wantAlongside int
+	}{
+		{"hevc family", ArchiveHEVC, "", 28, 34},
+		{"av1 family", ArchiveAV1, "", 32, 38},
+		{"an unset codec means hevc", "", "", 28, 34},
+		{"a named encoder answers for itself", "", "libx265", 28, 34},
+		{"nvenc is on the same scale as x265", ArchiveHEVC, "hevc_nvenc", 28, 34},
+		// The encoder is the more specific fact, so it wins over a family label
+		// that disagrees with it. Bounding an SVT-AV1 encode by the HEVC
+		// family's 28 would refuse that encoder's own shipped default.
+		{"the encoder wins over a mismatched family", ArchiveHEVC, "libsvtav1", 32, 38},
+		// An unknown codec falls back to the default family, exactly as
+		// ArchiveEncoder does, so a bound is never taken from an empty set.
+		{"an unknown family falls back to hevc", ArchiveCodec("vp9"), "", 28, 34},
+		{"an unknown encoder leaves it to the family", ArchiveAV1, "hevc_future", 32, 38},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MaxReplaceArchiveQuality(tc.codec, tc.encoder); got != tc.wantReplace {
+				t.Fatalf("MaxReplaceArchiveQuality = %d, want %d", got, tc.wantReplace)
+			}
+			if got := MaxArchiveQuality(tc.codec, tc.encoder); got != tc.wantAlongside {
+				t.Fatalf("MaxArchiveQuality = %d, want %d", got, tc.wantAlongside)
+			}
+			// The whole point of having two numbers is that they differ, and
+			// that the one guarding the delete is the tighter of the two.
+			if MaxReplaceArchiveQuality(tc.codec, tc.encoder) >= MaxArchiveQuality(tc.codec, tc.encoder) {
+				t.Fatal("the replace ceiling is not tighter than the alongside ceiling")
+			}
+		})
+	}
+}
+
+// ArchiveArgs is exported, so a caller can build an ArchiveSpec without going
+// past ArchiveParams.Validate. A CRF of 45 encodes, decodes and verifies
+// perfectly while looking nothing like the master, so that number must not
+// reach the encoder verbatim through any door.
+func TestArchiveArgsClampsAQualityThatNeverSawTheValidator(t *testing.T) {
+	tests := []struct {
+		name string
+		spec ArchiveSpec
+		flag string
+		want string
+	}{
+		{"x265 well into the mush band", ArchiveSpec{Encoder: "libx265", Quality: 45}, "-crf", "34"},
+		{"x265 at the very top of its scale", ArchiveSpec{Encoder: "libx265", Quality: 51}, "-crf", "34"},
+		{"svt-av1 at the top of its wider scale", ArchiveSpec{Encoder: "libsvtav1", Quality: 63}, "-crf", "38"},
+		{"nvenc counts the same way x265 does", ArchiveSpec{Encoder: "hevc_nvenc", Quality: 44}, "-cq", "34"},
+		// Positive control. A clamp that returned its floor for everything, or
+		// an implementation that refused every number, would satisfy the rows
+		// above and fail these: an in-range request must survive untouched,
+		// including one sitting exactly on the ceiling.
+		{"a better picture than the default is honoured", ArchiveSpec{Encoder: "libx265", Quality: 20}, "-crf", "20"},
+		{"a request one point inside the ceiling", ArchiveSpec{Encoder: "libx265", Quality: 33}, "-crf", "33"},
+		{"a request exactly on the ceiling", ArchiveSpec{Encoder: "libx265", Quality: 34}, "-crf", "34"},
+		{"unset still means the profile default", ArchiveSpec{Encoder: "libx265"}, "-crf", "28"},
+		{"svt-av1 inside its own wider range", ArchiveSpec{Encoder: "libsvtav1", Quality: 36}, "-crf", "36"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.spec.Input, tc.spec.Output = "in.mkv", "out.mkv"
+			mustArg(t, ArchiveArgs(tc.spec), tc.flag, tc.want)
+		})
+	}
+}

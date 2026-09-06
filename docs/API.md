@@ -184,12 +184,52 @@ tokens are for.
   with `{"error": "..."}` saying what is wrong, in language meant for the person
   looking at the screen.
 - Lists return `[]`, never `null`.
-- A route that acts on the running pipeline is `503` with
-  `{"error": "...", "code": "no_source"}` on an install that has no source yet.
-  The `code` is there so a client can tell "nothing has been created here"
-  from "something is broken" without matching on the sentence; every other
-  error omits it. Reads answer normally — an install with no source reports an
-  empty status, an empty process list and no levels, which is the truth.
+- **`code` is the branch key on a refusal.** It exists so a client can tell one
+  refusal from another without matching on the sentence — the sentences are
+  written for a person and are translated into fifteen languages, so a
+  comparison against one is a comparison that will eventually be false
+  everywhere. An error that has nothing to branch on omits the field, and `code`
+  absent means exactly that; it is not a category. Three exist today:
+
+  | `code` | Status | Means |
+  |---|---|---|
+  | `no_source` | `503` | This install has no source yet, so there is no programme to act on. An **empty state**, not a fault: nothing is broken and only the operator can create one. |
+  | `source_required` | `400` | There are several programmes and the body did not say which. The request was well formed; the choice was simply not made. |
+  | `account_in_use` | `409` | Disconnecting this platform account would cut destinations loose. See below. |
+
+  Reads answer normally on an install with no source — an empty status, an empty
+  process list and no levels, which is the truth.
+
+- **`DELETE /platforms/accounts/{id}` refuses an unconfirmed disconnect while
+  destinations are still on the account**, and answers:
+
+  ```json
+  {
+    "error": "2 destinations are still on this connected account: Main YouTube, Backup. …",
+    "code": "account_in_use",
+    "destinations": [
+      {"id": 3, "name": "Main YouTube", "platform": "youtube", "enabled": true,
+       "broadcastId": "AbC123", "phase": "live", "broadcasting": true}
+    ]
+  }
+  ```
+
+  **This is the ordinary answer, not an edge case.** A destination blocks if it
+  is `enabled` **or** mid-broadcast, and a normal install leaves its
+  destinations enabled — so most disconnects get this back the first time. Send
+  the same request again with a body of `{"confirm": true}` to proceed; nothing
+  has been deleted when the `409` is returned.
+
+  A confirmed disconnect answers `200` with `{"status": "disconnected"}`, the
+  same `destinations` array, and a past-tense `warnings` entry. It is not
+  reversible by reconnecting: the destinations' `account_id` is set to `NULL`,
+  the reconnected account gets a new row id, and a destination that was
+  mid-broadcast is left live with nothing able to end it — the remedy after that
+  is the platform's own studio.
+
+  An absent body means unconfirmed. A body that is present and malformed — or
+  that misspells the field — is a `400`, so a client that meant to confirm is
+  never read as one that did not.
 - **No response returns a secret it did not just create.** Stream keys, client
   secrets, API tokens and TLS private keys are never returned on a read, and
   webhook URLs come back masked — handing the masked form back on an update

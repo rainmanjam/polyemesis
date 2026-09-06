@@ -233,6 +233,62 @@ func (p ArchiveParams) Validate() error {
 	if p.Codec != "" && p.Codec != ArchiveHEVC && p.Codec != ArchiveAV1 {
 		return fmt.Errorf("unknown archive codec %q", p.Codec)
 	}
+	// poka-yoke: refuses a quality number that would encode the master into mush
+	// and, when ReplaceOriginal is set, rename the mush over it.
+	//
+	// The name and the codec family were bounded here from the start and the
+	// quality was not, which left the one knob on this payload that VerifyArchive
+	// cannot check afterwards as the one knob with no bound. A CRF in the high
+	// thirties encodes cleanly, keeps every audio track, decodes without an
+	// error and shrinks enormously, so the verifier passes it and the rename
+	// goes ahead. See archive.go's quality-bounds block for where the two
+	// ceilings come from and why replacing the master gets the tighter one.
+	//
+	// This runs in two places and the message has to work in both. On
+	// submission, NewArchiveJob returns it and the API answers 400 with this
+	// text. On a job QUEUED BEFORE this bound existed, RunArchive revalidates
+	// and returns jobs.Permanent, so the job goes straight to Failed with this
+	// text on the row — no retries, no encode, nothing deleted. An operator
+	// meeting that after an upgrade has to be able to read the row and know
+	// what changed and what to do about it, which is why the refusal names the
+	// ceiling, the direction of the scale, the remedy, and the fact that
+	// nothing has happened to their footage.
+	if p.Quality != 0 {
+		limit := MaxArchiveQuality(p.Codec, p.Encoder)
+		act := "an archive written beside the original"
+		alternative := ""
+		if p.ReplaceOriginal {
+			limit = MaxReplaceArchiveQuality(p.Codec, p.Encoder)
+			act = "an archive that replaces the original"
+			alternative = fmt.Sprintf(
+				", or leave the original in place and resubmit at %d or lower",
+				MaxArchiveQuality(p.Codec, p.Encoder))
+		}
+		// The floor and the ceiling are refused separately because they are
+		// different mistakes and the same sentence cannot explain both: below
+		// the floor the number is not a quality at all, and telling someone who
+		// sent -5 that a higher number is a worse picture points them further
+		// the wrong way.
+		if p.Quality < MinArchiveQuality {
+			return fmt.Errorf(
+				"archive quality %d is below %d, and there is no such quality: "+
+					"the scale counts up from %d, where a lower number is a better "+
+					"picture, and 0 already means take the codec's own default. "+
+					"Resubmit at 0 for the default, or between %d and %d. "+
+					"Nothing has been encoded and nothing has been deleted",
+				p.Quality, MinArchiveQuality, MinArchiveQuality, MinArchiveQuality, limit)
+		}
+		if p.Quality > limit {
+			return fmt.Errorf(
+				"archive quality %d is outside %d-%d, the range %s may be encoded at "+
+					"with this codec: a higher number is a worse picture, and past %d the "+
+					"re-encode is no longer an archive of the master. "+
+					"Resubmit at %d or lower%s. "+
+					"Nothing has been encoded and nothing has been deleted — a job queued "+
+					"before this limit existed fails here instead of running",
+				p.Quality, MinArchiveQuality, limit, act, limit, limit, alternative)
+		}
+	}
 	return nil
 }
 

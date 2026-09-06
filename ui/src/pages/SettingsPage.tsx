@@ -61,7 +61,7 @@ import {
   supportOf,
   tierInfo,
 } from "@/lib/capabilities";
-import { api } from "@/lib/api";
+import { api, isAccountInUse, type AccountDestination } from "@/lib/api";
 import {
   acmeStance,
   acmeYaml,
@@ -1929,7 +1929,13 @@ function PlatformCapabilityMatrix() {
   );
 }
 
-function PlatformCredCard({
+/** Exported for its test, like VariantsCard in PlayoutPage.
+ *
+ *  SettingsPage.disconnect.test.tsx drives the disconnect flow through this
+ *  card rather than through the whole settings page, which would have to stand
+ *  up TLS status, system info and the API-token list to ask a question about
+ *  one button. */
+export function PlatformCredCard({
   guide,
   creds,
   accounts,
@@ -1992,10 +1998,70 @@ function PlatformCredCard({
     onChanged();
   };
 
-  const disconnect = async (a: PlatformAccount) => {
-    await api.deleteAccount(a.id);
+  /* THE 409 IS THE ORDINARY ANSWER HERE, not an edge case.
+   *
+   * The server refuses an unconfirmed disconnect while any destination on the
+   * account is enabled or mid-broadcast, and a normal install leaves its
+   * destinations enabled — so most presses of this button get the refusal back
+   * the first time. Before this branch existed the rejection escaped into an
+   * unhandled promise: no dialog, no toast, no row removed. The button simply
+   * did nothing, on most accounts, and looked like a broken build rather than a
+   * guard doing its job.
+   *
+   * The state below is the operator's second decision, held separately from
+   * `confirmDisconnect` because it is a different question. The first dialog
+   * asks "disconnect this account?"; this one answers "not while these are
+   * still on it — here they are, still want to?" and carries the server's own
+   * sentence rather than a paraphrase, so a terminal and a browser say the same
+   * thing. */
+  const [inUse, setInUse] = useState<{
+    account: PlatformAccount;
+    message: string;
+    destinations: AccountDestination[];
+  } | null>(null);
+
+  const disconnected = () => {
     toast.success(t("set.accountDisconnected"));
     onChanged();
+  };
+
+  const disconnect = async (a: PlatformAccount) => {
+    try {
+      await api.deleteAccount(a.id);
+    } catch (err) {
+      if (isAccountInUse(err)) {
+        // Nothing was deleted. The account is still connected and the
+        // destinations still point at it, so there is no half-done state to
+        // report — only a question to ask.
+        setInUse({ account: a, message: err.message, destinations: err.destinations });
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : t("set.couldNotDisconnect"));
+      return;
+    }
+    disconnected();
+  };
+
+  const disconnectAnyway = async () => {
+    if (!inUse) return;
+    try {
+      await api.confirmDeleteAccount(inUse.account.id);
+    } catch (err) {
+      // SWALLOWED HERE, DELIBERATELY, and reported as a toast. Rethrowing would
+      // leave the dialog open, which reads better -- but ConfirmDestructive
+      // awaits this without a catch of its own, so the rejection would escape
+      // into an unhandled promise and the operator would see nothing at all.
+      // That is the exact failure this whole change exists to end.
+      //
+      // The dialog closes either way: ConfirmDestructive calls onOpenChange
+      // (false) as soon as onConfirm RESOLVES, and returning resolves it. The
+      // account is still connected, so pressing Disconnect again re-runs the
+      // same refusal and brings the same list back.
+      toast.error(err instanceof Error ? err.message : t("set.couldNotDisconnect"));
+      return;
+    }
+    setInUse(null);
+    disconnected();
   };
 
   const copyRedirect = async () => {
@@ -2232,6 +2298,53 @@ function PlatformCredCard({
         onConfirm={async () => {
           if (confirmDisconnect.target) await disconnect(confirmDisconnect.target);
         }}
+      />
+      {/* THE SERVER'S REFUSAL, RENDERED. Second dialog rather than a branch
+          inside the first, because the first one has already been dismissed by
+          the time the 409 arrives and its subject is a different question.
+
+          requireTyping, and it earns it: ON DELETE SET NULL rewrites every one
+          of these rows in place, reconnecting mints a NEW account id, and the
+          destinations' account_id is already NULL by then — so there is no
+          undo, only re-linking each destination by hand. That is exactly the
+          "does not come back" that ConfirmDestructive reserves typing for.
+
+          The sentence is the server's, verbatim. The same refusal reaches a
+          terminal, and two phrasings is how they come to disagree. */}
+      <ConfirmDestructive
+        open={inUse !== null}
+        onOpenChange={(o) => {
+          if (!o) setInUse(null);
+        }}
+        subject={inUse?.account.accountName ?? ""}
+        title={t("set.disconnectInUseTitle")}
+        description={
+          <>
+            {inUse?.message}
+            {inUse && inUse.destinations.length > 0 && (
+              <span className="mt-2 flex flex-col gap-0.5">
+                <span className="text-[10px] uppercase tracking-wider text-subtle-foreground">
+                  {t("set.disconnectInUseList")}
+                </span>
+                {/* NAMED, not counted. "3 destinations" is not something an
+                    operator can act on; "Main YouTube" is — and the one that
+                    is mid-broadcast is the one they most need to see, because
+                    disconnecting leaves it live with nothing able to end it. */}
+                {inUse.destinations.map((d) => (
+                  <span key={d.id} className="text-[12px]">
+                    {d.name}
+                    {d.broadcasting && (
+                      <span className="text-warn"> — {t("set.disconnectMidBroadcast")}</span>
+                    )}
+                  </span>
+                ))}
+              </span>
+            )}
+          </>
+        }
+        requireTyping
+        confirmLabel={t("set.disconnectAnyway")}
+        onConfirm={disconnectAnyway}
       />
       {platformSupportsDeviceCode(guide) && (
         <DeviceCodeDialog

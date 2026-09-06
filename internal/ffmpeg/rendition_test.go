@@ -364,12 +364,13 @@ func TestBlurProxySize(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			w, h := blurProxySize(tc.w, tc.h)
-			if w != tc.wantW || h != tc.wantH {
-				t.Errorf("blurProxySize(%d, %d) = %dx%d, want %dx%d", tc.w, tc.h, w, h, tc.wantW, tc.wantH)
+			proxy := blurProxySize(frameSize{W: tc.w, H: tc.h})
+			if proxy.W != tc.wantW || proxy.H != tc.wantH {
+				t.Errorf("blurProxySize(%dx%d) = %dx%d, want %dx%d",
+					tc.w, tc.h, proxy.W, proxy.H, tc.wantW, tc.wantH)
 			}
-			if w%2 != 0 || h%2 != 0 {
-				t.Errorf("proxy %dx%d is not a legal 4:2:0 frame", w, h)
+			if proxy.W%2 != 0 || proxy.H%2 != 0 {
+				t.Errorf("proxy %dx%d is not a legal 4:2:0 frame", proxy.W, proxy.H)
 			}
 		})
 	}

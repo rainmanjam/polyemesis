@@ -41,6 +41,7 @@ import type {
   LogLine,
   MediaFile,
   Metadata,
+  Platform,
   PlatformAccount,
   PlatformCreds,
   PlayoutAdminView,
@@ -93,6 +94,34 @@ import type {
 
 const BASE = "/api/v1";
 
+/** One destination a refusal is ABOUT, exactly as the server named it.
+ *
+ *  Mirrors `accountDestination` in internal/api/oauth_handlers.go. It rides on
+ *  the 409 that refuses an unconfirmed disconnect AND on the 200 that reports a
+ *  confirmed one, for the reason the Go side gives: an operator who confirmed
+ *  still has to know what they just did, and a client that only ever sees a
+ *  count cannot render a sentence with a destination's name in it. */
+export interface AccountDestination {
+  id: number;
+  name: string;
+  platform: Platform;
+  /** The operator's run/stop intent. It survives the disconnect — the FK is
+   *  ON DELETE SET NULL and nothing clears this — so an enabled row goes on
+   *  being reconciled with no account behind it. */
+  enabled: boolean;
+  broadcastId?: string;
+  phase?: string;
+  /** There is a broadcast and the platform has not said it is over. */
+  broadcasting: boolean;
+}
+
+/** What a disconnect answers with once it goes through. */
+export interface AccountDeleted {
+  status: string;
+  destinations?: AccountDestination[];
+  warnings?: string[];
+}
+
 /** Thrown for any non-2xx response, carrying the server's message. */
 export class ApiError extends Error {
   // Written out longhand rather than as a parameter property: the build sets
@@ -107,11 +136,31 @@ export class ApiError extends Error {
    *  reword and could never work once that sentence is translated. */
   readonly code: string;
 
-  constructor(status: number, message: string, code = "") {
+  /** The rows the refusal is about, `[]` when the server named none.
+   *
+   *  LIFTED HERE RATHER THAN AT THE CALL SITE, for the same reason `code` is.
+   *  A refusal that names rows is useless to an operator unless the screen can
+   *  print the names, and the only place the body still exists is inside
+   *  `request`. A caller that had to re-parse the response would first need the
+   *  response, which the throw has already thrown away.
+   *
+   *  Only `account_in_use` sends this today. `[]` is therefore the ordinary
+   *  value and a caller reading it on any other error gets an empty list rather
+   *  than `undefined` — a `.map` over a refusal is not allowed to be the thing
+   *  that breaks the error path. */
+  readonly destinations: AccountDestination[];
+
+  constructor(
+    status: number,
+    message: string,
+    code = "",
+    destinations: AccountDestination[] = [],
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.destinations = destinations;
   }
 }
 
@@ -133,6 +182,31 @@ export const NO_SOURCE = "no_source";
  *  install is failing. */
 export function isNoSource(e: unknown): boolean {
   return e instanceof ApiError && e.code === NO_SOURCE;
+}
+
+/** The code the server sends when a disconnect would cut destinations loose.
+ *
+ *  Written here beside NO_SOURCE and for the same reason: a screen branches on
+ *  this rather than on the English, because the English is due to be translated
+ *  into fifteen languages and a comparison against a sentence is a comparison
+ *  that will one day be false everywhere but en-GB.
+ *
+ *  THIS IS THE ORDINARY ANSWER, not an edge case. `accountDestination.blocks()`
+ *  fires on `Enabled` alone and a normal install leaves its destinations
+ *  enabled, so most disconnects get this back the first time. A client with no
+ *  branch for it is a client whose Disconnect button does nothing.
+ *
+ *  lib/account-in-use-code.test.ts reads the Go constant and asserts this
+ *  equals it. */
+export const ACCOUNT_IN_USE = "account_in_use";
+
+/** Whether a rejected request was the disconnect refusal.
+ *
+ *  A type guard rather than a boolean, so a caller that has narrowed on it can
+ *  reach `e.destinations` and `e.message` without a second cast — the two
+ *  things it needs in order to say WHICH destinations are in the way. */
+export function isAccountInUse(e: unknown): e is ApiError {
+  return e instanceof ApiError && e.code === ACCOUNT_IN_USE;
 }
 
 /** Read the double-submit CSRF token the server set as a readable cookie. */
@@ -183,10 +257,24 @@ async function request<T>(
       body && typeof body === "object" && "code" in body
         ? String((body as { code: unknown }).code)
         : "";
-    throw new ApiError(resp.status, msg, code);
+    throw new ApiError(resp.status, msg, code, refusedDestinations(body));
   }
   reportReconcileFailure(body);
   return body as T;
+}
+
+/** The `destinations` array off an error body, `[]` when there is none.
+ *
+ *  Defensive about the ELEMENTS as well as the field, because this runs on the
+ *  error path: a body whose `destinations` is a string, or an object, must
+ *  produce an empty list rather than something a `.map` will throw inside. The
+ *  rows themselves are trusted once the array is — they come from this
+ *  install's own server, and a screen that re-validated every field would be
+ *  writing a second copy of the Go struct. */
+function refusedDestinations(body: unknown): AccountDestination[] {
+  if (!body || typeof body !== "object" || !("destinations" in body)) return [];
+  const list = (body as { destinations: unknown }).destinations;
+  return Array.isArray(list) ? (list as AccountDestination[]) : [];
 }
 
 /** Raise the amber toast for a mutation the server saved but could not apply.
@@ -232,6 +320,15 @@ const put = <T,>(p: string, body: unknown) =>
 const patch = <T,>(p: string, body: unknown) =>
   request<T>(p, { method: "PATCH", body: JSON.stringify(body) });
 const del = <T,>(p: string) => request<T>(p, { method: "DELETE" });
+// DELETE WITH A BODY, and a second verb rather than an optional argument on
+// `del`. Thirty-odd routes are deleted through `del` and exactly one of them
+// takes a body; an optional parameter would let every one of the others acquire
+// one by a typo, and — worse in the other direction — would let the one route
+// that MUST send `{"confirm": true}` be called without it and look identical at
+// the call site. Two names means the confirmed disconnect is greppable and the
+// unconfirmed one cannot be reached by forgetting an argument.
+const delWithBody = <T,>(p: string, body: unknown) =>
+  request<T>(p, { method: "DELETE", body: JSON.stringify(body) });
 
 /** `?t=<token>` when a playback token is in play, empty otherwise. The public
  *  routes accept the token this way because an <img> src and a <video> src are
@@ -1102,8 +1199,22 @@ export const api = {
   deleteCreds: (platform: string) =>
     del<{ status: string }>(`/platforms/credentials/${platform}`),
   listAccounts: () => get<PlatformAccount[]>("/platforms/accounts"),
-  deleteAccount: (id: number) =>
-    del<{ status: string }>(`/platforms/accounts/${id}`),
+  /** Disconnects an account, UNCONFIRMED.
+   *
+   *  Rejects with `ApiError(409, …, ACCOUNT_IN_USE)` whenever a destination on
+   *  the account is enabled or mid-broadcast — which on a normal install is
+   *  most accounts, so this rejection is the expected path and not a fault.
+   *  `isAccountInUse(err)` narrows it; `err.destinations` says which rows.
+   *  Nothing has been deleted when it rejects. */
+  deleteAccount: (id: number) => del<AccountDeleted>(`/platforms/accounts/${id}`),
+  /** Disconnects an account ANYWAY, after the operator has read the list.
+   *
+   *  A SEPARATE FUNCTION rather than `deleteAccount(id, true)`, because a
+   *  boolean at a call site says nothing about what it turns off. This name
+   *  does, and it means the override is one grep away from being audited. The
+   *  200 carries the same destination list back as a past-tense warning. */
+  confirmDeleteAccount: (id: number) =>
+    delWithBody<AccountDeleted>(`/platforms/accounts/${id}`, { confirm: true }),
   /** The live viewer count for one connected account.
    *
    *  200 in every non-fatal case, including the two that look like failures and

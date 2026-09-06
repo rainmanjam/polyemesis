@@ -176,6 +176,102 @@ type RenditionSpec struct {
 	GOPSeconds float64
 }
 
+// frameSize is one output size in pixels, carried as a single value so that a
+// width and a height cannot be handed to a function the wrong way round.
+//
+// That is the entire reason this type exists, and it is worth saying plainly
+// because it does very little else: no arithmetic beyond a positivity check, a
+// margin pairing and one formatter, and it costs a struct copy per call. What
+// it buys is that the swap stops compiling.
+//
+// The output size used to travel as two bare ints through overlayGraph,
+// drawtextFilter, textPosition, overlayPosition, scaleFilter, cropFitFilter,
+// padFitFilter, blurredPadFilter, fitInsideFilter and blurProxySize. No call
+// in the shipped code was ever transposed, and that is the point: at every one
+// of those sites the transposition was one keystroke away and the compiler had
+// nothing to say about it. Both of these built cleanly against the old
+// signatures, and neither is expressible now:
+//
+//	overlayGraph(s, prof, s.Height, s.Width)      // compiled
+//	drawtextFilter(s.Text, s.Height, s.Width)     // compiled
+//
+// Nor would `go test ./internal/ffmpeg/` have caught them: the string tests
+// covering this chain ran at 1280x720 and 640x200 and asserted on substrings
+// that name no pixel count. An unasserted pixel count is blind to a
+// transposition, and a square size is blind to one even when it is asserted.
+//
+// What the mistake would cost is not a crash and not a failed start. drawtext
+// with the axes swapped still parses; overlay with the axes swapped still
+// composites. The output would be a logo sized to a percentage of the wrong
+// edge, or a caption placed past the bottom of the canvas, in a rendition
+// already going out to a platform. Nobody would see it until it was on air,
+// and the operator's only symptom would be "the overlay looks wrong", with no
+// error anywhere to search for.
+//
+// A struct cannot be transposed positionally: frameSize is not an int, so the
+// compiler refuses the swapped call outright rather than accepting it and
+// producing a wrong picture. A transposition is still expressible in an
+// unkeyed composite literal, frameSize{h, w} — go vet's composites check only
+// covers types from other packages, and everything here is one package. The
+// non-test code builds a frameSize in exactly two places, outputSize and
+// blurProxySize, and its sibling `margins` in one, marginsPx; all three write
+// their fields by NAME, and the literals in the tests are keyed too.
+type frameSize struct {
+	W int
+	H int
+}
+
+// sized reports whether both dimensions are set, which is what every filter
+// that needs a concrete pixel count requires before it can render one.
+//
+// A method rather than `w > 0 && h > 0` repeated at each caller: before this
+// type the predicate was spelled out independently in four places — as a
+// `<= 0 || <= 0` guard in overlayGraph, drawtextFilter and aspectFilter, and as
+// the first arm of scaleFilter's switch — which is four chances for one of them
+// to drift into checking a single axis.
+func (f frameSize) sized() bool { return f.W > 0 && f.H > 0 }
+
+// wh renders the pair in FFmpeg's own width:height argument order, which is
+// the order scale, crop and pad all take.
+//
+// Each of those is a `%d:%d` that can be filled the wrong way round, and none
+// of them errors when it is: `scale=1920:1080` is a perfectly valid way to
+// encode a portrait rendition as a landscape one. Routing every emission site
+// through here leaves one line in the package where the two fields are written
+// in an order that could be wrong, instead of seven.
+func (f frameSize) wh() string { return fmt.Sprintf("%d:%d", f.W, f.H) }
+
+// margins is a pair of pixel gaps from the anchored edges: X measured across
+// the frame and Y measured down it. Named fields, so that neither producing
+// the pair nor reading it back can quietly exchange the two.
+type margins struct {
+	X int
+	Y int
+}
+
+// marginsPx resolves an anchored element's two margin percentages against the
+// axis each one is measured along.
+//
+// This is the ONLY place in the package that pairs a margin percentage with a
+// dimension. overlayPosition and textPosition each used to write that pairing
+// out for themselves, two lines apiece, and `marginPx(o.MarginYPct, out.W)` is
+// a mistake neither the compiler nor a square-sized test can see. They now ask
+// for both at once and read the answer back by field name.
+func (f frameSize) marginsPx(xPct, yPct float64) margins {
+	return margins{X: marginPx(xPct, f.W), Y: marginPx(yPct, f.H)}
+}
+
+// outputSize is the rendition's target frame, and the ONLY place in the
+// non-test code that turns the spec's two int fields into a frameSize.
+//
+// Funnelling it here is what makes the type worth having. A transposition is
+// only expressible where the struct is built from loose ints; with one such
+// site, reading the two fields by name, there is one line to get right instead
+// of ten call sites.
+func (s RenditionSpec) outputSize() frameSize {
+	return frameSize{W: s.Width, H: s.Height}
+}
+
 // encoderProfile captures the ways FFmpeg encoders disagree about their own
 // flags. Handing an encoder a flag it does not own is not free: FFmpeg either
 // warns loudly on every start or, for the hardware wrappers, refuses to open.
@@ -413,7 +509,7 @@ func RenditionArgs(s RenditionSpec) []string {
 	// graph -- it copies every audio track through untouched -- so adding an
 	// input here is safe. Written down because it looks like the same hazard
 	// and is not, and someone will otherwise "fix" it wrongly.
-	overlay := overlayGraph(s, prof, s.Width, s.Height)
+	overlay := overlayGraph(s, prof, s.outputSize())
 	if overlay != "" {
 		args = append(args, "-i", s.Overlay.ImagePath)
 	}
@@ -616,14 +712,14 @@ func videoFilterChain(s RenditionSpec, prof encoderProfile, includeText bool) st
 		// The aspect chain already ends at exactly Width x Height, so the plain
 		// scale would be a second, redundant resize.
 		chain = append(chain, fit)
-	} else if scale := scaleFilter(s.Width, s.Height); scale != "" {
+	} else if scale := scaleFilter(s.outputSize()); scale != "" {
 		chain = append(chain, scale)
 	}
 	// Text BEFORE the VAAPI tail, for the same reason the image overlay goes
 	// before it: drawtext is an ordinary software filter and cannot run on the
 	// GPU surfaces that hwupload produces.
 	if includeText {
-		if dt := drawtextFilter(s.Text, s.Width, s.Height); dt != "" {
+		if dt := drawtextFilter(s.Text, s.outputSize()); dt != "" {
 			chain = append(chain, dt)
 		}
 	}
@@ -642,14 +738,14 @@ func videoFilterChain(s RenditionSpec, prof encoderProfile, includeText bool) st
 // -2 (not -1) derives the missing dimension rounded to an even number, which
 // H.264's 4:2:0 chroma subsampling requires; -1 can land on an odd height and
 // the encoder then refuses to open.
-func scaleFilter(w, h int) string {
+func scaleFilter(out frameSize) string {
 	switch {
-	case w > 0 && h > 0:
-		return fmt.Sprintf("scale=%d:%d", w, h)
-	case w > 0:
-		return fmt.Sprintf("scale=%d:-2", w)
-	case h > 0:
-		return fmt.Sprintf("scale=-2:%d", h)
+	case out.sized():
+		return "scale=" + out.wh()
+	case out.W > 0:
+		return fmt.Sprintf("scale=%d:-2", out.W)
+	case out.H > 0:
+		return fmt.Sprintf("scale=-2:%d", out.H)
 	default:
 		return ""
 	}
@@ -666,16 +762,17 @@ func scaleFilter(w, h int) string {
 // restrictive direction, and a stream that does not start is a worse answer
 // than a stream in the wrong shape.
 func aspectFilter(s RenditionSpec) string {
-	if s.Width <= 0 || s.Height <= 0 {
+	out := s.outputSize()
+	if !out.sized() {
 		return ""
 	}
 	switch s.Aspect {
 	case AspectCrop:
-		return cropFitFilter(s.Width, s.Height)
+		return cropFitFilter(out)
 	case AspectPad:
-		return padFitFilter(s.Width, s.Height, s.PadColor)
+		return padFitFilter(out, s.PadColor)
 	case AspectBlurredPad:
-		return blurredPadFilter(s.Width, s.Height)
+		return blurredPadFilter(out)
 	default:
 		return ""
 	}
@@ -697,10 +794,10 @@ func aspectFilter(s RenditionSpec) string {
 // ratio: without this the file is 1080x1920 carrying SAR 404:405, so a player
 // that honours SAR shows a 9:16 rendition very slightly un-square. Verified
 // against real FFmpeg — it is not a hypothetical.
-func cropFitFilter(w, h int) string {
-	cw := evenExpr(fmt.Sprintf("min(iw\\,ih*%d/%d)", w, h))
-	ch := evenExpr(fmt.Sprintf("min(ih\\,iw*%d/%d)", h, w))
-	return fmt.Sprintf("crop=%s:%s,scale=%d:%d,setsar=1", cw, ch, w, h)
+func cropFitFilter(out frameSize) string {
+	cw := evenExpr(fmt.Sprintf("min(iw\\,ih*%d/%d)", out.W, out.H))
+	ch := evenExpr(fmt.Sprintf("min(ih\\,iw*%d/%d)", out.H, out.W))
+	return fmt.Sprintf("crop=%s:%s,scale=%s,setsar=1", cw, ch, out.wh())
 }
 
 // padFitFilter scales the whole frame to fit and letterboxes the remainder.
@@ -708,9 +805,9 @@ func cropFitFilter(w, h int) string {
 // setsar=1 closes the chain because the padded frame IS the target shape now:
 // an anamorphic source that arrived with a non-square SAR would otherwise hand
 // the player a display aspect that no longer describes the canvas we built.
-func padFitFilter(w, h int, color string) string {
-	return fmt.Sprintf("%s,pad=%d:%d:%s:%s:%s,setsar=1",
-		fitInsideFilter(w, h), w, h,
+func padFitFilter(out frameSize, color string) string {
+	return fmt.Sprintf("%s,pad=%s:%s:%s:%s,setsar=1",
+		fitInsideFilter(out), out.wh(),
 		evenExpr("(ow-iw)/2"), evenExpr("(oh-ih)/2"), padColor(color))
 }
 
@@ -720,14 +817,14 @@ func padFitFilter(w, h int, color string) string {
 // split feeds one decoded frame to both halves, so the background is always the
 // picture behind it rather than a still or a colour. The background is built at
 // proxy size and blown back up; see blurProxyDivisor for why.
-func blurredPadFilter(w, h int) string {
-	bw, bh := blurProxySize(w, h)
+func blurredPadFilter(out frameSize) string {
+	proxy := blurProxySize(out)
 	var b strings.Builder
 	b.WriteString("split=2[bgsrc][fgsrc];")
-	fmt.Fprintf(&b, "[bgsrc]scale=%d:%d:force_original_aspect_ratio=increase:force_divisible_by=2,"+
-		"crop=%d:%d,gblur=sigma=%d,scale=%d:%d,setsar=1[bg];",
-		bw, bh, bw, bh, blurProxySigma, w, h)
-	fmt.Fprintf(&b, "[fgsrc]%s[fg];", fitInsideFilter(w, h))
+	fmt.Fprintf(&b, "[bgsrc]scale=%s:force_original_aspect_ratio=increase:force_divisible_by=2,"+
+		"crop=%s,gblur=sigma=%d,scale=%s,setsar=1[bg];",
+		proxy.wh(), proxy.wh(), blurProxySigma, out.wh())
+	fmt.Fprintf(&b, "[fgsrc]%s[fg];", fitInsideFilter(out))
 	// W/H are the background's dimensions and w/h the foreground's, which is
 	// overlay's own vocabulary rather than ours; the result is the real frame
 	// centred on the canvas.
@@ -735,23 +832,33 @@ func blurredPadFilter(w, h int) string {
 	return b.String()
 }
 
-// fitInsideFilter scales to the largest size that fits inside w x h with the
-// source's own aspect ratio intact.
+// fitInsideFilter scales to the largest size that fits inside the target with
+// the source's own aspect ratio intact.
 //
 // force_divisible_by=2 is not decoration: the derived side of a
 // force_original_aspect_ratio scale lands wherever the arithmetic puts it, and
 // an odd width reaches the encoder as "width not divisible by 2" — a start
 // failure, not a warning. It needs FFmpeg 4.4, comfortably below the 6.0 the
 // startup check already demands.
-func fitInsideFilter(w, h int) string {
-	return fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2", w, h)
+func fitInsideFilter(out frameSize) string {
+	return "scale=" + out.wh() + ":force_original_aspect_ratio=decrease:force_divisible_by=2"
 }
 
 // blurProxySize is the background's working size, kept even so the proxy is
 // itself a legal 4:2:0 frame.
-func blurProxySize(w, h int) (int, int) {
-	return evenDown(max(w/blurProxyDivisor, minBlurProxyDimension)),
-		evenDown(max(h/blurProxyDivisor, minBlurProxyDimension))
+//
+// It returns a frameSize rather than a bare (int, int) pair for the reason
+// frameSize exists at all: `bw, bh := blurProxySize(...)` leaves the caller one
+// keystroke from binding the height to bw, which would build the background at
+// a transposed size and stretch the blur across the wrong axis. A named field
+// on the way out closes the same hole the parameter list closes on the way in,
+// and the proxy then reaches the filter string through frameSize.wh() like
+// every other size in this file.
+func blurProxySize(out frameSize) frameSize {
+	return frameSize{
+		W: evenDown(max(out.W/blurProxyDivisor, minBlurProxyDimension)),
+		H: evenDown(max(out.H/blurProxyDivisor, minBlurProxyDimension)),
+	}
 }
 
 // evenExpr wraps an FFmpeg expression so its value lands on an even number of

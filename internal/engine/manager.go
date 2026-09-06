@@ -87,6 +87,38 @@ type Manager struct {
 	// Always taken OUTSIDE mu. Nothing may acquire it while holding mu.
 	syncMu sync.Mutex
 
+	// settingsMu serialises a settings SAVE end to end: the write into
+	// m.settings and the push of the resulting snapshot into the engines are
+	// one indivisible step, and so is the pair "an engine becomes visible / an
+	// engine is handed the settings" in Sync's creation path.
+	//
+	// It exists because of what engineSettings changed. A SetX used to push
+	// only its own value -- SetHooks called eng.SetHooks and touched nothing
+	// else -- so two setters running at once could not interfere. Every SetX
+	// now pushes the WHOLE snapshot, which is what makes a forgotten setting
+	// unrepresentable, and which turns any gap between a setter's write and its
+	// push into a lost update:
+	//
+	//	SetHooks:     write hooks=d ......................... push {d, nil}
+	//	SetLifecycle:      write lifecycle=o ... push {d, o}
+	//
+	// SetHooks read the block before SetLifecycle's write landed and pushed it
+	// afterwards, rolling the engine's observer back to nil. Nothing corrects
+	// it: m.settings still says o, so the manager does not disagree with itself
+	// and no later push is triggered. That is the SAME invisible failure
+	// engineSettings exists to prevent -- a coordinator the operator wired, the
+	// manager agrees is wired, and that programme's YouTube broadcasts sitting
+	// in "testing" for the whole show -- in a new place. #741.
+	//
+	// It is NOT mu, for the reason syncMu is not mu: the push calls eng.SetX,
+	// which takes each ENGINE's lock, and holding mu across that would order
+	// the manager's lock above every engine's. It is not syncMu either, because
+	// Sync holds that across every engine's Start and a settings save must not
+	// wait on ffmpeg.
+	//
+	// Always taken OUTSIDE mu. Nothing may acquire it while holding mu.
+	settingsMu sync.Mutex
+
 	mu sync.RWMutex
 	// srt and rtmp are the one-port listeners, one per protocol, each shared by
 	// every source. Nil when the port could not be bound, which is logged
@@ -106,31 +138,156 @@ type Manager struct {
 	ctx      context.Context
 	started  bool
 
-	// transcriber is remembered rather than applied once, because engines are
-	// created after Start whenever a source is added, and a programme whose
-	// recordings silently never transcribe is a bug nobody reports.
-	tw        *transcribe.Tools
-	modelsDir string
-	nice      func(name string, args []string) (string, []string)
+	// settings is every Manager-level setting that has to reach an engine.
+	//
+	// Guarded by mu for every access, and by settingsMu for the whole save.
+	// The ONLY write is the one saveEngineSetting makes; the only reads are the
+	// one it takes under that same write lock and engineSettingsSnapshot.
+	// Because nothing else touches the block, no caller can write one field and
+	// then push a snapshot that another caller's write has already moved past.
+	settings engineSettings
+}
 
-	// alertAttempts is remembered for the same reason and against the same
-	// failure: a source added after the setting was saved would otherwise chase
-	// a dead webhook for a different number of tries than every other source,
-	// with nothing to show an operator that the two disagree. Zero means
-	// "never set", and leaves the alerts package default in place.
+// engineSettings is THE list of install-wide settings an engine is handed after
+// it is built, and the reason it is one struct rather than four loose fields on
+// Manager.
+//
+// Every one of these is remembered rather than applied once, because engines
+// are created and destroyed as an operator adds and removes sources long after
+// main wired the process up. A value pushed only into the engines that happened
+// to be running at wiring time is silently lost the moment a source is added,
+// and each of these has its own flavour of that failure: a programme whose
+// recordings never transcribe, one whose hooks never fire, one that chases a
+// dead webhook for a different number of tries than every other source, and --
+// the worst of them -- one whose YouTube destinations stream perfectly while
+// their broadcasts sit in "testing" for the whole show. All four are invisible.
+// Nobody reports them; they report the symptom, days later.
+//
+// THE MISTAKE THIS STRUCT PREVENTS is the one that survived the first fix.
+// Remembering the values got each setting a Manager field and a SetX method
+// that looped over the live engines, and a second, hand-written block in Sync's
+// creation path that re-applied them to a new engine. Two lists that had to
+// agree, kept in step by nothing but a comment. Add a fifth setting, wire the
+// SetX loop, forget the block, and the setting works on every engine until the
+// operator adds a source -- at which point it works on all of them except the
+// new one, with no error anywhere. Adding a field here and a line to
+// applyEngineSettings now reaches both paths by construction, because there is
+// only one path.
+type engineSettings struct {
+	tw            *transcribe.Tools
+	modelsDir     string
+	nice          func(name string, args []string) (string, []string)
 	alertAttempts int
+	hooks         *hooks.Dispatcher
+	lifecycle     LifecycleObserver
+}
 
-	// hooks is remembered for the same reason the transcriber is: engines are
-	// created after Start whenever a source is added, and a programme whose
-	// hooks silently never fire is a bug nobody reports.
-	hooks *hooks.Dispatcher
+// engineSettingsSnapshot reads the settings block WHOLE, in one acquisition of
+// mu. Every push starts from a value of this shape: either one returned here,
+// or the copy saveEngineSetting takes under the write lock it is already
+// holding, which is the only other read of the block.
+//
+// A push that read m.settings field by field, or once per engine, would be a
+// push of a state that never existed -- half of one save and half of the next,
+// and different halves for different engines. One read of the whole struct
+// under one lock makes that unrepresentable rather than unlikely.
+func (m *Manager) engineSettingsSnapshot() engineSettings {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings
+}
 
-	// lifecycle is remembered for the same reason and against a worse failure.
-	// A source added after the API server was built would otherwise have no
-	// lifecycle observer, so nothing on that programme ever crosses an edge the
-	// coordinator can see -- and its YouTube destinations would stream perfectly
-	// while their broadcasts stayed in "testing" for the whole show.
-	lifecycle LifecycleObserver
+// applyEngineSettings pushes ONE snapshot of the install-wide settings into one
+// engine. It is called from Sync's creation path, so an engine born after
+// wiring gets the same settings as its siblings, and from applyEngineSettingsAll
+// on every save, so a setting saved later reaches the engines already running.
+//
+// The snapshot is an ARGUMENT rather than something this function reads, which
+// is the difference between the two shapes of #741. Reading it here meant the
+// value each engine got was whatever the block held at the moment that engine's
+// turn came round, so a save landing mid-loop gave the first engines one state
+// and the rest another, and a stale caller could push a state older than the
+// one already applied. Taking it from the caller means the caller decides -- and
+// the caller holds settingsMu while it does.
+//
+// Applied unconditionally, zero values and all. That is deliberate: a guard at
+// this call site is a fifth thing to keep in step, and every setter downstream
+// already treats its zero as "not configured" -- Engine.SetTranscriber
+// substitutes the install's models directory for an empty one and a nil
+// *transcribe.Tools is simply an install without whisper.cpp,
+// alerts.Notifier.SetRetry ignores a non-positive budget and a nil receiver,
+// and a nil dispatcher or observer is what an unconfigured engine already
+// holds. The push runs OUTSIDE m.mu because eng.SetX takes the ENGINE's lock
+// and holding m.mu across that would put the manager's lock above every
+// engine's.
+func (m *Manager) applyEngineSettings(eng *Engine, s engineSettings) {
+	eng.SetTranscriber(s.tw, s.modelsDir, s.nice)
+	eng.SetAlertRetry(s.alertAttempts)
+	eng.SetHooks(s.hooks)
+	eng.SetLifecycle(s.lifecycle)
+}
+
+// applyEngineSettingsAll is the other half: every save ends here rather than
+// writing its own loop, so the set of settings a running engine receives cannot
+// drift from the set a new one receives. One snapshot reaches every engine.
+//
+// Callers must hold settingsMu. Without it two saves interleave and the slower
+// one's older snapshot lands last; see settingsMu.
+func (m *Manager) applyEngineSettingsAll(s engineSettings) {
+	for _, eng := range m.Engines() {
+		m.applyEngineSettings(eng, s)
+	}
+}
+
+// saveEngineSetting is the WHOLE of every Manager SetX: mutate the block, then
+// push what the mutation produced, with settingsMu held across both.
+//
+// The mutation arrives as a callback rather than each setter writing its own
+// field and calling a push, because those are the two halves that #741 came
+// from. A setter that can write m.settings on its own can also forget to push,
+// push a snapshot it read too early, or push without the lock -- and every one
+// of those failures is silent. Here there is no way to reach the block except
+// through this function, so writing a setting and publishing it are one step by
+// construction.
+//
+// Adding a fifth setting is: a field on engineSettings, a line in
+// applyEngineSettings, and a SetX that is one call to this.
+func (m *Manager) saveEngineSetting(mutate func(*engineSettings)) {
+	m.settingsMu.Lock()
+	defer m.settingsMu.Unlock()
+
+	m.mu.Lock()
+	mutate(&m.settings)
+	s := m.settings
+	m.mu.Unlock()
+
+	m.applyEngineSettingsAll(s)
+}
+
+// publishEngine makes a freshly started engine visible and hands it the current
+// settings, with settingsMu held across both so that no save can fall between.
+//
+// Sync configures an engine BEFORE Start -- it has to, because Start is what
+// spawns the loops that read those settings -- and cannot register it until
+// Start has succeeded, because a registered engine that failed to start is one
+// nothing will ever stop. That leaves a window, the length of a reconcile, in
+// which the engine is configured but invisible: a save landing there enumerates
+// the engines, does not find this one, and reaches every programme except the
+// one the operator just added. It is engineSettings' own failure mode,
+// reintroduced by visibility rather than by a forgotten line.
+//
+// Registering and pushing under settingsMu closes it from both sides. A save
+// that got in first is in the snapshot read here; a save that comes later finds
+// the engine registered.
+func (m *Manager) publishEngine(id int64, eng *Engine) {
+	m.settingsMu.Lock()
+	defer m.settingsMu.Unlock()
+
+	m.mu.Lock()
+	m.engines[id] = eng
+	m.mu.Unlock()
+
+	m.applyEngineSettings(eng, m.engineSettingsSnapshot())
 }
 
 // NewManager builds the manager. No engines exist until Start.
@@ -361,39 +518,20 @@ func (m *Manager) Sync() error {
 			m.log.Error("cannot build engine for source", "source", id, "err", err)
 			continue
 		}
-		m.mu.RLock()
-		tw, dir, nice := m.tw, m.modelsDir, m.nice
-		attempts := m.alertAttempts
-		hookd := m.hooks
-		lifecycle := m.lifecycle
-		m.mu.RUnlock()
-		if tw != nil {
-			eng.SetTranscriber(tw, dir, nice)
-		}
-		// Zero means the operator never set one, which leaves the alerts
-		// package default rather than clamping this engine to something no
-		// other engine is using. SetRetry tolerates a nil Notifier.
-		if attempts > 0 {
-			eng.Alerts().SetRetry(attempts)
-		}
-		if hookd != nil {
-			eng.SetHooks(hookd)
-		}
-		// The half that is easy to forget, and forgetting it is the exact
-		// failure SetAlertRetry's comment names: a value pushed only into the
-		// engines running at wiring time is silently lost the moment an
-		// operator adds a source.
-		if lifecycle != nil {
-			eng.SetLifecycle(lifecycle)
-		}
+		// Before Start, and through the ONE function every save also goes
+		// through: a setting this path forgot would work on every engine the
+		// operator already had and silently not on the one they just added.
+		// See engineSettings.
+		m.applyEngineSettings(eng, m.engineSettingsSnapshot())
 		if err := eng.Start(ctx); err != nil {
 			m.log.Error("cannot start engine for source", "source", id, "err", err)
 			eng.Stop()
 			continue
 		}
-		m.mu.Lock()
-		m.engines[id] = eng
-		m.mu.Unlock()
+		// Registering and re-pushing are ONE step, because a save that ran
+		// while this engine was starting could not have seen it. See
+		// publishEngine.
+		m.publishEngine(id, eng)
 	}
 	return nil
 }
@@ -1135,12 +1273,9 @@ func (m *Manager) Default() *Engine {
 // SetTranscriber applies speech transcription to every engine, now and to any
 // engine created later.
 func (m *Manager) SetTranscriber(w *transcribe.Tools, modelsDir string, nice func(name string, args []string) (string, []string)) {
-	m.mu.Lock()
-	m.tw, m.modelsDir, m.nice = w, modelsDir, nice
-	m.mu.Unlock()
-	for _, eng := range m.Engines() {
-		eng.SetTranscriber(w, modelsDir, nice)
-	}
+	m.saveEngineSetting(func(s *engineSettings) {
+		s.tw, s.modelsDir, s.nice = w, modelsDir, nice
+	})
 }
 
 // LastReload is what each engine's most recent reconcile did, in display order.
@@ -1160,24 +1295,14 @@ func (m *Manager) LastReload() []ReloadReport {
 // SetHooks attaches the shared lifecycle-hook dispatcher to every engine, now
 // and to any created later.
 func (m *Manager) SetHooks(d *hooks.Dispatcher) {
-	m.mu.Lock()
-	m.hooks = d
-	m.mu.Unlock()
-	for _, eng := range m.Engines() {
-		eng.SetHooks(d)
-	}
+	m.saveEngineSetting(func(s *engineSettings) { s.hooks = d })
 }
 
 // SetLifecycle attaches the broadcast-lifecycle coordinator to every engine, now
-// and to any created later. The Sync half is in reconcile above; without it a
-// source added later observes nothing.
+// and to any created later. There is no separate Sync half to remember any more:
+// both reach the engines through applyEngineSettings.
 func (m *Manager) SetLifecycle(o LifecycleObserver) {
-	m.mu.Lock()
-	m.lifecycle = o
-	m.mu.Unlock()
-	for _, eng := range m.Engines() {
-		eng.SetLifecycle(o)
-	}
+	m.saveEngineSetting(func(s *engineSettings) { s.lifecycle = o })
 }
 
 // SetAlertRetry applies the alert delivery budget to every engine, now and to
@@ -1188,17 +1313,18 @@ func (m *Manager) SetLifecycle(o LifecycleObserver) {
 // only into the engines running at save time is silently lost the moment an
 // operator adds a source. That failure is invisible -- the new source's alerts
 // simply chase a dead endpoint for a different length of time than every other
-// source's -- which makes it exactly the kind worth designing out.
+// source's -- which makes it exactly the kind worth designing out. See
+// engineSettings for the device that now covers all four of them at once.
+//
+// A non-positive budget is refused here rather than stored, because zero means
+// the operator never chose one and an engine left at the alerts package default
+// is right; storing it would clamp every engine to something no engine is
+// actually using.
 func (m *Manager) SetAlertRetry(attempts int) {
 	if attempts <= 0 {
 		return
 	}
-	m.mu.Lock()
-	m.alertAttempts = attempts
-	m.mu.Unlock()
-	for _, eng := range m.Engines() {
-		eng.Alerts().SetRetry(attempts)
-	}
+	m.saveEngineSetting(func(s *engineSettings) { s.alertAttempts = attempts })
 }
 
 // IngestLive reports whether ANY programme is receiving.

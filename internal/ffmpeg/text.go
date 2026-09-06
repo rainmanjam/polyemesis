@@ -70,7 +70,11 @@ const (
 // drawtextFilter renders the drawtext filter for one TextSpec, or "" when
 // there is nothing to draw.
 //
-// outW and outH are the rendition's output size in pixels.
+// out is the rendition's output size in pixels. A frameSize rather than a width
+// and a height, because `drawtextFilter(s.Text, s.Height, s.Width)` used to
+// compile and used to pass the package's tests, and would have burned the
+// caption in at a font size taken from the wrong axis with its margin measured
+// against the other one. See frameSize.
 //
 // Three details are load-bearing, and two of them are security-relevant:
 //
@@ -88,12 +92,15 @@ const (
 //   - fontsize is computed in Go rather than expressed as a filter variable, for
 //     the reason overlayWidthPx gives: the value is already known here, and an
 //     expression would differ across FFmpeg versions.
-func drawtextFilter(t *TextSpec, outW, outH int) string {
-	if !t.Active() || outW <= 0 || outH <= 0 {
+func drawtextFilter(t *TextSpec, out frameSize) string {
+	if !t.Active() || !out.sized() {
 		return ""
 	}
-	size := textSizePx(t.SizePct, outH)
-	x, y := textPosition(t, outW, outH)
+	// The whole frame goes to textSizePx, not out.H: which axis a SizePct is a
+	// fraction of is that function's business, and picking the field here would
+	// put the choice back at a call site where it can be picked wrongly.
+	size := textSizePx(t.SizePct, out)
+	x, y := textPosition(t, out)
 
 	var b strings.Builder
 	b.WriteString("drawtext=fontfile=")
@@ -183,8 +190,16 @@ func filterPath(p string) string {
 // Floored rather than allowed to reach zero: drawtext accepts fontsize=0 and
 // draws nothing at all, which looks to the operator exactly like the overlay
 // being ignored and gives them nothing to act on.
-func textSizePx(pct float64, outH int) int {
-	px := int(math.Round(clamp01(pct) * float64(outH)))
+//
+// It takes the whole frame and reads out.H itself. SizePct is a fraction of the
+// output HEIGHT — see TextSpec.SizePct, legibility is set by how tall a glyph is
+// and a portrait rendition sized off its width would get type nobody can read —
+// and that is a fact about this function, so it is stated once here rather than
+// re-decided by whoever writes the next call. This line is the last place a
+// caption can pick up the wrong axis, and it is covered by
+// TestFilterGeometryNamesTheRightAxisAtANonSquareSize.
+func textSizePx(pct float64, out frameSize) int {
+	px := int(math.Round(clamp01(pct) * float64(out.H)))
 	if px < MinTextSizePx {
 		return MinTextSizePx
 	}
@@ -197,30 +212,32 @@ func textSizePx(pct float64, outH int) int {
 // `w`/`h` here (overlay calls it main_w/main_h) and the drawn box is
 // `text_w`/`text_h` (overlay calls it overlay_w/overlay_h). Using the wrong
 // pair is a filtergraph error at start time, not a misplacement.
-func textPosition(t *TextSpec, outW, outH int) (string, string) {
-	mx := marginPx(t.MarginXPct, outW)
-	my := marginPx(t.MarginYPct, outH)
+func textPosition(t *TextSpec, out frameSize) (string, string) {
+	// Both margins at once, by field name; see frameSize.marginsPx, which is
+	// the only place in the package that decides which span a given percentage
+	// is measured against.
+	m := out.marginsPx(t.MarginXPct, t.MarginYPct)
 
 	var x, y string
 	switch t.Anchor {
 	case AnchorTopCenter, AnchorCenter, AnchorBottomCenter:
 		x = "(w-text_w)/2"
 	case AnchorTopRight, AnchorMiddleRight, AnchorBottomRight:
-		x = fmt.Sprintf("w-text_w-%d", mx)
+		x = fmt.Sprintf("w-text_w-%d", m.X)
 	default:
 		// Every left anchor, and an unrecognised one. Degrading to top-left
 		// rather than refusing, exactly as overlayPosition does: a rendition
 		// row written by a newer build must still encode, and a stream that
 		// does not start is a worse answer than a caption in the wrong corner.
-		x = fmt.Sprintf("%d", mx)
+		x = fmt.Sprintf("%d", m.X)
 	}
 	switch t.Anchor {
 	case AnchorMiddleLeft, AnchorCenter, AnchorMiddleRight:
 		y = "(h-text_h)/2"
 	case AnchorBottomLeft, AnchorBottomCenter, AnchorBottomRight:
-		y = fmt.Sprintf("h-text_h-%d", my)
+		y = fmt.Sprintf("h-text_h-%d", m.Y)
 	default:
-		y = fmt.Sprintf("%d", my)
+		y = fmt.Sprintf("%d", m.Y)
 	}
 	return x, y
 }

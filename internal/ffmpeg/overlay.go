@@ -82,9 +82,13 @@ const (
 // overlayGraph renders the -filter_complex value for a rendition carrying an
 // image overlay, or "" when there is none.
 //
-// outW and outH are the rendition's output size in pixels. They must both be
-// positive: see overlayProblem for why that is a validation rule rather than
-// something handled here.
+// out is the rendition's output size in pixels. Both dimensions must be
+// positive: see db.RenditionOverlay.problems for why that is a validation rule
+// rather than something handled here. It arrives as a frameSize rather than a
+// height so that `overlayGraph(s, prof, s.Height, s.Width)` — which used to
+// compile, and would have sized the logo off the wrong edge of a live stream
+// with no error to show for it — is no longer a call this function accepts.
+// See frameSize.
 //
 //	[0:v:0]<main chain>[bs];
 //	[1:v]format=rgba,scale=230:-2[ov];
@@ -104,9 +108,9 @@ const (
 //     `overlay` happens to auto-insert.
 //   - For VAAPI the overlay goes BEFORE the `format=nv12,hwupload` tail, which
 //     stays last. The overlay is an ordinary software stage; see videoFilter.
-func overlayGraph(s RenditionSpec, prof encoderProfile, outW, outH int) string {
+func overlayGraph(s RenditionSpec, prof encoderProfile, out frameSize) string {
 	o := s.Overlay
-	if !o.Active() || outW <= 0 || outH <= 0 {
+	if !o.Active() || !out.sized() {
 		return ""
 	}
 
@@ -129,17 +133,21 @@ func overlayGraph(s RenditionSpec, prof encoderProfile, outW, outH int) string {
 	// The image chain. format=rgba first so a logo saved without an alpha
 	// channel still composites, and so colourchannelmixer has an alpha channel
 	// to scale.
-	fmt.Fprintf(&b, "[1:v]format=rgba,scale=%d:-2", overlayWidthPx(o.WidthPct, outW))
+	//
+	// The whole frame goes to overlayWidthPx, not out.W: which axis a WidthPct
+	// is a fraction of is that function's business, and picking the field here
+	// would put the choice back at a call site where it can be picked wrongly.
+	fmt.Fprintf(&b, "[1:v]format=rgba,scale=%d:-2", overlayWidthPx(o.WidthPct, out))
 	if op := clamp01(o.Opacity); op > 0 && op < 1 {
 		fmt.Fprintf(&b, ",colorchannelmixer=aa=%s", trimFloat(op))
 	}
 	b.WriteString(labelOverlay + ";")
 
 	// The composite.
-	x, y := overlayPosition(o, outW, outH)
+	x, y := overlayPosition(o, out)
 	fmt.Fprintf(&b, "%s%soverlay=x=%s:y=%s:eof_action=repeat", labelBase, labelOverlay, x, y)
 	// Text after the composite, so it draws over the logo.
-	if dt := drawtextFilter(s.Text, outW, outH); dt != "" {
+	if dt := drawtextFilter(s.Text, out); dt != "" {
 		b.WriteString("," + dt)
 	}
 	b.WriteString(",format=yuv420p")
@@ -163,8 +171,14 @@ func overlayGraph(s RenditionSpec, prof encoderProfile, outW, outH int) string {
 // Minimum 2, and even: an odd or zero-width overlay makes the scale filter
 // refuse to open, and a watermark scaled to nothing is a stream that will not
 // start for a reason the operator cannot see.
-func overlayWidthPx(pct float64, outW int) int {
-	px := int(math.Round(clamp01(pct) * float64(outW)))
+//
+// It takes the whole frame and reads out.W itself. WidthPct is a fraction of
+// the output WIDTH — see OverlaySpec.WidthPct — and that is a fact about this
+// function, so it is stated once here rather than re-decided by whoever writes
+// the next call. This line is the last place an image overlay can pick up the
+// wrong axis, and it is covered by TestFilterGeometryNamesTheRightAxisAtANonSquareSize.
+func overlayWidthPx(pct float64, out frameSize) int {
+	px := int(math.Round(clamp01(pct) * float64(out.W)))
 	if px < 2 {
 		return 2
 	}
@@ -178,16 +192,19 @@ func overlayWidthPx(pct float64, outW int) int {
 // The edge-anchored axes use `main_w`/`main_h` for the same reason it costs
 // nothing to: if the main chain's rounding lands a pixel off the requested
 // size, the margin stays correct against what was actually produced.
-func overlayPosition(o *OverlaySpec, outW, outH int) (string, string) {
-	mx := marginPx(o.MarginXPct, outW)
-	my := marginPx(o.MarginYPct, outH)
+func overlayPosition(o *OverlaySpec, out frameSize) (string, string) {
+	// marginsPx rather than two marginPx calls: this function no longer names
+	// either dimension, so it has no way to measure the horizontal margin down
+	// the frame. See frameSize.marginsPx, which is where that pairing lives for
+	// both this function and textPosition.
+	m := out.marginsPx(o.MarginXPct, o.MarginYPct)
 
 	var x, y string
 	switch o.Anchor {
 	case AnchorTopCenter, AnchorCenter, AnchorBottomCenter:
 		x = "(main_w-overlay_w)/2"
 	case AnchorTopRight, AnchorMiddleRight, AnchorBottomRight:
-		x = fmt.Sprintf("main_w-overlay_w-%d", mx)
+		x = fmt.Sprintf("main_w-overlay_w-%d", m.X)
 	default:
 		// Every left anchor, and an unrecognised one.
 		//
@@ -195,19 +212,28 @@ func overlayPosition(o *OverlaySpec, outW, outH int) (string, string) {
 		// aspectFilter and deinterlaceFilter already make: a rendition row
 		// written by a newer build must still encode, and a stream that does not
 		// start is a worse answer than a logo in the wrong corner.
-		x = fmt.Sprintf("%d", mx)
+		x = fmt.Sprintf("%d", m.X)
 	}
 	switch o.Anchor {
 	case AnchorMiddleLeft, AnchorCenter, AnchorMiddleRight:
 		y = "(main_h-overlay_h)/2"
 	case AnchorBottomLeft, AnchorBottomCenter, AnchorBottomRight:
-		y = fmt.Sprintf("main_h-overlay_h-%d", my)
+		y = fmt.Sprintf("main_h-overlay_h-%d", m.Y)
 	default:
-		y = fmt.Sprintf("%d", my)
+		y = fmt.Sprintf("%d", m.Y)
 	}
 	return x, y
 }
 
+// marginPx is the one genuinely axis-agnostic piece of this arithmetic: a
+// percentage of a span, floored at zero because a negative margin would render
+// as a filter expression FFmpeg cannot parse.
+//
+// It takes a bare span rather than a frameSize deliberately — it has no opinion
+// about which axis it is measuring, and pretending otherwise would only move
+// the question somewhere it can be answered wrongly. Deciding WHICH span goes
+// with which percentage is frameSize.marginsPx's job, and that is the only
+// caller in the non-test code.
 func marginPx(pct float64, span int) int {
 	px := int(math.Round(clamp01(pct) * float64(span)))
 	if px < 0 {

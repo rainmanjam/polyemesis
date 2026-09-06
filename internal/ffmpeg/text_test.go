@@ -43,7 +43,7 @@ func TestDrawtextNeverInterpretsOperatorText(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var got string
-			if g := overlayGraph(tc.spec, encoderProfile{}, tc.spec.Width, tc.spec.Height); g != "" {
+			if g := overlayGraph(tc.spec, encoderProfile{}, tc.spec.outputSize()); g != "" {
 				got = g
 			} else {
 				got = videoFilter(tc.spec, encoderProfile{})
@@ -68,7 +68,7 @@ func TestDrawtextEscapesAColonInThePathAndAwkwardText(t *testing.T) {
 		// drive-letter hazard on every platform rather than only on Windows.
 		s.FontFile = "/srv/my:fonts/Inter-Regular.ttf"
 		s.Text = `12:30 - Tom's "show"`
-	}), 1280, 720)
+	}), frameSize{W: 1280, H: 720})
 
 	// An unescaped colon ends the fontfile option early and the next thing the
 	// parser looks for is an option name.
@@ -128,7 +128,7 @@ func TestDrawtextIsAbsentWhenThereIsNothingToDraw(t *testing.T) {
 		{"no font", textSpec(func(s *TextSpec) { s.FontFile = "" })},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := drawtextFilter(tc.spec, 1280, 720); got != "" {
+			if got := drawtextFilter(tc.spec, frameSize{W: 1280, H: 720}); got != "" {
 				t.Errorf("drawtextFilter = %q, want empty", got)
 			}
 		})
@@ -138,17 +138,19 @@ func TestDrawtextIsAbsentWhenThereIsNothingToDraw(t *testing.T) {
 // The whole point of percentage geometry: the same spec on a landscape and a
 // portrait rendition must produce type that reads at both sizes.
 func TestTextSizeScalesWithTheRenditionHeight(t *testing.T) {
+	// Both frames are non-square, so a body reading out.W would return 192 and
+	// 64 rather than 108 and 36. SizePct is a fraction of the HEIGHT.
 	spec := textSpec(func(s *TextSpec) { s.SizePct = 0.1 })
-	if got := textSizePx(spec.SizePct, 1080); got != 108 {
+	if got := textSizePx(spec.SizePct, frameSize{W: 1920, H: 1080}); got != 108 {
 		t.Errorf("10%% of 1080 = %d, want 108", got)
 	}
-	if got := textSizePx(spec.SizePct, 360); got != 36 {
+	if got := textSizePx(spec.SizePct, frameSize{W: 640, H: 360}); got != 36 {
 		t.Errorf("10%% of 360 = %d, want 36", got)
 	}
 	// Floored rather than allowed to reach zero: drawtext accepts fontsize=0,
 	// draws nothing, and exits 0, which looks exactly like the feature being
 	// ignored.
-	if got := textSizePx(0.0001, 100); got < MinTextSizePx {
+	if got := textSizePx(0.0001, frameSize{W: 100, H: 100}); got < MinTextSizePx {
 		t.Errorf("a tiny percentage gave fontsize %d, below the %d floor", got, MinTextSizePx)
 	}
 }
@@ -157,7 +159,7 @@ func TestTextSizeScalesWithTheRenditionHeight(t *testing.T) {
 // are main_w/main_h and overlay_w/overlay_h. Using the wrong pair is a
 // filtergraph error at start time.
 func TestTextPositionUsesDrawtextsOwnVariables(t *testing.T) {
-	got := drawtextFilter(textSpec(func(s *TextSpec) { s.Anchor = AnchorCenter }), 1280, 720)
+	got := drawtextFilter(textSpec(func(s *TextSpec) { s.Anchor = AnchorCenter }), frameSize{W: 1280, H: 720})
 	for _, bad := range []string{"main_w", "main_h", "overlay_w", "overlay_h"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("drawtext uses %s, which it does not define: %s", bad, got)
@@ -173,7 +175,7 @@ func TestTextIsDrawnAfterTheImageOverlay(t *testing.T) {
 	g := overlayGraph(RenditionSpec{
 		Width: 1280, Height: 720, Text: textSpec(),
 		Overlay: &OverlaySpec{ImagePath: "/data/logo.png", WidthPct: 0.2, Opacity: 1},
-	}, encoderProfile{}, 1280, 720)
+	}, encoderProfile{}, frameSize{W: 1280, H: 720})
 
 	ov, dt := strings.Index(g, "overlay=x="), strings.Index(g, "drawtext=")
 	if ov < 0 || dt < 0 {
@@ -190,14 +192,14 @@ func TestTextIsDrawnAfterTheImageOverlay(t *testing.T) {
 func TestBoxOpacityFoldsIntoTheColourWithoutDoublingIt(t *testing.T) {
 	got := drawtextFilter(textSpec(func(s *TextSpec) {
 		s.Box, s.BoxColor, s.BoxOpacity = true, "black", 0.5
-	}), 1280, 720)
+	}), frameSize{W: 1280, H: 720})
 	if !strings.Contains(got, "boxcolor=black@0.5") {
 		t.Errorf("box opacity was not applied: %s", got)
 	}
 
 	got = drawtextFilter(textSpec(func(s *TextSpec) {
 		s.Box, s.BoxColor, s.BoxOpacity = true, "black@0.25", 0.5
-	}), 1280, 720)
+	}), frameSize{W: 1280, H: 720})
 	if strings.Contains(got, "@0.25@") || strings.Contains(got, "0.25@0.5") {
 		t.Errorf("two alphas were stacked onto one colour, which FFmpeg rejects: %s", got)
 	}
@@ -252,7 +254,7 @@ func TestDrawtextGraphRunsAndDoesNotExpandAPercentSign(t *testing.T) {
 	render := func(spec *TextSpec) int {
 		out := filepath.Join(t.TempDir(), "f.png")
 		graph := "color=c=black:s=640x200:d=1"
-		if f := drawtextFilter(spec, 640, 200); f != "" {
+		if f := drawtextFilter(spec, frameSize{W: 640, H: 200}); f != "" {
 			graph += "," + f
 		}
 		cmd := exec.Command(bin, "-hide_banner", "-loglevel", "error",
@@ -325,7 +327,7 @@ func TestAFontPathContainingAColonOpens(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "f.png")
 	graph := "color=c=black:s=320x120:d=1," + drawtextFilter(&TextSpec{
 		Text: "OK", FontFile: font, SizePct: 0.5, Color: "white",
-	}, 320, 120)
+	}, frameSize{W: 320, H: 120})
 	b, err := exec.Command(bin, "-hide_banner", "-loglevel", "error",
 		"-f", "lavfi", "-i", graph, "-frames:v", "1", "-y", out).CombinedOutput()
 	if err != nil {
@@ -349,7 +351,7 @@ func TestTheEmbeddedFontPathSurvivesTheFilterGraph(t *testing.T) {
 	}
 	got := drawtextFilter(&TextSpec{
 		Text: "x", FontFile: font, SizePct: 0.1, Color: "white",
-	}, 1280, 720)
+	}, frameSize{W: 1280, H: 720})
 
 	// Every separator in the escaped path must be doubled on Windows and
 	// untouched elsewhere; either way the raw path must not appear verbatim

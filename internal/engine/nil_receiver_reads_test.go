@@ -35,7 +35,13 @@ var nilEngineAnswers = map[string]bool{
 	"Levels":      true,
 	"Processes":   true,
 	"Alerts":      true,
-	"Loudness":    true,
+	// The delivery budget the manager pushed in. Zero is the honest answer on
+	// an install with no programme: nobody pushed one, so nothing is clamped
+	// and the alerts package default is what a delivery would use. Answering
+	// rather than refusing keeps it in step with Alerts, which is the object it
+	// describes.
+	"AlertRetry": true,
+	"Loudness":   true,
 	// The Meters page's switch, which cannot assert a state it has not been
 	// told. An install with no engine has no analyser tier running, so `false`
 	// is the true answer rather than a placeholder -- and the page draws the

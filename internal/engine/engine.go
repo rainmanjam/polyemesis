@@ -337,6 +337,12 @@ type Engine struct {
 	// alertLoop, and the notifier is explicitly non-blocking, which is the
 	// whole reason a slow endpoint cannot reach the reconcile loop.
 	alerter *alerts.Notifier
+	// alertAttempts is the delivery budget the manager pushed in, kept under
+	// e.mu so AlertRetry can answer it. The notifier holds the authoritative
+	// copy; this one exists because that copy is unexported and in another
+	// package, which left no way to see that the push ever landed. Zero means
+	// the operator never chose one. See SetAlertRetry.
+	alertAttempts int
 	// hooks delivers lifecycle webhooks and hookWatch derives their edges.
 	//
 	// The dispatcher is SHARED across every engine -- it is handed in by the
@@ -4742,10 +4748,63 @@ func (e *Engine) Alerts() *alerts.Notifier {
 	return e.alerter
 }
 
+// SetAlertRetry hands the engine the install-wide alert delivery budget.
+//
+// A setter on the Engine rather than the manager reaching through Alerts() into
+// the notifier, and that is the point rather than tidiness: the manager applies
+// four install-wide settings to an engine and three of them were `eng.SetX`
+// while this one was `eng.Alerts().SetRetry`. The odd one out is the one that
+// gets left out of a list, and a settings push that has to know which of an
+// engine's sub-objects owns which value cannot be written as one uniform block.
+// Now it can. See engineSettings in manager.go.
+//
+// The remembered copy is what AlertRetry answers with. alerts.Notifier keeps
+// the authoritative value -- it is what a delivery actually reads -- but it
+// keeps it unexported and in another package, so without this field there is no
+// way to observe from the outside that the budget ever arrived, and a settings
+// push that silently skipped an engine would look exactly like one that worked.
+//
+// Zero and negative are ignored rather than stored, matching
+// alerts.Notifier.SetRetry: "never set" leaves the alerts package default in
+// place and must not overwrite a budget already applied.
+func (e *Engine) SetAlertRetry(attempts int) {
+	if e == nil || attempts <= 0 {
+		return
+	}
+	e.mu.Lock()
+	e.alertAttempts = attempts
+	e.mu.Unlock()
+	e.Alerts().SetRetry(attempts)
+}
+
+// AlertRetry is the delivery budget this engine was given, or zero when the
+// operator never set one and the alerts package default is in force.
+func (e *Engine) AlertRetry() int {
+	if e == nil {
+		return 0
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.alertAttempts
+}
+
 // Hooks exposes the dispatcher so the API can report its counters, list recent
 // deliveries and send a test. Nil when no dispatcher was wired.
+//
+// IT TAKES THE LOCK, and every read of e.hooks goes through it. SetHooks writes
+// under e.mu and three readers did not take it -- observeLoop twice and
+// destinations.go once -- which the race detector caught the moment
+// Manager.applyEngineSettings started pushing settings to RUNNING engines
+// rather than only to ones being created. The write was always guarded; the
+// reads were always not, and nothing exercised them concurrently before.
+//
+// A field read directly in one place and through an accessor in another is the
+// shape that produced this: the accessor is where somebody would add the lock,
+// so the direct reads never got it. There is one spelling now.
 func (e *Engine) Hooks() *hooks.Dispatcher {
 	e.requireEngine("Hooks")
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	return e.hooks
 }
 
@@ -5002,7 +5061,7 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			// e.hooks may be nil; HasHooks is nil-safe, the same discipline
 			// alerts.Notifier and transcribe.Tools use. Guarding at the call
 			// site instead is what makes the two diverge.
-			if !observeWanted(e.alerter.HasRules(), e.hooks.HasHooks(), e.lifecycleWanted()) {
+			if !observeWanted(e.alerter.HasRules(), e.Hooks().HasHooks(), e.lifecycleWanted()) {
 				haveDisk = false
 				continue
 			}
@@ -5030,8 +5089,13 @@ func (e *Engine) observeLoop(ctx context.Context) {
 				// or did it crash", which is the difference between ending a
 				// broadcast and leaving it alone.
 				lc := e.lifecycleObserver()
+				// Read ONCE for the whole batch rather than per event: a
+				// SetHooks landing mid-loop would otherwise publish some of one
+				// Observe's events to the old dispatcher and some to the new,
+				// which is a split nobody could explain from the delivery log.
+				dispatcher := e.Hooks()
 				for _, ev := range e.hookWatch.Observe(snap) {
-					e.hooks.Publish(ev)
+					dispatcher.Publish(ev)
 					if lc != nil {
 						// Contractually non-blocking; see LifecycleObserver.
 						lc.Observe(ev)

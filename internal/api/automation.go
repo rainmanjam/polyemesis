@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -358,6 +359,69 @@ func scheduleViewOf(sc scheduler.Schedule, now time.Time) scheduleView {
 	return v
 }
 
+// destinationID is one entry of scheduleRequest.DestinationIDs, and it exists
+// so that a list which NAMES destinations cannot decode into a list that names
+// none.
+//
+// THE MISTAKE IT PREVENTS. `{"destinationIds":[null]}` into a plain []int64 is
+// the whole hazard: encoding/json writes the zero value for a null element and
+// returns no error, so a body naming three destinations arrives as [0,0,0].
+// Schedule.Normalized() then drops every id <= 0 -- correctly, it is filtering
+// junk -- and hands Validate an EMPTY list. Empty does not mean "none" here.
+// scheduleTargets reads it as EVERY destination on this install, because "start
+// the show" usually names nothing and that is the commonest shape the feature
+// has. So a `stop` schedule that named three destinations is stored as one that
+// stops all of them, and fires unattended at 03:00 against every YouTube
+// broadcast on the box -- which destinations_bulk.go records as permanently
+// COMPLETED, with no way back. Nothing downstream can tell the two requests
+// apart afterwards, because by then they are the same bytes.
+//
+// The decode is the last moment the difference still exists, which is why the
+// device is here rather than in a check further in. encoding/json calls
+// UnmarshalJSON for a JSON null too -- that is documented behaviour and it is
+// what makes this possible at all -- so this sees the element the plain type
+// silently swallows.
+//
+// IT REFUSES ONLY WHAT JSON WOULD ZERO-FILL, and that boundary is deliberate.
+// A null, a string, an object: these are elements a []int64 turns into 0 with
+// no error, so nothing after this point could know they were ever there. A
+// zero or a negative number is different -- it is a well-formed number, it
+// arrives intact, and Schedule.Normalized already has a considered rule for it.
+// Letting it through to that rule is what keeps refuseEmptiedTargets, which
+// owns the "some destinations became all destinations" invariant, on a path
+// that requests actually travel. A guard nothing can reach is a guard nobody
+// has watched work.
+//
+// What this pair still lets past is [5,0] normalising to [5]: one named
+// destination quietly dropped from a list that keeps others. That is the safe
+// direction -- the schedule acts on fewer things, never on more -- and refusing
+// it would mean teaching the boundary check to tell a dropped id apart from a
+// deduplicated one, which is a second copy of Normalized's rules living where
+// they would go stale.
+//
+// Only the schedule editor's body uses this type. Making db.Destination's own
+// id this type would be the stronger device -- every route taking a destination
+// id would inherit it -- but that reaches the store, the engine and the UI
+// contract, and this list is the one place where losing an id silently turns a
+// request into its opposite.
+type destinationID int64
+
+func (d *destinationID) UnmarshalJSON(b []byte) error {
+	if strings.TrimSpace(string(b)) == "null" {
+		return errors.New("destinationIds contains a null, which is not a destination. " +
+			"It is also not the same as sending no list at all: an empty destinationIds " +
+			"means EVERY destination on this install")
+	}
+	var n int64
+	if err := json.Unmarshal(b, &n); err != nil {
+		return fmt.Errorf("destinationIds contains %s, which is not a destination id. "+
+			"An entry that cannot be read is an entry that would be dropped, and a "+
+			"destinationIds that ends up empty means EVERY destination on this install", b)
+	}
+	*d = destinationID(n)
+	return nil
+}
+
 // scheduleRequest is a whole schedule as the editor submits it. Unlike an alert
 // rule there is no secret to preserve, so this is a replace rather than a patch.
 type scheduleRequest struct {
@@ -365,7 +429,7 @@ type scheduleRequest struct {
 	Enabled        bool             `json:"enabled"`
 	Action         scheduler.Action `json:"action"`
 	Kind           scheduler.Kind   `json:"kind"`
-	DestinationIDs []int64          `json:"destinationIds"`
+	DestinationIDs []destinationID  `json:"destinationIds"`
 	TZ             string           `json:"tz"`
 	AtMinutes      int              `json:"atMinutes"`
 	Days           []time.Weekday   `json:"days"`
@@ -378,13 +442,84 @@ func (q scheduleRequest) applyTo(sc scheduler.Schedule) scheduler.Schedule {
 	sc.Enabled = q.Enabled
 	sc.Action = q.Action
 	sc.Kind = q.Kind
-	sc.DestinationIDs = append([]int64(nil), q.DestinationIDs...)
+	// Widened one at a time rather than copied wholesale, because destinationID
+	// and int64 are no longer the same type -- which is the point of it. Built
+	// from nil so an absent list stays nil, exactly as the previous
+	// append([]int64(nil), ...) left it: Normalized rebuilds the slice either
+	// way, and a shape change here would be a change nothing asked for.
+	sc.DestinationIDs = nil
+	for _, id := range q.DestinationIDs {
+		sc.DestinationIDs = append(sc.DestinationIDs, int64(id))
+	}
 	sc.TZ = q.TZ
 	sc.AtMinutes = q.AtMinutes
 	sc.Days = append([]time.Weekday(nil), q.Days...)
 	sc.RunAt = q.RunAt
 	sc.GraceSeconds = q.GraceSeconds
 	return sc
+}
+
+// refuseEmptiedTargets rejects a schedule whose destination list arrived
+// naming destinations and would be stored naming none.
+//
+// It is the same hazard destinationID guards, caught one layer in, and it is
+// deliberately not the same check. destinationID knows what the PARSER can
+// lose; this knows the INVARIANT -- a schedule that named destinations must
+// still name destinations by the time it is written, because an empty list is
+// not a smaller version of a non-empty one, it is the opposite request.
+//
+// It is what answers [0] and [-1], which decode perfectly well and are dropped
+// by Normalized as junk, and it is what will answer whatever reason Normalized
+// grows next for dropping an id -- a ceiling, a programme scope, an ownership
+// check. The parser guard cannot know about any of those. This one needs to
+// know nothing about them.
+//
+// It compares against ZERO rather than against the count sent, because dropping
+// ids is sometimes right: [7,7] normalising to [7] is deduplication doing its
+// job and means exactly what was asked for. Only the transition from "some" to
+// "none" changes what the schedule does, and only that is refused.
+//
+// Before Validate, not after: Validate reads the normalised list and so cannot
+// see that anything was there. Its own destination clauses -- MaxTargets, and
+// the playlist actions that may not name destinations at all -- are about a
+// list that survived, and this is about one that did not.
+//
+// THE CONSEQUENCE IS NOT THE SAME FOR BOTH KINDS OF SCHEDULE. "Empty means
+// every destination on this install" is true of the destination actions and
+// false of the playlist ones: scheduler.go's Validate refuses a playlist
+// schedule that names destinations at all, so an empty list on one of those
+// means the playlist and could never have meant everything. A 400 that
+// describes a consequence which could not have happened is how a reader learns
+// to stop believing the next one, so the sentence is branched rather than
+// generalised.
+func refuseEmptiedTargets(w http.ResponseWriter, named int, sc scheduler.Schedule) bool {
+	if named == 0 || len(sc.DestinationIDs) > 0 {
+		return false
+	}
+	// Still a refusal, not an early return. Returning false here would store
+	// `{"action":"playlist.start","destinationIds":[0]}` as a valid playlist
+	// schedule while the identical body with [5] is a 400 from Validate -- the
+	// same malformed request succeeding or failing on whether its junk id
+	// happened to survive Normalized. The body is wrong either way; only the
+	// explanation differs.
+	if sc.TargetsPlaylist() {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf(
+			"destinationIds named %d destination(s) and none of them survived as a "+
+				"usable id. This schedule acts on the playlist, and a playlist schedule "+
+				"cannot also name destinations, so neither reading of this request can "+
+				"be stored: if you meant those destinations, send a second schedule with "+
+				"a destination action; if you meant the playlist, omit destinationIds "+
+				"entirely.", named))
+		return true
+	}
+	writeError(w, http.StatusBadRequest, fmt.Sprintf(
+		"destinationIds named %d destination(s) and none of them survived as a usable "+
+			"id. Storing this schedule with an empty list would not be the request that "+
+			"was sent: an empty destinationIds means EVERY destination on this install, "+
+			"so a stop schedule that named three would take down every broadcast on the "+
+			"box instead. Send positive destination ids, or omit destinationIds entirely "+
+			"if every destination really is what you mean.", named))
+	return true
 }
 
 func (s *Server) handleListSchedules(w http.ResponseWriter, r *http.Request) {
@@ -420,7 +555,13 @@ func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	// Counted BEFORE Normalized, which is the only moment the two states are
+	// still distinguishable. See refuseEmptiedTargets.
+	named := len(req.DestinationIDs)
 	sc := req.applyTo(scheduler.Schedule{}).Normalized()
+	if refuseEmptiedTargets(w, named, sc) {
+		return
+	}
 	if err := sc.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -451,9 +592,17 @@ func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	// Counted BEFORE Normalized, and off the REQUEST rather than off the stored
+	// row: applyTo replaces the stored list wholesale, so an edit is as capable
+	// of turning three named destinations into "all of them" as a create is.
+	// See refuseEmptiedTargets.
+	named := len(req.DestinationIDs)
 	// Built on top of the stored row so LastRunAt survives an edit: dropping it
 	// is how a daily schedule fires a second time the same evening.
 	sc := req.applyTo(*existing).Normalized()
+	if refuseEmptiedTargets(w, named, sc) {
+		return
+	}
 	if err := sc.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
