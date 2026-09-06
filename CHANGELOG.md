@@ -118,6 +118,22 @@ its first tagged release.
 
 ### Fixed
 
+- **The YouTube setup guide told operators to pick the option that breaks every
+  week.** Both copies of it ended a step with "You do not need to publish the
+  app." Google issues a refresh token that expires after seven days to any
+  external app left in *Testing* — unless the only permissions it asks for are
+  name, email and profile, and polyemesis asks for more than that. So an install
+  that followed the guide lost its YouTube connection weekly, nothing said why,
+  and reconnecting restarted the same clock. The guide now says to set the
+  publishing status to *In production*, and says the thing that makes that
+  advice usable: an app only you sign in to does not need to pass Google's
+  verification review. Verification is what Google asks for before *other
+  people* can grant it access.
+- **What YouTube chat costs is now written down.** It is the only platform here
+  that is metered — Twitch is a socket and Kick posts webhooks, both free — and
+  the allowance is per Google Cloud project rather than per channel, which is
+  why each install needs its own. Neither fact was anywhere an operator would
+  find it.
 - **A scheduled stop could fire against every destination on the install.**
   `[null]` in a schedule's `destinationIds` decodes to `[0]`, and the list was
   normalised — dropping every id at or below zero — *before* it was validated,
