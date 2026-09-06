@@ -86,14 +86,27 @@ func TestDiscoveryBacksOff(t *testing.T) {
 			"the discovery loop never backs off and an idle install polls at the "+
 			"opening rate for ever", ytBroadcastPollMax, ytBroadcastPoll)
 	}
+	// REPORTED, NOT SKIPPED ON. The first draft of this test skipped when the
+	// opening interval was already within budget, on the grounds that the
+	// backoff was not load-bearing and there was nothing to measure. The skip
+	// census refused it, correctly: a test that declines to run prints ok and
+	// counts as coverage, which is the free pass this repository has spent
+	// whole rounds removing in other shapes.
+	//
+	// The fix is not a quieter skip, it is noticing the test was asserting two
+	// different things. That the backoff EXISTS is always checkable and is
+	// checked above. Whether it currently MATTERS is a fact about today's
+	// constants, and a fact is reported.
 	atOpening := int(24*time.Hour/ytBroadcastPoll) * QuotaCostListBroadcasts
-	if atOpening <= DefaultQuotaUnits/5 {
-		t.Skipf("polling at the opening interval all day would cost %d units, already "+
-			"within budget; the backoff is not load-bearing at the current cost and "+
-			"this test is not measuring anything", atOpening)
+	atCeiling := int(24*time.Hour/ytBroadcastPollMax) * QuotaCostListBroadcasts
+	loadBearing := atOpening > DefaultQuotaUnits/5
+	t.Logf("idle day at the opening interval: %d units (%.0f%% of the allowance); "+
+		"at the ceiling: %d units. Backoff load-bearing at the current cost: %v",
+		atOpening, float64(atOpening)/float64(DefaultQuotaUnits)*100, atCeiling, loadBearing)
+	if !loadBearing {
+		t.Logf("the backoff is not what keeps this within budget today -- the cost "+
+			"being %d is. If QuotaCostListBroadcasts is ever measured higher, the "+
+			"backoff becomes the thing holding the line and this flips.",
+			QuotaCostListBroadcasts)
 	}
-	t.Logf("backoff is load-bearing: at the opening interval an idle day would cost "+
-		"%d units (%.0f%% of the allowance); at the ceiling it costs %d",
-		atOpening, float64(atOpening)/float64(DefaultQuotaUnits)*100,
-		int(24*time.Hour/ytBroadcastPollMax)*QuotaCostListBroadcasts)
 }
