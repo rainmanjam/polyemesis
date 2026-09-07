@@ -230,6 +230,43 @@ tokens are for.
   An absent body means unconfirmed. A body that is present and malformed — or
   that misspells the field — is a `400`, so a client that meant to confirm is
   never read as one that did not.
+- **A schedule whose `destinationIds` cannot be resolved is refused, not
+  emptied.** An empty `destinationIds` means *every destination on this
+  install*, which is the correct reading of "no filter given" — but a list that
+  arrives with entries and resolves to nothing is a different thing, and it used
+  to normalise to empty before validation saw it. A `stop` schedule that named
+  three destinations then fired against every broadcast on the box, and stopping
+  a YouTube broadcast completes it permanently.
+
+  So both the create and the update route compare the length before and after
+  normalisation, and answer `400` when a non-empty list empties. `[null]` and
+  `[0]` are the shapes that reach this: JSON `null` decodes to the zero id
+  without error, and ids at or below zero are dropped.
+
+  The refusal is qualified for playlist schedules, where an empty list means the
+  playlist rather than everything — a `400` describing a consequence that could
+  not have happened is its own defect.
+- **An archive `quality` outside the supported range is refused.** The value
+  reaches the encoder's rate control directly, and nothing downstream can see
+  that a picture is bad: a high CRF encodes cleanly, copies every audio track
+  bit-for-bit, decodes without error and shrinks enormously, so verification —
+  which compares containers, streams and durations — passes it. With
+  `replaceOriginal` set, the smaller file is then renamed over a bit-exact
+  master. It is the only route in this API that destroys data it cannot
+  reconstruct.
+
+  **There are two bounds, and the same value can pass one and fail the other.**
+  An archive written *alongside* the original is allowed some headroom, because
+  the master survives whatever comes out. An archive with `replaceOriginal` set
+  is held to the tighter one — destroying the master and adding a file are not
+  the same act, and the API does not treat them as one. Both bounds depend on
+  the codec and the chosen encoder rather than being a single number, so the
+  refusal names the bound it applied.
+
+  **On upgrade, a job already queued past the bound fails on its next attempt**
+  rather than running — the error names the bound and the reason, because a
+  queued job that starts failing after an upgrade with an opaque message is the
+  worst version of this.
 - **No response returns a secret it did not just create.** Stream keys, client
   secrets, API tokens and TLS private keys are never returned on a read, and
   webhook URLs come back masked — handing the masked form back on an update
