@@ -1,5 +1,21 @@
 # Status — 2026-09-01, main `99262db2`, latest release v0.8.0
 
+> **This is a dated snapshot, not a live status page.** It records what a
+> twelve-reviewer audit found on **2026-09-01**, at `main` `99262db2`, when the
+> latest release was **v0.8.0**. It is deliberately not edited to stay current:
+> the value of a dated audit is that it says what was true on its date, and
+> revising it to look fresh destroys exactly that.
+>
+> **Since then:** 48 commits, and **v0.9.0** was released on 2026-09-06.
+> Fourteen of the sixteen issues cited below are now closed — #380, #606, #612,
+> #631, #638, #642, #643, #644, #645, #646, #647, #648, #649 and #651. Only
+> **#375** (needs GPU hardware) and **#376** (needs a real platform account)
+> remain, and neither is blocked on code.
+>
+> Two further poka-yoke rounds ran after this audit and are not reflected here;
+> they found thirty-three more hazards and are recorded in
+> [CHANGELOG.md](../CHANGELOG.md). **For current state, read the changelog.**
+
 What works, what is known broken, and how each claim was established. Produced
 by a twelve-reviewer audit graded against **self-hosted v1.0**: one operator
 running polyemesis on their own machine. Every defect listed here was verified

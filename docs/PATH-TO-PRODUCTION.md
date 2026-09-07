@@ -1,5 +1,13 @@
 # Path to production — self-hosted v1.0
 
+> **Dated with the audit it came from.** This ordering was produced from the
+> **2026-09-01** audit in [STATUS.md](STATUS.md) and is kept as a record of what
+> was prioritised then, rather than revised to match today. Most of it is done:
+> of the issues it orders, only **#375** and **#376** are still open, and both
+> wait on hardware or an account rather than on work.
+>
+> [CHANGELOG.md](../CHANGELOG.md) is the current record.
+
 Ordered from the 2026-09-01 audit ([STATUS.md](STATUS.md)). "Production" here
 means one operator running polyemesis on a machine they own, upgrading it
 without losing data, and being told when something is wrong. Each item names
@@ -61,7 +69,7 @@ install or the data. They block v1.0 outright.
 | — | `docs/UPGRADING.md:83` no longer says 0.7.0 is unreleased; the VACUUM credential scrub is stated as required; `:266` no longer says only the first playlist item plays | Warning | docs-drift check covers UPGRADING.md |
 | — | `docs/MODULES.md:177–178` image table matches the Dockerfiles (`ubuntu:26.04`, `golang:1.27-alpine`); `TESTING.md` §10 matches ci.yml's matrix; `SITE-DEPLOY.md` names the `docs/**` filter | Warning | a test asserts MODULES.md's table against `FROM` lines |
 | — | `/api/v1/health` reports something that can be false (engine reachable, DB opens, disk floor) | Warning | installer `verify` and the debug bundle read a real answer |
-| — | A release runbook: merge → wait for push-to-main ci → tag → publish → deploy → verify; the same-day-UTC changelog gate documented | 0 → Warning | `docs/RELEASING.md` exists and the release workflow links to it |
+| — | A release runbook: merge → wait for push-to-main ci → tag → publish → deploy → verify; the same-day-UTC changelog gate documented | 0 → Warning | `docs/RELEASE-RUNBOOK.md` exists and the release workflow links to it |
 | — | `secret.key` minted over an existing database logs a WARN naming the count of destinations that will fail to open | Warning | boot log line + test |
 
 ## Stage 5 — the checks that certify the above can fail
