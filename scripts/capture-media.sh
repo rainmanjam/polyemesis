@@ -293,6 +293,42 @@ else
   echo "    skipped: python3 with Pillow not found, shots left unquantised"
 fi
 
+# ---------------------------------------------------- the marketing site's copy
+#
+# THE SITE KEEPS ITS OWN COPY AND NOTHING USED TO REFRESH IT. web/ imports its
+# screenshots through Astro's image pipeline, which requires them under
+# web/src/assets/ so they can be hashed and optimised at build time -- a path
+# outside the project root cannot be globbed, so a shared directory or a symlink
+# is not available.
+#
+# That left a manual copy as the only link between them, and a manual copy is a
+# step people forget: the site shipped screenshots EIGHT DAYS OLDER than the
+# docs, showing an interface that had already changed, and ten of its eleven
+# files had drifted before anybody noticed. Nothing announced it, because both
+# sets existed and both looked plausible.
+#
+# So the capture writes both. Only the files the site already has are copied --
+# adding a screenshot here must not silently add weight to the site bundle, and
+# what the site shows is features.astro's decision rather than this script's.
+SITE_SHOTS="$ROOT/web/src/assets/shots"
+if [ -d "$SITE_SHOTS" ]; then
+  echo
+  echo "==> refreshing the site's copies"
+  copied=0
+  for dst in "$SITE_SHOTS"/*.png; do
+    [ -e "$dst" ] || continue
+    src="$OUT/$(basename "$dst")"
+    if [ -f "$src" ] && ! cmp -s "$src" "$dst"; then
+      cp -f "$src" "$dst"
+      echo "    $(basename "$dst")"
+      copied=$((copied + 1))
+    fi
+  done
+  [ "$copied" -eq 0 ] && echo "    already in step"
+else
+  echo "    web/src/assets/shots not found, skipping the site copy"
+fi
+
 echo
 echo "==> done"
 ls -la "$OUT"

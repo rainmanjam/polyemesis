@@ -82,3 +82,64 @@ describe("the features page's screenshots", () => {
     ).toEqual([]);
   });
 });
+
+/* THE SITE'S SCREENSHOTS MUST BE THE ONES THE CAPTURE PRODUCED.
+ *
+ * web/ keeps its own copies because Astro's image pipeline needs them under
+ * src/assets to hash and optimise them; a path outside the project root cannot
+ * be globbed, so a shared directory is not on offer. That left a manual copy as
+ * the only link to docs/media, which scripts/capture-media.sh writes -- and a
+ * manual copy is a step people forget.
+ *
+ * It was forgotten. The site shipped screenshots EIGHT DAYS OLDER than the
+ * docs, showing an interface that had already changed, and ten of its eleven
+ * files had drifted. Nothing said so: both sets existed, both looked plausible,
+ * and the only way to notice was to compare them by hand.
+ *
+ * capture-media.sh now refreshes both. This is what catches the cases it
+ * cannot: an image edited in place, a copy done for some files and not others,
+ * a capture interrupted between the two writes.
+ *
+ * It compares BYTES rather than dimensions or mtimes. Two captures of the same
+ * screen at the same size are still different pictures, which is the whole
+ * defect -- and an mtime says when a file was written, not what is in it. */
+describe("the site's screenshots match the capture output", () => {
+  const shotsDir = join(here, "..", "assets", "shots");
+  const docsDir = join(here, "..", "..", "..", "docs", "media");
+
+  const siteShots = readdirSync(shotsDir).filter((f) => f.endsWith(".png"));
+
+  it("has screenshots to check", () => {
+    /* The positive control. Every assertion below passes over an empty list --
+     * a renamed directory, a moved assets folder, a glob that stopped matching
+     * -- and a green run over nothing is the failure this file exists to stop
+     * repeating elsewhere. */
+    expect(
+      siteShots.length,
+      "no screenshots found in src/assets/shots, so the comparison below " +
+        "asserts nothing. Fix the path rather than accepting the pass.",
+    ).toBeGreaterThan(0);
+  });
+
+  it.each(siteShots)("%s is byte-identical to docs/media", (name) => {
+    const site = readFileSync(join(shotsDir, name));
+    let docs: Buffer;
+    try {
+      docs = readFileSync(join(docsDir, name));
+    } catch {
+      throw new Error(
+        `docs/media/${name} does not exist, but the site ships a screenshot ` +
+          `by that name. Either the capture no longer produces it and the ` +
+          `site's copy is orphaned, or it was added to the site by hand.`,
+      );
+    }
+    expect(
+      site.equals(docs),
+      `src/assets/shots/${name} differs from docs/media/${name}. The capture ` +
+        `writes docs/media and copies to the site; a difference means the copy ` +
+        `did not happen, or one of them was edited in place. Re-run ` +
+        `scripts/capture-media.sh rather than copying by hand — the two have ` +
+        `already drifted eight days apart once.`,
+    ).toBe(true);
+  });
+});
