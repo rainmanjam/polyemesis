@@ -39,6 +39,32 @@ function declaredColours(): Set<string> {
   return names;
 }
 
+/* THE OTHER TWO NAMESPACES THAT SHARE THESE PREFIXES.
+ *
+ * `text-` and `shadow-` name a colour in most of this file's cases and a TYPE
+ * STEP or an ELEVATION LEVEL in the rest: `text-micro` is 10px, `shadow-overlay`
+ * is the popover shadow, and neither is a --color-* token. Before the design
+ * system's type and elevation tokens were actually consumed by components,
+ * every utility with these prefixes really was a colour, so the check below
+ * could assume it.
+ *
+ * Read from index.css rather than listed here, deliberately. A hardcoded
+ * allow-list of "non-colour words" would also swallow the typo this whole file
+ * exists to catch — `text-micrro` would have to be added by hand to fail, which
+ * is backwards. Declared in :root means valid; anything else still fails. */
+function declaredScale(prefix: "text" | "shadow"): Set<string> {
+  const css = readFileSync(join(SRC, "index.css"), "utf8");
+  const names = new Set<string>();
+  for (const m of css.matchAll(new RegExp(`--${prefix}-([a-z0-9-]+)\\s*:`, "g"))) {
+    // `--text-sm--line-height` and `--text-sm-lh` are the companion halves of a
+    // step, not steps of their own; Tailwind pairs them with the size and no
+    // utility names them.
+    if (m[1].includes("--line-height") || m[1].endsWith("-lh")) continue;
+    names.add(m[1]);
+  }
+  return names;
+}
+
 function tsxFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry: string) => {
     const p = join(dir, entry);
@@ -68,12 +94,30 @@ const PREFIX = "text|bg|border|ring|fill|stroke|outline|divide|accent|caret|plac
 
 describe("colour utilities name a declared token", () => {
   const declared = declaredColours();
+  const textSteps = declaredScale("text");
+  const shadowLevels = declaredScale("shadow");
 
   it("index.css declares the signal tokens the app is built on", () => {
     // Guards the guard: if the parse silently returned nothing, every
     // assertion below would pass vacuously.
     for (const t of ["live", "warn", "down", "destructive", "primary", "muted"]) {
       expect(declared, `--color-${t} should be declared`).toContain(t);
+    }
+  });
+
+  it("index.css declares the six type steps and both shadows", () => {
+    // The same guard-the-guard for the two namespaces added below. An empty
+    // set here would not fail anything on its own -- it would just make every
+    // text-* and shadow-* utility look like a colour typo -- but a MISSING
+    // step is worth failing on directly: six is the number the scale commits
+    // to, and a seventh chosen by accident is the failure it exists to
+    // prevent.
+    for (const s of ["micro", "tiny", "sm", "base", "lg", "display"]) {
+      expect(textSteps, `--text-${s} should be declared`).toContain(s);
+    }
+    expect(textSteps.size, "the type scale is six steps, no more").toBe(6);
+    for (const s of ["raised", "overlay"]) {
+      expect(shadowLevels, `--shadow-${s} should be declared`).toContain(s);
     }
   });
 
@@ -94,6 +138,11 @@ describe("colour utilities name a declared token", () => {
           const name = u[2];
           if (NON_COLOUR.test(name)) continue;
           if (PALETTE.has(name.split("-")[0])) continue;
+          // A declared type step or elevation level, not a colour. Checked
+          // against the prefix that was actually matched, so `bg-overlay` --
+          // which names no colour -- still fails.
+          if (u[1] === "text" && textSteps.has(name)) continue;
+          if (u[1] === "shadow" && shadowLevels.has(name)) continue;
           // `ring-offset-surface` names its colour after the second segment.
           const candidates = [name, name.replace(/^offset-/, "")];
           if (candidates.some((c) => declared.has(c))) continue;

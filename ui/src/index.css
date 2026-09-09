@@ -197,7 +197,18 @@
   /* --- TYPE SCALE. Six steps, and six is the point: a seventh gets chosen by
      accident and the scale stops being one. Tighter at the small end than a
      marketing scale, because a console shows numbers read at a glance far more
-     often than prose read carefully. See docs/DESIGN-SYSTEM.md. --- */
+     often than prose read carefully. See docs/DESIGN-SYSTEM.md.
+
+     COMPONENTS NAME A STEP, NEVER A NUMBER: `text-micro`, `text-tiny`,
+     `text-sm`, `text-base`, `text-lg`, `text-display`, all registered as
+     Tailwind utilities in @theme below. `text-[13px]` is not a smaller version
+     of this scale, it is a seventh step, and it is invisible in review because
+     it looks like a size rather than like a decision.
+
+     Every component in components/ui/ used to be written that way — 10, 11,
+     12, 13 and 15px literals across the kit and the shell — which is why the
+     scale could be declared here in full and still not exist on screen. The
+     six steps below are only real while something consumes them. --- */
   --text-micro: 0.625rem; /* 10px - units, axis labels, meter scales */
   --text-micro-lh: 0.875rem;
   --text-tiny: 0.6875rem; /* 11px - field hints, secondary stats */
@@ -243,7 +254,16 @@
 
   /* --- ELEVATION. Surface first, shadow second: a dark UI reads depth from
      lightness far more than from shadow, so the shadows are faint on purpose
-     and two of the four levels have none at all. --- */
+     and two of the four levels have none at all.
+
+     There is no --elev-* token, deliberately: the four levels are pairings of
+     tokens that already exist (flat=--surface, card=--card + border,
+     raised=--card-raised + --shadow-raised, overlay=--popover +
+     --shadow-overlay), and a name for the pairing would buy nothing. What the
+     two shadows below buy is that every floating surface uses the SAME one —
+     Dialog had shadow-2xl and the menu, select, popover and tooltip had
+     shadow-xl, which is five components each answering "how far off the page
+     is this?" on Tailwind's scale instead of on ours. --- */
   --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.4);
   --shadow-overlay: 0 8px 24px -4px rgb(0 0 0 / 0.6);
 }
@@ -361,8 +381,25 @@
     background-color: var(--surface);
     color: var(--foreground);
     font-family: var(--font-sans);
-    /* Dense, information-first layout: the base size is small on purpose. */
-    font-size: 13px;
+    /* Dense, information-first layout: the base size is small on purpose, and
+       it is now a STEP OF THE SCALE rather than a number beside it.
+
+       This was a literal 13px, which is not any of the six steps in :root — it
+       sat between --text-sm (12px) and --text-base (14px). That is precisely
+       the seventh step the scale's own note says gets chosen by accident: every
+       element that did not name a size inherited a size the system does not
+       define, so "the console default" was one value in the documentation and
+       a different one on screen. --text-sm IS the console default, and this is
+       where the app says so.
+
+       The line-height goes with it because a scale step is a size/line PAIR;
+       taking the size without the leading is how the pairing drifts. It is
+       inherited as a computed length, so an element that opts into another
+       step must carry that step's leading with it — every text-* utility in
+       this app does, because each --text-* token in @theme above is registered
+       with its --line-height companion. */
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-lh);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -497,26 +534,39 @@
   max-width: 24rem;
   min-width: 18rem;
   padding: 0.75rem;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.55);
+  /* ELEVATION: overlay. --popover above, --shadow-overlay here — the same
+     pairing Dialog, Popover, DropdownMenu and Select use, restated from the
+     token rather than as a fourth hand-written shadow that happens to look
+     close. See the Elevation table in docs/DESIGN-SYSTEM.md. */
+  box-shadow: var(--shadow-overlay);
 }
 
 .polyemesis-tour .driver-popover-title {
-  /* The app's own heading scale (PageHeader is 15px/semibold), not driver.js's
-     19px/700, which is larger than any real heading in the console. */
-  font-size: 13px;
+  /* The app's own type scale, not driver.js's 19px/700, which is larger than
+     any real heading in the console. These were literal px — 13/11/10 — which
+     matched the console when they were written and then could not follow it:
+     a step changed in :root left the tour behind, silently, because nothing
+     here referenced it. --text-base is the step dialog copy sits on, and this
+     popover is a dialog by another name. */
+  font-size: var(--text-base);
+  line-height: var(--text-base-lh);
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--foreground);
 }
 
 .polyemesis-tour .driver-popover-description {
-  font-size: 11px;
+  font-size: var(--text-sm);
+  /* Unitless, deliberately: these steps carry real explanation that wraps to
+     several lines, and prose wants more leading than the scale's tabular pair
+     gives it. */
   line-height: 1.55;
   color: var(--muted-foreground);
 }
 
 .polyemesis-tour .driver-popover-progress-text {
-  font-size: 10px;
+  font-size: var(--text-micro);
+  line-height: var(--text-micro-lh);
   color: var(--subtle-foreground);
   font-variant-numeric: tabular-nums;
 }
@@ -535,7 +585,8 @@
   color: var(--secondary-foreground);
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) - 2px);
-  font-size: 11px;
+  font-size: var(--text-tiny);
+  line-height: var(--text-tiny-lh);
   padding: 0.25rem 0.5rem;
 }
 .polyemesis-tour .driver-popover-footer-btn:hover,

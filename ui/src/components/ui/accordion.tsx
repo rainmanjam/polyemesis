@@ -18,10 +18,15 @@ const AccordionTrigger = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Trigger>
 >(({ className, children, ...props }, ref) => (
   <AccordionPrimitive.Header className="flex">
+    {/* transition-colors, not transition-all. Only the colour changes on hover,
+        and `all` also eases WIDTH and HEIGHT — so a trigger whose label wraps
+        differently after a disclosure opens animates its own layout, which is
+        motion that explains nothing. The chevron keeps its own transform
+        transition at --motion-quick, the disclosure step. */}
     <AccordionPrimitive.Trigger
       ref={ref}
       className={cn(
-        "flex flex-1 items-center justify-between gap-2 py-2 text-left text-[12px] font-medium transition-all hover:text-primary [&[data-state=open]>svg]:rotate-180",
+        "flex flex-1 items-center justify-between gap-2 py-2 text-left text-sm font-medium transition-colors hover:text-primary [&[data-state=open]>svg]:rotate-180",
         className,
       )}
       {...props}
@@ -39,7 +44,11 @@ const AccordionContent = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <AccordionPrimitive.Content
     ref={ref}
-    className="overflow-hidden text-[12px] data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
+    /* duration-quick: a disclosure is the spec's --motion-quick step. Without
+       it these ran at tw-animate-css's own 0.2s default, which is a fourth
+       duration nobody chose — the height animation reads --tw-duration, which
+       is what the utility sets. */
+    className="overflow-hidden text-sm duration-quick data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
     {...props}
   >
     <div className={cn("pb-3 pt-0", className)}>{children}</div>

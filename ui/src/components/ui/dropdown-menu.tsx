@@ -15,8 +15,11 @@ const DropdownMenuContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 min-w-[9rem] overflow-hidden rounded-md border border-border-strong bg-popover p-1 shadow-xl",
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+        // ELEVATION: overlay, from the tokens rather than from Tailwind's
+        // shadow scale. See the Elevation table in docs/DESIGN-SYSTEM.md.
+        "z-50 min-w-[9rem] overflow-hidden rounded-md border border-border-strong bg-popover p-1 shadow-overlay",
+        // duration-quick, the spec's step for a menu opening.
+        "duration-quick data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         className,
       )}
       {...props}
@@ -32,7 +35,7 @@ const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-[12px] outline-none transition-colors",
+      "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-sm outline-none transition-colors",
       "focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       "[&_svg]:size-3.5",
       destructive && "text-down focus:bg-down-dim focus:text-down",
@@ -49,7 +52,7 @@ const DropdownMenuLabel = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DropdownMenuPrimitive.Label
     ref={ref}
-    className={cn("px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground", className)}
+    className={cn("px-2 py-1 text-micro font-semibold uppercase tracking-wider text-muted-foreground", className)}
     {...props}
   />
 ));
