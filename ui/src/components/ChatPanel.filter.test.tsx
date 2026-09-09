@@ -276,10 +276,17 @@ describe("what an empty timeline says", () => {
  * and adding the confirmation dialog made it worse — the operator now got a
  * dialog promising removal, clicked through it, and then met a server error.
  *
- * Trovo is the specimen because it is a real ChatPlatform with no row in the
- * adapter table, so it genuinely cannot delete. (`custom` is the other one.)
+ * Two specimens, because there are two ways to be unable to delete and the
+ * dangerous one is invisible to the compiler:
+ *
+ *   rumble  is OUTSIDE the ChatPlatform union (types.ts) and still arrives at
+ *           runtime. ChatMessageMenu.reason.test.tsx says why that matters --
+ *           "the type system believes this message cannot exist" -- and it is
+ *           exactly how an ungated Delete survived review the first time.
+ *   trovo   is INSIDE the union with no row in the adapter table.
+ *
  * Twitch is the control: if the gate were wired backwards, or to a constant,
- * one of these two would say so.
+ * one of these three would say so.
  */
 describe("the row delete icon is gated on what the platform can do", () => {
   const trash = (name: string) =>
@@ -287,13 +294,24 @@ describe("the row delete icon is gated on what the platform can do", () => {
 
   beforeEach(() => {
     feed.messages = [
-      message("1", "trovo", "trovan", "cannot be deleted upstream"),
-      message("2", "twitch", "twitcher", "can be deleted upstream"),
+      // The cast is the point, not a workaround: this platform reaches the
+      // renderer and the union says it cannot.
+      message("1", "rumble" as unknown as ChatPlatform, "rumbler", "no moderation API at all"),
+      message("2", "trovo", "trovan", "in the union, absent from the adapter table"),
+      message("3", "twitch", "twitcher", "can be deleted upstream"),
     ];
     feed.statuses = [status("trovo"), status("twitch")];
   });
 
-  it("disables it on a platform with no delete API, and says why", () => {
+  it("disables it on a platform outside the union, and says why", () => {
+    render(<ChatPanel />);
+    const btn = trash("rumbler");
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toMatch(/Rumble/i);
+    expect(btn.title).toMatch(/no moderation API/i);
+  });
+
+  it("disables it on an in-union platform with no adapter row", () => {
     render(<ChatPanel />);
     const btn = trash("trovan");
     expect(btn.disabled).toBe(true);
