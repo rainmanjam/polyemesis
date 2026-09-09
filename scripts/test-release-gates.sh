@@ -310,6 +310,24 @@ else
   have "and the publish waits on it" \
        '"installer-gate" in w["jobs"]["binaries"]["needs"]'
 
+  # THE WIRING IS THE GATE. Every assertion in this file drives a gate's BODY
+  # standalone, extracted out of the YAML -- so all of them stay green whether
+  # or not release.yml actually waits on the job that runs it. `binaries.needs`
+  # is the only thing that makes a gate block a publish, and only installer-gate
+  # was ever named here: deleting ci-gate or changelog-gate from that list
+  # publishes a release past both of them with this suite still passing.
+  #
+  # Derived from the job names rather than a second hardcoded list, because a
+  # list to keep in step with another list is the thing that drifted. A job
+  # calling itself "(fail closed)" and not being waited on is now a failure.
+  fail_closed='set(k for k, v in w["jobs"].items() if "(fail closed)" in v.get("name", ""))'
+  # POSITIVE CONTROL FIRST: a subset test over an empty set is vacuously true,
+  # so rename the jobs and the assertion below would pass over nothing.
+  have "the workflow still labels its blocking gates (fail closed)" \
+       "len(${fail_closed}) >= 3"
+  have "and the publish waits on every one of them" \
+       "${fail_closed} <= set(w[\"jobs\"][\"binaries\"][\"needs\"])"
+
   # #531/#557/#584: generate_release_notes alone is a list of merged PR titles.
   # The three facts an operator needs BEFORE they upgrade were in no note at all.
   body_step='[s for s in w["jobs"]["binaries"]["steps"] if s.get("name") == "Publish GitHub Release"][0]'

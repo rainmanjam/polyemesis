@@ -272,13 +272,14 @@ describe("what an empty timeline says", () => {
  *
  * `{onDelete && …}` says the operator may delete. It says nothing about
  * whether the platform CAN, and the context menu was fixed for exactly that
- * while this icon kept the ungated form: a Rumble line rendered a live trash
- * can, and adding the confirmation dialog made it worse — the operator now got
- * a dialog promising removal, clicked through it, and then met a server error.
+ * while this icon kept the ungated form: the line rendered a live trash can,
+ * and adding the confirmation dialog made it worse — the operator now got a
+ * dialog promising removal, clicked through it, and then met a server error.
  *
- * Rumble publishes no moderation API at all, which is why it is the message
- * used here; Twitch is the control, and if the gate were wired backwards or to
- * a constant, one of these two would say so.
+ * Trovo is the specimen because it is a real ChatPlatform with no row in the
+ * adapter table, so it genuinely cannot delete. (`custom` is the other one.)
+ * Twitch is the control: if the gate were wired backwards, or to a constant,
+ * one of these two would say so.
  */
 describe("the row delete icon is gated on what the platform can do", () => {
   const trash = (name: string) =>
@@ -286,22 +287,22 @@ describe("the row delete icon is gated on what the platform can do", () => {
 
   beforeEach(() => {
     feed.messages = [
-      message("1", "rumble", "rumbler", "cannot be deleted upstream"),
+      message("1", "trovo", "trovan", "cannot be deleted upstream"),
       message("2", "twitch", "twitcher", "can be deleted upstream"),
     ];
-    feed.statuses = [status("rumble"), status("twitch")];
+    feed.statuses = [status("trovo"), status("twitch")];
   });
 
   it("disables it on a platform with no delete API, and says why", () => {
     render(<ChatPanel />);
-    const btn = trash("rumbler");
+    const btn = trash("trovan");
     expect(btn.disabled).toBe(true);
     // The blanket reason, not the per-action one: every adapter in the table
     // can delete, so the only reachable "cannot" is having no adapter at all.
-    // That is what Rumble is, and the sentence has to name it -- a disabled
+    // That is what Trovo is, and the sentence has to name it -- a disabled
     // control with no explanation sends a moderator looking for their own
     // mistake instead of reading that the platform publishes nothing to call.
-    expect(btn.title).toMatch(/Rumble/);
+    expect(btn.title).toMatch(/Trovo/i);
     expect(btn.title).toMatch(/no moderation API/i);
   });
 

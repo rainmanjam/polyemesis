@@ -49,6 +49,19 @@
 //     this UI does that, and if something ever does the failure is a leaf
 //     reported unreachable, not one wrongly reported reachable.
 //
+//  3. WRITE. The two passes above only ever read what a control DISPLAYS, and a
+//     control can display one leaf while its onChange writes another -- the
+//     copy-paste hazard in any block repeated per field. These forms are
+//     controlled, so the test is local and needs no save: type into a correctly
+//     wired control and the leaf moves, the component re-renders, and the
+//     control shows what you typed. Type into a miswired one and the displayed
+//     leaf never moved, so React puts the OLD value back and the DOM reverts.
+//
+//     Fields are driven before toggles, because a section switch sits above the
+//     fields it reveals and turning it off unmounts them before they are
+//     tested. The first version of this pass did exactly that and reported
+//     success over four untested MQTT fields.
+//
 // ---------------------------------------------------------------------------
 // WHAT THIS DOES NOT COVER, stated here rather than discovered later. A guard
 // that overclaims is how #788 happened.
@@ -70,8 +83,13 @@
 //  - LISTS EDITED BY ROW. A playlist entry is added by picking an upload and
 //    removed by a button; its value is text in the row, not a field. Reachable,
 //    invisible here.
-//  - WHETHER THE CONTROL SAVES. This says a control exists and moves with the
-//    leaf. It does not say the change survives a PUT; the page suites do that.
+//  - WHETHER THE CONTROL SAVES. Pass 3 types into every control it can drive
+//    and requires it to KEEP what it was given, which catches a control that
+//    displays one leaf and writes to another. It still does not follow the
+//    value to the wire: whether the PUT is issued and accepted is the page
+//    suites' question. Radix Selects and Sliders are not driven at all -- their
+//    value moves through a portal menu this does not open -- so for those, pass
+//    2's display evidence is still the whole of it.
 //
 // ---------------------------------------------------------------------------
 // THE LISTS BELOW ARE THE POINT. A leaf that no control reaches is either a
@@ -86,7 +104,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -485,6 +503,25 @@ interface Shot {
 }
 
 /** Render one screen against one settings document and read its controls. */
+/** Turn the macrotask queue over until the screen stops changing, and return
+ *  what it settled on. Extracted from `shoot` so the write pass below settles
+ *  by exactly the same rule -- a second reading taken under a different
+ *  settling rule would not be comparable to the first. */
+async function settle(): Promise<Shot> {
+  let previous = "";
+  let shot = readControls();
+  for (let turn = 0; turn < 40; turn++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    shot = readControls();
+    const now = signatureOf(shot);
+    if (shot.keyed.size > 0 && now === previous) break;
+    previous = now;
+  }
+  return shot;
+}
+
 async function shoot(screen: Screen, settings: Doc): Promise<Shot> {
   serveWith(settings);
   const route = screen.at.split("?")[0];
@@ -520,19 +557,38 @@ async function shoot(screen: Screen, settings: Doc): Promise<Shot> {
   // 0 to be greater than 0", which is true and useless. The empty screen is
   // returned, and the positive control below reports it in words that say what
   // to go and look at.
-  let previous = "";
-  let shot = readControls();
-  for (let turn = 0; turn < 40; turn++) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    shot = readControls();
-    const now = signatureOf(shot);
-    if (shot.keyed.size > 0 && now === previous) break;
-    previous = now;
-  }
+  const shot = await settle();
   cleanup();
   return shot;
+}
+
+/** Every frozen control the walk stepped over, for the positive control below.
+ *  Module-level because the walk runs once and the assertion is a separate
+ *  test. */
+const FROZEN_SEEN = new Set<string>();
+
+/** A control the operator cannot actually operate.
+ *
+ *  The walk's question is "can somebody CHANGE this setting", and a disabled or
+ *  read-only control answers no while looking exactly like one that answers
+ *  yes: it renders, it holds a value, and its value moves when the fixture
+ *  moves -- so the fingerprint matched and the leaf was credited as reachable.
+ *  A setting behind a permanently disabled control is precisely the kind of
+ *  unreachable capability this file exists to find, and it was the one shape
+ *  guaranteed to be missed.
+ *
+ *  Skipping is the safe direction. A control disabled only while a save is in
+ *  flight (`disabled={busy}`) would now fall to the excuse lists rather than be
+ *  silently credited, which is a failure someone reads rather than a pass
+ *  nobody does. */
+function isFrozen(el: Element): boolean {
+  if (el.getAttribute("aria-disabled") === "true") return true;
+  if (el.getAttribute("data-disabled") !== null) return true;
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    return el.disabled || el.readOnly;
+  }
+  if (el instanceof HTMLSelectElement || el instanceof HTMLButtonElement) return el.disabled;
+  return false;
 }
 
 /** The controls on screen right now. */
@@ -541,6 +597,10 @@ function readControls(): Shot {
   const shown = new Set<string>();
   const census = new Map<string, number>();
   document.querySelectorAll(CONTROLS).forEach((el) => {
+    if (isFrozen(el)) {
+      FROZEN_SEEN.add(keyOf(el, census.get(roleOf(el)) ?? 0));
+      return;
+    }
     const role = roleOf(el);
     const ordinal = census.get(role) ?? 0;
     census.set(role, ordinal + 1);
@@ -557,6 +617,206 @@ function readControls(): Shot {
  *  does not move a count. */
 function signatureOf(shot: Shot): string {
   return [...shot.keyed].map(([k, v]) => `${k}=${v}`).join("\u0000");
+}
+
+/* ------------------------------------------- pass 3: does the control WRITE? */
+
+/* DISPLAYING A LEAF IS NOT EDITING IT.
+ *
+ * The two passes above ask whether a control's DISPLAY moves with a leaf. They
+ * cannot see where that control's onChange sends what you type, and this file's
+ * header has always disclosed the gap: "it does not say the change survives a
+ * PUT". The gap has a shape, and it is a copy-paste: SettingsPage's MQTT block
+ * repeats the same four-line spread for host, port, user and prefix, and an
+ * onChange left naming `prefix` in the block that displays `user` credits
+ * `mqtt.user` as reachable while making it impossible to edit. Both leaves are
+ * still displayed, so both passes are still green.
+ *
+ * Reading the PUT body would answer it, but that needs a Save button per screen
+ * and a settled request per control. There is a sharper signal already on
+ * screen. These forms are CONTROLLED: the input renders `value={x.a}`. Type
+ * into a correctly wired one and the leaf moves, the component re-renders, and
+ * the input shows what you typed. Type into one whose onChange writes `x.b` and
+ * the displayed leaf never moved -- React re-renders it with the OLD value and
+ * the DOM reverts under you. One event per control, no save, no network.
+ *
+ * A control that reformats its input (clamping a port, trimming a slug) reverts
+ * too and is not a defect. Those are listed in REFORMATS below, by hand, for
+ * the same reason every other list here is: so that a new one is a decision
+ * somebody wrote down rather than a silent hole.
+ */
+
+/** Controls that legitimately do not keep what they are given, and why.
+ *
+ *  Two shapes qualify, and neither is a defect:
+ *
+ *   - SAVE-THROUGH. The control has no local draft. It PUTs on change and then
+ *     shows whatever the next read returns -- `checked={settings.recording
+ *     .enabled}` with `onCheckedChange={(v) => saveRecording({enabled: v})}`.
+ *     The stub in this file answers every read with the same document, so the
+ *     old value comes straight back. Against a real server these keep their
+ *     value; against this one they cannot, and that is the stub's honesty
+ *     rather than the control's fault.
+ *   - REFORMATTING. A control that clamps or trims what it is handed.
+ *
+ *  Listed by hand, like every other exception here, so a seventh entry is
+ *  something somebody decided rather than a hole that opened. The population is
+ *  small and it is entirely switches: the copy-paste this pass exists to catch
+ *  lives in repeated TEXT blocks, and every one of those is still checked. */
+const REFORMATS: Record<string, string> = {
+  "Recordings #rec-enabled": "save-through: onCheckedChange calls saveRecording, no local draft",
+  "Recordings #rec-stems": "save-through: onCheckedChange calls saveRecording, no local draft",
+  "Playout @Enable playout": "save-through: onCheckedChange calls savePlayoutSettings",
+  "Playout @Serve viewers without a session": "save-through: onCheckedChange calls onSaveSettings",
+  "Playout @Allow cross-origin playback": "save-through: onCheckedChange calls onSaveSettings",
+  "Playout @Enable zzq41": "save-through: a rendition row's switch, saved on change",
+};
+
+/** Controls the write pass cannot drive, with why.
+ *
+ *  Radix Select and Slider are the population: both are button-and-portal
+ *  widgets whose value changes through a menu this pass does not open. They are
+ *  already covered for DISPLAY by pass 2, and the miswiring this pass exists to
+ *  catch is a copy-paste in a repeated text block, which is not their shape. */
+/** A control that RESTRUCTURES the screen when driven rather than just taking a
+ *  value. Ordering the batch on this keeps a section switch from unmounting the
+ *  fields beneath it before they have been tested. */
+function isToggle(el: Element): boolean {
+  if (el instanceof HTMLInputElement) return el.type === "checkbox";
+  return !(el instanceof HTMLTextAreaElement);
+}
+
+function drivable(el: Element): boolean {
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement) {
+    return ["text", "number", "url", "email", "password", "search", "tel", "checkbox"].includes(
+      el.type,
+    );
+  }
+  return el.getAttribute("role") === "switch" || el.getAttribute("role") === "checkbox";
+}
+
+/** What to type so the control has somewhere to move to.
+ *
+ *  Numbers step by one from where they are, rather than to a constant: a port
+ *  field that clamps to 1..65535 would reject a made-up number and read as a
+ *  revert, which would be this pass inventing a defect. */
+function nextValueFor(el: HTMLInputElement | HTMLTextAreaElement): string {
+  if (el instanceof HTMLInputElement && el.type === "number") {
+    const n = Number(el.value);
+    return Number.isFinite(n) ? String(n + 1) : "2";
+  }
+  return el.value === "zzq42" ? "zzq43" : "zzq42";
+}
+
+interface WritePass {
+  driven: string[];
+  reverted: string[];
+}
+
+/** Render the screen, type into every control it can drive, and report the ones
+ *  that did not keep what they were given. */
+async function writePass(screen: Screen, settings: Doc): Promise<WritePass> {
+  serveWith(settings);
+  const route = screen.at.split("?")[0];
+  render(
+    <MemoryRouter initialEntries={[screen.at]}>
+      <Routes>
+        <Route path={route} element={screen.element} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  await settle();
+
+  const driven: string[] = [];
+  const reverted: string[] = [];
+  const seen = new Set<string>();
+
+  /* ROUNDS, because half these controls are behind the other half.
+   *
+   * The MQTT block is the case that proved it: host, port, user and prefix do
+   * not exist until `mq-enabled` is on, so a single snapshot of the DOM drives
+   * the switch and never sees the four fields it just revealed -- which are
+   * exactly the repeated text block this pass was written to check. One pass
+   * over a snapshot silently covered one control where it should cover five.
+   *
+   * So: scan, drive whatever is new, let the screen settle, scan again. Each
+   * control is driven once (`seen`), and the loop ends when a round reveals
+   * nothing further. The bound is a backstop against a pair of controls that
+   * reveal each other, not an expected exit. */
+  for (let round = 0; round < 6; round++) {
+    const census = new Map<string, number>();
+    const batch: Array<{ el: Element; key: string }> = [];
+    document.querySelectorAll(CONTROLS).forEach((el) => {
+      const role = roleOf(el);
+      const ordinal = census.get(role) ?? 0;
+      census.set(role, ordinal + 1);
+      if (isFrozen(el) || !drivable(el)) return;
+      const key = `${screen.name} ${keyOf(el, ordinal)}`;
+      if (seen.has(key)) return;
+      batch.push({ el, key });
+    });
+    if (batch.length === 0) break;
+
+    /* FIELDS BEFORE TOGGLES, and this is not a matter of taste.
+     *
+     * A section switch sits ABOVE the fields it reveals, so in DOM order it is
+     * driven first -- and turning MQTT off unmounted host, port, user and
+     * prefix before any of them had been typed into. They were then skipped as
+     * disconnected, so the repeated text block this pass exists to check went
+     * untested while the pass reported success. That is exactly the shape of
+     * failure this file was written against, reproduced inside it.
+     *
+     * Typing into a field first can destroy nothing: a text change reveals and
+     * hides no section here, and a toggle is the only control that restructures
+     * the screen. */
+    batch.sort((x, y) => Number(isToggle(x.el)) - Number(isToggle(y.el)));
+
+    for (const { el, key } of batch) {
+      // Claimed on driving, not on scanning. Marking a control seen when it had
+      // merely been LOOKED AT is what stopped those four MQTT fields from ever
+      // being revisited once a toggle above them had unmounted them.
+      if (!el.isConnected) continue;
+      seen.add(key);
+
+      if (el instanceof HTMLInputElement && el.type === "checkbox") {
+        const was = el.checked;
+        await act(async () => {
+          fireEvent.click(el);
+        });
+        driven.push(key);
+        if (el.isConnected && el.checked === was) reverted.push(key);
+        continue;
+      }
+      if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement)) {
+        // A Radix switch: aria-checked has to flip.
+        const was = el.getAttribute("aria-checked");
+        await act(async () => {
+          fireEvent.click(el);
+        });
+        driven.push(key);
+        if (el.isConnected && el.getAttribute("aria-checked") === was) reverted.push(key);
+        continue;
+      }
+
+      const want = nextValueFor(el);
+      await act(async () => {
+        fireEvent.change(el, { target: { value: want } });
+      });
+      driven.push(key);
+      // Gone from the DOM after the change: a control that unmounts itself by
+      // being edited said nothing about where it writes, so it is not counted
+      // either way.
+      if (el.isConnected && el.value !== want) reverted.push(key);
+    }
+
+    // Whatever those changes revealed has to finish arriving before the next
+    // scan, or the round after this one reads a half-built section.
+    await settle();
+  }
+
+  cleanup();
+  return { driven, reverted };
 }
 
 /* ------------------------------------------------------------- the verdicts */
@@ -593,15 +853,28 @@ const BOUND_BUT_UNMEASURABLE: Array<{
   path: string;
   why: string;
   /** A control id that must be rendered on one of the screens above. */
-  control?: string;
-  /** An exact binding that must still exist in the named file. */
-  boundAt?: { file: string; needle: string };
+  /* NO `control: "#id"` VARIANT, deliberately.
+   *
+   *  There was one, and what it proved was that SOME element with that id had
+   *  been rendered. A `<div id="mt-vendor-0" />` satisfies it. It could not
+   *  tell an editable Select from a label, a disabled trigger, or a leftover id
+   *  on a wrapper -- and this is the one list in the file that CLAIMS A CONTROL
+   *  EXISTS, so a receipt that cannot see the handler is the exact failure the
+   *  list was written to prevent, reintroduced inside it.
+   *
+   *  `boundAt` reads the source and requires the binding itself, so the
+   *  evidence names the write rather than the markup around it. One shape, and
+   *  it is the strong one. */
+  boundAt: { file: string; needle: string };
 }> = [
   {
     path: "multitrack.gpus[].vendorId",
     why:
       "a Select over the PCI vendor IDs Twitch recognises. Both probe values are outside that set, so the trigger shows the same empty label for each and nothing moves",
-    control: "#mt-vendor-0",
+    boundAt: {
+      file: "src/pages/SettingsPage.tsx",
+      needle: "onValueChange={(v) => patch(i, { vendorId: Number(v) })}",
+    },
   },
   {
     path: "ingest.pull.rtspTransport",
@@ -930,27 +1203,68 @@ describe("every settings leaf an operator is meant to change", () => {
     ).toEqual([]);
   });
 
+  it("every control it can drive keeps what it is given", async () => {
+    const driven: string[] = [];
+    const reverted: string[] = [];
+    for (const screen of SCREENS) {
+      const pass = await writePass(screen, document_(leaves, new Set()));
+      driven.push(...pass.driven);
+      reverted.push(...pass.reverted);
+    }
+
+    // POSITIVE CONTROL. A pass that drove nothing reports no reverts, which
+    // looks exactly like a pass where everything is wired correctly.
+    expect(
+      driven.length,
+      "the write pass drove no controls at all, so it is provably not checking anything",
+    ).toBeGreaterThan(20);
+
+    // TEMP PROBE
+    const unexplained = reverted.filter((k) => !(k in REFORMATS));
+    expect(
+      unexplained,
+      `these controls did not keep what was typed into them. A CONTROLLED input that ` +
+        `discards your keystrokes is displaying one leaf and writing to another -- the ` +
+        `copy-paste this pass exists to catch. If instead the control legitimately ` +
+        `reformats its input (clamping a port, trimming a slug), add it to REFORMATS ` +
+        `with which it is.`,
+    ).toEqual([]);
+  });
+
+  /* POSITIVE CONTROL FOR THE FROZEN-CONTROL FILTER.
+   *
+   * `isFrozen` removes controls from the walk. A filter that matches nothing is
+   * indistinguishable from no filter at all, and it would go on being
+   * indistinguishable for as long as nobody rendered a disabled control -- at
+   * which point the leaf behind it would be credited again with this file
+   * still green. Asserting that the screens DO contain frozen controls is what
+   * keeps the filter honest about doing something. */
+  it("actually steps over frozen controls", () => {
+    expect(
+      FROZEN_SEEN.size,
+      "no disabled or read-only control was seen on any of the four screens, so " +
+        "the isFrozen filter is provably doing nothing and would not notice a " +
+        "setting that became unreachable behind a permanently disabled control",
+    ).toBeGreaterThan(0);
+  });
+
   /* BOUND_BUT_UNMEASURABLE is the only list that claims a control EXISTS. A
    * claim with no check is the thing this whole file was written against, so
    * each entry carries its evidence and the evidence is read. */
   it("checks the control every unmeasurable entry claims", () => {
+    // POSITIVE CONTROL. A for-loop over an empty list passes, and this test's
+    // whole job is reading evidence -- so "there was evidence to read" has to
+    // be asserted before the reading.
+    expect(BOUND_BUT_UNMEASURABLE.length).toBeGreaterThan(0);
+
     for (const entry of BOUND_BUT_UNMEASURABLE) {
-      if (entry.control) {
-        expect(
-          walk.identities.has(entry.control),
-          `${entry.path} is excused because ${entry.control} edits it, and no screen this ` +
-            `file walks rendered ${entry.control}. The excuse has outlived the control.`,
-        ).toBe(true);
-      }
-      if (entry.boundAt) {
-        const src = readFileSync(join(ROOT, entry.boundAt.file), "utf8");
-        expect(
-          src.includes(entry.boundAt.needle),
-          `${entry.path} is excused because ${entry.boundAt.file} binds it as ` +
-            `\`${entry.boundAt.needle}\`, and that binding is no longer there. Either the ` +
-            `control moved -- update the entry -- or it is gone and the leaf is unreachable.`,
-        ).toBe(true);
-      }
+      const src = readFileSync(join(ROOT, entry.boundAt.file), "utf8");
+      expect(
+        src.includes(entry.boundAt.needle),
+        `${entry.path} is excused because ${entry.boundAt.file} binds it as ` +
+          `\`${entry.boundAt.needle}\`, and that binding is no longer there. Either the ` +
+          `control moved -- update the entry -- or it is gone and the leaf is unreachable.`,
+      ).toBe(true);
     }
   });
 });
