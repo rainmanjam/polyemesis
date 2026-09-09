@@ -136,8 +136,8 @@ export function ChatPage() {
         <section className="flex min-h-0 flex-col rounded-md border border-border bg-card">
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-1.5">
             <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-[12px] font-semibold">{t("chatpage.timeline")}</span>
-            <span className="tnum font-mono text-[10px] text-subtle-foreground">
+            <span className="text-sm font-semibold">{t("chatpage.timeline")}</span>
+            <span className="tnum font-mono text-micro text-subtle-foreground">
               {visible.length}
               {visible.length !== messages.length && ` of ${messages.length}`}
             </span>
@@ -190,7 +190,7 @@ export function ChatPage() {
               empty={
                 hidden.size > 0 && messages.length > 0 ? (
                   <div className="flex h-full items-center justify-center px-6 text-center">
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-tiny text-muted-foreground">
                     {t("chatpage.allFiltered")}
                     </p>
                   </div>
@@ -213,7 +213,7 @@ export function ChatPage() {
         <aside className="flex min-h-0 flex-col gap-2 overflow-y-auto">
           {troubled.length > 0 && (
             <div className="rounded-md border border-warn/40 bg-warn-dim px-2 py-1.5">
-              <p className="text-[11px] font-semibold text-warn">
+              <p className="text-tiny font-semibold text-warn">
                 {troubled.length} platform{troubled.length === 1 ? "" : "s"} need
                 {troubled.length === 1 ? "s" : ""} attention
               </p>
@@ -224,19 +224,19 @@ export function ChatPage() {
           <ChatStatusList statuses={statuses} />
 
           {configured && statuses.length === 0 && (
-            <p className="rounded-md border border-border bg-card px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            <p className="rounded-md border border-border bg-card px-2 py-1.5 text-tiny leading-relaxed text-muted-foreground">
                     {t("chatpage.noAccount")}
             </p>
           )}
 
           {!configured && !loading && (
-            <p className="rounded-md border border-border bg-card px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            <p className="rounded-md border border-border bg-card px-2 py-1.5 text-tiny leading-relaxed text-muted-foreground">
                     {t("chatpage.notRunning")}
             </p>
           )}
 
           {stats && (
-            <dl className="rounded-md border border-border bg-card px-2 py-1.5 text-[10px] text-subtle-foreground">
+            <dl className="rounded-md border border-border bg-card px-2 py-1.5 text-micro text-subtle-foreground">
               <div className="flex justify-between gap-2">
                 <dt>{t("chatpage.received")}</dt>
                 <dd className="tnum font-mono">{stats.received.toLocaleString()}</dd>
@@ -262,7 +262,7 @@ export function ChatPage() {
             </dl>
           )}
 
-          <p className="px-1 text-[10px] leading-relaxed text-subtle-foreground">
+          <p className="px-1 text-micro leading-relaxed text-subtle-foreground">
                     {t("chatpage.deleteNote")}
           </p>
         </aside>

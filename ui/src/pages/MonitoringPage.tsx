@@ -242,7 +242,7 @@ function ExpertPanel() {
           Expert mode — extra FFmpeg arguments
         </CardTitle>
         <Select value={selected} onValueChange={choose}>
-          <SelectTrigger className="h-7 w-56 text-[11px]">
+          <SelectTrigger className="h-7 w-56 text-tiny">
             <SelectValue placeholder={t("mon.chooseDestination")} />
           </SelectTrigger>
           <SelectContent>
@@ -256,7 +256,7 @@ function ExpertPanel() {
       </CardHeader>
 
       <CardContent className="flex flex-col gap-2.5">
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-tiny text-muted-foreground">
           These two strings are appended to the generated command — input arguments immediately
           before <code className="font-mono">-i</code>, output arguments immediately before the
           publish target. Nothing else is replaced, so the routing graph this destination was
@@ -265,7 +265,7 @@ function ExpertPanel() {
         </p>
 
         {selected === "" ? (
-          <div className="rounded border border-dashed border-border py-6 text-center text-[11px] text-muted-foreground">
+          <div className="rounded border border-dashed border-border py-6 text-center text-tiny text-muted-foreground">
             Choose a destination to edit its command line.
           </div>
         ) : (
@@ -312,14 +312,14 @@ function ExpertPanel() {
                 Clear
               </Button>
               {!shown && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-micro text-muted-foreground">
             {t("mon.resolveHint")}
                 </span>
               )}
             </div>
 
             {error && (
-              <div className="flex gap-1.5 rounded border border-down/30 bg-down-dim p-2 text-[11px] text-down">
+              <div className="flex gap-1.5 rounded border border-down/30 bg-down-dim p-2 text-tiny text-down">
                 <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
                 <span className="break-words">{error}</span>
               </div>
@@ -328,7 +328,7 @@ function ExpertPanel() {
             {guards.map((g) => (
               <div
                 key={g.arg}
-                className="flex gap-1.5 rounded border border-warn/30 bg-warn-dim p-2 text-[11px] text-warn"
+                className="flex gap-1.5 rounded border border-warn/30 bg-warn-dim p-2 text-tiny text-warn"
               >
                 <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
                 <span className="break-words">{g.reason}</span>
@@ -350,12 +350,12 @@ function ExpertPanel() {
             )}
 
             {resolved?.warning && !error && (
-              <div className="rounded border border-warn/30 bg-warn-dim p-2 text-[11px] text-warn">
+              <div className="rounded border border-warn/30 bg-warn-dim p-2 text-tiny text-warn">
                 {resolved.warning}
               </div>
             )}
             {saved && !error && (
-              <div className="rounded border border-border bg-surface p-2 text-[11px] text-muted-foreground">
+              <div className="rounded border border-border bg-surface p-2 text-tiny text-muted-foreground">
                 {saved}
               </div>
             )}
@@ -363,7 +363,7 @@ function ExpertPanel() {
             {resolved?.command?.command && (
               <div>
                 <div className="mb-1 flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-wide text-subtle-foreground">
+                  <span className="text-micro uppercase tracking-wide text-subtle-foreground">
             {t("mon.fullCommand")}
                   </span>
                   <Badge variant={resolved.command.live ? "default" : "outline"}>
@@ -373,22 +373,22 @@ function ExpertPanel() {
                 </div>
                 <pre
                   className={cn(
-                    "max-h-56 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-background p-2 font-mono text-[10px]",
+                    "max-h-56 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-background p-2 font-mono text-micro",
                     shown ? "text-foreground" : "text-subtle-foreground",
                   )}
                 >
                   {resolved.command.command}
                 </pre>
                 {resolved.command.note && (
-                  <p className="mt-1 text-[10px] text-muted-foreground">{resolved.command.note}</p>
+                  <p className="mt-1 text-micro text-muted-foreground">{resolved.command.note}</p>
                 )}
               </div>
             )}
 
             {dryRun && (
               <div>
-                <div className="mb-1 flex items-center gap-2 text-[11px]">
-                  <span className="text-[10px] uppercase tracking-wide text-subtle-foreground">
+                <div className="mb-1 flex items-center gap-2 text-tiny">
+                  <span className="text-micro uppercase tracking-wide text-subtle-foreground">
             {t("mon.dryRun")}
                   </span>
                   <span className={DRY_RUN_TONE[dryRun.verdict]}>
@@ -396,14 +396,14 @@ function ExpertPanel() {
                   </span>
                 </div>
                 {dryRun.message && (
-                  <p className="text-[11px] text-muted-foreground">{dryRun.message}</p>
+                  <p className="text-tiny text-muted-foreground">{dryRun.message}</p>
                 )}
                 {dryRun.output && (
                   <details className="mt-1">
-                    <summary className="cursor-pointer text-[10px] text-muted-foreground hover:text-foreground">
+                    <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
                       FFmpeg output
                     </summary>
-                    <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-[9px] text-muted-foreground">
+                    <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
                       {dryRun.output}
                     </pre>
                   </details>
@@ -561,7 +561,7 @@ export function MonitoringPage() {
               value={pct(system?.cpuPercent ?? 0)}
               tone={(system?.cpuPercent ?? 0) > 85 ? "warn" : "default"}
             />
-            <div className="mt-1 text-[10px] text-muted-foreground">
+            <div className="mt-1 text-micro text-muted-foreground">
               {system?.numCpu ?? 0} cores · polyemesis {pct(system?.procCpuPercent ?? 0)}
             </div>
           </CardContent>
@@ -573,7 +573,7 @@ export function MonitoringPage() {
               value={pct(system?.memPercent ?? 0)}
               tone={(system?.memPercent ?? 0) > 90 ? "warn" : "default"}
             />
-            <div className="mt-1 text-[10px] text-muted-foreground">
+            <div className="mt-1 text-micro text-muted-foreground">
               {bytes(system?.memUsedBytes ?? 0)} / {bytes(system?.memTotalBytes ?? 0)} · rss{" "}
               {bytes(system?.procMemBytes ?? 0)}
             </div>
@@ -582,7 +582,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat labelKey="mon.relayIn" value={bytes(status?.relay.rxBytes ?? 0)} />
-            <div className="mt-1 text-[10px] text-muted-foreground">
+            <div className="mt-1 text-micro text-muted-foreground">
               {status?.relay.subscribers?.length ?? 0} subscribers · port {status?.relay.port ?? "—"}
             </div>
           </CardContent>
@@ -594,7 +594,7 @@ export function MonitoringPage() {
               value={status?.relay.dropped ?? 0}
               tone={(status?.relay.dropped ?? 0) > 0 ? "warn" : "muted"}
             />
-            <div className="mt-1 text-[10px] text-muted-foreground">
+            <div className="mt-1 text-micro text-muted-foreground">
               sends to a consumer that had not bound its port yet
             </div>
           </CardContent>
@@ -606,7 +606,7 @@ export function MonitoringPage() {
               value={`${(status?.relay.lossPercent ?? 0).toFixed(2)}%`}
               tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
             />
-            <div className="mt-1 text-[10px] text-muted-foreground">
+            <div className="mt-1 text-micro text-muted-foreground">
               {(status?.relay.tsLost ?? 0).toLocaleString()} of{" "}
               {((status?.relay.tsPackets ?? 0) + (status?.relay.tsLost ?? 0)).toLocaleString()} TS
               packets missing · {(status?.relay.discontinuities ?? 0).toLocaleString()} breaks
@@ -622,7 +622,7 @@ export function MonitoringPage() {
         </CardHeader>
         <CardContent className="h-40 px-1">
           {chartData.length < 2 ? (
-            <div className="flex h-full items-center justify-center text-[11px] text-muted-foreground">
+            <div className="flex h-full items-center justify-center text-tiny text-muted-foreground">
               Collecting samples…
             </div>
           ) : (
@@ -692,7 +692,7 @@ export function MonitoringPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-1.5">
             {processes.length === 0 && (
-              <div className="py-3 text-center text-[11px] text-muted-foreground">
+              <div className="py-3 text-center text-tiny text-muted-foreground">
                 <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" />
               </div>
             )}
@@ -703,7 +703,7 @@ export function MonitoringPage() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-1.5">
                       <StatusDot tone={tone} size="sm" />
-                      <span className="truncate font-mono text-[11px]">{p.name}</span>
+                      <span className="truncate font-mono text-tiny">{p.name}</span>
                     </div>
                     <Badge variant={toneBadge[tone]}>{stateLabel(p.state)}</Badge>
                   </div>
@@ -721,20 +721,20 @@ export function MonitoringPage() {
                     />
                   </div>
                   {p.nextRetryIn ? (
-                    <div className="mt-1 text-[10px] text-warn">
+                    <div className="mt-1 text-micro text-warn">
                       retrying in {p.nextRetryIn.toFixed(0)}s
                     </div>
                   ) : null}
                   {p.lastError && (
-                    <div className="mt-1 line-clamp-2 break-words text-[10px] text-down">
+                    <div className="mt-1 line-clamp-2 break-words text-micro text-down">
                       {p.lastError}
                     </div>
                   )}
                   <details className="mt-1">
-                    <summary className="cursor-pointer text-[10px] text-muted-foreground hover:text-foreground">
+                    <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
                       command line
                     </summary>
-                    <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-[9px] text-muted-foreground">
+                    <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
                       {command}
                     </pre>
                   </details>
@@ -750,7 +750,7 @@ export function MonitoringPage() {
             <CardTitle>{t("mon.ffmpegLog")}</CardTitle>
             <div className="flex items-center gap-2">
               <Select value={filter} onValueChange={setFilter}>
-                <SelectTrigger className="h-7 w-36 text-[11px]">
+                <SelectTrigger className="h-7 w-36 text-tiny">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -776,7 +776,7 @@ export function MonitoringPage() {
           <CardContent>
             <div
               ref={logRef}
-              className="h-[26rem] overflow-y-auto rounded border border-border bg-background p-2 font-mono text-[10px] leading-relaxed"
+              className="h-[26rem] overflow-y-auto rounded border border-border bg-background p-2 font-mono text-micro leading-relaxed"
             >
               {filtered.length === 0 ? (
                 <div className="py-6 text-center text-muted-foreground">

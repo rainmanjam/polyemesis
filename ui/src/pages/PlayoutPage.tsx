@@ -192,7 +192,7 @@ export function PlayoutPage() {
         subtitle={t("play.subtitle")}
         actions={
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-tiny text-muted-foreground">
               {play.enabled ? t("common.enabled") : t("common.disabled")}
             </span>
             <Switch
@@ -209,7 +209,7 @@ export function PlayoutPage() {
 
       {!view.running && play.enabled && (
         <Card className="mb-3 border-warn/40">
-          <CardContent className="flex items-center gap-2 py-3 text-[12px] text-muted-foreground">
+          <CardContent className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
             <ShieldAlert className="h-4 w-4 shrink-0 text-warn" />
             Playout is enabled but the packager is not running on this server.
             Nothing is being published.
@@ -222,7 +222,7 @@ export function PlayoutPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-[13px]">
+            <CardTitle className="flex items-center gap-2">
               <Eye className="h-3.5 w-3.5" />
               Audience
             </CardTitle>
@@ -238,14 +238,14 @@ export function PlayoutPage() {
               <Stat labelKey="play.onDisk" value={fmtBytes(usage.bytes)} />
             </div>
             {analytics.uncounted > 0 && (
-              <p className="mt-3 text-[11px] text-muted-foreground">
+              <p className="mt-3 text-tiny text-muted-foreground">
                 {analytics.uncounted} viewers arrived with the session table full.
                 They are being served normally; only the count is short. Raise the
                 session cap below to measure them.
               </p>
             )}
             {usage.overLimit && (
-              <p className="mt-3 flex items-start gap-1.5 text-[11px] text-down">
+              <p className="mt-3 flex items-start gap-1.5 text-tiny text-down">
                 <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0" />
                 The disk cap is below one playlist window. Raise it or lower the
                 bitrate — segments viewers are mid-playback on cannot be deleted.
@@ -282,7 +282,7 @@ export function PlayoutPage() {
 
       <Card className="mt-3">
         <CardHeader>
-          <CardTitle className="text-[13px]">{t("play.playerPage")}</CardTitle>
+          <CardTitle>{t("play.playerPage")}</CardTitle>
           <CardDescription>
             {t("play.posterNote")}
           </CardDescription>
@@ -341,7 +341,7 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
   const t = useT();
   if (!view.status.enabled) {
     return (
-      <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-[12px] text-muted-foreground">
+      <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
         <Lock className="h-3.5 w-3.5 shrink-0" />
         Playout is off. Nothing is being served to viewers.
       </div>
@@ -349,7 +349,7 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
   }
   if (!view.status.public) {
     return (
-      <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-[12px]">
+      <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
         <Lock className="h-3.5 w-3.5 shrink-0 text-live" />
         <span>
           <span className="font-medium">{t("play.private")}</span>{" "}
@@ -363,7 +363,7 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
   }
   if (view.exposed) {
     return (
-      <div className="mb-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px]">
+      <div className="mb-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
         <Globe className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
         <span>
           <span className="font-medium text-destructive">
@@ -379,7 +379,7 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
     );
   }
   return (
-    <div className="mb-3 flex items-start gap-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-[12px]">
+    <div className="mb-3 flex items-start gap-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm">
       <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
       <span>
         <span className="font-medium">{t("play.unlisted")}</span>{" "}
@@ -415,7 +415,7 @@ function CopyField({
           readOnly
           value={value}
           onFocus={(e) => e.currentTarget.select()}
-          className={cn("text-[11px]", mono && "font-mono")}
+          className={cn("text-tiny", mono && "font-mono")}
         />
         <Button
           variant="secondary"
@@ -434,7 +434,7 @@ function CopyField({
           {copied ? <Check /> : <Copy />}
         </Button>
       </div>
-      {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-tiny text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -470,7 +470,7 @@ export function ShareCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-[13px]">{t("play.share")}</CardTitle>
+        <CardTitle>{t("play.share")}</CardTitle>
         <CardDescription>
           {play.public
             ? t("play.linksPublic") : t("play.linksProtected")}
@@ -499,10 +499,10 @@ export function ShareCard({
             rows={3}
             value={view.urls.embed}
             onFocus={(e) => e.currentTarget.select()}
-            className="font-mono text-[11px]"
+            className="font-mono text-tiny"
           />
           {!play.allowCrossOrigin && (
-            <p className="text-[11px] text-warn">
+            <p className="text-tiny text-warn">
               Embedding on another site also needs “Allow cross-origin” on. Without
               it the player only works on pages served from this server.
             </p>
@@ -519,7 +519,7 @@ export function ShareCard({
               <KeyRound />
               {t("play.rotate")}
             </Button>
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="mt-1 text-tiny text-muted-foreground">
               {t("play.rotateHint")}
             </p>
             <ConfirmDestructive
@@ -566,7 +566,7 @@ function ProtectionCard({
   return (
     <Card className="mt-3">
       <CardHeader>
-        <CardTitle className="text-[13px]">{t("play.whoCanWatch")}</CardTitle>
+        <CardTitle>{t("play.whoCanWatch")}</CardTitle>
         <CardDescription>
             {t("play.protectedNote")}
         </CardDescription>
@@ -591,7 +591,7 @@ function ProtectionCard({
               </SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-tiny text-muted-foreground">
             {view.protection === "token"
               ? t("play.basicPasswordNote") : t("play.noCredentialNote")}
           </p>
@@ -599,8 +599,8 @@ function ProtectionCard({
 
         <div className="flex items-start justify-between gap-3 rounded-md border border-border p-2.5">
           <div>
-            <p className="text-[12px] font-medium">{t("play.public")}</p>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-sm font-medium">{t("play.public")}</p>
+            <p className="text-tiny text-muted-foreground">
               Serve viewers who are not signed in. Off means administrators only,
               whatever the protection setting says.
             </p>
@@ -615,8 +615,8 @@ function ProtectionCard({
 
         <div className="flex items-start justify-between gap-3 rounded-md border border-border p-2.5">
           <div>
-            <p className="text-[12px] font-medium">{t("play.allowCrossOrigin")}</p>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-sm font-medium">{t("play.allowCrossOrigin")}</p>
+            <p className="text-tiny text-muted-foreground">
               Lets a player embedded on another website fetch the media, and lets
               this server's player page be framed. Not needed for same-site
               embedding.
@@ -694,7 +694,7 @@ export function VariantsCard({
   return (
     <Card className="mt-3">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-[13px]">
+        <CardTitle className="flex items-center gap-2">
           <Radio className="h-3.5 w-3.5" />
           Ladder
         </CardTitle>
@@ -704,7 +704,7 @@ export function VariantsCard({
       </CardHeader>
       <CardContent className="grid gap-2">
         {play.variants.length === 0 && (
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {t("play.noRungs")}
           </p>
         )}
@@ -727,7 +727,7 @@ export function VariantsCard({
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-[10px]">{t("play.name")}</Label>
+                <Label className="text-micro">{t("play.name")}</Label>
                 {/* Uncontrolled, and committed on blur rather than on every
                     keystroke: a rename is a directory move and a muxer
                     restart, so saving mid-word would cycle the stream once per
@@ -736,7 +736,7 @@ export function VariantsCard({
                   key={v.name}
                   defaultValue={v.name}
                   maxLength={32}
-                  className="text-[12px]"
+                  className="text-sm"
                   onBlur={(e) => {
                     const name = e.currentTarget.value.trim();
                     if (name && name !== v.name) update(i, { name });
@@ -746,7 +746,7 @@ export function VariantsCard({
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-[10px]">{t("play.videoSource")}</Label>
+                <Label className="text-micro">{t("play.videoSource")}</Label>
                 <Select
                   value={v.renditionId == null ? "source" : String(v.renditionId)}
                   disabled={busy}
@@ -754,7 +754,7 @@ export function VariantsCard({
                     update(i, { renditionId: val === "source" ? null : Number(val) })
                   }
                 >
-                  <SelectTrigger className="text-[12px]">
+                  <SelectTrigger className="text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -769,7 +769,7 @@ export function VariantsCard({
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-[10px]">{t("play.audioTrack")}</Label>
+                <Label className="text-micro">{t("play.audioTrack")}</Label>
                 {/* Committed on blur for the same reason the name is: each
                     save restarts this rung's muxer. */}
                 <Input
@@ -778,7 +778,7 @@ export function VariantsCard({
                   min={0}
                   max={63}
                   defaultValue={v.audioTrack}
-                  className="w-20 text-[12px]"
+                  className="w-20 text-sm"
                   onBlur={(e) => {
                     const n = Number(e.currentTarget.value);
                     if (Number.isFinite(n) && n >= 0 && n !== v.audioTrack) {
@@ -792,13 +792,13 @@ export function VariantsCard({
 
               <div className="flex items-center gap-1 pb-1">
                 {st?.running && st.bandwidth > 0 && (
-                  <Badge variant="outline" className="font-mono text-[10px]">
+                  <Badge variant="outline" className="font-mono text-micro">
                     {Math.round(st.bandwidth / 1000)}k
                     {st.height ? ` · ${st.height}p` : ""}
                   </Badge>
                 )}
                 {st?.viewers ? (
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge variant="outline" className="text-micro">
                     {st.viewers} watching
                   </Badge>
                 ) : null}
@@ -816,7 +816,7 @@ export function VariantsCard({
               </div>
 
               {st?.error && (
-                <p className="text-[11px] text-down sm:col-span-5">{st.error}</p>
+                <p className="text-tiny text-down sm:col-span-5">{st.error}</p>
               )}
             </div>
           );
@@ -899,7 +899,7 @@ function NumberField({
           else setDraft(String(value));
         }}
       />
-      {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-tiny text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -919,7 +919,7 @@ function PackagingCard({
   return (
     <Card className="mt-3">
       <CardHeader>
-        <CardTitle className="text-[13px]">{t("play.packaging")}</CardTitle>
+        <CardTitle>{t("play.packaging")}</CardTitle>
         <CardDescription>
             {t("play.restartNote")}
         </CardDescription>
@@ -940,7 +940,7 @@ function PackagingCard({
               <SelectItem value="hls+dash">{t("play.hlsDash")}</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-tiny text-muted-foreground">
             DASH is muxed by the same process from the same copied video — no
             second encode.
           </p>

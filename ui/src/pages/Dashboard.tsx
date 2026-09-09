@@ -378,14 +378,14 @@ function GoLiveComposer() {
           <Megaphone className="h-3.5 w-3.5 text-muted-foreground" />
           Go live
         </CardTitle>
-        <span className="font-mono text-[10px] text-muted-foreground">
+        <span className="font-mono text-micro text-muted-foreground">
           {targets.length === 1 ? "1 account" : `${targets.length} accounts`}
         </span>
       </CardHeader>
 
       {targets.length === 0 ? (
         <CardContent>
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {t("dash.connectPrompt")}
           </p>
         </CardContent>
@@ -398,7 +398,7 @@ function GoLiveComposer() {
                 <Label htmlFor="golive-title">{t("dash.metaTitle")}</Label>
                 {titleMax > 0 && (
                   <span
-                    className={`tnum font-mono text-[10px] ${
+                    className={`tnum font-mono text-micro ${
                       overLimit.length > 0 ? "text-down" : "text-muted-foreground"
                     }`}
                   >
@@ -413,7 +413,7 @@ function GoLiveComposer() {
                 onChange={(e) => setTitle(e.target.value)}
               />
               {overLimit.length > 0 && (
-                <p className="text-[10px] text-down">
+                <p className="text-micro text-down">
                   Too long for {overLimit.map((t) => t.platform).join(", ")}; that platform will be
                   reported as failed and the others still pushed.
                 </p>
@@ -430,7 +430,7 @@ function GoLiveComposer() {
                 onChange={(e) => setDescription(e.target.value)}
               />
               {noDescription.length > 0 && (
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-micro text-muted-foreground">
                   {noDescription.map((t) => t.platform).join(", ")} has no description field, so
                   this is skipped there rather than failed.
                 </p>
@@ -446,7 +446,7 @@ function GoLiveComposer() {
                 onChange={(e) => setCategory(e.target.value)}
               />
               {categoryHint && (
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-micro text-muted-foreground">
                   {categoryHint} Type the name — polyemesis looks up the id.
                 </p>
               )}
@@ -461,7 +461,7 @@ function GoLiveComposer() {
                   placeholder={t("dash.tagsPlaceholder")}
                   onChange={(e) => setTags(e.target.value)}
                 />
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-micro text-muted-foreground">
                   Comma separated. These REPLACE the existing tags rather than adding to them,
                   because that is what each platform's API does. Applies to{" "}
                   {tagTargets.map((t) => t.platform).join(", ")}.
@@ -473,7 +473,7 @@ function GoLiveComposer() {
               <div className="flex flex-col gap-2 rounded-md border border-border p-3">
                 <div className="flex items-center justify-between gap-2">
                   <Label>{t("dash.broadcastSettings")}</Label>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-micro text-muted-foreground">
                     {broadcastAccounts.map((w) => w.platform).join(", ")} only
                   </span>
                 </div>
@@ -486,13 +486,13 @@ function GoLiveComposer() {
                     value={scheduledStart}
                     onChange={(e) => setScheduledStart(e.target.value)}
                   />
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-micro text-muted-foreground">
                     Leave empty to keep the current one.
                   </span>
                 </div>
 
                 {contentDetailsLocked && (
-                  <p className="text-[10px] text-warn">
+                  <p className="text-micro text-warn">
                     {lockedReason ||
                       t("dash.youtubeStopsAcceptingTheseOnce")}
                   </p>
@@ -523,7 +523,7 @@ function GoLiveComposer() {
                     </div>
                   ))}
                 </div>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-micro text-muted-foreground">
             {t("dash.leaveUnchangedNote")}
                 </span>
               </div>
@@ -533,13 +533,13 @@ function GoLiveComposer() {
               <Button size="sm" onClick={push} disabled={empty || busy}>
                 <Megaphone /> {busy ? t("dash.pushing") : t("dash.pushToPlatforms")}
               </Button>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-micro text-muted-foreground">
                 Applies to {accepts("title").length === 1 ? t("dash.theConnectedAccount") : t("dash.everyConnectedAccount")}.
               </span>
             </div>
 
             {withCompliance.length > 0 && (
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-micro text-muted-foreground">
                 This push also sends the compliance settings stored on{" "}
                 {withCompliance.map((t) => t.accountName || t.platform).join(", ")} &mdash;
                 visibility, made-for-kids and content labels are configured per destination, not
@@ -551,7 +551,7 @@ function GoLiveComposer() {
           {/* ---------- what each platform did ---------- */}
           <div aria-live="polite" className="flex flex-col gap-1.5">
             {job === null ? (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-tiny text-muted-foreground">
                 Results appear here, one row per platform.
               </p>
             ) : (
@@ -565,8 +565,8 @@ function GoLiveComposer() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex min-w-0 items-center gap-2">
                         <StatusDot tone={tone} size="sm" />
-                        <span className="truncate text-[11px] font-medium">{res.platform}</span>
-                        <span className="truncate font-mono text-[10px] text-muted-foreground">
+                        <span className="truncate text-tiny font-medium">{res.platform}</span>
+                        <span className="truncate font-mono text-micro text-muted-foreground">
                           {res.accountName}
                         </span>
                       </div>
@@ -574,20 +574,20 @@ function GoLiveComposer() {
                     </div>
 
                     {res.applied.length > 0 && (
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-micro text-muted-foreground">
                         Set {res.applied.join(", ")}
                         {res.category && ` — category “${res.category}”`}
                         {res.target && ` on ${res.target}`}
                       </p>
                     )}
                     {res.skipped && res.skipped.length > 0 && (
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-micro text-muted-foreground">
                         Not supported here: {res.skipped.join(", ")}
                       </p>
                     )}
-                    {res.message && <p className="text-[10px] text-down">{res.message}</p>}
+                    {res.message && <p className="text-micro text-down">{res.message}</p>}
                     {res.warnings?.map((warn) => (
-                      <p key={warn} className="text-[10px] text-warn">
+                      <p key={warn} className="text-micro text-warn">
                         {warn}
                       </p>
                     ))}
@@ -727,7 +727,7 @@ function BulkDestinationControl({
         >
           <Square /> {busy === "stop" ? t("dash.bulkStopping") : t("dash.stopAll")}
         </Button>
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-micro text-muted-foreground">
           {t("dash.bulkAppliesTo", { count })}
         </span>
       </div>
@@ -735,7 +735,7 @@ function BulkDestinationControl({
       {/* Starts are paced on the server, so the button stays busy for a while
           on a long list. Saying why turns a stuck-looking dashboard into one
           that is visibly working. */}
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-micro text-muted-foreground">
         Starts are spread out rather than fired together, so a long list takes a
         while and the outcomes below arrive all at once at the end.
       </p>
@@ -743,7 +743,7 @@ function BulkDestinationControl({
       {/* ---------- what each destination did ---------- */}
       <div aria-live="polite" className="flex flex-col gap-1.5">
         {report === null ? (
-          <p className="text-[11px] text-muted-foreground">{t("dash.bulkResultsEmpty")}</p>
+          <p className="text-tiny text-muted-foreground">{t("dash.bulkResultsEmpty")}</p>
         ) : (
           report.results.map((res) => {
             const tone = bulkTone[res.outcome];
@@ -755,8 +755,8 @@ function BulkDestinationControl({
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <StatusDot tone={tone} size="sm" />
-                    <span className="truncate text-[11px] font-medium">{res.name}</span>
-                    <span className="truncate font-mono text-[10px] text-muted-foreground">
+                    <span className="truncate text-tiny font-medium">{res.name}</span>
+                    <span className="truncate font-mono text-micro text-muted-foreground">
                       {res.platform}
                     </span>
                   </div>
@@ -767,7 +767,7 @@ function BulkDestinationControl({
                     find out what this request already knows. */}
                 {res.message && (
                   <p
-                    className={`text-[10px] ${
+                    className={`text-micro ${
                       res.outcome === "failed" ? "text-down" : "text-warn"
                     }`}
                   >
@@ -800,7 +800,7 @@ function FailoverExposure({ notice }: { notice: FailoverNotice }) {
 
   return (
     <div
-      className="mb-2 flex items-start gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-[11px]"
+      className="mb-2 flex items-start gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-tiny"
       // Not role="alert". Nothing has gone wrong yet, and announcing a standing
       // configuration fact as an alert on every page load is how a screen-reader
       // user learns to tune the region out.
@@ -1268,7 +1268,7 @@ export function Dashboard() {
                 {preview.panes.map((pane) => (
                   <figure key={pane.id} className="flex flex-col gap-1.5">
                     <PreviewPlayer active={settingsPreview} {...pane.player} />
-                    <figcaption className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <figcaption className="flex items-center gap-2 text-tiny text-muted-foreground">
                       <span className="truncate">{pane.label}</span>
                     </figcaption>
                   </figure>
@@ -1302,7 +1302,7 @@ export function Dashboard() {
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {attribution && (
-                <p className="rounded border border-border bg-muted/40 px-2 py-1 text-[10px] leading-relaxed text-muted-foreground">
+                <p className="rounded border border-border bg-muted/40 px-2 py-1 text-micro leading-relaxed text-muted-foreground">
                   {t("dash.ingestSharedFeed")}
                 </p>
               )}
@@ -1338,7 +1338,7 @@ export function Dashboard() {
               </div>
 
               {source?.video && (
-                <div className="font-mono text-[10px] text-muted-foreground">
+                <div className="font-mono text-micro text-muted-foreground">
                   {source.video.codec} {source.video.width}×{source.video.height}
                   {source.video.frameRate > 0 && ` @ ${source.video.frameRate.toFixed(2)}fps`}
                 </div>
@@ -1349,7 +1349,7 @@ export function Dashboard() {
                 {urlCarriesCredential(system?.ingestUrl ?? "") ? (
                   <SecretCode value={system?.ingestUrl ?? ""} />
                 ) : (
-                  <code className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
+                  <code className="min-w-0 flex-1 truncate font-mono text-micro text-muted-foreground">
                     {system?.ingestUrl ?? "…"}
                   </code>
                 )}
@@ -1359,13 +1359,13 @@ export function Dashboard() {
               </div>
 
               {ingest?.lastError && ingest.state !== "running" && (
-                <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-[10px] text-down">
+                <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-micro text-down">
                   {ingest.lastError}
                 </div>
               )}
 
               {system && !system.ffmpeg.hasLibsrt && (
-                <div className="rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn">
+                <div className="rounded border border-warn/30 bg-warn-dim px-2 py-1 text-micro text-warn">
                   This FFmpeg build has no SRT support, so multi-track SRT ingest will not work.
                   Install a build with <code className="font-mono">--enable-libsrt</code>, or switch
                   the ingest to RTMP in Settings.
@@ -1413,17 +1413,17 @@ export function Dashboard() {
                   <div key={label} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <StatusDot tone={tone} size="sm" />
-                      <span className="text-[11px]">{label}</span>
+                      <span className="text-tiny">{label}</span>
                     </div>
-                    <span className="font-mono text-[10px] text-muted-foreground">
+                    <span className="font-mono text-micro text-muted-foreground">
                       {proc ? stateLabel(proc.state) : absent}
                     </span>
                   </div>
                 );
               })}
               <div className="mt-1 flex items-center justify-between border-t border-border pt-1.5">
-                <span className="text-[11px] text-muted-foreground">{t("dash.relaySubscribers")}</span>
-                <span className="tnum font-mono text-[10px]">
+                <span className="text-tiny text-muted-foreground">{t("dash.relaySubscribers")}</span>
+                <span className="tnum font-mono text-micro">
                   {/* Not `?? 0`: before the first snapshot there is no
                       subscriber count, and zero subscribers is a meaningful,
                       alarming number to show someone who is broadcasting. #663. */}
@@ -1437,9 +1437,9 @@ export function Dashboard() {
                   fault, and the destination count is the whole economic
                   argument: three platforms on one tier is still one encode. */}
               <div className="mt-1 flex flex-col gap-1 border-t border-border pt-1.5">
-                <span className="text-[11px] text-muted-foreground">{t("dash.renditions")}</span>
+                <span className="text-tiny text-muted-foreground">{t("dash.renditions")}</span>
                 {renditions.length === 0 ? (
-                  <span className="font-mono text-[10px] text-muted-foreground">
+                  <span className="font-mono text-micro text-muted-foreground">
                     none — every destination is on passthrough
                   </span>
                 ) : (
@@ -1450,9 +1450,9 @@ export function Dashboard() {
                           tone={r.consumers === 0 ? "idle" : toneForState(r.process?.state)}
                           size="sm"
                         />
-                        <span className="truncate text-[11px]">{r.name}</span>
+                        <span className="truncate text-tiny">{r.name}</span>
                       </div>
-                      <span className="tnum shrink-0 font-mono text-[10px] text-muted-foreground">
+                      <span className="tnum shrink-0 font-mono text-micro text-muted-foreground">
                         {r.consumers === 1 ? "1 dest" : `${r.consumers} dests`}
                       </span>
                     </div>
@@ -1471,7 +1471,7 @@ export function Dashboard() {
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-[13px] font-semibold tracking-tight">
             Destinations
-            <span className="ml-1.5 font-mono text-[11px] font-normal text-muted-foreground">
+            <span className="ml-1.5 font-mono text-tiny font-normal text-muted-foreground">
               {destinations.length}
             </span>
           </h2>
@@ -1527,13 +1527,13 @@ export function Dashboard() {
         {!snapshotKnown ? (
           <Card>
             <CardContent className="py-8 text-center">
-              <p className="text-[12px] text-muted-foreground">{t("dash.loadingDestinations")}</p>
+              <p className="text-sm text-muted-foreground">{t("dash.loadingDestinations")}</p>
             </CardContent>
           </Card>
         ) : destinations.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
-              <p className="text-[12px] text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
             {t("dash.noDestinations")}
               </p>
               <Button
@@ -1566,7 +1566,7 @@ export function Dashboard() {
                  renders nothing while lanes are on. */
               lanes.lanes.map((lane) => (
                 <section key={lane.sourceId} className="flex flex-col gap-2">
-                  <h3 className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <h3 className="flex items-center gap-2 text-tiny font-medium uppercase tracking-wide text-muted-foreground">
                     <RadioTower className="h-3 w-3 shrink-0" />
                     <span className="truncate">{lane.name}</span>
                     <span className="font-mono normal-case tracking-normal">
@@ -1586,14 +1586,14 @@ export function Dashboard() {
                            collapsing: the programme exists, and a lane that
                            vanished until a tile arrived would read as a
                            programme that does not. */
-                        <div className="flex aspect-video w-full items-center justify-center rounded-md border border-border bg-black text-[11px] text-muted-foreground">
+                        <div className="flex aspect-video w-full items-center justify-center rounded-md border border-border bg-black text-tiny text-muted-foreground">
                           {t("dash.laneNoPreview")}
                         </div>
                       )}
                     </Suspense>
                     <div className="grid gap-3 lg:col-span-2 xl:grid-cols-2">
                       {lane.destinations.length === 0 ? (
-                        <p className="text-[11px] text-muted-foreground">{t("dash.destNoneHere")}</p>
+                        <p className="text-tiny text-muted-foreground">{t("dash.destNoneHere")}</p>
                       ) : (
                         lane.destinations.map((d) => renderDestination(d, destinations.indexOf(d)))
                       )}
@@ -1612,7 +1612,7 @@ export function Dashboard() {
                  Drawn rather than filtered out: each is still configured and may
                  still be running, and this is the only screen that lists it. */
               <section className="flex flex-col gap-2">
-                <p className="text-[11px] text-warn">{t("dash.destOrphaned")}</p>
+                <p className="text-tiny text-warn">{t("dash.destOrphaned")}</p>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {lanes.orphans.map((d) => renderDestination(d, destinations.indexOf(d)))}
                 </div>

@@ -238,7 +238,7 @@ export function JobsPage() {
           subtitle={t("jobs.subtitle")}
         />
         <Card>
-          <CardContent className="py-8 text-center text-[12px] text-muted-foreground">
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
             No background job queue is running on this server. Post-production
             work cannot be queued until one is.
           </CardContent>
@@ -392,14 +392,14 @@ export function JobsPage() {
       </Tabs>
 
       {!view.whisper.available && (
-        <p className="mt-3 text-[11px] text-muted-foreground">
+        <p className="mt-3 text-tiny text-muted-foreground">
           Transcription is unavailable on this machine: {view.whisper.unavailable}.
           Everything else still runs — an optional tool being missing is never a
           reason to stop.
         </p>
       )}
       {gates && !governed && (
-        <p className="mt-3 text-[11px] text-warn">
+        <p className="mt-3 text-tiny text-warn">
           The resource policy is switched off. Jobs still queue and still run;
           they simply stop yielding to the live stream.
         </p>
@@ -489,7 +489,7 @@ function GatePanel({ view }: { view: JobsOverview }) {
           <div className="w-full border-t border-border pt-2">
             <div className="flex flex-wrap gap-x-4 gap-y-1">
               {blocked.map((v) => (
-                <span key={v.kind} className="text-[11px] text-muted-foreground">
+                <span key={v.kind} className="text-tiny text-muted-foreground">
                   <span className="font-mono text-foreground">{v.kind}</span> — {v.reason}
                 </span>
               ))}
@@ -525,7 +525,7 @@ function JobTable({
 
   if (jobs.length === 0) {
     return (
-      <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">{empty}</div>
+      <div className="px-3 py-8 text-center text-sm text-muted-foreground">{empty}</div>
     );
   }
 
@@ -548,7 +548,7 @@ function JobTable({
           return (
             <Fragment key={j.id}>
               <TableRow>
-                <TableCell className="text-[11px]">
+                <TableCell className="text-tiny">
                   <button
                     type="button"
                     className={cn(
@@ -560,13 +560,13 @@ function JobTable({
                     aria-expanded={expanded}
                   >
                     <span className="block">{j.label ?? j.kind}</span>
-                    <span className="block font-mono text-[10px] text-muted-foreground">
+                    <span className="block font-mono text-micro text-muted-foreground">
                       #{j.id}
                       {j.attempts > 1 ? ` · attempt ${j.attempts}/${j.maxAttempts}` : ""}
                     </span>
                   </button>
                 </TableCell>
-                <TableCell className="max-w-[16rem] truncate font-mono text-[11px] text-muted-foreground">
+                <TableCell className="max-w-[16rem] truncate font-mono text-tiny text-muted-foreground">
                   {j.recording ?? j.target}
                 </TableCell>
                 <TableCell>
@@ -575,7 +575,7 @@ function JobTable({
                 <TableCell>
                   <ProgressCell job={j} />
                 </TableCell>
-                <TableCell className="text-[11px] text-muted-foreground">
+                <TableCell className="text-tiny text-muted-foreground">
                   {j.error ? (
                     <span className="flex items-start gap-1 text-down">
                       <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -643,13 +643,13 @@ function JobTable({
                 <TableRow>
                   <TableCell colSpan={6} className="bg-card-raised/40">
                     <div className="flex flex-col gap-1 py-1.5">
-                      {j.error && <p className="text-[11px] text-down">{j.error}</p>}
+                      {j.error && <p className="text-tiny text-down">{j.error}</p>}
                       {(j.log?.length ?? 0) > 0 && (
-                        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-muted-foreground">
+                        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-micro leading-relaxed text-muted-foreground">
                           {j.log?.join("\n")}
                         </pre>
                       )}
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-micro text-muted-foreground">
                         queued {timestamp(j.createdAt)}
                         {j.startedAt ? ` · started ${timestamp(j.startedAt)}` : ""}
                         {j.finishedAt ? ` · finished ${timestamp(j.finishedAt)}` : ""}
@@ -668,10 +668,10 @@ function JobTable({
 
 function ProgressCell({ job }: { job: JobView }) {
   if (job.state === "done") {
-    return <span className="text-[11px] text-muted-foreground">complete</span>;
+    return <span className="text-tiny text-muted-foreground">complete</span>;
   }
   if (job.state !== "running") {
-    return <span className="text-[11px] text-muted-foreground">—</span>;
+    return <span className="text-tiny text-muted-foreground">—</span>;
   }
   const pct = Math.round(Math.min(1, Math.max(0, job.progress)) * 100);
   return (
@@ -679,11 +679,11 @@ function ProgressCell({ job }: { job: JobView }) {
       <div className="h-1 flex-1 overflow-hidden rounded-full bg-secondary">
         <div className="h-full bg-live transition-[width]" style={{ width: `${pct}%` }} />
       </div>
-      <span className="tnum w-8 shrink-0 text-right font-mono text-[10px]">{pct}%</span>
+      <span className="tnum w-8 shrink-0 text-right font-mono text-micro">{pct}%</span>
       {/* The ETA is withheld below a few per cent, where the extrapolation is
           nonsense. A wildly wrong ETA is worse than none. */}
       {job.etaSeconds ? (
-        <span className="tnum w-14 shrink-0 text-right font-mono text-[10px] text-muted-foreground">
+        <span className="tnum w-14 shrink-0 text-right font-mono text-micro text-muted-foreground">
           {duration(job.etaSeconds)}
         </span>
       ) : (
@@ -748,7 +748,7 @@ function PolicyEditor({
           at the top is a bar an operator editing the last card cannot see. */}
       {dirty && (
         <div className="sticky top-0 z-10 flex items-center justify-end gap-2 rounded-md border border-warn/40 bg-background/95 px-2 py-1.5 backdrop-blur">
-          <span className="mr-auto text-[11px] text-warn">{t("jobs.unsavedChanges")}</span>
+          <span className="mr-auto text-tiny text-warn">{t("jobs.unsavedChanges")}</span>
           <Button variant="ghost" size="sm" disabled={busy} onClick={onRevert}>
             Revert
           </Button>
@@ -770,9 +770,9 @@ function PolicyEditor({
                 <CardHeader className="flex-row items-start justify-between gap-2">
                   <div className="min-w-0">
                     <CardTitle>{k.label}</CardTitle>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">{k.description}</p>
+                    <p className="mt-0.5 text-tiny text-muted-foreground">{k.description}</p>
                     {!k.available && (
-                      <p className="mt-1 text-[11px] text-warn">{k.unavailable}</p>
+                      <p className="mt-1 text-tiny text-warn">{k.unavailable}</p>
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
@@ -801,7 +801,7 @@ function PolicyEditor({
                   </div>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
-                  <p className="text-[11px] text-muted-foreground">{JOB_MODE_HINT[mode]}</p>
+                  <p className="text-tiny text-muted-foreground">{JOB_MODE_HINT[mode]}</p>
 
                   {mode === "scheduled" && (
                     <WindowEditor
@@ -811,14 +811,14 @@ function PolicyEditor({
                   )}
 
                   <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
-                    <label className="flex items-center gap-2 text-[11px]">
+                    <label className="flex items-center gap-2 text-tiny">
                       <Switch
                         checked={row?.usesGpu ?? k.usesGpu}
                         onCheckedChange={(v) => setKind(k.kind, { usesGpu: v })}
                       />
                       Competes with the GPU encoder
                     </label>
-                    <label className="flex items-center gap-2 text-[11px]">
+                    <label className="flex items-center gap-2 text-tiny">
                       <Switch
                         checked={row?.ignoreIngest ?? k.ignoreIngest}
                         onCheckedChange={(v) => setKind(k.kind, { ignoreIngest: v })}
@@ -839,19 +839,19 @@ function PolicyEditor({
               <CardTitle>{t("jobs.global")}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
-              <label className="flex items-center justify-between gap-2 text-[12px]">
+              <label className="flex items-center justify-between gap-2 text-sm">
                 Resource policy
                 <Switch
                   checked={draft.enabled}
                   onCheckedChange={(v) => onPatch({ enabled: v })}
                 />
               </label>
-              <p className="-mt-2 text-[10px] text-muted-foreground">
+              <p className="-mt-2 text-micro text-muted-foreground">
                 Off makes the governor inert: work still queues and still runs,
                 it simply stops yielding.
               </p>
 
-              <label className="flex items-center justify-between gap-2 text-[12px]">
+              <label className="flex items-center justify-between gap-2 text-sm">
                 Yield to the live stream
                 <Switch
                   checked={draft.yieldToStream}
@@ -914,7 +914,7 @@ function PolicyEditor({
                 max={19}
                 onChange={(n) => onPatch({ niceLevel: n })}
               />
-              <label className="flex items-center justify-between gap-2 text-[12px]">
+              <label className="flex items-center justify-between gap-2 text-sm">
                 Idle IO priority
                 <Switch checked={draft.idleIo} onCheckedChange={(v) => onPatch({ idleIo: v })} />
               </label>
@@ -929,18 +929,18 @@ function PolicyEditor({
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
-              <label className="flex items-center justify-between gap-2 text-[12px]">
+              <label className="flex items-center justify-between gap-2 text-sm">
                 Avoid the GPU while streaming
                 <Switch
                   checked={draft.avoidGpuWhenStreaming}
                   onCheckedChange={(v) => onPatch({ avoidGpuWhenStreaming: v })}
                 />
               </label>
-              <label className="flex items-center justify-between gap-2 text-[12px]">
+              <label className="flex items-center justify-between gap-2 text-sm">
                 The GPU is in use by streaming
                 <Switch checked={draft.gpuBusy} onCheckedChange={(v) => onPatch({ gpuBusy: v })} />
               </label>
-              <p className="-mt-2 text-[10px] text-muted-foreground">
+              <p className="-mt-2 text-micro text-muted-foreground">
                 A manual switch because GPU contention is close to undetectable
                 on every platform we run on, and guessing "free" is the guess
                 that hurts the broadcast.
@@ -976,7 +976,7 @@ function PolicyEditor({
                 id="jobs-whisper-model"
                 value={draft.whisperModel ?? ""}
                 onChange={(e) => onPatch({ whisperModel: e.target.value })}
-                className="h-8 w-56 rounded border border-border bg-card-raised px-2 text-[12px]"
+                className="h-8 w-56 rounded border border-border bg-card-raised px-2 text-sm"
               >
                 {/* Empty is first and is the default, because the
                     hardware-derived choice is the right answer until an operator
@@ -988,19 +988,19 @@ function PolicyEditor({
                   </option>
                 ))}
               </select>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-micro text-muted-foreground">
                 What a transcribe job uses when it does not name a model. Bigger models are more
                 accurate, slower, and want more memory &mdash; and this machine currently picks{" "}
                 <strong>{whisper.defaultModel || "nothing, because whisper.cpp is missing"}</strong>{" "}
                 on its own.
               </span>
               {!whisper.available && (
-                <span className="text-[10px] text-warn">
+                <span className="text-micro text-warn">
             {t("jobs.whisperMissing")}
                 </span>
               )}
               {(whisper.models ?? []).length === 0 && whisper.available && (
-                <span className="text-[10px] text-warn">
+                <span className="text-micro text-warn">
             {t("jobs.noModels")}
                 </span>
               )}
@@ -1071,7 +1071,7 @@ function NumberField({
           onChange(Number.isNaN(n) ? min : n);
         }}
       />
-      {hint && <p className="text-[10px] text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-micro text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -1108,7 +1108,7 @@ function WindowEditor({
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-card-raised/40 p-2">
       {windows.length === 0 && (
-        <p className="text-[11px] text-warn">
+        <p className="text-tiny text-warn">
           No windows, so this kind never runs. Add one.
         </p>
       )}
@@ -1116,15 +1116,15 @@ function WindowEditor({
         <div key={i} className="flex flex-wrap items-center gap-2">
           <Input
             type="time"
-            className="tnum h-7 w-24 font-mono text-[11px]"
+            className="tnum h-7 w-24 font-mono text-tiny"
             value={minutesToClock(w.startMinutes)}
             onChange={(e) => set(i, { startMinutes: clockToMinutes(e.target.value) })}
             aria-label={t("jobs.windowStart")}
           />
-          <span className="text-[11px] text-muted-foreground">to</span>
+          <span className="text-tiny text-muted-foreground">to</span>
           <Input
             type="time"
-            className="tnum h-7 w-24 font-mono text-[11px]"
+            className="tnum h-7 w-24 font-mono text-tiny"
             value={minutesToClock(w.endMinutes >= 1440 ? 1439 : w.endMinutes)}
             onChange={(e) => set(i, { endMinutes: clockToMinutes(e.target.value) })}
             aria-label={t("jobs.windowEnd")}
@@ -1140,7 +1140,7 @@ function WindowEditor({
                   aria-pressed={on}
                   onClick={() => toggleDay(i, day)}
                   className={cn(
-                    "h-6 w-6 rounded text-[10px] font-semibold transition-colors",
+                    "h-6 w-6 rounded text-micro font-semibold transition-colors",
                     on
                       ? "bg-primary-dim text-foreground"
                       : "text-muted-foreground hover:bg-accent",
@@ -1160,7 +1160,7 @@ function WindowEditor({
           >
             <X />
           </Button>
-          <span className="w-full text-[10px] text-muted-foreground">{windowSummary(w)}</span>
+          <span className="w-full text-micro text-muted-foreground">{windowSummary(w)}</span>
         </div>
       ))}
       <Button

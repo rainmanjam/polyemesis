@@ -285,7 +285,7 @@ export function LibraryPage() {
           {query.trim().length >= 2 && (
             <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2">
               <Select value={order} onValueChange={(v) => setOrder(v as TranscriptOrder)}>
-                <SelectTrigger className="h-7 w-36 text-[11px]">
+                <SelectTrigger className="h-7 w-36 text-tiny">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -296,7 +296,7 @@ export function LibraryPage() {
               </Select>
               {(view?.speakers.length ?? 0) > 0 && (
                 <Select value={speaker || "__all"} onValueChange={(v) => setSpeaker(v === "__all" ? "" : v)}>
-                  <SelectTrigger className="h-7 w-40 text-[11px]">
+                  <SelectTrigger className="h-7 w-40 text-tiny">
                     <SelectValue placeholder={t("lib.anySpeaker")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -310,7 +310,7 @@ export function LibraryPage() {
                 </Select>
               )}
               {results && (
-                <span className="tnum ml-auto font-mono text-[11px] text-muted-foreground">
+                <span className="tnum ml-auto font-mono text-tiny text-muted-foreground">
                   {results.total < 0
                     ? `${results.hits.length} shown`
                     : `${results.hits.length} of ${results.total}`}
@@ -325,7 +325,7 @@ export function LibraryPage() {
         <Card className="mb-3">
           <CardContent className="px-0 py-0">
             {results.hits.length === 0 ? (
-              <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
+              <div className="px-3 py-8 text-center text-sm text-muted-foreground">
                 Nothing said matches that.
                 {!view?.transcribeAvailable && (
                   <>
@@ -357,7 +357,7 @@ export function LibraryPage() {
           <div className="flex flex-col gap-1">
             <Label htmlFor="lib-tag">{t("lib.tag")}</Label>
             <Select value={tag || "__all"} onValueChange={(v) => setTag(v === "__all" ? "" : v)}>
-              <SelectTrigger id="lib-tag" className="h-7 w-40 text-[11px]">
+              <SelectTrigger id="lib-tag" className="h-7 w-40 text-tiny">
                 <SelectValue placeholder={t("lib.anyTag")} />
               </SelectTrigger>
               <SelectContent>
@@ -376,7 +376,7 @@ export function LibraryPage() {
           <Input
             id="lib-since"
             type="date"
-            className="tnum h-7 w-36 font-mono text-[11px]"
+            className="tnum h-7 w-36 font-mono text-tiny"
             value={since}
             onChange={(e) => setSince(e.target.value)}
           />
@@ -386,12 +386,12 @@ export function LibraryPage() {
           <Input
             id="lib-until"
             type="date"
-            className="tnum h-7 w-36 font-mono text-[11px]"
+            className="tnum h-7 w-36 font-mono text-tiny"
             value={until}
             onChange={(e) => setUntil(e.target.value)}
           />
         </div>
-        <label className="flex items-center gap-2 pb-1 text-[11px]">
+        <label className="flex items-center gap-2 pb-1 text-tiny">
           <Switch checked={onlyTranscribed} onCheckedChange={setOnlyTranscribed} />
           Has a transcript
         </label>
@@ -409,7 +409,7 @@ export function LibraryPage() {
             Clear filters
           </Button>
         )}
-        <span className="tnum ml-auto pb-1 font-mono text-[11px] text-muted-foreground">
+        <span className="tnum ml-auto pb-1 font-mono text-tiny text-muted-foreground">
           {sessions.length} session{sessions.length === 1 ? "" : "s"}
         </span>
       </div>
@@ -425,7 +425,7 @@ export function LibraryPage() {
           made to work from here, so the only fix available is to say why once,
           in reading order, above the rows whose buttons are greyed. */}
       {view?.jobsAvailable && !view.transcribeAvailable && (
-        <p className="mb-2 text-[11px] text-warn">
+        <p className="mb-2 text-tiny text-warn">
           {t("lib.transcribeUnavailable")}
           {view.transcribeNote ? ` ${view.transcribeNote}` : ""}
         </p>
@@ -435,7 +435,7 @@ export function LibraryPage() {
       <div className="flex flex-col gap-2">
         {sessions.length === 0 && (
           <Card>
-            <CardContent className="py-8 text-center text-[12px] text-muted-foreground">
+            <CardContent className="py-8 text-center text-sm text-muted-foreground">
               {view?.sessions.length
                 ? t("lib.noSessionMatch") : t("lib.nothingRecorded")}
             </CardContent>
@@ -516,21 +516,21 @@ function HitRow({
       >
         <div className="flex flex-wrap items-baseline gap-2">
           {hit.speaker && (
-            <span className="text-[11px] font-semibold text-primary">{hit.speaker}</span>
+            <span className="text-tiny font-semibold text-primary">{hit.speaker}</span>
           )}
-          <span className="tnum font-mono text-[10px] text-muted-foreground">
+          <span className="tnum font-mono text-micro text-muted-foreground">
             {offsetLabel(hit.startMs)}
           </span>
-          <span className="truncate font-mono text-[10px] text-muted-foreground">
+          <span className="truncate font-mono text-micro text-muted-foreground">
             {hit.recording}
           </span>
-          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+          <span className="ml-auto shrink-0 text-micro text-muted-foreground">
             {timestamp(hit.at)}
           </span>
         </div>
-        <p className="text-[12px] leading-relaxed">{highlight(hit.snippet, markers)}</p>
+        <p className="text-sm leading-relaxed">{highlight(hit.snippet, markers)}</p>
         {hit.context && (
-          <p className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+          <p className="line-clamp-2 text-tiny leading-relaxed text-muted-foreground">
             {hit.context}
           </p>
         )}
@@ -615,7 +615,7 @@ function SessionCard({
 
         <div className="min-w-0 flex-1">
           <CardTitle className="truncate">{session.displayTitle}</CardTitle>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-tiny text-muted-foreground">
             <span className="tnum font-mono">{timestamp(session.startedAt)}</span>
             <span className="tnum font-mono">{shortDuration(session.durationMs)}</span>
             <span className="tnum font-mono">{bytes(session.bytes)}</span>
@@ -640,7 +640,7 @@ function SessionCard({
             ))}
           </div>
           {session.description && (
-            <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+            <p className="mt-1 line-clamp-2 text-tiny text-muted-foreground">
               {session.description}
             </p>
           )}
@@ -727,7 +727,7 @@ function SessionEditor({
             />
           </div>
           {session.auto && (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-tiny text-muted-foreground">
             {t("lib.autoGroupedNote")}
             </p>
           )}
@@ -784,7 +784,7 @@ function RecordingList({
 
   if (recordings.length === 0) {
     return (
-      <div className="px-3 py-6 text-center text-[12px] text-muted-foreground">
+      <div className="px-3 py-6 text-center text-sm text-muted-foreground">
             {t("lib.noSegments")}
       </div>
     );
@@ -838,10 +838,10 @@ function RecordingList({
                 )}
               />
               <span className="min-w-0">
-                <span className="block truncate font-mono text-[11px]">
+                <span className="block truncate font-mono text-tiny">
                   {r.title || r.filename}
                 </span>
-                <span className="tnum block font-mono text-[10px] text-muted-foreground">
+                <span className="tnum block font-mono text-micro text-muted-foreground">
                   {timestamp(r.startedAt)} · {r.durationMs > 0 ? shortDuration(r.durationMs) : "—"} ·{" "}
                   {bytes(r.bytes)}
                   {r.tracks > 0 ? ` · ${r.tracks} tracks` : ""}
@@ -1011,7 +1011,7 @@ function PlayerDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-4xl">
         <DialogHeader>
-          <DialogTitle className="truncate font-mono text-[12px]">
+          <DialogTitle className="truncate font-mono text-sm">
             {rec?.title || rec?.filename || "Recording"}
           </DialogTitle>
         </DialogHeader>
@@ -1044,7 +1044,7 @@ function PlayerDialog({
               ) : (
                 <div className="flex flex-col items-center gap-2 rounded border border-dashed border-border-strong px-3 py-8 text-center">
                   <Film className="h-5 w-5 text-muted-foreground" />
-                  <p className="text-[12px] text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     No proxy for this recording yet. Browsers cannot play the
                     multitrack MKV master, so there is nothing to show until one
                     is generated.
@@ -1055,7 +1055,7 @@ function PlayerDialog({
                       Generate a proxy
                     </Button>
                   ) : (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-tiny text-muted-foreground">
                       No job queue is running on this server, so one cannot be
                       generated here.
                     </p>
@@ -1063,7 +1063,7 @@ function PlayerDialog({
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-tiny text-muted-foreground">
                 {rec && (
                   <>
                     <span className="tnum font-mono">{timestamp(rec.startedAt)}</span>
@@ -1085,7 +1085,7 @@ function PlayerDialog({
             {/* --- the transcript, which is the reason to open this at all --- */}
             <div className="flex max-h-[28rem] flex-col gap-1 overflow-y-auto rounded border border-border p-2">
               {merged.length === 0 ? (
-                <p className="py-6 text-center text-[11px] text-muted-foreground">
+                <p className="py-6 text-center text-tiny text-muted-foreground">
                   No transcript for this recording yet.
                 </p>
               ) : (
@@ -1097,7 +1097,7 @@ function PlayerDialog({
                       type="button"
                       onClick={() => seek(seg.startMs)}
                       className={cn(
-                        "rounded px-1.5 py-1 text-left text-[11px] leading-relaxed transition-colors hover:bg-accent",
+                        "rounded px-1.5 py-1 text-left text-tiny leading-relaxed transition-colors hover:bg-accent",
                         current && "bg-primary-dim",
                       )}
                     >
@@ -1107,7 +1107,7 @@ function PlayerDialog({
                             {seg.speaker}
                           </span>
                         )}
-                        <span className="tnum shrink-0 font-mono text-[10px] text-muted-foreground">
+                        <span className="tnum shrink-0 font-mono text-micro text-muted-foreground">
                           {offsetLabel(seg.startMs)}
                         </span>
                       </span>

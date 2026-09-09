@@ -493,12 +493,12 @@ function AlertRules({
               and the operator's mistake is believing an answer they were never
               given. */}
           {loadFailed ? (
-            <div className="flex items-start gap-1.5 px-3 py-8 text-center text-[12px] text-warn">
+            <div className="flex items-start gap-1.5 px-3 py-8 text-center text-sm text-warn">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               <span className="text-left">{t("auto.rulesUnread")}</span>
             </div>
           ) : rules.length === 0 ? (
-            <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
+            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
               No alert rules. Add one with a Discord, Slack or plain JSON webhook URL and
               polyemesis will tell you when a destination drops, the ingest goes away, or the disk
               fills.
@@ -518,22 +518,22 @@ function AlertRules({
                 {rules.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell>
-                      <div className="text-[12px]">{r.name}</div>
-                      <div className="text-[10px] text-muted-foreground">
+                      <div className="text-sm">{r.name}</div>
+                      <div className="text-micro text-muted-foreground">
                         {r.format} · at least {r.minSeverity} · coalesced {r.debounceSeconds}s ·
                         max 1 per {r.minIntervalSeconds}s
                       </div>
                     </TableCell>
                     {/* The stored URL is never sent back; this is the mask, and
                         editing it is how you replace the endpoint. */}
-                    <TableCell className="max-w-56 truncate font-mono text-[10px] text-muted-foreground">
+                    <TableCell className="max-w-56 truncate font-mono text-micro text-muted-foreground">
                       {r.url}
                     </TableCell>
                     <TableCell>
                       {(r.events ?? []).length === 0 ? (
                         <Badge variant="outline">everything</Badge>
                       ) : (
-                        <span className="text-[11px] text-muted-foreground">
+                        <span className="text-tiny text-muted-foreground">
                           {(r.events ?? []).length} event
                           {(r.events ?? []).length === 1 ? "" : "s"}
                         </span>
@@ -594,7 +594,7 @@ function AlertRules({
               delivered and nothing has failed", which is the one reading an
               operator checking on their alerting must not be given. */}
           {loadFailed && !stats && (
-            <p className="col-span-2 flex items-start gap-1.5 rounded border border-warn/50 bg-warn/5 p-2 text-[10px] text-warn">
+            <p className="col-span-2 flex items-start gap-1.5 rounded border border-warn/50 bg-warn/5 p-2 text-micro text-warn">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               {t("auto.deliveryUnread")}
             </p>
@@ -618,7 +618,7 @@ function AlertRules({
             />
           )}
           {stats?.lastError && (
-            <p className="col-span-2 flex items-start gap-1.5 rounded border border-down/50 bg-down/5 p-2 text-[10px] text-down">
+            <p className="col-span-2 flex items-start gap-1.5 rounded border border-down/50 bg-down/5 p-2 text-micro text-down">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               {stats.lastError}
             </p>
@@ -721,7 +721,7 @@ function RuleDialog({
               placeholder={t("auto.webhookPlaceholder")}
               onChange={(e) => setForm({ ...form, url: e.target.value })}
             />
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-micro text-muted-foreground">
               {editing
                 ? t("auto.secretMasked") : t("auto.webhookHint")}
             </span>
@@ -768,12 +768,12 @@ function RuleDialog({
 
           <div className="flex flex-col gap-1.5">
             <Label>{t("auto.events")}</Label>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-micro text-muted-foreground">
               None selected means every event, which is the useful default for a first rule.
             </p>
             <div className="grid gap-1.5 sm:grid-cols-2">
               {meta.events.map((ev) => (
-                <label key={ev} className="flex items-center gap-2 text-[11px]">
+                <label key={ev} className="flex items-center gap-2 text-tiny">
                   <Checkbox checked={events.includes(ev)} onCheckedChange={() => toggleEvent(ev)} />
                   {eventLabel(t, ev)}
                 </label>
@@ -901,12 +901,12 @@ function Schedules({
         </CardHeader>
         <CardContent className="px-0 pb-0">
           {loadFailed ? (
-            <div className="flex items-start gap-1.5 px-3 py-8 text-[12px] text-warn">
+            <div className="flex items-start gap-1.5 px-3 py-8 text-sm text-warn">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               <span className="text-left">{t("auto.schedulesUnread")}</span>
             </div>
           ) : schedules.length === 0 ? (
-            <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
+            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
               No schedules. A schedule flips the same enabled switch you would click, so a
               scheduled start is indistinguishable from a manual one.
             </div>
@@ -925,20 +925,20 @@ function Schedules({
                 {schedules.map((s) => (
                   <TableRow key={s.id}>
                     <TableCell>
-                      <div className="flex items-center gap-1.5 text-[12px]">
+                      <div className="flex items-center gap-1.5 text-sm">
                         <Badge variant={isStartAction(s.action) ? "live" : "outline"}>
                           {s.action}
                         </Badge>
                         {s.name}
                       </div>
-                      <div className="truncate text-[10px] text-muted-foreground">
+                      <div className="truncate text-micro text-muted-foreground">
                         {targets(s)}
                       </div>
                     </TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground">
+                    <TableCell className="text-tiny text-muted-foreground">
                       {describeSchedule(s)}
                     </TableCell>
-                    <TableCell className="tnum font-mono text-[11px]">
+                    <TableCell className="tnum font-mono text-tiny">
                       {s.nextAt ? (
                         timestamp(s.nextAt)
                       ) : (
@@ -987,26 +987,26 @@ function Schedules({
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {runs.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-tiny text-muted-foreground">
             {t("auto.nothingFired")}
             </p>
           ) : (
             runs.map((r) => (
               <div key={`${r.id}-${r.at}`} className="flex flex-col gap-0.5 border-b border-border pb-2 last:border-0">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-[11px]">{r.name}</span>
+                  <span className="truncate text-tiny">{r.name}</span>
                   <Badge variant={r.error ? "down" : r.fired ? "live" : "outline"}>
                     {r.error ? "error" : r.fired ? t("auto.fired") : t("auto.skipped")}
                   </Badge>
                 </div>
-                <span className="tnum font-mono text-[10px] text-muted-foreground">
+                <span className="tnum font-mono text-micro text-muted-foreground">
                   {timestamp(r.at)}
                 </span>
-                <span className="text-[10px] text-muted-foreground">{r.error ?? r.reason}</span>
+                <span className="text-micro text-muted-foreground">{r.error ?? r.reason}</span>
               </div>
             ))
           )}
-          <p className="text-[10px] text-subtle-foreground">
+          <p className="text-micro text-subtle-foreground">
             {t("auto.missedNote")}
           </p>
         </CardContent>
@@ -1175,7 +1175,7 @@ function ScheduleDialog({
                 value={toLocalInput(form.runAt)}
                 onChange={(e) => setForm({ ...form, runAt: fromLocalInput(e.target.value) })}
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-micro text-muted-foreground">
                 Read in this browser's clock and stored as an instant, so the zone below does not
                 apply to a one-shot.
               </span>
@@ -1208,7 +1208,7 @@ function ScheduleDialog({
                     <option value="UTC" />
                     <option value={browserZone()} />
                   </datalist>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-micro text-muted-foreground">
                     IANA name. Empty means UTC.
                   </span>
                 </div>
@@ -1219,7 +1219,7 @@ function ScheduleDialog({
                   <Label>{t("auto.days")}</Label>
                   <div className="flex flex-wrap gap-3">
                     {WEEKDAY_KEYS.map((label, i) => (
-                      <label key={label} className="flex items-center gap-1.5 text-[11px]">
+                      <label key={label} className="flex items-center gap-1.5 text-tiny">
                         <Checkbox checked={days.includes(i)} onCheckedChange={() => toggleDay(i)} />
                         {label}
                       </label>
@@ -1233,14 +1233,14 @@ function ScheduleDialog({
           {!form.action.startsWith("playlist.") && (
             <div className="flex flex-col gap-1.5">
               <Label>{t("auto.destinations")}</Label>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-micro text-muted-foreground">
                 None selected means every destination, which is what "start the show" usually
                 means.
               </p>
               {destinationsKnown ? (
                 <div className="grid gap-1.5 sm:grid-cols-2">
                   {status.destinations.map((d) => (
-                    <label key={d.id} className="flex items-center gap-2 text-[11px]">
+                    <label key={d.id} className="flex items-center gap-2 text-tiny">
                       <Checkbox
                         checked={dests.includes(d.id)}
                         onCheckedChange={() => toggleDest(d.id)}
@@ -1253,7 +1253,7 @@ function ScheduleDialog({
                 // An empty list is a positive claim -- "this install has no
                 // destinations" -- and beside the sentence above it becomes
                 // "so this stops all of them". Said plainly instead.
-                <span className="text-[10px] text-warn">
+                <span className="text-micro text-warn">
                   {t("auto.blockDestinationsUnknown")}
                 </span>
               )}
@@ -1270,7 +1270,7 @@ function ScheduleDialog({
               value={form.graceSeconds}
               onChange={(e) => setForm({ ...form, graceSeconds: Number(e.target.value) })}
             />
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-micro text-muted-foreground">
               How late an occurrence may still be acted on after a restart. Past it, the
               occurrence is skipped.
             </span>
@@ -1282,7 +1282,7 @@ function ScheduleDialog({
               button.tsx sets `disabled:pointer-events-none`, so a title on a
               disabled button is unreachable by mouse and by keyboard. */}
           {blocked.kind !== "ok" && blocked.kind !== "name" && (
-            <span className="mr-auto text-left text-[10px] text-warn">{t(blocked.reason)}</span>
+            <span className="mr-auto text-left text-micro text-warn">{t(blocked.reason)}</span>
           )}
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
