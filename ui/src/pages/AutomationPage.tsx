@@ -74,6 +74,18 @@ export interface AlertRule {
   minSeverity: AlertSeverity;
   debounceSeconds: number;
   minIntervalSeconds: number;
+  /** The operator saying they meant an endpoint on their own network.
+   *
+   *  Mirrors alerts.Rule.AllowPrivateTarget. The server refuses a LAN,
+   *  loopback or metadata address without it and says so in the 400: "set
+   *  allowPrivateTarget to permit a self-hosted endpoint on purpose". Until
+   *  this field reached the dialog that message named a setting no screen could
+   *  set, which on a self-hosted install -- notifying a box on the same LAN is
+   *  the normal case here -- made the refusal a dead end rather than a prompt.
+   *
+   *  Optional because a server older than the field omits it, and absent has to
+   *  read as off rather than as undefined-and-therefore-truthy. */
+  allowPrivateTarget?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -349,6 +361,9 @@ export function AutomationPage() {
                   minSeverity: "info",
                   debounceSeconds: 10,
                   minIntervalSeconds: 30,
+                  // Off, like the server's own default. The opt-in is the point
+                  // of the guard: it has to be a thing somebody chose.
+                  allowPrivateTarget: false,
                   createdAt: "",
                   updatedAt: "",
                 })
@@ -677,6 +692,11 @@ function RuleDialog({
         debounceSeconds: form.debounceSeconds,
         minIntervalSeconds: form.minIntervalSeconds,
         enabled: form.enabled,
+        // Sent on every save, create and edit alike. Omitting it on the edit
+        // path would make the box un-tickable for a rule that already exists,
+        // which is precisely the rule an operator is fixing when they hit the
+        // refusal.
+        allowPrivateTarget: Boolean(form.allowPrivateTarget),
       };
       if (editing) await autoApi.put(`/alerts/rules/${form.id}`, body);
       else await autoApi.post("/alerts/rules", body);
@@ -726,6 +746,34 @@ function RuleDialog({
                 ? t("auto.secretMasked") : t("auto.webhookHint")}
             </span>
           </div>
+
+          {/* THE OPT-IN THE SERVER'S REFUSAL ASKS FOR. #771.
+              alerts.Rule.Validate rejects a private address with "set
+              allowPrivateTarget to permit a self-hosted endpoint on purpose",
+              and nothing on this dialog could set it -- so an operator pointing
+              an alert at their own Home Assistant or ntfy box on the same LAN,
+              which is the ordinary case for a self-hosted install, met a 400
+              naming a field that existed only in the API.
+
+              Worded as a fact rather than a warning. The risk is real and
+              specific -- an unchecked URL here reaches the cloud metadata
+              service and reports whether a port answered, which is a port
+              scanner driven from a form -- but a scary sentence over a normal
+              workflow is one an operator learns to click past. */}
+          <label className="flex items-start gap-2">
+            <Checkbox
+              className="mt-0.5"
+              checked={Boolean(form.allowPrivateTarget)}
+              onCheckedChange={(v) => setForm({ ...form, allowPrivateTarget: Boolean(v) })}
+              aria-label={t("common.allowPrivateTarget")}
+            />
+            <span className="flex flex-col gap-0.5">
+              <span className="text-[11px]">{t("common.allowPrivateTarget")}</span>
+              <span className="text-[10px] text-muted-foreground">
+                {t("common.allowPrivateTargetHint")}
+              </span>
+            </span>
+          </label>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">

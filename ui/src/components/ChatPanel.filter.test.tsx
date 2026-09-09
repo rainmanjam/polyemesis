@@ -206,6 +206,17 @@ describe("a refused delete", () => {
     const del = screen.getAllByRole("button", { name: /delete/i })[0];
     fireEvent.click(del);
 
+    /* THE CONFIRMATION IS NOW BETWEEN THE CLICK AND THE DELETE, and this test
+       drove the old one-click path. #770: this panel is the chat page's menu
+       mounted in the dashboard pane, and it deleted without asking while the
+       identical menu on ChatPage confirmed.
+
+       Confirming here rather than deleting the step: what this test is about is
+       that a REFUSAL repeats the platform's own words, and that is still worth
+       pinning — it just now happens one gesture later. */
+    const confirm = await screen.findByRole("button", { name: "Delete for everyone" });
+    fireEvent.click(confirm);
+
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     expect(
       String(toastError.mock.calls[0][0]),

@@ -30,6 +30,8 @@ import {
   splitMessage,
 } from "@/lib/chat";
 import { messageKey, useChatFeed } from "@/hooks/useChatFeed";
+import { useConfirm } from "@/hooks/useConfirm";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useChatSearch, type ChatSearchState } from "@/hooks/useChatSearch";
 import { ChatUserCard } from "@/components/ChatUserCard";
 import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
@@ -708,6 +710,7 @@ export function ChatPanel({
   className?: string;
   showComposer?: boolean;
 }) {
+  const t = useT();
   const {
     messages,
     statuses,
@@ -744,6 +747,14 @@ export function ChatPanel({
   const [menu, setMenu] = useState<{ m: ChatMessage; at: MenuAnchor } | null>(null);
   const search = useChatSearch();
 
+  // THE SECOND SURFACE, and the reason this is here rather than only on
+  // ChatPage. #770 was filed against the chat page's menu and fixed there; this
+  // panel is the same menu mounted in the dashboard pane, reached by the same
+  // right-click reflex, and it still deleted on one click. A confirmation that
+  // exists on one of two identical surfaces is the inconsistency the issue was
+  // about, one level down.
+  const confirmDelete = useConfirm<ChatMessage>();
+
   const del = useCallback(
     async (m: ChatMessage) => {
       try {
@@ -759,6 +770,19 @@ export function ChatPanel({
 
   return (
     <div className={cn("flex min-h-0 flex-col rounded-md border border-border bg-card", className)}>
+      <ConfirmDestructive
+        open={confirmDelete.open}
+        onOpenChange={confirmDelete.onOpenChange}
+        subject={confirmDelete.target?.author.name ?? ""}
+        title={t("chatpage.deleteTitle")}
+        description={t("chatpage.deleteBody", {
+          platform: confirmDelete.target?.platform ?? "",
+        })}
+        confirmLabel={t("chatpage.deleteConfirm")}
+        onConfirm={async () => {
+          if (confirmDelete.target) await del(confirmDelete.target);
+        }}
+      />
       {card && (
         <ChatUserCard
           platform={card.platform}
@@ -775,7 +799,7 @@ export function ChatPanel({
           anchor={menu.at}
           onClose={() => setMenu(null)}
           onOpenCard={setCard}
-          onDelete={del}
+          onDelete={confirmDelete.ask}
         />
       )}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1.5">
@@ -811,14 +835,14 @@ export function ChatPanel({
       {search.active ? (
         <ChatSearchResults
           search={search}
-          onDelete={del}
+          onDelete={confirmDelete.ask}
           onOpenUser={setCard}
           onMenu={(m, at) => setMenu({ m, at })}
         />
       ) : (
         <ChatTimeline
           messages={visible}
-          onDelete={del}
+          onDelete={confirmDelete.ask}
           onOpenUser={setCard}
           onMenu={(m, at) => setMenu({ m, at })}
           compact

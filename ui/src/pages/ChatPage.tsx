@@ -17,8 +17,10 @@ import { accentFor, platformsIn } from "@/lib/chat";
 import { ChatUserCard } from "@/components/ChatUserCard";
 import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
 import { ChatRules } from "@/components/ChatRules";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useChatFeed } from "@/hooks/useChatFeed";
 import { useChatSearch } from "@/hooks/useChatSearch";
+import { useConfirm } from "@/hooks/useConfirm";
 import { useT } from "@/lib/i18n";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
 
@@ -76,6 +78,31 @@ export function ChatPage() {
   // card needs the platform and account to address a moderation call, and
   // cannot re-derive either.
   const [card, setCard] = useState<ChatMessage | null>(null);
+
+  /* DELETING ASKS FIRST, like every other destructive action in this app.
+   *
+   * It did not. The trash icon on a row, the Delete item in the right-click
+   * menu and the same item over a search result all called this straight
+   * through to the platform — while a permanent ban, two items above it in
+   * that same menu, deliberately refuses to be one click and routes through
+   * the user card to be confirmed. Two irreversible actions a centimetre
+   * apart, one guarded and one not, is worse than neither being guarded: it
+   * trains the caution out of an operator exactly where it matters. That
+   * inconsistency is the defect ConfirmDestructive's own header names as the
+   * reason it exists.
+   *
+   * It is also the delete with the smallest target in the product. The icon
+   * appears on hover, at the right-hand edge of a row, in a list that moves on
+   * its own while a stream is live — the pointer is over one message when the
+   * decision is made and over the next one when the button arrives. A
+   * mis-click removed a viewer's message on the platform with no undo and no
+   * way to find out which one it had been.
+   *
+   * ONE dialog for all three entry points, because a per-caller confirmation
+   * is how one of them ends up without one — the point useConfirm's own header
+   * makes about three pages rolling their own `deleting` state.
+   */
+  const confirmDelete = useConfirm<ChatMessage>();
 
   const del = useCallback(
     async (m: ChatMessage) => {
@@ -168,23 +195,60 @@ export function ChatPage() {
               anchor={menu.at}
               onClose={() => setMenu(null)}
               onOpenCard={setCard}
-              onDelete={del}
+              onDelete={confirmDelete.ask}
             />
           )}
+
+          {/* The one confirmation, shared by the row icon, the right-click menu
+              and the search results. It names the platform and QUOTES THE
+              MESSAGE, which is the part that actually guards against the
+              mis-click this exists for: the operator can see they are about to
+              remove the line they meant, not the one that scrolled into its
+              place.
+
+              No requireTyping. That is reserved for things whose name is worth
+              typing — a recording, a credential, a cascade — and a chat
+              message has no name to type. It also has to stay usable at the
+              speed of a live chat: the permanent ban next to it is one
+              confirming click, and matching that keeps the friction
+              proportional rather than making this the heaviest control in the
+              pane. */}
+          <ConfirmDestructive
+            open={confirmDelete.open}
+            onOpenChange={confirmDelete.onOpenChange}
+            subject={confirmDelete.target?.author.name ?? ""}
+            title={t("chatpage.deleteTitle")}
+            description={
+              <>
+                {t("chatpage.deleteBody", {
+                  platform: confirmDelete.target
+                    ? accentFor(confirmDelete.target.platform).label
+                    : "",
+                })}
+                <span className="mt-2 block max-h-24 overflow-y-auto rounded border border-border bg-card-raised px-2 py-1 text-[11px] leading-snug text-foreground">
+                  {confirmDelete.target?.text}
+                </span>
+              </>
+            }
+            confirmLabel={t("chatpage.deleteConfirm")}
+            onConfirm={async () => {
+              if (confirmDelete.target) await del(confirmDelete.target);
+            }}
+          />
 
           <ChatSearchBox search={search} />
 
           {search.active ? (
             <ChatSearchResults
               search={search}
-              onDelete={del}
+              onDelete={confirmDelete.ask}
               onOpenUser={setCard}
               onMenu={(m, at) => setMenu({ m, at })}
             />
           ) : (
             <ChatTimeline
               messages={visible}
-              onDelete={del}
+              onDelete={confirmDelete.ask}
               onOpenUser={setCard}
               onMenu={(m, at) => setMenu({ m, at })}
               empty={

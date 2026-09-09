@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { SecretCode } from "@/components/SecretCode";
+import { SecretInput } from "@/components/SecretInput";
 import { copyToClipboard } from "@/lib/clipboard";
 import { Stat } from "@/components/signature/Stat";
 import { toast } from "sonner";
@@ -49,6 +50,27 @@ const TRIGGER_LABELS: Record<string, TranslationKey> = {
 const errText = (err: unknown, fallback: string) =>
   err instanceof Error && err.message ? err.message : fallback;
 
+/** A hook draft, plus the one field a stored Hook can never carry.
+ *
+ *  `secret` is write-only: hooks.Hook marshals it as nothing at all, so it is
+ *  absent from every hook this card reads and present only on one it writes. */
+type HookDraft = Partial<Hook> & { secret?: string };
+
+/** 32 random bytes as hex — the same length db.CreateHook mints when a create
+ *  leaves the secret empty (hooks.SecretBytes).
+ *
+ *  Offered because the alternative is an operator inventing a signing key by
+ *  hand, and a key somebody typed is a key somebody can type again. Generated
+ *  in the browser rather than asked of the server on purpose: PUT /hooks/{id}
+ *  answers with the hook, never with a plaintext key, so a server-minted
+ *  rotation would leave the operator with a webhook whose new key nobody can
+ *  read — which is the one failure a rotation must not have. */
+function newSigningKey(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /** Lifecycle webhooks: one signed POST per transition, for a script rather than
  *  a person.
  *
@@ -62,7 +84,7 @@ export function HooksCard() {
   const [hooks, setHooks] = useState<Hook[]>([]);
   const [meta, setMeta] = useState<HookMeta | null>(null);
   const [loading, setLoading] = useState(true);
-  const [draft, setDraft] = useState<Partial<Hook> | null>(null);
+  const [draft, setDraft] = useState<HookDraft | null>(null);
   // In flight, same flag every other mutating dialog in this console carries.
   // It matters more here than in most of them: a second create is not a
   // duplicate row an operator can delete and forget, it is a second signing
@@ -158,15 +180,39 @@ export function HooksCard() {
   const save = async () => {
     if (!draft || busy) return;
     setBusy(true);
+    // ONLY THE FIELDS THE SERVER'S REQUEST TYPE DECLARES.
+    //
+    // api.decodeJSONInto calls DisallowUnknownFields, and api.hookRequest has
+    // no `id`, `hasSecret`, `createdAt` or `updatedAt` -- so handing it the
+    // stored Hook the edit dialog was seeded with earns a 400 naming whichever
+    // one the decoder reached first. Built here rather than by deleting keys
+    // off the draft, because the enumeration is the contract: a field the
+    // server adds is added here deliberately, and a field it drops stops being
+    // sent instead of turning every save into a 400.
+    const secret = (draft.secret ?? "").trim();
+    const body = {
+      name: draft.name ?? "",
+      enabled: draft.enabled ?? true,
+      url: draft.url ?? "",
+      triggers: draft.triggers ?? [],
+      timeoutSeconds: draft.timeoutSeconds ?? 10,
+      maxAttempts: draft.maxAttempts ?? 3,
+      allowPrivateTarget: Boolean(draft.allowPrivateTarget),
+      // Empty means UNCHANGED, which is what db.UpdateHook does with it and
+      // what every edit that is not a rotation sends.
+      ...(secret ? { secret } : {}),
+    };
     try {
       if (draft.id) {
-        await api.hooks.update(draft.id, draft);
-        toast.success(t("hooks.updated"));
+        await api.hooks.update(draft.id, body);
+        // A ROTATION IS SHOWN THE SAME WAY A CREATE IS. The update answers with
+        // the hook and never with a key, so this plaintext exists in exactly
+        // one place -- this tab -- and closing the dialog would be the end of
+        // it. The receiver needs it before the next delivery goes out.
+        if (secret) setNewSecret(secret);
+        toast.success(secret ? t("hooks.rotated") : t("hooks.updated"));
       } else {
-        const created = await api.hooks.create({
-          ...draft,
-          url: draft.url ?? "",
-        });
+        const created = await api.hooks.create(body);
         setNewSecret(created.secret);
         toast.success(t("hooks.created"));
       }
@@ -483,10 +529,10 @@ function HookDialog({
   onClose,
   onSave,
 }: {
-  draft: Partial<Hook> | null;
+  draft: HookDraft | null;
   meta: HookMeta | null;
   busy: boolean;
-  onChange: (h: Partial<Hook>) => void;
+  onChange: (h: HookDraft) => void;
   onClose: () => void;
   onSave: () => void;
 }) {
@@ -532,6 +578,81 @@ function HookDialog({
               <p className="text-[10px] text-muted-foreground">{t("hooks.urlMasked")}</p>
             )}
           </div>
+
+          {/* THE OPT-IN THE SERVER'S REFUSAL ASKS FOR. #771.
+              hooks.Hook.Validate rejects a private address with "set
+              allowPrivateTarget to permit a self-hosted endpoint on purpose",
+              and this dialog could not set it -- so a hook aimed at a CI box or
+              a home-automation controller on the same LAN, which is the
+              ordinary case for a self-hosted install, met a 400 naming a field
+              that existed only in the API. The twin of the alert-rule control
+              in pages/AutomationPage.tsx, sharing its wording so the two
+              refusals do not read as two different rules. */}
+          <label className="flex items-start gap-2">
+            <Checkbox
+              className="mt-0.5"
+              checked={Boolean(draft.allowPrivateTarget)}
+              onCheckedChange={(v) => onChange({ ...draft, allowPrivateTarget: Boolean(v) })}
+              aria-label={t("common.allowPrivateTarget")}
+            />
+            <span className="flex flex-col gap-0.5">
+              <span className="text-[11px]">{t("common.allowPrivateTarget")}</span>
+              <span className="text-[10px] text-muted-foreground">
+                {t("common.allowPrivateTargetHint")}
+              </span>
+            </span>
+          </label>
+
+          {/* ROTATING THE SIGNING KEY. #778.
+
+              docs/HOOKS.md:141 has always said "if you lose it, edit the hook
+              and set a new one", PUT /hooks/{id} has always taken a `secret`,
+              and this dialog had no field for it -- so the documented rotation
+              could not be performed and the only way to change a key was to
+              delete the webhook and make another.
+
+              THAT IS NOT THE SAME OPERATION, and the difference is invisible
+              until it bites. `sequence` counts from 1 PER ENDPOINT, and HOOKS.md
+              tells receivers that a gap means deliveries were dropped and a
+              reset to 1 means polyemesis restarted. A recreated hook is a new
+              endpoint row, so its counter starts again — and a consumer
+              checking for gaps sees the number go backwards and concludes it
+              lost deliveries that were never sent. Rotating in place keeps the
+              row, so the counter keeps counting.
+
+              Only while editing: a create mints its own key and returns it once,
+              and offering a second way to set one on the same form is how an
+              operator ends up with a key they typed and a key they were shown. */}
+          {editing && (
+            <div className="space-y-1 rounded border border-border p-2">
+              <Label htmlFor="hook-secret">{t("hooks.rotateLabel")}</Label>
+              <div className="flex items-center gap-1.5">
+                {/* SecretInput, not Input: this is a credential typed on a
+                    console that is often being screen-shared while somebody
+                    sets a broadcast up, and it is the exact case
+                    components/secret-fields.test.ts guards. Masked with a
+                    deliberate reveal, so an operator can still check what they
+                    pasted without saving and reopening. */}
+                <SecretInput
+                  id="hook-secret"
+                  className="flex-1"
+                  value={draft.secret ?? ""}
+                  placeholder={t("hooks.rotatePlaceholder")}
+                  onChange={(e) => onChange({ ...draft, secret: e.target.value })}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onChange({ ...draft, secret: newSigningKey() })}
+                >
+                  {t("hooks.rotateGenerate")}
+                </Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground">{t("hooks.rotateHint")}</p>
+              <p className="text-[10px] text-warn">{t("hooks.rotateCutover")}</p>
+            </div>
+          )}
 
           <div className="space-y-1">
             <Label>{t("hooks.triggers")}</Label>

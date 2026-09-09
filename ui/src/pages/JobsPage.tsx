@@ -71,6 +71,16 @@ import { useT } from "@/lib/i18n";
  *  faster poll would only show the same snapshot twice. */
 const POLL_MS = 4000;
 
+/** The one job kind whose history row owns a file on disk.
+ *
+ *  internal/clipper/worker.go registers the export under this exact name, and
+ *  internal/api/jobs.go's removeClipExport returns early for every other kind —
+ *  so this is the only kind whose deletion reaches past the row. It is spelled
+ *  out here because the delete confirmation has to say what is destroyed, and
+ *  claiming a file loss for a transcode that never wrote an export is the same
+ *  defect as hiding the one that does happen. */
+const CLIP_EXPORT_KIND = "clip.export";
+
 const STATE_TONE: Record<JobState, "live" | "warn" | "down" | "outline" | "default" | "armed"> = {
   running: "live",
   queued: "outline",
@@ -96,6 +106,18 @@ function clockToMinutes(s: string): number {
   const [h, m] = s.split(":").map((n) => Number.parseInt(n, 10));
   if (Number.isNaN(h) || Number.isNaN(m)) return 0;
   return h * 60 + m;
+}
+
+/** The browser's own zone, offered as the default so nobody has to know that an
+ *  empty zone means UTC on the server. Wrapped because a locked-down runtime
+ *  can throw here, and a zone we cannot read is UTC — the same answer the
+ *  server gives an empty one. Mirrors AutomationPage.browserZone. */
+function browserZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
 }
 
 const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -128,6 +150,10 @@ export function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
+  // The job whose row delete is waiting on a confirmation, held as the JOB
+  // rather than as its id: the dialog has to name what is destroyed, and only
+  // the job itself knows whether a file is part of that (see CLIP_EXPORT_KIND).
+  const [pendingDelete, setPendingDelete] = useState<JobView | null>(null);
   // The policy is edited locally and saved explicitly. Live-saving every
   // keystroke of a CPU ceiling would write a policy nobody meant through the
   // half-typed values on the way there.
@@ -384,12 +410,50 @@ export function JobsPage() {
                 empty={t("jobs.noFinished")}
                 busy={busy}
                 onRetry={(id) => act(() => api.retryJob(id), "Job re-armed.")}
-                onDelete={(id) => act(() => api.deleteJob(id), "Job removed.")}
+                onDelete={(id) =>
+                  setPendingDelete(view.recent.find((j) => j.id === id) ?? null)
+                }
               />
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* THE ROW DELETE TAKES THE FILE TOO, and said nothing about it.
+          handleDeleteJob (internal/api/jobs.go) calls removeClipExport once the
+          row is gone, and a clip export's row is the ONLY reference to its file
+          -- the download route is keyed on the job, and the exports directory
+          sits outside the rolling buffer's pruning. So the small trash icon in
+          the history table was a file delete wearing a list-tidying icon, and
+          it went out on the click while the bulk Purge two feet away asked
+          first. An operator who learns "deletes ask here" and meets one that
+          does not has had their caution trained out of them exactly where it
+          mattered.
+
+          The description names the file only for the kind that has one. A
+          confirmation that claims a loss which does not happen is the same
+          defect as one that hides the loss that does -- and after the third
+          "this deletes files" dialog over a transcode that deletes nothing, the
+          sentence stops being read at all. */}
+      <ConfirmDestructive
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        subject={pendingDelete ? (pendingDelete.label ?? pendingDelete.kind) : ""}
+        title={t("jobs.deleteTitle")}
+        description={
+          pendingDelete?.kind === CLIP_EXPORT_KIND
+            ? t("jobs.deleteExportDescription")
+            : t("jobs.deleteDescription")
+        }
+        confirmLabel={t("jobs.deleteConfirm")}
+        onConfirm={() =>
+          pendingDelete
+            ? act(() => api.deleteJob(pendingDelete.id), "Job removed.")
+            : undefined
+        }
+      />
 
       {!view.whisper.available && (
         <p className="mt-3 text-[11px] text-muted-foreground">
@@ -805,6 +869,7 @@ function PolicyEditor({
 
                   {mode === "scheduled" && (
                     <WindowEditor
+                      idBase={k.kind}
                       windows={windows}
                       onChange={(next) => setKind(k.kind, { windows: next })}
                     />
@@ -904,6 +969,62 @@ function PolicyEditor({
                 min={0}
                 max={100}
                 onChange={(n) => onPatch({ cpuResumePercent: n })}
+              />
+              {/* THE FOUR TIMINGS THE TWO PERCENTAGES ABOVE ARE MEASURED WITH.
+                  The ceiling and the resume level say WHERE the gate moves;
+                  sustain and settle say how long the load has to stay there
+                  before it does, and linger and defer say how long the other
+                  two gates hold on afterwards. All four have been in
+                  PostProdSettings and in the policy endpoint since the governor
+                  landed, and none of them had a control -- so an operator whose
+                  transcodes were suspended by a five-second CPU spike could see
+                  the ceiling that did it, could edit the ceiling, and could not
+                  reach the window that decided the spike counted. The only
+                  route was hand-editing settings on disk.
+
+                  0 is NOT "off" for three of the four. normalise() in
+                  internal/jobs/governor.go substitutes DefaultCPUSustained,
+                  DefaultCPUSettle and DefaultDeferFor for a zero, so those
+                  three fields read 0 and behave as 30, 20 and 30 seconds; only
+                  ingest linger honours a zero as "release the gate at once".
+                  Each hint says so, because a field showing 0 while the machine
+                  waits half a minute is a lie an operator can only discover by
+                  timing it with a stopwatch. */}
+              <NumberField
+                id="jobs-cpu-sustained"
+                label={t("jobs.cpuSustained")}
+                hint={t("jobs.cpuSustainedHint")}
+                value={draft.cpuSustainedSeconds}
+                min={0}
+                max={3600}
+                onChange={(n) => onPatch({ cpuSustainedSeconds: n })}
+              />
+              <NumberField
+                id="jobs-cpu-settle"
+                label={t("jobs.cpuSettle")}
+                hint={t("jobs.cpuSettleHint")}
+                value={draft.cpuSettleSeconds}
+                min={0}
+                max={3600}
+                onChange={(n) => onPatch({ cpuSettleSeconds: n })}
+              />
+              <NumberField
+                id="jobs-ingest-linger"
+                label={t("jobs.ingestLinger")}
+                hint={t("jobs.ingestLingerHint")}
+                value={draft.ingestLingerSeconds}
+                min={0}
+                max={3600}
+                onChange={(n) => onPatch({ ingestLingerSeconds: n })}
+              />
+              <NumberField
+                id="jobs-defer-seconds"
+                label={t("jobs.deferFor")}
+                hint={t("jobs.deferHint")}
+                value={draft.deferSeconds}
+                min={0}
+                max={3600}
+                onChange={(n) => onPatch({ deferSeconds: n })}
               />
               <NumberField
                 id="jobs-nice"
@@ -1079,14 +1200,20 @@ function NumberField({
 // ---------------------------------------------------------- window editor
 
 function WindowEditor({
+  idBase,
   windows,
   onChange,
 }: {
+  /** Makes the zone datalist's id unique. One of these editors is rendered per
+   *  scheduled kind, and two <datalist> elements sharing an id is the kind of
+   *  invalid HTML that works until it does not. */
+  idBase: string;
   windows: JobWindow[];
   onChange: (next: JobWindow[]) => void;
 }) {
   const t = useT();
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const tz = browserZone();
+  const zoneListId = `jobs-window-tz-${idBase}`;
 
   const set = (i: number, p: Partial<JobWindow>) =>
     onChange(windows.map((w, n) => (n === i ? { ...w, ...p } : w)));
@@ -1151,6 +1278,32 @@ function WindowEditor({
               );
             })}
           </div>
+          {/* THE ZONE IS PART OF THE WINDOW, and it was captured once and then
+              printed for ever.
+              A window is created carrying whatever zone the CREATING BROWSER
+              was in -- see the Add window handler below, which is right, because
+              an operator setting 02:00 means 02:00 where they are. What was
+              missing is the second half: nothing could ever change it again.
+              An operator who added an overnight window from a hotel in Tokyo
+              came home to a policy that runs transcodes at 02:00 JST, saw the
+              zone stated in the summary line, and had no way to correct it
+              short of deleting the window and rebuilding its days by hand.
+              A free-text IANA name rather than a picker, because the server
+              takes any zone time.LoadLocation knows and rejects the rest with a
+              message that names the string it could not load -- the same
+              contract, and the same control, as the schedule editor on the
+              automation page. The datalist offers the two answers that are
+              nearly always wanted without shutting out the third. */}
+          <Input
+            list={zoneListId}
+            className="h-7 w-44 font-mono text-[11px]"
+            value={w.tz ?? ""}
+            spellCheck={false}
+            placeholder="UTC"
+            onChange={(e) => set(i, { tz: e.target.value })}
+            aria-label={t("jobs.windowZone")}
+            title={t("jobs.windowZoneHint")}
+          />
           <Button
             variant="ghost"
             size="icon-sm"
@@ -1163,6 +1316,15 @@ function WindowEditor({
           <span className="w-full text-[10px] text-muted-foreground">{windowSummary(w)}</span>
         </div>
       ))}
+      {/* One list for every row in this editor, which is why the id carries the
+          kind: the suggestions are the same for all of them. */}
+      <datalist id={zoneListId}>
+        <option value="UTC" />
+        <option value={tz} />
+      </datalist>
+      {windows.length > 0 && (
+        <p className="text-[10px] text-muted-foreground">{t("jobs.windowZoneHint")}</p>
+      )}
       <Button
         variant="outline"
         size="sm"

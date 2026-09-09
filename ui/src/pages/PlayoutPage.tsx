@@ -42,6 +42,8 @@ import { Stat } from "@/components/signature/Stat";
 import { api } from "@/lib/api";
 import { bytes as fmtBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { sourceChoices } from "@/lib/destinationSource";
+import { asSourceId } from "@/lib/types";
 import type {
   PlayoutAdminView,
   PlayoutProtection,
@@ -49,6 +51,7 @@ import type {
   PlayoutVariant,
   RenditionView,
   Settings,
+  SourceView,
 } from "@/lib/types";
 import { useT } from "@/lib/i18n";
 
@@ -72,6 +75,7 @@ export function PlayoutPage() {
   const [view, setView] = useState<PlayoutAdminView | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [renditions, setRenditions] = useState<RenditionView[]>([]);
+  const [sources, setSources] = useState<SourceView[]>([]);
   const [busy, setBusy] = useState(false);
 
   // Draft copies. Publishing fields are free text, so they are edited locally
@@ -81,14 +85,16 @@ export function PlayoutPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [v, s, r] = await Promise.all([
+      const [v, s, r, src] = await Promise.all([
         api.playout(),
         api.getSettings(),
         api.listRenditions().catch(() => [] as RenditionView[]),
+        api.listSources().catch(() => [] as SourceView[]),
       ]);
       setView(v);
       setSettings(s);
       setRenditions(r);
+      setSources(src);
       setTitle(v.title);
       setDescription(v.description);
     } catch (err) {
@@ -206,6 +212,8 @@ export function PlayoutPage() {
       />
 
       <ExposureBanner view={view} />
+
+      <ProgrammeCard play={play} sources={sources} busy={busy} onSave={savePlayoutSettings} />
 
       {!view.running && play.enabled && (
         <Card className="mb-3 border-warn/40">
@@ -389,6 +397,75 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
         </span>
       </span>
     </div>
+  );
+}
+
+// --------------------------------------------------------------- programme
+
+/** Which programme the PUBLIC page serves.
+ *
+ *  Settings are a singleton -- one playout intent for the whole box -- while
+ *  a multi-source install runs a separate playout manager per engine
+ *  (playout.go:273 reads `set.Playout.SourceID` to pick one of them). This
+ *  interface had the field on the wire and nowhere to set it from the UI, so
+ *  the public route served whichever engine happened to come up first: a
+ *  two-programme install could be showing its audience the horizontal feed
+ *  while the operator broadcasts, and believes they are sharing, the
+ *  vertical one.
+ *
+ *  Hidden entirely on a single-source install, the same call ShareCard's
+ *  sibling controls and DestinationDialog's own source picker make: with one
+ *  programme there is nothing to choose, and a Select whose every use lands
+ *  on the same answer is not a choice, it is a shape occupying a slot. */
+export function ProgrammeCard({
+  play,
+  sources,
+  busy,
+  onSave,
+}: {
+  play: PlayoutSettings;
+  sources: SourceView[];
+  busy: boolean;
+  onSave: (next: PlayoutSettings) => Promise<void>;
+}) {
+  const t = useT();
+  const choices = useMemo(() => sourceChoices(sources), [sources]);
+  if (choices.length < 2) return null;
+
+  const value = play.sourceId != null ? String(play.sourceId) : "default";
+
+  return (
+    <Card className="mb-3">
+      <CardHeader>
+        <CardTitle className="text-[13px]">{t("play.whichProgramme")}</CardTitle>
+        <CardDescription>{t("play.programmeNote")}</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-1.5">
+        <Label htmlFor="playout-source">{t("play.programme")}</Label>
+        <Select
+          value={value}
+          disabled={busy}
+          onValueChange={(v) =>
+            void onSave({
+              ...play,
+              sourceId: v === "default" ? null : asSourceId(Number(v)),
+            })
+          }
+        >
+          <SelectTrigger id="playout-source" className="max-w-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="default">{t("play.defaultProgramme")}</SelectItem>
+            {choices.map((c) => (
+              <SelectItem key={c.id} value={String(c.id)}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </CardContent>
+    </Card>
   );
 }
 
