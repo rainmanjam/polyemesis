@@ -43,7 +43,26 @@ export function SecretInput({
         onChange={onChange}
         autoComplete="off"
         spellCheck={false}
-        className={cn("pe-8", className)}
+        /* MONOSPACED HERE, NOT AT THE CALL SITES, because this component is
+           the definition of "a value nobody can afford to misread".
+           docs/DESIGN-SYSTEM.md makes --font-mono a correctness rule and names
+           this exact field as the example: a proportional font makes `l` and
+           `1` in a stream key indistinguishable, and the failure is a stream
+           that will not start for a reason nobody can see. Revealing a key to
+           check it against the platform's console — the whole purpose of the
+           reveal button beside this — is the moment the glyphs have to be
+           unambiguous.
+
+           Five call sites render one of these; exactly one had remembered to
+           pass `font-mono`, which is what a rule enforced by remembering
+           produces. Stated first in the list so a caller can still override
+           it; nothing should, but the option belongs to them.
+
+           It survives the type flip on purpose: `type` toggles between
+           password and text as the value is revealed, so anything keyed on
+           the type would style the masked dots and give up exactly when the
+           characters appear. */
+        className={cn("pe-8 font-mono", className)}
       />
       <Button
         type="button"
