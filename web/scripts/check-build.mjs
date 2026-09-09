@@ -242,6 +242,81 @@ if (!/var\(--motion-instant\)/.test(css)) {
       "so the scale is decorative and cannot be overridden",
   );
 }
+/* --motion-enter is the entry duration, and it is the one the page-load cascade
+ * and the scroll reveals both run on. It was declared in the token block and
+ * referenced by NOTHING: `.rise` was written `0.45s cubic-bezier(0.22, 0.61,
+ * 0.36, 1)` and `.reveal` was `0.5s ease`, four lines below the token that
+ * named the same intention. That is how a scale stops being one — not by being
+ * deleted, but by never being used, so the next person tunes the literal in
+ * front of them and the token drifts away from the page it describes.
+ *
+ * Same two checks as --motion-instant above, for the same two failure modes:
+ * declared-but-absent, and present-but-inlined. */
+/* `420ms` OR `.42s`, because Lightning CSS rewrites a duration to whichever
+ * spelling is shorter and 420ms is one of the ones it changes — the check above
+ * survives on 90ms only because `.09s` is no shorter. Matching the source
+ * spelling here failed on a build where the token was present and correct,
+ * which is the failure mode this whole file is about, arriving in the check
+ * rather than in the page. */
+if (!/--motion-enter:\s*(?:420ms|\.42s)/.test(css)) {
+  fail.push("the motion scale is missing from the built CSS: --motion-enter was not emitted");
+}
+if (!/var\(--motion-enter\)/.test(css)) {
+  fail.push(
+    "nothing REFERENCES --motion-enter in the built CSS — entry motion has been " +
+      "hand-written as a literal again, so the scale no longer describes the page",
+  );
+}
+
+/* A COLOUR UTILITY NAMING A TOKEN THIS THEME DOES NOT DEFINE.
+ *
+ * THIS GUARDS A DEFECT THAT SHIPPED AND WAS INVISIBLE. index.astro carried
+ * `class="… text-accent"` on the "Built for" label. This theme's accent token
+ * is --color-primary; there is no --color-accent, so Tailwind generated no
+ * rule, the class did nothing, and the element inherited body colour — which
+ * happened to look deliberate. Nothing failed: not the build, not astro check,
+ * not the browser. A class that silently does nothing is the exact shape of
+ * failure the rest of this file exists for.
+ *
+ * The check is the whole theory: Tailwind emits a rule for every utility it
+ * recognises, so a plain colour utility in the markup with no matching rule in
+ * the bundle is a class that was never generated. Deliberately narrow —
+ * variant-prefixed (`hover:…`), opacity-modified (`…/70`) and arbitrary
+ * (`…-[#fff]`) forms are excluded, because their selectors are escaped in ways
+ * that make matching a guessing game and the plain form is where this mistake
+ * actually gets made. Measured at the time of writing: 39 candidate classes
+ * across 39 pages, zero of them unmatched.
+ *
+ * Astro inlines a component's scoped CSS into the page rather than the bundle,
+ * so the haystack is the bundle plus every built page — the same reason the
+ * `.shot-open::after` check above reads both. */
+{
+  const plainColourUtility = /^(?:text|bg|border|decoration)-[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+  const inert = new Map();
+  for (const f of pages) {
+    const html = readFileSync(join(DIST, f), "utf8");
+    const haystack = css + html;
+    for (const m of html.matchAll(/class="([^"]*)"/g)) {
+      for (const cls of m[1].split(/\s+/)) {
+        if (!plainColourUtility.test(cls) || inert.has(cls)) continue;
+        // A rule for `.foo` starts at the beginning of the stylesheet or after
+        // a `}` or `,`, and ends at `{`, `,` or a pseudo-class.
+        const rule = new RegExp(`(^|[,}])\\.${cls.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[{,:])`);
+        if (!rule.test(haystack)) inert.set(cls, f);
+      }
+    }
+  }
+  for (const [cls, f] of inert) {
+    fail.push(
+      `${f}: \`${cls}\` is on an element and no rule for it exists in the built CSS — ` +
+        `Tailwind never generated it, so the class does nothing and the element keeps ` +
+        `whatever it inherited.\n` +
+        `    Almost always a token name that is not this theme's: there is no ` +
+        `--color-accent (the accent is --color-primary), no --color-bg (the page ` +
+        `paints --color-ink). Check the @theme block at the top of global.css.`,
+    );
+  }
+}
 
 /* The meter-like keyframe must stay asymmetric.
  *

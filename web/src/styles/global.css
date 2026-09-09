@@ -557,6 +557,56 @@
     border-color: var(--color-live);
   }
 
+  /* --- the announcement bar --------------------------------------------- */
+
+  /* THE ONE SATURATED FIELD ON THE SITE. Everything else is near-black with
+     saturation reserved for signal; this is the single exception, and it is
+     deliberate — it is the accent's home, and a band of it at the top of the
+     page is what makes the accent read as one decision rather than as a colour
+     that turns up wherever something needed emphasis.
+     If a second saturated field ever appears, this one has stopped working.
+
+     ink ON primary, NOT fg. Measured from the tokens: #0b0d11 on #5b7fc7 is
+     4.91:1, which clears AA for text under 18pt; #edf2f8 on the same ground is
+     3.52:1 and does not. The light text is the obvious choice and it is the
+     failing one, which is exactly the sort of thing that ships on a bar nobody
+     re-measures. It is also the pairing .btn-primary already uses, so the bar
+     and the primary CTA are the same object seen twice. */
+  .announce {
+    background: var(--color-primary);
+    color: var(--color-ink);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    /* Thin. This is a line of type, not a section: it has to be readable and
+       then forgotten, because it is above the headline on every page and a
+       visitor who arrives at the 24th document does not want a banner. */
+    padding-block: 0.4375rem;
+  }
+  .announce a {
+    font-weight: 500;
+    text-decoration: underline;
+    /* Far enough off the baseline that the descender in "p" does not sit on the
+       rule, matching .doc-prose a — the same fix for the same reason. */
+    text-underline-offset: 0.2em;
+    /* 45% ink over the accent: visible as a rule without competing with the
+       text it belongs to. It goes to full ink on hover, so the link gains
+       weight on approach rather than announcing itself the whole time. */
+    text-decoration-color: color-mix(in srgb, var(--color-ink) 45%, transparent);
+    transition: text-decoration-color var(--motion-instant) var(--ease-out);
+  }
+  .announce a:hover {
+    text-decoration-color: var(--color-ink);
+  }
+  /* The focus ring everywhere else is --color-primary-bright, which is a
+     lighter version of the ground this link sits on and would be close to
+     invisible here. Ink is the highest-contrast outline available against the
+     accent, and this is the only place on the site that needs the exception. */
+  .announce a:focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
   .chip {
     display: inline-flex;
     align-items: center;
@@ -815,6 +865,18 @@
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    /* THE DELAY HAD TO GO TOO, and leaving it out was a hole in this block
+       rather than a nuance of it. The standard recipe zeroes duration and stops
+       there, which is correct for anything that merely animates — but the hero's
+       entry cascade carries `animation-fill-mode: both`, so an element with a
+       350ms delay holds the `from` keyframe, opacity 0, for those 350ms no
+       matter how short the animation itself has been made.
+       The reader who asked for less motion got exactly the same staggered
+       appearance, minus the easing that made it legible: five blocks popping
+       into existence one after another. Zeroing the delay is what makes the
+       whole hero paint at once, which is what "reduce" means here. */
+    animation-delay: 0s !important;
+    transition-delay: 0s !important;
   }
 
   /* Scroll-driven reveals need switching OFF, not shortening.
@@ -849,20 +911,44 @@
 
 @layer components {
   /* 1. Content arriving. A short rise on first paint for the hero, and on
-        entry for everything below it. 14px and 400ms — far enough to read as
-        motion, short enough that a fast scroller never waits for it. */
+        entry for everything below it. 14px — far enough to read as motion,
+        short enough that a fast scroller never waits for it.
+
+     ON THE TOKENS NOW, AND IT WAS NOT. The duration and the curve were written
+     here as `0.45s cubic-bezier(0.22, 0.61, 0.36, 1)` — two literals four lines
+     below the block that names --motion-enter (420ms) and --ease-out for
+     exactly this. That is how a scale becomes decorative: the tokens are
+     declared, nothing references them, and the next person to tune the timing
+     tunes the literal because it is the thing in front of them. 420ms and
+     --ease-out are close enough to what was here that the page looks unchanged;
+     what changes is that retuning entry motion is now one edit at the top of
+     this file rather than a search for every literal that happened to mean it.
+
+     ONE PAGE-LOAD MOMENT, NOT FIVE INDEPENDENT FADES. The delays are a single
+     70ms cascade indexed by --rise-step, so the hero reads top to bottom in the
+     order a person reads it and the product panel lands last, as the payoff.
+     Three elements in the old hero shared rise-3 and therefore arrived
+     simultaneously from three different places on the screen — which is not a
+     sequence, it is a flicker with a delay on it.
+
+     Deliberately capped at five steps. 70ms × 5 plus the 420ms rise is 770ms to
+     the last element; a sixth step pushes the payoff past the point where a
+     visitor has started scrolling and animates content they can no longer see
+     arrive. */
   @keyframes rise {
     from { opacity: 0; transform: translateY(14px); }
     to   { opacity: 1; transform: none; }
   }
 
   .rise {
-    animation: rise 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    animation: rise var(--motion-enter) var(--ease-out) both;
+    animation-delay: calc(var(--rise-step, 0) * 70ms);
   }
-  .rise-1 { animation-delay: 0.05s; }
-  .rise-2 { animation-delay: 0.12s; }
-  .rise-3 { animation-delay: 0.19s; }
-  .rise-4 { animation-delay: 0.26s; }
+  .rise-1 { --rise-step: 1; }
+  .rise-2 { --rise-step: 2; }
+  .rise-3 { --rise-step: 3; }
+  .rise-4 { --rise-step: 4; }
+  .rise-5 { --rise-step: 5; }
 
   /* Entry reveals. Marked in the markup with `data-reveal`, which is inert on
      its own — nothing is hidden until one of the two mechanisms below has
@@ -887,10 +973,17 @@
 
   /* Path 2, everywhere else: Base.astro adds `.reveal` — hiding the element —
      and the observer adds `.shown` when it comes into view. */
+  /* The same duration and curve as `.rise` above, from the same tokens, because
+     it is the same event seen by a browser that cannot drive it from scroll.
+     It was 0.5s ease / 0.5s cubic-bezier here against 0.45s cubic-bezier there:
+     two hand-written approximations of one intention, which is what the token
+     block exists to stop. */
   .reveal {
     opacity: 0;
     transform: translateY(18px);
-    transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.22, 0.61, 0.36, 1);
+    transition:
+      opacity var(--motion-enter) var(--ease-out),
+      transform var(--motion-enter) var(--ease-out);
   }
   .reveal.shown { opacity: 1; transform: none; }
 

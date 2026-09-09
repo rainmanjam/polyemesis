@@ -28,11 +28,21 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
         is the smallest decision on this page; whether you can operate the thing
         afterwards is the real one, and these are what answer it. Both render
         from docs/ at build time, so neither can drift from the software. */}
+    {/* NOT ACCENT-COLOURED AT REST, matching index.astro's hero. The accent
+        budget docs/DESIGN-SYSTEM.md sets is the announcement bar, half the
+        headline and the primary CTA; a standing arrow link in the same hue as
+        the one filled button on the page competes with it for the same
+        meaning. The arrow and the hover underline carry the affordance, and
+        the accent arrives on approach.
+        Inline links inside prose are deliberately NOT changed — see
+        `.doc-prose a` in global.css. There, colour separates a link from the
+        sentence around it and removing it would cost a reader something real;
+        here it decorates a link that is already unmistakably a link. */}
     <p class="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-      <a href="/docs/quickstart" class="text-primary-bright hover:underline"
+      <a href="/docs/quickstart" class="text-fg transition-colors hover:text-primary-bright hover:underline"
         >Quickstart — first stream in about five minutes →</a
       >
-      <a href="/docs/install" class="text-primary-bright hover:underline"
+      <a href="/docs/install" class="text-fg transition-colors hover:text-primary-bright hover:underline"
         >Install guide — per-platform, service files, GPU images →</a
       >
     </p>
@@ -253,7 +263,7 @@ make build            # builds the UI, embeds it, produces ./polyemesis
       <p class="mt-4">
         <a
           href="/how-to-multistream-from-obs"
-          class="inline-block py-1 text-sm text-primary-bright hover:underline"
+          class="inline-block py-1 text-sm text-fg transition-colors hover:text-primary-bright hover:underline"
         >
           The full OBS guide →
         </a>
