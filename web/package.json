@@ -18,7 +18,7 @@
     "@astrojs/markdown-satteri": "0.3.8",
     "@astrojs/sitemap": "^3.7.0",
     "@tailwindcss/vite": "^4.1.18",
-    "astro": "^7.2.9",
+    "astro": "^7.3.1",
     "mermaid": "^11.16.1",
     "motion": "^13.0.0",
     "tailwindcss": "^4.1.18",
@@ -29,5 +29,9 @@
     "jsdom": "^30.0.1",
     "vitest": "^4.1.10",
     "wrangler": "4.127.1"
+  },
+  "//overrides": "sharp is pinned up for miniflare, not for us. wrangler -> miniflare pins sharp 0.35.2, which carries the libheif advisories GHSA-g89c-p67h-r497 and GHSA-2jg2-4ch7-h545. It is a devDependency and never reaches the built site, but osv-scanner reads the whole lockfile and is right to: a dev toolchain is still a supply chain. Dependabot cannot deliver this -- wrangler 4.129.0 (#761) still resolves miniflare's own pin. The override does not add a second copy: miniflare deduplicates onto the top-level sharp 0.35.4 that astro already uses in this tree, so the vulnerable copy disappears rather than being shadowed. Remove this once miniflare ships 0.35.4 or later.",
+  "overrides": {
+    "sharp": "^0.35.4"
   }
 }
