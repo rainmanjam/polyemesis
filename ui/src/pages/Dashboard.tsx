@@ -833,7 +833,10 @@ function BulkDestinationControl({
       <ConfirmDestructive
         open={confirmStopAll.open}
         onOpenChange={confirmStopAll.onOpenChange}
-        subject={t("dash.stopAll")}
+        // No one target: this stops every running broadcast. The count is
+        // in the title and the description; a subject box would have shown
+        // the verb "Stop all".
+        subject={{ unnamed: true }}
         title={t("dash.stopAllTitle", { count })}
         description={t("dash.stopAllConsequence", { count: String(count) })}
         confirmLabel={t("dash.stopAll")}

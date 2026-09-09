@@ -30,8 +30,9 @@ import {
   splitMessage,
 } from "@/lib/chat";
 import { messageKey, useChatFeed } from "@/hooks/useChatFeed";
-import { useConfirm } from "@/hooks/useConfirm";
-import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { useConfirm, type Asks } from "@/hooks/useConfirm";
+import { ConfirmDeleteMessage } from "@/components/ConfirmDeleteMessage";
+import { chatActionSupport } from "@/lib/chatModeration";
 import { useChatSearch, type ChatSearchState } from "@/hooks/useChatSearch";
 import { ChatUserCard } from "@/components/ChatUserCard";
 import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
@@ -108,7 +109,7 @@ function MessageRow({
   compact,
 }: {
   m: ChatMessage;
-  onDelete?: (m: ChatMessage) => void;
+  onDelete?: Asks<ChatMessage>;
   /** Open the moderator's user card for whoever said this. */
   onOpenUser?: (m: ChatMessage) => void;
   /** Open the quick-action menu at a point. */
@@ -118,6 +119,11 @@ function MessageRow({
   const accent = accentFor(m.platform);
   const Icon = accent.icon;
   const [busy, setBusy] = useState(false);
+
+  // Whether this platform can delete at all, asked the same way the context
+  // menu asks it. Not `onDelete !== undefined`: the handler being wired says
+  // the OPERATOR may delete, never that the PLATFORM can.
+  const deletable = chatActionSupport(m.platform, "delete");
 
   const del = async () => {
     if (!onDelete) return;
@@ -213,14 +219,26 @@ function MessageRow({
         <MessageBody m={m} />
       </span>
 
+      {/* THE SAME GATE THE MENU USES, on the icon that does the same thing.
+          
+          `{onDelete && …}` alone was the defect fixed in ChatMessageMenu, and
+          this row icon kept it: Rumble publishes no delete API, so the trash
+          can appeared on every Rumble line, opened a confirmation promising
+          removal, and then failed against the server. Adding the confirmation
+          without adding the gate made the failure MORE convincing, not less.
+          
+          Disabled-with-the-reason rather than hidden, which is what this file
+          already does one control up: "Saying why beats a control that
+          silently does nothing." A moderator who cannot find the delete has to
+          be told the platform has none, or they go looking for their mistake. */}
       {onDelete && (
         <button
           type="button"
           onClick={() => void del()}
-          disabled={busy}
+          disabled={busy || !deletable.ok}
           aria-label={`Delete message from ${m.author.name}`}
-          title="Delete on the platform it came from"
-          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-subtle-foreground hover:text-down group-hover:flex"
+          title={deletable.ok ? "Delete on the platform it came from" : deletable.reason}
+          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-subtle-foreground hover:text-down disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-subtle-foreground group-hover:flex"
         >
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </button>
@@ -241,7 +259,7 @@ export function ChatTimeline({
   empty,
 }: {
   messages: ChatMessage[];
-  onDelete?: (m: ChatMessage) => void;
+  onDelete?: Asks<ChatMessage>;
   onOpenUser?: (m: ChatMessage) => void;
   onMenu?: (m: ChatMessage, at: { x: number; y: number }) => void;
   compact?: boolean;
@@ -643,7 +661,7 @@ export function ChatSearchResults({
   onMenu,
 }: {
   search: ChatSearchState;
-  onDelete?: (m: ChatMessage) => void;
+  onDelete?: Asks<ChatMessage>;
   onOpenUser?: (m: ChatMessage) => void;
   onMenu?: (m: ChatMessage, at: { x: number; y: number }) => void;
 }) {
@@ -710,7 +728,6 @@ export function ChatPanel({
   className?: string;
   showComposer?: boolean;
 }) {
-  const t = useT();
   const {
     messages,
     statuses,
@@ -770,18 +787,10 @@ export function ChatPanel({
 
   return (
     <div className={cn("flex min-h-0 flex-col rounded-md border border-border bg-card", className)}>
-      <ConfirmDestructive
-        open={confirmDelete.open}
+      <ConfirmDeleteMessage
+        target={confirmDelete.target}
         onOpenChange={confirmDelete.onOpenChange}
-        subject={confirmDelete.target?.author.name ?? ""}
-        title={t("chatpage.deleteTitle")}
-        description={t("chatpage.deleteBody", {
-          platform: confirmDelete.target?.platform ?? "",
-        })}
-        confirmLabel={t("chatpage.deleteConfirm")}
-        onConfirm={async () => {
-          if (confirmDelete.target) await del(confirmDelete.target);
-        }}
+        onConfirm={del}
       />
       {card && (
         <ChatUserCard

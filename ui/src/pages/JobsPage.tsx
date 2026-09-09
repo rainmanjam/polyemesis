@@ -387,7 +387,8 @@ export function JobsPage() {
               <ConfirmDestructive
                 open={purgeOpen}
                 onOpenChange={setPurgeOpen}
-                subject={t("jobs.purge")}
+                // No one target: the pool is named by `consequences` below.
+                subject={{ unnamed: true }}
                 title={t("jobs.purgeTitle")}
                 description={t("jobs.purgeDescription")}
                 consequencesLabel={t("jobs.purgeRemoves")}

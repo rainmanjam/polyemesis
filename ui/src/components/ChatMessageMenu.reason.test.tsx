@@ -5,6 +5,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 
 import { ChatMessageMenu } from "./ChatMessageMenu";
 import { moderationColumnSaysYes } from "@/lib/chatModeration";
+import type { Asks } from "@/hooks/useConfirm";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
 
 /* A REASON RENDERED WHERE NOBODY CAN REACH IT IS NOT A REASON.
@@ -33,7 +34,15 @@ const msg = (over: Partial<ChatMessage> = {}): ChatMessage =>
     ...over,
   }) as ChatMessage;
 
-const draw = (m: ChatMessage, onDelete?: (m: ChatMessage) => void) =>
+/** A stand-in for `useConfirm().ask`.
+ *
+ *  The brand on `Asks` is phantom, so minting one takes a cast. That is the
+ *  point rather than a hole: a test opting in deliberately is fine, and what
+ *  the brand prevents is PRODUCTION code passing the immediate deleter to a
+ *  prop that promises to ask first, which now cannot be written by accident. */
+const asks = (fn: (m: ChatMessage) => void = () => {}) => fn as Asks<ChatMessage>;
+
+const draw = (m: ChatMessage, onDelete?: Asks<ChatMessage>) =>
   render(
     <ChatMessageMenu
       message={m}
@@ -120,7 +129,7 @@ describe("ChatMessageMenu on a platform whose moderation column says yes", () =>
     // The other half of per-action gating, and the reason a menu-wide banner
     // is no longer the right shape: greying Delete here would be the same
     // defect pointed the other way.
-    draw(msg({ platform: "facebook" }), () => {});
+    draw(msg({ platform: "facebook" }), asks());
     expect(inert(/Delete message/)).toBe(false);
   });
 
@@ -129,7 +138,7 @@ describe("ChatMessageMenu on a platform whose moderation column says yes", () =>
     // what made a missing author id disable it for no reason.
     draw(
       msg({ platform: "facebook", author: { id: "", name: "someone" } } as Partial<ChatMessage>),
-      () => {},
+      asks(),
     );
     expect(inert(/Delete message/)).toBe(false);
     expect(inert(/Time out 1 min/)).toBe(true);
@@ -150,26 +159,26 @@ describe("ChatMessageMenu on a platform that implements nothing", () => {
     // It was `{onDelete && <DropdownMenuItem …>}` with no gate whatever, three
     // lines under this menu's own sentence saying Rumble publishes no
     // moderation API. Pressing it reached hub.go:699, which refuses.
-    draw(rumble(), () => {});
+    draw(rumble(), asks());
     expect(inert(/Delete message/)).toBe(true);
   });
 
   it("says why, on screen, in the same menu", () => {
-    draw(rumble(), () => {});
+    draw(rumble(), asks());
     expect(screen.getByText(/Rumble publishes no moderation API/)).toBeTruthy();
   });
 
   it("names the platform properly rather than echoing the lowercase id", () => {
     // platformNoun passes an unknown platform straight through, which is how
     // the menu came to print "rumble publishes no moderation API".
-    draw(rumble(), () => {});
+    draw(rumble(), asks());
     expect(screen.queryByText(/^rumble /)).toBeNull();
   });
 
   it("does not repeat one sentence once per greyed item", () => {
     // Everything in this menu is inert for the same reason, so it is said
     // once. Five copies is how a two-second shortcut turns back into a form.
-    draw(rumble(), () => {});
+    draw(rumble(), asks());
     expect(screen.getAllByText(/publishes no moderation API/)).toHaveLength(1);
   });
 });

@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import { authorReason, chatActionSupport, personActionSupport } from "@/lib/chatModeration";
 import { TIMEOUTS } from "@/lib/chat";
 import { openPlatformLink, platformLinkFor, platformNoun } from "@/lib/platformLinks";
+import type { Asks } from "@/hooks/useConfirm";
 import type { ChatMessage } from "@/lib/types";
 
 /* ===========================================================================
@@ -68,7 +69,7 @@ export function ChatMessageMenu({
   anchor: MenuAnchor;
   onClose: () => void;
   onOpenCard: (m: ChatMessage) => void;
-  onDelete?: (m: ChatMessage) => void;
+  onDelete?: Asks<ChatMessage>;
 }) {
   // Radix positions against a trigger element, and the trigger here is a point
   // rather than a control. A zero-size fixed div at the cursor is the standard

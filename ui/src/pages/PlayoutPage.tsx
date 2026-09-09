@@ -602,7 +602,8 @@ export function ShareCard({
             <ConfirmDestructive
               open={rotateOpen}
               onOpenChange={setRotateOpen}
-              subject={t("play.rotate")}
+              // No one target: rotating kills every shared link at once.
+              subject={{ unnamed: true }}
               title={t("play.rotateTitle")}
               description={t("play.rotateDescription")}
               consequencesLabel={t("play.rotateDrops")}

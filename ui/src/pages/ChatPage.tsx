@@ -17,7 +17,7 @@ import { accentFor, platformsIn } from "@/lib/chat";
 import { ChatUserCard } from "@/components/ChatUserCard";
 import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
 import { ChatRules } from "@/components/ChatRules";
-import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { ConfirmDeleteMessage } from "@/components/ConfirmDeleteMessage";
 import { useChatFeed } from "@/hooks/useChatFeed";
 import { useChatSearch } from "@/hooks/useChatSearch";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -213,27 +213,10 @@ export function ChatPage() {
               confirming click, and matching that keeps the friction
               proportional rather than making this the heaviest control in the
               pane. */}
-          <ConfirmDestructive
-            open={confirmDelete.open}
+          <ConfirmDeleteMessage
+            target={confirmDelete.target}
             onOpenChange={confirmDelete.onOpenChange}
-            subject={confirmDelete.target?.author.name ?? ""}
-            title={t("chatpage.deleteTitle")}
-            description={
-              <>
-                {t("chatpage.deleteBody", {
-                  platform: confirmDelete.target
-                    ? accentFor(confirmDelete.target.platform).label
-                    : "",
-                })}
-                <span className="mt-2 block max-h-24 overflow-y-auto rounded border border-border bg-card-raised px-2 py-1 text-[11px] leading-snug text-foreground">
-                  {confirmDelete.target?.text}
-                </span>
-              </>
-            }
-            confirmLabel={t("chatpage.deleteConfirm")}
-            onConfirm={async () => {
-              if (confirmDelete.target) await del(confirmDelete.target);
-            }}
+            onConfirm={del}
           />
 
           <ChatSearchBox search={search} />
