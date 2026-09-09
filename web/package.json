@@ -20,7 +20,7 @@
     "@tailwindcss/vite": "^4.1.18",
     "astro": "^7.3.1",
     "mermaid": "^11.16.1",
-    "motion": "^13.0.0",
+    "motion": "^13.2.0",
     "tailwindcss": "^4.1.18",
     "typescript": "^6.0.3"
   },
