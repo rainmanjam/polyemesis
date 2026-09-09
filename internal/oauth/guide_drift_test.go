@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -125,6 +126,24 @@ func TestTheGuideDriftCheckStillAllowsLegitimateCaveats(t *testing.T) {
 	}
 }
 
+// Ways a guide can tell somebody publishing is optional. Each has to mean "you
+// can leave it in Testing", not merely mention publishing.
+//
+// ONE SLICE, BOTH SURFACES. #734 put this claim in two places -- the Go guide
+// in oauth.go and the YouTube section of docs/PLATFORMS.md -- and the test
+// written to catch it walked only the Go structs. The comment above that test
+// SAYS the claim lived in both places, so the guard's own header records a
+// surface the guard does not cover: restoring the sentence in the document
+// alone reproduces #734 in full with this file green. Declared at package level
+// so the doc check below cannot drift from the guide check above.
+var publishingIsOptionalClaims = []string{
+	"do not need to publish",
+	"don't need to publish",
+	"no need to publish",
+	"without publishing",
+	"publishing is optional",
+}
+
 // A GOOGLE GUIDE MAY NOT SAY PUBLISHING IS OPTIONAL. #734.
 //
 // The YouTube guide told operators "You do not need to publish the app" for
@@ -162,15 +181,6 @@ func TestNoGoogleGuideSaysPublishingIsUnnecessaryWhileAskingForASensitiveScope(t
 		"email":   true,
 		"profile": true,
 	}
-	// Ways a guide can tell somebody publishing is optional. Each has to mean
-	// "you can leave it in Testing", not merely mention publishing.
-	claims := []string{
-		"do not need to publish",
-		"don't need to publish",
-		"no need to publish",
-		"without publishing",
-		"publishing is optional",
-	}
 
 	checked := 0
 	for _, g := range guides() {
@@ -194,7 +204,7 @@ func TestNoGoogleGuideSaysPublishingIsUnnecessaryWhileAskingForASensitiveScope(t
 			continue
 		}
 		hay := strings.ToLower(g.Note + " " + strings.Join(g.Steps, " "))
-		for _, claim := range claims {
+		for _, claim := range publishingIsOptionalClaims {
 			if strings.Contains(hay, claim) {
 				t.Errorf("the %s guide says %q while requesting %v.\n"+
 					"An External Google app left in Testing issues refresh tokens that expire "+
@@ -244,4 +254,75 @@ func TestTheYouTubeGuideWarnsAboutTheSevenDayExpiry(t *testing.T) {
 		return
 	}
 	t.Fatal("no YouTube guide found; the walk is broken")
+}
+
+// THE SAME CLAIM, ON THE OTHER SURFACE. #734.
+//
+// The guide checks above walk Go structs. The false sentence also lived in
+// docs/PLATFORMS.md -- the header on TestNoGoogleGuideSaysPublishingIsUnnecessary
+// WhileAskingForASensitiveScope says so in as many words -- and nothing has ever
+// read that file for it. platforms_doc_drift_test.go reads the same document but
+// only to compare the capability matrix; it never looks at the prose.
+//
+// So the state before this test: correct the Go guide, restore the sentence in
+// the document, and an operator following the documentation loses their YouTube
+// connection every seven days with the whole suite green. The document is the
+// surface most operators actually read.
+func TestThePlatformsDocDoesNotSayPublishingIsOptionalForYouTube(t *testing.T) {
+	section := youTubeSectionOfPlatformsDoc(t)
+	hay := strings.ToLower(section)
+
+	for _, claim := range publishingIsOptionalClaims {
+		if strings.Contains(hay, claim) {
+			t.Errorf("docs/PLATFORMS.md's YouTube section says %q.\n"+
+				"polyemesis requests https://www.googleapis.com/auth/youtube, which is "+
+				"not one of the three scopes Google exempts, so an External app left in "+
+				"Testing issues refresh tokens that expire after 7 days. The connection "+
+				"breaks weekly and the document does not warn anybody.", claim)
+		}
+	}
+
+	// The correction has to be PRESENT, not merely the false claim absent --
+	// deleting the paragraph satisfies the loop above and leaves the operator
+	// with no way to know, which is the state #734 was filed about.
+	if !strings.Contains(hay, "seven days") {
+		t.Error("docs/PLATFORMS.md's YouTube section no longer mentions the seven-day " +
+			"expiry. Removing the warning is the same defect as denying it: the " +
+			"operator chooses a publishing status without the one fact that matters.")
+	}
+}
+
+// youTubeSectionOfPlatformsDoc returns every heading about YouTube and the prose
+// under it. Both `### YouTube (Google)` and the `### What YouTube chat costs`
+// that follows it are in scope; the region ends at the first heading that is
+// about something else.
+func youTubeSectionOfPlatformsDoc(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile("../../docs/PLATFORMS.md")
+	if err != nil {
+		t.Fatalf("read PLATFORMS.md: %v", err)
+	}
+	var out []string
+	inSection := false
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "#") {
+			// A heading naming YouTube opens or continues the region; any other
+			// heading closes it.
+			inSection = strings.Contains(strings.ToLower(line), "youtube")
+		}
+		if inSection {
+			out = append(out, line)
+		}
+	}
+
+	// POSITIVE CONTROL. A renamed heading, a restructured document, or a wrong
+	// relative path all yield an empty region -- over which every assertion
+	// above passes while reading nothing at all. That is the exact failure this
+	// file keeps finding elsewhere.
+	if len(out) < 10 {
+		t.Fatalf("found %d lines of YouTube section in docs/PLATFORMS.md; the "+
+			"heading has moved or been renamed, so this test is asserting nothing",
+			len(out))
+	}
+	return strings.Join(out, "\n")
 }
