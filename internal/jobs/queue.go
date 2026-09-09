@@ -512,7 +512,36 @@ func (q *Queue) backoffFor(attempt int) time.Duration {
 // Cancel stops a job. A running job has its context cancelled — the worker is
 // responsible for killing its own child process — and the row is written when
 // it returns. A job that has not started yet is cancelled in the store.
+//
+// THE DISPATCH LOCK IS THE POINT, and it is not about serialising two Cancels.
+//
+// Which of the two paths below is correct is decided by looking in q.running,
+// and Tick creates a moment when that map gives the wrong answer: ClaimJob has
+// already written state='running' to the store, but start has not yet
+// registered the execution. A cancel arriving in that gap saw `running ==
+// false`, took the store path, and set the row to 'cancelled' — while start
+// went on to launch a worker that nothing was now holding.
+//
+// Both halves of that are bad, and the quiet one is worse. The operator's
+// cancel was later overwritten with 'done' by finish, which is merely a lie;
+// but the partial unique-target index covers state IN ('queued','running',
+// 'deferred'), so a cancelled row is OUTSIDE it. The target went free while its
+// worker still held the output, and the next submission for the same target
+// started a second worker writing the same file.
+//
+// Taking dispatchMu — the lock Tick holds across claim-and-start — makes the
+// gap unobservable rather than merely unlikely: a cancel either arrives before
+// the claim, and the row is simply cancelled where it sits, or after the
+// registration, and it finds the execution and cancels its context. There is no
+// third interleaving left to get wrong. Rung 1.
+//
+// It costs a Cancel the wait for one dispatch pass, which claims and launches;
+// it never waits for a job to RUN. Run calls wg.Wait outside this lock, so
+// shutdown cannot deadlock against it.
 func (q *Queue) Cancel(id int64) error {
+	q.dispatchMu.Lock()
+	defer q.dispatchMu.Unlock()
+
 	q.mu.Lock()
 	ex, running := q.running[id]
 	if running {
