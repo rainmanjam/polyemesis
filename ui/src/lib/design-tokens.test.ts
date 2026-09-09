@@ -161,11 +161,39 @@ describe("the app and the website hold one set of design tokens", () => {
      * find out why --warn must not be folded into --color-cross. A copy that
      * keeps the values and drops the arguments is how the next person makes the
      * same mistake with the same confidence. */
+    const block = rootBlock(appCss, "ui/src/index.css");
+    const at = siteTokensCss.indexOf(block);
     expect(
-      siteTokensCss.includes(rootBlock(appCss, "ui/src/index.css")),
+      at,
       `web/src/styles/tokens.css is not a verbatim copy of the :root block in ` +
         `ui/src/index.css. It is a generated file: ${REGENERATE}.`,
-    ).toBe(true);
+    ).toBeGreaterThanOrEqual(0);
+
+    /* CONTAINMENT IS NOT COPYING.
+     *
+     * `includes` was the whole check, and `includes` is blind to anything the
+     * file holds IN ADDITION. Append a second `:root { --color-down: hotpink }`
+     * after the generated block and every assertion in this file still passes:
+     * the copy is verbatim, it is present, the site imports it -- and the later
+     * block wins the cascade, so the website renders a palette the app has
+     * never heard of while the guard reports one design system.
+     *
+     * It is also the likeliest way for this file to be edited. The header says
+     * DO NOT EDIT, which is rung 0, and the natural way to disregard it is to
+     * leave the generated part alone and add underneath. */
+    expect(
+      siteTokensCss.slice(at + block.length).trim(),
+      `web/src/styles/tokens.css has content AFTER the generated :root block. ` +
+        `Whatever it declares wins the cascade over the block above it, so the ` +
+        `website stops rendering the app's palette while every other assertion ` +
+        `here still passes. Put the change in ui/src/index.css: ${REGENERATE}.`,
+    ).toBe("");
+
+    expect(
+      [...siteTokensCss.matchAll(/^:root\s*\{$/gm)].length,
+      `web/src/styles/tokens.css declares more than one :root block. Only the ` +
+        `generated one is checked against the app; the others are unguarded.`,
+    ).toBe(1);
   });
 
   it("has the website actually including the block, not merely holding it", () => {
@@ -198,7 +226,26 @@ describe("the website reads shared values rather than restating them", () => {
     const shared = new Map(
       [...tokensIn(appCss, "ui/src/index.css")].map(([name, value]) => [value, name]),
     );
-    const theme = siteCss.slice(siteCss.indexOf("@theme {"));
+    /* THE ANCHOR IS CHECKED BEFORE IT IS USED.
+     *
+     * `indexOf` returns -1 when the anchor is gone, and `slice(-1)` is the LAST
+     * CHARACTER of the file -- so the loop below walks one byte, matches
+     * nothing, and reports no restated literals. The guard does not fail when
+     * it loses its footing; it passes, over nothing.
+     *
+     * The move that does it is ordinary and correct: Tailwind v4's own docs use
+     * `@theme inline {`, and renaming the block that way is a legitimate edit
+     * that silently switches this check off for good. */
+    const themeAt = siteCss.indexOf("@theme {");
+    expect(
+      themeAt,
+      "web/src/styles/global.css has no `@theme {` block. This test slices from " +
+        "that anchor, and a missing one makes it scan a single character and " +
+        "pass over nothing -- so the anchor is asserted rather than assumed. If " +
+        "the block was renamed (`@theme inline {` is the Tailwind v4 spelling), " +
+        "update the anchor here in the same commit.",
+    ).toBeGreaterThanOrEqual(0);
+    const theme = siteCss.slice(themeAt);
     const restated: string[] = [];
     for (const m of stripComments(theme).matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
       const name = m[1];
