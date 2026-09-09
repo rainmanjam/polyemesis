@@ -1,4 +1,22 @@
 @import "tailwindcss";
+/* THE DESIGN SYSTEM ITSELF, and everything below this line is a consumer of it.
+ *
+ * tokens.css is the app's :root block — ui/src/index.css — copied verbatim by
+ * scripts/sync-design-tokens.mjs. It is plain CSS custom properties with no
+ * Tailwind syntax in it, which is the property that lets two projects with two
+ * build systems share one palette; docs/DESIGN-SYSTEM.md calls that split
+ * ":root is the system, @theme is one consumer".
+ *
+ * IMPORTED AFTER TAILWIND ON PURPOSE, and it is load-bearing rather than
+ * tidiness. `@import "tailwindcss"` opens @layer theme/base/components/
+ * utilities and puts Tailwind's own defaults inside them. tokens.css is
+ * unlayered, and unlayered author styles beat every layer — so the shared
+ * --font-sans and --font-mono override the ui-sans-serif/ui-monospace stacks
+ * Tailwind would otherwise hand to `font-sans` and `font-mono`, without this
+ * file having to restate either family. That is why neither appears in the
+ * @theme block below.
+ */
+@import "./tokens.css";
 
 /* ---------------------------------------------------------------------------
    Tokens.
@@ -47,35 +65,70 @@
    token belongs in that list by name, with its meaning stated, not slipped in
    as a one-off hex value on a component.
 
-   A BRAND SPINE, NOT A COINCIDENCE. --color-ink, --color-primary,
-   --color-primary-dim, --color-live, --color-live-dim and --color-meter are
-   bit-for-bit the app's own --background, --primary, --primary-dim, --live,
-   --live-dim and --armed (ui/src/index.css). That equality is the point: one
-   product, one set of brand facts, restated here because Astro/Tailwind and
-   Vite/Tailwind share no build step that could hold one literal both read.
-   Each is marked SPINE below; the mirrored note lives in ui/src/index.css.
+   THE APP'S VALUES, READ RATHER THAN RESTATED. This block used to hold its own
+   copy of the app's literals and a comment promising six of them were
+   bit-for-bit identical. Nothing checked the promise, and by the time anyone
+   measured, --color-surface, --color-muted and --color-down were all different
+   colours from the app tokens of the same name — and the site loaded IBM Plex
+   Sans and JetBrains Mono while the app rendered in whatever the operating
+   system supplied. Two products, one claim of a shared palette, four typefaces.
 
-   --color-cross is deliberately NOT on that list — see its own note below.
+   So a token below is either `var(--something)` reading the shared block, or it
+   is site-only AND SAYS WHY. There is no third kind. Restating an app value as
+   a literal here is the specific mistake this file has already made once.
+
+   THE MAPPING IS BY ROLE, NOT BY SPELLING, and two names make that necessary:
+
+     - The app's --surface is the PAGE it paints; this site's --color-surface is
+       a CARD's fill, and the page here is --color-ink. Wiring them by name
+       would have put the app's page colour behind every card, 1.8% of lightness
+       off the page they sit on, and dissolved the card edges the layout depends
+       on. The card level in DESIGN-SYSTEM.md's elevation table is --card, so
+       that is what --color-surface reads.
+     - The app's --muted is an inert FILL (a slider track); this site's
+       --color-muted is secondary TEXT. Taking the fill by name would have set
+       every secondary line to oklch 25% on a 16% ground — unreadable rather
+       than merely wrong. The app token that means what this one means is
+       --muted-foreground.
+
+   --color-cross is deliberately NOT read from the app's --warn, even though the
+   two are equal today — see its own note below.
    --------------------------------------------------------------------------- */
 
 @theme {
   /* Space Grotesk carries the headings: mechanical and geometric, and audibly
      not the Inter that every adjacent developer tool uses. Plex Sans carries
      body copy because Grotesk gets tiring below 15px and this page is dense.
-     JetBrains Mono carries every number, route and config line. */
+     JetBrains Mono carries every number, route and config line.
+
+     SITE-ONLY, and the only one of the three still declared here. A display
+     face is a marketing need: the console's largest step is a 28px page title,
+     so there is nothing there for a headline face to do, and shipping a third
+     woff2 into the binary would buy a family nothing may use.
+
+     --font-sans and --font-mono are deliberately absent. Both now come from the
+     shared block imported at the top of this file, which is unlayered and
+     therefore beats the defaults Tailwind puts in @layer theme — the app self-
+     hosts the same two woff2 files and names the same two stacks, so the
+     product renders in one pair of typefaces for the first time. Re-declaring
+     either name here would take that back silently. */
   --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* --- 60 / NEUTRAL --- */
-  --color-ink: oklch(15.9% 0.0091 264.3); /* SPINE: == app --background (ui/src/index.css) */
-  --color-surface: oklch(19.6% 0.0149 266.8);
-  --color-raised: oklch(22.9% 0.0215 260.5);
-  --color-line: oklch(28.1% 0.0256 265.4);
-  --color-line-strong: oklch(32.3% 0.0317 259.7);
+  --color-ink: var(--background); /* the page; the app paints its shell with it */
+  /* Not var(--surface) — see "the mapping is by role" above. This is a card
+     fill, and the app's card fill is --card. */
+  --color-surface: var(--card);
+  --color-raised: var(--card-raised);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
 
-  --color-fg: oklch(95.9% 0.0097 252.8);
-  --color-muted: oklch(72.9% 0.0293 253.3);
+  --color-fg: var(--foreground);
+  /* The app's --muted-foreground, NOT its --muted: this token is secondary
+     text and --muted is a slider track. Reads 6.39:1 on --color-ink, 5.84 on a
+     card and 5.41 on a raised card, so the WCAG headroom the note below insists
+     on for --color-subtle holds here too. */
+  --color-muted: var(--muted-foreground);
   /* WCAG AA, and it was not. Lighthouse (desktop, 2026-08-16) failed
      color-contrast on twelve nodes: #6b7686 measured 4.22 against --color-bg
      #0b0d11 and 4.13 against the raised #0e1015, where 4.5 is required for text
@@ -85,33 +138,55 @@
      #7d8798 is not the minimum that passes. #727c8b clears it at 4.60/4.50,
      and 4.50 is the threshold itself: any later darkening of a background, or a
      browser rounding differently, puts it back in breach. This value measures
-     5.36 and 5.25, which leaves room to move without re-failing. */
+     5.36 and 5.25, which leaves room to move without re-failing.
+
+     SITE-ONLY FOR THAT REASON. The app's token of this meaning is
+     --subtle-foreground, and it is oklch 51.2%, which measures 3.41:1 on this
+     page's ground — a contrast failure on a marketing site that is read at
+     arm's length on a phone in daylight, not in a dark control room where it
+     is a placeholder in a form the operator is already looking at. This is the
+     one place the two products are allowed to disagree about a neutral, and
+     the disagreement is a measurement rather than a preference. */
   --color-subtle: oklch(62.1% 0.0282 261.1);
 
   /* --- 30 / THE ONE ACCENT --- */
-  --color-primary: oklch(60.2% 0.1177 263.2); /* SPINE: == app --primary (ui/src/index.css) */
+  --color-primary: var(--primary);
+  /* Site-only: a lighter step of the accent for link text and hover, which the
+     console has no use for — a button there is the accent or it is not. */
   --color-primary-bright: oklch(71.9% 0.1090 257.4);
-  --color-primary-dim: oklch(31.3% 0.0447 262.9); /* SPINE: == app --primary-dim */
+  --color-primary-dim: var(--primary-dim);
 
   /* --- 10 / SIGNAL, SATURATED. Every token below spends real meaning — see
      the reservation at the top of this file and the track-colour note further
      down — so a new one here is a decision about a new kind of state, not a
      free accent colour. --- */
-  --color-live: oklch(75.6% 0.1840 149.9); /* SPINE: == app --live */
-  --color-live-dim: oklch(32.4% 0.0629 154.8); /* SPINE: == app --live-dim */
-  /* active crosspoint ONLY (see the reservation above). NOT SPINE: this used
-     to be bit-for-bit the app's --warn (ui/src/index.css — "reconnecting,
-     degraded, near clip"), which was a coincidence, not a shared brand fact —
-     a crosspoint being lit and a stream degrading are unrelated states that
-     happened to land on the same oklch literal. Holding the app's exact value
-     invited exactly the mistake this rule exists to prevent: someone "syncing
-     the palettes" and moving an operator's degraded-stream colour because a
-     designer retuned this crosspoint. If a future pass proposes folding these
-     two into one token, that is the mistake -- refuse it here. */
+  --color-live: var(--live);
+  --color-live-dim: var(--live-dim);
+  /* active crosspoint ONLY (see the reservation above). THE ONE SIGNAL COLOUR
+     THAT IS DELIBERATELY NOT READ FROM THE SHARED BLOCK, and the literal is the
+     point: it is bit-for-bit the app's --warn (ui/src/index.css — "reconnecting,
+     degraded, near clip"), and that is a coincidence rather than a shared brand
+     fact — a crosspoint being lit and a stream degrading are unrelated states
+     that happened to land on the same oklch literal. Writing `var(--warn)` here
+     would make the coincidence structural, and the next person to retune a
+     crosspoint on a marketing page would move an operator's degraded-stream
+     colour without ever opening the app. The duplication is the safety. If a
+     future pass proposes folding these two into one token, that is the mistake
+     -- refuse it here, and note that ui/src/lib/design-tokens.test.ts does not
+     require this line to be a var() for exactly this reason. */
   --color-cross: oklch(76.5% 0.1399 72.9);
   --color-cross-dim: oklch(31.4% 0.0482 83.5);
-  --color-meter: oklch(72.1% 0.1065 216.8); /* SPINE: == app --armed */
-  --color-down: oklch(64.7% 0.1678 23.0);
+  --color-meter: var(--armed);
+  /* WAS oklch(64.7% 0.1678 23.0) — a near-miss of the app's --down that no
+     decision ever produced. The app's value is the one the product ships in
+     every failed-destination badge, so it is the one that is right, and it is
+     what a reader compares a screenshot against. Measured where this token is
+     actually used before taking it: 4.98:1 on --color-ink (the calculator's
+     hard-warning box) and 4.55:1 on --color-surface (the matrix's "silent"
+     readout), both above the 4.5 small-text floor. It would NOT clear it on
+     --color-raised at 4.22, so if a red label ever lands on a raised card, that
+     is the case to measure rather than assume. */
+  --color-down: var(--down);
   /* Two more TRACK colours. The hero panel names four tracks at once — mic,
      music, co-host, game — and the palette had only two that read as signal, so
      three of the four chips would have had to share one.
@@ -133,12 +208,13 @@
 
      A console animates to EXPLAIN a state change, never to decorate one. On
      the marketing site the equivalent rule is that motion should look like
-     instrumentation behaving, not like a page being pleased with itself. --- */
-  --motion-instant: 90ms; /* hover, focus, press */
-  --motion-quick: 160ms; /* disclosure, hover reveal */
-  --motion-settle: 260ms; /* larger state change */
-  --motion-enter: 420ms; /* content arriving on scroll */
-  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+     instrumentation behaving, not like a page being pleased with itself.
+
+     --motion-instant, --motion-quick, --motion-settle and --ease-out are no
+     longer declared here: they are in the shared block, which is where "the
+     same scale" stops being a claim about two files and becomes one file. Only
+     the two the console has no equivalent for are still site-only. --- */
+  --motion-enter: 420ms; /* content arriving on scroll; nothing arrives in a console */
   /* Symmetric, for anything that breathes rather than arrives. */
   --ease-breath: cubic-bezier(0.4, 0, 0.6, 1);
 }

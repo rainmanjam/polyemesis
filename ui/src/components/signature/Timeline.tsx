@@ -102,6 +102,10 @@ interface Palette {
   armed: string;
   muted: string;
   text: string;
+  /** The mono stack, as a font-family list. A canvas takes no class and
+   *  inherits no stylesheet, so a face this component does not name is a face
+   *  it does not get. */
+  mono: string;
 }
 
 // index.css is authoritative; these literals only exist because a canvas
@@ -118,6 +122,7 @@ function readPalette(): Palette {
     armed: cssVar("--armed", "#45b5d0"),
     muted: cssVar("--subtle-foreground", "#5d6779"),
     text: cssVar("--muted-foreground", "#8b94a7"),
+    mono: cssVar("--font-mono", "ui-monospace, SFMono-Regular, monospace"),
   };
 }
 
@@ -639,7 +644,12 @@ function drawRuler(
   const first = Math.ceil(st.viewStartMs / step) * step;
   ctx.strokeStyle = p.grid;
   ctx.fillStyle = p.text;
-  ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
+  /* THE TIMECODES ARE THE ONE THING ON THIS CANVAS AN OPERATOR READS DIGIT BY
+     DIGIT, and until the app self-hosted JetBrains Mono this line was the only
+     place in the console that could not follow the token: a hardcoded stack
+     drew them in SF Mono on a Mac and Consolas on Windows while every other
+     figure in the app used --font-mono. Read like every colour above it. */
+  ctx.font = `9px ${p.mono}`;
   ctx.textBaseline = "top";
   for (let ms = first; ms <= st.viewStartMs + st.span; ms += step) {
     const px = Math.round(x(ms)) + 0.5;
