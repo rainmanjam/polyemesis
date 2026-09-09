@@ -2,6 +2,43 @@ package supervisor
 
 import "testing"
 
+/* THESE COUNTERS ARE PACKAGE-LEVEL AND WRITTEN FROM A GOROUTINE.
+ *
+ * supervisor.go:1108/1115 call noteTeardown inside the `go func()` that watches
+ * a stopping child, so a teardown started by an EARLIER test in this package
+ * lands whenever that child happens to exit -- which can be after the next test
+ * has already called resetTeardownsForTest(). Nothing serialises the two: the
+ * tests do not run in parallel, but the goroutine outlives the test that
+ * started it.
+ *
+ * Every assertion of the form `len(got) != 1` therefore had a race with the
+ * rest of the package, and it fired: TestCleanTeardownsAreCountedAtAll failed
+ * on macos-latest with a stray second kind in the tally. A slower runner widens
+ * the window; it does not create it.
+ *
+ * Two changes make the premise true instead of hoping for it:
+ *
+ *   - Each test uses a kind no production Spec has, so a real teardown cannot
+ *     land in the row under assertion.
+ *   - Assertions read THAT KIND's row rather than the length of the whole
+ *     tally, so a foreign row is irrelevant rather than fatal.
+ *
+ * resetTeardownsForTest stays: it keeps one test's rows out of the next one's
+ * ordering assertions. It just is no longer load-bearing for correctness.
+ */
+
+// statsFor returns the tally row for one kind, and a zero row when the kind has
+// no entry -- which is a legitimate answer meaning "nothing was counted".
+func statsFor(t *testing.T, kind string) TeardownStats {
+	t.Helper()
+	for _, s := range Teardowns() {
+		if s.Kind == kind {
+			return s
+		}
+	}
+	return TeardownStats{Kind: kind}
+}
+
 // The counter exists to answer one question the logs cannot: what FRACTION of
 // teardowns had to be killed. So the property that matters is not that kills
 // are counted -- the log already did that, badly -- but that clean teardowns
@@ -13,14 +50,14 @@ func TestCleanTeardownsAreCountedAtAll(t *testing.T) {
 	// The whole point. Before this, a teardown that went perfectly wrote
 	// nothing anywhere: supervise() returns on context cancellation before it
 	// reaches the exit log, so success was invisible and no ratio existed.
-	noteTeardown("ingest", false)
+	noteTeardown("test-clean", false)
 
-	got := Teardowns()
-	if len(got) != 1 || got[0].Total != 1 {
+	got := statsFor(t, "test-clean")
+	if got.Total != 1 {
 		t.Fatalf("a clean teardown was not counted: %+v", got)
 	}
-	if got[0].Kills != 0 {
-		t.Errorf("clean teardown counted as a kill: %+v", got[0])
+	if got.Kills != 0 {
+		t.Errorf("clean teardown counted as a kill: %+v", got)
 	}
 }
 
@@ -29,9 +66,9 @@ func TestKillsAreASubsetOfTotal(t *testing.T) {
 	// increment Total, the ratio would exceed 1 and the number would be
 	// nonsense in the direction that causes a false alarm.
 	resetTeardownsForTest()
-	noteTeardown("meters", true)
+	noteTeardown("test-kill", true)
 
-	got := Teardowns()[0]
+	got := statsFor(t, "test-kill")
 	if got.Total != 1 || got.Kills != 1 {
 		t.Fatalf("kill did not increment both counters: %+v", got)
 	}
@@ -42,11 +79,11 @@ func TestTheRatioIsComputable(t *testing.T) {
 	// visible as such rather than as a stream of unscaled log lines.
 	resetTeardownsForTest()
 	for range 3 {
-		noteTeardown("preview", true)
+		noteTeardown("test-ratio", true)
 	}
-	noteTeardown("preview", false)
+	noteTeardown("test-ratio", false)
 
-	got := Teardowns()[0]
+	got := statsFor(t, "test-ratio")
 	if got.Total != 4 || got.Kills != 3 {
 		t.Fatalf("want 3 of 4, got %+v", got)
 	}
@@ -57,20 +94,15 @@ func TestKindsAreSeparate(t *testing.T) {
 	// one may have lost a flush, the other has nothing to lose. Merging them
 	// into one number hides exactly the distinction worth alerting on.
 	resetTeardownsForTest()
-	noteTeardown("recorder", true)
-	noteTeardown("meters", false)
-	noteTeardown("meters", false)
+	noteTeardown("test-recorder", true)
+	noteTeardown("test-meters", false)
+	noteTeardown("test-meters", false)
 
-	got := Teardowns()
-	if len(got) != 2 {
-		t.Fatalf("want two kinds, got %+v", got)
+	if m := statsFor(t, "test-meters"); m.Total != 2 || m.Kills != 0 {
+		t.Errorf("meters: %+v", m)
 	}
-	// Sorted by kind, so meters precedes recorder.
-	if got[0].Kind != "meters" || got[0].Total != 2 || got[0].Kills != 0 {
-		t.Errorf("meters: %+v", got[0])
-	}
-	if got[1].Kind != "recorder" || got[1].Kills != 1 {
-		t.Errorf("recorder: %+v", got[1])
+	if r := statsFor(t, "test-recorder"); r.Total != 1 || r.Kills != 1 {
+		t.Errorf("recorder: %+v", r)
 	}
 }
 
@@ -80,8 +112,8 @@ func TestAnUnnamedKindStillCounts(t *testing.T) {
 	resetTeardownsForTest()
 	noteTeardown("", true)
 
-	got := Teardowns()
-	if len(got) != 1 || got[0].Kind != "unknown" || got[0].Total != 1 {
+	got := statsFor(t, "unknown")
+	if got.Total != 1 {
 		t.Fatalf("an unnamed kind was dropped from the tally: %+v", got)
 	}
 }
