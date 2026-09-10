@@ -289,11 +289,38 @@ async function maskPublishTokens(page: import("@playwright/test").Page) {
     return { tokens: tokens.length, hits };
   });
 
-  // Asserted, not assumed. A mask that silently matched nothing -- the field
-  // moved, the API shape changed -- leaves the credential on screen and reports
-  // success, which is the failure this whole function exists to prevent.
+  // The API must still hand out credentials, or this function is masking an
+  // empty set and every check below it is vacuous.
   expect(masked.tokens, "no publish tokens came back from the API").toBeGreaterThan(0);
-  expect(masked.hits, "the tokens were never found on the page to mask").toBeGreaterThan(0);
+
+  /* `hits > 0` USED TO BE ASSERTED HERE, and it was a proxy for the property
+   * that matters rather than the property itself.
+   *
+   * The reasoning was sound when written: a mask that matched nothing might
+   * mean the field had moved, leaving the credential on screen. But the
+   * product has since started masking its own credentials -- SecretCode
+   * renders `"•".repeat(16)` and puts the real value in the DOM only when the
+   * operator reveals it -- so on this page there is now legitimately nothing
+   * for this sweep to hit. The assertion began failing on a page that had
+   * become SAFER, and it blocked 05-sources.png from ever being refreshed.
+   *
+   * Deleting it outright would restore the original hazard, so it is not
+   * deleted so much as relocated: assertNoTokenSurvived, which runs after the
+   * shutter, checks the real question directly -- is any live token present in
+   * the page's text or in any field value. A field that moves and leaks fails
+   * THAT, whether or not this sweep found anything. The mask stays because a
+   * future page may well print a token in plain text again; it just no longer
+   * has to succeed for the shot to be taken.
+   *
+   * `hits` is returned for the log rather than thrown away, because "the mask
+   * hit nothing" is worth being able to see when a shot looks wrong. */
+  if (masked.hits === 0) {
+    // eslint-disable-next-line no-console
+    console.log(
+      "capture: no plaintext token found to mask -- the page masks its own " +
+        "credentials. assertNoTokenSurvived below is what proves the shot is clean.",
+    );
+  }
 }
 
 /** Reads the page back AFTER the shutter and fails if a token is on it.
