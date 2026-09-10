@@ -2132,6 +2132,27 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	// equal while being a different object to unsubscribe from.
 	hub := e.downstreamHub()
 	if hub == nil {
+		// THE PORT GOES BACK, for symmetry rather than for a reproduction.
+		//
+		// Every other return below the allocation above releases it -- the
+		// subscribe failure, the stopped re-check before the publish -- and this
+		// one did not. A return that keeps a port while its siblings give theirs
+		// up is a bug whether or not anything reaches it today.
+		//
+		// REACHABILITY IS NARROW AND IS NOT CLAIMED TO BE THE WINDOWS FAILURE.
+		// previewFlowing, called a few lines above, itself returns false when
+		// downstreamHub() is nil -- so getting here needs the hub to disappear
+		// BETWEEN that call and this one, which a failover can do and a
+		// single-threaded test cannot. An attempt to pin it with a test that
+		// nils the hub up front was deleted: previewFlowing refuses first, so the
+		// test never allocated a port and passed against the unfixed code too.
+		//
+		// windows-latest failed TestAPreviewStartThatPublishesIntoAShutdown
+		// StartsNothing on exactly this assertion ("a publish that refuses must
+		// give the port back") and that failure remains UNEXPLAINED. Every path
+		// in that test's route releases, so this fix is not known to be its
+		// cause. It is here because it is right, not because it was measured.
+		e.releasePort(port)
 		return
 	}
 	e.mu.Lock()
