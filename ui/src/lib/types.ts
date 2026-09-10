@@ -987,6 +987,62 @@ export interface Status {
    *  matches on; `reason` is the sentence a person reads, and may be reworded
    *  freely -- so the UI renders `reason` and never branches on it. */
   destinationHold?: { code: string; reason: string } | null;
+  /** The source-selector tier's live state, absent unless failover is running
+   *  -- which is the default, so absent is the ordinary reading.
+   *
+   *  Mirrors engine.Status.Failover, whose comment says why it is on the wire
+   *  at all: "a failover nobody notices is how an operator discovers at the end
+   *  of a broadcast that they streamed the backup all night." It was on the
+   *  wire and declared nowhere here, so no screen could read it -- and the
+   *  switch BACK, POST /failover/source, had no caller in the console either.
+   *
+   *  THE SNAPSHOT IS NOT SOURCE-SCOPED. The status socket is install-wide and
+   *  every engine publishes onto it, so on a multi-programme install this
+   *  describes whichever engine spoke last. `source.id` names which one; a
+   *  reader that acts on this must check it against the programme it is
+   *  showing, exactly as the preview grid does. See Dashboard.tsx. */
+  failover?: FailoverStatus | null;
+}
+
+/** Which input the failover selector has on air.
+ *
+ *  Mirrors engine.sourceKind. The empty string is engine's `sourceNone` -- no
+ *  pin, or nothing decided yet -- and is never something an operator asks for,
+ *  which is why the request type below is a different union. */
+export type FailoverSource = "primary" | "backup" | "slate" | "playlist" | "";
+
+/** What POST /failover/source accepts.
+ *
+ *  "auto" is NOT a source: it clears the operator's pin and hands the decision
+ *  back to the detector. Kept out of FailoverSource above so a status field and
+ *  a request field cannot be confused for each other -- the server would take
+ *  "" as an unknown source and answer 400. */
+export type FailoverPin = "primary" | "backup" | "slate" | "playlist" | "auto";
+
+/** The failover tier as the server reports it. Mirrors engine.FailoverStatus.
+ *
+ *  `pinned` is the operator's standing manual choice and is absent while the
+ *  detector is in charge. It is honoured ONLY while that source is delivering,
+ *  so `pinned` and `active` legitimately disagree -- a pin on a primary that
+ *  has not come back yet leaves the backup on air and takes effect the moment
+ *  it does. A screen that renders one as the other would tell an operator the
+ *  switch already happened. */
+export interface FailoverStatus {
+  active: FailoverSource;
+  /** Why the selector last moved, in the server's own words. Empty when
+   *  nothing changed on the sweep that produced this snapshot. */
+  reason?: string;
+  pinned?: FailoverSource;
+  switchedAt: string;
+  switches: number;
+  error?: string;
+  relayPort?: number;
+  primaryLive: boolean;
+  backupLive: boolean;
+  backupEnabled: boolean;
+  slateEnabled: boolean;
+  feed?: ProcessStatus | null;
+  backup?: ProcessStatus | null;
 }
 
 /** peak[track][channel] and rms[track][channel], in dBFS. */
@@ -1456,6 +1512,16 @@ export interface PlayoutVariant {
 
 export interface PlayoutSettings {
   enabled: boolean;
+  /** WHICH PROGRAMME the public page serves. Read by playout.go:273 as
+   *  `set.Playout.SourceID`, and this interface omitted it entirely: nothing
+   *  in ui/ could read the field back or write a new one, so a multi-source
+   *  install had no way to choose which programme its one public page shows
+   *  short of editing the database by hand.
+   *
+   *  Null (the JSON key is `omitempty`) is the default programme -- every
+   *  single-source install, unchanged. See PlayoutPage's ProgrammeCard for
+   *  where this is set. */
+  sourceId?: SourceId | null;
   /** Serves playlists and segments without an admin session. Off by default. */
   public: boolean;
   /** Sends CORS headers on the media so a player on another site can fetch it,
@@ -3157,6 +3223,13 @@ export interface Hook {
   triggers: HookTrigger[];
   timeoutSeconds: number;
   maxAttempts: number;
+  /** The operator saying they meant an endpoint on their own network.
+   *
+   *  Mirrors hooks.Hook.AllowPrivateTarget, and see the twin on AlertRule in
+   *  pages/AutomationPage.tsx: the server refuses a LAN, loopback or metadata
+   *  address without it and its 400 names the field by this spelling, so a
+   *  console that could not set it turned that refusal into a dead end. */
+  allowPrivateTarget?: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -173,3 +173,52 @@ describe("ConfirmDestructive speaks the operator's language", () => {
     );
   });
 });
+
+/* THE NAME MUST BE ON SCREEN EVEN WHEN NOTHING HAS TO BE TYPED.
+ *
+ * `subject` was rendered ONLY inside the requireTyping block. Nineteen of the
+ * twenty-six call sites pass the name of the exact row being destroyed and do
+ * not ask for typing; fifteen of those named the thing NOWHERE, because their
+ * titles and descriptions are static translated strings with no interpolation.
+ * Three webhooks, three identical dialogs -- the mis-click this component was
+ * built to catch was invisible in the majority of the dialogs it rendered.
+ *
+ * Deleting the render block must fail a test, or the prop can quietly go back
+ * to being accepted and discarded.
+ */
+describe("ConfirmDestructive names what it is about to destroy", () => {
+  afterEach(cleanup);
+
+  const showPlain = (subject: string | { unnamed: true }) =>
+    render(
+      <ConfirmDestructive
+        open
+        onOpenChange={() => {}}
+        subject={subject as string}
+        title="Delete rule"
+        description="Static prose that does not name the rule."
+        confirmLabel="Delete"
+        onConfirm={() => {}}
+      />,
+    );
+
+  it("shows the subject with no typed challenge in play", () => {
+    showPlain("spam-filter-v2");
+    expect(
+      screen.getByText("spam-filter-v2"),
+      "the dialog names neither the rule in its title nor its description, so " +
+        "dropping the subject leaves three rules with three identical dialogs",
+    ).toBeTruthy();
+  });
+
+  /* POSITIVE CONTROL. If the assertion above passed because getByText matches
+   * something incidental, this would pass too -- and it must not. */
+  it("shows no name when the caller declared there is no single target", () => {
+    showPlain({ unnamed: true });
+    expect(screen.queryByText("spam-filter-v2")).toBeNull();
+    expect(
+      screen.queryByText("[object Object]"),
+      "a bulk dialog must not stringify its own subject marker into the UI",
+    ).toBeNull();
+  });
+});

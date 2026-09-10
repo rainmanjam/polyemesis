@@ -32,20 +32,12 @@ import { useT } from "@/lib/i18n";
    trained out of them exactly where it mattered.
    =========================================================================== */
 
-export interface ConfirmDestructiveProps {
+interface ConfirmDestructiveBase {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** What is being destroyed, e.g. "rec-20260727.mkv". */
-  subject: string;
   title: string;
   /** What will happen, in the operator's terms. */
   description: React.ReactNode;
-  /** Requires the subject to be typed before the action unlocks.
-   *
-   *  Reserve this for things that do not come back: a deleted file, a revoked
-   *  credential, a cascade. Using it on recoverable actions is how a control
-   *  becomes a reflex, and a reflex is not a control. */
-  requireTyping?: boolean;
   /** The blast radius, when the action reaches beyond its subject. Shown as
    *  counts rather than prose: confirming a number is a decision, confirming a
    *  vibe is a click. */
@@ -68,6 +60,49 @@ export interface ConfirmDestructiveProps {
   confirmLabel?: string;
   onConfirm: () => void | Promise<void>;
 }
+
+/* A NAMED TARGET, OR AN EXPLICIT DECLARATION THAT THERE ISN'T ONE.
+   
+   `subject` used to be a plain string that was RENDERED ONLY under
+   `requireTyping`. Nineteen of twenty-six call sites passed the name of the
+   exact row being destroyed and the dialog displayed none of it: fifteen of
+   them named the thing nowhere at all, because their titles and descriptions
+   are static translated strings. An operator with three webhooks got the same
+   dialog whichever one they clicked, which is precisely the mis-click this
+   component exists to catch.
+   
+   Two devices, both rung 1:
+   
+   1. A string subject is ALWAYS displayed. Passing a name and having it
+      silently dropped is no longer expressible.
+   2. `requireTyping` cannot be combined with an unnamed subject. Asking an
+      operator to type a name that does not exist would leave the button
+      locked forever; it is now a compile error rather than a dead dialog.
+   
+   The bulk actions -- purge history, stop all, rotate the link -- have no one
+   target, and used to pass their own BUTTON LABEL as the subject ("Stop all").
+   That is a verb, and displaying it would have read as nonsense. They now say
+   `{ unnamed: true }`, which is a deliberate declaration rather than a
+   placeholder, and they carry `consequences` to say what the set contains. */
+export type ConfirmDestructiveProps =
+  | (ConfirmDestructiveBase & {
+      /** The one thing being destroyed, e.g. "rec-20260727.mkv". Shown in the
+       *  dialog, so a mis-click on the wrong row is visible before it lands. */
+      subject: string;
+      /** Requires the subject to be typed before the action unlocks.
+       *
+       *  Reserve this for things that do not come back: a deleted file, a
+       *  revoked credential, a cascade. Using it on recoverable actions is how
+       *  a control becomes a reflex, and a reflex is not a control. */
+      requireTyping?: boolean;
+    })
+  | (ConfirmDestructiveBase & {
+      /** No single target: a purge, a stop-all, a link rotation. Say what the
+       *  set contains with `consequences` -- a set is confirmed by its count. */
+      subject: { unnamed: true };
+      /** Unavailable here: there is no name to type. */
+      requireTyping?: never;
+    });
 
 export function ConfirmDestructive({
   open,
@@ -108,7 +143,12 @@ export function ConfirmDestructive({
   // place the rule lives, rather than trusting seven call sites to keep being
   // careful. An eighth caller passing `dest?.name ?? ""` is an ordinary line of
   // code, and it must not be able to turn the control off.
-  const unlocked = !requireTyping || (subject !== "" && typed.trim() === subject);
+  // `null` when the caller declared there is no single target. The union above
+  // makes `requireTyping` unreachable in that case, so the second clause can
+  // never be the thing that locks a bulk dialog shut.
+  const named = typeof subject === "string" ? subject : null;
+
+  const unlocked = !requireTyping || (named !== null && named !== "" && typed.trim() === named);
 
   // The template, not the rendered string: the subject is a styled element
   // rather than text, so the sentence is split at the `{subject}` token and the
@@ -136,6 +176,20 @@ export function ConfirmDestructive({
           </DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
+
+        {/* THE NAME, ALWAYS, IN ONE PLACE.
+            
+            Above the consequences panel rather than below it, because the
+            order the operator reads in is "what am I destroying" and only
+            then "what else does that take with it". Monospace and unstyled
+            by locale: a filename is a filename in every language, and the
+            uppercase Label treatment that broke the typing prompt (see below)
+            has no business anywhere near a name being matched by eye. */}
+        {named !== null && named !== "" && (
+          <div className="rounded-md border border-border bg-muted/40 px-2.5 py-1.5 font-mono text-[13px] font-semibold break-words">
+            {named}
+          </div>
+        )}
 
         {consequences && consequences.length > 0 && (
           <div className="flex flex-col gap-1 rounded-md border border-down/40 bg-down-dim/20 px-2.5 py-2">
@@ -183,7 +237,7 @@ export function ConfirmDestructive({
                 <Fragment key={i}>
                   {i > 0 && (
                     <span className="font-mono font-semibold normal-case">
-                      {subject}
+                      {named}
                     </span>
                   )}
                   {part}
@@ -195,7 +249,7 @@ export function ConfirmDestructive({
               value={typed}
               autoComplete="off"
               spellCheck={false}
-              placeholder={subject}
+              placeholder={named ?? ""}
               onChange={(e) => setTyped(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && void run()}
             />

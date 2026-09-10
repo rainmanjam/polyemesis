@@ -14,7 +14,7 @@ import { topRowLayout } from "@/lib/dashboardLayout";
 import { failoverNotice, type FailoverNotice } from "@/lib/failoverNotice";
 import { trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
-import { Copy, Megaphone, Play, Plus, Radio, RadioTower, ShieldAlert, Square } from "lucide-react";
+import { Copy, Megaphone, Play, Plus, Radio, RadioTower, RotateCcw, ShieldAlert, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,12 +41,15 @@ import type {
   Destination,
   DestinationId,
   DestStatus,
+  FailoverPin,
   FailoverSettings,
+  FailoverSource,
+  FailoverStatus,
   MetaField,
   SourceView,
   SystemInfo,
 } from "@/lib/types";
-import { useT, useStateLabel } from "@/lib/i18n";
+import { useT, useStateLabel, type TranslationKey } from "@/lib/i18n";
 
 // hls.js is a few hundred kilobytes that only the preview needs, and the
 // preview is off entirely for some installs. Load it alongside the dashboard
@@ -278,6 +281,35 @@ function GoLiveComposer() {
     [targets, title],
   );
 
+  /* THE SAME COUNTER FOR THE DESCRIPTION, and it is here because the limit was
+   * already on the wire and already enforced.
+   *
+   * oauth.MetadataCaps.DescriptionMax has been sent since the composer shipped
+   * -- YouTube publishes 5000 -- and MetaCaps declared it, so the field existed
+   * in this file and nothing read it. api/metadata.go:505 refuses the push over
+   * it with "YouTube descriptions are limited to 5000 characters; yours is N",
+   * which meant the one platform that has a description limit told the operator
+   * about it only AFTER they pressed Push, next to a title field that had been
+   * counting down beside them the whole time. #786.
+   *
+   * The tightest limit among the targets, exactly as titleMax above: it is the
+   * one that will refuse first. Both zeros mean "no published limit" rather
+   * than "zero characters", which is why they are filtered out and not
+   * min()-ed in. */
+  const descriptionMax = useMemo(() => {
+    const limits = (targets ?? []).map((t) => t.caps.descriptionMax ?? 0).filter((n) => n > 0);
+    return limits.length > 0 ? Math.min(...limits) : 0;
+  }, [targets]);
+
+  const descriptionOverLimit = useMemo(
+    () =>
+      (targets ?? []).filter((t) => {
+        const max = t.caps.descriptionMax ?? 0;
+        return max > 0 && description.length > max;
+      }),
+    [targets, description],
+  );
+
   const categoryHint = (targets ?? []).find((t) => t.caps.categoryHint)?.caps.categoryHint ?? "";
   const noDescription = (targets ?? []).filter((t) => !t.caps.fields.includes("description"));
   // What a push will send BEYOND what is typed here.
@@ -421,7 +453,18 @@ function GoLiveComposer() {
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="golive-description">{t("dash.metaDescription")}</Label>
+              <div className="flex items-baseline justify-between">
+                <Label htmlFor="golive-description">{t("dash.metaDescription")}</Label>
+                {descriptionMax > 0 && (
+                  <span
+                    className={`tnum font-mono text-[10px] ${
+                      descriptionOverLimit.length > 0 ? "text-down" : "text-muted-foreground"
+                    }`}
+                  >
+                    {description.length}/{descriptionMax}
+                  </span>
+                )}
+              </div>
               <Textarea
                 id="golive-description"
                 value={description}
@@ -429,6 +472,13 @@ function GoLiveComposer() {
                 placeholder={t("dash.descriptionPlaceholder")}
                 onChange={(e) => setDescription(e.target.value)}
               />
+              {descriptionOverLimit.length > 0 && (
+                <p className="text-[10px] text-down">
+                  {t("dash.descTooLong", {
+                    platforms: descriptionOverLimit.map((t) => t.platform).join(", "),
+                  })}
+                </p>
+              )}
               {noDescription.length > 0 && (
                 <p className="text-micro text-muted-foreground">
                   {noDescription.map((t) => t.platform).join(", ")} has no description field, so
@@ -783,7 +833,10 @@ function BulkDestinationControl({
       <ConfirmDestructive
         open={confirmStopAll.open}
         onOpenChange={confirmStopAll.onOpenChange}
-        subject={t("dash.stopAll")}
+        // No one target: this stops every running broadcast. The count is
+        // in the title and the description; a subject box would have shown
+        // the verb "Stop all".
+        subject={{ unnamed: true }}
         title={t("dash.stopAllTitle", { count })}
         description={t("dash.stopAllConsequence", { count: String(count) })}
         confirmLabel={t("dash.stopAll")}
@@ -823,6 +876,153 @@ function FailoverExposure({ notice }: { notice: FailoverNotice }) {
   );
 }
 
+/** What each selector source is called on screen. Keyed by the wire value, so
+ *  a kind the server adds later renders its own name rather than crashing the
+ *  lookup -- see the fallback at the call site. */
+const FAILOVER_LABEL: Record<FailoverSource, TranslationKey> = {
+  primary: "dash.failoverPrimary",
+  backup: "dash.failoverBackup",
+  slate: "dash.failoverSlate",
+  playlist: "dash.failoverPlaylist",
+  "": "dash.failoverNothing",
+};
+
+/* ===========================================================================
+   THE WAY BACK FROM A FAILOVER. Issue #768.
+
+   POST /failover/source has been registered since the selector tier shipped and
+   had no caller anywhere in this console. On a default install `failover.return`
+   is `manual` -- deliberately, because an automatic return flaps and each flap
+   is a visible cut -- so the product moved the broadcast to the backup, the
+   slate or the playlist when the primary dropped and then offered NOTHING that
+   could move it back. The operator found that out mid-broadcast, with the
+   standby feed going to the platform and every control on every screen unable
+   to end it. That is a one-way door, and it is the whole reason this exists.
+
+   HERE, NOT IN SETTINGS. Settings is where failover is configured, months
+   earlier, by someone who is not mid-broadcast. This is the screen an operator
+   is already looking at when the switch has happened, so the control belongs
+   beside the state that says it happened.
+
+   NOT A PERMANENT ROW. It draws only when the broadcast is off the primary or
+   an operator's pin is standing -- i.e. when there is something to undo. The
+   failover exposure notice below the destinations makes the same argument at
+   length: a banner that is on every install every day is furniture, and
+   furniture is what an operator scrolls past on the one day it matters.
+
+   BOTH BUTTONS CONFIRM, and neither is a formality. Returning to the primary
+   cuts the feed the platform is receiving right now; handing the choice back
+   can move it too, because with no pin a selector sitting on a slate or a
+   playlist returns to a live ingest the moment one is available (see
+   engine.chooseFrom). An operator who learns "the disruptive things ask" and
+   then meets one that does not has had their caution trained out of them
+   exactly where it mattered -- which is the argument ConfirmDestructive itself
+   is built on.
+   =========================================================================== */
+export function FailoverControl({
+  state,
+  manualReturn,
+  busy,
+  onSwitch,
+}: {
+  /** The tier's live state, or null when failover is not running -- which is
+   *  the default on most installs, and draws nothing. */
+  state: FailoverStatus | null;
+  /** Whether `failover.return` is `manual`. It comes from the settings read
+   *  rather than from the status, because the status does not carry it, and
+   *  the sentence this decides is the difference between "nothing will bring
+   *  this back" and "something already will". Saying the first on an install
+   *  configured for the second would be a false alarm. */
+  manualReturn: boolean;
+  busy: boolean;
+  onSwitch: (to: FailoverPin) => void | Promise<void>;
+}) {
+  const t = useT();
+  const confirm = useConfirm<FailoverPin>();
+
+  if (!state) return null;
+  const onPrimary = state.active === "primary";
+  // "" is engine's sourceNone: the ABSENCE of a pin, not a pin on nothing.
+  const pinned = state.pinned ? state.pinned : null;
+  if (onPrimary && !pinned) return null;
+
+  const name = (kind: FailoverSource) =>
+    FAILOVER_LABEL[kind] ? t(FAILOVER_LABEL[kind]) : kind;
+  const target = confirm.target ?? "primary";
+
+  return (
+    <section
+      className="mb-3 flex flex-col gap-2 rounded-md border border-warn/40 bg-warn-dim px-2.5 py-2"
+      aria-label={t("dash.failoverTitle")}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-warn" />
+        <span className="text-[11px] font-medium">
+          {t("dash.failoverOnAir", { source: name(state.active) })}
+        </span>
+        <Badge variant="outline">
+          {pinned ? t("dash.failoverByHand") : t("dash.failoverAutomatic")}
+        </Badge>
+      </div>
+
+      {/* The server's own sentence for the last move. Rendered verbatim rather
+          than re-derived here: it names the cause ("the primary ingest stopped
+          delivering") and a paraphrase computed from `active` alone could only
+          restate the effect, which is the half already on screen above. */}
+      {state.reason && <p className="text-[10px] text-muted-foreground">{state.reason}</p>}
+
+      <p className="text-[11px] text-muted-foreground">
+        {onPrimary
+          ? t("dash.failoverPinnedHere")
+          : manualReturn
+            ? t("dash.failoverManualHint")
+            : t("dash.failoverAutoHint")}
+      </p>
+
+      {/* A PIN ON A DEAD PRIMARY IS ACCEPTED AND DOES NOT SWITCH. engine's
+          chooseFrom honours a pin only while that source is available, so the
+          request answers 200 and the picture does not change until the encoder
+          is back. Without this line the operator presses the button, gets a
+          success toast, and watches the backup keep going out. */}
+      {!onPrimary && !state.primaryLive && (
+        <p className="text-[10px] text-warn">{t("dash.failoverPrimaryDown")}</p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        {!onPrimary && (
+          <Button size="sm" disabled={busy} onClick={() => confirm.ask("primary")}>
+            <RotateCcw /> {t("dash.failoverReturn")}
+          </Button>
+        )}
+        {pinned && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => confirm.ask("auto")}
+          >
+            {t("dash.failoverHandBack")}
+          </Button>
+        )}
+      </div>
+
+      <ConfirmDestructive
+        open={confirm.open}
+        onOpenChange={confirm.onOpenChange}
+        subject={target === "auto" ? t("dash.failoverAutomatic") : name("primary")}
+        title={target === "auto" ? t("dash.failoverHandBackTitle") : t("dash.failoverReturnTitle")}
+        description={
+          target === "auto" ? t("dash.failoverHandBackBody") : t("dash.failoverReturnBody")
+        }
+        confirmLabel={
+          target === "auto" ? t("dash.failoverHandBack") : t("dash.failoverReturn")
+        }
+        onConfirm={() => onSwitch(target)}
+      />
+    </section>
+  );
+}
+
 /** The dashboard's right-hand cards: a stack in one grid cell, or two cells.
  *
  *  A COMPONENT RATHER THAN A TERNARY AROUND THE CHILDREN, because the children
@@ -840,13 +1040,30 @@ function SideColumn({ stacked, children }: { stacked: boolean; children: ReactNo
 export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
-  const { status, bitrate, snapshotKnown } = useLiveData();
+  const { status, bitrate, snapshotKnown, programme } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
   /* The failover settings, for the exposure line above the destinations. Null
    * until the read lands, and failoverNotice() treats that as "say nothing"
    * rather than "unprotected" -- see lib/failoverNotice.ts. */
   const [failover, setFailover] = useState<FailoverSettings | null>(null);
+  /* The failover TIER's live state, which is a different thing from the
+   * settings above: those are what the operator configured, this is what the
+   * selector is doing right now.
+   *
+   * KEPT RATHER THAN READ STRAIGHT OFF `status`, and the copy is the point. The
+   * status socket is install-wide -- every engine publishes onto it and the app
+   * keeps one snapshot -- so on a two-programme install `status.failover`
+   * alternates between two tiers every couple of seconds. Rendering that
+   * directly would flash a control that switches the OTHER programme's source,
+   * which is the #497 family of bug in its most expensive form: a switch
+   * reports success for the programme the operator named and puts a different
+   * show on its slate. `source.id` names whose snapshot this is, so snapshots
+   * belonging to another programme are ignored and the last matching one is
+   * held -- at most one publish interval stale, which is what every other
+   * reading on this page already is. */
+  const [failoverState, setFailoverState] = useState<FailoverStatus | null>(null);
+  const [failoverBusy, setFailoverBusy] = useState(false);
   // The recorder's and the meters' own settings, kept rather than discarded.
   //
   // This page already fetched the whole settings object and threw all but one
@@ -943,6 +1160,40 @@ export function Dashboard() {
     const poll = setInterval(readSourceCount, 10_000);
     return () => clearInterval(poll);
   }, [refreshKey, readSourceCount]);
+
+  // See the failoverState declaration for why this filters by programme rather
+  // than reading the snapshot straight through. `?? null` matters as much as
+  // the filter: the field is omitted entirely once the tier stops, so a
+  // snapshot without it has to CLEAR the state rather than leave the last one
+  // standing -- otherwise switching failover off in Settings would leave a live
+  // control on the dashboard aimed at a tier that no longer exists.
+  useEffect(() => {
+    if (!status || programme == null) return;
+    if (status.source?.id !== programme) return;
+    setFailoverState(status.failover ?? null);
+  }, [status, programme]);
+
+  const switchSource = useCallback(
+    async (to: FailoverPin) => {
+      setFailoverBusy(true);
+      try {
+        // The ANSWER is stored, not an assumption: a pin on a source that is
+        // not delivering is accepted and changes nothing until it is, so
+        // guessing the new state here would show a switch that has not
+        // happened. See api.switchSource.
+        setFailoverState(await api.switchSource(to, programme));
+        toast.success(to === "auto" ? t("dash.failoverHandedBack") : t("dash.failoverSwitched"));
+      } catch (err) {
+        // Every refusal here is this configuration saying it cannot do what was
+        // asked -- failover not running, a source this install has not enabled.
+        // The server's sentence says which, so it is shown rather than replaced.
+        toast.error(err instanceof Error ? err.message : t("dash.failoverFailed"));
+      } finally {
+        setFailoverBusy(false);
+      }
+    },
+    [programme, t],
+  );
 
   const act = useCallback(
     async (id: DestinationId, fn: () => Promise<unknown>, label: string) => {
@@ -1226,6 +1477,16 @@ export function Dashboard() {
           destination grid below are the detail behind those two answers rather
           than a flat inventory of the install. See components/OnAirBar.tsx. */}
       <OnAirBar status={status} />
+
+      {/* THE WAY BACK, directly under what is on air. See FailoverControl: it
+          renders nothing at all unless this broadcast is off its primary ingest
+          or a manual pin is standing. */}
+      <FailoverControl
+        state={failoverState}
+        manualReturn={failover?.return !== "auto"}
+        busy={failoverBusy}
+        onSwitch={switchSource}
+      />
 
       {/* TWO COLUMNS WITH A PREVIEW, THREE WITHOUT.
        *

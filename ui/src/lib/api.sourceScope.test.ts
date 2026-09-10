@@ -79,6 +79,16 @@ const calls: { name: string; scoped: () => Promise<unknown>; unscoped: () => Pro
     scoped: () => api.processLogs("ingest", 7),
     unscoped: () => api.processLogs("ingest", null),
   },
+  {
+    // #768. handleSwitchSource is scoped like every other member of this
+    // family, and its own comment says why: "asking the default engine for it
+    // put a DIFFERENT programme on its slate while reporting success for the
+    // one the operator named". This one is worse than the reads above, because
+    // the wrong answer here is a live broadcast cut to a standby feed.
+    name: "switchSource — puts one programme's failover source on air",
+    scoped: () => api.switchSource("primary", 7),
+    unscoped: () => api.switchSource("primary", null),
+  },
 ];
 
 describe("every programme-scoped call carries the source id it was given", () => {

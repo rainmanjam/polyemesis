@@ -206,6 +206,17 @@ describe("a refused delete", () => {
     const del = screen.getAllByRole("button", { name: /delete/i })[0];
     fireEvent.click(del);
 
+    /* THE CONFIRMATION IS NOW BETWEEN THE CLICK AND THE DELETE, and this test
+       drove the old one-click path. #770: this panel is the chat page's menu
+       mounted in the dashboard pane, and it deleted without asking while the
+       identical menu on ChatPage confirmed.
+
+       Confirming here rather than deleting the step: what this test is about is
+       that a REFUSAL repeats the platform's own words, and that is still worth
+       pinning — it just now happens one gesture later. */
+    const confirm = await screen.findByRole("button", { name: "Delete for everyone" });
+    fireEvent.click(confirm);
+
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     expect(
       String(toastError.mock.calls[0][0]),
@@ -254,5 +265,71 @@ describe("what an empty timeline says", () => {
     render(<ChatEmpty {...base} statuses={[status("twitch")]} hiddenMessages={4} />);
     expect(screen.getByText(/hiding 4 messages/i)).toBeTruthy();
     expect(screen.queryByText(/nothing has been said yet/i)).toBeNull();
+  });
+});
+
+/* THE ROW TRASH ICON MUST ASK THE PLATFORM, NOT THE PROP.
+ *
+ * `{onDelete && …}` says the operator may delete. It says nothing about
+ * whether the platform CAN, and the context menu was fixed for exactly that
+ * while this icon kept the ungated form: the line rendered a live trash can,
+ * and adding the confirmation dialog made it worse — the operator now got a
+ * dialog promising removal, clicked through it, and then met a server error.
+ *
+ * Two specimens, because there are two ways to be unable to delete and the
+ * dangerous one is invisible to the compiler:
+ *
+ *   rumble  is OUTSIDE the ChatPlatform union (types.ts) and still arrives at
+ *           runtime. ChatMessageMenu.reason.test.tsx says why that matters --
+ *           "the type system believes this message cannot exist" -- and it is
+ *           exactly how an ungated Delete survived review the first time.
+ *   trovo   is INSIDE the union with no row in the adapter table.
+ *
+ * Twitch is the control: if the gate were wired backwards, or to a constant,
+ * one of these three would say so.
+ */
+describe("the row delete icon is gated on what the platform can do", () => {
+  const trash = (name: string) =>
+    screen.getByLabelText(`Delete message from ${name}`) as HTMLButtonElement;
+
+  beforeEach(() => {
+    feed.messages = [
+      // The cast is the point, not a workaround: this platform reaches the
+      // renderer and the union says it cannot.
+      message("1", "rumble" as unknown as ChatPlatform, "rumbler", "no moderation API at all"),
+      message("2", "trovo", "trovan", "in the union, absent from the adapter table"),
+      message("3", "twitch", "twitcher", "can be deleted upstream"),
+    ];
+    feed.statuses = [status("trovo"), status("twitch")];
+  });
+
+  it("disables it on a platform outside the union, and says why", () => {
+    render(<ChatPanel />);
+    const btn = trash("rumbler");
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toMatch(/Rumble/i);
+    expect(btn.title).toMatch(/no moderation API/i);
+  });
+
+  it("disables it on an in-union platform with no adapter row", () => {
+    render(<ChatPanel />);
+    const btn = trash("trovan");
+    expect(btn.disabled).toBe(true);
+    // The blanket reason, not the per-action one: every adapter in the table
+    // can delete, so the only reachable "cannot" is having no adapter at all.
+    // That is what Trovo is, and the sentence has to name it -- a disabled
+    // control with no explanation sends a moderator looking for their own
+    // mistake instead of reading that the platform publishes nothing to call.
+    expect(btn.title).toMatch(/Trovo/i);
+    expect(btn.title).toMatch(/no moderation API/i);
+  });
+
+  /* POSITIVE CONTROL. A gate wired to `false`, or to the wrong action, would
+   * pass the assertion above and fail this one. */
+  it("leaves it live on a platform that can delete", () => {
+    render(<ChatPanel />);
+    const btn = trash("twitcher");
+    expect(btn.disabled).toBe(false);
+    expect(btn.title).toMatch(/Delete on the platform/i);
   });
 });

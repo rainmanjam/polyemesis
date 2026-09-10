@@ -294,7 +294,7 @@ export function DestinationCard({
         </div>
 
         {/* --- performance --- */}
-        <div className="grid grid-cols-5 gap-2">
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
           <Stat
             labelKey="dest.bitrate"
             value={running ? kbps(progress?.bitrateKbps ?? 0) : "—"}
@@ -330,6 +330,18 @@ export function DestinationCard({
             labelKey="dest.dropped"
             value={running && progress ? (progress.dropFrames ?? 0) : "—"}
             tone={running && (progress?.dropFrames ?? 0) > 0 ? "warn" : "muted"}
+          />
+          {/* #787: dupFrames has existed on Progress since types.ts:729 and
+              docs/MONITORING.md promises it beside Dropped ("The same numbers
+              are on each destination's card, live") -- nothing here ever read
+              it. Same gating and dash-not-zero rule as Dropped right above:
+              cumulative over a run, so it stays on screen after the encoder
+              is gone, and "0" from a destination nothing is measuring would
+              read as a clean run rather than as unmeasured. */}
+          <Stat
+            labelKey="dest.duplicated"
+            value={running && progress ? (progress.dupFrames ?? 0) : "—"}
+            tone={running && (progress?.dupFrames ?? 0) > 0 ? "warn" : "muted"}
           />
           {/* Almost every destination here is a passthrough, so there is barely
               any encoding work to be slow at — a speed under 1 means FFmpeg is

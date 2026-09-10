@@ -27,6 +27,13 @@ type memStore struct {
 	now  func() time.Time
 
 	claimErr error
+
+	// afterClaim runs on the claiming goroutine the instant a row has been
+	// marked running in the store and BEFORE Queue.start has registered it.
+	// That gap is the whole subject of
+	// TestCancelBetweenClaimAndStartCannotStrandAWorker, and it is not
+	// reachable from outside the package any other way.
+	afterClaim func(*Job)
 }
 
 func newMemStore(now func() time.Time) *memStore {
@@ -148,6 +155,16 @@ func (m *memStore) FindActiveJob(kind Kind, target string) (*Job, error) {
 }
 
 func (m *memStore) ClaimJob(kinds []Kind, now time.Time) (*Job, error) {
+	out, err := m.claim(kinds, now)
+	// OUTSIDE the store lock, or a hook that touches the store would block on
+	// it and never reach the window it exists to open.
+	if out != nil && m.afterClaim != nil {
+		m.afterClaim(out)
+	}
+	return out, err
+}
+
+func (m *memStore) claim(kinds []Kind, now time.Time) (*Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.claimErr != nil {
@@ -1020,5 +1037,105 @@ func TestQueueSurvivesAStoreThatCannotClaim(t *testing.T) {
 	}
 	if q.Stats().Running != 0 {
 		t.Error("a claim error left the queue thinking something was running")
+	}
+}
+
+/* A CANCEL THAT LANDS BETWEEN THE CLAIM AND THE START MUST NOT BE LOST.
+ *
+ * Tick claims a row -- which writes state='running' in the store -- and only
+ * then calls start, which registers the execution in q.running. Cancel decides
+ * which of its two paths to take by looking in that map:
+ *
+ *     ex, running := q.running[id]   // absent during the gap
+ *     if running { ex.cancel() } else { store.CancelJob(id) }
+ *
+ * A cancel arriving in the gap therefore took the store path. The row went to
+ * 'cancelled' while start went on to launch the worker, and the two facts never
+ * met again:
+ *
+ *   - The worker kept running with a live context. Nothing would stop it, and
+ *     finish would later write 'done' straight over the operator's cancel.
+ *   - The partial unique-target index covers state IN ('queued','running',
+ *     'deferred'). A cancelled row is outside it, so the target was free again
+ *     while its worker still held the output -- submit the same target and a
+ *     SECOND worker starts writing the same file.
+ *
+ * internal/db/jobs.go already carries a comment about duplicate active rows and
+ * patches the symptom downstream. This is the window that produces them.
+ */
+func TestCancelBetweenClaimAndStartCannotStrandAWorker(t *testing.T) {
+	q, st, _ := testQueue(t, WithTick(time.Second))
+
+	// Whether the worker ever learned it was cancelled. Map membership is the
+	// wrong question: finish writes the terminal row and only then deregisters,
+	// so a job completing normally is briefly "cancelled in the store with an
+	// entry still in q.running" -- benign, and under -race wide enough to hit.
+	// What is NOT benign is a worker whose context stayed live.
+	observed := make(chan bool, 1)
+	started := make(chan struct{})
+	mustRegister(t, q, "k", 0, func(ctx context.Context, _ Job, _ Reporter) error {
+		close(started)
+		select {
+		case <-ctx.Done():
+			observed <- true
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+			// Never cancelled. Returning nil is what writes 'done' over the
+			// operator's cancel, so the assertion below can name it.
+			observed <- false
+			return nil
+		}
+	})
+
+	seeded := st.seed(Job{
+		Kind: "k", Target: "out.mkv", Unique: true,
+		State: StateQueued, MaxAttempts: 1, Params: json.RawMessage("{}"),
+	})
+
+	cancelDone := make(chan struct{})
+	st.afterClaim = func(j *Job) {
+		// The claiming goroutine is now exactly in the gap. Cancel has to come
+		// from another goroutine: it is what a request handler does, and doing
+		// it inline would simply be the same goroutine.
+		go func() {
+			defer close(cancelDone)
+			if err := q.Cancel(j.ID); err != nil {
+				t.Errorf("Cancel: %v", err)
+			}
+		}()
+		// Give that goroutine time to reach its decision. With the window open
+		// it takes the store path here; with the window closed it blocks until
+		// dispatch has finished registering the execution.
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	q.Tick(context.Background())
+	<-cancelDone
+
+	// The worker must have started, or the test proved nothing about the gap.
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the worker never started, so this test proved nothing")
+	}
+
+	// THE INVARIANT. A cancel that took the store path leaves the row out of
+	// the unique-target index with this worker's context still live: it runs to
+	// completion, writes 'done' over the operator's cancel, and for its whole
+	// duration a second job for the same target can be claimed and started.
+	select {
+	case saw := <-observed:
+		if !saw {
+			t.Fatalf("job %d ran to completion with a live context after being "+
+				"cancelled: the unique-target slot for %q was free while this "+
+				"worker still held the output", seeded.ID, seeded.Target)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("the worker never returned")
+	}
+
+	drain(t, q, context.Background())
+	if final := getJob(t, st, seeded.ID); final.State != StateCancelled {
+		t.Errorf("final state = %s, want cancelled: the operator asked", final.State)
 	}
 }

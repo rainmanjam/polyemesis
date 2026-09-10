@@ -50,6 +50,7 @@ import type {
   SearchResults,
   TranscriptHit,
   TranscriptOrder,
+  TranscriptTrack,
   TranscriptView,
 } from "@/lib/types";
 import { useT } from "@/lib/i18n";
@@ -480,6 +481,8 @@ export function LibraryPage() {
           target={player}
           onClose={() => setPlayer(null)}
           jobsAvailable={view?.jobsAvailable ?? false}
+          transcribeAvailable={view?.transcribeAvailable ?? false}
+          transcribeNote={view?.transcribeNote}
           onChanged={load}
         />
       )}
@@ -939,16 +942,22 @@ function RecordingList({
  *
  *  It plays the PROXY. Browsers cannot play the multitrack MKV masters at all,
  *  so when the proxy is missing the honest thing is to offer to generate one —
- *  not to render a <video> that will sit there black forever. */
-function PlayerDialog({
+ *  not to render a <video> that will sit there black forever.
+ *
+ *  Exported for its test, like ShareCard and VariantsCard are for PlayoutPage's. */
+export function PlayerDialog({
   target,
   onClose,
   jobsAvailable,
+  transcribeAvailable,
+  transcribeNote,
   onChanged,
 }: {
   target: PlayerTarget;
   onClose: () => void;
   jobsAvailable: boolean;
+  transcribeAvailable: boolean;
+  transcribeNote?: string;
   onChanged: () => void;
 }) {
   const t = useT();
@@ -958,6 +967,15 @@ function PlayerDialog({
   const [busy, setBusy] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [atMs, setAtMs] = useState(target.atMs ?? 0);
+  // #785: deleteTranscript and setTranscriptSpeaker were both defined on the
+  // client (api.ts:1025, api.ts:1032) and never called from anywhere in ui/.
+  // A transcript that whisper.cpp got wrong -- the wrong language, a track
+  // transcribed against the wrong speaker's mic -- was permanent from this
+  // screen: there was no delete, and so no way to ask it to try again either.
+  // Scoped per TRACK, not per recording, because setTranscriptSpeaker already
+  // is (`track 2` becomes `Ana`) and a bad transcript is almost always one
+  // mic's, not the whole multitrack take's.
+  const confirmDeleteTrack = useConfirm<TranscriptTrack>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1005,7 +1023,52 @@ function PlayerDialog({
     }
   };
 
+  const saveSpeaker = async (track: number, speaker: string) => {
+    setBusy(true);
+    try {
+      await api.setTranscriptSpeaker(target.recordingId, track, speaker);
+      toast.success(t("lib.speakerSaved"));
+      await load();
+    } catch (err) {
+      toast.error(errText(err, t("lib.couldNotSaveSpeaker")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteTrackTranscript = async (tr: TranscriptTrack) => {
+    setBusy(true);
+    try {
+      await api.deleteTranscript(target.recordingId, tr.track);
+      toast.success(t("lib.transcriptDeleted"));
+      await load();
+    } catch (err) {
+      toast.error(errText(err, t("lib.couldNotDeleteTranscript")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Re-runs the SAME job RecordingList's captions button submits -- there is
+  // no separate "retry" endpoint, and there does not need to be one: the
+  // queue already folds a resubmit into work already running (submit()
+  // above), so hitting this after a delete is indistinguishable from
+  // transcribing for the first time.
+  const retranscribe = async () => {
+    setBusy(true);
+    try {
+      const res = await api.submitRecordingJob(target.recordingId, "transcribe");
+      toast.success(res.created ? "Transcription queued." : "Transcription was already queued.");
+      onChanged();
+    } catch (err) {
+      toast.error(errText(err, "Could not queue transcription."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const merged = transcript?.merged ?? [];
+  const tracks = transcript?.transcript.tracks ?? [];
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -1083,43 +1146,123 @@ function PlayerDialog({
             </div>
 
             {/* --- the transcript, which is the reason to open this at all --- */}
-            <div className="flex max-h-[28rem] flex-col gap-1 overflow-y-auto rounded border border-border p-2">
-              {merged.length === 0 ? (
-                <p className="py-6 text-center text-tiny text-muted-foreground">
-                  No transcript for this recording yet.
-                </p>
-              ) : (
-                merged.map((seg) => {
-                  const current = atMs >= seg.startMs && atMs < seg.endMs;
-                  return (
-                    <button
-                      key={seg.id}
-                      type="button"
-                      onClick={() => seek(seg.startMs)}
-                      className={cn(
-                        "rounded px-1.5 py-1 text-left text-tiny leading-relaxed transition-colors hover:bg-accent",
-                        current && "bg-primary-dim",
-                      )}
-                    >
-                      <span className="flex items-baseline gap-2">
-                        {seg.speaker && (
-                          <span className="shrink-0 font-semibold text-primary">
-                            {seg.speaker}
-                          </span>
-                        )}
-                        <span className="tnum shrink-0 font-mono text-micro text-muted-foreground">
-                          {offsetLabel(seg.startMs)}
-                        </span>
+            <div className="flex flex-col gap-2">
+              {/* #785: per-track speaker naming and deletion, and a way to
+                  re-run. Before this, a track transcribed against the wrong
+                  mic had no fix from here at all -- deleteTranscript and
+                  setTranscriptSpeaker existed on the client and were never
+                  called, so a wrong transcript was permanent and an
+                  unlabelled speaker stayed unlabelled forever. */}
+              {tracks.length > 0 && (
+                <div className="flex flex-col gap-1 rounded border border-border p-2">
+                  {tracks.map((tr) => (
+                    <div key={tr.track} className="flex items-center gap-1.5">
+                      <span className="shrink-0 font-mono text-micro text-muted-foreground">
+                        {t("lib.trackLabel", { n: tr.track })}
                       </span>
-                      <span className="block">{seg.text}</span>
-                    </button>
-                  );
-                })
+                      {/* Committed on blur, like every other field this dialog
+                          saves this way (the session title, a rung's name):
+                          typing "Ana" one keystroke at a time must not fire a
+                          save per letter. Keyed by the loaded speaker so a
+                          successful save re-seeds the field rather than
+                          fighting the next render with a stale draft. */}
+                      <Input
+                        key={`speaker-${tr.track}-${tr.speaker ?? ""}`}
+                        defaultValue={tr.speaker ?? ""}
+                        placeholder={t("lib.speakerPlaceholder")}
+                        aria-label={t("lib.speakerFor", { n: tr.track })}
+                        disabled={busy}
+                        className="h-6 flex-1 text-tiny"
+                        onBlur={(e) => {
+                          const v = e.currentTarget.value.trim();
+                          if (v !== (tr.speaker ?? "")) void saveSpeaker(tr.track, v);
+                          else e.currentTarget.value = tr.speaker ?? "";
+                        }}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={busy}
+                        aria-label={t("lib.deleteTranscriptTrack", { n: tr.track })}
+                        onClick={() => confirmDeleteTrack.ask(tr)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  ))}
+                  <div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy || !transcribeAvailable}
+                      onClick={retranscribe}
+                      title={
+                        transcribeAvailable
+                          ? t("lib.transcribeEachTrackOnIts")
+                          : `Transcription unavailable: ${transcribeNote ?? "whisper.cpp was not found"}`
+                      }
+                    >
+                      <Captions />
+                      {t("lib.transcribe")}
+                    </Button>
+                  </div>
+                </div>
               )}
+
+              <div className="flex max-h-[28rem] flex-col gap-1 overflow-y-auto rounded border border-border p-2">
+                {merged.length === 0 ? (
+                  <p className="py-6 text-center text-tiny text-muted-foreground">
+                    No transcript for this recording yet.
+                  </p>
+                ) : (
+                  merged.map((seg) => {
+                    const current = atMs >= seg.startMs && atMs < seg.endMs;
+                    return (
+                      <button
+                        key={seg.id}
+                        type="button"
+                        onClick={() => seek(seg.startMs)}
+                        className={cn(
+                          "rounded px-1.5 py-1 text-left text-tiny leading-relaxed transition-colors hover:bg-accent",
+                          current && "bg-primary-dim",
+                        )}
+                      >
+                        <span className="flex items-baseline gap-2">
+                          {seg.speaker && (
+                            <span className="shrink-0 font-semibold text-primary">
+                              {seg.speaker}
+                            </span>
+                          )}
+                          <span className="tnum shrink-0 font-mono text-micro text-muted-foreground">
+                            {offsetLabel(seg.startMs)}
+                          </span>
+                        </span>
+                        <span className="block">{seg.text}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </div>
         )}
       </DialogContent>
+
+      <ConfirmDestructive
+        open={confirmDeleteTrack.open}
+        onOpenChange={confirmDeleteTrack.onOpenChange}
+        subject={
+          confirmDeleteTrack.target
+            ? t("lib.trackLabel", { n: confirmDeleteTrack.target.track })
+            : ""
+        }
+        title={t("lib.deleteTranscriptTitle", { n: confirmDeleteTrack.target?.track ?? 0 })}
+        description={t("lib.deleteTranscriptDescription")}
+        confirmLabel={t("lib.deleteTranscript")}
+        onConfirm={async () => {
+          if (confirmDeleteTrack.target) await deleteTrackTranscript(confirmDeleteTrack.target);
+        }}
+      />
     </Dialog>
   );
 }
