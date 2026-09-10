@@ -11,6 +11,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { armedCount, isOperable } from "@/lib/automodArmed";
+import { ACTION_KEYS, CHECKER_KEYS, checkerReady } from "@/lib/automodConfig";
+import { useT } from "@/lib/i18n";
 import type {
   AutomodAction,
   AutomodCell,
@@ -42,20 +44,12 @@ import type {
    should have to do.
    =========================================================================== */
 
-const ACTION_LABELS: Record<AutomodAction, string> = {
-  flag: "Flag for review",
-  hide_local: "Hide (local only)",
-  hide: "Hide (upstream)",
-  delete: "Delete",
-  timeout: "Time out",
-  ban: "Ban",
-};
-
-const CHECKER_LABELS: Record<AutomodChecker, string> = {
-  rules: "Rules",
-  history: "History",
-  model: "Model",
-};
+/* The action and checker names moved to lib/automodConfig.ts, unchanged.
+   AutomodConfig — the card that finally lets an operator write the rule and
+   configure the model these cells hand permission to — names the same six
+   actions, and a second copy of the vocabulary is precisely how the collapsed
+   line and the cells came to disagree. The English text is untouched: these
+   strings are accessible names the behaviour suite matches on. */
 
 /** Actions with no undo. They get a warning when armed, because the poka-yoke
  *  rule this project holds is that friction should be proportional to
@@ -68,6 +62,7 @@ export interface AutomodMatrixProps {
 }
 
 export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProps>) {
+  const t = useT();
   const [view, setView] = useState<AutomodMatrixView | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
@@ -94,6 +89,42 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
     }
     return m;
   }, [view]);
+
+  /** Whether each checker EXISTS on the server, from the draft.
+   *
+   *  THE ONE THIS CARD WAS MISSING. `view.cells[].available` answers "can this
+   *  platform perform this action", which is the only gate the matrix had — so
+   *  every cell in the Rules and Model columns was a live switch on an install
+   *  with no rules written and the model switched off, which is the default.
+   *  An operator could arm "Ban / Model", see it counted as armed, and be
+   *  granting a permission to a checker `automod.New` was handed as nil.
+   *
+   *  From the DRAFT rather than a second fetch, for the reason the armed count
+   *  is: the fields that decide this are edited on the same page, in the card
+   *  directly below, and a readiness read once at mount would say "no rules"
+   *  over a rule the operator has just typed. */
+  const readiness = useMemo(() => {
+    const m = new Map<AutomodChecker, ReturnType<typeof checkerReady>>();
+    for (const c of view?.checkers ?? []) {
+      m.set(c, checkerReady(settings.automod, c));
+    }
+    return m;
+  }, [view, settings.automod]);
+
+  /** Whether a cell could ever act: the platform can do it AND the checker
+   *  that would ask exists. Both gates, in one place, because the collapsed
+   *  line and the cells have to agree about what "armed" means — they did not
+   *  once already, and lib/automodArmed.ts exists because of it. */
+  const armable = useCallback(
+    (key: string) => {
+      const checker = key.split("/")[2] as AutomodChecker;
+      return (
+        (byKey.get(key)?.available ?? false) &&
+        (readiness.get(checker)?.ready ?? true)
+      );
+    },
+    [byKey, readiness],
+  );
 
   if (!automod || !view) {
     return (
@@ -127,7 +158,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
     const on = { ...(automod!.on ?? {}) };
     for (const checker of view!.checkers) {
       const key = `${platform}/${action}/${checker}`;
-      if (auto && byKey.get(key)?.available) on[key] = true;
+      if (auto && armable(key)) on[key] = true;
       else delete on[key];
     }
     onChange({ ...settings, automod: { ...automod!, on } });
@@ -138,7 +169,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
     const on = { ...(automod!.on ?? {}) };
     for (const action of view!.actions) {
       const key = `${platform}/${action}/${checker}`;
-      if (auto && byKey.get(key)?.available) on[key] = true;
+      if (auto && armable(key)) on[key] = true;
       else delete on[key];
     }
     onChange({ ...settings, automod: { ...automod!, on } });
@@ -218,7 +249,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
             actions: view.actions,
             checkers: view.checkers,
             on: automod.on,
-            available: (key) => byKey.get(key)?.available ?? false,
+            available: armable,
           });
           const isOpen = expanded[platform] ?? false;
 
@@ -272,18 +303,31 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                     <thead>
                       <tr>
                         <th className="pb-2 text-left font-medium">Action</th>
-                        {view.checkers.map((c) => (
-                          <th key={c} className="pb-2 px-2 font-medium">
-                            <div>{CHECKER_LABELS[c]}</div>
-                            <button
-                              type="button"
-                              className="mt-0.5 text-[10px] font-normal text-muted-foreground underline"
-                              onClick={() => setColumn(platform, c, false)}
-                            >
-                              clear
-                            </button>
-                          </th>
-                        ))}
+                        {view.checkers.map((c) => {
+                          const ready = readiness.get(c);
+                          return (
+                            <th key={c} className="pb-2 px-2 font-medium">
+                              <div>{t(CHECKER_KEYS[c])}</div>
+                              {/* Said once at the top of the column as well as
+                                  in every cell, because the cells are what an
+                                  operator scans and the column is where the
+                                  answer is: nothing here can be switched on
+                                  until this checker is configured, below. */}
+                              {ready && !ready.ready && (
+                                <div className="font-normal text-[10px] text-muted-foreground">
+                                  {t(ready.reason)}
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                className="mt-0.5 text-[10px] font-normal text-muted-foreground underline"
+                                onClick={() => setColumn(platform, c, false)}
+                              >
+                                clear
+                              </button>
+                            </th>
+                          );
+                        })}
                       </tr>
                     </thead>
                     <tbody>
@@ -291,7 +335,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                         <tr key={action} className="border-t">
                           <td className="py-2 pr-2">
                             <div className="flex items-center gap-1.5">
-                              {ACTION_LABELS[action]}
+                              {t(ACTION_KEYS[action])}
                               {IRREVERSIBLE.includes(action) && (
                                 <span
                                   className="rounded bg-warn/15 px-1 text-[10px] text-warn"
@@ -321,6 +365,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                             const key = `${platform}/${action}/${checker}`;
                             const cell = byKey.get(key);
                             const available = cell?.available ?? false;
+                            const ready = readiness.get(checker);
                             return (
                               <td key={checker} className="px-2 py-2 text-center">
                                 {!isOperable(action) ? (
@@ -352,11 +397,43 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                   >
                                     always on
                                   </span>
+                                ) : available && ready && !ready.ready ? (
+                                  /* INERT WITH THE REASON, exactly as an
+                                     unavailable platform's cell is, and for
+                                     the same reason spelled out below it: a
+                                     switch that silently does nothing leaves
+                                     the operator believing this channel is
+                                     protected.
+
+                                     What it protects against here is worse
+                                     than that. `automod.New` takes each
+                                     checker as a pointer and a nil one
+                                     "contributes nothing" -- and nil is the
+                                     DEFAULT for two of the three columns, so
+                                     "Ban / Model" was a live switch on a
+                                     fresh install with no model configured
+                                     and no field anywhere to configure one.
+                                     Arming it granted permission to
+                                     permanently remove a viewer to something
+                                     that did not exist, and the collapsed
+                                     line counted it as armed.
+
+                                     The platform gate is checked FIRST: when
+                                     a platform cannot perform the action at
+                                     all, configuring the checker would change
+                                     nothing, and "not configured" would send
+                                     an operator to fix the wrong thing. */
+                                  <span
+                                    className="cursor-help text-[10px] text-muted-foreground"
+                                    title={t(ready.reason)}
+                                  >
+                                    {t("automod.notConfigured")}
+                                  </span>
                                 ) : available ? (
                                   <Switch
                                     checked={Boolean(automod.on?.[key])}
                                     onCheckedChange={(v) => setCell(key, v)}
-                                    aria-label={`${CHECKER_LABELS[checker]} may ${ACTION_LABELS[action]} on ${platform}`}
+                                    aria-label={`${t(CHECKER_KEYS[checker])} may ${t(ACTION_KEYS[action])} on ${platform}`}
                                   />
                                 ) : (
                                   /* Inert WITH a reason, never an unticked box.

@@ -28,6 +28,7 @@ import { Switch } from "@/components/ui/switch";
 import { useIngestLive } from "@/hooks/useLiveData";
 import { AccountLiveStats } from "@/components/AccountLiveStats";
 import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
+import { AutomodConfig } from "@/components/AutomodConfig";
 import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
@@ -212,13 +213,27 @@ export function SettingsPage() {
     }
   }, [params, setParams]);
 
+  // KEPT AS STATE AS WELL AS A TOAST, because one refusal has a field to land
+  // on. The server rejects an automod rule whose regex will not compile -- it
+  // has to, since NewRuleSet is all-or-nothing and one bad pattern would
+  // silently disarm every rule -- and a toast puts that message somewhere the
+  // operator cannot see while looking at the pattern they mistyped.
+  //
+  // AutomodConfig reads this and renders the rejection against the offending
+  // rule. Everything else still gets the toast, which is the right shape for
+  // an error with no single field behind it.
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const save = async (next: Settings) => {
     setSaving(true);
+    setSaveError(null);
     try {
       setSettings(await api.putSettings(next));
       toast.success(t("set.settingsSavedAffectedProcessesHave"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("rec.saveFailed"));
+      const msg = err instanceof Error ? err.message : t("rec.saveFailed");
+      setSaveError(msg);
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
@@ -350,6 +365,7 @@ export function SettingsPage() {
             onSaveMqtt={saveMqtt}
             onClearMqttPassword={clearMqttPassword}
             saving={saving}
+            saveError={saveError}
           />
         </TabsContent>
         <TabsContent value="platforms">
@@ -759,18 +775,51 @@ function chatFrom(draft: Settings): Required<ChatRetentionSettings> {
   };
 }
 
+/** Whether THIS BROWSER can resolve an IANA zone name.
+ *
+ *  The server is the authority -- db.Settings.Validate refuses a zone
+ *  time.LoadLocation cannot load -- but that refusal arrives after a save, as
+ *  one line among however many other problems the whole document had. Asking
+ *  Intl the same question at the keystroke names the typo while the operator is
+ *  still looking at the field they typed it into.
+ *
+ *  NOT A GATE ON THE INPUT, and the difference matters: the zone database lives
+ *  in the browser here and in the Go binary there, so a browser older than the
+ *  server would refuse a zone that saves perfectly. This warns and the Save
+ *  stays live, which is the right way round -- the server is what actually
+ *  decides, and a warning is recoverable where a disabled field is not.
+ *
+ *  Empty is not "unknown", it is UTC. lib/format.ts makes the same call for the
+ *  same reason, and disagreeing here would mark the default install as broken.
+ */
+function zoneResolves(tz: string): boolean {
+  const want = tz.trim();
+  if (!want) return true;
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: want });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function PipelineSettings({
   settings,
   onSave,
   onSaveMqtt,
   onClearMqttPassword,
   saving,
+  // The last save's refusal, threaded down rather than re-fetched, so
+  // AutomodConfig can render a rejected regex against the rule that carries it.
+  // A toast cannot: the operator is looking at the pattern they mistyped.
+  saveError,
 }: {
   settings: Settings;
   onSave: (s: Settings) => void;
   onSaveMqtt: (s: Settings, password: string) => void;
   onClearMqttPassword: () => Promise<void>;
   saving: boolean;
+  saveError: string | null;
 }) {
   const t = useT();
   const [draft, setDraft] = useState(settings);
@@ -818,6 +867,43 @@ function PipelineSettings({
       </div>
 
     <div className="grid gap-3 lg:grid-cols-2">
+      {/* FIRST in the tab, which is where db.Settings puts Display and for the
+          reason its comment gives: it is the one install-wide block that
+          changes what every other screen LOOKS like without changing what any
+          of them DO. Nothing on this page could reach it -- lib/format.ts has
+          held the zone for every clock in the console since it was written, and
+          api.ts pushes it in on every settings read and every settings save, so
+          the whole mechanism was live with no producer at the front of it. An
+          install could only ever read UTC.
+
+          It is on this tab rather than a Display tab of its own because it is a
+          field of the same Settings document as everything else here, and the
+          tab has the one Save that commits it. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("set.displayTitle")}</CardTitle>
+          <CardDescription>{t("set.displayDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="disp-tz">{t("set.displayTimeZone")}</Label>
+            <Input
+              id="disp-tz"
+              value={draft.display?.timeZone ?? ""}
+              placeholder={t("set.displayTimeZonePlaceholder")}
+              onChange={(e) => setDraft({ ...draft, display: { timeZone: e.target.value } })}
+            />
+            <span className="text-[10px] text-muted-foreground">{t("set.displayTimeZoneNote")}</span>
+            {/* Warned rather than refused -- see zoneResolves. The line is the
+                only thing between a typo and a console that reads UTC for ever
+                with nothing saying why. */}
+            {!zoneResolves(draft.display?.timeZone ?? "") && (
+              <span className="text-[10px] text-warn">{t("set.displayTimeZoneUnknown")}</span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>{t("set.syntheticAudio")}</CardTitle>
@@ -909,6 +995,36 @@ function PipelineSettings({
               <span className="text-[10px] text-muted-foreground">{t("set.chatKeepNote")}</span>
             </div>
 
+            {/* THE SWEEP THAT MAKES THE TWO ABOVE TRUE ON DISK. Retention and
+                the keep-floor decide which rows are past it; nothing deletes
+                anything until this runs, so a message an operator believes was
+                dropped an hour ago is still in the database until the next
+                sweep -- which is a subject-access answer, not a tidiness one.
+
+                Cheap enough that the number is about promptness rather than
+                load: it is one indexed delete. db.ChatSettings.problems refuses
+                0 and anything over a day, and 0 is refused rather than
+                defaulted because a sweep on every tick is far likelier to be a
+                typo than a wish. */}
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="chat-purge">{t("set.chatPurge")}</Label>
+              <Input
+                id="chat-purge"
+                type="number"
+                min={1}
+                max={1440}
+                value={draft.chat?.purgeMinutes ?? 5}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    chat: { ...chatFrom(draft), purgeMinutes: Number(e.target.value) },
+                  })
+                }
+                className="w-28"
+              />
+              <span className="text-[10px] text-muted-foreground">{t("set.chatPurgeNote")}</span>
+            </div>
+
             <div className="flex flex-col gap-1">
               <Label htmlFor="chat-history">{t("set.chatSendOnConnect")}</Label>
               <Input
@@ -954,6 +1070,40 @@ function PipelineSettings({
                 {t("set.chatYouTubeQuotaNote")}
               </span>
             </div>
+
+            {/* THE SLICE HELD BACK SO SENDING STILL WORKS. Reading YouTube chat
+                and posting into it are billed out of the same daily allowance,
+                so a poller that spends the day leaves a moderator unable to
+                type -- and the message that could not be sent is the timeout,
+                at the moment it was needed. The pacer has always held a reserve
+                back for exactly that; it just held chat.DefaultQuotaReserve,
+                because the field beside the allowance had no control either.
+
+                Bounded against the allowance rather than absolutely, the way
+                db.ChatSettings.problems bounds it: a reserve at or above half
+                the budget leaves too little to read with, so chat would pause
+                the moment it started with the quota panel showing a full tank
+                -- a refusal that reads as a bug. */}
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="chat-yt-reserve">{t("set.chatYouTubeReserve")}</Label>
+              <Input
+                id="chat-yt-reserve"
+                type="number"
+                min={0}
+                max={Math.floor((draft.chat?.youtubeQuotaUnits ?? 10000) / 2)}
+                value={draft.chat?.youtubeQuotaReserve ?? 200}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    chat: { ...chatFrom(draft), youtubeQuotaReserve: Number(e.target.value) },
+                  })
+                }
+                className="w-32"
+              />
+              <span className="text-[10px] text-muted-foreground">
+                {t("set.chatYouTubeReserveNote")}
+              </span>
+            </div>
           </div>
 
           <span className="text-[10px] text-muted-foreground">
@@ -978,6 +1128,17 @@ function PipelineSettings({
           same subject: retention is the DEPTH the history checker can see, and
           a rate detector with a two-hour scrollback behind it is a different
           instrument from one with a week. */}
+      {/* THE CONFIG SITS ABOVE THE MATRIX BECAUSE THE MATRIX GRANTS PERMISSION
+          TO WHAT THIS CREATES. A matrix row for a checker nobody has configured
+          is a permission over an empty set -- and until this card existed the
+          matrix would happily arm "Ban / Model" over a nil checker, which is
+          how an operator ends up believing bans are being issued by a model
+          that was never given an endpoint.
+
+          Reading order is therefore the causal order: write the rules, key the
+          model, then say what each may do. */}
+      <AutomodConfig settings={draft} onChange={setDraft} saveError={saveError} />
+
       <AutomodMatrix settings={draft} onChange={setDraft} />
 
       {/* Alert DELIVERY, not alert matching. Which conditions fire is per-rule
@@ -1155,6 +1316,102 @@ function PipelineSettings({
                     />
                     <span className="text-[10px] text-muted-foreground">{t("set.slateColourNote")}</span>
                   </div>
+
+                  {/* THE SLATE'S OWN ENCODE. All three land in
+                      ffmpeg.SlateArgs, so all three are argv: changing one
+                      respawns the slate tier (docs/HOT-RELOAD.md, "the slate's
+                      own argv") and nothing else. Editing them while the slate
+                      is on screen is therefore a visible thing to do, and
+                      editing them while the primary is live costs nothing.
+
+                      There is deliberately NO width, height or frame rate here,
+                      and that absence is a design rather than a gap: the slate
+                      has to match the ingest that went away closely enough that
+                      a `-c:v copy` destination does not choke on the change, and
+                      the only thing that knows what the ingest was is the probe.
+                      See db.SlateSettings. */}
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="fo-slate-kbps">{t("set.slateBitrate")}</Label>
+                    <Input
+                      id="fo-slate-kbps"
+                      type="number"
+                      min={0}
+                      max={100000}
+                      value={draft.failover?.slate?.videoKbps ?? 0}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          failover: {
+                            ...draft.failover,
+                            enabled: true,
+                            slate: {
+                              ...draft.failover?.slate,
+                              enabled: true,
+                              videoKbps: Number(e.target.value),
+                            },
+                          },
+                        })
+                      }
+                      className="w-28"
+                    />
+                    <span className="text-[10px] text-muted-foreground">{t("set.slateBitrateNote")}</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="fo-slate-enc">{t("set.slateEncoder")}</Label>
+                      {/* Free text rather than a picker, for the reason
+                          Rendition.encoder is: which encoders exist is a
+                          property of the running FFmpeg build, and this page
+                          does not read GET /encoders. Empty is libx264 and is
+                          the right answer even on a box full of hardware -- a
+                          static frame costs a software encoder nothing, and the
+                          one job the slate has is to start when everything else
+                          has already failed. */}
+                      <Input
+                        id="fo-slate-enc"
+                        value={draft.failover?.slate?.encoder ?? ""}
+                        placeholder={t("set.slateEncoderPlaceholder")}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            failover: {
+                              ...draft.failover,
+                              enabled: true,
+                              slate: {
+                                ...draft.failover?.slate,
+                                enabled: true,
+                                encoder: e.target.value,
+                              },
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="fo-slate-preset">{t("set.slatePreset")}</Label>
+                      <Input
+                        id="fo-slate-preset"
+                        value={draft.failover?.slate?.preset ?? ""}
+                        placeholder={t("set.slatePresetPlaceholder")}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            failover: {
+                              ...draft.failover,
+                              enabled: true,
+                              slate: {
+                                ...draft.failover?.slate,
+                                enabled: true,
+                                preset: e.target.value,
+                              },
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">{t("set.slateEncoderNote")}</span>
                 </>
               )}
 
@@ -1718,13 +1975,38 @@ function MultitrackHardware({
                   onChange={(e) => patch(i, { dedicatedVideoMemory: Number(e.target.value) })}
                 />
               </div>
+              {/* The sixth field, and the one the other five were shipped
+                  without. It goes into the go-live body beside them
+                  (docs/HOT-RELOAD.md lists all six), so an inventory typed here
+                  described a GPU with no shared memory at all -- which is a
+                  claim about the machine rather than a blank, and this is a
+                  declaration Twitch validates rather than a form it ignores.
+
+                  BYTES, like the field above it and for the same reason: bytes
+                  is the unit the wire format uses, and converting in the form
+                  would put a unit mismatch between what is typed and what is
+                  sent. An integrated GPU shares system RAM and this is where
+                  that shows; a discrete card usually reports a smaller figure
+                  here rather than none at all. */}
+              <div className="flex flex-col gap-1">
+                <Label htmlFor={`mt-shared-${i}`}>Shared system memory (bytes)</Label>
+                <Input
+                  id={`mt-shared-${i}`}
+                  type="number"
+                  min={0}
+                  className="w-44"
+                  value={g.sharedSystemMemory ?? 0}
+                  onChange={(e) => patch(i, { sharedSystemMemory: Number(e.target.value) })}
+                />
+              </div>
             </div>
             {/* Optional, and said so rather than left for the operator to
                 discover by saving. A number invented to fill a box is worse
                 than an empty one: Twitch checks these. */}
             <span className="text-[10px] text-muted-foreground">
-              Device ID and video memory are optional — leave them at zero rather than guessing. The
-              model and the vendor are not: a vendor ID of zero is refused by name.
+              Device ID, video memory and shared system memory are optional — leave them at zero
+              rather than guessing. The model and the vendor are not: a vendor ID of zero is refused
+              by name.
             </span>
           </div>
         ))}

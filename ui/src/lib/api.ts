@@ -28,6 +28,8 @@ import type {
   EncoderList,
   ExpertArgs,
   ExpertResponse,
+  FailoverPin,
+  FailoverStatus,
   FontInfo,
   JobKindInfo,
   JobsOverview,
@@ -586,6 +588,30 @@ export const api = {
    *  it. Separate from getSettings() because settings only carries what the
    *  operator TYPED; this reports what the server can actually DO with it. */
   playlistStatus: () => get<PlaylistStatus>("/failover/playlist"),
+  /** Put one failover source on air by hand, or hand the choice back.
+   *
+   *  THE WAY OUT OF A ONE-WAY DOOR. `failover.return` defaults to `manual`,
+   *  which means that once the tier has moved a broadcast to the backup, the
+   *  slate or the playlist, nothing brings it back on its own -- and until this
+   *  wrapper existed the route that brings it back (POST /failover/source, live
+   *  since the tier shipped) had no caller anywhere in the console. An operator
+   *  whose encoder dropped and recovered watched the standby feed go out with
+   *  no control on any screen able to end it. #768.
+   *
+   *  "auto" CLEARS the pin rather than selecting anything; every other value is
+   *  honoured only while that source is actually delivering, which is what
+   *  makes a pin safe -- see engine.SwitchSource. A pin on a primary that is
+   *  still down is therefore accepted and takes effect when it returns, so a
+   *  200 here does NOT mean the picture has already changed. Read the answer,
+   *  which is the tier's state after the decision.
+   *
+   *  `sourceId` is required in spirit and typed as it is for the reason
+   *  listProcesses states: the handler resolves a scoped engine and refuses
+   *  with 400 source_required on any install running more than one programme.
+   *  A switch aimed at the wrong programme puts a DIFFERENT show on its slate
+   *  while reporting success for the one the operator named (#497). */
+  switchSource: (source: FailoverPin, sourceId: number | null) =>
+    post<FailoverStatus>("/failover/source" + sourceQuery(sourceId), { source }),
 
   // --- transport security ---
   /** Read-only: TLS lives in config.yaml because it has to be right before the

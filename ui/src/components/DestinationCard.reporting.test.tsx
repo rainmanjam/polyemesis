@@ -107,6 +107,33 @@ describe("A4-14: Restarts and Dropped", () => {
   });
 });
 
+/* #787: dupFrames existed on Progress (types.ts:729) and docs/MONITORING.md
+ * promises it beside Dropped -- "The same numbers are on each destination's
+ * card, live" -- but nothing under DestinationCard ever read the field. A
+ * stalled encoder padding in duplicate frames because the SOURCE was
+ * starving looked identical to a healthy one from this card, with no signal
+ * anywhere that anything was wrong. Same rules as Dropped, pinned the same
+ * way: a dash rather than a zero for a destination nothing is measuring. */
+describe("#787: Duplicated", () => {
+  afterEach(cleanup);
+
+  it("dashes Duplicated when the destination is not running", () => {
+    draw({
+      enabled: false,
+      process: { state: "stopped", restarts: 0, progress: { dupFrames: 0 } },
+    } as Partial<DestStatus>);
+    expect(statValue("Duplicated")).toBe("—");
+  });
+
+  it("prints duplicated frames while the destination is actually running", () => {
+    draw({
+      enabled: true,
+      process: { state: "running", restarts: 0, progress: { dupFrames: 7 } },
+    } as Partial<DestStatus>);
+    expect(statValue("Duplicated")).toBe("7");
+  });
+});
+
 describe("A4-2: a stop that was never confirmed", () => {
   afterEach(cleanup);
 

@@ -83,6 +83,35 @@ func (s *Server) DrainLifecycleWithin(parent context.Context) {
 	if s.lifecycle == nil {
 		return
 	}
+
+	// AN EXPIRED PARENT IS ANNOUNCED RATHER THAN OBEYED IN SILENCE.
+	//
+	// The comment above DrainLifecycle names this hazard and has since it was
+	// written: "a drain that inherited that context would do nothing at all
+	// while looking like it had run". A comment is not a device. Shutdown holds
+	// both contexts in scope at once, they are the same type, and the correct
+	// one is not the one named `ctx` -- so the mistake is a single-token edit
+	// with no failure anyone would see. `context.WithTimeout` on a dead parent
+	// returns an already-done context, `drain` returns immediately, and every
+	// broadcast the operator asked to end stays live on the platform.
+	//
+	// RETURNING FAST IS STILL CORRECT, so the behaviour does not change. #645
+	// made this phase draw from the same shutdown budget as the engines
+	// precisely so a slow drain cannot eat the share belonging to whatever is
+	// holding an open recording, and TestDrainLifecycleWithinHonoursTheCallers
+	// Deadline pins that. A fallback to a fresh budget would quietly undo it.
+	//
+	// The two cases -- a budget genuinely exhausted, and a context that was
+	// never the budget -- are indistinguishable from inside this function.
+	// What CAN be fixed is the silence: a drain that ran on a dead context and
+	// therefore ended nothing now says so, in the log an operator reads after a
+	// shutdown that left broadcasts up. Rung 2, and honest about being rung 2.
+	if err := parent.Err(); err != nil && s.log != nil {
+		s.log.Warn("the lifecycle drain was handed an expired context and ended nothing; "+
+			"if broadcasts the operator stopped are still live on the platform, this is why",
+			"err", err)
+	}
+
 	ctx, cancel := context.WithTimeout(parent, lifecycleDrainBudget)
 	defer cancel()
 	s.lifecycle.drain(ctx)

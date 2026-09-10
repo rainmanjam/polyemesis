@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,5 +85,48 @@ func TestDrainLifecycleUsesItsOwnBudgetWhenNobodyElseHasOne(t *testing.T) {
 	case <-done:
 	case <-time.After(lifecycleDrainBudget + 2*time.Second):
 		t.Fatal("DrainLifecycle did not return inside its own budget")
+	}
+}
+
+/* A DRAIN THAT ENDED NOTHING MUST SAY SO.
+ *
+ * Returning fast on an expired parent is correct and #645 is why, so the
+ * behaviour above is not the thing to change. What was wrong is that it was
+ * SILENT: shutdown holds the cancelled app context and the shutdown budget in
+ * scope at once, they are the same type, and the correct one is not the one
+ * named `ctx`. Passing the wrong one is a single-token edit, and the only
+ * evidence would be broadcasts still live on the platform after a clean stop --
+ * discovered on the platform's own dashboard, hours later, by someone who has
+ * no reason to connect it to a shutdown that looked fine.
+ */
+func TestAnExpiredDrainContextIsReported(t *testing.T) {
+	var buf bytes.Buffer
+	s := &Server{
+		lifecycle: drainCoordinator(t),
+		log:       slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.DrainLifecycleWithin(ctx)
+
+	if !strings.Contains(buf.String(), "ended nothing") {
+		t.Errorf("an expired drain context produced no warning; log was %q", buf.String())
+	}
+}
+
+/* POSITIVE CONTROL. A warning that fires on every drain is not a signal, and
+ * would train the operator to scroll past the one that matters. */
+func TestAHealthyDrainReportsNothing(t *testing.T) {
+	var buf bytes.Buffer
+	s := &Server{
+		lifecycle: drainCoordinator(t),
+		log:       slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}
+
+	s.DrainLifecycleWithin(context.Background())
+
+	if strings.Contains(buf.String(), "ended nothing") {
+		t.Errorf("a drain with a live context warned anyway; log was %q", buf.String())
 	}
 }

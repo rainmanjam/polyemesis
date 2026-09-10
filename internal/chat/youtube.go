@@ -159,8 +159,24 @@ func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 			if !y.cfg.Sleep(ctx, idleFor) {
 				return nil
 			}
+			// CLAMPED AFTER DOUBLING, not merely gated before it. Testing
+			// `idleFor < max` and then doubling lets the last step overshoot:
+			// from 30s the sequence is 30, 60, 120, 240, then 480 -- because
+			// 240 is under the 300s ceiling, so it doubles past it and settles
+			// there. The constant is called ytBroadcastPollMax and the comment
+			// on it says the backoff "stops at" that value; the loop settled
+			// 60% higher, and a broadcast going live was discovered up to eight
+			// minutes later instead of five.
+			//
+			// Neither test that guarded this could see it: one divides a day by
+			// the constant, the other compares the constant with its opening
+			// value. Both are arithmetic ABOUT the loop rather than observation
+			// OF it, and both passed throughout.
 			if idleFor < ytBroadcastPollMax {
 				idleFor *= 2
+				if idleFor > ytBroadcastPollMax {
+					idleFor = ytBroadcastPollMax
+				}
 			}
 			continue
 		}
