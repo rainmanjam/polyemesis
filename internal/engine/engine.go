@@ -528,6 +528,19 @@ type Engine struct {
 	// Nil in production, one nil check per preview start.
 	beforePublish func()
 
+	// beforeHubRead, when set, runs after startPreviewLocked has taken a relay
+	// port and immediately before it reads the hub it means to subscribe to.
+	//
+	// Same argument as beforePublish, for the window one step earlier.
+	// previewFlowing -- called a few lines above that read -- itself returns
+	// false when downstreamHub() is nil, so an engine with no hub set up front
+	// never reaches the read: it returns before allocating anything, and a test
+	// written that way passes against a leaking build. The window exists only
+	// because the hub can go away BETWEEN those two calls, which a failover
+	// does and no arrangement of initial state can reproduce.
+	// Nil in production, one nil check per preview start.
+	beforeHubRead func()
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -2130,6 +2143,9 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	// The hub itself is remembered rather than a label for it: a label is not
 	// identity, and a selector rebuilt with an equivalent spec would compare
 	// equal while being a different object to unsubscribe from.
+	if e.beforeHubRead != nil {
+		e.beforeHubRead()
+	}
 	hub := e.downstreamHub()
 	if hub == nil {
 		// THE PORT GOES BACK, for symmetry rather than for a reproduction.
