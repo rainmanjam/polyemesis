@@ -234,3 +234,96 @@ func TestEveryProcessIsPublishedUnderTheShutdownLatch(t *testing.T) {
 			"starting.", len(bare), strings.Join(bare, "\n"))
 	}
 }
+
+/* A PREVIEW START WHOSE HUB VANISHES MID-FLIGHT MUST GIVE ITS PORT BACK.
+ *
+ * startPreviewLocked takes a relay port and only then reads the hub it means
+ * to subscribe to. Every other return below that allocation releases the port
+ * -- the subscribe failure, the stopped re-check before the publish -- and the
+ * nil-hub return did not, so the port was gone for the lifetime of the
+ * process. The pool is four, the loss is permanent per occurrence, and the
+ * fifth request fails with "no relay port" naming a resource that four dead
+ * starts are holding.
+ *
+ * WHY THIS NEEDS A SEAM, and why the obvious test does not work. An engine
+ * with no hub set up front never reaches the read: previewFlowing is called a
+ * few lines above it and itself returns false when downstreamHub() is nil, so
+ * the function returns before allocating anything. A test written that way
+ * passes against a leaking build -- which is not a hypothetical, it is what
+ * the first version of this test did, and mutation testing is the only reason
+ * that was noticed rather than committed as proof.
+ *
+ * The window is real: the hub can go away BETWEEN previewFlowing and the read,
+ * which is what a failover with no backup yet does. beforeHubRead sits exactly
+ * there, the same device beforePublish already provides one step later.
+ */
+func TestAPreviewStartWhoseHubVanishesReleasesItsPort(t *testing.T) {
+	e, _ := storeEngine(t)
+	e.alloc = relay.NewPortAllocator(freeUDPPort(t), 4)
+
+	hub := e.downstreamHub()
+	if hub == nil {
+		t.Fatal("storeEngine produced no hub, so the fixture cannot arm previewFlowing")
+	}
+
+	// previewFlowing wants an advance it has SEEN, so the baseline is stamped
+	// and then the byte count is moved past it.
+	e.mu.Lock()
+	e.previewRxHub = hub
+	e.previewRxBytes = hub.RxBytes()
+	e.previewRxAt = time.Now()
+	e.stopped = false
+	kept := e.hub
+	e.mu.Unlock()
+
+	// The hub disappears in the window: after previewFlowing said yes and the
+	// port was taken, before the read that wants to subscribe.
+	fired := false
+	e.beforeHubRead = func() {
+		fired = true
+		e.mu.Lock()
+		e.sel = nil
+		e.hub = nil
+		e.mu.Unlock()
+	}
+	// Put it back before the fixture tears down: Engine.Stop closes e.hub with
+	// no nil check, and leaving it nil turns cleanup into a segfault reported
+	// against whatever ran last.
+	defer func() {
+		e.mu.Lock()
+		e.hub = kept
+		e.mu.Unlock()
+	}()
+
+	free := portsFree(t, e.alloc)
+	if free == 0 {
+		t.Fatal("the pool starts empty, so a leak of one port would be invisible")
+	}
+
+	e.previewMu.Lock()
+	e.startPreviewLocked(db.DefaultSettings())
+	e.previewMu.Unlock()
+
+	// POSITIVE CONTROL. If previewFlowing refused, or an earlier return took
+	// the call, nothing was ever allocated and the port assertion below is
+	// vacuous -- which is exactly how the first attempt at this test passed
+	// against a leak.
+	if !fired {
+		t.Fatal("the seam never ran, so this test never entered the window it is " +
+			"named after and proves nothing about the port")
+	}
+
+	e.mu.RLock()
+	published := e.preview
+	e.mu.RUnlock()
+	if published != nil {
+		t.Error("a preview was published with no hub to subscribe to")
+	}
+
+	if got := portsFree(t, e.alloc); got != free {
+		t.Errorf("the relay pool went from %d free to %d. startPreviewLocked took a "+
+			"port, found the hub gone, and returned without releasing it -- so every "+
+			"preview requested during a failover costs one of four ports, permanently.",
+			free, got)
+	}
+}

@@ -528,6 +528,19 @@ type Engine struct {
 	// Nil in production, one nil check per preview start.
 	beforePublish func()
 
+	// beforeHubRead, when set, runs after startPreviewLocked has taken a relay
+	// port and immediately before it reads the hub it means to subscribe to.
+	//
+	// Same argument as beforePublish, for the window one step earlier.
+	// previewFlowing -- called a few lines above that read -- itself returns
+	// false when downstreamHub() is nil, so an engine with no hub set up front
+	// never reaches the read: it returns before allocating anything, and a test
+	// written that way passes against a leaking build. The window exists only
+	// because the hub can go away BETWEEN those two calls, which a failover
+	// does and no arrangement of initial state can reproduce.
+	// Nil in production, one nil check per preview start.
+	beforeHubRead func()
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -2130,8 +2143,32 @@ func (e *Engine) startPreviewLocked(s db.Settings) {
 	// The hub itself is remembered rather than a label for it: a label is not
 	// identity, and a selector rebuilt with an equivalent spec would compare
 	// equal while being a different object to unsubscribe from.
+	if e.beforeHubRead != nil {
+		e.beforeHubRead()
+	}
 	hub := e.downstreamHub()
 	if hub == nil {
+		// THE PORT GOES BACK, for symmetry rather than for a reproduction.
+		//
+		// Every other return below the allocation above releases it -- the
+		// subscribe failure, the stopped re-check before the publish -- and this
+		// one did not. A return that keeps a port while its siblings give theirs
+		// up is a bug whether or not anything reaches it today.
+		//
+		// REACHABILITY IS NARROW AND IS NOT CLAIMED TO BE THE WINDOWS FAILURE.
+		// previewFlowing, called a few lines above, itself returns false when
+		// downstreamHub() is nil -- so getting here needs the hub to disappear
+		// BETWEEN that call and this one, which a failover can do and a
+		// single-threaded test cannot. An attempt to pin it with a test that
+		// nils the hub up front was deleted: previewFlowing refuses first, so the
+		// test never allocated a port and passed against the unfixed code too.
+		//
+		// windows-latest failed TestAPreviewStartThatPublishesIntoAShutdown
+		// StartsNothing on exactly this assertion ("a publish that refuses must
+		// give the port back") and that failure remains UNEXPLAINED. Every path
+		// in that test's route releases, so this fix is not known to be its
+		// cause. It is here because it is right, not because it was measured.
+		e.releasePort(port)
 		return
 	}
 	e.mu.Lock()
