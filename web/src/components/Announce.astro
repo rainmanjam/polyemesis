@@ -1,0 +1,35 @@
+---
+/* The announcement bar, and the first of the three places the accent is spent.
+ *
+ * docs/DESIGN-SYSTEM.md takes the site's structure from four comparable
+ * products that agree almost exactly, and its first line is "thin announcement
+ * bar, accent background, one sentence, one link". The site had no such bar at
+ * all, which is why the accent had nowhere to land and had drifted onto
+ * whatever needed emphasis instead — see the audit in index.astro.
+ *
+ * WHAT IT SAYS IS A SENTENCE THAT WAS ALREADY ON THE HOME PAGE, moved rather
+ * than written. It sat under the hero buttons in 14px grey, where it was the
+ * least prominent thing in the hero while being the most important thing a
+ * stranger can know about the project. It is now the first line on every page.
+ *
+ * NO VERSION NUMBER, NO DATE, NO COUNT. A bar reading "v0.9.0 is out" is a
+ * claim that decays the moment v0.10.0 ships, on the one element that appears
+ * on all 39 pages — and nothing would fail, because a stale banner renders
+ * perfectly. Everything here is true for as long as the sentence is true, and
+ * changing it is a deliberate edit to this file rather than a release chore
+ * somebody forgets.
+ *
+ * ONE LINK, and it points at the page that says where polyemesis loses. On
+ * /comparison itself that is a link to the page you are already on, which is
+ * mildly redundant and cheaper than the alternative: a per-page suppression
+ * rule is a branch that has to be right on 39 pages to save one reader one
+ * pointless click.
+ */
+---
+
+<div class="announce">
+  <p class="wrap flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5">
+    <span>Pre-release, one maintainer, MIT.</span>
+    <a href="/comparison">Where it loses is written down too&nbsp;→</a>
+  </p>
+</div>

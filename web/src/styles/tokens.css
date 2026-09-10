@@ -1,0 +1,166 @@
+/* GENERATED FILE — DO NOT EDIT.
+ *
+ * The design system's :root block, copied verbatim from ui/src/index.css by
+ * scripts/sync-design-tokens.mjs. The app is where a token is decided; this is
+ * the website receiving it, so that one palette, one type scale, one motion
+ * vocabulary and one pair of typefaces serve both halves of the product.
+ *
+ * Editing this file is how the two products stop looking like one. Change
+ * ui/src/index.css and re-run the script; ui/src/lib/design-tokens.test.ts
+ * fails on any commit where these two blocks disagree, including one that edits
+ * only this side.
+ *
+ * The comments below are the app's, kept rather than stripped: the reasoning
+ * for a colour is the most useful thing about it, and a reader who arrives at
+ * this file from a website stylesheet has nowhere else to find it.
+ */
+
+:root {
+  /* --- 60 / NEUTRAL SURFACES, darkest to lightest --- */
+  --background: oklch(15.9% 0.0091 264.3); /* app shell */
+  --surface: oklch(17.7% 0.0089 264.3); /* page background */
+  --card: oklch(20.9% 0.0190 266.1); /* panels, cards */
+  --card-raised: oklch(24.0% 0.0243 267.0); /* hovered rows, nested panels */
+  --popover: oklch(22.1% 0.0192 262.1);
+  --muted: oklch(25.2% 0.0245 264.0); /* inert fills, slider tracks */
+
+  /* --- 60 / NEUTRAL, text --- */
+  --foreground: oklch(93.3% 0.0087 264.5);
+  --muted-foreground: oklch(66.6% 0.0300 265.3); /* labels, units, secondary stats */
+  --subtle-foreground: oklch(51.2% 0.0311 262.2); /* disabled, placeholder */
+
+  /* --- 30 / THE ONE ACCENT, deliberately desaturated --- */
+  --primary: oklch(60.2% 0.1177 263.2);
+  --primary-foreground: oklch(15.9% 0.0091 264.3);
+  --primary-dim: oklch(31.3% 0.0447 262.9);
+
+  --secondary: oklch(25.2% 0.0245 264.0);
+  --secondary-foreground: oklch(85.9% 0.0225 263.2);
+  --accent: oklch(26.9% 0.0299 265.1);
+  --accent-foreground: oklch(93.3% 0.0087 264.5);
+
+  /* --- 60 / NEUTRAL, borders & focus --- */
+  --border: oklch(28.5% 0.0277 264.0);
+  --border-strong: oklch(34.8% 0.0360 263.0);
+  --input: oklch(28.5% 0.0277 264.0);
+  --ring: oklch(60.2% 0.1177 263.2);
+
+  /* --- 10 / SIGNAL. Saturated on purpose; used nowhere decorative. Four
+     hues, capped: a fifth is a new class of state, not a new colour, and
+     belongs in the design-intent note above before it belongs here. --- */
+  --live: oklch(75.6% 0.1840 149.9); /* running, healthy, on air */
+  --live-dim: oklch(32.4% 0.0629 154.8);
+  /* THE WEBSITE DOES NOT READ THIS ONE, ON PURPOSE, and it is the only token
+     in this block that it deliberately does not read. (The block is copied
+     whole, so --warn is defined over there; what global.css declines to do is
+     point --color-cross at it.) The two are equal bit-for-bit, and that is a
+     coincidence rather than a shared brand fact: this token means
+     "reconnecting / degraded / near clip" to an operator watching a live
+     broadcast; the website's identical value means "this crosspoint is lit",
+     which is closer to this app's --live than to this app's --warn. Do not
+     "fix the duplication" by pointing both at one variable — that would wire
+     an operator warning to a marketing-site hover state.
+
+     THE PREVIOUS VERSION OF THIS NOTE SAID global.css "deliberately holds a
+     value one hue-degree off this one". It does not and never did; both are
+     oklch(76.5% 0.1399 72.9). That sentence is why the correction is worth
+     recording rather than deleting: an unchecked comment does not merely go
+     stale, it invents a safeguard, and a reader who trusted it would have
+     believed the two tokens were already impossible to confuse. The real
+     safeguard is that global.css states the same rule beside its own literal
+     and design-tokens.test.ts does not require that literal to become a
+     var(). */
+  --warn: oklch(76.5% 0.1399 72.9); /* reconnecting, degraded, near clip */
+  --warn-dim: oklch(31.4% 0.0482 83.5);
+  --down: oklch(62.6% 0.1933 23.0); /* failed, clipping, destructive */
+  --down-dim: oklch(27.5% 0.0593 18.5);
+  --armed: oklch(72.1% 0.1065 216.8); /* configured but idle */
+  --armed-dim: oklch(30.2% 0.0421 220.8);
+
+  /* --- broadcast meter gradient stops (green -> yellow -> red) --- */
+  --meter-low: oklch(75.6% 0.1840 149.9);
+  --meter-mid: oklch(83.6% 0.1629 110.6);
+  --meter-high: oklch(76.5% 0.1399 72.9);
+  --meter-peak: oklch(62.6% 0.1933 23.0);
+  --meter-bg: oklch(20.0% 0.0173 264.1);
+  --meter-grid: oklch(28.5% 0.0277 264.0);
+  --meter-hold: oklch(93.3% 0.0087 264.5);
+
+  --destructive: oklch(62.6% 0.1933 23.0);
+  --destructive-foreground: oklch(97.8% 0.0107 17.3);
+
+  --radius: 0.375rem;
+
+  /* --- TYPE SCALE. Six steps, and six is the point: a seventh gets chosen by
+     accident and the scale stops being one. Tighter at the small end than a
+     marketing scale, because a console shows numbers read at a glance far more
+     often than prose read carefully. See docs/DESIGN-SYSTEM.md.
+
+     COMPONENTS NAME A STEP, NEVER A NUMBER: `text-micro`, `text-tiny`,
+     `text-sm`, `text-base`, `text-lg`, `text-display`, all registered as
+     Tailwind utilities in @theme below. `text-[13px]` is not a smaller version
+     of this scale, it is a seventh step, and it is invisible in review because
+     it looks like a size rather than like a decision.
+
+     Every component in components/ui/ used to be written that way — 10, 11,
+     12, 13 and 15px literals across the kit and the shell — which is why the
+     scale could be declared here in full and still not exist on screen. The
+     six steps below are only real while something consumes them. --- */
+  --text-micro: 0.625rem; /* 10px - units, axis labels, meter scales */
+  --text-micro-lh: 0.875rem;
+  --text-tiny: 0.6875rem; /* 11px - field hints, secondary stats */
+  --text-tiny-lh: 1rem;
+  --text-sm: 0.75rem; /* 12px - table cells, form labels: the console default */
+  --text-sm-lh: 1.125rem;
+  --text-base: 0.875rem; /* 14px - body prose, dialog copy */
+  --text-base-lh: 1.25rem;
+  --text-lg: 1.125rem; /* 18px - card titles */
+  --text-lg-lh: 1.5rem;
+  --text-display: 1.75rem; /* 28px - page titles */
+  --text-display-lh: 2rem;
+
+  /* --- TYPEFACES. Two families, both self-hosted by the @font-face rules at
+     the top of this file, and both stacks are the WEBSITE's — which is the
+     whole of the fix here. The app used to name no webfont at all and start its
+     mono stack with ui-monospace, so the console rendered in SF Mono on a Mac,
+     Consolas on Windows and something else again on Linux while the marketing
+     site rendered in JetBrains Mono everywhere. Same product, four typefaces.
+
+     The fallbacks after the first family are kept exactly as the site writes
+     them rather than tidied, so that a machine where the woff2 fails to load
+     degrades to the same face on both halves of the product.
+
+     Monospace is a CORRECTNESS rule, not a style one. Anything an operator may
+     copy or compare character by character goes here: stream keys, URLs, MQTT
+     topics, hex colours, timecodes. A proportional font makes `l` and `1`
+     indistinguishable in a stream key, and the failure is a stream that will
+     not start for a reason nobody can see. --- */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* --- MOTION. Three durations. A console animates to EXPLAIN a state change,
+     never to decorate one.
+
+     Nothing reflecting live state may animate its arrival: a meter, a status
+     pill and a viewer count change because reality changed, and easing them in
+     adds latency to the one number the operator is watching. --- */
+  --motion-instant: 90ms; /* hover, focus ring, button press */
+  --motion-quick: 160ms; /* disclosure, popover, tab change */
+  --motion-settle: 260ms; /* dialog, drawer, page transition */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
+  /* --- ELEVATION. Surface first, shadow second: a dark UI reads depth from
+     lightness far more than from shadow, so the shadows are faint on purpose
+     and two of the four levels have none at all.
+
+     There is no --elev-* token, deliberately: the four levels are pairings of
+     tokens that already exist (flat=--surface, card=--card + border,
+     raised=--card-raised + --shadow-raised, overlay=--popover +
+     --shadow-overlay), and a name for the pairing would buy nothing. What the
+     two shadows below buy is that every floating surface uses the SAME one —
+     Dialog had shadow-2xl and the menu, select, popover and tooltip had
+     shadow-xl, which is five components each answering "how far off the page
+     is this?" on Tailwind's scale instead of on ours. --- */
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-overlay: 0 8px 24px -4px rgb(0 0 0 / 0.6);
+}

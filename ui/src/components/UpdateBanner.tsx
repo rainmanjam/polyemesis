@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Check, Copy, ExternalLink, X } from "lucide-react";
 
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
+import { useMotionTransition } from "../lib/motion";
 import type { UpgradePlan, UpgradeResult, VersionInfo } from "../lib/types";
 
 /** Tells an operator a release exists, and -- where the install allows it --
@@ -40,6 +42,11 @@ export function UpdateBanner({ onInfo }: { onInfo?: (v: VersionInfo) => void }) 
   const t = useT();
   const [info, setInfo] = useState<VersionInfo | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  // Drawer tier, for the reason given at the return below: this strip changes
+  // the height of the whole console when it arrives and again when it leaves,
+  // and a layout shift is the one kind of motion that has to be slow enough to
+  // follow.
+  const settle = useMotionTransition("settle");
 
   // What the operator's action has produced so far. "idle" is the banner as it
   // has always been: a sentence and a link.
@@ -83,7 +90,10 @@ export function UpdateBanner({ onInfo }: { onInfo?: (v: VersionInfo) => void }) 
     };
   }, [onInfo]);
 
-  if (!info || dismissed) return null;
+  // `dismissed` is deliberately NOT part of this guard any more -- it is the
+  // one state this banner can leave from, and leaving is what has to animate.
+  // See the AnimatePresence at the return.
+  if (!info) return null;
   // A failed check says nothing and must look like nothing: an operator whose
   // box has no outbound network should not see a permanent warning about it.
   if (info.checkFailed) return null;
@@ -169,119 +179,160 @@ export function UpdateBanner({ onInfo }: { onInfo?: (v: VersionInfo) => void }) 
       .catch(fail);
   };
 
+  /* THE ONE THING IN THIS CONSOLE THAT RESIZES EVERYTHING ELSE.
+   *
+   * This strip is the first row of the app shell. It appears when an async
+   * fetch resolves -- a second or two after the page is already usable -- and
+   * it disappears when the operator dismisses it, and both events move every
+   * pixel below it by the height of a line of text. Before this, both happened
+   * in a single frame: whatever the operator was reaching for jumped, and on a
+   * page full of Stop buttons a jump is a mis-click.
+   *
+   * So the height is animated rather than switched, on --motion-settle -- the
+   * tier the motion scale reserves for dialogs and drawers, and the right one
+   * here because a layout shift is the kind of movement that has to be slow
+   * enough to follow with the eye.
+   *
+   * WHY A LIBRARY. `height: auto` is not a value CSS can transition to, and the
+   * dismissal removes the node before any CSS transition could run. Both halves
+   * need JavaScript; neither is decoration.
+   *
+   * THE WRAPPER IS GEOMETRY, THE INNER DIV IS THE BANNER. role="status" stays
+   * on the element that holds the text, so the live region announces the
+   * sentence rather than an empty box that later grows. overflow-hidden on the
+   * wrapper is what makes the collapse a wipe instead of squashed text --
+   * padding and line-height do not scale with a height animation, so without it
+   * the content compresses on its way out.
+   *
+   * The transition collapses to 0s under prefers-reduced-motion, and a
+   * zero-length exit still completes, so a dismissal is still a dismissal for
+   * an operator who asked for less movement. See lib/motion.ts. */
   return (
-    <div
-      role="status"
-      className="flex flex-wrap items-center gap-3 border-b border-border bg-muted/50 px-3 py-1.5 text-sm"
-    >
-      <span className="min-w-0 flex-1 truncate">
-        {headline}
-      </span>
-
-      {/* Everything below offers or performs an upgrade, and none of it applies
-          to a source build: there is no release that is known to be newer, so
-          there is nothing to prepare. The dismiss control stays, because an
-          operator who knows what they are running should be able to close it. */}
-      {!devBuild && info.onAirSummary && stage === "idle" && (
-        // Shown WITH the offer, not instead of it. An operator who learns a
-        // release exists is going to act on it eventually, and the useful moment
-        // to tell them what is live is while they are deciding -- not after they
-        // have clicked something that turned out to end a broadcast.
-        <span className="hidden shrink-0 text-muted-foreground sm:inline">
-          {t("chrome.updateOnAir", { what: info.onAirSummary })}
-        </span>
-      )}
-
-      {!devBuild && stage === "idle" && (
-        <button type="button" onClick={prepare} className="shrink-0 underline underline-offset-2">
-          {t("chrome.updatePrepare")}
-        </button>
-      )}
-
-      {(stage === "planning" || stage === "working") && (
-        <span className="shrink-0 text-muted-foreground">{t("chrome.updatePreparing")}</span>
-      )}
-
-      {stage === "confirm" && plan && (
-        <span className="flex shrink-0 items-center gap-2">
-          <span className="text-muted-foreground">
-            {t("chrome.updateInterrupt", { what: plan.onAirSummary ?? "" })}
-          </span>
-          {/* The override is a separate, explicit click that has already named
-              what it will interrupt. There is no setting that makes it the
-              default, on purpose. */}
-          <button
-            type="button"
-            onClick={() => stageUpdate(true)}
-            className="underline underline-offset-2"
-          >
-            {t("common.confirm")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setStage("idle")}
-            className="underline underline-offset-2 text-muted-foreground"
-          >
-            {t("common.cancel")}
-          </button>
-        </span>
-      )}
-
-      {stage === "manual" && plan && (
-        <span className="flex min-w-0 shrink items-center gap-2">
-          <span className="truncate text-muted-foreground">
-            {plan.reason || t("chrome.updateManual")}
-          </span>
-          {plan.command && <CopyableCommand value={plan.command} />}
-        </span>
-      )}
-
-      {stage === "done" && result && (
-        <span className="flex min-w-0 shrink items-center gap-2">
-          <span className="truncate">
-            {result.rolledBack
-              ? t("chrome.updateUndone")
-              : t("chrome.updateRestartRequired")}
-          </span>
-          <CopyableCommand value={result.command} />
-          {result.staged && (
-            // Offered HERE and nowhere else, because here is the only moment it
-            // is the right question. A rollback is undoing something that has
-            // not taken effect yet; once the service restarts, the banner is
-            // gone and recovering from a bad release is a different job.
-            <button type="button" onClick={undo} className="underline underline-offset-2">
-              {t("chrome.updateUndo")}
-            </button>
-          )}
-        </span>
-      )}
-
-      {error && (
-        <span className="min-w-0 shrink truncate text-destructive">
-          {t("chrome.updateFailed", { error })}
-        </span>
-      )}
-
-      {info.releaseUrl && (
-        <a
-          href={info.releaseUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="inline-flex shrink-0 items-center gap-1 underline underline-offset-2"
+    <AnimatePresence>
+      {!dismissed && (
+        <motion.div
+          key="update-banner"
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: "auto", opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={settle}
+          className="overflow-hidden"
         >
-          {t("chrome.releaseNotes")}
-          <ExternalLink className="size-3.5" aria-hidden />
-        </a>
+          <div
+            role="status"
+            className="flex flex-wrap items-center gap-3 border-b border-border bg-muted/50 px-3 py-1.5 text-sm"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {headline}
+            </span>
+
+            {/* Everything below offers or performs an upgrade, and none of it applies
+                to a source build: there is no release that is known to be newer, so
+                there is nothing to prepare. The dismiss control stays, because an
+                operator who knows what they are running should be able to close it. */}
+            {!devBuild && info.onAirSummary && stage === "idle" && (
+              // Shown WITH the offer, not instead of it. An operator who learns a
+              // release exists is going to act on it eventually, and the useful moment
+              // to tell them what is live is while they are deciding -- not after they
+              // have clicked something that turned out to end a broadcast.
+              <span className="hidden shrink-0 text-muted-foreground sm:inline">
+                {t("chrome.updateOnAir", { what: info.onAirSummary })}
+              </span>
+            )}
+
+            {!devBuild && stage === "idle" && (
+              <button type="button" onClick={prepare} className="shrink-0 underline underline-offset-2">
+                {t("chrome.updatePrepare")}
+              </button>
+            )}
+
+            {(stage === "planning" || stage === "working") && (
+              <span className="shrink-0 text-muted-foreground">{t("chrome.updatePreparing")}</span>
+            )}
+
+            {stage === "confirm" && plan && (
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="text-muted-foreground">
+                  {t("chrome.updateInterrupt", { what: plan.onAirSummary ?? "" })}
+                </span>
+                {/* The override is a separate, explicit click that has already named
+                    what it will interrupt. There is no setting that makes it the
+                    default, on purpose. */}
+                <button
+                  type="button"
+                  onClick={() => stageUpdate(true)}
+                  className="underline underline-offset-2"
+                >
+                  {t("common.confirm")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStage("idle")}
+                  className="underline underline-offset-2 text-muted-foreground"
+                >
+                  {t("common.cancel")}
+                </button>
+              </span>
+            )}
+
+            {stage === "manual" && plan && (
+              <span className="flex min-w-0 shrink items-center gap-2">
+                <span className="truncate text-muted-foreground">
+                  {plan.reason || t("chrome.updateManual")}
+                </span>
+                {plan.command && <CopyableCommand value={plan.command} />}
+              </span>
+            )}
+
+            {stage === "done" && result && (
+              <span className="flex min-w-0 shrink items-center gap-2">
+                <span className="truncate">
+                  {result.rolledBack
+                    ? t("chrome.updateUndone")
+                    : t("chrome.updateRestartRequired")}
+                </span>
+                <CopyableCommand value={result.command} />
+                {result.staged && (
+                  // Offered HERE and nowhere else, because here is the only moment it
+                  // is the right question. A rollback is undoing something that has
+                  // not taken effect yet; once the service restarts, the banner is
+                  // gone and recovering from a bad release is a different job.
+                  <button type="button" onClick={undo} className="underline underline-offset-2">
+                    {t("chrome.updateUndo")}
+                  </button>
+                )}
+              </span>
+            )}
+
+            {error && (
+              <span className="min-w-0 shrink truncate text-destructive">
+                {t("chrome.updateFailed", { error })}
+              </span>
+            )}
+
+            {info.releaseUrl && (
+              <a
+                href={info.releaseUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex shrink-0 items-center gap-1 underline underline-offset-2"
+              >
+                {t("chrome.releaseNotes")}
+                <ExternalLink className="size-3.5" aria-hidden />
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => setDismissed(true)}
+              aria-label={t("chrome.dismiss")}
+              className="shrink-0 rounded p-0.5 hover:bg-muted"
+            >
+              <X className="size-3.5" aria-hidden />
+            </button>
+          </div>
+        </motion.div>
       )}
-      <button
-        type="button"
-        onClick={() => setDismissed(true)}
-        aria-label={t("chrome.dismiss")}
-        className="shrink-0 rounded p-0.5 hover:bg-muted"
-      >
-        <X className="size-3.5" aria-hidden />
-      </button>
-    </div>
+    </AnimatePresence>
   );
 }
 

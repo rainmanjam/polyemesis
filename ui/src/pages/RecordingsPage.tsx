@@ -225,7 +225,7 @@ export function RecordingsPage() {
           </CardHeader>
           <CardContent className="px-0 pb-0">
             {readFailed(recRead) ? (
-              <div className="px-3 py-8 text-center text-[12px] text-warn">
+              <div className="px-3 py-8 text-center text-sm text-warn">
                 {t("rec.listUnread")}
               </div>
             ) : !mayClaim(recRead) ? (
@@ -233,7 +233,7 @@ export function RecordingsPage() {
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               </div>
             ) : recordings.length === 0 ? (
-              <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
+              <div className="px-3 py-8 text-center text-sm text-muted-foreground">
                 {t("rec.empty")}
               </div>
             ) : (
@@ -256,7 +256,7 @@ export function RecordingsPage() {
                     return (
                       <Fragment key={r.id}>
                         <TableRow>
-                          <TableCell className="font-mono text-[11px]">
+                          <TableCell className="font-mono text-tiny">
                             <div className="flex items-center gap-1">
                               {/* The disclosure only exists when there is
                                   something behind it; a chevron that opens an
@@ -281,12 +281,12 @@ export function RecordingsPage() {
                               {r.filename}
                             </div>
                           </TableCell>
-                          <TableCell className="tnum font-mono text-[11px] text-muted-foreground">
+                          <TableCell className="tnum font-mono text-tiny text-muted-foreground">
                             {timestamp(r.startedAt)}
                           </TableCell>
                           {/* Both are measured only once the recorder has moved on
                               to the next segment, so the live one reads as dashes. */}
-                          <TableCell className="tnum text-right font-mono text-[11px] text-muted-foreground">
+                          <TableCell className="tnum text-right font-mono text-tiny text-muted-foreground">
                             {r.durationMs > 0 ? shortDuration(r.durationMs) : "—"}
                           </TableCell>
                           <TableCell className="text-center">
@@ -295,7 +295,7 @@ export function RecordingsPage() {
                                 {r.tracks}
                               </Badge>
                             ) : (
-                              <span className="text-[11px] text-muted-foreground">—</span>
+                              <span className="text-tiny text-muted-foreground">—</span>
                             )}
                           </TableCell>
                           <TableCell className="text-center">
@@ -308,20 +308,20 @@ export function RecordingsPage() {
                                 {mine.length}
                               </Badge>
                             ) : stemsKnown ? (
-                              <span className="text-[11px] text-muted-foreground">—</span>
+                              <span className="text-tiny text-muted-foreground">—</span>
                             ) : (
                               // NOT a dash. The stems read did not come back,
                               // so "this segment has no per-track files" is a
                               // claim nobody is entitled to make here.
                               <span
-                                className="text-[11px] text-warn"
+                                className="text-tiny text-warn"
                                 title={t("rec.stemsUnread")}
                               >
                                 ?
                               </span>
                             )}
                           </TableCell>
-                          <TableCell className="tnum text-right font-mono text-[11px]">
+                          <TableCell className="tnum text-right font-mono text-tiny">
                             {bytes(r.bytes)}
                           </TableCell>
                           <TableCell>
@@ -353,11 +353,11 @@ export function RecordingsPage() {
                                     key={s.name}
                                     className="flex items-center justify-between gap-2"
                                   >
-                                    <span className="truncate font-mono text-[10px] text-muted-foreground">
+                                    <span className="truncate font-mono text-micro text-muted-foreground">
                                       <span className="text-foreground">{s.track}</span> · {s.name}
                                     </span>
                                     <span className="flex shrink-0 items-center gap-1.5">
-                                      <span className="tnum font-mono text-[10px] text-muted-foreground">
+                                      <span className="tnum font-mono text-micro text-muted-foreground">
                                         {bytes(s.bytes)}
                                       </span>
                                       <Button
@@ -423,7 +423,7 @@ export function RecordingsPage() {
             </CardContent>
             {usage?.storage.halted && (
               <CardContent className="pt-0">
-                <p className="rounded border border-down/50 bg-down/5 p-2 text-[11px] text-down">
+                <p className="rounded border border-down/50 bg-down/5 p-2 text-tiny text-down">
                   {usage.storage.reason ?? t("rec.haltedDefault")}{" "}
                   {t("rec.haltedRestarts")}
                 </p>
@@ -482,7 +482,7 @@ export function RecordingsPage() {
                         <SelectItem value="wav">{t("rec.stemWav")}</SelectItem>
                       </SelectContent>
                     </Select>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-micro text-muted-foreground">
                       {t("rec.stemNote")}
                     </span>
                   </div>
@@ -519,7 +519,7 @@ export function RecordingsPage() {
                       setDraft((d) => (d ? { ...d, maxGb: Number(e.target.value) } : d))
                     }
                   />
-                  <span className="text-[10px] text-muted-foreground">{t("rec.noSizeLimit")}</span>
+                  <span className="text-micro text-muted-foreground">{t("rec.noSizeLimit")}</span>
                 </div>
 
                 <div className="flex flex-col gap-1">
@@ -536,7 +536,7 @@ export function RecordingsPage() {
                       setDraft((d) => (d ? { ...d, maxAgeHours: Number(e.target.value) } : d))
                     }
                   />
-                  <span className="text-[10px] text-muted-foreground">{t("rec.keepForever")}</span>
+                  <span className="text-micro text-muted-foreground">{t("rec.keepForever")}</span>
                 </div>
 
                 <div className="flex flex-col gap-1">
@@ -554,13 +554,13 @@ export function RecordingsPage() {
                       setDraft((d) => (d ? { ...d, minFreeGb: Number(e.target.value) } : d))
                     }
                   />
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-micro text-muted-foreground">
                     {t("rec.minFreeNote")}
                   </span>
                 </div>
 
                 {dirty && (
-                  <span className="text-[10px] text-warn">{t("rec.unsavedRetention")}</span>
+                  <span className="text-micro text-warn">{t("rec.unsavedRetention")}</span>
                 )}
                 <Button
                   size="sm"
@@ -570,7 +570,7 @@ export function RecordingsPage() {
                   {saving && <Loader2 className="animate-spin" />}
                   {t("rec.savePolicy")}
                 </Button>
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-micro text-muted-foreground">
                   {t("rec.retentionNote")}
                 </p>
               </CardContent>

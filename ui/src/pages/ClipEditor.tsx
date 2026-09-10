@@ -692,10 +692,10 @@ export function ClipEditor() {
                   />
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
-                    <p className="text-[12px] text-muted-foreground">
+                    <p className="text-sm text-muted-foreground">
                       No proxy has been generated for this segment.
                     </p>
-                    <p className="text-[11px] text-subtle-foreground">
+                    <p className="text-tiny text-subtle-foreground">
                       The cut still works — a proxy only gives you a picture to aim with. Generate
                       one from the library.
                     </p>
@@ -785,7 +785,7 @@ export function ClipEditor() {
                   >
                     <ZoomIn />
                   </Button>
-                  <span className="tnum font-mono text-[11px] text-muted-foreground">
+                  <span className="tnum font-mono text-tiny text-muted-foreground">
                     {timecode(playheadMs)}
                   </span>
                 </div>
@@ -834,14 +834,14 @@ export function ClipEditor() {
                 <TimecodeField label={t("clipedit.in")} valueMs={inMs} onCommit={(ms) => setInMs(Math.max(0, Math.min(ms, outMs - 1)))} />
                 <TimecodeField label={t("clipedit.out")} valueMs={outMs} onCommit={(ms) => setOutMs(Math.max(inMs + 1, Math.min(ms, durationMs)))} />
                 <div className="flex flex-col gap-1">
-                  <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <Label className="text-micro uppercase tracking-wider text-muted-foreground">
                     Length
                   </Label>
-                  <div className="tnum flex h-8 items-center rounded-md border border-border px-2 font-mono text-[12px]">
+                  <div className="tnum flex h-8 items-center rounded-md border border-border px-2 font-mono text-sm">
                     {timecode(Math.max(0, outMs - inMs))}
                   </div>
                 </div>
-                <p className="ml-auto max-w-md text-[10px] text-subtle-foreground">
+                <p className="ml-auto max-w-md text-micro text-subtle-foreground">
             {t("clipedit.shortcuts")}
                 </p>
               </div>
@@ -866,7 +866,7 @@ export function ClipEditor() {
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div className="flex flex-col gap-1">
-                <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                <Label className="text-micro uppercase tracking-wider text-muted-foreground">
                   Mode
                 </Label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -886,10 +886,10 @@ export function ClipEditor() {
               </div>
 
               <div className="flex flex-col gap-1">
-                <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                <Label className="text-micro uppercase tracking-wider text-muted-foreground">
                   Audio
                 </Label>
-                <label className="flex items-center gap-2 text-[12px]">
+                <label className="flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={audioAll}
                     onCheckedChange={(v) => setAudioAll(v === true)}
@@ -900,13 +900,13 @@ export function ClipEditor() {
                 {!audioAll && (
                   <div className="mt-1 flex flex-col gap-1 rounded-md border border-border p-2">
                     {source.tracks.length === 0 ? (
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-tiny text-muted-foreground">
                         This recording's track count was never measured, so there is nothing to pick
                         from. Take every track instead.
                       </p>
                     ) : (
                       source.tracks.map((t) => (
-                        <label key={t.index} className="flex items-center gap-2 text-[12px]">
+                        <label key={t.index} className="flex items-center gap-2 text-sm">
                           <Checkbox
                             checked={tracks.includes(t.index)}
                             onCheckedChange={(v) =>
@@ -918,7 +918,7 @@ export function ClipEditor() {
                             }
                             aria-label={`Audio track ${t.index + 1}`}
                           />
-                          <span className="font-mono text-[11px]">{t.index + 1}</span>
+                          <span className="font-mono text-tiny">{t.index + 1}</span>
                           <span className="truncate">
                             {t.speaker || t.label || `Track ${t.index + 1}`}
                           </span>
@@ -930,7 +930,7 @@ export function ClipEditor() {
                         </label>
                       ))
                     )}
-                    <p className="text-[10px] text-subtle-foreground">
+                    <p className="text-micro text-subtle-foreground">
                       Selected tracks are copied, not mixed — the clip keeps them as separate
                       tracks, exactly as recorded.
                     </p>
@@ -949,7 +949,7 @@ export function ClipEditor() {
               </div>
 
               <div className="flex flex-col gap-1">
-                <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                <Label className="text-micro uppercase tracking-wider text-muted-foreground">
                   Container
                 </Label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -975,7 +975,7 @@ export function ClipEditor() {
                 {exporting ? <Loader2 className="animate-spin" /> : <Scissors />}
                 Export clip
               </Button>
-              <p className="text-[10px] text-subtle-foreground">
+              <p className="text-micro text-subtle-foreground">
             {t("clipedit.queueNote")}
               </p>
             </CardContent>
@@ -993,7 +993,7 @@ export function ClipEditor() {
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
               {!source.hasTranscript ? (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-tiny text-muted-foreground">
             {t("clipedit.noTranscript")}
                 </p>
               ) : (
@@ -1013,7 +1013,7 @@ export function ClipEditor() {
                     onMouseUp={onTranscriptMouseUp}
                   >
                     {visibleLines.length === 0 ? (
-                      <p className="py-4 text-center text-[11px] text-muted-foreground">
+                      <p className="py-4 text-center text-tiny text-muted-foreground">
                         Nothing matches.
                       </p>
                     ) : (
@@ -1028,7 +1028,7 @@ export function ClipEditor() {
                       ))
                     )}
                   </div>
-                  <p className="text-[10px] text-subtle-foreground">
+                  <p className="text-micro text-subtle-foreground">
             {t("clipedit.clickLine")}
                   </p>
                 </>
@@ -1043,7 +1043,7 @@ export function ClipEditor() {
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
               {jobs.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">{t("clipedit.nothingExported")}</p>
+                <p className="text-tiny text-muted-foreground">{t("clipedit.nothingExported")}</p>
               ) : (
                 jobs.map((j) => <JobRow key={j.id} job={j} />)
               )}
@@ -1081,8 +1081,8 @@ function ModeButton({
           : "border-border bg-card hover:bg-card-raised",
       )}
     >
-      <div className="text-[12px] font-semibold">{title}</div>
-      <div className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{body}</div>
+      <div className="text-sm font-semibold">{title}</div>
+      <div className="mt-0.5 text-micro leading-snug text-muted-foreground">{body}</div>
     </button>
   );
 }
@@ -1107,7 +1107,7 @@ function TimecodeField({
   };
   return (
     <div className="flex flex-col gap-1">
-      <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</Label>
+      <Label className="text-micro uppercase tracking-wider text-muted-foreground">{label}</Label>
       <Input
         value={shown}
         aria-label={`${label} point`}
@@ -1155,19 +1155,19 @@ function PlanPanel({
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {tooLong && (
-          <p className="rounded-md border border-down bg-down-dim px-2 py-1.5 text-[11px]">
+          <p className="rounded-md border border-down bg-down-dim px-2 py-1.5 text-tiny">
             That range is longer than the {Math.round(maxSeconds / 3600)} hour ceiling for one clip.
           </p>
         )}
         {error && !tooLong && (
-          <p className="rounded-md border border-down bg-down-dim px-2 py-1.5 text-[11px]">
+          <p className="rounded-md border border-down bg-down-dim px-2 py-1.5 text-tiny">
             {error}
           </p>
         )}
 
         {plan && (
           <>
-            <p className="text-[12px]">{plan.describe}</p>
+            <p className="text-sm">{plan.describe}</p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Stat
                 labelKey="clipedit.starts"
@@ -1193,18 +1193,18 @@ function PlanPanel({
               />
             </div>
             {plan.mode !== plan.requestedMode && (
-              <p className="text-[11px] text-warn">
+              <p className="text-tiny text-warn">
                 Asked for {plan.requestedMode}, will run as {plan.mode}.
               </p>
             )}
             {plan.concat && (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-tiny text-muted-foreground">
                 The cut spans {plan.segments} recording files; they are joined before it is
                 trimmed.
               </p>
             )}
             {(plan.warnings ?? []).map((wmsg) => (
-              <p key={wmsg} className="text-[11px] text-warn">
+              <p key={wmsg} className="text-tiny text-warn">
                 {wmsg}
               </p>
             ))}
@@ -1212,7 +1212,7 @@ function PlanPanel({
         )}
 
         {plan && !plan.driftKnown && (
-          <p className="text-[11px] text-warn">
+          <p className="text-tiny text-warn">
             {t("clipedit.noKeyframes")}
           </p>
         )}
@@ -1238,7 +1238,7 @@ function TranscriptRow({
       data-line-start={line.startMs}
       data-line-end={line.endMs}
       className={cn(
-        "group flex cursor-pointer gap-2 rounded-[3px] px-1.5 py-1 text-[12px] transition-colors",
+        "group flex cursor-pointer gap-2 rounded-sm px-1.5 py-1 text-sm transition-colors",
         selected ? "bg-primary-dim" : "hover:bg-card-raised",
       )}
       onClick={onSeek}
@@ -1266,7 +1266,7 @@ function TranscriptRow({
       // shorter and less useful, and would need translating into twelve
       // locales to say less.
     >
-      <span className="tnum shrink-0 font-mono text-[10px] text-subtle-foreground">
+      <span className="tnum shrink-0 font-mono text-micro text-subtle-foreground">
         {timecode(line.startMs).slice(0, 8)}
       </span>
       <span className="min-w-0 flex-1">
@@ -1301,7 +1301,7 @@ function JobRow({ job }: { job: ClipJob }) {
     <div className="flex flex-col gap-1 rounded-md border border-border p-2">
       <div className="flex items-center gap-2">
         <Badge variant={done ? "live" : failed ? "warn" : "outline"}>{job.state}</Badge>
-        <span className="tnum font-mono text-[11px] text-muted-foreground">
+        <span className="tnum font-mono text-tiny text-muted-foreground">
           {done && res?.bytes ? bytes(res.bytes) : `${Math.round((job.progress ?? 0) * 100)}%`}
         </span>
         {done && (
@@ -1324,11 +1324,11 @@ function JobRow({ job }: { job: ClipJob }) {
           "host cpu is above the ceiling". Without it a governed queue looks
           broken rather than polite. */}
       {job.blocked && job.reason && (
-        <p className="text-[10px] text-muted-foreground">{job.reason}</p>
+        <p className="text-micro text-muted-foreground">{job.reason}</p>
       )}
-      {job.error && <p className="text-[10px] text-down">{job.error}</p>}
+      {job.error && <p className="text-micro text-down">{job.error}</p>}
       {done && res?.driftKnown && (res.inDriftMs ?? 0) !== 0 && (
-        <p className="text-[10px] text-warn">
+        <p className="text-micro text-warn">
           Started {driftText(res.inDriftMs ?? 0)} from where it was asked for.
         </p>
       )}

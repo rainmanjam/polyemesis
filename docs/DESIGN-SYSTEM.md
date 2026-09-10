@@ -58,8 +58,13 @@ duration was written inline at the point of use, which is how a scale drifts.
 `@theme inline` block below. Count them with:
 
 ```sh
-grep -cE '^\s*--[a-z-]+:\s*#' ui/src/index.css
+grep -cE '^\s*--[a-z-]+:\s*oklch\(' ui/src/index.css
 ```
+
+That command used to match `#`, and therefore counted zero: the palette has been
+written in `oklch()` since before this document existed. The number beside it
+was right and the way to check it was not, which is the same failure as the rest
+of this page in miniature.
 
 They were already correct and are unchanged. The rule that matters:
 
@@ -90,6 +95,32 @@ be — six steps, no more, because a seventh gets chosen by accident.
 character-by-character: stream keys, URLs, topic names, hex colours, timecodes.
 That is a correctness rule, not a stylistic one — a proportional font makes `l`
 and `1` in a stream key indistinguishable.
+
+### Typefaces
+
+Two families, and both halves of the product load the same two files.
+
+| Token | Family | Served from |
+|---|---|---|
+| `--font-sans` | IBM Plex Sans | `ui/public/fonts/` and `web/public/fonts/` |
+| `--font-mono` | JetBrains Mono | `ui/public/fonts/` and `web/public/fonts/` |
+
+Self-hosted woff2, one variable file per family subset to latin, with
+`font-display: swap`. Not a CDN link: a font request to a third party is a
+request the operator did not make, and polyemesis is routinely run on an
+isolated broadcast LAN where such a request does not fail fast — it hangs for
+the connect timeout and then renders in Times.
+
+The website also carries **Space Grotesk** for marketing headlines. The console
+has no display type — its largest step is `--text-display`, a 28px page title —
+so it does not ship that third file.
+
+This was the loudest half of the gap between this document and the code. The
+website has loaded both families since it was written; the app declared
+`--font-sans` and `--font-mono`, named no webfont at all, and fell through to
+`ui-sans-serif`/`system-ui`. The two halves of one product rendered in different
+typefaces, which explains more of why they did not look alike than any colour
+does.
 
 ### Motion
 
@@ -128,18 +159,67 @@ tokens, this table is the definition they should collapse to.
 
 ## Sharing tokens with the website
 
-The tokens live in `ui/src/index.css`, which the website cannot import. Copying
-them is how two products stop looking like one.
-
-The system's source of truth is therefore a **plain CSS custom-property block**
-with no Tailwind syntax in it — the `:root` section of `index.css`. It is valid
+The system's source of truth is a **plain CSS custom-property block** with no
+Tailwind syntax in it — the `:root` section of `ui/src/index.css`. It is valid
 CSS anywhere, so the website includes the same block and gets the same palette,
-type scale and motion without depending on Tailwind, a build step or a package
-registry.
+type scale, motion and typefaces without depending on Tailwind, a build step or
+a package registry.
 
 The `@theme inline` block below it is the Tailwind adapter and is app-only. That
 split is the whole mechanism: **`:root` is the system, `@theme` is one
 consumer.** A website built in anything at all consumes the first half.
+
+### How the block gets there
+
+```sh
+node scripts/sync-design-tokens.mjs
+```
+
+That copies the `:root` block verbatim into `web/src/styles/tokens.css`, which
+`web/src/styles/global.css` imports. Run it after editing any token.
+
+A checked-in copy rather than an import, because the website has to build from
+`web/` alone: `web/Dockerfile` uses that directory as its build context, so a
+relative path reaching into `ui/` is a file the image does not contain. A shared
+npm package is rejected under [what is deliberately
+absent](#what-is-deliberately-absent), and generating the file during the Astro
+build fails for the same reason the import does.
+
+The copy is imported **after** `@import "tailwindcss"` and is unlayered, which
+is what lets the shared `--font-sans` and `--font-mono` override the defaults
+Tailwind puts in `@layer theme` without the website restating either family.
+
+### What enforces it
+
+`ui/src/lib/design-tokens.test.ts`, and this section is the reason it exists.
+Between the day this document was written and the day anyone measured, the
+sharing described above was never implemented and nothing said so: 13 of the
+app's token names appeared on the website at all, `--surface`, `--muted` and
+`--down` were different colours in the two products, and the two halves rendered
+in different typefaces — while a comment in `index.css` described the palettes
+as identical.
+
+The test compares the two blocks token by token, fails when a value differs,
+fails when the website restates an app literal instead of reading it, fails when
+the app names a font family it does not self-host, and fails when the two
+`public/fonts/` copies of a woff2 stop being byte-identical. It also fails when
+its own walk finds nothing, because two stylesheets that yield no tokens agree
+perfectly and mean nothing.
+
+Where the two are deliberately allowed to differ, the reason is written beside
+the value rather than left to a reader to infer:
+
+| Site token | Why it is not shared |
+|---|---|
+| `--color-cross` | Equal to the app's `--warn` by coincidence. A lit crosspoint and a degrading stream are unrelated states, and wiring them together would let a marketing retune move an operator's warning colour |
+| `--color-subtle` | The app's `--subtle-foreground` measures 3.41:1 on this page's ground. A placeholder in a dark control room and 11px body copy on a phone in daylight are not the same contrast problem |
+| `--color-primary-bright`, `--font-display`, `--motion-enter`, `--ease-breath` | Site-only; the console has nothing for them to do |
+
+Two site tokens read an app token of a **different name**, because the names
+collide and the meanings do not. `--color-surface` is a card fill, so it reads
+`--card` rather than the app's `--surface`, which is a page. `--color-muted` is
+secondary text, so it reads `--muted-foreground` rather than the app's `--muted`,
+which is a slider track.
 
 ## Component rules
 
@@ -189,5 +269,7 @@ can show honestly, because none of them route audio per destination.
 ## See also
 
 - `ui/src/index.css` — the tokens themselves, and the only place they live
+- `scripts/sync-design-tokens.mjs` — how the website gets them
+- `ui/src/lib/design-tokens.test.ts` — what stops the two drifting apart again
 - [ARCHITECTURE](ARCHITECTURE.md)
 - [MONITORING](MONITORING.md) — what the signal colours mean operationally

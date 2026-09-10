@@ -1,5 +1,6 @@
 ---
 import "../styles/global.css";
+import Announce from "../components/Announce.astro";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
 
@@ -202,6 +203,12 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
       class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-primary focus:px-4 focus:py-2 focus:text-ink"
       >Skip to content</a
     >
+    {/* ABOVE THE NAV, and in normal flow rather than sticky. The nav below it
+        is `sticky top-0`, so the bar scrolls away once and the navigation takes
+        the top edge for the rest of the page — which is the behaviour the four
+        sites in docs/DESIGN-SYSTEM.md all have. A sticky bar would spend a
+        permanent 30px of a phone's viewport on a sentence that is read once. */}
+    <Announce />
     <Nav />
     <main id="main">
       <slot />

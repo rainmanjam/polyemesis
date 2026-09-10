@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { attention, onAir } from "@/lib/attention";
 import { toneForState } from "@/lib/signal";
 import { kbps } from "@/lib/format";
+import { useMotionTransition } from "@/lib/motion";
 import type { Status } from "@/lib/types";
 import { useStateLabel } from "@/lib/i18n";
 
@@ -45,6 +47,12 @@ export function AcrossTheRoom({
   // to Escape and one that does not is the one that feels stuck. Bound only
   // while open, so the console keeps Escape for its dialogs the rest of the
   // time.
+  //
+  // KEYED ON `open`, NOT ON WHETHER THE PANEL IS ON SCREEN. The panel now
+  // outlives `open` by one fade (see below), and Escape must stop answering the
+  // moment the operator closes it rather than a quarter of a second later --
+  // otherwise a second Escape aimed at whatever is underneath gets eaten by a
+  // dialog that is already on its way out.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -54,8 +62,47 @@ export function AcrossTheRoom({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // --motion-settle: this is a dialog, and the motion table in
+  // docs/DESIGN-SYSTEM.md puts dialogs, drawers and page transitions on the
+  // slowest of the three tiers.
+  //
+  // The fade is OPACITY ONLY -- no slide, no scale. Everything on this screen
+  // is sized to be read from two or three metres away, and text that is still
+  // moving or still growing at that distance is text you have to wait for. The
+  // 260ms is spent on the panel arriving, never on the words settling down.
+  //
+  // The exit is what needs a library at all. React drops this subtree the
+  // instant `open` goes false, and a CSS transition on a node that no longer
+  // exists never runs: without AnimatePresence the console does not fade back,
+  // it snaps, which reads as a glitch rather than as a dismissal.
+  const settle = useMotionTransition("settle");
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <RoomPanel key="across-the-room" onClose={onClose} status={status} transition={settle} />
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** The panel itself, split out so none of the reading below happens on the
+ *  Dashboard renders where this is closed -- which is nearly all of them, since
+ *  a live status feed re-renders the page several times a second.
+ *
+ *  It also means the content FREEZES during the fade out. AnimatePresence keeps
+ *  rendering the element it was handed last, so a destination that changes
+ *  state mid-dismissal does not flicker on a panel that is already leaving. */
+function RoomPanel({
+  onClose,
+  status,
+  transition,
+}: {
+  onClose: () => void;
+  status: Status | null | undefined;
+  transition: ReturnType<typeof useMotionTransition>;
+}) {
   const stateLabel = useStateLabel();
-  if (!open) return null;
 
   const air = onAir(status?.destinations);
   const faults = attention(status);
@@ -71,7 +118,11 @@ export function AcrossTheRoom({
     // bg-background rather than a translucent scrim, for the same reason the
     // theme is near-black at all: anything showing through is contrast this
     // view is spending on nothing.
-    <div
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={transition}
       role="dialog"
       aria-modal="true"
       aria-label="Across the room"
@@ -138,6 +189,6 @@ export function AcrossTheRoom({
           );
         })}
       </ul>
-    </div>
+    </motion.div>
   );
 }

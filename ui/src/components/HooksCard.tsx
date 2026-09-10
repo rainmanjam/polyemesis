@@ -568,7 +568,13 @@ function HookDialog({
 
           <div className="space-y-1">
             <Label htmlFor="hook-url">{t("hooks.url")}</Label>
+            {/* font-mono, matching the table cell above that lists the same
+                value: an endpoint typed here and an endpoint read back there
+                are the same string, and an operator comparing them should not
+                have to allow for two different typefaces. The mono rule in
+                docs/DESIGN-SYSTEM.md names URLs. */}
             <Input
+              className="font-mono"
               id="hook-url"
               value={draft.url ?? ""}
               onChange={(e) => onChange({ ...draft, url: e.target.value })}

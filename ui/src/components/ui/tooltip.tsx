@@ -15,8 +15,14 @@ const TooltipContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 overflow-hidden rounded border border-border-strong bg-popover px-2 py-1 text-[11px] shadow-xl",
-        "animate-in fade-in-0 zoom-in-95",
+        // ELEVATION: overlay. A tooltip is the smallest thing this app floats
+        // and it still uses the shared pairing, because the alternative is a
+        // fifth shadow that only differs because nobody compared them.
+        "z-50 overflow-hidden rounded border border-border-strong bg-popover px-2 py-1 text-tiny shadow-overlay",
+        // duration-instant: a tooltip answers a hover, and the spec puts hover
+        // on the 90ms step. Anything slower reads as lag on a pointer that has
+        // already stopped moving.
+        "duration-instant animate-in fade-in-0 zoom-in-95",
         className,
       )}
       {...props}

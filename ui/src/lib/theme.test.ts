@@ -39,6 +39,32 @@ function declaredColours(): Set<string> {
   return names;
 }
 
+/* THE OTHER TWO NAMESPACES THAT SHARE THESE PREFIXES.
+ *
+ * `text-` and `shadow-` name a colour in most of this file's cases and a TYPE
+ * STEP or an ELEVATION LEVEL in the rest: `text-micro` is 10px, `shadow-overlay`
+ * is the popover shadow, and neither is a --color-* token. Before the design
+ * system's type and elevation tokens were actually consumed by components,
+ * every utility with these prefixes really was a colour, so the check below
+ * could assume it.
+ *
+ * Read from index.css rather than listed here, deliberately. A hardcoded
+ * allow-list of "non-colour words" would also swallow the typo this whole file
+ * exists to catch — `text-micrro` would have to be added by hand to fail, which
+ * is backwards. Declared in :root means valid; anything else still fails. */
+function declaredScale(prefix: "text" | "shadow"): Set<string> {
+  const css = readFileSync(join(SRC, "index.css"), "utf8");
+  const names = new Set<string>();
+  for (const m of css.matchAll(new RegExp(`--${prefix}-([a-z0-9-]+)\\s*:`, "g"))) {
+    // `--text-sm--line-height` and `--text-sm-lh` are the companion halves of a
+    // step, not steps of their own; Tailwind pairs them with the size and no
+    // utility names them.
+    if (m[1].includes("--line-height") || m[1].endsWith("-lh")) continue;
+    names.add(m[1]);
+  }
+  return names;
+}
+
 function tsxFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry: string) => {
     const p = join(dir, entry);
@@ -68,12 +94,32 @@ const PREFIX = "text|bg|border|ring|fill|stroke|outline|divide|accent|caret|plac
 
 describe("colour utilities name a declared token", () => {
   const declared = declaredColours();
+  const textSteps = declaredScale("text");
+  const shadowLevels = declaredScale("shadow");
 
   it("index.css declares the signal tokens the app is built on", () => {
     // Guards the guard: if the parse silently returned nothing, every
     // assertion below would pass vacuously.
     for (const t of ["live", "warn", "down", "destructive", "primary", "muted"]) {
       expect(declared, `--color-${t} should be declared`).toContain(t);
+    }
+  });
+
+  it("index.css declares the six type steps and both shadows", () => {
+    // The same guard-the-guard for the two namespaces added below. An empty
+    // set here would not fail anything on its own -- it would just make every
+    // text-* and shadow-* utility look like a colour typo -- but a MISSING
+    // step is worth failing on directly: six is the number the scale commits
+    // to, and a seventh chosen by accident is the failure it exists to
+    // prevent.
+    for (const s of ["micro", "tiny", "sm", "base", "lg", "display"]) {
+      expect(textSteps, `--text-${s} should be declared`).toContain(s);
+    }
+    expect(textSteps.size, "the type scale is six steps, no more").toBe(6);
+    // ...and see "no size outside the scale is added" below, which is what
+    // stops the app having a seventh step that this cap cannot count.
+    for (const s of ["raised", "overlay"]) {
+      expect(shadowLevels, `--shadow-${s} should be declared`).toContain(s);
     }
   });
 
@@ -94,6 +140,11 @@ describe("colour utilities name a declared token", () => {
           const name = u[2];
           if (NON_COLOUR.test(name)) continue;
           if (PALETTE.has(name.split("-")[0])) continue;
+          // A declared type step or elevation level, not a colour. Checked
+          // against the prefix that was actually matched, so `bg-overlay` --
+          // which names no colour -- still fails.
+          if (u[1] === "text" && textSteps.has(name)) continue;
+          if (u[1] === "shadow" && shadowLevels.has(name)) continue;
           // `ring-offset-surface` names its colour after the second segment.
           const candidates = [name, name.replace(/^offset-/, "")];
           if (candidates.some((c) => declared.has(c))) continue;
@@ -196,6 +247,85 @@ describe("state colour comes from tokens, not the Tailwind palette", () => {
       "use the semantic tokens (text-warn, text-down, text-live…) so a colour " +
         "keeps meaning one thing. If a use is genuinely outside the state " +
         "vocabulary, add it to EXEMPT with the reason.",
+    ).toEqual([]);
+  });
+});
+
+/* SIX STEPS IN THE STYLESHEET IS NOT SIX SIZES ON SCREEN.
+ *
+ * The cap above counts `--text-*` DECLARATIONS. An arbitrary utility declares
+ * nothing: `text-[13px]` sets a size Tailwind generates on the spot, so the
+ * scale can sit at exactly six steps for ever while the app renders eleven
+ * different sizes. The token that the scale commits to is not the thing the
+ * reader sees.
+ *
+ * A ratchet on the total would be the weakest possible device -- a number
+ * nobody lowers is a comment. This ratchets on the DISTINCT sizes instead,
+ * which is the property that matters and is small enough to enumerate: 348
+ * occurrences, eleven sizes. A new one has to be added here by hand, and an
+ * entry whose size no longer appears anywhere is STALE and fails, so converting
+ * the last `text-[13px]` closes that size permanently rather than leaving a
+ * licence behind for the next person.
+ */
+const OFF_SCALE: Record<string, string> = {
+  "9px": "denser than --text-micro; meter ticks and tabular annotations",
+  "10px": "the app's real smallest step, 216 uses. --text-micro is 11px",
+  "11px": "= --text-micro, written arbitrarily. Convertible today",
+  "12px": "= --text-tiny, written arbitrarily. Convertible today",
+  "13px": "between --text-tiny and --text-sm, 6 uses",
+  "15px": "between --text-sm and --text-base, 1 use",
+  // Responsive display type. Not a step and not convertible: a clamp is a range
+  // across viewports, which is exactly what a fixed scale cannot express.
+  "clamp(0.875rem,1.8vw,1.25rem)": "responsive display type",
+  "clamp(0.875rem,2vw,1.5rem)": "responsive display type",
+  "clamp(1rem,2.2vw,1.5rem)": "responsive display type",
+  "clamp(1rem,2.5vw,1.75rem)": "responsive display type",
+  "clamp(2.5rem,9vw,7rem)": "responsive display type",
+};
+
+describe("the type scale is the sizes on screen, not the tokens in the file", () => {
+  it("adds no size outside the scale", () => {
+    const found = new Map<string, string[]>();
+    for (const file of tsxFiles(SRC)) {
+      if (file.includes(".test.")) continue;
+      const src = readFileSync(file, "utf8");
+      for (const attr of src.matchAll(
+        /class(?:Name)?=(?:"([^"]*)"|\{`([^`]*)`\}|\{"([^"]*)"\})/g,
+      )) {
+        const chunk = attr[1] ?? attr[2] ?? attr[3] ?? "";
+        for (const u of chunk.matchAll(/(?<![\w-])text-\[([^\]]+)\]/g)) {
+          const line = src.slice(0, attr.index).split("\n").length;
+          const where = `${file.slice(SRC.length)}:${line}`;
+          found.set(u[1], [...(found.get(u[1]) ?? []), where]);
+        }
+      }
+    }
+
+    // POSITIVE CONTROL. A regex that stopped matching -- a changed attribute
+    // spelling, a moved source root -- yields an empty map, over which "no new
+    // size" is trivially true and "no stale entry" would be the only signal.
+    expect(
+      found.size,
+      "no arbitrary text size was found anywhere in ui/src. There are hundreds; " +
+        "the scan is broken, so this test is asserting nothing.",
+    ).toBeGreaterThan(0);
+
+    const added = [...found].filter(([size]) => !(size in OFF_SCALE));
+    expect(
+      added.map(([size, at]) => `text-[${size}] at ${at.slice(0, 3).join(", ")}`),
+      "a text size outside the six-step scale. The scale is the sizes the reader " +
+        "sees, not the tokens index.css declares -- an arbitrary utility adds a " +
+        "step without touching either. Use a --text-* step, or, if this size " +
+        "genuinely has no step, add it to OFF_SCALE with why.",
+    ).toEqual([]);
+
+    const stale = Object.keys(OFF_SCALE).filter((size) => !found.has(size));
+    expect(
+      stale,
+      "these sizes are listed in OFF_SCALE and no longer appear in ui/src. The " +
+        "conversion is done; delete the entries. Leaving them is what turns a " +
+        "ratchet back into a comment -- the size stays licensed for the next " +
+        "person who reaches for it.",
     ).toEqual([]);
   });
 });

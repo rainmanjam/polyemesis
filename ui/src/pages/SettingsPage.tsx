@@ -275,7 +275,7 @@ export function SettingsPage() {
 
   if (loadFailed) {
     return (
-      <div className="flex h-full items-center justify-center p-3 text-center text-[12px] text-muted-foreground">
+      <div className="flex h-full items-center justify-center p-3 text-center text-sm text-muted-foreground">
         {t("set.couldNotLoad")}
       </div>
     );
@@ -441,7 +441,7 @@ function IngestSettings({
               </SelectContent>
             </Select>
             {system && !system.ffmpeg.hasLibsrt && draft.ingest.mode === "srt" && (
-              <span className="text-[10px] text-warn">{t("set.noLibsrt")}</span>
+              <span className="text-micro text-warn">{t("set.noLibsrt")}</span>
             )}
           </div>
 
@@ -484,7 +484,7 @@ function IngestSettings({
                     })
                   }
                 />
-                <span className="text-[10px] text-muted-foreground">{t("set.passphraseNote")}</span>
+                <span className="text-micro text-muted-foreground">{t("set.passphraseNote")}</span>
               </div>
             </>
           ) : (
@@ -522,7 +522,7 @@ function IngestSettings({
                     })
                   }
                 />
-                <span className="text-[10px] text-muted-foreground">{t("set.streamKeyNote")}</span>
+                <span className="text-micro text-muted-foreground">{t("set.streamKeyNote")}</span>
               </div>
             </>
           )}
@@ -534,7 +534,7 @@ function IngestSettings({
               The button says what will happen rather than "Save", because a
               label an operator reads is worth more than a dialog they dismiss. */}
           {live && (
-            <p className="flex items-start gap-1.5 text-[11px] text-warn">
+            <p className="flex items-start gap-1.5 text-tiny text-warn">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               A stream is arriving now. Saving restarts the ingest, which
               disconnects the encoder and drops everyone watching. The encoder
@@ -563,7 +563,7 @@ function IngestSettings({
             {urlCarriesCredential(system?.ingestUrl ?? "") ? (
               <SecretCode value={system?.ingestUrl ?? ""} />
             ) : (
-              <code className="min-w-0 flex-1 break-all font-mono text-[10px] text-muted-foreground">
+              <code className="min-w-0 flex-1 break-all font-mono text-micro text-muted-foreground">
                 {system?.ingestUrl ?? "…"}
               </code>
             )}
@@ -571,7 +571,7 @@ function IngestSettings({
               <Copy />
             </Button>
           </div>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             For multitrack, use OBS → Settings → Output → Recording, set type to Custom Output
             (FFmpeg), container <code className="font-mono">mpegts</code>, and enable the audio
             tracks you want to send. The README has the exact field values.
@@ -697,7 +697,7 @@ function FfmpegBadges({ system }: { system: SystemInfo | null }) {
    * before it renders at all, so a null here means the read FAILED and saying
    * so is the whole difference between a blank panel and an answer. */
   if (!system) {
-    return <span className="text-[11px] text-muted-foreground">{t("set.ffmpegUnknown")}</span>;
+    return <span className="text-tiny text-muted-foreground">{t("set.ffmpegUnknown")}</span>;
   }
   return (
     <div className="mt-1 flex flex-wrap gap-1">
@@ -858,7 +858,7 @@ function PipelineSettings({
           see. It is also the only place a Save now exists on this tab, so it
           has to be reachable from everywhere in it. */}
       <div className="sticky top-0 z-10 flex items-center gap-2 rounded-md border border-border bg-background/95 px-2 py-1.5 backdrop-blur">
-        <span className={cn("mr-auto text-[11px]", dirty ? "text-warn" : "text-muted-foreground")}>
+        <span className={cn("mr-auto text-tiny", dirty ? "text-warn" : "text-muted-foreground")}>
           {dirty ? t("set.pipelineUnsaved") : t("set.pipelineOneSave")}
         </span>
         <Button size="sm" onClick={saveTab} disabled={saving || !dirty}>
@@ -918,7 +918,7 @@ function PipelineSettings({
               onCheckedChange={(v) => setDraft({ ...draft, synth: { silenceOnVideoOnly: v } })}
             />
           </div>
-          <span className="text-[10px] text-muted-foreground">{t("set.synthesiseNote")}</span>
+          <span className="text-micro text-muted-foreground">{t("set.synthesiseNote")}</span>
         </CardContent>
       </Card>
 
@@ -941,8 +941,8 @@ function PipelineSettings({
               }
               className="w-28"
             />
-            <span className="text-[10px] text-muted-foreground">{t("set.staggerNote")}</span>
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-micro text-muted-foreground">{t("set.staggerNote")}</span>
+            <span className="text-micro text-muted-foreground">
               {t("set.staggerReconnectNote")}</span>
           </div>
         </CardContent>
@@ -973,7 +973,7 @@ function PipelineSettings({
                 }
                 className="w-28"
               />
-              <span className="text-[10px] text-muted-foreground">0 keeps everything, forever.</span>
+              <span className="text-micro text-muted-foreground">0 keeps everything, forever.</span>
             </div>
 
             <div className="flex flex-col gap-1">
@@ -992,7 +992,7 @@ function PipelineSettings({
                 }
                 className="w-32"
               />
-              <span className="text-[10px] text-muted-foreground">{t("set.chatKeepNote")}</span>
+              <span className="text-micro text-muted-foreground">{t("set.chatKeepNote")}</span>
             </div>
 
             {/* THE SWEEP THAT MAKES THE TWO ABOVE TRUE ON DISK. Retention and
@@ -1041,7 +1041,7 @@ function PipelineSettings({
                 }
                 className="w-32"
               />
-              <span className="text-[10px] text-muted-foreground">{t("set.chatSendNote")}</span>
+              <span className="text-micro text-muted-foreground">{t("set.chatSendNote")}</span>
             </div>
 
             {/* YOUTUBE IS THE ONLY PLATFORM HERE THAT BILLS FOR CHAT. Twitch is
@@ -1066,7 +1066,7 @@ function PipelineSettings({
                 }
                 className="w-32"
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-micro text-muted-foreground">
                 {t("set.chatYouTubeQuotaNote")}
               </span>
             </div>
@@ -1106,15 +1106,15 @@ function PipelineSettings({
             </div>
           </div>
 
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-micro text-muted-foreground">
             Both apply and the more generous one wins: a message goes when it is older than the
             hours <em>and</em> outside the newest N. So a busy channel keeps less time than you
             asked and a quiet one keeps more &mdash; which is the right way round, because the
             floor is what stops a slow channel&rsquo;s user cards being empty.
           </span>
-          <span className="text-[10px] text-muted-foreground">{t("set.chatNotOnlyDisk")}</span>
-          <span className="text-[10px] text-muted-foreground">{t("set.chatSmall")}</span>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-micro text-muted-foreground">{t("set.chatNotOnlyDisk")}</span>
+          <span className="text-micro text-muted-foreground">{t("set.chatSmall")}</span>
+          <span className="text-micro text-muted-foreground">
             <strong>{t("set.chatSendOnConnectShort")}</strong> is a different kind of number from the other two. Those
             bound what is kept on disk; this one is a buffer held in memory, allocated in full
             whether or not anyone is talking. It is what a browser receives the instant it opens the
@@ -1164,10 +1164,10 @@ function PipelineSettings({
               }
               className="w-28"
             />
-            <span className="text-[10px] text-muted-foreground">{t("set.attemptsNote")}</span>
+            <span className="text-micro text-muted-foreground">{t("set.attemptsNote")}</span>
           </div>
-          <span className="text-[10px] text-muted-foreground">{t("set.attemptsRetryable")}</span>
-          <span className="text-[10px] text-muted-foreground">{t("set.attemptsBackoff")}</span>
+          <span className="text-micro text-muted-foreground">{t("set.attemptsRetryable")}</span>
+          <span className="text-micro text-muted-foreground">{t("set.attemptsBackoff")}</span>
         </CardContent>
       </Card>
 
@@ -1192,7 +1192,7 @@ function PipelineSettings({
               }
             />
           </div>
-          <span className="text-[10px] text-muted-foreground">{t("set.failoverRemuxNote")}</span>
+          <span className="text-micro text-muted-foreground">{t("set.failoverRemuxNote")}</span>
 
           {draft.failover?.enabled && (
             <>
@@ -1210,7 +1210,7 @@ function PipelineSettings({
                     })
                   }
                 />
-                <span className="text-[10px] text-muted-foreground">{t("set.graceNote")}</span>
+                <span className="text-micro text-muted-foreground">{t("set.graceNote")}</span>
               </div>
 
               <div className="flex flex-col gap-1">
@@ -1232,7 +1232,7 @@ function PipelineSettings({
                     <SelectItem value="auto">{t("set.returnAutomatic")}</SelectItem>
                   </SelectContent>
                 </Select>
-                <span className="text-[10px] text-muted-foreground">{t("set.returnManualNote")}</span>
+                <span className="text-micro text-muted-foreground">{t("set.returnManualNote")}</span>
               </div>
 
               {draft.failover?.return === "auto" && (
@@ -1294,7 +1294,7 @@ function PipelineSettings({
                         })
                       }
                     />
-                    <span className="text-[10px] text-muted-foreground">{t("set.slateImageNote")}</span>
+                    <span className="text-micro text-muted-foreground">{t("set.slateImageNote")}</span>
                   </div>
 
                   <div className="flex flex-col gap-1">
@@ -1314,7 +1314,7 @@ function PipelineSettings({
                         })
                       }
                     />
-                    <span className="text-[10px] text-muted-foreground">{t("set.slateColourNote")}</span>
+                    <span className="text-micro text-muted-foreground">{t("set.slateColourNote")}</span>
                   </div>
 
                   {/* THE SLATE'S OWN ENCODE. All three land in
@@ -1436,7 +1436,7 @@ function PipelineSettings({
                   }
                 />
               </div>
-              <span className="text-[10px] text-muted-foreground">{t("set.playLoopNote")}</span>
+              <span className="text-micro text-muted-foreground">{t("set.playLoopNote")}</span>
 
               {draft.failover?.playlist?.enabled && (
                 <PlaylistEditor
@@ -1473,7 +1473,7 @@ function PipelineSettings({
               onCheckedChange={(v) => setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: v } })}
             />
           </div>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-micro text-muted-foreground">
             <strong>{t("set.mqtt5Only")}</strong> A broker pinned to 3.1.1 will not complete a connection
             at all &mdash; it is not a degraded mode. Mosquitto 2.x, EMQX and the Home Assistant
             add-on are all fine.
@@ -1498,7 +1498,7 @@ function PipelineSettings({
                     setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, brokerUrl: e.target.value } })
                   }
                 />
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-micro text-muted-foreground">
                   {t("set.brokerUrlNote")}
                 </span>
                 {/* Said at the point of configuration rather than left to the
@@ -1508,7 +1508,7 @@ function PipelineSettings({
                     a trusted LAN is the normal Home Assistant setup and what our
                     own documentation recommends. */}
                 {(draft.mqtt?.brokerUrl ?? "").startsWith("mqtt://") && (
-                  <span className="text-[10px] text-warn">
+                  <span className="text-micro text-warn">
                     {t("set.brokerPlainNote")}
                   </span>
                 )}
@@ -1535,7 +1535,7 @@ function PipelineSettings({
                   />
                 </div>
               </div>
-              <span className="text-[10px] text-muted-foreground">{t("set.passwordNote")}</span>
+              <span className="text-micro text-muted-foreground">{t("set.passwordNote")}</span>
               {draft.mqtt?.hasPassword && (
                 <Button
                   size="sm"
@@ -1571,7 +1571,7 @@ function PipelineSettings({
                   />
                 </div>
               </div>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-micro text-muted-foreground">
                 {t("set.topicPrefixNote")}
               </span>
 
@@ -1609,7 +1609,7 @@ function PipelineSettings({
                   />
                 </div>
               </div>
-              <span className="text-[10px] text-muted-foreground">{t("set.intervalNote")}</span>
+              <span className="text-micro text-muted-foreground">{t("set.intervalNote")}</span>
 
               <div className="flex flex-col gap-1">
                 <Label htmlFor="mq-cid">{t("set.clientId")}</Label>
@@ -1621,7 +1621,7 @@ function PipelineSettings({
                     setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, clientId: e.target.value } })
                   }
                 />
-                <span className="text-[10px] text-muted-foreground">{t("set.clientIdNote")}</span>
+                <span className="text-micro text-muted-foreground">{t("set.clientIdNote")}</span>
               </div>
 
               <div className="flex items-center justify-between">
@@ -1725,7 +1725,7 @@ function PipelineSettings({
                 })
               }
             />
-            <span className="text-[10px] text-muted-foreground">{t("set.previewIdleNote")}</span>
+            <span className="text-micro text-muted-foreground">{t("set.previewIdleNote")}</span>
           </div>
         </CardContent>
       </Card>
@@ -1810,7 +1810,7 @@ function PipelineSettings({
               />
             </div>
           </div>
-          <span className="text-[10px] text-muted-foreground">{t("set.logsBoundNote")}</span>
+          <span className="text-micro text-muted-foreground">{t("set.logsBoundNote")}</span>
         </CardContent>
       </Card>
 
@@ -1894,7 +1894,7 @@ function MultitrackHardware({
           a destination with the toggle on goes live, and a refusal falls back to the ordinary
           Twitch ingest.
         </Experimental>
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-micro text-muted-foreground">
           Twitch grants Enhanced Broadcasting only to a client with a GPU it supports, and it checks
           what it is told: a zero vendor ID, a vendor it does not know and an out-of-date driver are
           each refused by name. polyemesis does not fill this in for you — it can read the PCI vendor
@@ -2003,7 +2003,7 @@ function MultitrackHardware({
             {/* Optional, and said so rather than left for the operator to
                 discover by saving. A number invented to fill a box is worse
                 than an empty one: Twitch checks these. */}
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-micro text-muted-foreground">
               Device ID, video memory and shared system memory are optional — leave them at zero
               rather than guessing. The model and the vendor are not: a vendor ID of zero is refused
               by name.
@@ -2068,7 +2068,7 @@ function PlatformSettings() {
 
       {(readFailed(guides) || readFailed(creds) || readFailed(accounts)) && (
         <Card>
-          <CardContent className="flex items-start gap-1.5 py-3 text-[11px] text-warn">
+          <CardContent className="flex items-start gap-1.5 py-3 text-tiny text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>{t("set.platformReadFailed")}</span>
           </CardContent>
@@ -2168,7 +2168,7 @@ function PlatformCapabilityMatrix() {
               <Badge variant={l.variant} className="normal-case">
                 {l.label}
               </Badge>
-              <span className="text-[10px] text-muted-foreground">{l.help}</span>
+              <span className="text-micro text-muted-foreground">{l.help}</span>
             </span>
           ))}
         </div>
@@ -2177,7 +2177,7 @@ function PlatformCapabilityMatrix() {
             to be misread as "no". Saying it plainly costs a sentence and saves
             an operator concluding a feature is blocked when it was only never
             checked. */}
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-micro text-muted-foreground">
           Unverified means exactly that: polyemesis does not do it today and nobody here has read
           the platform's API either way. It is never a refusal — if you can make it work, it
           works, and we would rather be told than guess. Only “not possible” is a checked
@@ -2194,12 +2194,12 @@ function PlatformCapabilityMatrix() {
             }
           >
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-medium">{p.name}</span>
+              <span className="text-tiny font-medium">{p.name}</span>
               <Badge variant={p.tier === "unsupported" ? "warn" : "outline"}>read first</Badge>
             </div>
             <p
               className={
-                p.tier === "unsupported" ? "text-[10px] text-warn" : "text-[10px] text-muted-foreground"
+                p.tier === "unsupported" ? "text-micro text-warn" : "text-micro text-muted-foreground"
               }
             >
               {p.readFirst}
@@ -2377,7 +2377,7 @@ export function PlatformCredCard({
           <AccordionItem value="steps" className="border-b-0">
             <AccordionTrigger>{t("set.stepByStep")}</AccordionTrigger>
             <AccordionContent>
-              <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-[11px] text-muted-foreground">
+              <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-tiny text-muted-foreground">
                 {guide.steps.map((s, i) => (
                   <li key={i}>{s}</li>
                 ))}
@@ -2386,20 +2386,20 @@ export function PlatformCredCard({
                 <div className="mt-2 flex flex-col gap-1">
                   <Label>{t("set.redirectUri")}</Label>
                   <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
-                    <code className="min-w-0 flex-1 break-all font-mono text-[10px]">
+                    <code className="min-w-0 flex-1 break-all font-mono text-micro">
                       {guide.redirectPath}
                     </code>
                     <Button variant="ghost" size="icon-sm" onClick={copyRedirect} aria-label={t("set.copy")}>
                       {copied ? <Check className="text-live" /> : <Copy />}
                     </Button>
                   </div>
-                  <span className="text-[10px] text-muted-foreground">{t("set.redirectNote")}</span>
+                  <span className="text-micro text-muted-foreground">{t("set.redirectNote")}</span>
                   {/* Above the credential fields on purpose: registering the
                       right URI has to happen before the credentials matter. */}
                   {guide.redirectWarnings?.map((warning) => (
                     <div
                       key={warning}
-                      className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn"
+                      className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-micro text-warn"
                     >
                       <AlertTriangle className="mt-px size-3 shrink-0" />
                       <span>{warning}</span>
@@ -2451,7 +2451,7 @@ export function PlatformCredCard({
                 one that ran and failed, and a platform outage must not be
                 reported as the operator's mistake. */}
             {check && (
-              <div className="flex items-start gap-2 text-[10px]">
+              <div className="flex items-start gap-2 text-micro">
                 <Badge
                   variant={
                     check.state === "verified"
@@ -2515,14 +2515,14 @@ export function PlatformCredCard({
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="truncate text-[12px]">{a.accountName}</span>
+                        <span className="truncate text-sm">{a.accountName}</span>
                         {a.reconnect?.needed && (
-                          <Badge variant="outline" className="border-warn text-[9px] text-warn">
+                          <Badge variant="outline" className="border-warn text-micro text-warn">
                             reconnect needed
                           </Badge>
                         )}
                       </div>
-                      <div className="font-mono text-[10px] text-muted-foreground">{a.accountRef}</div>
+                      <div className="font-mono text-micro text-muted-foreground">{a.accountRef}</div>
                       {/* What the capability matrix two cards up promises, on
                           the account it is a promise about. "Viewers: Works"
                           read as a claim nobody could check until this was
@@ -2536,7 +2536,7 @@ export function PlatformCredCard({
                           the point is that a token cannot gain a permission it
                           was not issued with, which is nobody's mistake. */}
                       {a.reconnect?.needed && (
-                        <div className="mt-0.5 text-[10px] text-warn">
+                        <div className="mt-0.5 text-micro text-warn">
                           {a.reconnect.reason}
                           {a.reconnect.missing && a.reconnect.missing.length > 0 && (
                             <> Missing: <code>{a.reconnect.missing.join(", ")}</code></>
@@ -2554,7 +2554,7 @@ export function PlatformCredCard({
                     </Button>
                   </div>
                 ))}
-                <span className="text-[10px] text-muted-foreground">{t("set.multiAccountNote")}</span>
+                <span className="text-micro text-muted-foreground">{t("set.multiAccountNote")}</span>
               </div>
             )}
           </>
@@ -2605,7 +2605,7 @@ export function PlatformCredCard({
             {inUse?.message}
             {inUse && inUse.destinations.length > 0 && (
               <span className="mt-2 flex flex-col gap-0.5">
-                <span className="text-[10px] uppercase tracking-wider text-subtle-foreground">
+                <span className="text-micro uppercase tracking-wider text-subtle-foreground">
                   {t("set.disconnectInUseList")}
                 </span>
                 {/* NAMED, not counted. "3 destinations" is not something an
@@ -2613,7 +2613,7 @@ export function PlatformCredCard({
                     is mid-broadcast is the one they most need to see, because
                     disconnecting leaves it live with nothing able to end it. */}
                 {inUse.destinations.map((d) => (
-                  <span key={d.id} className="text-[12px]">
+                  <span key={d.id} className="text-sm">
                     {d.name}
                     {d.broadcasting && (
                       <span className="text-warn"> — {t("set.disconnectMidBroadcast")}</span>
@@ -2900,25 +2900,25 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
 
   return (
     <div className="flex flex-col gap-2 border-t border-border pt-2">
-      <span className="text-[11px] text-muted-foreground">{t("set.acmeTitle")}</span>
-      <p className="text-[10px] text-muted-foreground">{t(acmeStanceCopy[stance])}</p>
+      <span className="text-tiny text-muted-foreground">{t("set.acmeTitle")}</span>
+      <p className="text-micro text-muted-foreground">{t(acmeStanceCopy[stance])}</p>
 
       {offersPreflight(stance) && (
         <>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="acme-host" className="text-[10px]">
+            <Label htmlFor="acme-host" className="text-micro">
               {t("set.acmeHostname")}
             </Label>
             <Input
               id="acme-host"
-              className="h-7 font-mono text-[11px]"
+              className="h-7 font-mono text-tiny"
               placeholder="stream.example.com"
               value={hostname}
               onChange={(e) => setHostname(e.target.value)}
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="acme-email" className="text-[10px]">
+            <Label htmlFor="acme-email" className="text-micro">
               {t("set.acmeEmailLabel")}
             </Label>
             {/* Never sent to this server: it only ever appears in the YAML
@@ -2926,12 +2926,12 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
             <Input
               id="acme-email"
               type="email"
-              className="h-7 font-mono text-[11px]"
+              className="h-7 font-mono text-tiny"
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-            <p className="text-[10px] text-muted-foreground">{t("set.acmeEmailHint")}</p>
+            <p className="text-micro text-muted-foreground">{t("set.acmeEmailHint")}</p>
           </div>
           <Button
             size="sm"
@@ -2944,33 +2944,33 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
             {checking ? t("set.acmeRunning") : t("set.acmeRun")}
           </Button>
 
-          {checkError && <p className="text-[10px] text-down">{checkError}</p>}
+          {checkError && <p className="text-micro text-down">{checkError}</p>}
 
           {result && (
             <>
-              <p className={`text-[10px] ${result.ready ? toneText.live : toneText.down}`}>
+              <p className={`text-micro ${result.ready ? toneText.live : toneText.down}`}>
                 {result.ready ? t("set.acmeReady") : t("set.acmeBlocked")}
               </p>
               <ul className="flex flex-col gap-1.5">
                 {result.checks.map((c) => (
                   <li key={c.id} className="flex flex-col">
-                    <span className={`text-[10px] font-medium ${toneText[acmeCheckTone[c.status]]}`}>
+                    <span className={`text-micro font-medium ${toneText[acmeCheckTone[c.status]]}`}>
                       {t(acmeCheckLabel[c.id])}
                     </span>
-                    <span className="text-[10px] text-muted-foreground">{c.detail}</span>
+                    <span className="text-micro text-muted-foreground">{c.detail}</span>
                   </li>
                 ))}
               </ul>
               {/* Said before the snippet, not after it: a failed order costs an
                   hour, and the operator reads downward. */}
-              <p className="text-[10px] text-warn">{t("set.acmeRateLimit")}</p>
+              <p className="text-micro text-warn">{t("set.acmeRateLimit")}</p>
               <div className="flex items-center justify-between">
-                <span className="text-[11px] text-muted-foreground">{t("set.acmeThen")}</span>
+                <span className="text-tiny text-muted-foreground">{t("set.acmeThen")}</span>
                 <Button size="sm" variant="ghost" onClick={copySnippet}>
                   {copied ? <Check /> : <Copy />} {t("set.copy")}
                 </Button>
               </div>
-              <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-[10px] text-muted-foreground">
+              <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-micro text-muted-foreground">
                 {snippet}
               </pre>
             </>
@@ -3014,26 +3014,26 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {!tls && !loadError && (
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-2 text-tiny text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" /> Reading the certificate…
           </div>
         )}
-        {loadError && <p className="text-[11px] text-down">{loadError}</p>}
+        {loadError && <p className="text-tiny text-down">{loadError}</p>}
 
         {tls && (
           <>
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-muted-foreground">{t("set.mode")}</span>
+              <span className="text-tiny text-muted-foreground">{t("set.mode")}</span>
               <div className="flex items-center gap-1.5">
                 {tls.configured === "auto" && (
-                  <span className="text-[10px] text-subtle-foreground">auto resolved to</span>
+                  <span className="text-micro text-subtle-foreground">auto resolved to</span>
                 )}
                 <Badge variant={toneBadge[modeTone(tls)]}>{t(tlsModeLabel[tls.mode])}</Badge>
               </div>
             </div>
 
             {tls.mode === "off" && (
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-micro text-muted-foreground">
                 {tls.trustProxyHeaders
                   ? t("set.proxyTerminatesTls") : t("set.noEncryption")}
               </p>
@@ -3042,24 +3042,24 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             {cert ? (
               <>
                 <div className="flex items-center justify-between gap-2 border-t border-border pt-2">
-                  <span className="text-[11px] text-muted-foreground">{t("set.expires")}</span>
+                  <span className="text-tiny text-muted-foreground">{t("set.expires")}</span>
                   <span className="flex items-baseline gap-1.5">
-                    <code className="tnum font-mono text-[10px]">{timestamp(cert.notAfter)}</code>
-                    <span className={`tnum text-[10px] ${toneText[expiryTone(cert.daysRemaining)]}`}>
+                    <code className="tnum font-mono text-micro">{timestamp(cert.notAfter)}</code>
+                    <span className={`tnum text-micro ${toneText[expiryTone(cert.daysRemaining)]}`}>
                       {expiryLabel(cert)}</span>
                   </span>
                 </div>
                 <div className="flex items-start justify-between gap-2">
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{t("set.issuer")}</span>
-                  <span className="min-w-0 break-all text-right text-[10px]">{cert.issuer}</span>
+                  <span className="shrink-0 text-tiny text-muted-foreground">{t("set.issuer")}</span>
+                  <span className="min-w-0 break-all text-right text-micro">{cert.issuer}</span>
                 </div>
                 <div className="flex items-start justify-between gap-2">
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{t("set.subject")}</span>
-                  <span className="min-w-0 break-all text-right text-[10px]">{cert.subject}</span>
+                  <span className="shrink-0 text-tiny text-muted-foreground">{t("set.subject")}</span>
+                  <span className="min-w-0 break-all text-right text-micro">{cert.subject}</span>
                 </div>
                 <div className="flex items-start justify-between gap-2">
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{t("set.validFor")}</span>
-                  <code className="min-w-0 break-all text-right font-mono text-[10px]">
+                  <span className="shrink-0 text-tiny text-muted-foreground">{t("set.validFor")}</span>
+                  <code className="min-w-0 break-all text-right font-mono text-micro">
                     {sans.length ? sans.join(", ") : "—"}
                   </code>
                 </div>
@@ -3069,15 +3069,15 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
               // repeating the API's wording underneath it reads as a fault.
               tls.mode !== "off" &&
               tls.certificateError && (
-                <p className="border-t border-border pt-2 text-[10px] text-muted-foreground">
+                <p className="border-t border-border pt-2 text-micro text-muted-foreground">
                   {tls.certificateError}
                 </p>
               )
             )}
 
-            {tls.hstsWarning && <p className="text-[10px] text-warn">{tls.hstsWarning}</p>}
+            {tls.hstsWarning && <p className="text-micro text-warn">{tls.hstsWarning}</p>}
             {tls.hsts && (
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-micro text-muted-foreground">
                 HSTS is on. Browsers will refuse plain HTTP to
                 <code className="mx-1 font-mono">{tls.hostname || "this host"}</code>
                 until the max-age lapses; there is no server-side undo.
@@ -3086,10 +3086,10 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
 
             {tls.caAvailable && (
               <div className="flex flex-col gap-1.5 border-t border-border pt-2">
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-tiny text-muted-foreground">
                   Local certificate authority
                 </span>
-                <code className="tnum break-all rounded border border-border bg-background p-1.5 font-mono text-[9px] leading-relaxed text-muted-foreground">
+                <code className="tnum break-all rounded border border-border bg-background p-1.5 font-mono text-micro leading-relaxed text-muted-foreground">
                   {tls.caFingerprint}
                 </code>
                 {/* A plain link, not XHR: this is a file the browser saves, and
@@ -3100,7 +3100,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
                     <Download /> Download CA certificate
                   </a>
                 </Button>
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-micro text-muted-foreground">
                   Install it to stop the browser warning, after checking the fingerprint above
                   matches the one your browser shows.
                   <span className="mt-1 block">
@@ -3127,12 +3127,12 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             <LetsEncryptWalkthrough tls={tls} />
 
             <div className="flex items-center justify-between border-t border-border pt-2">
-              <span className="text-[11px] text-muted-foreground">config.yaml</span>
+              <span className="text-tiny text-muted-foreground">config.yaml</span>
               <Button size="sm" variant="ghost" onClick={copyYaml}>
                 {copied ? <Check /> : <Copy />} {t("set.copy")}
               </Button>
             </div>
-            <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-[10px] text-muted-foreground">
+            <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-micro text-muted-foreground">
               {tlsYaml(tls)}
             </pre>
           </>
@@ -3147,12 +3147,12 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             operator to find it. See ui/src/lib/tourSteps.ts. */}
         <div data-tour="data-directory" className="flex flex-col gap-2">
           <div className="flex items-start justify-between gap-2 border-t border-border pt-2">
-            <span className="shrink-0 text-[11px] text-muted-foreground">{t("set.dataDirectory")}</span>
-            <code className="min-w-0 break-all text-right font-mono text-[10px]">
+            <span className="shrink-0 text-tiny text-muted-foreground">{t("set.dataDirectory")}</span>
+            <code className="min-w-0 break-all text-right font-mono text-micro">
               {system?.dataDir ?? "—"}
             </code>
           </div>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             OAuth tokens and client secrets are encrypted at rest with NaCl secretbox, keyed by
             <code className="mx-1 font-mono">secret.key</code> in that directory. Back it up with the
             database, or connected accounts must be re-authorised.
@@ -3264,13 +3264,13 @@ function ApiTokens() {
             {busy ? <Loader2 className="animate-spin" /> : <KeyRound />} Create token
           </Button>
         </form>
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-micro text-muted-foreground">
           {scope === "read" ? t("set.tokenScopeReadHint") : t("set.tokenScopeAdminHint")}
         </span>
 
         {minted && (
           <div className="flex flex-col gap-1.5 rounded border border-warn/50 bg-warn/5 p-2">
-            <span className="text-[11px] font-medium">
+            <span className="text-tiny font-medium">
               Copy {minted.token.name} now — it is never shown again.
             </span>
             <div className="flex items-center gap-1.5">
@@ -3279,16 +3279,16 @@ function ApiTokens() {
                 {copied ? <Check /> : <Copy />} {copied ? t("clipedit.copied") : t("common.copy")}
               </Button>
             </div>
-            <span className="text-[10px] text-muted-foreground">{t("set.tokenHashNote")}</span>
+            <span className="text-micro text-muted-foreground">{t("set.tokenHashNote")}</span>
           </div>
         )}
 
         {readFailed(tokens) ? (
-          <span className="text-[11px] text-warn">{t("set.tokensUnread")}</span>
+          <span className="text-tiny text-warn">{t("set.tokensUnread")}</span>
         ) : !mayClaim(tokens) ? (
-          <span className="text-[11px] text-muted-foreground">{t("set.tokensLoading")}</span>
+          <span className="text-tiny text-muted-foreground">{t("set.tokensLoading")}</span>
         ) : tokens.value.length === 0 ? (
-          <span className="text-[11px] text-muted-foreground">{t("set.noTokens")}</span>
+          <span className="text-tiny text-muted-foreground">{t("set.noTokens")}</span>
         ) : (
           <div className="flex flex-col gap-1">
             {tokens.value.map((t) => (
@@ -3298,7 +3298,7 @@ function ApiTokens() {
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate text-[12px]">{t.name}</span>
+                    <span className="truncate text-sm">{t.name}</span>
                     {/* Admin is the one worth spotting in a list, so it is the
                         one that gets the loud variant. A read token is the
                         expected case and reads as ordinary. */}
@@ -3306,7 +3306,7 @@ function ApiTokens() {
                       {t.scope}
                     </Badge>
                   </div>
-                  <div className="font-mono text-[10px] text-muted-foreground">
+                  <div className="font-mono text-micro text-muted-foreground">
                     {t.prefix}… · created {new Date(t.createdAt).toLocaleDateString()} ·{" "}
                     {tokenLastUsed(t)}
                   </div>

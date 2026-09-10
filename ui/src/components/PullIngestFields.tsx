@@ -59,7 +59,13 @@ export function PullIngestFields({
     <>
       <div className="flex flex-col gap-1">
         <Label htmlFor={`${idPrefix}-url`}>{t("set.sourceUrl")}</Label>
+        {/* font-mono: a source URL is read character by character — the
+            scheme decides how it is ingested, and a `file://` path is checked
+            against a directory listing. The design system's mono rule names
+            URLs outright, and this field was proportional while the identical
+            destination URL field two dialogs away was not. */}
         <Input
+          className="font-mono"
           id={`${idPrefix}-url`}
           value={pull.url}
           placeholder={t("set.sourceUrlPlaceholder")}

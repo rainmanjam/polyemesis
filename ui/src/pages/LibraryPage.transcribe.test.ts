@@ -23,7 +23,9 @@ describe("LibraryPage", () => {
     expect(src).toContain('t("lib.transcribeUnavailable")');
     expect(src).toContain("view?.jobsAvailable && !view.transcribeAvailable");
     // Rendered as page text, not as an attribute on the disabled control.
-    expect(src).toContain('<p className="mb-2 text-[11px] text-warn">');
+    // text-tiny is the design-system token for 11px (docs/DESIGN-SYSTEM.md) --
+    // same rendered size as the literal this pinned before that token existed.
+    expect(src).toContain('<p className="mb-2 text-tiny text-warn">');
   });
 
   it("still keeps the button disabled, because the fix is a warning and not a control", () => {

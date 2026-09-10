@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 
 import { ingestChipReading } from "@/lib/ingestChip";
+import { useMotionTransition } from "@/lib/motion";
 import { NavLink, Outlet, useLocation } from "react-router";
 
 import { UpdateBanner } from "./UpdateBanner";
@@ -109,6 +111,11 @@ export function AppLayout({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
 
+  // The drawer tier. --motion-settle is the motion scale's slowest step and
+  // the one docs/DESIGN-SYSTEM.md names for "dialog, drawer, page transition";
+  // the nav drawer and its backdrop are one gesture and share it.
+  const settle = useMotionTransition("settle");
+
   // WHICH RAIL TOOLTIP IS OPEN, held here rather than by Radix.
   //
   // Radix opens a Tooltip.Root on hover whether or not it has any content to
@@ -204,6 +211,14 @@ export function AppLayout({
       <TourOffer />
 
       <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-background px-3">
+        {/* Icon-only, and one of the two places in the shell where that is the
+            right answer rather than an omission: this exists only below md,
+            where the header is the width of a phone and a word beside the
+            glyph would push the programme switcher off the bar. It takes the
+            floor the design system sets for that case — an accessible name,
+            plus the hover text Button derives from it for the tablet widths
+            that do have a pointer. The other is the rail's own collapse
+            toggle, whose label is the rail. */}
         <Button
           variant="ghost"
           size="icon-sm"
@@ -219,7 +234,7 @@ export function AppLayout({
             something to sit in. The mark carries its own colour. */}
         <div className="flex items-center gap-2">
           <BrandMark size={18} />
-          <span className="text-[13px] font-semibold tracking-tight">polyemesis</span>
+          <span className="text-base font-semibold tracking-tight">polyemesis</span>
         </div>
 
         {/* #638: which programme everything on screen is describing, and the
@@ -229,13 +244,13 @@ export function AppLayout({
 
         <div className="ml-2 hidden items-center gap-2 sm:flex">
           <StatusDot tone={ingestTone} />
-          <span className="text-[11px] text-muted-foreground">{t("chrome.ingest")}</span>
+          <span className="text-tiny text-muted-foreground">{t("chrome.ingest")}</span>
           {/* By test id: ui/e2e/live-status-rendering.spec.ts asserts what this
               says for an SRT source, which has no ingest child and read
               "Offline" on every healthy install until it was driven from
               useIngestLive. Nothing else in the chrome distinguishes it from
               the uptime beside it, which carries the same classes. */}
-          <span data-testid="chrome-ingest-status" className="tnum font-mono text-[11px]">
+          <span data-testid="chrome-ingest-status" className="tnum font-mono text-tiny">
             {/* The bitrate when there is a process to read it from, and the
                 state otherwise. An SRT source is live without a child, so it
                 has no bitrate to show here — saying "Running" is the honest
@@ -262,7 +277,7 @@ export function AppLayout({
             </Badge>
           )}
           {ingest?.state === "running" && (
-            <span className="tnum hidden font-mono text-[11px] text-muted-foreground sm:inline">
+            <span className="tnum hidden font-mono text-tiny text-muted-foreground sm:inline">
               {duration(ingest.uptimeSec)}
             </span>
           )}
@@ -288,7 +303,7 @@ export function AppLayout({
               frame error
             </Badge>
           )}
-          <span className="hidden text-[11px] text-muted-foreground lg:inline">{username}</span>
+          <span className="hidden text-tiny text-muted-foreground lg:inline">{username}</span>
 
           {/* Between the username and the language button -- the slot the
               layout density toggle vacated in c1c9c514. */}
@@ -297,14 +312,35 @@ export function AppLayout({
           {/* Sits in the chrome rather than on Settings: the operator who needs
               it cannot necessarily read the nav item that would lead there. */}
           <DropdownMenu>
+            {/* THE LABEL IS ON THE CONTROL, not only in its tooltip.
+             *
+             * The design system's first component rule, from the Riverside
+             * review: every control in a bar carries a text label under or
+             * beside its icon, because icon-only chrome belongs to
+             * applications where a wrong click is cheap. Two glyphs sat side
+             * by side here — a globe and a door — and the door signs the
+             * operator out mid-broadcast.
+             *
+             * Below lg the label is display:none and the control is a glyph
+             * again, which is the honest trade in a 44px header: the room for
+             * a word is genuinely not there. `title` therefore stays,
+             * explicitly, rather than being derived from the size the way
+             * Button does it for its icon-only sizes — this is no longer one
+             * of those sizes, and the narrow case still needs hover text.
+             *
+             * `aria-label` is unchanged and still wins the accessible name, so
+             * the button announces exactly what it announced before and the
+             * words come from the same t() call the label renders. No new
+             * string, therefore no new key in fifteen locales. */}
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
-                size="icon-sm"
+                size="sm"
                 aria-label={t("chrome.language")}
                 title={t("chrome.language")}
               >
                 <Languages />
+                <span className="hidden lg:inline">{t("chrome.language")}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -318,13 +354,20 @@ export function AppLayout({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Labelled for the same reason as the language control beside it,
+           *  and more so: this is the only button in the chrome that ends the
+           *  session, and it was a door glyph two icon-widths from a globe.
+           *  See the note above for why the label is lg-only and why the
+           *  accessible name is untouched. */}
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="sm"
             onClick={onSignOut}
             aria-label={t("chrome.signOut")}
+            title={t("chrome.signOut")}
           >
             <LogOut />
+            <span className="hidden lg:inline">{t("chrome.signOut")}</span>
           </Button>
         </div>
       </header>
@@ -350,15 +393,35 @@ export function AppLayout({
          * find is the toggle button in the header, which already carries the
          * state. A backdrop announced as a button would be a second, unlabelled
          * way to do the same thing. */}
-        {mobileOpen && (
-          <button
-            type="button"
-            aria-hidden="true"
-            tabIndex={-1}
-            onClick={() => setMobileOpen(false)}
-            className="fixed inset-0 top-11 z-30 cursor-default bg-black/40 md:hidden"
-          />
-        )}
+        {/* THE SCRIM FADES BECAUSE THE DRAWER SLIDES.
+         *
+         * The drawer itself is always mounted and moves on a CSS transform, so
+         * it slides out over --motion-settle. This backdrop was mounted and
+         * unmounted, so it vanished in one frame -- the tap that dismissed the
+         * menu produced a hard black flash followed by a quarter-second of
+         * drawer still travelling, which reads as two separate things happening
+         * rather than one menu closing.
+         *
+         * A CSS transition cannot fix that: by the time it would run, React has
+         * removed the node. AnimatePresence holds it for the length of its own
+         * fade, which is why this file now imports an animation library at all.
+         * Same tier as the drawer it belongs to, so the two finish together. */}
+        <AnimatePresence>
+          {mobileOpen && (
+            <motion.button
+              key="nav-scrim"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={settle}
+              type="button"
+              aria-hidden="true"
+              tabIndex={-1}
+              onClick={() => setMobileOpen(false)}
+              className="fixed inset-0 top-11 z-30 cursor-default bg-black/40 md:hidden"
+            />
+          )}
+        </AnimatePresence>
 
         {/* ---- sidebar ---- */}
         <TooltipProvider delayDuration={0}>
@@ -383,7 +446,17 @@ export function AppLayout({
               // Measured at 936x500: body scrollHeight 514 vs clientHeight 500,
               // exactly the toggle's height. Above ~620px tall the nav fits and
               // nothing here has any effect.
-              "z-40 flex min-h-0 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-background p-2 transition-[width]",
+              //
+              // THE TWO DURATIONS ARE TWO DIFFERENT GESTURES, not a
+              // breakpoint quirk. Above md this element changes WIDTH and
+              // nothing else, which is a disclosure -- --motion-quick.
+              // Below md the width is fixed at w-44 and the element is a
+              // DRAWER sliding in from the edge, which the motion scale in
+              // docs/DESIGN-SYSTEM.md puts on --motion-settle beside dialogs. Without the variants both ran
+              // at Tailwind's default, which this project points at
+              // --motion-instant: a 90ms drawer does not slide, it teleports,
+              // and the backdrop below has nothing to fade in step with.
+              "z-40 flex min-h-0 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-background p-2 transition-[width] duration-quick max-md:duration-settle",
               navCollapsed ? "md:w-12" : "md:w-44",
               // The drawer is always full width: a collapsed rail behind a
               // hamburger would be an icon strip nobody asked for, and the
@@ -456,7 +529,7 @@ export function AppLayout({
                       // Drive the active look from `aria-current="page"`
                       // instead, which NavLink already sets on itself.
                       className={cn(
-                        "flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors",
+                        "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
                         navCollapsed && "md:justify-center md:px-0",
                         "text-muted-foreground hover:bg-accent hover:text-foreground",
                         "aria-[current=page]:bg-primary-dim aria-[current=page]:text-foreground",
@@ -536,7 +609,18 @@ export function AppLayout({
 }
 
 /** Consistent page header. Every page uses it so titles, subtitles and
- *  actions sit in the same place regardless of what the page does. */
+ *  actions sit in the same place regardless of what the page does.
+ *
+ *  THE ONE PLACE --text-display IS SPENT. The scale reserves its top step for
+ *  page titles, and this component is the only thing that renders one, so the
+ *  step and the component are the same decision — a page that wants a bigger
+ *  heading is asking for a seventh step, and the answer is no.
+ *
+ *  It was a 15px literal, which is not on the scale at all and sat two pixels
+ *  above body text. That is what "the design was documented and never applied"
+ *  looked like in practice: every page had a title that had to be found rather
+ *  than seen, and the console's whole vertical hierarchy was four points wide
+ *  from smallest label to largest heading. */
 export function PageHeader({
   title,
   subtitle,
@@ -549,8 +633,8 @@ export function PageHeader({
   return (
     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
       <div>
-        <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-[11px] text-muted-foreground">{subtitle}</p>}
+        <h1 className="text-display font-semibold tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-1 text-tiny text-muted-foreground">{subtitle}</p>}
       </div>
       {actions && <div className="flex items-center gap-1.5">{actions}</div>}
     </div>

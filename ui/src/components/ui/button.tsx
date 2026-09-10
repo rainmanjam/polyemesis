@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
  * happens to produce. Spelled with min-h/min-w on Button alone: Switch and
  * Checkbox are drawn to a fixed geometry that a min-height would pull apart. */
 const buttonVariants = cva(
-  "inline-flex min-h-[1.5rem] min-w-[1.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-surface disabled:pointer-events-none disabled:opacity-40 [&_svg]:pointer-events-none [&_svg]:size-[0.875rem] [&_svg]:shrink-0",
+  "inline-flex min-h-[1.5rem] min-w-[1.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-surface disabled:pointer-events-none disabled:opacity-40 [&_svg]:pointer-events-none [&_svg]:size-[0.875rem] [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -33,7 +33,7 @@ const buttonVariants = cva(
       },
       size: {
         default: "h-8 px-3",
-        sm: "h-7 px-2.5 text-[11px]",
+        sm: "h-7 px-2.5 text-tiny",
         lg: "h-9 px-4",
         icon: "h-8 w-8",
         "icon-sm": "h-7 w-7",

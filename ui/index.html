@@ -20,6 +20,20 @@
     <!-- Paint the shell colour before the bundle loads, so a slow first load
          does not flash white in a dark room. -->
     <meta name="theme-color" content="#0f1115" />
+    <!-- The two faces the console renders in, discovered here rather than four
+         round trips later. The @font-face rules live in src/index.css, which is
+         inside the bundle: without these the browser cannot know a font is
+         needed until it has fetched the module graph, parsed the stylesheet and
+         laid out the first text — and every operator sees the fallback face for
+         that whole window. web/src/layouts/Base.astro carries the same three
+         lines for the same reason, and its comment records the measurement: the
+         one face that was NOT preloaded there began loading 592ms after its
+         siblings.
+         No extra bytes; both files are fetched either way. crossorigin is
+         required even same-origin, because font requests are made in CORS mode
+         and a preload whose mode does not match is silently fetched twice. -->
+    <link rel="preload" href="/fonts/ibm-plex-sans.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin />
     <title>polyemesis</title>
   </head>
   <body style="background:#0f1115">

@@ -255,16 +255,16 @@ export function ClipsPage() {
               </div>
 
               {!buffer?.enabled ? (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-tiny text-muted-foreground">
                   The buffer is off. Turn it on to the right; it costs memory, not disk, until you
                   capture something.
                 </p>
               ) : !buffer.running ? (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-tiny text-muted-foreground">
                   Nothing is arriving yet. The buffer starts filling as soon as a stream is live.
                 </p>
               ) : (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-tiny text-muted-foreground">
                   Holding {held.toFixed(0)}s of the last {stats?.windowSeconds.toFixed(0) ?? "—"}s.
                   {/* Asking for more than has arrived is not an error — the
                       capture is simply as long as the history allows. */}
@@ -284,7 +284,7 @@ export function ClipsPage() {
             </CardHeader>
             <CardContent className="px-0 pb-0">
               {failed ? (
-                <div className="px-3 py-8 text-center text-[12px] text-warn">
+                <div className="px-3 py-8 text-center text-sm text-warn">
                   {t("clips.listUnread")}
                 </div>
               ) : !mayClaim(read) ? (
@@ -292,7 +292,7 @@ export function ClipsPage() {
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 </div>
               ) : clips.length === 0 ? (
-                <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
+                <div className="px-3 py-8 text-center text-sm text-muted-foreground">
                   {t("clips.noneYet")}
                 </div>
               ) : (
@@ -309,7 +309,7 @@ export function ClipsPage() {
                   <TableBody>
                     {clips.map((c) => (
                       <TableRow key={c.name}>
-                        <TableCell className="font-mono text-[11px]">
+                        <TableCell className="font-mono text-tiny">
                           {c.name}
                           {!c.keyframeAligned && (
                             <Badge
@@ -324,13 +324,13 @@ export function ClipsPage() {
                         {/* StartedAt, not CreatedAt: "the clip from 20:31"
                             means when the action happened, not when the
                             operator got round to pressing the button. */}
-                        <TableCell className="tnum font-mono text-[11px] text-muted-foreground">
+                        <TableCell className="tnum font-mono text-tiny text-muted-foreground">
                           {timestamp(c.startedAt)}
                         </TableCell>
-                        <TableCell className="tnum text-right font-mono text-[11px]">
+                        <TableCell className="tnum text-right font-mono text-tiny">
                           {c.seconds.toFixed(1)}s
                         </TableCell>
-                        <TableCell className="tnum text-right font-mono text-[11px]">
+                        <TableCell className="tnum text-right font-mono text-tiny">
                           {bytes(c.bytes)}
                         </TableCell>
                         <TableCell>
@@ -455,9 +455,9 @@ export function ClipsPage() {
                     beside it rather than nowhere, and the sentence says where
                     the number goes instead. */}
                 {!buffer?.enabled && (
-                  <span className="text-[10px] text-warn">{t("clips.windowAppliesOnEnable")}</span>
+                  <span className="text-micro text-warn">{t("clips.windowAppliesOnEnable")}</span>
                 )}
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-micro text-muted-foreground">
                   {view?.bounds.minWindowSeconds ?? 5}–{view?.bounds.maxWindowSeconds ?? 300}s. A
                   longer window costs memory proportional to the stream's bitrate.
                 </span>
@@ -467,12 +467,12 @@ export function ClipsPage() {
                 <Stat labelKey="clips.clipsKept" value={view?.usage.count ?? 0} />
                 <Stat labelKey="clips.onDisk" value={bytes(view?.usage.usedBytes ?? 0)} tone="muted" />
               </div>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-micro text-muted-foreground">
                 Retention keeps at most {view?.usage.maxClips ?? 0} clips and{" "}
                 {bytes(view?.usage.maxBytes ?? 0)}; the oldest go first. Clips are MPEG-TS, which
                 every editor and every player opens.
               </p>
-              <p className="text-[10px] text-subtle-foreground">
+              <p className="text-micro text-subtle-foreground">
             {t("clips.bufferLiveNote")}
               </p>
             </CardContent>

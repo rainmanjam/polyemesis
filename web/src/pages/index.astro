@@ -56,10 +56,18 @@ const features = [
     <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
     <div class="wrap relative grid gap-12 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-28">
       <div class="max-w-xl">
-        <span class="chip rise rise-1">
-          <span class="size-1.5 rounded-full bg-live"></span>
-          MIT licensed · self-hosted
-        </span>
+        {/* THE DOT IS GONE, and it was the smallest of the accent findings and
+            the clearest. A filled green disc is this product's LIVE indicator —
+            it means a destination is up, and it means that in the panel to the
+            right of this chip, in the meters on /features, and in the
+            application itself. Beside the words "MIT licensed" it means
+            nothing, and a status light that means nothing anywhere teaches a
+            reader to stop reading status lights everywhere.
+
+            Nothing replaces it. A grey dot would be the same decoration with
+            the meaning drained out; the chip's border already says "this is a
+            label" without help. */}
+        <span class="chip rise rise-1">MIT licensed · self-hosted</span>
 
         {/* "One stream in. A different mix out of each." — the shape the social
             card settled on, and it is a better opening than the old headline for
@@ -67,9 +75,45 @@ const features = [
             what comes out) rather than in the product's (six tracks, platforms).
             The old one named OBS in the first three words, which excludes every
             reader who arrived from a hardware encoder. */}
+        {/* THREE LINES, AND docs/DESIGN-SYSTEM.md ASKS FOR TWO. This is the one
+            place the design note could not be executed as written, so the
+            measurement is recorded here rather than left for the next person to
+            rediscover by trying it.
+
+            The headline is 42 characters. This column is max-w-xl (576px) and
+            the type is 3.4rem, which measures ~0.47em per character in Space
+            Grotesk Bold — about 24 characters per line. Two lines therefore
+            needs the longest of them to be ≤24 characters, and the best split
+            at a word boundary is 26 ("One stream in. A different" / "mix out of
+            each."). It does not fit at any break, and it gets worse going down:
+            at the lg breakpoint itself, 1024px, the copy cell is 493px and a
+            two-line headline would need the type dropped to ~2.3rem — which
+            trades the "large type" half of the same finding for the "two lines"
+            half.
+
+            Rendered at 1440px, the two-line version wrapped to three anyway and
+            left "each." alone on the third — an orphan the eye reads as a
+            mistake. A composed break beats an accidental one, so the breaks
+            stay, one clause per line.
+
+            WHAT WOULD ACTUALLY FIX IT is in the report accompanying this
+            change: every site the design note draws from — Linear, Modal, Neon
+            — has a SINGLE-COLUMN hero, where the headline gets the full 1240px
+            and two lines is free. The two-column hero is what makes the rule
+            unreachable, not the headline.
+
+            THE HIGHLIGHT IS THE ACCENT NOW, NOT THE LIVE COLOUR. "different
+            mix" was painted --color-live, which this system reserves for a
+            destination that is actually up — the same reservation the amber
+            rule at the top of global.css states for the signal path and that
+            check-build enforces. Green in a headline spends the colour that
+            makes a green dot legible in the panel eighteen inches to the right.
+            The accent is what a headline is allowed to use, and this is one of
+            the three places docs/DESIGN-SYSTEM.md gives it: the announcement
+            bar, half the headline, the primary CTA. */}
         <h1 class="rise rise-2 mt-6 text-balance text-4xl font-bold leading-[1.08] sm:text-5xl lg:text-[3.4rem]">
           One stream in.<br />
-          A <span class="text-live">different mix</span><br />
+          A <span class="text-primary-bright">different mix</span><br />
           out of each.
         </h1>
 
@@ -101,59 +145,99 @@ const features = [
             visitor who cannot answer it does not run the command at all. So it
             sits directly above, as a link rather than a second button
             competing with the copy control. */}
-        <div class="rise rise-3 mt-8">
-          <a href="/calculator" class="btn btn-ghost text-sm">
-            Bandwidth calculator
-          </a>
-          {/* Under the button, not beside it. Inline, the sentence wrapped
-              around the button's right edge at every width between a phone and
-              a wide desktop -- a ragged second line starting under the middle
-              of a control reads as a caption that lost its anchor. Below it,
-              the line breaks where the column does, like every other paragraph
-              on the page. */}
-          <p class="mt-3 max-w-md text-sm leading-relaxed text-subtle">
-            What one stream to several platforms costs your uplink, per month.
-          </p>
-        </div>
+        {/* ONE ENTRY MOMENT FOR THE WHOLE CONTROL GROUP, which is what this
+            wrapper is for and its only job.
 
-        <div class="rise rise-4 mt-6">
-          <CodeBlock
-            label="docker"
-            code={`docker run -d --name polyemesis \\
+            The three blocks inside it — the calculator link, the command, the
+            two buttons — used to enter separately: two of them shared rise-3
+            with the subhead (arriving from three places on the screen at the
+            same instant, which is a flicker rather than a sequence), one had
+            rise-4, and the buttons had no rise at all, so the single most
+            important control in the hero was the one element that did not
+            participate in the page's arrival.
+
+            They are one thing to a reader — "here is how you start" — so they
+            are one thing to the cascade. The hero now reads top to bottom in
+            four steps and hands off to the product panel on the fifth. */}
+        <div class="rise rise-4">
+          {/* A LINK, WHICH IS WHAT THE COMMENT ABOVE SAYS IT IS. It was written
+              `class="btn btn-ghost"` — the same outlined button as "Install
+              guide" thirty lines below — so the hero shipped three buttons and a
+              rule about two, and the reasoning directly above it described a
+              control that did not exist. docs/DESIGN-SYSTEM.md's website section
+              is explicit: one filled primary and one outlined secondary, never
+              more, because a hero with three equal-weight controls has no primary
+              action at all. The rule the code contradicted is the one that was
+              right, so the code moved. */}
+          <div class="mt-8">
+            <a
+              href="/calculator"
+              class="text-sm text-fg underline decoration-line underline-offset-4 transition-colors hover:decoration-primary-bright"
+            >
+              Bandwidth calculator →
+            </a>
+            {/* Under the button, not beside it. Inline, the sentence wrapped
+                around the button's right edge at every width between a phone and
+                a wide desktop -- a ragged second line starting under the middle
+                of a control reads as a caption that lost its anchor. Below it,
+                the line breaks where the column does, like every other paragraph
+                on the page. */}
+            <p class="mt-3 max-w-md text-sm leading-relaxed text-subtle">
+              What one stream to several platforms costs your uplink, per month.
+            </p>
+          </div>
+
+          <div class="mt-6">
+            <CodeBlock
+              label="docker"
+              code={`docker run -d --name polyemesis \\
   -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
   -v polyemesis-data:/data \\
   rainmanjam/polyemesis:latest`}
-          />
-          <p class="mt-3 text-sm leading-relaxed text-subtle">
-            Then open <span class="font-mono text-fg">http://localhost:8080</span> and set an
-            admin password on the first-run screen. Note the
-            <span class="font-mono text-fg">/udp</span> on 6000 — SRT is UDP, and omitting the
-            suffix is the classic reason an ingest silently receives nothing.
-            1935 is published even if you plan to use SRT: a container's port
-            map is frozen when it is created, so adding RTMP later means
-            recreating the container.
-          </p>
-        </div>
+            />
+            <p class="mt-3 text-sm leading-relaxed text-subtle">
+              Then open <span class="font-mono text-fg">http://localhost:8080</span> and set an
+              admin password on the first-run screen. Note the
+              <span class="font-mono text-fg">/udp</span> on 6000 — SRT is UDP, and omitting the
+              suffix is the classic reason an ingest silently receives nothing.
+              1935 is published even if you plan to use SRT: a container's port
+              map is frozen when it is created, so adding RTMP later means
+              recreating the container.
+            </p>
+          </div>
 
-        {/* THE DOCS ARE THE CALL TO ACTION, not a footer link. Nobody signs up
-            for a self-hosted binary; they decide whether they can operate it,
-            and the only thing that answers that is the documentation. So the
-            primary control is the quickstart and the secondary is the install
-            guide — both rendered from the repository's own files, so neither can
-            promise something the software does not do. */}
-        <div class="mt-7 flex flex-wrap items-center gap-3">
-          <a href="/docs/quickstart" class="btn btn-primary">Read the quickstart</a>
-          <a href="/docs/install" class="btn btn-ghost">Install guide</a>
-          <a href="#matrix" class="inline-block py-2 text-sm text-primary-bright hover:underline">
-            See the routing →
-          </a>
+          {/* THE DOCS ARE THE CALL TO ACTION, not a footer link. Nobody signs up
+              for a self-hosted binary; they decide whether they can operate it,
+              and the only thing that answers that is the documentation. So the
+              primary control is the quickstart and the secondary is the install
+              guide — both rendered from the repository's own files, so neither can
+              promise something the software does not do. */}
+          {/* The tertiary link is NOT accent-coloured, and this is the accent
+              audit applied at the one place it costs something. It was
+              text-primary-bright, sitting 12px from the filled primary button in
+              a lighter shade of the same colour — two controls, one hue, no
+              hierarchy between them. It keeps every affordance that matters (the
+              arrow, the underline on hover, a real focus ring) and gains the
+              accent only on hover, so approaching it is what lights it up. */}
+          <div class="mt-7 flex flex-wrap items-center gap-3">
+            <a href="/docs/quickstart" class="btn btn-primary">Read the quickstart</a>
+            <a href="/docs/install" class="btn btn-ghost">Install guide</a>
+            <a
+              href="#matrix"
+              class="inline-block py-2 text-sm text-fg transition-colors hover:text-primary-bright hover:underline"
+            >
+              See the routing →
+            </a>
+          </div>
+          {/* "Pre-release, one maintainer, MIT — where it loses is written down
+              too" USED TO BE HERE, in 14px --color-subtle under the buttons: the
+              least prominent line in the hero, carrying the most important thing
+              a stranger can be told about this project. It is now the
+              announcement bar (components/Announce.astro), which is the first
+              line of every page — so it is said once, at the top, rather than
+              twice on the page a reader is least likely to have scrolled. */}
+          <p class="mt-3 text-sm text-subtle">First stream in about five minutes.</p>
         </div>
-        <p class="mt-3 text-sm text-subtle">
-          First stream in about five minutes. Pre-release, one maintainer, MIT —
-          <a href="/comparison" class="underline decoration-line underline-offset-4 hover:text-fg"
-            >where it loses is written down too</a
-          >.
-        </p>
       </div>
 
       {/* The hero visual is the signal path itself, not a screenshot floating
@@ -170,7 +254,12 @@ const features = [
           shorter than the text column, and top-aligning left a hole under it
           that read as a missing element. */}
       <div class="relative flex items-center">
-        <div class="rise rise-3 w-full">
+        {/* LAST IN THE CASCADE, on purpose. It shared rise-3 with the subhead
+            and the calculator block, so the product panel — the thing the whole
+            hero is an argument for — arrived in the middle of the copy instead
+            of after it. Landing it last makes the page-load one sentence: this
+            is what it is, this is how you start, and here it is running. */}
+        <div class="rise rise-5 w-full">
           <HeroRouting />
         </div>
       </div>
@@ -284,7 +373,7 @@ const features = [
       }
     </div>
     <p class="mt-6 text-sm text-subtle">
-      <a href="/features" class="inline-block py-1 text-primary-bright hover:underline">The full list →</a>
+      <a href="/features" class="inline-block py-1 text-fg transition-colors hover:text-primary-bright hover:underline">The full list →</a>
     </p>
   </section>
 
@@ -332,7 +421,20 @@ const features = [
       <h2 class="text-balance text-3xl font-medium">Is this for you?</h2>
       <div class="mt-10 grid gap-8 sm:grid-cols-2">
         <div class="card p-6">
-          <p class="font-mono text-[11px] uppercase tracking-wider text-accent">Built for</p>
+          {/* text-fg, and it was `text-accent` — a class Tailwind never
+              generated, because this theme defines no --color-accent (the
+              accent token is --color-primary). It therefore emitted no rule at
+              all and the label inherited body colour, which happens to BE
+              --color-fg: the label has always rendered exactly as it does on
+              this line, and the difference from its "Not built for" sibling was
+              an accident that looked deliberate.
+
+              Left at fg rather than given the accent for real. The two columns
+              are a pair and the difference between them is emphasis, not
+              category — spending the accent here would put a fourth saturated
+              thing on a page whose accent budget is the announcement bar, half
+              the headline and the primary CTA. */}
+          <p class="font-mono text-[11px] uppercase tracking-wider text-fg">Built for</p>
           <ul class="mt-4 space-y-3 text-sm leading-relaxed text-muted">
             <li>You already run a server, or are willing to. A VPS is enough.</li>
             <li>You stream to more than one platform and want each to hear something different.</li>
@@ -399,12 +501,12 @@ const features = [
         </div>
 
         <div class="mt-7 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm">
-          <a href="/download" class="text-primary-bright hover:underline">Install options →</a>
-          <a href="/docs" class="text-primary-bright hover:underline">All {PUBLISHED.length} documents →</a>
+          <a href="/download" class="text-fg transition-colors hover:text-primary-bright hover:underline">Install options →</a>
+          <a href="/docs" class="text-fg transition-colors hover:text-primary-bright hover:underline">All {PUBLISHED.length} documents →</a>
           <a
             href="https://github.com/rainmanjam/polyemesis"
             rel="noopener"
-            class="text-primary-bright hover:underline">Read the source →</a
+            class="text-fg transition-colors hover:text-primary-bright hover:underline">Read the source →</a
           >
         </div>
       </div>
