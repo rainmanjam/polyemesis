@@ -149,8 +149,87 @@ func ReserveTCP(t *testing.T) *Reservation {
 // 6000", which is what internal/engine's copy already said. It is here so the
 // four packages share one implementation rather than four, and so a call site
 // that CAN hold the port has an obvious upgrade path next to it.
+// EPHEMERAL FLOOR. #752.
+//
+// A port the OS is willing to hand out for a `:0` bind can be handed to
+// somebody else the instant a test stops holding it, and the test then reads
+// its own allocator as short. That is not a narrow window to be shortened --
+// it is a port the machine believes is available inventory, and no amount of
+// holding-and-releasing changes its mind.
+//
+// Below the floor it is not inventory. Linux's default dynamic range starts at
+// 32768; Windows and macOS start at 49152. 32768 is therefore the conservative
+// line, and a window drawn beneath it cannot be handed to another process by
+// the OS at all -- which is a different property from being briefly held.
+//
+// It does NOT stop another test process binding the same number deliberately,
+// which is what the spread below is for and what the scan-on-failure in
+// windowStarts already handles.
+const ephemeralFloor = 32768
+
+// lowBandStart is where to begin scanning: well clear of the well-known and
+// registered service ports, well below the floor, and spread by PID so two
+// packages running in parallel do not converge on the same number.
+//
+// The spread is deterministic rather than random: `go test` runs packages in
+// separate processes, so the PID is exactly the axis they differ on, and a
+// deterministic start makes a collision reproducible instead of occasional.
+//
+// IT ALSO HAS TO ADVANCE. The first version returned the same number for every
+// call in a process, and it was right about the band and wrong about
+// everything else: FreeUDPPort releases the port before returning, so the next
+// call bound the very same one and got the very same answer. A test that draws
+// an HTTP port and an RTMP port then handed both the same number, and
+// TestSettingsRefusesAnRTMPListenerOnTheServersOwnHTTPPort failed with the
+// server refusing its own port -- correctly, for a configuration the test
+// never meant to build.
+//
+// The ephemeral draw this replaced never had that problem: the kernel hands
+// out a different port each time. So the cursor is what buys that back, and
+// the PID only decides where the process starts.
+var lowBandCursor struct {
+	sync.Mutex
+	next int
+}
+
+func lowBandStart() int {
+	const from, to = 20000, ephemeralFloor - 2048
+	lowBandCursor.Lock()
+	defer lowBandCursor.Unlock()
+	if lowBandCursor.next == 0 {
+		lowBandCursor.next = from + (os.Getpid()*97)%(to-from)
+	}
+	p := lowBandCursor.next
+	// Step by more than one so a caller asking for a small window does not
+	// collide with the next caller's base.
+	lowBandCursor.next += 8
+	if lowBandCursor.next >= to {
+		lowBandCursor.next = from
+	}
+	return p
+}
+
 func FreeUDPPort(t *testing.T) int {
 	t.Helper()
+	// BELOW THE EPHEMERAL FLOOR, because this number usually becomes the base
+	// of a relay.PortAllocator range that nothing holds -- see #752, where the
+	// OS took one of those ports mid-test and the allocator correctly reported
+	// a pool one short. An ephemeral draw is inventory the machine will re-lend;
+	// a low port is not.
+	for _, p := range windowStarts(lowBandStart(), 1, 512) {
+		if p >= ephemeralFloor {
+			continue
+		}
+		c, err := net.ListenPacket("udp", fmt.Sprintf("127.0.0.1:%d", p))
+		if err != nil {
+			continue
+		}
+		_ = c.Close()
+		return p
+	}
+	// The low band is full, which is odd but not this test's problem. Fall back
+	// to the old ephemeral draw rather than failing: a shorter window is still
+	// better than no port.
 	r := ReserveUDP(t)
 	r.Release()
 	return r.port
@@ -203,9 +282,13 @@ func FreeUDPWindow(t *testing.T, n int) (base int, held []*Reservation) {
 	// currently willing to hand out, then try to bind n CONSECUTIVE numbers
 	// starting a little above it. Anything already taken fails its bind and the
 	// scan moves on.
-	probe := ReserveUDP(t)
-	from := probe.Port() + 1
-	probe.Release()
+	// SEEDED BELOW THE EPHEMERAL FLOOR rather than from an ephemeral probe.
+	// The original seed asked the kernel where it was currently handing ports
+	// out and then scanned upward from there, which put the whole window inside
+	// the dynamic range -- the one region the OS re-lends the moment a test
+	// releases it. #752 failed here three times on three different ranges, all
+	// of them inside it.
+	from := lowBandStart()
 
 	for _, start := range windowStarts(from, n, 4096) {
 		run := make([]*Reservation, 0, n)

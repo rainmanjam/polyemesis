@@ -129,3 +129,77 @@ func TestTheWindowScanRefusesAnImpossibleWidthAndClampsALowProbe(t *testing.T) {
 		}
 	}
 }
+
+/* PORTS DRAWN FOR TESTS MUST SIT BELOW THE OS DYNAMIC RANGE. #752.
+ *
+ * A port the OS hands out for a `:0` bind is inventory it will re-lend the
+ * moment nothing holds it. windows-latest failed four times on that: a test
+ * released a window, the OS gave one of the ports to something else, and the
+ * allocator correctly reported a pool one short while the test read it as a
+ * leak. Holding the ports for longer narrows the gap; it does not change the
+ * machine's mind about whose they are.
+ *
+ * Below 32768 -- Linux's floor, and lower than Windows' and macOS' 49152 --
+ * they are not inventory at all. That is the property under test here, and it
+ * is checkable on any platform even though the failure is Windows-only.
+ */
+func TestDrawnPortsAreBelowTheEphemeralFloor(t *testing.T) {
+	if got := FreeUDPPort(t); got >= ephemeralFloor {
+		t.Errorf("FreeUDPPort returned %d, at or above the ephemeral floor %d. "+
+			"That port is inventory the OS will re-lend as soon as nothing holds "+
+			"it, which is #752.", got, ephemeralFloor)
+	}
+
+	base, held := FreeUDPWindow(t, 3)
+	if base < 1024 || base+2 >= ephemeralFloor {
+		t.Errorf("FreeUDPWindow(3) returned base %d, so the window %d-%d is not "+
+			"wholly below the ephemeral floor %d", base, base, base+2, ephemeralFloor)
+	}
+	// POSITIVE CONTROL. A window of zero ports is trivially "below the floor",
+	// and a helper that silently returned nothing would pass the bound check.
+	if len(held) != 3 {
+		t.Fatalf("FreeUDPWindow(3) held %d ports; the bound above was checked "+
+			"against a window that does not exist", len(held))
+	}
+}
+
+/* THE BAND IS NOT ENOUGH ON ITS OWN; THE DRAW HAS TO MOVE.
+ *
+ * The first version of lowBandStart returned the same number for every call in
+ * a process. It was right about the band and wrong about everything else:
+ * FreeUDPPort releases the port before returning, so the next call bound the
+ * same one and got the same answer, and a test drawing an HTTP port and an
+ * RTMP port was handed one port twice.
+ * TestSettingsRefusesAnRTMPListenerOnTheServersOwnHTTPPort caught it by
+ * failing on a configuration it never meant to build.
+ *
+ * The ephemeral draw this replaced never had that problem -- the kernel hands
+ * out a different port each time -- so the property is not new, it is one that
+ * had to be bought back deliberately.
+ */
+func TestSuccessiveDrawsDoNotRepeatAPort(t *testing.T) {
+	seen := map[int]bool{}
+	for i := range 12 {
+		p := FreeUDPPort(t)
+		if p >= ephemeralFloor {
+			t.Fatalf("draw %d returned %d, at or above the ephemeral floor", i, p)
+		}
+		if seen[p] {
+			t.Fatalf("draw %d returned %d again. Every caller in this process is "+
+				"getting the same port, so a test drawing two of them binds one "+
+				"number twice.", i, p)
+		}
+		seen[p] = true
+	}
+}
+
+func TestTheLowBandStartStaysInsideItsBand(t *testing.T) {
+	// Checked across several draws rather than one, because the cursor wraps
+	// and a wrap that lands outside the band would only show on the wrap.
+	for range 40 {
+		got := lowBandStart()
+		if got < 20000 || got >= ephemeralFloor-2048 {
+			t.Fatalf("lowBandStart() = %d, outside the band it documents", got)
+		}
+	}
+}
