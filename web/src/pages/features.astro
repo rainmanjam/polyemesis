@@ -219,6 +219,21 @@ const sections = [
     caption: "One timeline across five platforms, with a per-platform verdict when only half a fan-out succeeds.",
     alt: "polyemesis chat page: merged timeline across platforms with a single send box",
   },
+  {
+    id: "automod",
+    provenBy: "setAutomodKey",
+    eyebrow: "Automatic moderation",
+    title: "Rules you write, and a model only if you want one",
+    body: [
+      "Patterns and rate detectors run in the process, on the messages already arriving for the chat pane — a regex with an action, a window with a message count, a repeat and link ceiling. Nothing is sent anywhere to make those decisions, and they are the ones that catch the traffic a live chat actually gets.",
+      "A model is the second tier, and it is off until you turn it on. Point it at any OpenAI-compatible endpoint, including one running on the same machine, write the instruction in your own words, and set a confidence floor and a calls-per-hour ceiling so the bill has a lid. While it is off, no message leaves the server — which is the default, not the fallback.",
+      "What either tier may DO is granted per platform, per action, in a matrix that starts empty. A checker that nobody has configured cannot be armed, and an irreversible action says so before you arm it: a ban needs a human to lift it and a deleted message is gone from the platform. Every cell a platform cannot honour is greyed with the reason, because Facebook has no chat ban API and a switch that silently does nothing is worse than one that is missing.",
+    ],
+    shot: "20-automod.png",
+    alt: "polyemesis automatic moderation settings: a model checker with endpoint, instruction and spend ceiling beside a per-platform matrix granting each action",
+    caption:
+      "The model checker beside the matrix that grants permission — Twitch with three automatic actions armed, Kick and Facebook with none.",
+  },
 ];
 
 /* The expanded view is plain <img src> assigned from a data attribute, so it
