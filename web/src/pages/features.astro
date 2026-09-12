@@ -82,6 +82,7 @@ const SHOT_WIDTHS = [420, 690, 960, 1440];
 const sections = [
   {
     id: "routing",
+    provenBy: "compileRouting",
     eyebrow: "Audio routing",
     title: "Choose the tracks, per destination",
     body: [
@@ -94,6 +95,7 @@ const sections = [
   },
   {
     id: "vod",
+    claimIsBehaviour: "the second audio track is built by the server from one ingest; the operator selects tracks through the routing editor, which section \"routing\" already proves",
     eyebrow: "Two mixes, one connection",
     title: "The broadcast carries the music. The VOD track does not.",
     body: [
@@ -109,6 +111,7 @@ const sections = [
   },
   {
     id: "matrix",
+    provenBy: "putSettings",
     eyebrow: "Mix matrix",
     title: "Channel-level control when the checkboxes are not enough",
     body: [
@@ -121,6 +124,7 @@ const sections = [
   },
   {
     id: "renditions",
+    provenBy: "createRendition",
     eyebrow: "Renditions",
     title: "One shared encode feeds every destination that selects it",
     body: [
@@ -134,6 +138,7 @@ const sections = [
   },
   {
     id: "failover",
+    provenBy: "switchSource",
     eyebrow: "Failover",
     title: "When the encoder dies, the destinations stay up",
     body: [
@@ -147,6 +152,7 @@ const sections = [
   },
   {
     id: "platforms",
+    provenBy: "connectUrl",
     eyebrow: "Platform sign-in",
     title: "Stop pasting stream keys",
     body: [
@@ -161,6 +167,7 @@ const sections = [
   },
   {
     id: "player",
+    provenBy: "playoutPublic",
     eyebrow: "Your own player",
     title: "A page you can send someone, with no platform in the middle",
     body: [
@@ -174,6 +181,7 @@ const sections = [
   },
   {
     id: "monitoring",
+    claimIsBehaviour: "a read-only surface: the page reports what the supervisor is doing and offers no action to prove",
     eyebrow: "Monitoring",
     title: "Every process, with its own FFmpeg output",
     body: [
@@ -186,6 +194,7 @@ const sections = [
   },
   {
     id: "recording",
+    provenBy: "submitRecordingJob",
     eyebrow: "Recording and post",
     title: "The full multitrack archive, stream-copied",
     body: [
@@ -199,6 +208,7 @@ const sections = [
   },
   {
     id: "chat",
+    provenBy: "deleteChatMessage",
     eyebrow: "Chat",
     title: "Five platforms in one timeline",
     body: [
