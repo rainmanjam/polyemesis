@@ -69,7 +69,28 @@ table is the wrong way to do this.
 child's full command line as it spawns, which is usually the fastest route to
 understanding a process that will not start.
 
-## Three things that surprise people
+## Five things that surprise people
+
+### The display time zone does not move your schedules
+
+**Settings → Display → Time zone** takes an IANA name and changes how times are
+WRITTEN DOWN — in the console, in exports, in the server log. It is a
+presentation setting and nothing else.
+
+It deliberately does not reach the scheduler. A schedule either says its own
+zone out loud or it means UTC, and quietly redefining that empty to follow this
+setting would move when every existing schedule fires on an install where
+somebody changed a display preference. Those are different decisions and the
+product keeps them apart.
+
+Empty means UTC, which is what an install that never touches it has always
+done. A zone that cannot be resolved is refused when you type it rather than
+rendering as UTC for ever with nothing saying why.
+
+A job window carries its own zone for the same reason. The console offers the
+browser's zone as the default because it is the likeliest right answer, not
+because it is the only one — a window that must follow a broadcast in another
+country is set to that country's zone and stays there when you travel.
 
 ### The built-in default is `off`; `auto` comes from the example file
 
