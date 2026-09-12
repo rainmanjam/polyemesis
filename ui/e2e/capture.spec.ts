@@ -568,6 +568,30 @@ test("recordings — segments and retention", async ({ page }) => {
   await page.screenshot({ path: `${OUT}/15-recordings.png` });
 });
 
+test("automod — the rules, and the matrix that grants them", async ({ page }) => {
+  // The pipeline tab, because that is where the card is mounted: automod sits
+  // directly after chat retention, since retention is the depth its history
+  // checker can see.
+  await page.goto("/settings?tab=pipeline");
+
+  // The matrix is the shot. It renders every platform against every action
+  // with the cells a platform cannot do greyed and reasoned, so it is full of
+  // content whether or not anything is configured -- but an empty rule list
+  // above it would still photograph as a form nobody has used, which is why
+  // seed_demo.go writes two rules and a detector.
+  // Located by the switch the card is named for, not by a table: the matrix is
+  // a grid of divs, and the first version of this waited thirty seconds for a
+  // <table> that was never going to exist.
+  const toggle = page.getByRole("switch", { name: /automatic moderation/i }).first();
+  await expect.poll(() => toggle.count(), { timeout: 30_000 }).toBeGreaterThan(0);
+  await toggle.scrollIntoViewIfNeeded();
+  // Seeded on, so a screenshot of it off would be a screenshot of the feature
+  // switched off -- worth asserting rather than hoping.
+  await expect(toggle).toBeChecked();
+  await settle(page);
+  await page.screenshot({ path: `${OUT}/20-automod.png` });
+});
+
 test("settings — listeners, and the one-port design in the UI", async ({ page }) => {
   await page.goto("/settings");
   await settle(page, 1500);
