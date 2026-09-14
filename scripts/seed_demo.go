@@ -751,6 +751,61 @@ func annotate() {
 		{"track": 1, "role": "music", "label": "Music bed"},
 		{"track": 2, "role": "commentary", "label": "Co-host"},
 	}
+
+	// AUTOMOD, SEEDED SO IT PHOTOGRAPHS AS AN INSTRUMENT RATHER THAN A FORM.
+	//
+	// The same argument as the synthetic stream at the top of
+	// capture-media.sh: a screenshot of an empty rule list shows a product
+	// that does nothing. Two patterns and a rate detector is the smallest
+	// configuration that shows what the card is for -- a regex rule with an
+	// action, a sequence detector with a window, and the matrix granting each
+	// of them permission on one platform.
+	//
+	// NO MODEL KEY. `enabled` stays false and the endpoint is the local
+	// address an operator would actually use for a self-hosted model, because
+	// the one thing this capture must not do is photograph a credential --
+	// maskPublishTokens covers publish tokens, not this. An unkeyed model card
+	// also shows the honest default: the checker exists and is off.
+	settings["automod"] = map[string]any{
+		"enabled": true,
+		"platformEnabled": map[string]any{
+			"twitch": true, "youtube": true,
+		},
+		"rules": []map[string]any{
+			{
+				"id": 1, "name": "Link spam", "enabled": true,
+				"pattern": `(?i)\b(?:bit\.ly|discord\.gg)/\S+`,
+				"action":  "delete",
+			},
+			{
+				"id": 2, "name": "Shouting", "enabled": true,
+				"pattern": `^[^a-z]{12,}$`,
+				"action":  "timeout", "timeoutSeconds": 60,
+			},
+		},
+		"history": map[string]any{
+			"windowSeconds": 30, "maxMessages": 5, "maxRepeats": 3,
+			"maxLinks": 2, "maxMentionsPerMessage": 4,
+			"minLengthForCaps": 12, "maxCapsRatio": 0.8,
+			"action": "timeout",
+		},
+		"model": map[string]any{
+			"enabled": false,
+			// An OpenAI-compatible endpoint; any local runner serves this path.
+			"endpoint":       "http://127.0.0.1:11434/v1/chat/completions",
+			"model":          "llama3.1:8b",
+			"timeoutSeconds": 4, "maxCallsPerHour": 200,
+			"action": "flag",
+		},
+		// The matrix grants what the rules above may actually do, per platform.
+		"on": map[string]any{
+			"twitch/delete/rules":    true,
+			"twitch/timeout/rules":   true,
+			"twitch/timeout/history": true,
+			"youtube/delete/rules":   true,
+		},
+	}
+
 	put("/settings", settings)
 }
 

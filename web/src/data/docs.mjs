@@ -191,6 +191,8 @@ const DOCS_BY_SECTION = {
   ],
 
   operating: [
+    ["AUTOMOD.md", "Automatic moderation: rules, and a model if you want one",
+      "Regex and rate checkers that run in-process, an optional external model that is off by default, and a per-platform matrix that grants each of them permission."],
     ["CONFIGURATION.md", "Configuration: config.yaml and the web UI",
       "Two places a setting can live, and they are not interchangeable. Every config.yaml key, its default, the data directory, and the environment variables."],
     ["PLATFORMS.md", "Streaming platforms: what can be automated",
