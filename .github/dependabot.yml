@@ -51,6 +51,28 @@ updates:
       dev-tooling:
         dependency-type: development
         update-types: [minor, patch]
+    ignore:
+      # TypeScript 7 is the native compiler rewrite, and `astro check` cannot
+      # run against it: TS7 exposes only `version` and `versionMajorMinor`,
+      # while Volar and the TypeScript Language Service API that `astro check`
+      # is built on need `ts.sys`, `ts.findConfigFile` and LanguageServiceHost.
+      # web/'s build is `astro check && astro build && …`, so taking the bump
+      # would trade a type-checked site for a newer type checker.
+      #
+      # The hold is here rather than left to a standing red PR. #669 sat
+      # unmergeable for eleven days, and a permanently failing PR is not a
+      # reminder -- it is training to ignore a red check. #520 is the reminder.
+      #
+      # REMOVE THIS WHEN #520 CLOSES. The trigger is an upstream event rather
+      # than a date, deliberately, and that is the weaker kind: the Node hold
+      # below can name 2026-10-28 because the calendar decides it, whereas this
+      # one waits on withastro/roadmap#1321 and nobody here sets that date.
+      # Rechecked 2026-09-10 against typescript 7.0.2, @astrojs/check 0.9.10 and
+      # @astrojs/language-server 2.16.16 -- the guard is still in the shipped
+      # check.js. The recheck is recorded on #520 so the next one starts from
+      # the answer.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   # The actions are pinned by major tag; this is what notices a v7 -> v8.
   - package-ecosystem: github-actions
