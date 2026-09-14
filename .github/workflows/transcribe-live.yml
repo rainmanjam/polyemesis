@@ -168,8 +168,29 @@ jobs:
         run: |
           set -euo pipefail
 
-          tag="$(gh release view --repo ggml-org/whisper.cpp --json tagName --jq .tagName)"
-          echo "whisper.cpp $tag"
+          # THE NEWEST RELEASE THAT CARRIES THE BINARY, not the newest release.
+          #
+          # This was `gh release view --json tagName`, which answers "the latest
+          # non-prerelease" -- a proxy for the thing actually wanted, and it
+          # stopped being true on 2026-09-11. whisper.cpp v1.9.4 is a
+          # source-only tag with ZERO assets; the binaries now land on the
+          # bNNNN build tags, which are marked prerelease and therefore never
+          # what that call returns. Older semver tags did carry them (v1.9.0
+          # through v1.9.2), which is why this worked for months and then did
+          # not.
+          #
+          # Selecting on the asset rather than on the tag survives upstream
+          # changing its release naming again, which it has now done twice.
+          asset='whisper-bin-ubuntu-x64.tar.gz'
+          tag="$(gh api repos/ggml-org/whisper.cpp/releases \
+                   --jq "first(.[] | select(any(.assets[]; .name==\"$asset\")) | .tag_name)")"
+          if [ -z "$tag" ]; then
+            echo "::error title=No whisper.cpp build carries $asset::Checked the most " \
+                 "recent releases of ggml-org/whisper.cpp and none publishes that asset. " \
+                 "Upstream has renamed or dropped it; this step needs the new name."
+            exit 1
+          fi
+          echo "whisper.cpp $tag (newest release carrying $asset)"
 
           # Retried, because this is the one step that can fail for a reason
           # that has nothing to do with the code under test, and a weekly job
@@ -179,7 +200,7 @@ jobs:
           # would read as "whisper is not installed here" and be a lie.
           for attempt in 1 2 3; do
             if gh release download "$tag" --repo ggml-org/whisper.cpp \
-                 --pattern 'whisper-bin-ubuntu-x64.tar.gz' --dir /tmp --clobber; then
+                 --pattern "$asset" --dir /tmp --clobber; then
               break
             fi
             echo "whisper.cpp download attempt $attempt failed"
