@@ -19,7 +19,7 @@
     "@astrojs/sitemap": "^3.7.4",
     "@tailwindcss/vite": "^4.1.18",
     "astro": "^7.3.2",
-    "mermaid": "^11.16.1",
+    "mermaid": "^12.0.0",
     "motion": "^13.2.0",
     "tailwindcss": "^4.1.18",
     "typescript": "^6.0.3"
