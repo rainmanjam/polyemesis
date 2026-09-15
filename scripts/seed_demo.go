@@ -294,9 +294,12 @@ func main() {
 // two share a selection and every track is used by something — which is what
 // makes the mix matrix in a screenshot read as a matrix rather than a list.
 var demoDestinations = []demoDest{
-	{"YouTube — full mix", "youtube.mkv", []int{0, 1, 2}},
-	{"Twitch — no music", "twitch.mkv", []int{0, 2}},
-	{"Podcast — mic only", "podcast.mkv", []int{0}},
+	{"YouTube — full mix", "youtube.mkv", []int{0, 1, 2}, false},
+	{"Twitch — no music", "twitch.mkv", []int{0, 2}, false},
+	// The matrix specimen. Still mic-only, so its name and the routing
+	// caption stay true; what changes is HOW that one track reaches the two
+	// output channels.
+	{"Podcast — mic only", "podcast.mkv", []int{0}, true},
 }
 
 // THE PROGRAMMES AFTER THE FIRST. Each a different shape on purpose: a
@@ -316,8 +319,8 @@ type demoProgramme struct {
 var secondProgramme = demoProgramme{
 	name: "Studio B — panel show",
 	destinations: []demoDest{
-		{"YouTube — panel", "panel-youtube.mkv", []int{0, 1}},
-		{"Archive — hosts only", "panel-archive.mkv", []int{1}},
+		{"YouTube — panel", "panel-youtube.mkv", []int{0, 1}, false},
+		{"Archive — hosts only", "panel-archive.mkv", []int{1}, false},
 	},
 }
 
@@ -328,7 +331,7 @@ var secondProgramme = demoProgramme{
 var thirdProgramme = demoProgramme{
 	name: "Studio C — outside broadcast",
 	destinations: []demoDest{
-		{"Facebook — match feed", "obc-facebook.mkv", []int{0, 1}},
+		{"Facebook — match feed", "obc-facebook.mkv", []int{0, 1}, false},
 	},
 }
 
@@ -359,6 +362,12 @@ type demoDest struct {
 	name   string
 	file   string
 	tracks []int
+	// matrix asks for a channel-to-output profile instead of the simple
+	// per-track checkboxes. Exactly one demo destination sets it, because
+	// 08-mix-matrix.png needs one to exist and the capture test SKIPS when
+	// none does -- which is why that shot sat unchanged from 2026-08-27 while
+	// every other one was recaptured twice.
+	matrix bool
 }
 
 func (d demoDest) body(sourceID int64) map[string]any {
@@ -374,8 +383,31 @@ func (d demoDest) body(sourceID int64) map[string]any {
 		"name": d.name, "kind": "file", "platform": "custom",
 		"sourceId": sourceID,
 		"url":      d.file, "enabled": true, "audioBitrate": 160,
-		"profile": map[string]any{
+		"profile": d.profile(rows),
+	}
+}
+
+// profile is the routing this destination receives.
+//
+// THE MATRIX ONE IS ILLUSTRATIVE, not arbitrary. A mono mic panned dead centre
+// is the case the grid exists for and the one a column of checkboxes cannot
+// express: track 0's single channel reaching BOTH outputs, at a gain per cell.
+// A grid of unity cells would photograph as a more complicated way to write
+// what simple mode already says.
+func (d demoDest) profile(rows []map[string]any) map[string]any {
+	if !d.matrix {
+		return map[string]any{
 			"mode": "simple", "tracks": rows, "normalize": "auto", "sampleRate": 48000,
+		}
+	}
+	return map[string]any{
+		"mode": "matrix", "tracks": rows, "normalize": "auto", "sampleRate": 48000,
+		"matrix": []map[string]any{
+			// Track 0 is the host mic, mono: one channel into each output, a
+			// little hotter on the left so the grid shows two different
+			// numbers rather than a wall of 1.0.
+			{"track": 0, "channel": 0, "out": 0, "gain": 1.0},
+			{"track": 0, "channel": 0, "out": 1, "gain": 0.85},
 		},
 	}
 }
