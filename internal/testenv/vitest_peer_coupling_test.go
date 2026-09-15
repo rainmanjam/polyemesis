@@ -81,50 +81,116 @@ func majorOf(t *testing.T, spec string) int {
 // The workspaces that have a package.json of their own.
 var jsWorkspaces = []string{"ui", "web"}
 
-func TestVitestAndItsCoveragePluginAreBumpedTogether(t *testing.T) {
+// seriesOf reads "major.minor" out of a range like "^19.3.0" or ">=24".
+//
+// MAJOR ALONE IS NOT ENOUGH, and the mutation test is what proved it. The
+// vitest pair that motivated this file drifted across a major -- 5 against 4 --
+// so a major comparison caught it. react 19.3 against react-dom 19.2 is the
+// same defect one digit to the right, and #808 is exactly that: both are major
+// 19, npm installs them happily, and `tsc -b` fails on types that name neither
+// package. A guard written from one example measures what that example
+// happened to break.
+func seriesOf(t *testing.T, spec string) string {
+	t.Helper()
+	m := regexp.MustCompile(`(\d+)\.(\d+)`).FindStringSubmatch(spec)
+	if m != nil {
+		return m[1] + "." + m[2]
+	}
+	// A range with no minor ("^19", ">=24") pins only the major, and two such
+	// ranges agree whenever their majors do.
+	return strconv.Itoa(majorOf(t, spec)) + ".*"
+}
+
+// wildcardAgrees lets a range that pins only a major ("^19") sit beside one
+// that pins a minor ("^19.3.0") without being called a mismatch.
+func wildcardAgrees(x, y string) bool {
+	xs, ys := strings.SplitN(x, ".", 2), strings.SplitN(y, ".", 2)
+	if xs[0] != ys[0] {
+		return false
+	}
+	return xs[1] == "*" || ys[1] == "*"
+}
+
+// PACKAGES THAT MUST MOVE TOGETHER, and the reason each pair is coupled.
+//
+// This started as one hardcoded pair because one pair had just cost a day.
+// react/react-dom is the second instance in the same week -- dependabot opened
+// #808 moving react to 19.3.0 and #806 moving react-dom to 19.3.0, each
+// leaving the other behind, and neither could pass alone. A guard written for
+// one instance of a recurring shape is a guard that watches one door.
+//
+// A pair belongs here when the two packages cannot be installed at different
+// majors, OR when they can but the result does not type-check or run. The
+// second kind is the one dependabot cannot see: npm resolves react 19.3
+// against react-dom 19.2 happily, and the failure surfaces as a typecheck
+// error naming neither.
+var coupledPairs = []struct {
+	a, b string
+	why  string
+}{
+	{
+		"vitest", "@vitest/coverage-v8",
+		"the plugin declares a HARD peer on the exact vitest version, so at " +
+			"different majors `npm ci` fails with ERESOLVE and every job in the " +
+			"workspace goes red at once",
+	},
+	{
+		"react", "react-dom",
+		"react-dom renders react's element types; npm installs a mismatched pair " +
+			"without complaint and `tsc -b` then fails on types that name neither " +
+			"package. #808 and #806 each moved one half and neither could pass",
+	},
+	{
+		"@types/react", "@types/react-dom",
+		"the DOM types extend the core ones, so a split pair produces type errors " +
+			"in application code that has not changed",
+	},
+}
+
+func TestCoupledPackagesAreBumpedTogether(t *testing.T) {
 	root := repoRootFromTest(t)
 
 	checked := 0
 	for _, ws := range jsWorkspaces {
 		p := readPkg(t, filepath.Join(root, ws, "package.json"))
-		vitest, hasVitest := p.declared("vitest")
-		cov, hasCov := p.declared("@vitest/coverage-v8")
 
-		if !hasVitest {
-			if hasCov {
-				t.Errorf("%s declares @vitest/coverage-v8 (%s) and no vitest. The plugin "+
-					"peers on an exact vitest version, so on its own it can only ever "+
-					"resolve by accident.", ws, cov)
+		for _, pair := range coupledPairs {
+			av, hasA := p.declared(pair.a)
+			bv, hasB := p.declared(pair.b)
+
+			switch {
+			case !hasA && !hasB:
+				// This workspace uses neither. Nothing to keep in step.
+				continue
+
+			case hasA != hasB:
+				// One without the other. Sometimes legitimate -- a workspace may
+				// run vitest with no coverage plugin -- so it is said out loud
+				// rather than failed, and the pair that IS a hard peer fails on
+				// the version comparison below instead.
+				t.Logf("%s declares %s but not %s; nothing to keep in step", ws, pair.a, pair.b)
+				continue
 			}
-			continue
-		}
-		checked++
 
-		if !hasCov {
-			// Not an error: a workspace may legitimately run tests without a
-			// coverage report. Said out loud so it is a decision, not a gap.
-			t.Logf("%s runs vitest with no coverage plugin; nothing to keep in step", ws)
-			continue
-		}
-
-		if a, b := majorOf(t, vitest), majorOf(t, cov); a != b {
-			t.Errorf("%s has vitest %s and @vitest/coverage-v8 %s.\n"+
-				"@vitest/coverage-v8 declares a HARD peer on the exact vitest version, so "+
-				"these two cannot be installed at different majors -- `npm ci` fails with "+
-				"ERESOLVE and every job in the workspace goes red at once.\n"+
-				"Dependabot files one PR per package and cannot know they are coupled: it "+
-				"opened #760 and #762 separately and neither could pass. Bump both in the "+
-				"same commit.", ws, vitest, cov)
+			checked++
+			if x, y := seriesOf(t, av), seriesOf(t, bv); x != y && !wildcardAgrees(x, y) {
+				t.Errorf("%s has %s %s and %s %s, which are not the same release series.\n%s.\n"+
+					"Dependabot files one PR per package and cannot know they are "+
+					"coupled, so a split pair arrives as two PRs that each look "+
+					"reasonable and neither of which can merge. Bump both in the "+
+					"same commit.", ws, pair.a, av, pair.b, bv, pair.why)
+			}
 		}
 	}
 
 	// POSITIVE CONTROL. A renamed workspace, a moved package.json, or a typo in
-	// jsWorkspaces leaves the loop above comparing nothing, and a loop that
-	// compares nothing agrees with itself.
+	// a pair name leaves the loop comparing nothing, and a loop that compares
+	// nothing agrees with itself.
 	if checked == 0 {
-		t.Fatal("no workspace was found declaring vitest. jsWorkspaces is wrong or a " +
-			"package.json has moved, so this test is asserting nothing about the coupling " +
-			"it exists to protect.")
+		t.Fatal("no coupled pair was compared in any workspace. jsWorkspaces is " +
+			"wrong, a package.json has moved, or every name in coupledPairs is " +
+			"misspelled -- so this test is asserting nothing about the coupling it " +
+			"exists to protect.")
 	}
 }
 
