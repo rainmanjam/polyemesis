@@ -8,6 +8,119 @@ its first tagged release.
 
 ## [Unreleased]
 
+> Heading date deliberately unset. `changelog-gate` matches the pushed tag
+> against the top **dated** heading, so this becomes `## [0.10.0] — YYYY-MM-DD`
+> on the day the tag is cut and not before. `[Unreleased]` must be empty at that
+> point, so promoting this block is the last edit before tagging.
+
+### Added
+
+- **Twenty-one capabilities the server had and no operator could reach.** A
+  sweep asked one question of every settings leaf, route and capability: can an
+  operator actually get at this. 113 of 153 leaves had a control. The rest are
+  reachable now — and four controls that were already reachable were repaired,
+  because they did not do what they said.
+
+  The worst was failover, which was a one-way door: `POST /failover/source`
+  worked and had been live since the failover tier shipped, and no screen called
+  it. An operator could pin a source and not hand it back.
+
+  The cause is one mistake and it is instructive. `settings_drift_test.go`
+  asserted that every settings field is *named* in `types.ts`, and its own header
+  already said why that is not enough — "nameable is not reachable. A field
+  present in types.ts still needs a control somewhere. It matches anywhere in the
+  file." It documented the inadequacy it shipped. Eight findings trace to it,
+  three of them passing because the name matched on an unrelated interface:
+  `sourceId` on `Destination` standing in for `playout.sourceId`, `encoder` and
+  `preset` on `Rendition` standing in for the slate's.
+
+- **Every claim on the features page now carries a receipt.** The site said an
+  operator could hand a pinned source back with auto on 2026-08-16. The console
+  gained that ability on 2026-09-09 — twenty-four days during which the site
+  advertised a capability nobody could reach, with nothing red anywhere, because
+  no artefact tied the site's *claims* to the product.
+
+  Each section now names a `provenBy` wrapper in `api.ts`, and the guard asserts
+  the wrapper exists **and** is called from outside `api.ts`. The second half is
+  the one that matters: in the failover case the route existed, was live, and had
+  a wrapper — what was missing was a screen reaching it.
+
+- Automatic moderation on the features page, with `docs/AUTOMOD.md`.
+
+- `docs/GITNEXUS-IMPACT.md` — what the code-intelligence graph does not record,
+  and why a zero from it is not an answer. `docs/BRANCH-ARCHIVE.md` — which
+  mechanism preserves each deleted branch. Both withheld from the site.
+
+### Changed
+
+- **The design system is executed rather than declared.** The type scale existed
+  and nothing used it: `index.css` declared six steps and wired them into
+  Tailwind, the component kit reached past them for arbitrary sizes, and
+  `index.css` itself set `body` to a literal 13px — a seventh step, which is
+  precisely what the spec says happens when a seventh gets chosen by accident.
+
+  Every hardcoded size now names a step. This is a large and deliberate visible
+  change, because everything inherits the kit: body 13→12px, page titles 15→28px,
+  card titles 13→18px. One palette and one type scale, shared between the app and
+  the site through a single token source, with a drift guard over both.
+
+- Every screenshot recaptured against the design system, and the site's
+  screenshots — which had shipped eight days older than the docs — resynchronised.
+
+### Fixed
+
+- **A preview start whose hub vanished kept its relay port.** Every other return
+  below the allocation in `startPreviewLocked` released the port; this one did
+  not. Reachability is narrow: `previewFlowing` a few lines above already returns
+  false when `downstreamHub()` is nil, so reaching it needs the hub to disappear
+  between the two calls — which a failover can do and a single-threaded test
+  cannot.
+
+  Worth recording how it was confirmed. The fix was argued from symmetry and
+  shipped explicitly unmeasured, after a first test was deleted for passing
+  against the unfixed code too. It was measured afterwards, and it was a real
+  leak.
+
+- **A screenshot had been ageing for three weeks behind a guard that was working
+  exactly as written.** `08-mix-matrix.png` skipped its check whenever no
+  destination on the capture install used the matrix, and none did. A destination
+  now carries a matrix profile, so the shot is taken rather than skipped: 19
+  capture tests, 0 skipped. Two captions were wrong and are corrected — the
+  matrix grid runs the opposite way to what its caption described, and no
+  filtergraph appears in that shot at all.
+
+- The transcription workflow picked the newest whisper.cpp release rather than
+  the newest release *carrying the binary*, so an upstream source-only release
+  broke it. It now selects on the asset.
+
+### Security
+
+- The `lodash-es` advisory carried in by mermaid 12's new dependency.
+- A nested `sharp` advisory that dependabot structurally could not reach, because
+  the parent pins it — cleared with an `overrides` dedupe rather than by waiting.
+- Two advisories published between green runs.
+
+### Testing
+
+- vitest 5 across both workspaces as a single commit, because
+  `@vitest/coverage-v8` declares a hard peer on the exact vitest version and the
+  two cannot move separately.
+- Test ports are drawn below the OS dynamic range, so a port a test lends cannot
+  be re-lent underneath it by the OS.
+- The invariant that two unguarded `Subscribe` calls rest on is now pinned.
+- react and react-dom move as one bump, guarded by a check that compares
+  major *and* minor — these install happily mismatched and fail only at typecheck.
+
+### CI
+
+- `workflow lint` and the `web/` build now block a merge instead of only
+  reporting. Both ran on every pull request and neither could stop one: the job
+  that catches a broken workflow file was advisory about workflow files, and
+  `npm run build` — `astro check && astro build && scripts/check-build.mjs`, the
+  only CI `web/` has — was red-but-mergeable. The site build needed a
+  `changes`/shim partition first, because a workflow-level `paths:` filter skips
+  the whole workflow and an absent check can never be satisfied.
+
 ## [0.9.0] — 2026-09-06
 
 ### Security
