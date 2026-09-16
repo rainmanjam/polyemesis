@@ -93,6 +93,14 @@ its first tagged release.
   the newest release *carrying the binary*, so an upstream source-only release
   broke it. It now selects on the asset.
 
+- **A competitor's price was wrong on the live site, and nothing in the
+  repository could have said so.** Aitum renamed its paid suite ("Aitum App" ->
+  Nexus) and moved its price ($4.99/mo -> $5.49/mo) inside 32 days; both stale
+  figures were published on `/how-to-multistream-from-obs` and
+  `/vs/aitum-multistream`. Re-reading all eight vendors against their own pages
+  confirmed everything else the site leans on, Restream's full tier table
+  included — monthly and annual, every figure exact.
+
 ### Security
 
 - The `lodash-es` advisory carried in by mermaid 12's new dependency.
@@ -120,6 +128,18 @@ its first tagged release.
   only CI `web/` has — was red-but-mergeable. The site build needed a
   `changes`/shim partition first, because a workflow-level `paths:` filter skips
   the whole workflow and an absent check can never be satisfied.
+
+- Competitor claims now have a device instead of a convention. Three pages named
+  `docs/evidence/competitor-facts-<date>.md` as "the only sanctioned source" and
+  nothing in CI referenced that file; one page's header even stated the rule
+  — "every price carries a visible checked date" — while four of its five
+  siblings ignored it. `check-build.mjs` now requires every page sourcing that
+  file to **render** a date the file actually claims, read from the built page
+  rather than the source: two pages had a `const CHECKED` they never put on
+  screen, which is a stamp only the author can see. A weekly `claim freshness`
+  job fails when the newest check passes 90 days — a schedule and not a test,
+  because a time-based assertion in the build turns red on a morning nobody
+  touched the repository.
 
 ## [0.9.0] — 2026-09-06
 
