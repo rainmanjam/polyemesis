@@ -30,6 +30,22 @@ on:
   # Pull requests build and check but never publish — see the `if` on the
   # publish step, which requires refs/heads/main as well as the credential.
   #
+  # NO `paths:` FILTER HERE, AND THAT IS WHAT MAKES THIS CHECK REQUIRABLE.
+  # A workflow-level `paths:` filter does not skip the job, it skips the whole
+  # workflow -- no run, no check, no name. Branch protection cannot require a
+  # name that is absent on most pull requests: it would wait on it forever with
+  # nothing red to point at, which is precisely the failure
+  # internal/testenv/required_checks_test.go was written after (#650, #656,
+  # #659, all unmergeable at once on 2026-09-02, forty of forty green).
+  #
+  # So the filter moved INSIDE, to the `changes` job below, where a pull request
+  # that touches nothing this workflow covers is answered by a shim job carrying
+  # the same name rather than by silence. ci.yml's container-not-applicable is
+  # the same pattern. The cost is one ~20s job on pull requests that do not
+  # touch the site; what it buys is that `astro check`, the link/fragment
+  # resolution pass and the built-CSS assertions in web/scripts/check-build.mjs
+  # can gate merge instead of being advisory.
+  pull_request:
   # docs/** (RB-5, #499): content.config.ts loads with `base: "../docs"` and
   # astro.config.mjs maps every `/docs/${slug}` route straight onto
   # `../docs/${file}` — this build renders the REPO'S docs/, not a copy under
@@ -38,11 +54,10 @@ on:
   # merges to main and never redeploys. That is exactly the failure mode
   # this issue is named for: the fix for the false 0.7.0 claim would itself
   # have been unable to reach the published site.
-  pull_request:
-    paths:
-      - "web/**"
-      - "docs/**"
-      - ".github/workflows/pages.yml"
+  #
+  # The filter stays on `push:`, where the question is different: a push to main
+  # that changes nothing the site renders has nothing to redeploy, and there is
+  # no check to answer.
   push:
     branches: [main]
     paths:
@@ -82,8 +97,71 @@ permissions:
   contents: read
 
 jobs:
+  # The `paths:` filter that used to sit on `pull_request:`, moved somewhere it
+  # can be answered. Same rule, same shape as ci.yml's `changes` job -- a plain
+  # git diff rather than a third-party action, and anything that is not a pull
+  # request runs everything, because a push, a release and a dispatch have no
+  # diff to reason about.
+  changes:
+    name: which site changes
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      site: ${{ steps.detect.outputs.site }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "site=true" >> "$GITHUB_OUTPUT"
+            echo "not a pull request: building"
+            exit 0
+          fi
+          CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          echo "changed files:"; echo "$CHANGED" | sed 's/^/  /'
+          # The same three globs the `pull_request:` filter used to carry. Note
+          # docs/** is load-bearing and not a courtesy -- astro.config.mjs maps
+          # /docs/${slug} onto the repository's own docs/, so a docs-only change
+          # IS a site change. See the comment on the triggers above.
+          if grep -qE '^(web/|docs/|\.github/workflows/pages\.yml$)' <<<"$CHANGED"; then
+            echo "site=true" >> "$GITHUB_OUTPUT"
+            echo "touches the site: building"
+          else
+            echo "site=false" >> "$GITHUB_OUTPUT"
+            echo "touches nothing the site renders: not applicable"
+          fi
+
+  # THE SHIM. Carries the same name as `deploy` so that the required context is
+  # ALWAYS answered -- green when the pull request cannot affect the site, and
+  # never silent. Without it, requiring this check would hang every pull request
+  # that does not touch web/ or docs/.
+  deploy-not-applicable:
+    name: build web/ and publish to Cloudflare Pages
+    permissions:
+      contents: read
+    needs: changes
+    if: needs.changes.outputs.site != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Not applicable to this pull request
+        run: |
+          echo "::notice title=Site not built::This pull request changes nothing under web/ or docs/, so the site was not rebuilt. It builds in full on main and on every pull request that touches it. See the changes job for the rule that decided this."
+          echo "pages: not applicable to this pull request."
+
   deploy:
     name: build web/ and publish to Cloudflare Pages
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
     runs-on: ubuntu-latest
     # The build measures at ~5s after install; 15 minutes is almost entirely
     # headroom for `npm ci` on a cold cache and for the upload.
