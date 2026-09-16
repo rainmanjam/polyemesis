@@ -92,10 +92,31 @@ pushed, never had a pull request, and deliberately left alone. `majors/ops`
 alone is 20 commits. Nothing on GitHub holds any of them; if they are ever to be
 deleted they want `archive/*` tags first, the same as the table above.
 
-## Two tags pushed as a side effect
+## The tag namespaces
 
-`git push origin --tags` pushes every local tag, not the ones just created, so
-`backup-pre-github` (`5a902c6e`) and `rescue-main-17caf8b` (`17caf8b6`) — local
-rescue points from July, not on `main` — went up too. Left in place because they
-are backups and deleting them would destroy the only remote copy, but they were
-not part of the intended change. Push tags by name.
+`origin` carries three, and the split is the point:
+
+| namespace | holds | who reads it |
+|---|---|---|
+| `v*` | releases | `release.yml`, `git describe --tags` on `main`, the site footer |
+| `evidence/*` | measurement artifacts from #126 | anyone re-deriving that result |
+| `archive/*` | commits nothing else holds | whoever needs a deleted branch back |
+
+Only `v*` is load-bearing for automation. `release.yml` triggers on `tags: ["v*"]`
+and nothing else under `.github/workflows` is tag-triggered, so neither of the
+other two namespaces can fire a build. None of them is reachable from `main`, so
+`git describe --tags` there cannot select one either.
+
+### `archive/backup-pre-github` and `archive/rescue-main-17caf8b`
+
+These two arrived by accident and are worth recording as such. `git push origin
+--tags` pushes EVERY local tag, not the ones just created, so two July rescue
+points — `5a902c6e` and `17caf8b6`, neither on `main` — went up alongside the
+archive set under their bare names, sitting in the tag list beside the releases.
+
+They were not deleted, because by then `origin` was their only remote copy and
+removing them would have recreated the exact problem this file is about. They
+were renamed under `archive/` instead, which is where the `evidence/*` precedent
+says such a thing belongs.
+
+**Push tags by name.** `--tags` is not a way of saying "the tags I just made".
