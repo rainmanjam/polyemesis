@@ -44,6 +44,54 @@ be verified against a vendor page, and they are NOT confirmed:
 A claim in that list is not false. It is unverified, which is the state this
 file exists to make visible rather than hide.
 
+### Browser pass, same day — what a rendered page could answer that a fetch could not
+
+Every gap above traced to one cause: the vendor ships a JS shell and a plain
+fetch retrieves nothing. Re-run through a real browser (Playwright), four of
+them resolve. **A fetch returning no pricing is not evidence of no pricing**, and
+the difference between the two runs is the whole argument for checking that way.
+
+*   **Streamlabs — RESOLVED.** `/pricing` redirects to `/ultra`. The gate is
+    real and now has numbers: **Starter, "Free, always" — 2 destinations.
+    Ultra, $27/mo or $189/year (marked "Save $135") — 3+ destinations.**
+*   **StreamElements — RESOLVED, and the free-tier claim holds.**
+    `/pricing` is a genuine 404 ("This page went off-stream"); there is no
+    pricing page because there are no prices. The homepage carries "FREE
+    FOREVER", "100% FREE customizable alerts & widgets", "100% FREE forever!"
+    and "No small print here, whatever you use will be yours for free forever."
+    No currency figure appears anywhere on it. SE.Live still exists, at
+    `/selive`. §7's "StreamElements has a free tier and Castr does not" is
+    confirmed on the StreamElements half.
+*   **MistServer — CONFIRMED.** `/pricing` redirects to `/download`, which says
+    "All versions of MistServer are full-featured and free to use for any
+    purpose (including commercial purposes) with no restrictions whatsoever",
+    under Unlicense / Public Domain. One qualifier for whoever writes next:
+    the same page says "We plan to provide a full list of possible services and
+    associated pricing soon", so "no paid tier" is true today and is the kind of
+    sentence that stops being true without warning.
+*   **Restream — EVERY PUBLISHED FIGURE CONFIRMED EXACTLY**, monthly and annual,
+    read off the live pricing table with the billing toggle exercised both ways:
+    Free $0 "/forever" 2 channels; Standard **$19/mo**, or **$16/mo "Billed as
+    $190 per year"**, 3 channels; Professional **$49/mo**, or **$39/mo "Billed
+    as $470 per year"**, 5 channels. These are the numbers this site publishes
+    most and all six are right.
+
+TWO RESTREAM QUALIFIERS REMAIN UNSUPPORTED, and the browser pass makes that
+finding stronger rather than weaker, because the page rendered fully:
+
+*   "personal profiles/platforms only" — the pricing page does not say it.
+*   "excludes Facebook Pages/Groups" — the word Facebook does not occur on the
+    pricing page at all.
+
+Neither is contradicted; neither is stated. Do not publish either as a fact
+sourced from this file. Note also that the page's own word is "Restream
+branding", not "watermark".
+
+NOT IN THIS FILE AND NOW ON RESTREAM'S PAGE: a **Business** tier at $239/mo
+(8 channels, $199/mo billed as $2,390 per year) and an **Enterprise** tier. The
+file's tier table is not wrong, it is incomplete, which matters if anything here
+ever claims to enumerate Restream's plans.
+
 ## What may be published about another product
 
 Every claim must trace to a **dated, citable source**, and the date must be shown
