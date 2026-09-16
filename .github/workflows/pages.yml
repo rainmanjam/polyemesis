@@ -38,10 +38,11 @@ on:
   # internal/testenv/required_checks_test.go was written after (#650, #656,
   # #659, all unmergeable at once on 2026-09-02, forty of forty green).
   #
-  # So the filter moved INSIDE, to the `changes` job below, where a pull request
-  # that touches nothing this workflow covers is answered by a shim job carrying
-  # the same name rather than by silence. ci.yml's container-not-applicable is
-  # the same pattern. The cost is one ~20s job on pull requests that do not
+  # So the filter moved INSIDE, to the `site-scope` job below, where a pull
+  # request that touches nothing this workflow covers is answered by a shim job
+  # carrying the same name rather than by silence. ci.yml's
+  # container-not-applicable is the same pattern. The cost is one ~20s job on
+  # pull requests that do not
   # touch the site; what it buys is that `astro check`, the link/fragment
   # resolution pass and the built-CSS assertions in web/scripts/check-build.mjs
   # can gate merge instead of being advisory.
@@ -98,11 +99,26 @@ permissions:
 
 jobs:
   # The `paths:` filter that used to sit on `pull_request:`, moved somewhere it
-  # can be answered. Same rule, same shape as ci.yml's `changes` job -- a plain
-  # git diff rather than a third-party action, and anything that is not a pull
-  # request runs everything, because a push, a release and a dispatch have no
-  # diff to reason about.
-  changes:
+  # can be answered. A plain git diff rather than a third-party action, and
+  # anything that is not a pull request runs everything, because a push, a
+  # release and a dispatch have no diff to reason about.
+  #
+  # NOT NAMED `changes`, AND NOT THE DOCUMENTATION GATE. internal/testenv/
+  # docsgate_test.go watches the job named `changes` and the expression
+  # `needs.changes.outputs.code`, and its rule is deliberately flat: that gate
+  # is read from a step's `if:` and never from a job's, because a skipped MATRIX
+  # job never expands its matrix and its per-leg required contexts are then
+  # absent rather than skipped (#351, and #349 unmergeable at fifteen green).
+  #
+  # This is a different gate with a different hazard. It decides whether the
+  # site needs rebuilding at all, it gates a job with NO matrix, and the
+  # complement is answered by a sibling carrying the same name -- which is the
+  # shape ci.yml already uses for container-suites -> container /
+  # container-not-applicable, not the shape docsgate_test is about. Naming it
+  # `changes` would have made this file claim membership of a rule whose
+  # prescription it cannot follow: pagesdeploy_test.go requires the Build step
+  # to carry no `if:` at all, which is the opposite of "gate every step".
+  site-scope:
     name: which site changes
     permissions:
       contents: read
@@ -148,8 +164,8 @@ jobs:
     name: build web/ and publish to Cloudflare Pages
     permissions:
       contents: read
-    needs: changes
-    if: needs.changes.outputs.site != 'true'
+    needs: site-scope
+    if: needs.site-scope.outputs.site != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -160,8 +176,8 @@ jobs:
 
   deploy:
     name: build web/ and publish to Cloudflare Pages
-    needs: changes
-    if: needs.changes.outputs.site == 'true'
+    needs: site-scope
+    if: needs.site-scope.outputs.site == 'true'
     runs-on: ubuntu-latest
     # The build measures at ~5s after install; 15 minutes is almost entirely
     # headroom for `npm ci` on a cold cache and for the upload.
