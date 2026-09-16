@@ -62,13 +62,36 @@ the difference between the two runs is the whole argument for checking that way.
     No currency figure appears anywhere on it. SE.Live still exists, at
     `/selive`. §7's "StreamElements has a free tier and Castr does not" is
     confirmed on the StreamElements half.
-*   **MistServer — CONFIRMED.** `/pricing` redirects to `/download`, which says
-    "All versions of MistServer are full-featured and free to use for any
-    purpose (including commercial purposes) with no restrictions whatsoever",
-    under Unlicense / Public Domain. One qualifier for whoever writes next:
-    the same page says "We plan to provide a full list of possible services and
-    associated pricing soon", so "no paid tier" is true today and is the kind of
-    sentence that stops being true without warning.
+*   **MistServer — CONFIRMED, AND §6 WAS ALREADY RIGHT.** §6 says "Free, with no
+    stream limits or feature locks. Optional paid SLAs, custom development and
+    consulting", and that is exactly what the vendor sells. Nothing here needed
+    changing.
+
+    WHAT WAS ADDED: the numbers, which this file never had, from
+    mistserver.**com**/pricing — a different domain to the project's
+    mistserver.org, and the reason two passes missed it. Support tiers **Basic
+    €500/mo, Advanced €1,000/mo, Developer €5,000/mo**; add-ons **Irregular
+    hours €1,500/mo, Live SLA €2,000/mo, 24/7 SLA €5,000/mo**, and a custom SLA.
+    The software stays free: "Every feature. Every server. $0 in license fees",
+    Unlicense / Public Domain. Their FAQ: "If the software is completely free,
+    how do you make money? ... when stakes get high we offer paid support."
+
+    THREE MISTAKES ON THE WAY HERE, recorded because each is a different way to
+    be confidently wrong:
+    1.  The agent sweep was asked to check "Free, $0, **no paid tier**, no
+        paywall" against MistServer. That sentence is **SE.Live's** §D, not
+        MistServer's — mis-attributed when the prompt was written. The agent
+        dutifully investigated a claim this file never made about that vendor.
+    2.  `mistserver.org/pricing` redirects to `/download`, which shows no
+        prices. That was read as *there is no pricing*. **A redirect to a
+        download page is not evidence that no pricing exists**; the company
+        sells from a separate domain. A human supplied the .com URL.
+    3.  On that basis this file briefly claimed MistServer's paid services were
+        merely "planned". They are live and priced, and have been.
+
+    The durable lesson is the second one. Absence of a pricing page is not
+    absence of pricing, and a project/company domain split (`.org` vs `.com`) is
+    where that error hides.
 *   **Restream — EVERY PUBLISHED FIGURE CONFIRMED EXACTLY**, monthly and annual,
     read off the live pricing table with the billing toggle exercised both ways:
     Free $0 "/forever" 2 channels; Standard **$19/mo**, or **$16/mo "Billed as
