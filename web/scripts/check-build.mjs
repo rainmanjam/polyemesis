@@ -1160,6 +1160,100 @@ if (goPresets.size && pages.includes("features.html")) {
   }
 }
 
+/* EVERY PAGE THAT SOURCES A COMPETITOR CLAIM MUST SHOW THE READER ITS DATE.
+ *
+ * The /calculator rule above already says why, for one page: "undated bitrates
+ * are the failure the Checked field exists to prevent." The same reasoning
+ * applies wherever the site describes somebody else's product, and there it
+ * matters more -- a competitor's pricing is the most volatile thing this site
+ * publishes, and the reader has no way to judge a claim whose age is hidden.
+ *
+ * WHY THIS READS THE BUILT PAGE AND NOT THE SOURCE. A `const CHECKED` in an
+ * .astro file proves a date was DECLARED, not that it was RENDERED. When this
+ * check was written, vs/streamlabs and vs/streamelements each had a CHECKED
+ * constant and neither put it on the page: a source-grep guard would have
+ * called both compliant while the reader saw an undated comparison. The
+ * property is "the reader can see when this was checked"; the constant is a
+ * proxy for it, and the two had already diverged on two pages out of nine.
+ *
+ * THE DATE MUST ALSO BE ONE THE FACTS FILE ACTUALLY CLAIMS, which is a weaker
+ * rule than "equals the filename" and is the correct one. The file is amended
+ * in place: competitor-facts-2026-08-15.md carries "# 8. Streamlabs Multistream
+ * -- added 2026-08-16", so /vs/streamlabs showing 16 August 2026 is right and
+ * an equality check would have called it a lie. What must not be possible is a
+ * page showing a date its source never claimed, which is how a stamp drifts
+ * into decoration. */
+const FACTS_RE = /competitor-facts-(\d{4}-\d{2}-\d{2})\.md/;
+const PAGES_SRC = new URL("../src/pages/", import.meta.url).pathname;
+const MONTHS = {
+  jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+  jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+};
+
+/** The three spellings the site actually uses, normalised to ISO-8601:
+ * "2026-08-15", "15 Aug 2026", "15 August 2026". A fourth spelling should
+ * fail loudly here rather than be silently unreadable. */
+function isoFromShownDate(text) {
+  const iso = /[Cc]hecked\s+(?:on\s+)?(\d{4}-\d{2}-\d{2})/.exec(text);
+  if (iso) return iso[1];
+  const words = /[Cc]hecked\s+(?:on\s+)?(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})/.exec(text);
+  if (!words) return null;
+  const mm = MONTHS[words[2].slice(0, 3).toLowerCase()];
+  if (!mm) return null;
+  return `${words[3]}-${mm}-${String(words[1]).padStart(2, "0")}`;
+}
+
+const sourcedPages = [];
+for (const entry of readdirSync(PAGES_SRC, { recursive: true })) {
+  const rel = String(entry);
+  if (!rel.endsWith(".astro")) continue;
+  const src = readFileSync(join(PAGES_SRC, rel), "utf8");
+  const cited = FACTS_RE.exec(src);
+  if (!cited) continue;
+  sourcedPages.push({ rel, page: rel.replace(/\.astro$/, ".html"), factsDate: cited[1] });
+}
+
+// GREEN OVER NOTHING. If the walk stops matching -- the pages move, the
+// filename convention changes, readdirSync loses its recursive option -- this
+// check would pass by examining zero pages, which is the one outcome that must
+// not look like success.
+if (sourcedPages.length === 0) {
+  fail.push(
+    "no page under web/src/pages cites docs/evidence/competitor-facts-<date>.md. Either every " +
+    "competitor claim was removed from the site, or this check stopped being able to find them. " +
+    "It examined nothing, so it proved nothing.",
+  );
+}
+
+// Every date the facts file itself asserts: its own header, plus the
+// "added <date>" markers on sections appended after it was first written.
+const factsClaims = new Set();
+if (sourcedPages.length) {
+  const factsFile = readFileSync(join(DOCS_SRC, `evidence/competitor-facts-${sourcedPages[0].factsDate}.md`), "utf8");
+  for (const m of factsFile.matchAll(/(\d{4}-\d{2}-\d{2})/g)) factsClaims.add(m[1]);
+}
+
+for (const { rel, page, factsDate } of sourcedPages) {
+  if (!pages.includes(page)) {
+    fail.push(`web/src/pages/${rel} cites the competitor facts file but builds no ${page}. The page-to-file mapping in this check is wrong, or the page is gone.`);
+    continue;
+  }
+  const shown = isoFromShownDate(norm(readFileSync(join(DIST, page), "utf8")));
+  if (!shown) {
+    fail.push(
+      `${servedAt(page)} describes another product using docs/evidence/competitor-facts-${factsDate}.md ` +
+      "and shows the reader no check date. A competitor claim whose age is hidden cannot be judged, " +
+      "and pricing is the fastest thing on this site to go stale. Render the date next to the claims.",
+    );
+  } else if (!factsClaims.has(shown)) {
+    fail.push(
+      `${servedAt(page)} tells the reader its competitor facts were checked ${shown}, but ` +
+      `competitor-facts-${factsDate}.md never claims that date. It claims ` +
+      `${[...factsClaims].sort(compareIso).join(", ")}. A date the source does not support is decoration.`,
+    );
+  }
+}
+
 if (fail.length) {
   console.error("build checks FAILED:\n" + fail.map((f) => "  - " + f).join("\n"));
   process.exit(1);

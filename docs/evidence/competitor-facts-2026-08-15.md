@@ -3,6 +3,118 @@
 Gathered by an independent research pass with a source URL required for every
 claim.
 
+## Re-check, 2026-09-16
+
+Every vendor in this file was re-read against its own live pages on 2026-09-16,
+32 days after the original sweep. **This is a partial re-check and the heading
+date above is deliberately unchanged**, because re-dating the whole file would
+claim more than was established.
+
+WHAT CHANGED (2 of 8 vendors):
+
+*   **Aitum** — the paid suite was renamed "Aitum App" -> **Nexus**, and its
+    price moved **$4.99/mo -> $5.49/mo** ($49.99/yr, 14-day trial). Both wrong
+    figures were live on the site. §4 is corrected.
+*   **Castr** — Starter's allocation differs by billing period in a way this
+    file flattened: 2 streams / 200 GB per month, or 3 streams / 2.4 TB upfront
+    on the annual plan at $16.67/mo effective. Not published on the site, so
+    nothing shipped wrong; recorded so the next writer does not reintroduce it.
+
+WHAT WAS CONFIRMED UNCHANGED (6 of 8): Restream's full tier table — the figures
+most heavily published on this site — datarhei Restreamer, obs-multi-rtmp,
+MistServer, Streamlabs and StreamElements.
+
+WHAT THIS RE-CHECK COULD NOT ESTABLISH, said out loud so a later reader does not
+mistake this section for a clean bill of health. 27 individual claims could not
+be verified against a vendor page, and they are NOT confirmed:
+
+*   **Streamlabs and StreamElements pricing could not be read at all.** Both
+    sites are JS-rendered shells that return no pricing content to a fetch. Every
+    claim about their price gates is as old as the original sweep.
+*   **Restream's Free-plan exclusions** ("personal profiles/platforms only",
+    "excludes Facebook Pages/Groups") are not stated on the pricing page today.
+    The prices verified; these two qualifiers did not.
+*   **Restreamer's audio claims** could not be checked — the docs are a GitBook
+    that did not yield content. An absence cannot be established from pages that
+    were never retrieved, and §1's "cannot mix or sum tracks" is an absence
+    claim.
+*   **MistServer's "no cap on simultaneous destinations"** was not confirmed on
+    either page read.
+
+A claim in that list is not false. It is unverified, which is the state this
+file exists to make visible rather than hide.
+
+### Browser pass, same day — what a rendered page could answer that a fetch could not
+
+Every gap above traced to one cause: the vendor ships a JS shell and a plain
+fetch retrieves nothing. Re-run through a real browser (Playwright), four of
+them resolve. **A fetch returning no pricing is not evidence of no pricing**, and
+the difference between the two runs is the whole argument for checking that way.
+
+*   **Streamlabs — RESOLVED.** `/pricing` redirects to `/ultra`. The gate is
+    real and now has numbers: **Starter, "Free, always" — 2 destinations.
+    Ultra, $27/mo or $189/year (marked "Save $135") — 3+ destinations.**
+*   **StreamElements — RESOLVED, and the free-tier claim holds.**
+    `/pricing` is a genuine 404 ("This page went off-stream"); there is no
+    pricing page because there are no prices. The homepage carries "FREE
+    FOREVER", "100% FREE customizable alerts & widgets", "100% FREE forever!"
+    and "No small print here, whatever you use will be yours for free forever."
+    No currency figure appears anywhere on it. SE.Live still exists, at
+    `/selive`. §7's "StreamElements has a free tier and Castr does not" is
+    confirmed on the StreamElements half.
+*   **MistServer — CONFIRMED, AND §6 WAS ALREADY RIGHT.** §6 says "Free, with no
+    stream limits or feature locks. Optional paid SLAs, custom development and
+    consulting", and that is exactly what the vendor sells. Nothing here needed
+    changing.
+
+    WHAT WAS ADDED: the numbers, which this file never had, from
+    mistserver.**com**/pricing — a different domain to the project's
+    mistserver.org, and the reason two passes missed it. Support tiers **Basic
+    €500/mo, Advanced €1,000/mo, Developer €5,000/mo**; add-ons **Irregular
+    hours €1,500/mo, Live SLA €2,000/mo, 24/7 SLA €5,000/mo**, and a custom SLA.
+    The software stays free: "Every feature. Every server. $0 in license fees",
+    Unlicense / Public Domain. Their FAQ: "If the software is completely free,
+    how do you make money? ... when stakes get high we offer paid support."
+
+    THREE MISTAKES ON THE WAY HERE, recorded because each is a different way to
+    be confidently wrong:
+    1.  The agent sweep was asked to check "Free, $0, **no paid tier**, no
+        paywall" against MistServer. That sentence is **SE.Live's** §D, not
+        MistServer's — mis-attributed when the prompt was written. The agent
+        dutifully investigated a claim this file never made about that vendor.
+    2.  `mistserver.org/pricing` redirects to `/download`, which shows no
+        prices. That was read as *there is no pricing*. **A redirect to a
+        download page is not evidence that no pricing exists**; the company
+        sells from a separate domain. A human supplied the .com URL.
+    3.  On that basis this file briefly claimed MistServer's paid services were
+        merely "planned". They are live and priced, and have been.
+
+    The durable lesson is the second one. Absence of a pricing page is not
+    absence of pricing, and a project/company domain split (`.org` vs `.com`) is
+    where that error hides.
+*   **Restream — EVERY PUBLISHED FIGURE CONFIRMED EXACTLY**, monthly and annual,
+    read off the live pricing table with the billing toggle exercised both ways:
+    Free $0 "/forever" 2 channels; Standard **$19/mo**, or **$16/mo "Billed as
+    $190 per year"**, 3 channels; Professional **$49/mo**, or **$39/mo "Billed
+    as $470 per year"**, 5 channels. These are the numbers this site publishes
+    most and all six are right.
+
+TWO RESTREAM QUALIFIERS REMAIN UNSUPPORTED, and the browser pass makes that
+finding stronger rather than weaker, because the page rendered fully:
+
+*   "personal profiles/platforms only" — the pricing page does not say it.
+*   "excludes Facebook Pages/Groups" — the word Facebook does not occur on the
+    pricing page at all.
+
+Neither is contradicted; neither is stated. Do not publish either as a fact
+sourced from this file. Note also that the page's own word is "Restream
+branding", not "watermark".
+
+NOT IN THIS FILE AND NOW ON RESTREAM'S PAGE: a **Business** tier at $239/mo
+(8 channels, $199/mo billed as $2,390 per year) and an **Enterprise** tier. The
+file's tier table is not wrong, it is incomplete, which matters if anything here
+ever claims to enumerate Restream's plans.
+
 ## What may be published about another product
 
 Every claim must trace to a **dated, citable source**, and the date must be shown
@@ -104,7 +216,7 @@ silence; restream.io duplicates one stereo track everywhere.
 *   **A. AUDIO:** **SELECTS** a track. Each configured destination can be assigned a specific OBS Audio Track (1–6) ([Source: Aitum Multistream GitHub](https://github.com/Aitum/obs-aitum-multistream)). It does **not** sum tracks within the plugin itself (summing is done upstream by OBS's Advanced Audio Properties).
 *   **B. VIDEO:** Supports **copy** (cloning the main OBS stream output) and **independent re-encoding** per destination with custom resolution, bitrate, and encoder selection ([Source: Aitum Multistream GitHub](https://github.com/Aitum/obs-aitum-multistream)).
 *   **C. INGEST:** Plugin inside OBS Studio (inherits OBS support for SRT, multitrack SRT, RTMP, and local captures) ([Source: Aitum Multistream GitHub](https://github.com/Aitum/obs-aitum-multistream)). Outputs over RTMP/RTMPS.
-*   **D. PRICE:** **100% Free ($0)** for the Multistream plugin ([Source: Aitum Website](https://aitum.tv/)). *(Note: The separate "Aitum App" desktop automation suite is paid at $4.99/mo, but is not required to run Multistream)* ([Source: Aitum Pricing](https://aitum.tv/)).
+*   **D. PRICE:** **100% Free ($0)** for the Multistream plugin ([Source: Aitum Website](https://aitum.tv/)). *(Note: the separate paid desktop automation suite is **Nexus**, at **$5.49/mo or $49.99/yr** after a 14-day trial, and is not required to run Multistream)* ([Source: Aitum Nexus](https://aitum.tv/products/nexus)). **Re-checked 2026-09-16** — was recorded here as "Aitum App ... $4.99/mo"; both the name and the price had changed and the old figures were live on the site. `$4.99` appears nowhere on aitum.tv today. Caveat kept deliberately: only public marketing pages were read, so $5.49 is the advertised price, not a confirmed charge at checkout, and the currency selector in the nav was not exercised.
 *   **E. LICENCE & HOSTING:** **GPL-2.0 License** ([Source: Aitum Multistream License](https://github.com/Aitum/obs-aitum-multistream/blob/main/LICENSE)); **OBS Studio Plugin** (Local).
 *   **F. CHANGES IN LAST 12 MONTHS:** Bundled into the **Aitum StreamSuite** packaging alongside Aitum Vertical, integrating unified multi-chat and metadata panels ([Source: Aitum StreamSuite](https://aitum.tv/)).
 
