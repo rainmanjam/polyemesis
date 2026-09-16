@@ -3,6 +3,47 @@
 Gathered by an independent research pass with a source URL required for every
 claim.
 
+## Re-check, 2026-09-16
+
+Every vendor in this file was re-read against its own live pages on 2026-09-16,
+32 days after the original sweep. **This is a partial re-check and the heading
+date above is deliberately unchanged**, because re-dating the whole file would
+claim more than was established.
+
+WHAT CHANGED (2 of 8 vendors):
+
+*   **Aitum** — the paid suite was renamed "Aitum App" -> **Nexus**, and its
+    price moved **$4.99/mo -> $5.49/mo** ($49.99/yr, 14-day trial). Both wrong
+    figures were live on the site. §4 is corrected.
+*   **Castr** — Starter's allocation differs by billing period in a way this
+    file flattened: 2 streams / 200 GB per month, or 3 streams / 2.4 TB upfront
+    on the annual plan at $16.67/mo effective. Not published on the site, so
+    nothing shipped wrong; recorded so the next writer does not reintroduce it.
+
+WHAT WAS CONFIRMED UNCHANGED (6 of 8): Restream's full tier table — the figures
+most heavily published on this site — datarhei Restreamer, obs-multi-rtmp,
+MistServer, Streamlabs and StreamElements.
+
+WHAT THIS RE-CHECK COULD NOT ESTABLISH, said out loud so a later reader does not
+mistake this section for a clean bill of health. 27 individual claims could not
+be verified against a vendor page, and they are NOT confirmed:
+
+*   **Streamlabs and StreamElements pricing could not be read at all.** Both
+    sites are JS-rendered shells that return no pricing content to a fetch. Every
+    claim about their price gates is as old as the original sweep.
+*   **Restream's Free-plan exclusions** ("personal profiles/platforms only",
+    "excludes Facebook Pages/Groups") are not stated on the pricing page today.
+    The prices verified; these two qualifiers did not.
+*   **Restreamer's audio claims** could not be checked — the docs are a GitBook
+    that did not yield content. An absence cannot be established from pages that
+    were never retrieved, and §1's "cannot mix or sum tracks" is an absence
+    claim.
+*   **MistServer's "no cap on simultaneous destinations"** was not confirmed on
+    either page read.
+
+A claim in that list is not false. It is unverified, which is the state this
+file exists to make visible rather than hide.
+
 ## What may be published about another product
 
 Every claim must trace to a **dated, citable source**, and the date must be shown
@@ -104,7 +145,7 @@ silence; restream.io duplicates one stereo track everywhere.
 *   **A. AUDIO:** **SELECTS** a track. Each configured destination can be assigned a specific OBS Audio Track (1–6) ([Source: Aitum Multistream GitHub](https://github.com/Aitum/obs-aitum-multistream)). It does **not** sum tracks within the plugin itself (summing is done upstream by OBS's Advanced Audio Properties).
 *   **B. VIDEO:** Supports **copy** (cloning the main OBS stream output) and **independent re-encoding** per destination with custom resolution, bitrate, and encoder selection ([Source: Aitum Multistream GitHub](https://github.com/Aitum/obs-aitum-multistream)).
 *   **C. INGEST:** Plugin inside OBS Studio (inherits OBS support for SRT, multitrack SRT, RTMP, and local captures) ([Source: Aitum Multistream GitHub](https://github.com/Aitum/obs-aitum-multistream)). Outputs over RTMP/RTMPS.
-*   **D. PRICE:** **100% Free ($0)** for the Multistream plugin ([Source: Aitum Website](https://aitum.tv/)). *(Note: The separate "Aitum App" desktop automation suite is paid at $4.99/mo, but is not required to run Multistream)* ([Source: Aitum Pricing](https://aitum.tv/)).
+*   **D. PRICE:** **100% Free ($0)** for the Multistream plugin ([Source: Aitum Website](https://aitum.tv/)). *(Note: the separate paid desktop automation suite is **Nexus**, at **$5.49/mo or $49.99/yr** after a 14-day trial, and is not required to run Multistream)* ([Source: Aitum Nexus](https://aitum.tv/products/nexus)). **Re-checked 2026-09-16** — was recorded here as "Aitum App ... $4.99/mo"; both the name and the price had changed and the old figures were live on the site. `$4.99` appears nowhere on aitum.tv today. Caveat kept deliberately: only public marketing pages were read, so $5.49 is the advertised price, not a confirmed charge at checkout, and the currency selector in the nav was not exercised.
 *   **E. LICENCE & HOSTING:** **GPL-2.0 License** ([Source: Aitum Multistream License](https://github.com/Aitum/obs-aitum-multistream/blob/main/LICENSE)); **OBS Studio Plugin** (Local).
 *   **F. CHANGES IN LAST 12 MONTHS:** Bundled into the **Aitum StreamSuite** packaging alongside Aitum Vertical, integrating unified multi-chat and metadata panels ([Source: Aitum StreamSuite](https://aitum.tv/)).
 

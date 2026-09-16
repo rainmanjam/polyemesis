@@ -71,6 +71,12 @@ const merits = [
     p: "No cost, no account, no server, no second machine. It ingests whatever OBS ingests and publishes over RTMP and RTMPS.",
   },
 ];
+
+/* THE CHECK DATE IS RENDERED, NOT MERELY DECLARED. web/scripts/check-build.mjs
+ * reads the BUILT page for this, because two sibling pages already had a
+ * CHECKED constant they never put on the screen -- which is a stamp only the
+ * author can see. */
+const CHECKED = "15 August 2026";
 ---
 
 <Base
@@ -250,6 +256,12 @@ const merits = [
       <a href="/vs/streamlabs" class="text-primary underline-offset-4 hover:underline">Streamlabs</a>
       ·
       <a href="/vs/restreamer" class="text-primary underline-offset-4 hover:underline">Restreamer and restream.io</a>
+    </p>
+    <p class="wrap mt-10 text-xs leading-relaxed text-muted">
+      Everything this page says about obs-multi-rtmp was checked on{' '}
+      <span class="font-mono text-fg">{CHECKED}</span>, and is recorded in
+      <code>docs/evidence/competitor-facts-2026-08-15.md</code>. Prices and plan
+      limits move; check before deciding on the strength of a number here.
     </p>
   </section>
 </Base>

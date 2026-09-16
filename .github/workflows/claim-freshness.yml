@@ -1,0 +1,74 @@
+# ARE THE COMPETITOR CLAIMS STILL YOUNG ENOUGH TO PUBLISH?
+#
+# web/scripts/check-build.mjs already makes the check date VISIBLE: every page
+# sourcing docs/evidence/competitor-facts-<date>.md must render a date the file
+# actually claims, and that check blocks a merge. It cannot ask the one question
+# left, because the answer changes with nothing but the calendar: is the date
+# still recent enough that publishing it is honest?
+#
+# THAT IS WHY THIS IS A SCHEDULE AND NOT A TEST. A time-based assertion inside
+# `go test` or the build would turn green into red on a morning nobody touched
+# the repository, and block every unrelated pull request until somebody did a
+# research task. changelog-freshness.yml made the same call for the same reason;
+# this follows it.
+#
+# THRESHOLD: 90 days. Not arbitrary -- it is the shortest window that does not
+# fire on normal maintenance, and the longest that survives the question "when
+# did you last check?" from somebody whose pricing page you are quoting. The
+# 2026-09-16 re-check found Aitum had both renamed its paid product and moved
+# its price inside 32 days, with the old figures live on the site, so 90 is
+# already generous rather than cautious.
+name: claim freshness
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_age_days:
+        description: "Days a competitor-facts check may age before this fails"
+        type: string
+        default: "90"
+  schedule:
+    # 09:30 UTC Mondays. Clear of changelog-freshness at 09:00 and cache-prune
+    # at 04:17, so a shared runner-queue delay on one never explains another.
+    - cron: "30 9 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  age:
+    name: competitor facts age
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: How old is the newest check?
+        env:
+          MAX_AGE_DAYS: ${{ inputs.max_age_days || '90' }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(docs/evidence/competitor-facts-*.md)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::no docs/evidence/competitor-facts-*.md exists. Either the site stopped describing other products, or this check lost the file it watches -- it examined nothing, so it proved nothing."
+            exit 1
+          fi
+
+          # The newest date the file ASSERTS, not its filename: it is amended in
+          # place, so a section added later is a more recent check than the name.
+          newest="$(grep -ohE '[0-9]{4}-[0-9]{2}-[0-9]{2}' "${files[@]}" | sort | tail -1)"
+          if [ -z "$newest" ]; then
+            echo "::error::${files[*]} contains no ISO-8601 date at all. A facts file that does not say when it was checked cannot be published from."
+            exit 1
+          fi
+
+          age=$(( ( $(date -u +%s) - $(date -u -d "$newest" +%s) ) / 86400 ))
+          echo "newest competitor check: $newest ($age days old); threshold ${MAX_AGE_DAYS}"
+
+          if [ "$age" -le "${MAX_AGE_DAYS}" ]; then
+            echo "Within threshold."
+            exit 0
+          fi
+
+          echo "::error title=Competitor claims are ${age} days old::The site publishes prices and plan limits for other products, sourced from ${files[*]} whose newest check is ${newest}. Re-read each vendor's own pages, correct what moved, and record the sweep in that file. On 2026-09-16 a 32-day-old file already had a renamed product and a changed price live on the site."
+          exit 1
