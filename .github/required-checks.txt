@@ -68,3 +68,37 @@ which container suites
 # new_coverage 70.6% against a threshold of 80, every other condition clean --
 # and nothing would have stopped that merge.
 SonarCloud analysis
+
+# workflow lint
+#
+# Added 2026-09-16. actionlint has run on every pull request since it was added
+# -- no `needs: changes`, no `if:`, nothing path-filtered -- and could not block
+# one. So the job whose entire purpose is to catch a broken workflow file was
+# advisory about workflow files, which is the one place an advisory check is
+# worth least: a workflow that does not parse takes its own checks down with it,
+# and the checks it takes down are the ones protection was relying on.
+#
+# Nothing had to change in ci.yml to allow this. The name was always producible;
+# it simply was not listed here.
+workflow lint
+
+# build web/ and publish to Cloudflare Pages
+#
+# Added 2026-09-16, and it needed a workflow change first, which is why it was
+# not here from the start. pages.yml carried a `paths:` filter on
+# `pull_request:`, and a workflow-level filter skips the WORKFLOW -- so on a
+# pull request touching neither web/ nor docs/ the check did not fail, it did
+# not exist. Requiring an absent name is the 2026-09-02 outage above.
+#
+# The filter now lives in a `changes` job inside pages.yml, with a shim job
+# carrying this same name for the not-applicable case, so the context is always
+# answered. Same partition as `container: <suite>` and container-not-applicable.
+#
+# What it gates: `npm run build` in web/ is `astro check && astro build &&
+# scripts/check-build.mjs`, and check-build.mjs is the only thing in the
+# repository that asserts about the shipped CSS, the resolvability of every
+# internal link, and that every docs/*.md is declared published or withheld.
+# All of it was red-but-mergeable until now -- including on #814, which added a
+# docs page and a manifest row and would have deployed a broken site on main if
+# the row had been forgotten.
+build web/ and publish to Cloudflare Pages
