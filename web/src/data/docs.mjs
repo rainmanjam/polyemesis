@@ -272,6 +272,7 @@ export const SECTION_IDS_WITH_DOCS = Object.keys(DOCS_BY_SECTION);
 /** @type {WithheldRow[]} */
 const WITHHELD_ROWS = [
   ["SITE-DEPLOY.md", "Deployment runbook for this website."],
+  ["BRANCH-ARCHIVE.md", "Where the work on 21 deleted branches went, and which mechanism preserves each -- refs/pull/N/head, reachability from main, or a deliberate archive/* tag. Repository maintenance history for contributors, not something a user of polyemesis needs."],
   ["GITNEXUS-IMPACT.md", "What the code-intelligence graph does not record -- impact reports 0 callers and LOW risk for most Go symbols, because a method body contributes no call edges. About the tooling this repository is developed with, not about running polyemesis, so it is for contributors rather than the site."],
   ["TEST-STRATEGY.md", "Internal test strategy; TESTING.md is the user-facing half."],
   ["MODULES.md", "Internal package inventory; ARCHITECTURE.md is the user-facing half."],
