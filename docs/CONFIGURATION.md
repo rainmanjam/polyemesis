@@ -31,7 +31,7 @@ The keys, in brief:
 
 | Key | Default | What it is |
 |---|---|---|
-| `addr` | `":8080"` | HTTP listen address for the UI and API |
+| `addr` | `"127.0.0.1:8080"` | HTTP listen address for the UI and API. **Loopback only** — see below |
 | `dataDir` | `"./data"` | Holds `polyemesis.db`, `secret.key`, `recordings/`, `hls/`, `tls/` |
 | `tls.mode` | `"off"` — but `config.example.yaml` ships `"auto"` | `auto`, `acme`, `selfsigned`, `manual`, `off` |
 | `tls.hostname` | `""` | The DNS name this server is reached by |
@@ -56,7 +56,10 @@ without editing anything.
 -log       debug | info | warn | error   (default "info")
 -version   print the version and exit
 
--reset-admin  set a new admin password and sign out every session, then exit
+-reset-admin        set a new admin password and sign out every session, then exit
+-revoke-api-tokens  with -reset-admin, also delete every API token
+-verify-backup DIR  check that a backup directory holds a database that opens,
+                    then exit
 ```
 
 `-reset-admin` is for an operator who has shell access and no way in through the
@@ -64,6 +67,58 @@ UI. It asks twice without echoing, and it is safe to run against a live server:
 it touches only the database and exits before anything binds a port. Piping the
 password twice scripts it. See the FAQ for why deleting the row from the users
 table is the wrong way to do this.
+
+**It does not end API tokens, and it says so every time.** Resetting the
+password bumps the token epoch, which ends *sessions*. API tokens are resolved
+by their hash alone, carry no epoch, and survive untouched. So the command
+reads the surviving tokens back and prints them rather than letting you assume:
+either
+
+```
+no API tokens exist, so nothing else can reach this install.
+```
+
+or a list — `2 API TOKEN(S) STILL WORK. A password change does not end them:`
+followed by each token's name, scope and creation date. If you are resetting
+because you believe the install is compromised, that list is the rest of the
+job.
+
+`-revoke-api-tokens` is the rest of the job. Pass it alongside `-reset-admin`
+and every API token is deleted, with the count printed
+(`4 API token(s) revoked.`):
+
+```
+polyemesis -reset-admin -revoke-api-tokens
+```
+
+It is opt-in rather than implied on purpose: routine password rotation is the
+common case, and destroying every integration's credential is the wrong default
+for that.
+
+`-verify-backup <dir>` answers the only question a backup has to answer — does
+it restore. Point it at a *copy* of the data directory. It opens
+`polyemesis.db` directly, runs `PRAGMA integrity_check`, and confirms the file
+holds polyemesis's own tables (`sources`, `destinations`, `settings`) rather
+than being an empty database something created by copying a path that did not
+exist. It opens the `-wal` sidecar along with the main file, because a copy
+taken from a live database keeps committed data there that the main file does
+not have. It never runs a migration: migrating the backup would move the copy
+forward to the schema you are keeping a way back *from*.
+
+```
+polyemesis -verify-backup /var/backups/polyemesis-2026-09-16
+backup at /var/backups/polyemesis-2026-09-16 opens, passes integrity_check and holds this server's schema
+```
+
+Anything else is a non-zero exit and a line naming what is wrong: `backup has
+no polyemesis.db`, `backup's polyemesis.db is zero bytes`, `backup's
+polyemesis.db failed its integrity check: …`, or `backup has no secret.key, so
+every destination would come back disabled and the restore would read as
+successful until go-live`. Every failure it catches leaves a file of plausible
+size — a database copied while the server was writing to it, a truncated file,
+an archive unpacked into the wrong shape, a disk that filled halfway through —
+which is why existence checks do not find them. Run this when you take the
+backup, not on the day you need it.
 
 `-log debug` is the one to reach for when something is wrong. It logs each
 child's full command line as it spawns, which is usually the fastest route to
@@ -163,14 +218,36 @@ once, and the machinery is already here.
    stream.example.com.   A   203.0.113.10
    ```
 
-2. **Name it in `config.yaml`.**
+2. **Name it in `config.yaml` — and listen where browsers and Let's Encrypt
+   will look.**
 
    ```yaml
+   addr: ":443"                    # not the default; see below
    tls:
      mode: auto                    # or acme, to be explicit
      hostname: stream.example.com
      acmeEmail: you@example.com
    ```
+
+   The `addr` line is the one people leave out, because nothing else in a
+   `tls:` block mentions a port. Both the compiled-in default and the value
+   `config.example.yaml` ships are `127.0.0.1:8080` — loopback, on a port no
+   browser tries and that Let's Encrypt will never connect back to. Set the
+   hostname and leave `addr` alone and issuance simply never runs: the
+   certificate warning in step 4 never clears, and the box is not reachable
+   from another machine at all.
+
+   The server tells you this at startup rather than leaving you to work it
+   out. The line reads *"TLS is on but the listener is 127.0.0.1:8080, not
+   :443. Browsers reach this server only if every visitor types the port, and
+   http:// redirects will carry it too. Set addr: \":443\" in config.yaml…"*
+   If you are debugging a certificate that never arrives, look for that line
+   before you look at DNS.
+
+   Binding 443 needs privilege. A systemd unit running as a non-root user also
+   needs `AmbientCapabilities=CAP_NET_BIND_SERVICE` in its unit file, which
+   `install.sh` grants for you. Keep a higher port only when something in
+   front of this box is terminating TLS on 443, or the port is deliberate.
 
 3. **Make port 443 reachable from the internet**, including *inbound* from
    Let's Encrypt. See the validation note below — this is the step people skip.
@@ -381,22 +458,50 @@ and can be ignored.
   polyemesis.db     configuration, destinations, credentials, the library index
   secret.key        decrypts stored OAuth tokens and client secrets
   recordings/       segments, stems/, clips/, exports/
-  hls/              playout segments
+  hls/              PREVIEW segments, one numbered subdirectory per source
+  playout/          the public HLS/DASH origin, one directory per variant
+  fonts/            fonts text overlays draw with (0755, deliberately not private)
+  models/whisper/   downloaded speech models
   tls/              generated CA and certificates (dir 0700, keys 0600)
 ```
+
+`hls/` and `playout/` are easy to confuse and are not the same thing. `hls/` is
+the **preview**, and it is per source — `hls/3/` for source 3 — because each
+engine clears its own directory when a preview starts and again when it stops,
+so two engines sharing one directory deleted each other's live playlist. (The
+bare `hls/` still backs the legacy unscoped `/hls` route for the default
+source, so an existing player keeps working.) `playout/` is the public origin
+that viewers are actually served from.
+
+The server creates `recordings/`, `hls/`, `playout/` and `fonts/` at every
+startup; `models/whisper/` appears the first time a speech model is
+downloaded.
 
 **Back this up, and treat it as secret material.** `secret.key` is what decrypts
 your stored platform tokens; without it they are unrecoverable, and with it
 anyone can use them.
+
+Not everything here costs the same to lose. `hls/` and `playout/` are
+regenerated from the live stream and do not need backing up. `fonts/` and
+`models/whisper/` are the ones a narrow backup quietly drops: neither is in the
+database, so skipping them loses any font an operator dropped in for text
+overlays, and turns a restore into a re-download of every speech model. Check
+what you have with `-verify-backup`, which reads `polyemesis.db` and
+`secret.key` and says nothing about the rest.
 
 Nothing outside this directory is written at runtime, which is also what makes
 the container's single volume mount sufficient.
 
 ## Environment variables
 
-**Two, both for Rumble chat**, and everything else is a file key or a flag. The
-restraint is deliberate: with three mechanisms it stops being obvious which one
-won, so a variable has to earn its place.
+**Nothing that shapes a deployment is one.** Listen address, data directory,
+TLS and binary paths are file keys or flags, and the restraint is deliberate:
+with three mechanisms it stops being obvious which one won, so a variable has
+to earn its place. The ones that have earned it are a credential with nowhere
+else to live, and a set of escape hatches an operator reaches for while
+standing at a terminal reading an error.
+
+### Rumble chat
 
 | Variable | What it does |
 |---|---|
@@ -405,6 +510,50 @@ won, so a variable has to earn its place.
 
 Both are read at startup by `internal/api/chat_wiring.go`. See
 [PLATFORMS.md](PLATFORMS.md) for the Rumble setup.
+
+### FFmpeg
+
+| Variable | What it does |
+|---|---|
+| `POLYEMESIS_FFMPEG_ASSUME_MAJOR` | States the major version of an FFmpeg build whose own `-version` output does not carry a readable one — a master nightly reporting `N-113518-gd6a4b1e` being the honest case. Set it to the leading number: `POLYEMESIS_FFMPEG_ASSUME_MAJOR=7` |
+| `POLYEMESIS_FFMPEG_LOGLEVEL` | The `-loglevel` every FFmpeg child gets. Default `warning`; takes any value FFmpeg's own `-loglevel` takes |
+
+`POLYEMESIS_FFMPEG_ASSUME_MAJOR` is the answer to a server that refuses to
+start because it cannot read a version number. polyemesis requires FFmpeg 6.0
+or newer — that floor is where stable multi-track MPEG-TS mapping, the modern
+channel-layout API and parseable `-progress` output all become reliable — and
+a nightly's version string satisfies nothing it can check.
+
+It is a claim, not an override. A value below 6 is refused rather than
+honoured (`POLYEMESIS_FFMPEG_ASSUME_MAJOR says this build is FFmpeg 5, but
+polyemesis requires 6.0 or newer`), so it cannot be used to run a build the
+floor exists to keep out, and a value that is not a number is an error rather
+than a silent fall back to "unset" — a typo that read as unset would put you
+back at the same refusal with no idea why your answer was ignored. It is an
+environment variable and not a config key for the same reason: it is consulted
+once, before the database opens, by somebody at a terminal, and a config key
+would be a permanent, forgettable claim about a binary that gets upgraded
+underneath it.
+
+`POLYEMESIS_FFMPEG_LOGLEVEL=debug` is how you get the demuxer's own account of
+an ingest that will not resolve — which streams it saw, how many frames per
+PID, and why it gave up resolving codec parameters. It raises the level for
+every child, so it is noisy; set it, reproduce, unset it.
+
+```
+POLYEMESIS_FFMPEG_LOGLEVEL=debug polyemesis -log debug
+```
+
+### Capture and diagnostics
+
+These exist to investigate a specific failure and write unbounded files. Leave
+them unset in production.
+
+| Variable | What it does |
+|---|---|
+| `POLYEMESIS_INGEST_CAPTURE` | A path. Adds a second, identical `-map 0 -c copy -f mpegts` output to the ingest child. The relay hub copies datagrams verbatim, so this file *is* what every destination receives |
+| `POLYEMESIS_RELAY_CAPTURE` | A path prefix. Each relay hub writes its fan-out to `<prefix>.<port>.ts` — one file per hub port, so a multi-hub install does not interleave two streams into one capture. It logs `relay capture armed` with the path it opened |
+| `POLYEMESIS_RTMP_DROP_LOG` | An integer N: log every Nth dropped RTMP packet. Unset, or set to anything that is not a number, means 0 — which logs nothing |
 
 ## Configuring a container
 

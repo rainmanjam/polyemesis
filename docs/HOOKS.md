@@ -70,24 +70,80 @@ up either.
 `ingest.disconnected` can only fire **after** a publish, so a server sitting idle
 since boot never announces a disconnection that never happened.
 
+**An empty `triggers` list means every trigger, not none.** It is the useful
+default for the first hook somebody creates, and it is a trap on the second: an
+operator who clears the list in the editor meaning "stop sending me things"
+subscribes to the firehose instead. It also means the subscription grows
+underneath you — `broadcast.fault` and `destination.rolledover` were both
+appended to the table above after the fact, and every hook that had never
+narrowed its `triggers` started receiving them on upgrade. If you want two
+triggers, name two.
+
+A trigger you mistype is refused at save time, with a `400` that names it:
+
+```
+hook "deploy" subscribes to "ingest.publish", which is not a trigger this build
+fires; check the spelling against the trigger list, because a hook that keeps no
+valid subscription at all means every trigger
+```
+
+A trigger that is already *stored* and unknown to the running build — a row
+written by a newer release, or one whose trigger a later version removed — is
+not refused on load. The hook keeps delivering the triggers this build does
+fire, and the unknown name simply never matches anything. Refusing at load would
+stop every hook on the install to punish one stale name.
+
 ## The envelope
 
 ```json
 {
   "specVersion": "1",
-  "id": "d_9f2c1a7b4e",
+  "id": "9f2c1a7b4e8d05c31f6a2b9047e1c8d3",
   "sequence": 42,
   "trigger": "destination.down",
   "at": "2026-07-31T18:04:11Z",
   "source": { "id": 1, "name": "Main" },
   "destination": { "id": 3, "name": "Twitch", "platform": "twitch" },
-  "reason": "disabled",
-  "error": ""
+  "reason": "disabled"
 }
 ```
 
 `destination` is absent on the two ingest triggers. `reason` is free text meant
 for a human reading a log; **branch on `trigger`, not on `reason`.**
+
+`id` is **32 lowercase hex characters** — 16 bytes of `crypto/rand`, no prefix
+and no separators — and it is what `X-Polyemesis-Delivery` carries. Size an
+idempotency-key column for 32 characters, and do not validate it against a
+narrower shape.
+
+**Fields with nothing to say are absent, not empty.** `reason`, `error`,
+`missed` and `test` are all omitted when they are empty or zero, so a healthy
+delivery has no `error` key at all. Test for presence — in JavaScript
+`body.error` is `undefined`, not `""` — rather than comparing against an empty
+string.
+
+`test` is the one field that is not about the pipeline:
+
+```json
+{
+  "specVersion": "1",
+  "id": "4c1f0b77a9e34d5280af61b3c7d9e025",
+  "trigger": "ingest.published",
+  "sequence": 0,
+  "at": "2026-07-31T18:04:11Z",
+  "test": true,
+  "source": { "id": 0, "name": "test" },
+  "reason": "test delivery from polyemesis"
+}
+```
+
+It is `true` only on a delivery raised by the test button, and absent on
+everything raised by something that actually happened. A test carries a real
+trigger and a real signature, so **branching on `trigger` alone cannot tell a
+test from a go-live**. A receiver that starts a recording or posts "we're live"
+must check `test` first and refuse, or somebody clicking Test in the console
+fires the show. The two supporting tells are `sequence: 0`, which no real
+delivery ever has, and `source` being `{"id": 0, "name": "test"}`.
 
 Headers:
 
@@ -141,6 +197,48 @@ The signing key is shown **once**, when the hook is created. polyemesis stores
 it sealed and cannot show it again — if you lose it, edit the hook and set a new
 one.
 
+### When the *machine* loses the key
+
+The secret is sealed with this install's key file, so a restore from backup onto
+a different box, or a re-key, can leave polyemesis holding hook rows it cannot
+open. **Such a hook stops delivering entirely. It does not fall back to sending
+unsigned** — at the far end an unsigned delivery is indistinguishable from a
+forgery, and that was the old behaviour, which was worse.
+
+The condition surfaces as a `secretUnreadable` string on the hook's JSON, from
+`GET /hooks` and `GET /hooks/{id}` (other fields omitted here):
+
+```json
+{
+  "id": 4,
+  "name": "deploy",
+  "enabled": true,
+  "secretUnreadable": "the signing secret could not be read on this machine — re-enter it to enable this hook"
+}
+```
+
+The field is absent on every hook whose secret opened normally, which is all of
+them on a healthy install. It is not a stored column: it is recomputed on every
+read from whether the key file works *right now*, so restoring the right key
+file clears it by itself with no repair step and nothing to un-set. The row is
+deliberately left alone — `enabled` still reads `true` here, in the list and in
+the database — so the fix is restoring one file rather than re-enabling every
+hook by hand.
+
+Know the shape of the symptom, because the usual place to look is no help: no
+worker is started for such a hook, so **Recent deliveries stays empty**, which
+this page otherwise tells you to read as a hook firing into a black hole. The
+other signal is one Error-level log line per affected hook, repeated on every
+five-second reload of the hook list:
+
+```
+a hook is not being delivered because its signing secret could not be read on
+this machine; restore the key file or re-enter the secret. Nothing is being
+sent unsigned.
+```
+
+Either restore the key file, or edit the hook and set a new secret.
+
 ## Ordering, retries and gaps
 
 - **Ordering is per endpoint.** Deliveries to one hook arrive in the order the
@@ -148,10 +246,37 @@ one.
 - **Three attempts by default**, 1–5. A **4xx is never retried** — an endpoint
   saying the request is wrong will say it again, and retrying only delays
   everything queued behind it. A 5xx, a 429 and a 408 are retried.
-- **`sequence` counts from 1 per endpoint.** A gap means deliveries were
-  dropped.
-- **`missed`** appears on the next successful envelope after a drop, saying how
-  many were lost. Go and reconcile; nothing reconciles for you.
+- **Ten seconds per attempt by default**, 1–30, set per hook as
+  `timeoutSeconds`. Both it and `maxAttempts` are **clamped, not refused**: a
+  hook saved with `"timeoutSeconds": 120` is stored as `30` and answers
+  `201 Created` from `POST /hooks` (or `200 OK` from `PUT /hooks/{id}`) with no
+  warning anywhere, and `0` or a missing value becomes the default.
+  Read the value back from `GET /hooks/{id}` rather than trusting what you sent.
+  The live bounds are served as `bounds` on `GET /hooks/meta`. Clamping rather
+  than refusing is on purpose — a value that drifted out of range should cost a
+  bounded timeout, not a hook that has silently stopped firing.
+- **`sequence` counts from 1 per endpoint**, and it is assigned when the
+  delivery *leaves* that endpoint's queue, not when the transition happened. So
+  **a gap means a delivery was attempted and never accepted**: it exhausted
+  `maxAttempts`, or your endpoint answered 4xx and it was abandoned on the first
+  try. A gap does not mean an event was dropped — an event dropped before this
+  point never consumes a number, so a drop leaves the sequence unbroken.
+- **`missed`** is stamped on the next envelope *built* for that endpoint after a
+  drop *at that endpoint's own queue*, saying how many were lost there. The
+  counter is zeroed at that moment, before the first attempt is made: if that
+  delivery then exhausts `maxAttempts` or is abandoned on a 4xx, the count is
+  gone and appears on no later envelope, and all the receiver ever sees is a
+  sequence gap. Go and reconcile; nothing reconciles for you.
+- **`missed` does not see every drop.** There are two queues. The dispatcher has
+  one 256-deep intake shared by every hook, and each endpoint has its own
+  64-deep queue behind it. A drop at the per-endpoint queue bumps `missed`, and
+  the receiver is told only if the next envelope built for it is accepted. A
+  drop at the intake — the fan-out goroutine falling behind a burst —
+  **bumps nothing that any receiver can see**: no `missed`, no
+  sequence gap, and every endpoint carries on believing it is current. The only
+  trace is `dropped` in the `stats` block of `GET /hooks/meta`, which counts
+  both kinds together. A receiver that must not go quietly stale should
+  reconcile on a timer as well as on `missed`.
 - **`sequence` resetting to 1 means polyemesis restarted.** See the limitations.
 
 ## What is deliberately not in a payload
@@ -172,11 +297,36 @@ cannot smuggle a credential out by being named after one.
 
 - **The test button** sends a real signed delivery and shows you the exact body
   and signature that were sent — so you can check your verification code against
-  real bytes rather than against this page.
+  real bytes rather than against this page. The body carries `"test": true`; see
+  [the envelope](#the-envelope) for why your receiver has to look at it.
+- **A test never appears in Recent deliveries, and that is not a fault.** It is
+  posted straight to the endpoint, skipping the queue and the subscription
+  filter, so nothing records it. An empty Recent deliveries after a successful
+  test is the expected result, not the black hole described next.
 - **Recent deliveries** lists the last 50 per hook: trigger, sequence, status,
   duration and any error. A webhook that fires into a black hole is
-  indistinguishable from one that does not fire at all, and this is the
-  difference.
+  indistinguishable from one that does not fire at all, and for real transitions
+  this is the difference.
+
+The test button sends `ingest.published`. To exercise a different branch of your
+receiver, name the trigger on the route:
+
+```
+POST /api/v1/hooks/4/test?trigger=destination.down
+```
+
+`?trigger=` accepts any name from the trigger table above, and the test ignores
+the hook's subscription — a hook subscribed only to `ingest.published` still
+delivers a `destination.down` test. `destination.up` and `destination.down` are
+the two that attach a synthetic destination block,
+`{"id": 0, "name": "Example destination", "platform": "custom"}`, which is the
+only way to get a destination-shaped body without a destination changing state.
+
+**An unrecognised trigger is silently replaced with `ingest.published`.** There
+is no error and no warning: `?trigger=destination.dwon` answers `200` with a
+perfectly valid `ingest.published` delivery, and an operator reading that result
+concludes their `destination.down` routing works. Check the `trigger` field in
+the body the console shows you against the one you asked for.
 
 ## Private and LAN endpoints: `allowPrivateTarget`
 
@@ -233,10 +383,16 @@ must be idempotent**. `sequence` resetting to 1 is the signal.
 when nothing is subscribed, so the watcher's first observation is whatever is
 true at that moment.
 
-**Whether that happens depends on your alert rules.** If alert rules already
-exist the sweep has been running, the hook watcher is warm, and adding a hook
-fires nothing. If they do not, it is cold and adding a hook fires the current
-state. That inconsistency is real and is not fixed here.
+**Whether that happens depends on what else was already watching.** Three things
+keep the sweep warm, and any one of them is enough: an alert rule exists, a hook
+already exists, or a destination has a platform broadcast polyemesis starts and
+ends for you — today that means YouTube, whose lifecycle coordinator consumes
+the same edges the hook watcher does. If any of the three was already true the
+sweep has been running, the watcher is warm, and adding a hook fires nothing. If
+none of them was, it is cold and adding a hook fires the current state. So an
+install with no alert rules but one lifecycle-managed YouTube destination is
+warm, and reasoning from alert rules alone will predict the wrong answer there.
+That inconsistency is real and is not fixed here.
 
 **A one-sample handshake blip produces a publish/disconnect pair.**
 `ingest.published` has zero dwell by design. An SRT connection that delivers a

@@ -146,12 +146,85 @@ once.** Granting a scope never upgrades a token that has already been issued —
 and Settings → Platform credentials flags exactly this, so it does not have to be
 remembered from a page of documentation.
 
-**X (Twitter) — paste your key, there is no API.** X's developer platform covers
-posts, users, media and the post firehose. "Streaming" in its documentation
-means streaming posts, not ingesting video, and there is no documented
-third-party live-video ingest endpoint; access to what *is* documented is
-credit-based and paid. Create the source in X's own producer tooling and copy
-the URL and key across.
+**Trovo — the key is fetched, the server URL is not, and that split is the
+whole story.** Sign in and polyemesis reads your stream key from the channel
+resource over `channel_details_self`, pushes the title and category at go-live
+over `channel_update_self`, and reports the live viewer count off that same
+channel read. What it cannot fetch is the **ingest hostname**: Trovo issues it
+per region and publishes it nowhere in its API, so that one field is copied
+once from **Trovo creator dashboard → Stream** into the destination. It is one
+copy, not a per-broadcast chore — refreshing the key afterwards leaves the URL
+alone. A Trovo destination without it cannot be saved at all, so it never
+reaches a connection attempt: the preset is an RTMP destination, and validation
+refuses both create and update with `an RTMP URL is required`. Fetching the key
+first fails the same way rather than storing half a destination — the refresh
+returns 400 with *"...supplies the stream key but does not publish an ingest
+URL, and this destination has none yet. Copy the server URL from the platform's
+own dashboard into this destination first, then fetch the key..."*. Supply the
+URL first, then fetch the key.
+
+Two more things Trovo does not have. Its channel update takes **no description
+and no tags**, so the composer reports those as skipped rather than dropping
+them silently. And there is **no start or end call anywhere in its reference** —
+which was established by reading the whole thing, not by failing to find a page
+— so going live is the encoder starting, exactly as on Twitch and Kick. That is
+why the Start / end cell says *Not possible* rather than *Unverified*.
+
+The three chat and moderation cells say *Unverified* for the opposite reason:
+Trovo publishes all three and polyemesis has not written them yet. Chat arrives
+over a websocket rather than by poll or webhook, sending is
+`POST /openplatform/chat/send` over `chat_send_self` plus `send_to_my_channel`,
+and moderation is `POST /openplatform/channels/command` over `manage_messages`,
+which runs Trovo's own chat commands. Those three scopes are deliberately not
+requested until the features exist, because permissions on a consent screen
+that nothing uses is how a streamer learns to decline.
+
+**X (Twitter) — paste your key, and the "there is no API" this page used to
+carry was wrong.** It said X's developer platform covers posts, users, media
+and the post firehose, not live-video ingest, and that "streaming" in X's
+documentation means streaming posts. That was read off X's navigation index,
+which has no Broadcasts section. The spec X actually serves does:
+`api.x.com/2/openapi.json` (read 2026-08-16, "X API v2" 2.167) declares 149
+paths and 178 operations, of which nine paths and thirteen operations sit under
+the tag **Broadcasts** — glossed "Endpoints related to live broadcasts and
+their chat" — under two scopes nothing else in the whole spec uses:
+`broadcast.read` and `broadcast.write`.
+
+**The row still reads *Unverified* everywhere but the stream key, and those
+seven cells are the honest answer rather than a leftover.** polyemesis has a
+provider written against that family —
+`internal/oauth/x.go`, the OAuth flow and the two broadcast reads — and it is
+deliberately **not registered**: there is no X entry in the provider set, no
+setup guide and no *Connect account* button. The house rule is the one Rumble's
+viewer-stats cell already states: a capability nothing implements is not a
+capability, so a *Works* here would send you looking for a sign-in that does
+not exist. Nor is *Not possible* available, since X's own spec contradicts it.
+None of the four words means "documented and unbuilt"; *Unverified* is the
+fail-open one.
+
+There is a second reason not to promise anything. **X publishes no access tier
+for Broadcasts**: no pricing or tier page names the family, so whether your
+account can call those endpoints at all is a question only a live request
+answers.
+
+So today: create the source in X's own producer tooling and copy the URL and key
+across. **The key stays pasted even if the rest lands**, and the reason is
+narrow — X *consumes* a key (`source_id` is required when a broadcast is
+created, and is echoed back on every broadcast object) but publishes nothing
+that mints or enumerates one. polyemesis could confirm a binding it was given;
+it could not obtain one.
+
+What the family does publish, for anyone weighing whether to wait: title,
+description, language and the chat toggle on a **scheduled** broadcast
+(`POST`/`PUT /2/broadcasts/scheduled`, with `POST /2/broadcasts/scheduled/{id}/live`
+to publish it) and no metadata update on an already-live one, so a title change
+mid-show is not in it; chat history over `GET /2/broadcasts/{id}/chat` and
+sending over `POST` to the same path, capped at **140 characters**, which is X's
+bound and not ours; muting a viewer, lifting the mute, and deleting a message
+over `/2/broadcasts/{id}/chat/mutes` and `chat/{message_id}`; and
+`total_watching` and `total_watched` on the broadcast object, which X documents
+nothing about — all 26 fields in that schema are undescribed strings, so the
+numbers are readable but their unit and freshness are not stated.
 
 **Instagram — polyemesis cannot AUTOMATE it, but it will push to it.** The
 distinction matters and this page used to collapse it. Instagram's platform
@@ -255,6 +328,33 @@ pasted URL and key work exactly as well.
 `Settings → Platform credentials` has step-by-step instructions and renders the
 exact redirect URI to whitelist. In summary:
 
+**Four of the six platforms can prove the pair you pasted before you connect
+anything.** Twitch, Kick, Facebook and Vimeo each publish a client-credentials
+grant — an app token, needing no user consent — so polyemesis asks for one with
+your client ID and secret and throws the token away; obtaining it at all is the
+proof. A tick on the credentials page therefore means **both halves are right**,
+and a typo is caught where you typed it rather than at the end of a consent
+flow.
+
+**YouTube and Trovo cannot be checked**, for reasons belonging to them rather
+than to this code. Google offers no way to validate a client ID and secret
+without a user consent round-trip. Trovo publishes no client-credentials grant
+at all — its app-level authentication is a per-request HMAC signature rather
+than a token exchange — so there is no endpoint that answers *is this pair
+valid*. For those two the credentials are checked for **shape only**, and the
+real verdict arrives the first time you connect an account: a mistyped YouTube
+secret surfaces as a refusal from Google at the end of the consent round-trip,
+not on the page where it was entered.
+
+A check that cannot reach the platform is reported as **unreachable** rather
+than as a rejection, so a network problem at your end never reads as a bad
+secret. A 5xx or a 429 from the platform counts as unreachable for the same
+reason: its server breaking, or rate-limiting us, says nothing about whether
+the pair is correct. Every other status — 400, 401, 403, 404 — is the
+platform's considered answer about the credentials and stands as one. The check
+is bounded at **five seconds**, so a platform having a bad day does not become
+a settings page that hangs.
+
 ### YouTube (Google)
 
 1. <https://console.cloud.google.com/apis/credentials> — create or pick a project.
@@ -310,6 +410,40 @@ every install on one 10,000-unit pool.
 If a YouTube API Services audit grants you more, tell polyemesis in
 `Settings → Chat → YouTube daily API quota`. It paces on that number and has no
 way to discover it by itself.
+
+**There are two fields there, not one, and the 1,960 above is computed from
+both.** Directly beneath the allowance sits *Held back for sending (units)*,
+which defaults to **200**. Reading chat and posting into it are billed out of
+the same daily allowance, so a poller left to spend the whole of it leaves a
+moderator unable to type — and the message that could not be sent is the
+timeout, at the moment it was needed. The pacer therefore subtracts the reserve
+before dividing what is left by the 5 units a poll costs: (10,000 − 200) ÷ 5 =
+1,960. At 50 units a message, 200 units is four messages — enough to say "we
+are moving to Twitch" when it matters. Sending, deleting and banning spend
+*into* the reserve rather than being refused by it; that is the whole point of
+it.
+
+Raising the allowance does not scale the reserve. A project granted a million
+units still holds back 200 unless you change the second field, which is usually
+fine and is worth knowing rather than discovering.
+
+Two ways the reserve is refused on save, both by the same validator that
+refuses a nonsense allowance:
+
+* **More than half the allowance** — "youtube quota reserve 8000 is more than
+  half the 10000-unit allowance, which would leave too little to read chat
+  with". A reserve that large would pause reading almost immediately while the
+  quota panel still showed a full tank, which reads as a bug rather than as a
+  setting.
+* **Negative** — "youtube quota reserve -1 cannot be negative".
+
+Zero is accepted, and it means *unset* rather than "spend everything on
+reading": the pacer reads a zero as the 200-unit default, because a settings row
+written before this field existed reads as zero and honouring that literally
+would take away your ability to speak on stream. The allowance itself is
+different — it is refused below 1 or above 10,000,000, rather than quietly
+defaulted, because an allowance that is too generous kills chat mid-broadcast
+and leaves it dead until midnight Pacific.
 
 **How many YouTube destinations can be live at once depends on their stream
 keys.** Since February 2026 YouTube applies two concurrency limits together:
@@ -523,6 +657,47 @@ than grown as features land.
 Kick delivers chat over a webhook rather than a socket, so the chat pane needs a
 public HTTPS URL Kick can reach. Without one it says so rather than sitting
 silently.
+
+### Trovo
+
+**Read this first: Trovo does not hand out the client secret from its developer
+portal.** Its own documentation says, verbatim, *"If you don't have the Client
+Secret, please contact: developer@trovo.live"* — and the authorization-code flow
+cannot complete without one, because Trovo documents no PKCE and there is no
+alternative to fall back on. Ask for it before the day you need it, the way you
+would budget for Meta's review. Nothing else here is gated: registration is
+open, and every capability in the matrix above is in Trovo's published
+reference.
+
+1. <https://developer.trovo.live/> → register an application.
+2. Redirect URI: `https://YOUR_HOST/api/v1/oauth/trovo/callback` — exactly.
+   Trovo matches it character for character, so a trailing slash that differs is
+   a refused sign-in.
+3. Copy the Client ID into polyemesis. If the portal gave you no Client Secret,
+   email developer@trovo.live for one and wait.
+4. Paste both, then **Connect account**.
+5. **One field stays yours.** Copy the server URL from your Trovo creator
+   dashboard → Stream into the destination, once. Trovo's ingest hostname is
+   regional and its API never returns it, so there is nothing to prefill and
+   nothing to look up.
+
+Scopes requested: `channel_details_self` (channel identity, live state and the
+stream key) and `channel_update_self` (the title and category push). Chat and
+moderation scopes are not requested, because nothing here uses them yet — see
+the Trovo note further up this page.
+
+Which half comes from where, since this is the one platform where they differ:
+
+| Field | Where it comes from |
+|---|---|
+| Server URL | Trovo creator dashboard → Stream, copied by hand. It is an `rtmp://` address and it is **regional**, so no example is given here: this page has no verified value for your region and a wrong hostname is worse than none. |
+| Stream key | fetched for you over `channel_details_self` once the account is connected |
+
+Refreshing the key later leaves the server URL alone, so this is a one-time
+copy rather than a per-broadcast chore.
+
+Trovo has no start or end call, so going live is the encoder starting — the
+same as Twitch and Kick.
 
 ## Multiple accounts
 

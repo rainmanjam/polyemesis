@@ -153,6 +153,34 @@ of either scope. Requesting a playlist starts the on-demand preview encoder and
 polling keeps it running, and hls.js in the console authenticates with the
 session cookie anyway.
 
+`GET /previews` sits in the same session-only group, and is mounted at the root
+rather than under `/api/v1` because the preview it describes is. It answers
+with one object per running source — the whole grid in one read:
+
+```json
+[{"id": 1, "name": "Main", "width": 1920, "height": 1080,
+  "outputLive": true, "ingestLive": true, "onAir": "primary"},
+ {"id": 2, "name": "Studio B", "width": 1080, "height": 1920,
+  "outputLive": true, "ingestLive": false, "onAir": "slate"}]
+```
+
+`outputLive` is whether anything is reaching that programme's destinations —
+the encoder, a backup, the slate or a playlist. `ingestLive` is whether the
+operator's own encoder is arriving, and it only labels the tile: the second row
+above is a programme that is broadcasting its slate because the input went
+away, and reporting that as a dead tile would hide the thing actually going
+out. `onAir` names the tier the picture comes from — `primary`, `backup`,
+`slate`, `playlist`, or absent when the selector is not running. `width` and
+`height` are the last measured ingest geometry and are absent until a probe
+lands.
+
+It exists because the WebSocket's status is **not** source-scoped: every engine
+publishes onto the same feed, so a grid built on it redraws each tile from
+whichever engine spoke last. This is the only route that answers "what is on
+air on each programme" without one `GET /status?source=<id>` per source, and it
+is much smaller than N of those — a tile needs a name, whether anything is
+arriving, and what is on air.
+
 **Tokens created before scopes existed are `admin`.** They could already do
 everything, so the upgrade grandfathers them rather than silently narrowing a
 credential some running script is holding — the failure would otherwise land as
@@ -194,11 +222,51 @@ tokens are for.
   | `code` | Status | Means |
   |---|---|---|
   | `no_source` | `503` | This install has no source yet, so there is no programme to act on. An **empty state**, not a fault: nothing is broken and only the operator can create one. |
-  | `source_required` | `400` | There are several programmes and the body did not say which. The request was well formed; the choice was simply not made. |
+  | `source_required` | `400` | There are several programmes and the request did not say which. The request was well formed; the choice was simply not made. Add `?source=<id>` — see the next bullet. |
   | `account_in_use` | `409` | Disconnecting this platform account would cut destinations loose. See below. |
 
   Reads answer normally on an install with no source — an empty status, an empty
   process list and no levels, which is the truth.
+
+- **`?source=<id>` is how a request names the programme it acts on.** Fifteen
+  routes are scoped to one source, and on an install with more than one they
+  refuse until the choice is made:
+
+  `GET /status`, `GET /source`, `PUT /source/annotations`, `GET /levels`,
+  `POST /failover/source`, `POST /routing/compile`,
+  `POST /routing/presets/{preset}`, `GET /processes`,
+  `GET /processes/{name}/logs`, `GET /clips`, `POST /clips`,
+  `PUT /clips/buffer`, `GET /loudness`, `PUT /loudness` and `GET /ws`.
+
+  **It is a query parameter on every one of them, whatever the method.** Eight
+  are GETs with no body to put it in, and one of the POSTs takes a
+  full-replacement routing document with no room for a field that is not a
+  routing option — so one spelling serves every method rather than two. It is *not* the `source` field
+  in the body of `POST /failover/source`: that one names a failover tier
+  (`primary`, `backup`, `slate`, `auto`), the query parameter names the
+  programme the switch happens on, and a request can carry both.
+
+  ```sh
+  curl -H "Authorization: Bearer $TOKEN" \
+    "https://host:8080/api/v1/levels?source=2"
+  ```
+
+  Omitting it is correct on an install with one source, or none — the single
+  programme is unambiguous, which is why every client written before this
+  parameter existed keeps working. With two or more it is `400`:
+
+  ```json
+  {"error": "this install runs several programmes, so this request must say which one it is for: add \"?source=<id>\". Available: 1 (Main), 2 (Studio B).",
+   "code": "source_required"}
+  ```
+
+  The refusal lists the ids and names, so a client that has never called
+  `GET /sources` can still tell the operator what to pick. A value that is not
+  a positive integer is the same `400` `source_required`, reading `"source"
+  must be a source id.` followed by the same list. An id that parses but names
+  a programme that is not running is `409` — `source 4 is not running, so there
+  is nothing here to answer for it` — rather than a quiet fall back to the
+  first programme, which is the whole reason the parameter exists.
 
 - **`DELETE /platforms/accounts/{id}` refuses an unconfirmed disconnect while
   destinations are still on the account**, and answers:
@@ -283,9 +351,9 @@ tokens are for.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/setup` | Whether first-run setup is still needed |
-| `POST` | `/setup` | Create the admin. Refused once one exists |
+| `POST` | `/setup` | Create the admin. Refused once one exists. Throttled per client address |
 | `POST` | `/auth/login` | Throttled per client address |
-| `GET` | `/health` | Liveness |
+| `GET` | `/health` | Three named checks. Not every failure is a `503` — see below |
 | `GET` | `/tls/ca` | The generated CA, for trusting a self-signed instance |
 | `GET` | `/playout/public` | Public player, when playout is published |
 | `GET` | `/playout/poster.jpg` | Poster frame for the public player |
@@ -303,6 +371,59 @@ an HTTP basic password. A `read` token is treated exactly as an anonymous
 caller — the same status, the same body, the same headers. That is `read`
 meaning metadata and not content: live media is content, and `Public: false` is
 a decision about the resource that a role-level scope must not override.
+
+#### What `/health` actually reports
+
+A healthy server answers `200` with exactly `{"status":"ok"}` and nothing
+else. That body is byte-identical to what this route has always returned,
+because existing monitors compare against that string and a richer happy path
+would break them to say something none of them read.
+
+Anything else answers with a `status` of `degraded` or `unhealthy` and a
+`checks` array naming what failed:
+
+```json
+{"status": "degraded", "checks": [
+  {"name": "database", "ok": true},
+  {"name": "engine", "ok": true, "detail": "1 of 1 source(s) running"},
+  {"name": "recordingDisk", "ok": false,
+   "detail": "recording is halted by the free-space floor"}
+]}
+```
+
+The three checks are always all three, in that order. `database` is a real
+query, not a nil check — the failures it catches are a file that has gone away
+and a volume unmounted under a running process. `engine` fails when sources are
+configured and not one engine is running, which is "nothing is being
+published"; no sources at all is a fresh install and passes. `recordingDisk`
+fails when the free-space floor has halted recording.
+
+**Only `database` and `engine` are fatal, and only those two make the status
+`503`.** A `recordingDisk` failure answers `200` with `"status": "degraded"`,
+deliberately: a box that has stopped writing recordings is still broadcasting,
+and taking it out of a load balancer over it would end the stream to fix the
+files. The consequence for whoever wires up the monitoring is that **a full
+recording volume is invisible to a check keyed on the HTTP status** — key on
+the `status` field instead, and alert on `degraded` as well as on `unhealthy`.
+
+#### The two throttles
+
+`POST /setup` and `POST /auth/login` are rate-limited per client address, and
+both answer `429` with a `Retry-After` header carrying whole seconds. The
+policy is the same for each: five free attempts, then a delay starting at two
+seconds and doubling with every further one to a five-minute ceiling, and the
+counter for an address is forgotten after an hour of quiet. The bodies are
+`{"error": "too many setup attempts, try again later"}` and `{"error": "too
+many failed attempts, try again later"}`.
+
+What they count differs, and the difference is the one that catches
+provisioning scripts. `/auth/login` counts **failures**; a correct password
+clears the counter immediately. `/setup` counts **every attempt**, incremented
+before the body is read and cleared only when an admin is actually created — so
+a `POST /setup` refused because an admin already exists still counts. A script
+that re-runs its setup step idempotently meets a `429` on the seventh run and
+waits two seconds, then four, and so on. Honour `Retry-After`, or call
+`GET /setup` first and skip the POST when setup is no longer needed.
 
 ### Session and access
 
@@ -343,6 +464,13 @@ does not get to change what another operator's console shows them.
 | `GET` | `/processes`, `/processes/{name}/logs` | A child's own FFmpeg output |
 | `GET` | `/metrics` | Prometheus exposition |
 | `GET` | `/ws` | WebSocket: status, levels, logs, chat |
+
+`/status`, `/source`, `/source/annotations`, `/levels`, `/processes`,
+`/processes/{name}/logs` and `/ws` are programme-scoped: on an install with
+more than one source each of them needs `?source=<id>` and answers `400`
+`source_required` without it. See [Conventions](#conventions). `/stats` is not
+— it describes the box, not a programme, and one install running three sources
+used to have three samplers of the host disagreeing by a tick.
 
 ### Settings
 
@@ -554,6 +682,13 @@ against `platforms.go` too. The console asks; it does not derive.
 without saving anything. Useful for understanding what a selection actually
 does.
 
+It and `POST /routing/presets/{preset}` are programme-scoped and need
+`?source=<id>` on a multi-source install — see [Conventions](#conventions).
+The routing editor is where the scoping was written: with programme 2 open, a
+debounced track-label edit rewrote programme 1's ingest and restarted its live
+destinations, and the compile preview beside it was reading the same default
+engine — so the page showed a plausible answer for the wrong saved state.
+
 ### Failover
 
 | Method | Path | Notes |
@@ -563,6 +698,12 @@ does.
 
 `auto` clears a manual pin and returns control to the detector. `400` when
 failover is off — there is no tier to switch.
+
+**The body's `source` and the query string's `?source=` are different things**,
+and a multi-source install sends both: `?source=<id>` names the programme, the
+body names the tier within it. Putting Studio B on its slate is
+`POST /failover/source?source=2` with `{"source": "slate"}`. See
+[Conventions](#conventions).
 
 ### Playout
 
@@ -682,6 +823,46 @@ the ceiling, failures, and the last error.
 Every download route is confined to the data directory. A name that escapes it
 is refused, not served.
 
+**`DELETE /library/recordings/{id}/transcript` takes an optional `?track=N`.**
+Absent, it deletes the whole transcript; present, it deletes one track's, so a
+single bad microphone can be re-run without discarding every other track's work
+alongside it. `N` is zero-based, as track numbers are everywhere in this API,
+and a negative or non-numeric one is `400` `invalid track`.
+
+#### Searching transcripts
+
+`GET /library/search` is the one route in this section with a query string
+worth writing down. It needs an `admin` token or a session — see the denied
+list above — and `q` is required; omitting it is a `400` naming the empty
+query, not an empty result set.
+
+| Parameter | Effect |
+|---|---|
+| `q` | **Required.** The search text |
+| `prefix` | Treat the last word as a prefix, for search-as-you-type |
+| `raw` | Pass `q` to the FTS engine as written, operators and all, instead of quoting it |
+| `speaker` | One speaker label, as `GET /library` lists them |
+| `recordingId` | Confine the search to one recording |
+| `sessionId` | Confine it to one session |
+| `track` | Confine it to one track, zero-based |
+| `since`, `until` | Bound the time range. `2006-01-02` or full RFC3339 |
+| `order` | `relevance` (the default), `time` (oldest first) or `recent` (newest first). Anything else is a `400` naming the three |
+| `limit`, `offset` | The page. The store clamps `limit`; a negative `offset` is a `400` |
+| `context` | How many segments either side of a hit to return |
+| `snippetTokens` | How long the highlighted snippet is |
+
+`prefix`, `raw` and every other boolean here accept `1`, `true`, `yes` or `on`;
+anything else, including `0` and `false`, reads as off.
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://host:8080/api/v1/library/search?q=sponsor&recordingId=42&order=recent&limit=20"
+```
+
+An invalid `recordingId`, `sessionId`, `track`, `since`, `until` or any of the
+integer parameters is a `400` naming the one that did not parse, rather than a
+result set quietly computed without it.
+
 ### Clips (rolling buffer)
 
 | Method | Path |
@@ -695,6 +876,12 @@ On `PUT /clips/buffer`, a `windowSeconds` of `0` or less means **leave the
 window unchanged**, so a page that only toggles the switch does not need to know
 the current value.
 
+`GET /clips`, `POST /clips` and `PUT /clips/buffer` are programme-scoped — the
+buffer belongs to one source — so on an install with more than one they need
+`?source=<id>`. See [Conventions](#conventions). `DELETE /clips/{name}` and
+`GET /clips/{name}/download` are not — a clip already exists by name, and the
+name is the whole address.
+
 ### Jobs
 
 | Method | Path |
@@ -704,6 +891,32 @@ the current value.
 | `POST` | `/jobs/pause`, `/jobs/resume`, `/jobs/purge` |
 | `GET` `DELETE` | `/jobs/{id}` |
 | `POST` | `/jobs/{id}/cancel`, `/retry`, `/release` |
+
+`GET /jobs` takes five filters, all query parameters:
+
+| Parameter | Effect |
+|---|---|
+| `state` | One of `queued`, `running`, `done`, `failed`, `cancelled`, `deferred` — or `active`, which expands to `queued,running,deferred` |
+| `kind` | The job kind |
+| `target` | The job's target string, matched exactly |
+| `recordingId` | The same thing for a recording, spelt the way a client already has it. Translated here to the recording target, so only one place knows how one is written |
+| `limit` | How many rows to return |
+
+`state` and `kind` are both repeatable **and** comma-separated, so
+`?state=queued&state=running` and `?state=queued,running` are the same request.
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://host:8080/api/v1/jobs?state=active&limit=50"
+```
+
+`active` is the filter the console's own page opens with. It is spelt out on
+the server rather than in the client because two definitions of "active" drift.
+
+**An unrecognised `state` is a `400` — `unknown job state "quued"` — not an
+empty list**, and so is a negative `limit` or a `recordingId` that is not a
+positive integer. "No jobs match" and "your filter is misspelt" look identical
+in a table, so the server refuses to let them.
 
 ### Lifecycle webhooks
 
@@ -841,20 +1054,101 @@ something did *not* happen. **An empty result means "not in the scrollback we
 kept", never "never said"** — so render the note alongside no-results, not only
 alongside a full page.
 
-`DELETE /chat/messages` removes one message on the platform. `POST
-/chat/messages/hide` is Facebook's reversible hide where the platform offers it,
-and a local-only hide everywhere else — the pane stops showing it, the platform
-never hears about it.
+**Every moderation route is addressed by query parameters, not by path
+segments or a body.** A message id is an opaque platform-issued string and an
+account ref is whatever the platform calls an account; neither survives a path
+segment reliably.
 
-`POST` and `DELETE /chat/bans` ban, time out, and lift either. **The duration is
-a Go duration, and the adapters convert.** YouTube and Twitch count seconds;
-Kick counts *minutes*, so a unified `600` would mean ten minutes on two
-platforms and seven days on the third. Each adapter converts at the last moment
-and rounds **up**, because truncating 30s to zero minutes would reach Kick as a
-permanent ban.
+| Route | Parameters |
+|---|---|
+| `DELETE /chat/messages` | `platform`, `id` (both required), `account` |
+| `POST /chat/messages/hide` | `platform`, `id` (both required), `account`, `scope`, `hidden` |
+| `POST /chat/bans` | `platform`, `userId` (both required), `account`, `seconds`, `reason` |
+| `DELETE /chat/bans` | `platform`, `userId` (both required), `account` |
+| `PATCH /chat/settings` | `platform` (required), `account`, plus the rules in the JSON body |
+| `GET /chat/users` | `platform`, `authorId` (both required), `limit` |
+| `GET /chat/messages` | `platform`, `limit` |
+| `GET /chat/search` | `q`, `platform`, `limit` |
+
+A missing required parameter is a `400` saying which: `platform and id are
+required`, `platform and userId are required`, `platform and authorId are
+required`, `platform is required`. `account` is optional everywhere it appears
+and names which connected account on that platform to act as, for an install
+with more than one. `limit` defaults to `300` — roughly a screenful of
+scrollback and the room to scroll up through it — and is clamped to `2000`; a
+value that is zero, negative or not a number silently takes the default.
+
+`DELETE /chat/messages` removes one message on the platform. The platform is
+asked first and the local copy is only dropped once it agreed, because the
+other order leaves a message deleted in polyemesis and still on every viewer's
+screen — the exact failure the button exists to prevent.
+
+**`POST /chat/messages/hide` is local by default, on every platform including
+Facebook.** `scope` is the switch, and the default is the half that cannot
+overreach:
+
+| `scope` | What happens |
+|---|---|
+| omitted, or `local` | polyemesis stops showing the message. Works everywhere, because it asks nobody's permission — and **every viewer still sees it** |
+| `platform` | The platform hides it from viewers. Only Facebook can, and only because its live chat is a comment thread with an `is_hidden` field |
+
+Anything else is a `400`: `scope must be "local" (hide it here only) or
+"platform" (hide it from viewers)`. The `200` says which happened in words, not
+just a status — a local hide comes back with `"scope": "local"` and a `detail`
+of `Hidden in polyemesis only. Everyone watching on facebook can still see this
+message.` An operator who believes a local hide cleared their audience's
+screens has been misled by their own tool, so the response refuses to let them.
+
+A platform hide is the reversible one, and `hidden=false` is how it is
+reversed:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" -X POST \
+  "https://host:8080/api/v1/chat/messages/hide?platform=facebook&id=12345_67890&scope=platform&hidden=false"
+```
+
+Only the platform scope can be undone. A local hide is forgotten rather than
+flagged, and restoring a platform hide does not bring the message back into
+this pane either — polyemesis does not re-fetch what it has dropped.
+
+`POST` and `DELETE /chat/bans` ban, time out, and lift either. **The duration
+is `?seconds=`, a whole number of seconds, and it is the only unit on the
+wire.** `?seconds=600` is ten minutes everywhere. A value that is not a
+non-negative integer is a `400`: `seconds must be a whole number of seconds, or
+omitted for a permanent ban`.
+
+**Omitting `seconds`, or sending `0`, is a PERMANENT ban** — that is all three
+platforms' own convention, so it is kept rather than invented around, but it
+means a client computing a duration that comes out empty or zero issues a
+permanent ban on a live channel rather than a short timeout. Guard the
+arithmetic before the request, not after.
+
+```sh
+# ten-minute timeout
+curl -H "Authorization: Bearer $TOKEN" -X POST \
+  "https://host:8080/api/v1/chat/bans?platform=twitch&userId=123456&seconds=600&reason=spam"
+
+# permanent
+curl -H "Authorization: Bearer $TOKEN" -X POST \
+  "https://host:8080/api/v1/chat/bans?platform=twitch&userId=123456"
+```
+
+Seconds rather than each platform's own unit because the platforms disagree:
+YouTube and Twitch count seconds, Kick counts *minutes*, so a `600` passed
+straight through would be ten minutes on two platforms and ten hours on the
+third. Each adapter converts at the last moment and rounds **up**, because
+truncating 30 seconds to zero minutes would reach Kick as a permanent ban.
+
+The `200` reports the verb back — `{"status": "timed out", "scope": "10m0s"}`
+for a bounded ban, `{"status": "banned", "scope": "permanent"}` otherwise —
+because those are different things to have just done and the caller should not
+have to infer which from the request it sent.
 
 `PATCH /chat/settings` is Twitch's channel rules — slow mode, followers-only,
-subscribers-only, no repeated messages.
+subscribers-only, no repeated messages. It is a `PATCH` with pointer fields all
+the way down: an omitted field means "leave it alone", which is the only way to
+express "turn slow mode on and touch nothing else" without switching
+followers-only off as a side effect.
 
 One deletion trap is worth stating because the platform's own API hides it:
 `DELETE /helix/moderation/chat` with **no** `message_id` deletes every message in
@@ -866,6 +1160,18 @@ is built.
 `GET /ws` upgrades and then pushes status, audio levels, process logs, loudness
 reports and chat as they happen. It is the same data the polling routes return —
 use it when you want changes rather than snapshots.
+
+The upgrade is programme-scoped like the polling routes it replaces: on an
+install with more than one source, connect to `/api/v1/ws?source=<id>` or the
+upgrade is refused `400` `source_required` before it happens. That scope covers
+the opening burst — the snapshot the server assembles for the client — but not
+the stream that follows: every engine publishes onto the same socket, so frames
+produced by other programmes arrive on it too. They are source-tagged, each
+`status` frame carrying `source.id` and `source.name`, so a client can tell them
+apart on `status.source.id`. What a UI cannot do is keep one status series and
+one bitrate series for the socket — those get redrawn from whichever engine
+spoke last — which is why a multi-source grid polls `GET /previews` instead of
+deriving one from this feed.
 
 ## A worked example
 
