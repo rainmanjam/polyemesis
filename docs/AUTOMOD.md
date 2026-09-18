@@ -34,6 +34,104 @@ that catch what a live chat actually throws at you.
 A pattern that does not compile refuses the whole save rather than being
 skipped, because a rule silently not running is worse than a rejected form.
 
+## Writing a rule
+
+Patterns are **Go regular expressions (RE2)**, compiled with `(?i)` already
+prepended, and matched as a **substring** — `spam` fires on "a spammy sentence".
+You never need to write `(?i)` yourself, and there is no way to make a rule
+case-sensitive.
+
+### Each pattern is tried three ways
+
+A rule fires if it matches **any** of three forms of the message, which is why
+these examples catch evasions the pattern does not mention:
+
+| form | what it defeats |
+|---|---|
+| the message as sent | nothing — for patterns targeting punctuation the other forms remove |
+| **normalised** | case, padding, doubled letters, homoglyphs, zero-width characters |
+| **despaced** | letter-spacing, and only when the spacing looks deliberate |
+
+Normalising collapses runs of the same character, so `ssssbadword` reduces
+toward `badword`. Despacing is not applied to ordinary text — "a bad wordsmith"
+would otherwise match `badword`, which is the Scunthorpe problem arriving by a
+different road.
+
+### Examples that work
+
+Each was run against the real checker; the right-hand column is what it actually
+caught.
+
+| Pattern | Catches |
+|---|---|
+| `free\s*robux` | "FREE ROBUX now", and "f r e e   r o b u x" |
+| `badword` | "b a d w o r d", and "ssssbadword" |
+| `bit\.ly/\S+` | "check bit.ly/abc" |
+| `(?:discord\|t)\.me/\S+` | "join discord.me/xyz" |
+| `\b(?:buy\|cheap)\s+followers\b` | "buy cheap followers here" |
+| `^\s*!(?:so\|shoutout)\b` | "!so @someone" — anchored, so only at the start |
+
+### What RE2 refuses
+
+RE2 has no backtracking, so three habits from PCRE, Perl and JavaScript do not
+compile. The save is refused with the compiler's own message:
+
+| Pattern | Error |
+|---|---|
+| `(?!free)robux` | `invalid or unsupported Perl syntax: (?!` |
+| `(?<=@)\w+` | `invalid named capture` |
+| `(\w+)\s+\1` | `invalid escape sequence: \1` |
+| `(.)\1{9,}` | `invalid escape sequence: \1` |
+
+The last one is worth calling out because it is the natural way to write "the
+same character ten times over" — reach for the **history** checker's repeat
+detection instead, which is what that job belongs to.
+
+A pattern that does not compile refuses the whole save rather than being
+skipped, and the console renders the error against the offending rule.
+
+## The history checker's settings
+
+The rules checker needs patterns from you; this one ships working defaults and
+is deliberately forgiving. Every field below is what the console writes and what
+the API accepts.
+
+| Field | Default | What it means |
+|---|---|---|
+| `window` | **30s** | how far back every detector below looks |
+| `maxMessages` | **8** | messages in the window before it counts as flooding |
+| `maxRepeats` | **3** | repeats of the same *normalised* text in the window |
+| `maxLinks` | **3** | links in the window |
+| `maxMentionsPerMessage` | **5** | mentions in one message before it is mention spam |
+| `minLengthForCaps` | **12** | below this length a shouty message is just a short one — "OK" and "WHAT" are not shouting |
+| `maxCapsRatio` | **0.8** | proportion of capitals before it counts as shouting, 0..1 |
+| `action` | **timeout** | flooding is usually somebody carried away, and a timeout expires on its own where a ban needs a human |
+| `timeoutSeconds` | **60** | duration for that action |
+| `retain` | **24** | messages kept per author |
+| `idleEviction` | **10m** | how long an author is kept after their last message |
+| `maxAuthors` | **20000** | ceiling on tracked authors |
+
+The last three are memory bounds rather than policy. A raid is thousands of new
+authors in a minute, so the ring has to forget — otherwise the defence becomes
+the denial of service.
+
+Because `maxRepeats` compares the **normalised** text, a spammer varying case,
+padding or doubled letters still trips it.
+
+### A timeout of zero is a permanent ban
+
+On every platform. The server refuses to save a timeout action carrying no
+duration rather than accepting it and surprising you later:
+
+```
+rule "…" asks for a timeout but carries no duration; a timeout of zero seconds
+is a permanent ban on every platform, so set timeoutSeconds, or use the ban
+action if that is what you meant
+```
+
+Worth knowing when writing rules through the API, where it is easier to omit a
+field than it is in the console.
+
 ## The model tier
 
 Any OpenAI-compatible `/chat/completions` endpoint, including one on the same
