@@ -69,6 +69,81 @@ At the appointed time the schedule flips the same `enabled` bit you would have
 clicked and asks for a reconcile — so a scheduled start is indistinguishable
 from a manual one. There is exactly one way a destination comes up.
 
+**It fires within a sweep, not on the instant.** Schedules are evaluated by one
+sweep every **20 seconds**, so a 20:00 start acts somewhere between 20:00:00 and
+20:00:20 — never before. The alternative, a timer per schedule, would have to be
+torn down and rebuilt on every edit. If something else has to land at the same
+moment — a countdown, a pre-roll, a second system cutting over — budget that
+sweep instead of planning against the instant. (The acceptance table below arms
+a one-shot for six seconds out and checks the destination is still off three
+seconds later — three seconds *before* the window, not into it. That is a test
+that it does not fire *early*; it is not a claim of sub-second accuracy.)
+
+**A recurring time holds its wall clock across a daylight-saving change.** Each
+occurrence is built in the schedule's own zone rather than by adding 24 hours,
+so 07:00 in `Europe/London` is still 07:00 on both sides of the changeover and
+you have nothing to re-edit twice a year. A time that falls in the hour a
+spring-forward skips — 01:30 where the clocks go 01:00 → 02:00 — resolves to a
+real instant and fires once, slightly late, rather than being quietly missed for
+the year.
+
+**A window missed while the server was down does not fire late.** If the box was
+rebooting, upgrading or OOM-killed across 20:00, the schedule does not catch up
+when it comes back: the occurrence is marked as handled and skipped, and the
+show does not start. That is the deliberate choice — a stream that starts itself
+four hours late is worse than one that never started — but it does mean a
+scheduled start is not self-healing. If a start matters, check that it happened
+rather than assuming it will arrive eventually.
+
+How late is too late is the **lateness allowance** on the schedule itself
+(`graceSeconds` on the wire, *Lateness allowance* in the editor). It defaults to
+**300 seconds**, which is enough to survive a restart and a slow boot without
+being enough to start a stream in the middle of the night. It is clamped to a
+floor of **30 seconds** and a ceiling of **86400 seconds** (24 hours), and the
+clamp is **silent**: the value is normalised before it is validated, so
+
+```json
+{"name": "Evening show", "action": "start", "kind": "daily",
+ "tz": "Europe/London", "atMinutes": 1200, "graceSeconds": 5}
+```
+
+stores `graceSeconds: 30` and answers `201`, with no warning that it changed
+your number. `604800` stores `86400` the same way. If you sent a value near
+either edge, read the schedule back and look at what it actually holds. The
+editor is no safeguard: its number field carries `min={30}` and `max={86400}`,
+but it sits in no `<form>` and Save is an `onClick` handler, so the browser's
+constraint validation never runs and the save gate never reads `graceSeconds` at
+all. Type 5 and the editor posts 5, which the server clamps to 30 exactly as
+above. Those attributes only bound the spinner arrows and the `:invalid`
+styling.
+
+**`GET /schedules/runs` is where a sweep explains itself**, and it is the only
+place that does. It is the Automation page's runs view, and it returns the
+results of the last sweep in which anything happened — each entry naming the
+schedule, the occurrence, whether it `fired` or was `skipped`, and a `reason`
+written as a sentence. Two reasons reach it, because a schedule that had nothing
+to do produces no entry at all:
+
+```json
+[{"id": 3, "name": "Evening show", "action": "start", "fired": false,
+  "skipped": true, "at": "2026-03-14T20:00:00Z",
+  "reason": "the occurrence was missed while the server was not running"}]
+```
+
+The other is `"the occurrence is due"` on an entry with `"fired": true`. This is
+where you look when a scheduled start did not appear on air.
+
+One field there is worth knowing about before you need it. A fired schedule may
+also carry `reconcileError`, which means something different from `error`:
+`error` is the schedule failing to act, while `reconcileError` says the action
+succeeded and did not take effect — the intent was written to the database and
+the running pipeline could not be brought into line with it. **Nothing retries
+that.** The stored state and the processes have diverged until you intervene,
+and because the reconcile is one call for the whole sweep, the reason rides on
+every schedule that fired in it rather than being attributed to one. The results
+live in memory, so a restart empties the view until the next sweep does
+something.
+
 ## What was measured
 
 The acceptance suite proves, by measurement rather than assertion:
@@ -76,7 +151,7 @@ The acceptance suite proves, by measurement rather than assertion:
 | | Result |
 |---|---|
 | The ingest goes live with **no encoder connected** | bytes arriving at the relay |
-| The destination is **off** before its window, and does not fire early | checked 3 s in |
+| The destination is **off** before its window, and does not fire early | checked 3 s into a 6 s wait |
 | The schedule **turns it on** at the window | — |
 | The output carries the file's audio | 1200 Hz tone at −24.1 dBFS through a bandpass |
 | The file **loops** | 19.4 s of output from a 6 s clip |
@@ -182,9 +257,33 @@ transcoded once and appears in the sequence twice.
 `failover.playlist.enabled` and asks for a reconcile, through the same
 `SetPlaylistEnabled` call the settings endpoint makes. A scheduled enable is
 indistinguishable from one you clicked yourself, once it lands — the same
-guarantee this document already makes for destinations, above.
+guarantee this document already makes for destinations, above. The sweep
+interval, the lateness allowance and the missed-window rule are the same too, as
+is `GET /schedules/runs` for finding out what a sweep did with it.
 
-Two things about that switch are worth knowing before you schedule it, not
+**A playlist schedule may not also name destinations.** The obvious intent — "at
+20:00 start the playlist *and* bring these two destinations up" — is not one
+schedule. A `playlist.start` or `playlist.stop` body carrying a non-empty
+`destinationIds` is refused with a `400`:
+
+```
+schedule "Evening filler" acts on the playlist, so it cannot also name
+2 destination(s); use a second schedule for those
+```
+
+Write two schedules at the same time instead: one with action `playlist.start`
+and no `destinationIds`, one with action `start` naming the destinations. This
+is easy to walk into by editing a working destination schedule's body and
+changing only its action, because the destination list is left behind in the
+request. Note that an empty `destinationIds` means the playlist here, not "every
+destination" as it does on a destination schedule — so a list that names ids and
+has none of them survive normalisation (`[0]`) is a `400` of its own rather than
+either reading, and says so. `[null]` never gets that far: a null is refused by
+the JSON parser before any schedule exists, with the un-branched message that an
+empty `destinationIds` "means EVERY destination on this install" — the reading
+that does *not* apply to a playlist schedule.
+
+Two more things about that switch are worth knowing before you schedule it, not
 during a broadcast:
 
 **It is install-wide, not per-programme.** `failover.playlist` lives on

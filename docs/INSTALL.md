@@ -197,6 +197,33 @@ one on the first-run screen, so there is no credential for an installer to
 handle. In binary mode it verifies the download against the release's published
 `SHA256SUMS` and refuses to install on a mismatch.
 
+**If you later lose that password, or think it leaked.** `-reset-admin` sets a
+new one and signs out every existing session; it touches only the database and
+exits before anything binds a port, so it is safe to run against a live server.
+On a systemd install, run it as the service user and point it at the same
+config, or it will look for the database somewhere else:
+
+```bash
+sudo -u polyemesis /usr/local/bin/polyemesis \
+  -config /etc/polyemesis/config.yaml -reset-admin
+```
+
+What that does **not** do is end API tokens. Tokens carry no session epoch, so
+a password change leaves every one of them working — which is the wrong answer
+if the reason you are resetting is that the credentials are compromised. The
+command says so rather than leaving you to assume: it lists each surviving token
+by name, scope and creation date under `N API TOKEN(S) STILL WORK. A password
+change does not end them:`. To end them in the same run, add the second flag:
+
+```bash
+sudo -u polyemesis /usr/local/bin/polyemesis \
+  -config /etc/polyemesis/config.yaml -reset-admin -revoke-api-tokens
+```
+
+which prints `N API token(s) revoked.` It is opt-in rather than implied because
+routine rotation is the common case, and destroying every integration's
+credential is the wrong default for that.
+
 **Linux only.** It is bash, systemd, apt and ufw/firewalld, and it exits
 immediately anywhere else with `no /etc/os-release — this installer targets
 Linux`. macOS installs from the [macOS](#macos) section below; Windows has its
@@ -475,7 +502,7 @@ refuse to start against.
 | Ubuntu 24.04 LTS (noble) | 6.1.1 | works |
 | Debian 13 (trixie) | 7.1.5 | works |
 | Alpine 3.20 / 3.21 / 3.22 | 6.1.1 / 6.1.2 / 6.1.2 | works |
-| Alpine 3.23 / 3.24 | 8.0.1 / 8.1.2 | meets the floor; FFmpeg 8.x is not yet exercised here |
+| Alpine 3.23 / 3.24 | 8.0.1 / 8.1.2 | works — 8.1.2 is what the shipped image pins and what CI runs |
 | RHEL / Rocky / AlmaLinux | not in the base repositories at all | see below |
 | Fedora, Arch, openSUSE | not checked | verify for your release |
 
@@ -484,6 +511,14 @@ Checked against the distro package indexes on 2026-07-26 (`packages.ubuntu.com`,
 is not in this table, or you are reading this much later, run
 `apt-cache policy ffmpeg` (or your equivalent) and check the number yourself
 rather than trusting the row.
+
+**8.x is the exercised version, not an unknown.** The `Dockerfile` pins
+`FFMPEG_VERSION=8.1.2-r0`, verified on linux/amd64 and linux/arm64, and the host
+test suites pin BtbN's `n8.1-latest-…-gpl-8.1` build on Linux and Windows. The
+suites moved off 6.1.1 deliberately: running a version nobody deploys meant a
+defect fatal on one and survivable on the other could stay invisible here for
+months. 6.1.1 and 7.x still clear the floor and still work — they are simply not
+what the container ships.
 
 On RHEL and its rebuilds FFmpeg is not shipped at all for licensing reasons —
 RPM Fusion is the usual source. Verify the version it gives you before relying
@@ -542,6 +577,53 @@ make build                 # builds the UI, embeds it, produces ./polyemesis
 ```
 
 Open <http://localhost:8080> and set an admin password.
+
+**On the box itself.** That run binds **loopback only**. With no `config.yaml`
+and no `-addr`, the listen address is `127.0.0.1:8080` (`DefaultAddr` in
+`internal/config/config.go`), so `localhost` works where the binary is running
+and nothing reaches it from your laptop. No firewall rule fixes that, because
+nothing is listening on the external interface to be let through.
+
+It is deliberate. The old default was `":8080"` — every interface — with
+`tls.mode` defaulting to `off`, so the shipped do-nothing configuration served a
+login form and its session cookie in cleartext to the whole network, and the
+only thing between that and an operator was a warning in a boot log they had
+already scrolled past. Narrowing the default makes the exposure something
+somebody typed.
+
+So type it. Either on the command line:
+
+```bash
+./polyemesis -addr :8080 -data ./data
+```
+
+or in `config.yaml`:
+
+```yaml
+addr: "0.0.0.0:8080"
+```
+
+Both keep the startup warning about plaintext on a public bind, which is the
+point of them. Note that `config.example.yaml` ships `addr: "127.0.0.1:8080"`,
+so copying the example — the usual way a new install gets a config — does not
+widen the bind on its own.
+
+The third option is to widen nothing. If the box is reachable over SSH, leave it
+on loopback and forward the port:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 you@your-server
+```
+
+then open <http://localhost:8080> on your own machine. That is the shape
+[CONFIGURATION.md](CONFIGURATION.md#connecting-accounts-without-a-public-address)
+describes, and the one case where `tls.mode: off` is genuinely safe — SSH is
+carrying the encryption.
+
+The service and container paths never see this, because both name an address
+explicitly: `deploy/polyemesis.service` passes `--addr :8080` and the image's
+`CMD` is `["-addr", ":8080", "-data", "/data"]`. A flag or a config key beats
+the default.
 
 ### Run it as a service
 
@@ -660,6 +742,11 @@ cd polyemesis
 make build
 ./polyemesis -data ./data
 ```
+
+Then <http://localhost:8080>. As on Linux, that run binds `127.0.0.1:8080` and
+is reachable only from this Mac — see [on the box
+itself](#install-the-binary) above for why, and for `-addr :8080` /
+`addr: "0.0.0.0:8080"` if you want another machine on the LAN to reach it.
 
 ### Run it at login, or at boot
 
@@ -847,7 +934,7 @@ tls mode=… hostname=…
 
 | Port | Protocol | Needed when |
 |---|---|---|
-| 8080 | TCP | always — web UI and API. Configurable via `addr`. |
+| 8080 | TCP | always — web UI and API. Configurable via `addr`, which defaults to `127.0.0.1:8080` — **loopback only**, so nothing off the box reaches this port until you set `addr` or pass `-addr`. See [Install the binary](#install-the-binary). |
 | 6000 | **UDP** | SRT ingest. The default; changeable in *Settings → Ingest*. |
 | 1935 | TCP | RTMP ingest, only if you use the fallback. One port however many RTMP sources you run. |
 | 80 | TCP | only for `tls.mode: acme` (HTTP-01 validation), plus the HTTP→HTTPS redirect whenever polyemesis terminates TLS |
@@ -892,14 +979,109 @@ sudo /opt/polyemesis/uninstall.sh
 It removes what the installer added — the service, the unit file, the binary or
 container, and the config directory — and **keeps your data**, because that
 directory holds the database, your recordings, and `secret.key`. It prints the
-one command that removes it, so destroying it is a decision you make rather than
-one made for you.
+one command that removes it, `sudo /opt/polyemesis/uninstall.sh --remove-data`,
+so destroying it is a decision you make rather than one made for you.
+
+**It takes two flags, and it has two refusals.** Both matter if you are running
+it from anything other than a shell you are sitting in front of.
+
+```
+usage: uninstall.sh [--force] [--remove-data]
+
+  --force        do not ask, and do not refuse while a broadcast is on air
+  --remove-data  also delete $DATA_DIR (database, secret.key, recordings)
+```
+
+That usage is the systemd-mode script's. The Docker-mode script takes the same
+two flags, but its second line reads `--remove-data  also delete the
+polyemesis-data volume` — because in Docker mode the data lives in the
+`polyemesis-data` volume, not in a `$DATA_DIR` on the host. **Below, the two
+modes differ in what each refusal says and in what `--remove-data` checks, so
+read the paragraph for the mode you installed.**
+
+Without `--force` it **refuses while the install is publishing**, in both modes,
+but it looks in different places. The systemd script reads the unit's own cgroup
+(`/sys/fs/cgroup/system.slice/polyemesis.service/cgroup.procs`) for an FFmpeg
+holding an `rtmp:` or `srt:` target, lists the destinations it found, and exits
+with `REFUSING: polyemesis is publishing right now (listed above).` — where
+`polyemesis` is the service name the installer baked in. The Docker script has
+no cgroup to read: it greps the output of `docker compose top` (or
+`docker-compose top`, whichever the installer found) for the same FFmpeg
+targets, prints up to the first three matching lines, and exits with `REFUSING:
+this install is publishing right now (listed above).` Uninstalling ends a live
+broadcast, and one that has ended cannot be resumed. Both are scoped on purpose
+— to the unit's cgroup, and to the container's own process table — so an
+unrelated FFmpeg elsewhere on the box does not block you.
+
+Without `--force` it also **refuses when there is no terminal to ask on**,
+printing `No terminal to confirm on. Pass --force if you mean this.` — the same
+line in both modes. This is the one that catches Ansible, cron and
+`ssh host 'sudo …'`. On a real terminal the two modes ask for different words.
+The systemd script asks you to type the service name — `Type the service name
+(polyemesis) to confirm: `, and accepts only that name. The Docker script does
+not accept the service name at all: it prints `This stops and removes the
+container in /opt/polyemesis.` and then `Type "remove" to confirm: `, and takes
+only the literal string `remove`. Anything else leaves the host untouched with
+`Not confirmed; nothing was changed.` So a non-interactive decommission is:
+
+```bash
+sudo /opt/polyemesis/uninstall.sh --force --remove-data
+```
+
+**In systemd mode** `--remove-data` is the guarded path, and it is better than
+the `rm -rf` you would otherwise write by hand: it refuses an empty, relative or
+system directory, and then refuses any directory holding neither `polyemesis.db`
+nor `secret.key` — because the path is frozen into the script when the installer
+generates it, and an operator who later moved the data directory would otherwise
+delete whatever now lives at the old one while the real data survived a
+decommission they believed had finished.
+
+**In Docker mode none of that runs.** `--remove-data` there is a bare
+`docker volume rm polyemesis-data` with no guard in front of it: no path check,
+and no check that the volume is the one this install wrote. It is the flag, not
+the script, that decides — so treat it with the care you would give the `rm -rf`
+the systemd script exists to avoid.
 
 `secret.key` is what decrypts your stored platform tokens. A backup of the data
 directory without it is not a backup you can restore from, and a copy of it is
 as sensitive as the tokens themselves. If you are decommissioning a host rather
 than reinstalling, remove the data directory too — the uninstall script names
 the path.
+
+**Check that backup before you rely on it.** The binary will answer for it:
+`-verify-backup <dir>` opens the copy with the same SQLite driver the server
+runs on, runs `PRAGMA integrity_check`, reads the schema, and exits. It writes
+nothing and runs no migration — migrating the backup would move the copy
+forward to the schema you are keeping a way back *from* — so it is safe against
+a backup you intend to keep.
+
+```bash
+/usr/local/bin/polyemesis -verify-backup /var/backups/polyemesis-2026-07-26
+```
+
+On success it prints one line:
+
+```text
+backup at /var/backups/polyemesis-2026-07-26 opens, passes integrity_check and holds this server's schema
+```
+
+Anything else is a refusal naming what is wrong: no `polyemesis.db`, a
+zero-byte one, one that will not open or fails its integrity check, or — the
+quiet one — no `secret.key`, which it calls out separately because that restore
+reads as successful right up until go-live, when every destination comes back
+disabled. It opens the `-wal` sidecar alongside the main file, so a copy taken
+from a live database is judged on what it actually holds rather than on a main
+file missing the last few minutes.
+
+For a Docker install, unpack the archive and point the image at it:
+
+```bash
+docker run --rm -v /var/backups/polyemesis-2026-07-26:/backup:ro \
+  rainmanjam/polyemesis -verify-backup /backup
+```
+
+The `update.sh` the installer writes runs exactly this check on the backup it
+takes, in both modes, and refuses to upgrade if it fails.
 
 ### Installs that predate the script
 

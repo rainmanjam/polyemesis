@@ -37,6 +37,32 @@ relay ────────────────────────�
                 └─► dest:x        -c:v copy + audio graph D
 ```
 
+**A rendition belongs to one programme.** It re-encodes exactly one ingest, so
+it is created against a source — `POST /api/v1/renditions` refuses a body with
+no `"sourceId"` — and only that source's destinations can select it. Pointing a
+destination at another programme's rendition is refused when you save it:
+
+```
+invalid destination: rendition 4 ("1080p60 6M") belongs to source 1, but this
+destination belongs to source 2. A destination can only select a rendition from
+its own programme, because only that programme's engine runs it. Pick one of
+source 2's renditions, or leave this destination on passthrough.
+```
+
+That is not house policy, it is who runs the process: each programme's engine
+reconciles only its own renditions, so a destination wired across programmes
+would find no encode to read, and its card would explain itself with "rendition
+4 is no longer available" — a sentence that is false, because rendition 4 exists
+and is encoding under the other programme.
+
+On a single-source install, which is most of them, none of this is visible. On a
+multi-programme one it means the shared-encode arithmetic is **per programme**:
+two programmes that both want 1080p60 need a rendition each, and that is two
+encodes, not one. There is also no request that moves a rendition between
+programmes — a `PUT` carrying a different `sourceId` is refused for the same
+reason — so make the second one where it belongs and point its destinations at
+that.
+
 ## A rendition re-encodes video only
 
 This is the load-bearing rule, and it is worth stating plainly: a rendition
@@ -66,14 +92,31 @@ changes.
 
 ## A rendition only runs when something needs it
 
-The encode starts when the **first enabled** destination selects the rendition,
-and stops when the last one releases it. A rendition that nothing enabled points
-at has no process and burns no CPU — creating a tier you are not using yet is
-free, and stopping the last destination on a tier stops its encode too.
+The encode starts when the **first enabled consumer** selects the rendition, and
+stops when the last one releases it. A rendition that nothing enabled points at
+has no process and burns no CPU — creating a tier you are not using yet is free.
+
+**Destinations are not the only consumers.** An enabled playout variant that
+names a rendition counts exactly as an enabled destination does: the ref count
+the engine reconciles against is this programme's enabled destinations *plus*
+every enabled variant in `playout.variants` whose `renditionId` is set (none of
+them, if playout itself is switched off). Two consequences an operator hunting
+CPU should know before they go looking for a leak:
+
+- A rendition can be encoding with **every destination on that tier disabled**,
+  because the public player is reading it. The ref count is not stuck; it is
+  counting something that is not on the destinations list.
+- Disabling your last destination on a tier does **not** give the core back
+  while a playout variant is still on it. Disable the variant, or move it to
+  another tier, and the encode stops on the next reconcile.
+
+The consumer figure on the rendition's card includes the playout refs, so a card
+showing a running process never reads "0 consumers" — if it says 2 and you can
+only find one destination, the other is a variant.
 
 | Action | What restarts |
 |---|---|
-| Editing a rendition | That encode, and exactly the destinations reading it |
+| Editing a rendition | That encode, and exactly the destinations and playout variants reading it |
 | Renaming it, or editing its note | Nothing |
 | Deleting it | Its destinations fall back to passthrough and keep running |
 
@@ -183,18 +226,57 @@ The practical consequence is worth being clear about:
 
 ### Everything is a percentage
 
-| Setting | Means |
-|---|---|
-| **Width** | the image's width as a percentage of the frame's width |
-| **Margin X / Y** | the gap from the anchored edges, as percentages of the frame |
-| **Position** | one of nine anchors — corners, edge centres, or the middle |
-| **Opacity** | 1–100%; the image's own transparency is respected either way |
+| Setting | Means | Range |
+|---|---|---|
+| **Width** | the image's width as a percentage of the frame's width | 1–100% (`widthPct` 0.01–1.0) |
+| **Margin X / Y** | the gap from the anchored edges, as percentages of the frame | 0–45% each (`marginXPct`, `marginYPct` 0–0.45) |
+| **Position** | one of nine anchors — corners, edge centres, or the middle | `top-left`, `top-center`, `top-right`, `middle-left`, `center`, `middle-right`, `bottom-left`, `bottom-center`, `bottom-right` |
+| **Opacity** | the whole watermark's transparency; the image's own alpha is respected either way | 0–100% (`opacity` 0–1) |
 
 Percentages rather than pixels, because the same watermark has to be correct on
 a 1920×1080 tier and a 1080×1920 one. A logo placed 40 px from the right edge of
 a landscape frame is in a sensible place; the same 40 px on a vertical frame is
 not the same place at all, and a size in pixels that reads well on one lands
 comically large or invisible on the other.
+
+Those ranges are refused on save, not clamped, and the refusal quotes the number
+you sent: `overlay width 12.000 out of range (0.01-1.00 of the output width)`,
+`overlay horizontal margin 0.500 out of range (0-0.45)`. The margin ceiling is
+45% rather than 50% because a margin at half the canvas pushes an edge-anchored
+logo out past the opposite edge, and a watermark rendered off-frame is
+indistinguishable from one that never rendered at all.
+
+**The API's unit is a fraction, not a percentage.** The browser form shows whole
+percentages and divides by 100 on its way out; what is stored, and what
+`POST`/`PUT /api/v1/renditions` expects, is 0–1. A script that sends
+`"widthPct": 12` is asking for twelve times the frame width and gets the save
+refused. Worked example — a logo 12% of the frame wide, 3% in from the
+bottom-right corner, at 80% opacity:
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -H "Authorization: Bearer pmk_..." https://host:8080/api/v1/renditions \
+  -d '{
+    "sourceId": 1,
+    "name": "1080p60 6M",
+    "width": 1920, "height": 1080, "fps": 60, "videoBitrate": 6000,
+    "overlay": {
+      "image": "overlays/logo.png",
+      "anchor": "bottom-right",
+      "widthPct": 0.12,
+      "marginXPct": 0.03,
+      "marginYPct": 0.03,
+      "opacity": 0.8
+    }
+  }'
+```
+
+**An opacity of `0` means fully opaque, not invisible.** Zero is what a row
+saved before the field existed carries, and rendering those as nothing would
+have made every pre-existing watermark disappear on upgrade — so zero is read as
+1. It also means you cannot hide a logo by turning the opacity down to nothing:
+an invisible watermark is indistinguishable from a broken one, and the operator
+did ask for a watermark. Clear the image path instead.
 
 Margins are ignored on a centred axis — a centred logo is centred.
 
@@ -225,15 +307,48 @@ alternative is an encoder that keeps compositing the picture you just replaced.
 A rendition can also burn in a line of text. The settings mirror the watermark's
 reasoning — percentages, not pixels:
 
-| Setting | Means |
+| Setting | Means | Range |
+|---|---|---|
+| **Content** | the line to draw — **one** line | at most 200 characters; a line break or NUL is refused, not escaped |
+| **Font** | Inter Regular or Inter Bold, shipped embedded — or your own, dropped in `<data-directory>/fonts/` | a bare filename, at most 128 characters; empty means `Inter-Regular.ttf` |
+| **Position** | the same nine anchors a watermark uses | the same nine names, `top-left` to `bottom-right` |
+| **Size** | as a percentage of frame height | 1–50% (`sizePct` 0.01–0.5) |
+| **Colour** | the text colour | a name or hex, optionally `@alpha`; at most 32 characters; empty means `white` |
+| **Margin X / Y** | as percentages of the frame | 0–45% each (`marginXPct`, `marginYPct` 0–0.45) |
+| **Box** | an optional background box, with its own colour and opacity | same colour syntax, empty means `black`; opacity 0–100% (`boxOpacity` 0–1) |
+
+The fractions-not-percentages rule the watermark has applies here too: `sizePct`
+is `0.05` for 5% of the frame height, not `5`. The 50% size ceiling is already a
+caption half the picture tall — above it nothing legible fits — and 1% is where
+type stops surviving the encode, under four pixels on a 360p tier.
+
+**Content is a single line, capped at 200 characters.** A newline would end the
+filter argument and a NUL would truncate the C string FFmpeg receives, so both
+are refused at save (`text contains a line break or control character; it must
+be a single line`) rather than escaped or silently stripped. A two-line lower
+third is not a shorter string away — it is a feature with its own line-spacing
+question, and it is not built. The text is never interpreted, either: `drawtext`
+runs with `expansion=none`, so a `%` in a station name is a glyph and not a
+directive.
+
+**Colours are names and hex only, and the parser here is stricter than
+FFmpeg's.** Before the optional `@`, only letters, digits and `#` are accepted;
+after it, a number from 0 to 1. That is deliberate — the value becomes a filter
+argument, and a validator that took arbitrary punctuation would be one escaping
+bug away from letting a database row rewrite the filtergraph.
+
+| Accepted | Refused |
 |---|---|
-| **Content** | the line to draw |
-| **Font** | Inter Regular or Inter Bold, shipped embedded — or your own, dropped in `<data-directory>/fonts/` |
-| **Position** | the same nine anchors a watermark uses |
-| **Size** | as a percentage of frame height |
-| **Colour** | the text colour |
-| **Margin X / Y** | as percentages of the frame |
-| **Box** | an optional background box, with its own colour and opacity |
+| `white`, `black`, `yellow` | `rgb(255,255,255)` — `text colour "rgb(255,255,255)" must be a colour name or 0xRRGGBB, optionally @alpha` |
+| `0xFFCC00` | `white @ 0.8` — the spaces are not part of the syntax |
+| `white@0.8`, `0x000000@0.5` | `white@80%` — `text colour alpha "80%" must be a number from 0 to 1` |
+
+One box subtlety worth knowing before you fight it: the box opacity is folded
+into the box colour as FFmpeg's `colour@alpha`, so a box colour that already
+carries its own `@alpha` wins and the opacity field is ignored — appending a
+second alpha would produce a colour FFmpeg rejects. A box opacity of exactly 0
+or 1 also passes the colour through untouched, which means a fully opaque slab;
+it is the values in between that make the box readable over a picture.
 
 Fonts are embedded rather than assumed because FFmpeg's `drawtext` takes a font
 *path*, not bytes, and a container image routinely has neither fontconfig nor a
@@ -247,7 +362,22 @@ rendition without the text rather than refusing to start. Dropping the text
 keeps the picture up, which is the right way round: nobody watching would prefer
 a black screen with correct typography.
 
-Editing text restarts the encode, exactly as editing a watermark does.
+**A font file that will not resolve does the same thing, and comes back by
+itself.** Validation refuses a font name that is not a bare filename when you
+save, so this only happens when the file is removed from under a running
+install — renamed, tidied or replaced in `<data-directory>/fonts/` mid-broadcast.
+The rendition then runs with no text rather than failing: taking a live output
+off air over a caption is worse, and quietly substituting a different font ships
+a frame you did not design. Nothing on the card says the font is the reason, so
+if a caption vanishes and the picture stays up, look at the fonts directory
+before you look at the text settings. The fix is to put the file back: the
+encode's signature includes the font file's size and modification time, and
+records a missing font as missing rather than omitting it, so the caption
+returns on the next reconcile the moment the file reappears.
+
+Editing text restarts the encode, exactly as editing a watermark does — and so
+does replacing a font file with a corrected version of the same name, for the
+same reason replacing the watermark image does.
 
 ### What this is not, yet
 

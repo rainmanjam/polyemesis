@@ -149,6 +149,7 @@ a public port being used to burn your rate limit.
 ### 2. Homelab box with no public DNS
 
 ```yaml
+addr: "0.0.0.0:443"               # without this key it is loopback only
 tls:
   mode: "auto"                    # resolves to selfsigned
   hostname: "polyemesis.lan"
@@ -157,6 +158,47 @@ tls:
 polyemesis mints a local CA and a leaf for that name, plus `localhost`,
 `127.0.0.1` and `::1` so the first login over an SSH tunnel or by loopback does
 not warn either.
+
+**The `addr` line is the one people leave out, and it is load-bearing.** With no
+`addr` key the default applies — `127.0.0.1:8080`, loopback only (see
+[Binding, and the SSH tunnel](#binding-and-the-ssh-tunnel)) — and you get a
+correct, encrypted HTTPS server that nothing else on the LAN can open. The
+startup message that *explains* the loopback default is suppressed here,
+because it is gated on polyemesis not terminating TLS and the thing it exists to
+warn about — a login form crossing the network in clear text — is not what is
+happening. What you get in its place is the non-443 warning below, because TLS
+is on and 8080 is neither empty nor 443. It opens:
+
+```text
+TLS is on but the listener is 127.0.0.1:8080, not :443.
+```
+
+and continues exactly as the 8443 version quoted below, with `8080` in the
+closing sentence. So the operator is not met with silence: the bind is named
+verbatim, at `WARNING:` on the banner and at warn level in the log. The failure
+mode is a warning about the wrong half of the problem — it talks about the port
+when the sentence you needed was "reachable only from this machine" — and a
+connection refused from the laptop on the LAN this example was written for.
+
+Binding `:443` as a non-root user needs `CAP_NET_BIND_SERVICE`.
+`install.sh` writes a unit that grants it (`AmbientCapabilities=` and
+`CapabilityBoundingSet=`) and offers to move the port to 443 for you; a
+hand-written unit has to uncomment the block in
+[`deploy/polyemesis.service`](../deploy/polyemesis.service). An unprivileged
+port works fine instead — `addr: "0.0.0.0:8443"` — at the cost of a startup
+warning and a port in every URL you hand anyone:
+
+```text
+TLS is on but the listener is 0.0.0.0:8443, not :443. Browsers reach this
+server only if every visitor types the port, and http:// redirects will carry it
+too. Set addr: ":443" in config.yaml; a service running as a non-root user also
+needs AmbientCapabilities=CAP_NET_BIND_SERVICE in its unit, which install.sh
+grants for you. Keep 8443 if something in front of this box terminates TLS on
+443 or the port is deliberate.
+```
+
+That is a warning, not a refusal — a non-standard port is a legitimate choice,
+and polyemesis says it once at startup and serves anyway.
 
 Tradeoff: every browser warns until you
 [install the CA](#trusting-the-self-signed-ca), and mobile clients are genuinely
@@ -247,8 +289,12 @@ receives during the handshake; the private key has no route. The Settings page
 links to it, or:
 
 ```bash
-curl -k https://polyemesis.lan:8443/api/v1/tls/ca -o polyemesis-ca.crt
+curl -k https://polyemesis.lan/api/v1/tls/ca -o polyemesis-ca.crt
 ```
+
+That host and port are whatever your `addr` made them: no port here because
+[worked configuration 2](#2-homelab-box-with-no-public-dns) binds `:443`, and
+`https://polyemesis.lan:8443/api/v1/tls/ca` if you kept an unprivileged one.
 
 Check the fingerprint either way — `-k` means you have not yet verified who
 answered.
@@ -428,7 +474,24 @@ you already own the whole origin and can undo it.
 
 ## Binding, and the SSH tunnel
 
-The default `addr` is `":8080"` — **every interface**. Plain HTTP on every
+The default `addr` is `"127.0.0.1:8080"` — **loopback only**, so a fresh
+binary with no config file is not reachable from another machine at all. That is
+deliberate, and `internal/config/config.go` says why: the old default was
+`":8080"` — every interface — with `tls.mode` off, so the shipped do-nothing
+configuration served a login form and its session cookie in cleartext to the
+whole network. The only thing standing against it was a startup warning, and a
+log line cannot un-send a password somebody has already typed.
+
+**To expose it you now have to type it:** `addr: "0.0.0.0:8080"` in config.yaml,
+or `--addr :8080` on the command line. Both keep the warning.
+
+Most installs are unaffected because they already pass it explicitly — the
+Dockerfile's `CMD` has `-addr :8080`, `deploy/polyemesis.service` has
+`--addr :8080`, and `install.sh` writes one into the config.yaml it generates. A
+flag or a file key wins over the default. What is affected is a bare binary with
+no config.yaml, or a config.yaml with no `addr` key.
+
+Plain HTTP on every
 interface is the single biggest practical exposure this product has: the login
 form and the session cookie cross the network in clear text, and anyone on the
 path can read or replay them. polyemesis prints a loud warning at startup when

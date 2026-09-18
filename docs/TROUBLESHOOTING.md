@@ -52,7 +52,22 @@ server does not take them with it — check for strays:
 pgrep -af ffmpeg
 ```
 
----
+**An ingest port that cannot be bound does not stop the server** — which is why
+this symptom does not look like a start-up failure at all. A listener that fails
+to bind is logged at `ERROR` and skipped; the web UI comes up, the other
+protocol's listener comes up, and the install simply has no ingest on the
+protocol that lost:
+
+```
+level=ERROR msg="one-port ingest could not start" proto=rtmp addr=:1935 err="listen tcp :1935: bind: address already in use"
+level=ERROR msg="ingest not started: listener port out of range" proto=srt port=0
+```
+
+That is deliberate: an install whose `1935` is held by something else should
+still ingest over SRT. The cost is that the only evidence is that one line, and
+`ss -lntup` shows the port held by the *other* process with nothing to say that
+polyemesis wanted it. If an encoder cannot connect on one protocol while the
+server is otherwise healthy, grep the server log for `one-port ingest`.
 
 ## The ingest never goes live
 
@@ -71,9 +86,15 @@ pgrep -af ffmpeg
    which keys exist. Copy the URL and key from **Sources** rather than retyping
    them.
 4. **Is a firewall in the way?** SRT is UDP and is often dropped by default.
-5. **Does your FFmpeg have SRT?** `ffmpeg -protocols | grep -x srt`. Homebrew's
-   does not. Without it, the ingest cannot listen and the log says
-   `Protocol not found`.
+5. **Not this: your FFmpeg's SRT support.** `ffmpeg -protocols | grep -x srt`
+   is worth running before you configure an SRT *destination* — Homebrew's
+   build has no libsrt and cannot dial one — but it has nothing to do with
+   **ingest**. The SRT listener is a Go server inside polyemesis
+   (`datarhei/gosrt`), not an FFmpeg child, so an FFmpeg without libsrt accepts
+   publishers perfectly well. An older build did spawn FFmpeg here as well as
+   the Go listener, and on a host lacking libsrt that child's
+   `Protocol not found` hid the real problem: two things trying to bind one
+   port. Installing a libsrt build cannot change an ingest symptom.
 6. **Are you on macOS with a bare `:port`?** See directly below — this one looks
    exactly like a firewall and is not one.
 7. **Is the link lossy?** A handshake can fail on loss that an established
@@ -125,7 +146,7 @@ With one-port ingest the refusal is typed and says which:
 
 | Reason | What it means |
 |---|---|
-| `REJ_BADSECRET` | Wrong passphrase, or a token matching no source |
+| `REJ_BADSECRET` | Wrong passphrase, a token matching no source, or a peer currently rate-limited for repeated wrong tokens (see below) |
 | `REJ_CLOSE` | The source exists but is disabled |
 | `REJ_RESOURCE` | Something is already publishing to that source, or no pipeline is running for it |
 | `REJ_ROGUE` | The `streamid` is empty or over the length limit |
@@ -133,11 +154,62 @@ With one-port ingest the refusal is typed and says which:
 
 A token that does not exist and a token for a source that does not exist give
 the same answer deliberately, so a caller cannot use the refusal to enumerate
-sources. Neither is ever logged.
+sources. Neither token value is ever logged.
 
 The two `REJ_RESOURCE` cases are worth telling apart, and the server log does:
 *already publishing* names the incumbent peer, *no pipeline for source* means
 the source is enabled but nothing is running to receive it.
+
+#### The third `REJ_BADSECRET`: the peer is rate-limited
+
+Wrong tokens are counted per peer address, and **five of them inside 30 seconds
+gets that address refused outright for the next 5 seconds** — `REJ_BADSECRET`,
+before the token is even looked at. So a `REJ_BADSECRET` does not always mean
+the credential in front of you is wrong; it can mean the last handful were, and
+this attempt never got a hearing.
+
+The details that decide whether this is what you are looking at:
+
+- **Only an unrecognised token counts.** Every refusal past that point —
+  disabled source, nothing running to receive it, encrypted against a source
+  with no passphrase — has already proved the caller holds a real token, and
+  does not feed the counter.
+- **It is scoped by address, with the port stripped**, so every retry from one
+  encoder lands on the same counter. An encoder behind NAT shares that counter
+  with everything else behind the same address.
+- **One success clears it.** A peer that authenticates has its penalty deleted,
+  so an operator who fat-fingers a token and then fixes it carries nothing
+  forward.
+- **5 seconds, not a lockout.** This is a speed bump against automated guessing,
+  not something anyone has to go and clear.
+
+**At the default log level it is almost silent, which is the trap.** Crossing
+the threshold is logged once, at `WARN`:
+
+```
+level=WARN msg="srt: peer rate-limited after repeated wrong tokens" peer=203.0.113.7:51234
+```
+
+Every refusal made *during* the 5 seconds is `DEBUG` only, so unless you started
+with `-log debug` you see nothing:
+
+```
+level=DEBUG msg="srt connect refused: peer is rate-limited after repeated wrong tokens" peer=203.0.113.7:51234
+```
+
+The individual wrong tokens that got you there are `WARN`
+(`srt publish refused: token not recognised`), so the sequence to look for is a
+run of those followed by the rate-limit line.
+
+**Why this matters for the advice further down.** A rate-limited encoder
+produces server-side silence at the default log level, which
+[the macOS section](#macos-an-ipv4-publisher-times-out-and-nothing-is-logged--fixed)
+and [the loss section](#it-connects-on-some-attempts-and-not-others) both teach
+you to read as "no connection was ever offered". It is not the same thing, and
+the remedy is the opposite one: an encoder retrying on a stale token — a
+rotation it did not pick up, say — is feeding the counter with every reconnect,
+so turning auto-reconnect *on* makes it worse. Fix the token first; a peer that
+has stopped guessing is out of the penalty window 5 seconds later.
 
 ### It connects and then drops every few seconds
 
@@ -199,8 +271,14 @@ A handshake that never completed produces **no refusal at all** — nothing is
 logged, because nothing was refused. If instead you get a typed `REJ_` reason,
 loss is not your problem and [the refusal table](#the-publisher-is-refused) is.
 
+One thing produces the same silence without being loss: a peer being
+[rate-limited for repeated wrong tokens](#the-third-rej_badsecret-the-peer-is-rate-limited),
+whose refusals are logged at `DEBUG` only. Before you conclude the link is
+lossy, run the server with `-log debug` for one reconnect and check.
+
 **What to do:** retry, and turn on your encoder's auto-reconnect so it retries
-for you. At 10% loss a second attempt is very likely to succeed where the first
+for you — provided the token is right. On a stale token auto-reconnect is the
+wrong move, because every attempt feeds the rate limiter. At 10% loss a second attempt is very likely to succeed where the first
 did not, and once it does the connection will carry the stream.
 
 Raising SRT latency does not help here. Latency sizes the receive buffer on an
@@ -215,6 +293,48 @@ above, not this one.
 **Open its process log on the Monitoring page first.** The platform's own
 rejection is almost always there.
 
+### Nothing starts for up to 75 seconds after the ingest goes live
+
+**Destinations are held down until the ingest's channel layout has been
+measured**, and while they are held there is no process — so the Monitoring page
+has no log to show you, and the only account of it is in the server log.
+
+The reason is that a destination's routing matrix is written against the tracks
+the source is actually sending. Starting one on a guessed layout produces a
+destination that is live, green, and mixing the wrong things, which is a worse
+outcome than a destination that is thirty seconds late. So the probe runs first:
+every 3 seconds while bytes are flowing, each attempt bounded at 10 seconds.
+
+The first failure says so plainly:
+
+```
+level=WARN msg="ingest probe failed; destinations are held until a layout is measured" err="..." source=1
+```
+
+**The hold has two exits, and neither of them is "wait forever".** Five
+consecutive failures ends it, which is about 65 seconds on a stream where probes
+are actually being attempted back to back; and a 75-second wall-clock ceiling
+ends it for the case a consecutive-failure count cannot see, where probes are
+not being attempted at all. Whichever fires, destinations then start — but **on
+a runtime downmix rather than their configured routing matrices**:
+
+```
+level=WARN msg="ingest layout cannot be measured; starting destinations with a runtime downmix instead of their routing matrices" failures=5 err="..." source=1
+```
+
+That line is the whole explanation for the second symptom: destinations that
+came up carrying audio nobody routed. If you see it, the routing editor is not
+lying to you and nothing is misconfigured — the layout underneath it was never
+established. Fix the probe failure in `err` and the next successful reconcile
+puts the real matrices back.
+
+A source that has **already** been probed once is not held again if a later
+probe fails: the layout in use is simply the last one measured, and the log says
+so — `ingest probe failed; keeping the layout already measured` at `INFO`, then,
+after five in a row, `ingest probes keep failing; the layout in use is the last
+one measured and may no longer match the stream` at `WARN`. That second line is
+worth acting on if the source changed its track count.
+
 ### An upload is refused
 
 The Library probes every upload before it is stored under its final name, and
@@ -222,7 +342,7 @@ refuses anything ffprobe cannot read as media. Usually the message is ffprobe's
 own: `Invalid data found when processing input` means the file is not what its
 name says, and `moov atom not found` means an MP4 whose end is missing.
 
-Two refusals are polyemesis's own words rather than ffprobe's:
+Four refusals are polyemesis's own words rather than ffprobe's:
 
 - **"this file carries no video or audio stream"** — ffprobe read the container
   and found nothing playable in it. A renamed archive arrives this way.
@@ -231,6 +351,28 @@ Two refusals are polyemesis's own words rather than ffprobe's:
   even though ffprobe reports streams for them, because the streams belong to
   the files they NAME. A two-line, 44-byte text file would otherwise be stored
   with another video's codecs, resolution and duration shown as its own.
+- **"polyemesis cannot work out how long this file is"** — the container is one
+  we accept, but its length could neither be read from the file nor counted by
+  decoding it. It reaches you inside the generic wrapper, with the format
+  ffprobe saw and the reason the count failed:
+
+  ```
+  this file could not be read as media: polyemesis cannot work out how long this
+  file is (ffprobe read it as "matroska,webm" and reported no duration, and it
+  could not be counted: ...; re-save it as MP4 or MPEG-TS and upload it again)
+  ```
+
+  This is a verdict about the file, not a corrupt container — the remedy in the
+  message is the remedy.
+- **"ffprobe printed more about this file than polyemesis will read"** — ffprobe
+  ran fine and produced more than 8 MiB of JSON about one file, which no correct
+  media does. The reply would have to be parsed as a fragment, so it is refused
+  instead: `... (over 8388608 bytes)`.
+
+The last two arrive prefixed with **"this file could not be read as media: "**,
+which is the wrapper the upload path puts around any refusal it has no sentence
+of its own for. Do not read that prefix as ffprobe's words here — everything
+after the colon in those two is polyemesis's verdict.
 
 This is stricter than it used to be. The extension list was never a gate: an
 unrecognised extension was stored as `.bin` and listed as media anyway, so a
@@ -359,7 +501,11 @@ The startup log will not tell you: it prints ffmpeg's version and path and says
 nothing about ffprobe, and there is no "engine came up" line to look for. Grep
 the running server's log for `unchecked`.
 
-#### "polyemesis cannot use this container"
+#### "polyemesis does not accept this container format"
+
+The message in full is **"polyemesis does not accept this container format;
+re-save it as MP4 or MPEG-TS"**, which is what to search this page for if you
+are holding one.
 
 The file is real media in a format the upload path does not accept — the check
 is an allowlist of containers whose streams live in the bytes we were handed,
@@ -390,10 +536,92 @@ existing file — so the first restart died with "already exists" and every one
 after it did too. Current builds pick a fresh path per spawn and never overwrite
 existing footage.
 
+### Extra FFmpeg arguments are refused, or quietly are not applied
+
+A destination's expert boxes — **extra input arguments** and **extra output
+arguments**, `extraInputArgs` and `extraOutputArgs` over the API — take one
+pasted line each and split it into an argv. **No shell is ever involved**: the
+tokens go straight to `os/exec`. That is the whole reason for the rules below,
+because an argument list written as though a shell would read it does something
+other than what its author expects.
+
+What the splitter does:
+
+| Rule | Detail |
+| --- | --- |
+| Quoting | single or double quotes, which is how a space gets into one argument |
+| Backslash | **not an escape** — it is a path separator, so `C:\media\out` survives intact |
+| Rejected outside quotes | `;` `\|` `&` `$` `` ` `` `<` `>` |
+| Deliberately allowed | `*` `?` `[` `]` `{` `}` `~` `!` `#` — filter-graph syntax and the optional-stream suffix in `-map 0:a:1?` live in these |
+| Control characters | a NUL, CR or LF anywhere is refused outright |
+| Limits | 2000 characters and 64 arguments per box |
+
+So this is accepted, because the `&` is inside quotes:
+
+```
+-metadata "title=Rock & Roll" -muxdelay 0
+```
+
+and this is refused, naming the box it came from:
+
+```
+input args: contains the shell metacharacter "&". These arguments are handed to
+FFmpeg directly and never reach a shell, so "&" would be passed through as a
+literal character rather than doing what it does in a terminal. Remove it, or
+quote it if it really is part of a value.
+```
+
+The other four read the same way: `output args: has an unclosed '"' quote`,
+`input args: contains a control character`,
+`output args: too long (2431 characters, limit 2000)`, and
+`input args: has 71 arguments, limit 64`.
+
+**A stored value that no longer parses is dropped rather than failing the
+destination**, and this is the case worth knowing about, because nothing goes
+red. The API validates on the way in, so anything unparseable at spawn time was
+stored before the rules were what they are now. The destination starts on its
+generated command — live, green, and running without the arguments the operator
+believes are applied. The editor shows the stored text with the reason it will
+not apply, and the server log says it once per start:
+
+```
+level=WARN msg="ignoring unparseable expert arguments" dest="Twitch main" field=output err="has an unclosed '\"' quote"
+```
+
+`field` is `input` or `output`. Re-save the destination with the argument list
+corrected and it applies again.
+
 ### The platform accepts it and then disconnects
 
 - **Bitrate above what the platform allows.** The platform presets set limits
   the platform will actually take; a manual configuration can exceed them.
+- **An HEVC or AV1 ingest going to an RTMP destination.** Selecting HEVC or AV1
+  in OBS produces Enhanced RTMP, which polyemesis ingests happily — the RTMP
+  listener does not parse media — and video is then **stream-copied end to
+  end**, so HEVC in means HEVC out to every destination. FFmpeg muxes it into
+  FLV without complaint. Most mainstream RTMP ingests take H.264 only, so the
+  stream uploads cleanly and the platform drops it. This is the worst-shaped
+  failure available: it looks correct everywhere you can see. polyemesis says so
+  in the **server log**, the moment the ingest layout is known:
+
+  ```
+  level=WARN msg="the ingest video codec is not one this platform accepts; the stream will upload and be rejected" dest="Twitch main" platform=twitch ingestCodec=hevc accepts=h264
+  ```
+
+  It is a warning rather than a refusal because the video codec is not a setting
+  you picked in polyemesis — it is whatever the encoder sends, discovered at
+  probe time, long after every destination was saved. There is no save to
+  refuse. Support is recorded for four platforms: Twitch, Facebook and Kick take
+  `h264` only, YouTube takes `h264`, `hevc` and `av1` — so the same encoder
+  setting is a problem on three of them and not on the fourth, and no warning is
+  raised for the destination that is fine. For any other platform you get the
+  honest version rather than a guess:
+
+  ```
+  level=WARN msg="the ingest video codec is not H.264 and this platform's support is not recorded; if it is rejected, this is why" dest="Custom RTMP" platform=custom ingestCodec=av1
+  ```
+
+  The fix is in the encoder: send H.264.
 - **Keyframe interval.** Video is passed through untouched, so this is your
   *encoder's* setting, not a polyemesis one. Most platforms want 2 seconds.
 - **A backwards timestamp.** A platform drops the connection on one. If this
@@ -556,6 +784,18 @@ Publish the ingest port with the right protocol. SRT is UDP, RTMP is TCP:
 -p 8080:8080 -p 6000:6000/udp -p 1935:1935
 ```
 
+**If the ports are published and the UI is still unreachable, check whether you
+overrode `command:`.** The image's own `CMD` is
+`["-addr", ":8080", "-data", "/data"]`, and a `command:` in Compose replaces it
+outright rather than adding to it. The binary's built-in default for `addr` is
+`127.0.0.1:8080` — loopback, inside the container — so a `command:` that leaves
+`-addr` out publishes a port to a listener no packet from outside the container
+can reach. Carry both flags whenever you override it:
+
+```yaml
+command: ["-addr", ":8080", "-data", "/data", "-log", "debug"]
+```
+
 ### Recordings vanish on restart
 
 `/data` is not on a volume. One mount covers everything — the database, the key,
@@ -563,9 +803,31 @@ recordings and TLS material all live under it.
 
 ### Shutdown takes a while
 
-Up to about 30 seconds, and that is on purpose: recordings are finalised on the
-way down. `stop_grace_period: 30s` is set in the compose file. Forcing a shorter
-timeout truncates the recording you were making.
+Seconds, and that is on purpose: recordings are finalised on the way down. The
+supervisor gives each child 8 seconds to exit before escalating to `SIGKILL`
+(1 second for the children that write nothing — meters, loudness, silence), and
+a measured shutdown with three destinations live takes about 8.3s. Forcing a
+shorter timeout truncates the recording you were making, and a truncated
+Matroska file is exactly the right size on disk — nothing reports it, and you
+find out on playback.
+
+**The compose file's `stop_grace_period: 30s` is 5 seconds shorter than the
+process's own budget, not equal to it.** polyemesis works to a single shutdown
+deadline of **35 seconds**, sized as the systemd unit's `TimeoutStopSec=45` less
+a 10-second margin for systemd to observe a clean exit and for the last log
+lines to flush. A normal shutdown never approaches that, which is why 30s has
+been fine in practice — but a shutdown that actually used its full budget, one
+wedged child being the way to get there, is killed by Docker at 30s with five
+seconds of its own budget left.
+
+If you want Docker to cover the full budget, raise it to the same number the
+systemd unit uses:
+
+```yaml
+services:
+  polyemesis:
+    stop_grace_period: 45s
+```
 
 ---
 
