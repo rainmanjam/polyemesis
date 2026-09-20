@@ -8,10 +8,7 @@ its first tagged release.
 
 ## [Unreleased]
 
-> Heading date deliberately unset. `changelog-gate` matches the pushed tag
-> against the top **dated** heading, so this becomes `## [0.10.0] — YYYY-MM-DD`
-> on the day the tag is cut and not before. `[Unreleased]` must be empty at that
-> point, so promoting this block is the last edit before tagging.
+## [0.10.0] — 2026-09-20
 
 ### Added
 
@@ -4330,7 +4327,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/rainmanjam/polyemesis/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/rainmanjam/polyemesis/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/rainmanjam/polyemesis/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rainmanjam/polyemesis/compare/v0.6.0...v0.7.0
