@@ -8,7 +8,7 @@ its first tagged release.
 
 ## [Unreleased]
 
-## [0.10.0] — 2026-09-20
+## [0.10.0] — 2026-09-22
 
 ### Added
 
