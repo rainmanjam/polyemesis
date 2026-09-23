@@ -1603,6 +1603,79 @@ else
   bad "no rollback.sh was written beside update.sh (or no backup path was reported)"
 fi
 
+step "23. A docker re-run keeps the listener the operator moved, and says where it lives"
+#
+# Section 21 maps host N onto the server's DEFAULT 6000/1935. But an install
+# made before that fix published "7000:7000/udp", and the way an operator made
+# that work was to move the listener to 7000 under Settings -> Listeners.
+# Re-running install.sh with the same --srt-port then rewrote the mapping to
+# 7000:6000 -- onto a port the server had stopped listening on -- and the
+# ingest went dark. The container side of an existing file is the only record
+# this script can read of where the listener is now, so a re-run keeps it.
+rerun_compose() { # rerun_compose <dir> <srt> <rtmp> <existing compose body>
+  mkdir -p "$1"
+  printf '%s\n' "$4" > "$1/docker-compose.yml"
+  # Read by install.sh's install_docker_mode, which arrives through the eval.
+  # shellcheck disable=SC2034
+  ( load_install_defs || exit 1
+    INSTALL_DIR="$1"; MODE=docker; TLS_MODE=off
+    SRT_PORT="$2"; RTMP_PORT="$3"; ENABLE_RTMP=yes; COMPOSE_CMD=true
+    PATH="$ports_stub:$PATH" install_docker_mode >/dev/null 2>&1 )
+}
+old_compose='services:
+  polyemesis:
+    image: ghcr.io/rainmanjam/polyemesis:latest
+    ports:
+      - "8080:8080"
+      - "7000:7000/udp"
+      - "1936:1936"
+      - "80:80"'
+rerun_compose "$work/rerun-old" 7000 1936 "$old_compose"
+if grep -q '"7000:7000/udp"' "$work/rerun-old/docker-compose.yml" 2>/dev/null; then
+  ok "a re-run keeps an existing file's SRT container side (7000:7000/udp stays)"
+else
+  bad "a re-run rewrote the SRT mapping away from the listener the operator moved: $(grep -h '/udp' "$work/rerun-old/docker-compose.yml" 2>/dev/null | tr -d ' ')"
+fi
+if grep -q '"1936:1936"' "$work/rerun-old/docker-compose.yml" 2>/dev/null; then
+  ok "and its RTMP container side (1936:1936 stays)"
+else
+  bad "a re-run rewrote the RTMP mapping: $(grep -hE '"[0-9]+:[0-9]+"' "$work/rerun-old/docker-compose.yml" 2>/dev/null | tr -d ' ' | tr '\n' ' ')"
+fi
+# A changed HOST port still lands on the kept container side.
+new_compose='services:
+  polyemesis:
+    ports:
+      - "8080:8080"
+      - "6001:6000/udp"
+      - "1936:1935"'
+rerun_compose "$work/rerun-new" 6002 1937 "$new_compose"
+if grep -q '"6002:6000/udp"' "$work/rerun-new/docker-compose.yml" 2>/dev/null \
+   && grep -q '"1937:1935"' "$work/rerun-new/docker-compose.yml" 2>/dev/null; then
+  ok "a new host port on a re-run lands on the container side the file already had"
+else
+  bad "a re-run with new host ports did not keep the container side: $(grep -hE '"[0-9]+:[0-9]+(/udp)?"' "$work/rerun-new/docker-compose.yml" 2>/dev/null | tr -d ' ' | tr '\n' ' ')"
+fi
+# A file this script cannot read a mapping from falls back to the defaults.
+rerun_compose "$work/rerun-junk" 6001 1936 'services: {}'
+if grep -q '"6001:6000/udp"' "$work/rerun-junk/docker-compose.yml" 2>/dev/null; then
+  ok "an existing file with no SRT mapping falls back to the server's default 6000"
+else
+  bad "an unreadable existing file did not fall back to the default container side"
+fi
+
+# And the summary says where the listener lives in docker mode too, and that
+# moving it means editing the container side of the mapping. It used to print
+# that caveat only in binary mode.
+# Read by install.sh's print_summary, which arrives through the eval.
+# shellcheck disable=SC2034
+out="$( ( load_install_defs || exit 1
+  MODE=docker; TLS_MODE=off; INSTALL_DIR=/opt/polyemesis; COMPOSE_CMD="docker compose"
+  print_summary ) 2>&1 )"
+case "$out" in
+  *"Settings -> Listeners"*"docker-compose.yml"*) ok "the docker summary says a moved listener needs the compose mapping's container side changed" ;;
+  *) bad "the docker summary does not say that Settings -> Listeners and docker-compose.yml must agree" ;;
+esac
+
 # ------------------------------------------------------------- vacuity guard
 #
 # THE VERDICT ABOVE IS DERIVED FROM COUNTERS, AND COUNTERS CANNOT SEE A STEP

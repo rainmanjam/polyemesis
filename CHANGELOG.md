@@ -23,7 +23,11 @@ its first tagged release.
   opened a firewall port and printed an address nothing listened on; they are
   now refused with a pointer to Settings -> Listeners. In docker mode the chosen
   host port is published onto the server's 6000/1935 inside the container,
-  instead of `N:N`, which published a port nothing inside listened on.
+  instead of `N:N`, which published a port nothing inside listened on. A
+  docker re-run keeps the container side an existing `docker-compose.yml`
+  already has, so an install that made `7000:7000/udp` work by moving the
+  listener to 7000 is not rewritten to `7000:6000/udp`; the docker summary now
+  says that moving the listener means changing that container side too.
 - **The docker-mode `update.sh` refused every real upgrade.** Its backup check
   unpacked the archive into a root-owned 0700 directory and bound it into the
   image read-only; the image runs as uid 10001 and SQLite cannot open a WAL

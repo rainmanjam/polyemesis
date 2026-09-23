@@ -66,6 +66,11 @@ RTMP_PORT=1935
 # Go source by scripts/acceptance-install.sh.
 SERVER_SRT_PORT=6000
 SERVER_RTMP_PORT=1935
+# The container side docker mode actually publishes onto: the defaults above on
+# a first install, or what an existing docker-compose.yml already had on a
+# re-run (existing_container_ports).
+CONTAINER_SRT_PORT="$SERVER_SRT_PORT"
+CONTAINER_RTMP_PORT="$SERVER_RTMP_PORT"
 
 MODE=""            # docker | binary
 TLS_MODE="off"     # off | selfsigned | acme
@@ -1139,6 +1144,52 @@ refuse_unappliable_ports() {
   fi
 }
 
+# existing_container_ports reads the container side of the SRT and RTMP
+# mappings out of a docker-compose.yml this script wrote before, into
+# CONTAINER_SRT_PORT/CONTAINER_RTMP_PORT. With no file, or no mapping it can
+# read, they stay on the server's defaults.
+#
+# A RE-RUN MUST NOT MOVE THE CONTAINER SIDE. Installers before the host:server
+# fix published `--srt-port 7000` as "7000:7000/udp", onto a port nothing in the
+# container listened on, and the fix an operator found was to move the listener
+# to 7000 under Settings -> Listeners. Re-running with the same flag then wrote
+# "7000:6000/udp" -- onto the port the server had just been told to leave -- and
+# the ingest went dark with nothing said. The listener lives in the database,
+# which this script cannot read without stopping the container, so the mapping
+# already in the file is the best record there is of where it is now: the one
+# the operator made work.
+#
+# Read in the shape write-out below produces: the SRT entry is the one ending
+# /udp, and the RTMP entry is the tcp mapping written directly after it (80:80,
+# the acme challenge, is never it). A hand-edited file in some other shape
+# falls back to the defaults for whatever it cannot place.
+existing_container_ports() { # existing_container_ports <compose-file>
+  local f="$1" found
+  [ -f "$f" ] || return 0
+  found="$(awk '
+    /^[[:space:]]*-[[:space:]]*"?[0-9.:]+(\/(udp|tcp))?"?[[:space:]]*$/ {
+      s = $0; gsub(/[[:space:]"-]/, "", s)
+      proto = "tcp"; if (s ~ /\/udp$/) proto = "udp"
+      sub(/\/(udp|tcp)$/, "", s)
+      n = split(s, p, ":"); if (n < 2) next
+      if (proto == "udp") { if (srt == "") { srt = p[n]; after = 1 } ; next }
+      if (after && rtmp == "" && !(p[n-1] == 80 && p[n] == 80)) rtmp = p[n]
+      after = 0
+    }
+    END { print srt " " rtmp }' "$f")"
+  local srt="${found%% *}" rtmp="${found#* }"
+  if [[ "$srt" =~ ^[0-9]+$ ]] && [ "$srt" -ge 1 ] && [ "$srt" -le 65535 ]; then
+    CONTAINER_SRT_PORT="$srt"
+  fi
+  if [[ "$rtmp" =~ ^[0-9]+$ ]] && [ "$rtmp" -ge 1 ] && [ "$rtmp" -le 65535 ]; then
+    CONTAINER_RTMP_PORT="$rtmp"
+  fi
+  if [ "$CONTAINER_SRT_PORT" != "$SERVER_SRT_PORT" ] || [ "$CONTAINER_RTMP_PORT" != "$SERVER_RTMP_PORT" ]; then
+    info "keeping the existing mapping's container side: SRT udp/${CONTAINER_SRT_PORT}, RTMP tcp/${CONTAINER_RTMP_PORT}"
+    info "(it has to match Settings -> Listeners; a new install listens on ${SERVER_SRT_PORT}/${SERVER_RTMP_PORT})"
+  fi
+}
+
 # --------------------------------------------------------------- validation
 
 # resolve_path canonicalizes a path with GNU realpath -m, which tolerates
@@ -1606,6 +1657,9 @@ install_docker_mode() {
     tls_yaml
   } > "$INSTALL_DIR/config.yaml"
 
+  # Read BEFORE the file is rewritten below: it is the only record this script
+  # has of where the listeners are now. See existing_container_ports.
+  existing_container_ports "$INSTALL_DIR/docker-compose.yml"
   preserve_existing "$INSTALL_DIR/docker-compose.yml"
   {
     printf 'services:\n'
@@ -1625,9 +1679,11 @@ install_docker_mode() {
     # the host side is what the operator chose. This was "N:N", which for any
     # N but the default published a port nothing inside the container listened
     # on. If the listener is later moved under Settings -> Listeners, the
-    # container side here has to follow it.
-    printf '      - "%s:%s/udp"\n' "$SRT_PORT" "$SERVER_SRT_PORT"
-    [ "$ENABLE_RTMP" = yes ] && printf '      - "%s:%s"\n' "$RTMP_PORT" "$SERVER_RTMP_PORT"
+    # container side here has to follow it -- nothing makes it follow, so a
+    # re-run keeps whatever container side the existing file already had
+    # (CONTAINER_SRT_PORT/CONTAINER_RTMP_PORT, from existing_container_ports).
+    printf '      - "%s:%s/udp"\n' "$SRT_PORT" "$CONTAINER_SRT_PORT"
+    [ "$ENABLE_RTMP" = yes ] && printf '      - "%s:%s"\n' "$RTMP_PORT" "$CONTAINER_RTMP_PORT"
     [ "$TLS_MODE" = acme ] && printf '      - "80:80"\n'
     printf '    volumes:\n'
     printf '      - polyemesis-data:/data\n'
@@ -2913,6 +2969,13 @@ print_summary() {
   if [ "$MODE" != docker ]; then
     echo "  (the server's SRT port is set under Settings -> Listeners; if it was changed"
     echo "  there, that number is the one to use, and the one to open in the firewall)"
+  else
+    # The docker half of the same caveat, which used to go unsaid: the host port
+    # above is published onto the container port the server listens on, and
+    # nothing moves that mapping when the listener moves.
+    echo "  (inside the container the server listens on udp/${CONTAINER_SRT_PORT}; if you move"
+    echo "  it under Settings -> Listeners, change the container side of the SRT mapping in"
+    echo "  ${INSTALL_DIR}/docker-compose.yml to match and run \`${COMPOSE_CMD} up -d\`)"
   fi
   echo "  The Sources page shows the token. It is the address, so every source"
   echo "  shares this one port — adding another needs no new port and no restart."
