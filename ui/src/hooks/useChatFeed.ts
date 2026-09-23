@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { api } from "@/lib/api";
+import { liveSocketUrl } from "@/lib/liveSocket";
+import { useLiveData } from "@/hooks/useLiveData";
 import type {
   ChatLimit,
   ChatMessage,
@@ -70,6 +72,12 @@ let refs = 0;
 let socket: WebSocket | null = null;
 let retries = 0;
 let reconnectTimer: number | undefined;
+/** Which programme the socket is opened for. `undefined` is "not answered
+ *  yet" and opens nothing: /api/v1/ws refuses an unnamed upgrade on a
+ *  multi-source install, and an unnamed socket opened in that window is how
+ *  this feed used to sit on "socket offline" for the life of the tab. `null`
+ *  is the answered "this install has no sources", which the route accepts. */
+let programme: number | null | undefined;
 /** Dedupe across the socket and the initial fetch: the two overlap by exactly
  *  the messages that arrived while the fetch was in flight. */
 let seen = new Set<string>();
@@ -175,16 +183,21 @@ async function loadHistory() {
 }
 
 function openSocket() {
-  if (socket || refs === 0) return;
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${proto}//${location.host}/api/v1/ws`);
+  if (socket || refs === 0 || programme === undefined) return;
+  const ws = new WebSocket(liveSocketUrl(programme));
   socket = ws;
 
+  // Every handler first asks whether this is still THE socket. A socket
+  // retired by a programme switch closes asynchronously, and its onclose would
+  // otherwise null out the replacement and schedule a reconnect aimed at the
+  // programme the operator had just left.
   ws.onopen = () => {
+    if (socket !== ws) return;
     retries = 0;
     emit({ connected: true });
   };
   ws.onmessage = (ev) => {
+    if (socket !== ws) return;
     let msg: { type: string; data: unknown };
     try {
       msg = JSON.parse(ev.data as string) as { type: string; data: unknown };
@@ -205,6 +218,7 @@ function openSocket() {
     }
   };
   ws.onclose = () => {
+    if (socket !== ws) return;
     socket = null;
     emit({ connected: false });
     if (refs === 0) return;
@@ -227,12 +241,30 @@ function acquire() {
   }
 }
 
+/** Point the socket at a programme, reopening it if it was aimed elsewhere. */
+function aim(next: number | null) {
+  if (programme === next) return;
+  programme = next;
+  window.clearTimeout(reconnectTimer);
+  retries = 0;
+  const ws = socket;
+  socket = null;
+  if (ws) {
+    ws.close();
+    emit({ connected: false });
+  }
+  openSocket();
+}
+
 function release() {
   refs--;
   if (refs > 0) return;
   window.clearTimeout(reconnectTimer);
   const ws = socket;
   socket = null;
+  // Forgotten with the socket: the next mount waits for its own answer rather
+  // than reopening on whatever programme the last one was looking at.
+  programme = undefined;
   ws?.close();
 }
 
@@ -244,10 +276,17 @@ function subscribe(l: () => void) {
 /** The shared chat feed. Refcounted: the first component to mount opens the
  *  socket, the last to unmount closes it. */
 export function useChatFeed() {
+  // The programme comes from LiveDataProvider's one resolution rule, not a
+  // second one computed here -- two rules is how two panes come to describe
+  // different shows.
+  const { programme: current, programmeKnown } = useLiveData();
   useEffect(() => {
     acquire();
     return release;
   }, []);
+  useEffect(() => {
+    if (programmeKnown) aim(current);
+  }, [programmeKnown, current]);
   const state = useSyncExternalStore(subscribe, () => feed);
 
   const reload = useCallback(() => {

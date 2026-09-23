@@ -3,7 +3,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
+import type { ReactNode } from "react";
+
+import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
 import { useChatFeed } from "./useChatFeed";
+
+/** The chat socket waits for LiveDataProvider to name a programme; a
+ *  single-source answer is enough for this test's purpose. */
+const live = { programme: 1, programmeKnown: true } as LiveData;
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <LiveDataContext.Provider value={live}>{children}</LiveDataContext.Provider>
+);
 
 /* #13/#21, the chat half: identical hazard to LiveDataProvider's, and fixed
  * the same way. `connected` cannot say a frame failed to parse -- the socket
@@ -55,7 +65,7 @@ describe("useChatFeed, on a frame the socket cannot be parsed", () => {
   it("flips frameError true and keeps it true past a good frame", async () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
 
-    const { result, unmount } = renderHook(() => useChatFeed());
+    const { result, unmount } = renderHook(() => useChatFeed(), { wrapper });
 
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const ws = FakeWebSocket.instances[0];

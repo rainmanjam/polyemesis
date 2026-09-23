@@ -8,6 +8,16 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Live chat works on an install with more than one source.** The chat socket
+  opened `/api/v1/ws` without `?source=`, which the server refuses with
+  `400 source_required` once there are two programmes, so the chat page sat on
+  "socket offline" and reconnected forever while its scrollback loaded fine.
+  It now names the programme the console is following, waits until that is
+  known, and moves when the operator switches. Every socket URL is built by
+  one helper, and a test refuses any `new WebSocket(` that bypasses it.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added
