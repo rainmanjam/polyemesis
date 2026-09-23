@@ -61,6 +61,7 @@
   "auto.evAudioClipping": "Audioübersteuerung",
   "auto.evClipCaptured": "Clip aufgenommen",
   "auto.evDebugExported": "Diagnosepaket exportiert",
+  "auto.evAlertRuleChanged": "Alarmregel geändert",
   "auto.evDiskLow": "Speicherplatz wird knapp",
   "auto.evDiskRecovered": "Speicherplatz wieder verfügbar",
   "auto.evIngestLost": "Eingang verloren",

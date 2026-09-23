@@ -182,6 +182,7 @@ const EVENT_LABELS: Record<string, TranslationKey> = {
   "upgrade.staged": "auto.evUpgradeStaged",
   "upgrade.rolled_back": "auto.evUpgradeRolledBack",
   "debug.exported": "auto.evDebugExported",
+  "alerts.rule_changed": "auto.evAlertRuleChanged",
 };
 
 /** The stored event name is the fallback: an unknown type renders as itself

@@ -61,6 +61,7 @@
   "auto.evAudioClipping": "Audio clipping",
   "auto.evClipCaptured": "Clip captured",
   "auto.evDebugExported": "Debug bundle exported",
+  "auto.evAlertRuleChanged": "Alert rule changed",
   "auto.evDiskLow": "Disk running low",
   "auto.evDiskRecovered": "Disk recovered",
   "auto.evIngestLost": "Ingest lost",

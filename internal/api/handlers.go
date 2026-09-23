@@ -1141,6 +1141,14 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("metrics: recordings usage unavailable", "err", err)
 	}
 
+	// The same install-wide sums GET /alerts/meta serves, so the scrape and
+	// the automation page cannot disagree. Only with a manager: without one
+	// there is no notifier, and zeros would read as "nothing has failed".
+	if s.mgr != nil {
+		st := s.alertStats()
+		snap.Alerts = &metrics.AlertDeliveries{Sent: st.Sent, Failed: st.Failed, LastSent: st.LastSent}
+	}
+
 	sys := s.hostSystem()
 	snap.Host = metrics.Host{
 		CPUPercent:     sys.CPUPercent,
@@ -1237,6 +1245,36 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 			in.BitrateKbps = b[len(b)-1].Kbps
 		}
 		out = append(out, in)
+	}
+
+	// AND EVERY PROGRAMME WITH NO ENGINE, as stopped. Sync logs and carries on
+	// when one source's engine fails to build or start, so the walk above
+	// could leave a configured programme with no series at all -- and a
+	// series that does not exist cannot fire `ingest_up == 0`, nor the
+	// `ingest_bitrate == 0 and on() sources > 0` alert MONITORING.md
+	// recommends. The same sweep DestinationStatuses does for that
+	// programme's destinations (#540), for its ingest.
+	rows, err := s.store.ListSources()
+	if err != nil {
+		// The engines' answer is still worth returning; see
+		// DestinationStatuses for the same choice.
+		s.log.Warn("metrics: cannot list sources to check for programmes with no engine", "err", err)
+		return out
+	}
+	seen := make(map[int64]bool, len(out))
+	for _, in := range out {
+		seen[in.ID] = true
+	}
+	for _, src := range rows {
+		if seen[src.ID] {
+			continue
+		}
+		out = append(out, metrics.Ingest{
+			Process:  metrics.Process{State: string(supervisor.StateStopped)},
+			ID:       src.ID,
+			Name:     src.Name,
+			NoEngine: true,
+		})
 	}
 	return out
 }

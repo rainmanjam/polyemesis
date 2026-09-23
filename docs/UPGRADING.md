@@ -391,6 +391,46 @@ say when the address came from `--addr`.
 the unit and `config.yaml` with the port you answer, so answer with the port you
 use. After that, change the port only in `config.yaml`.
 
+### Upgrading past 0.10.0 (unreleased, on `main`): alert keys name their programme
+
+> Not yet in a tag, like the note above.
+
+**What changed.** An alert rule's `json` payload gives each alert a `key`.
+Three of them now end in the programme's id: `ingest` is now `ingest:<id>`,
+`failover` is now `failover:<id>`, and `clipping:track<N>` is now
+`clipping:track<N>:<id>`. Their titles now end in the programme's name, and
+every stream condition has `sourceId` and `sourceName` fields.
+`disk.low` and `disk.recovered` keep the key `disk` and are now sent once per
+install, not once per programme.
+
+**What you might need to do.** Only if a script that receives alerts matches
+on `key`: match on the prefix (`ingest:`), or on `type`, which has not
+changed. Discord and Slack rules need nothing.
+
+**A new event, `alerts.rule_changed`.** Creating, editing or deleting an alert
+rule now raises it. A rule with no event boxes ticked receives every type, so
+it starts receiving this one too; raise that rule's severity floor to
+`critical` if you want only deletions.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): health reports a programme that is not running
+
+> Not yet in a tag, like the notes above.
+
+**What changed.** `GET /api/v1/health` used to answer `"status": "ok"` when
+some sources had an engine and some did not, because one running engine was
+enough. It now answers `"status": "degraded"` in that state, and the `engine`
+check's detail says how many are running, for example
+`"1 of 2 source(s) running"`. The HTTP code stays `200`: a restart would not
+bring a programme back whose engine could not be built, so this is not a
+reason for an orchestrator to kill the process.
+
+**What you might need to do.** Only if an external monitor alerts when
+`status` is not `ok`: it now alerts while a programme is down, which is the
+intent. Look at the `engine` check's detail to see which count is short, and at
+the server log for the `cannot build engine for source` or
+`cannot start engine for source` line that names it. A monitor that alerts on
+the HTTP code alone is unchanged.
+
 ### Upgrading to 0.10.0
 
 **No schema change.** `internal/db` is identical between `v0.9.0` and

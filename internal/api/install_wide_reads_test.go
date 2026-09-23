@@ -74,6 +74,49 @@ func TestAlertCountersCoverEveryProgrammesNotifier(t *testing.T) {
 	}
 }
 
+// A DELETED PROGRAMME TOOK ITS DELIVERIES OUT OF THE TOTAL.
+//
+// The install's counters are a sum over the engines that exist, and the scrape
+// exports that sum as polyemesis_alert_deliveries_total. Deleting a programme
+// dropped its share: the counter fell without reaching zero, which Prometheus
+// reads as a reset, counting everything that remained as fresh increase -- so
+// an alert on increase(...{result="failed"}) fired with no new failure.
+//
+// Mutation: drop `out = s.mgr.RetiredAlertStats()` from alertStats. Observed
+// to fail with "queued fell from".
+func TestDeletingAProgrammeDoesNotLowerTheAlertCounters(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	second := secondProgramme(t, s)
+	eng := s.engineForSource(&second.ID)
+	if eng == nil {
+		t.Fatalf("no engine for source %d, which is running", second.ID)
+	}
+	for i := 0; i < 3; i++ {
+		eng.Alerts().Publish(alerts.Event{
+			Type: alerts.TypeIngestLost, Title: "studio b", Key: itoa(int64(i)),
+		})
+	}
+	before := metaStats(t, h, sign)
+
+	if err := s.store.DeleteSource(second.ID); err != nil {
+		t.Fatalf("DeleteSource: %v", err)
+	}
+	if err := s.mgr.Sync(); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if s.engineForSource(&second.ID) != nil {
+		t.Fatal("the deleted programme still has an engine, so nothing was retired")
+	}
+
+	// Engines keep publishing their own events, so the check is "did not
+	// fall", not "equal".
+	if after := metaStats(t, h, sign); after.Queued < before.Queued {
+		t.Errorf("queued fell from %d to %d when a programme was deleted: the scrape's "+
+			"counters read to Prometheus as a reset, and increase() counts every "+
+			"delivery that remains as new", before.Queued, after.Queued)
+	}
+}
+
 // metaStats is the delivery counters as GET /alerts/meta reports them.
 func metaStats(t *testing.T, h http.Handler, sign func(*http.Request)) alerts.Stats {
 	t.Helper()

@@ -61,6 +61,7 @@
   "auto.evAudioClipping": "Clipping audio",
   "auto.evClipCaptured": "Clip catturato",
   "auto.evDebugExported": "Pacchetto di debug esportato",
+  "auto.evAlertRuleChanged": "Regola di avviso modificata",
   "auto.evDiskLow": "Disco in esaurimento",
   "auto.evDiskRecovered": "Disco ripristinato",
   "auto.evIngestLost": "Ingresso perso",

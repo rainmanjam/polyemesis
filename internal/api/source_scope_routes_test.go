@@ -302,6 +302,11 @@ var defaultEngineSites = map[string]string{
 		"/system cannot advertise an ingest port with no listener behind it. Its " +
 		"one caller now accepts ?source= and labels which programme it answered " +
 		"for (#551).",
+	"farewell": "DELETE /alerts/rules/{id}'s message to the rule being " +
+		"deleted. It borrows a NOTIFIER to send one message to one stored rule, " +
+		"which is handleTestAlertRule's reach for handleTestAlertRule's reason: " +
+		"the rule is install-wide and the message goes to its endpoint whichever " +
+		"notifier carries it. With no engine it builds a notifier of its own.",
 	"handleTestAlertRule": "POST /alerts/rules/{id}/test. The reach chooses which " +
 		"NOTIFIER sends, and that is install-wide by construction: there is one " +
 		"alert_rules table, every engine's notifier reads it, and the rule under " +

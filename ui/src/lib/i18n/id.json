@@ -61,6 +61,7 @@
   "auto.evAudioClipping": "Clipping audio",
   "auto.evClipCaptured": "Klip ditangkap",
   "auto.evDebugExported": "Paket awakutu diekspor",
+  "auto.evAlertRuleChanged": "Aturan peringatan diubah",
   "auto.evDiskLow": "Disk menipis",
   "auto.evDiskRecovered": "Disk pulih",
   "auto.evIngestLost": "Masukan hilang",

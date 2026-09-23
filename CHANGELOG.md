@@ -69,6 +69,39 @@ its first tagged release.
   placeholder — sealing `[redacted]` as the backup key — and nothing failed
   until a failover needed it. Every such field now refuses a value containing
   the placeholder with a `400` that names the field.
+- **Alert delivery failures are on the metrics endpoint.** A webhook that
+  stopped accepting deliveries showed only on the Automation page.
+  `/api/v1/metrics` now has `polyemesis_alert_deliveries_total{result="sent"|"failed"}`
+  and `polyemesis_alert_last_success_timestamp_seconds`, and MONITORING.md
+  gives the Prometheus rule for "deliveries are failing and none is getting
+  through". Both counters, and the Automation page's, keep a deleted
+  programme's deliveries, so removing a programme never lowers them and
+  Prometheus does not mistake the drop for a counter reset.
+
+### Fixed
+
+- **A programme whose engine failed to start is no longer invisible.** When
+  one source's engine failed to build or start, the server logged it and kept
+  the others on air, which is right, but nothing reported it afterwards.
+  `GET /api/v1/health` said `ok` for "1 of 2 source(s) running", and
+  `/api/v1/metrics` emitted no ingest series for that programme, so
+  `polyemesis_ingest_up == 0` and the bitrate alert in MONITORING.md could not
+  fire for it. Health now answers `degraded` (still `200`) with the count, the
+  scrape reports the programme as a stopped ingest, and a new gauge,
+  `polyemesis_source_engine_up`, is 0 for it.
+
+- **Alerts say which programme they are about, and a filling disk alerts
+  once.** On an install with more than one programme, `ingest.lost`,
+  `failover.switched` and `audio.clipping` read the same for every programme:
+  same title, same `key`, and nothing saying which one. A receiver that
+  deduplicated on `key` dropped the second programme's outage as a repeat.
+  They now carry the programme's id in `key` (`ingest:1`), its name in the
+  title, and `sourceId` and `sourceName` fields. `disk.low` and
+  `disk.recovered` were sent once per programme, because every programme
+  measures the same recordings volume; they are now sent once per install,
+  with a second `disk.low` only if a later programme sees the recorder halt
+  after the first reported a warning.
+
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer
   tracks was tested with a 5 s gap. In the field, with a 30 s outage, track 2
@@ -593,6 +626,13 @@ its first tagged release.
   a stale count), and a destination in `testing` or `live` needs
   `{"confirm": true}`. The console sends both. API scripts that delete sources
   must change; see `docs/UPGRADING.md`.
+- **Changing or deleting an alert rule is now recorded.** Creating, editing
+  or deleting a rule wrote no log line and raised nothing, so deleting the only
+  rule left no trace and the channel just went quiet. Each change now writes an
+  `INFO` line (name, redacted URL, client address) and raises a new event,
+  `alerts.rule_changed`. A deleted rule is sent that event itself before it
+  stops receiving anything.
+
 - **Upgrading from 0.6.x no longer leaves plaintext stream keys in
   `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
   and every release before 0.7.0 ran without it: a real 0.6.0 install with five

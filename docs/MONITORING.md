@@ -33,7 +33,8 @@ machine-wide numbers, not the process's. Three scalars round the exposition out:
 `polyemesis_build_info`, always 1 and carrying a `version` label to join onto a
 dashboard or to alert on after a staged upgrade went somewhere unexpected;
 `polyemesis_uptime_seconds`; and `polyemesis_recording_files`, the segment count
-beside the byte counts.
+beside the byte counts. The alert rules' own delivery outcome is there too —
+see [When the alerts themselves stop arriving](#when-the-alerts-themselves-stop-arriving).
 
 **The endpoint requires authentication.** It accepts an API token, which is what
 a scraper should use — create one under *Settings → API tokens* and point
@@ -104,6 +105,10 @@ require restarting the server.
   can run several, and `polyemesis_ingest_up`, `polyemesis_ingest_state`,
   `polyemesis_ingest_bitrate_bits_per_second`, `polyemesis_ingest_restarts_total`
   and all five `polyemesis_relay_*` families carry one series per programme.
+  **Every programme in the sources table has these series, including one the
+  server has nothing running for**: a programme whose engine failed to build or
+  start is reported as a stopped ingest, and `polyemesis_source_engine_up` is 0
+  for it and 1 for every programme that has an engine.
 - `polyemesis_destination_info` carries `kind`, `platform` and `source_id` for
   joining. `source_id` is the `id` of the programme's ingest series, so it is how
   a destination query asks about its own programme's ingest (see the slow-output
@@ -138,7 +143,17 @@ rate(polyemesis_destination_output_seconds_total[1m]) < 0.9
       min_over_time(polyemesis_ingest_bitrate_bits_per_second[1m]) > 0,
       "source_id", "$1", "id", "(.*)"))                     # moving, but slowly
 polyemesis_recording_free_bytes < 20e9                      # disk filling up
+polyemesis_source_engine_up == 0                            # a programme the server is not running
 ```
+
+**The last is never normal.** `polyemesis_ingest_up` is 0 for a listener
+waiting on its streamer too, which is ordinary between shows.
+`polyemesis_source_engine_up` is 0 only when a configured programme has no
+engine at all: its ingest failed to build or to start, the server logged it and
+kept the other programmes on air. Nothing is receiving that programme's
+stream and no built-in alert can fire for it, because the alert watcher runs
+inside the engine. `GET /api/v1/health` reports the same state as `degraded`
+with a `200`, and its `engine` check says `N of M source(s) running`.
 
 The second is the one worth alerting on first: a destination that is enabled but
 not up is a platform you think you are streaming to and are not.
@@ -261,6 +276,34 @@ not retried at all. Raising the number is how you tolerate an endpoint that is
 down rather than slow; the backoff curve underneath is not exposed, and a saved
 change is applied to the running notifier of every programme without a restart.
 
+#### When the alerts themselves stop arriving
+
+An endpoint that refuses every delivery (a rotated Slack URL, a deleted
+Discord channel) cannot tell you so through itself. The *Automation → Alerts*
+page shows the failure count, but only to somebody who opens it. The scrape
+carries it too, summed over every programme:
+
+- `polyemesis_alert_deliveries_total{result="sent"}` and `{result="failed"}`
+  count deliveries, not events: one delivery carries everything coalesced into
+  it, and a failure is counted once the retry budget above is spent. A
+  deleted programme's deliveries stay in the total, so removing one never
+  lowers it; the count starts again from 0 only when the server process
+  restarts, which `increase()` and `rate()` treat as a counter reset.
+- `polyemesis_alert_last_success_timestamp_seconds` is the Unix time of the
+  newest delivery that succeeded. It is **absent** until one has, not 0: a 0
+  would make every quiet install look decades overdue.
+
+The alert to write on it is the failure, not the silence, because a quiet
+night sends nothing either:
+
+```promql
+increase(polyemesis_alert_deliveries_total{result="failed"}[30m]) > 0
+  and increase(polyemesis_alert_deliveries_total{result="sent"}[30m]) == 0
+```
+
+That is "deliveries are being attempted and none is getting through". Route it
+somewhere other than the webhooks it is about.
+
 #### A receiver on your own network
 
 The SSRF guard refuses a rule whose URL points at a non-public address, and it
@@ -336,8 +379,8 @@ The `json` format's envelope:
 
 **`alerts` is an array, and a receiver written as though it holds one item
 silently ignores every coalesced sibling.** Coalescing groups by *subject*:
-`key` is the subject — `ingest`, `disk`, `destination:3`, `destination:3:speed`,
-`loudness:3`, `clipping:track1` — and `count` is how many times it was raised
+`key` is the subject — `ingest:1`, `disk`, `destination:3`, `destination:3:speed`,
+`loudness:3`, `failover:1`, `clipping:track1:1` — and `count` is how many times it was raised
 inside the debounce window, so one delivery routinely carries several unrelated
 subjects at once. At most ten items fit; `overflow` is how many subjects did
 not, stated rather than quietly lost — it is `omitempty`, so the key is absent
@@ -352,6 +395,21 @@ function of its delivery and comparable in a test — so in a single-item payloa
 `sentAt` and that item's `lastAt` are always the identical timestamp, as above.
 It cannot be subtracted from anything to measure delivery lag; use your
 receiver's own arrival time for that.
+
+**Every stream condition names its programme.** Each programme is watched
+separately, so on an install with more than one, `ingest.lost`,
+`failover.switched` and `audio.clipping` would otherwise read the same for every
+one of them. Their `key` ends in the programme's id (`ingest:1`, `failover:1`,
+`clipping:track1:1`), their `title` ends in its name (`Ingest lost: Studio B`),
+and every stream condition carries `sourceId` and `sourceName` in `fields`.
+`disk.low` and `disk.recovered` are the exception: the recordings volume
+belongs to the whole install, so they carry no programme, keep the key `disk`,
+and are delivered **once per install** however many programmes are running:
+one `disk.low` when the first programme sees the volume fill (and another if a
+later one sees the recorder halt, so a `critical` floor still hears it), and
+one `disk.recovered` when the last programme that saw it low sees it clear.
+Deleting a programme while the disk is low does not use up the alert: the next
+fill is reported as usual.
 
 `text` and `fields` are omitted when empty, and `fields` is an object rather
 than a list because the consumer of a generic webhook is a script and a script
@@ -474,7 +532,7 @@ the API, under `lifecycle`.
 
 ### Security and configuration events
 
-Ten of the subscribable types are not about the stream. They are about the
+Eleven of the subscribable types are not about the stream. They are about the
 server itself, and they answer one question: *was that me?*
 
 | Event | Severity | Fires when |
@@ -489,9 +547,11 @@ server itself, and they answer one question: *was that me?*
 | `upgrade.rolled_back` | `critical` | the previous binary was restored. Names no version — a rollback restores whatever this box ran before, and inventing a tag would be a guess printed as a fact |
 | `debug.exported` | `critical` | a debug bundle was downloaded, with how many log records and whether the capture was truncated |
 | `clip.captured` | `info` | a clip was cut from the replay buffer |
+| `alerts.rule_changed` | `warning`, or `critical` for a delete | an alert rule was created, edited or deleted; names the rule, never its URL. **A deleted rule is sent this event itself**, on its way out, if it was enabled and would have wanted it |
 
 **The five `critical` ones are what belong on a phone**, and they are one story
-rather than five. Changing the password evicts every existing session; minting a
+rather than five. (Deleting an alert rule is `critical` too; it is covered
+below.) Changing the password evicts every existing session; minting a
 token creates a credential that survives the password change; replacing the
 binary creates something that survives the password change, the token revocation
 **and** the restart — and the restart is what arms it. A rollback is a binary
@@ -502,7 +562,7 @@ of this server's own logs leaves the operator's control, and since polyemesis
 keeps no copy of the bundle — a second place credentials could be read from — the
 event is the **only** durable record that it happened.
 
-All ten are in `AllTypes()`, so they appear in the rule picker and are delivered
+All eleven are in `AllTypes()`, so they appear in the rule picker and are delivered
 to any rule with an empty event list. A rule that subscribes to everything
 receives these whether or not it was written with them in mind.
 
@@ -553,13 +613,15 @@ events rather than slowing the streaming path down — so under sustained delive
 failure a security event can vanish with only the notifier's `dropped` counter to
 show for it.
 
-**Five of the ten do leave a line in the server log**, and it is worth knowing
+**Six of the eleven do leave a line in the server log**, and it is worth knowing
 which before you conclude an incident left no trace at all. Minting a token
 (`api token created`, carrying the name, the prefix — which the alert
 deliberately withholds — and the scope), revoking one (`api token revoked`),
 staging a binary (`upgrade staged`, carrying the version, whether it was forced,
 who did it and from which address) and rolling one back (`upgrade rolled back`)
-each write an `INFO` line as well as raising the alert.
+each write an `INFO` line as well as raising the alert. So does every alert-rule
+change (`alert rule created`, `alert rule edited`, `alert rule deleted`, with
+the rule's name, its redacted URL and the client address).
 
 The fifth is the failed sign-in, and it does not line up with the alert.
 `failed login` is written at `WARN` on **every** rejected attempt — the first
@@ -574,9 +636,12 @@ the debug bundle exports. It is a consequence of those handlers being chatty
 rather than a trail anybody designed: it rotates away with everything else, and
 the other five events on this page leave nothing behind.
 
-So an attacker who deletes your only alert rule leaves no record of the deletion
-and none of anything else on this list. If you need a record that survives the
-incident, the receiving end of the webhook is where to keep it.
+Deleting an alert rule is the one change built to be seen by the channel it
+silences. The deleted rule is sent `alerts.rule_changed` directly, from the copy
+read before the delete, so a channel that goes quiet has been told why, and the
+deletion is in the log. What an attacker who deletes your only rule still
+leaves unrecorded is everything they do *after* it. If you need a record that
+survives the incident, the receiving end of the webhook is where to keep it.
 
 ---
 

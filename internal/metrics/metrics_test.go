@@ -54,6 +54,7 @@ func testSnapshot() Snapshot {
 			CPUPercent: 41.5, MemUsedBytes: 1024, MemTotalBytes: 4096,
 			ProcCPUPercent: 12.5, ProcMemBytes: 512, NumCPU: 8,
 		},
+		Alerts: &AlertDeliveries{Sent: 3, Failed: 1, LastSent: time.Unix(1_790_000_000, 0)},
 	}
 }
 
@@ -363,5 +364,74 @@ func TestAnUnknownSourceCountIsOmittedRatherThanRenderedAsZero(t *testing.T) {
 	if !strings.Contains(text, "polyemesis_uptime_seconds") ||
 		!strings.Contains(text, "polyemesis_ingest_up") {
 		t.Fatalf("dropping the source count took other families with it:\n%s", text)
+	}
+}
+
+// polyemesis_source_engine_up is 0 only for a programme the server has nothing
+// running for, and its family header stands on an empty install like every
+// other per-programme family, so the alert can be written before the first
+// engine fails to build.
+func TestSourceEngineUpSaysWhichProgrammeHasNoEngine(t *testing.T) {
+	out := Render(Snapshot{Ingests: []Ingest{
+		{Process: Process{State: "running"}, ID: 1, Name: "Main"},
+		{Process: Process{State: "stopped"}, ID: 2, Name: "Studio B", NoEngine: true},
+	}})
+	for _, want := range []string{
+		`polyemesis_source_engine_up{id="1",name="Main"} 1`,
+		`polyemesis_source_engine_up{id="2",name="Studio B"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if empty := Render(Snapshot{}); !strings.Contains(empty, "# TYPE polyemesis_source_engine_up gauge") {
+		t.Error("the family header is missing on an install with no programme, so the " +
+			"alert cannot be written before the first engine fails")
+	}
+}
+
+// ALERT DELIVERY FAILURES WERE VISIBLE ONLY ON THE AUTOMATION PAGE.
+//
+// The notifier counts what it sent and what it failed to send, and GET
+// /alerts/meta shows the sums to somebody who opens the page. A webhook that
+// started refusing every delivery -- a rotated Slack URL, a deleted Discord
+// channel -- is exactly the failure the alert path cannot report through
+// itself, and nothing on the scrape moved. These are the out-of-band half.
+//
+// Mutation: skip the failed sample in renderAlerts. Observed to fail with
+// `missing "polyemesis_alert_deliveries_total{result=\"failed\"} 2"`.
+func TestAlertDeliveriesAreExposedByOutcome(t *testing.T) {
+	at := time.Unix(1_790_000_000, 0)
+	out := Render(Snapshot{Alerts: &AlertDeliveries{Sent: 5, Failed: 2, LastSent: at}})
+	for _, want := range []string{
+		"# TYPE polyemesis_alert_deliveries_total counter",
+		`polyemesis_alert_deliveries_total{result="sent"} 5`,
+		`polyemesis_alert_deliveries_total{result="failed"} 2`,
+		"# TYPE polyemesis_alert_last_success_timestamp_seconds gauge",
+		"polyemesis_alert_last_success_timestamp_seconds 1.79e+09",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+
+	// Never delivered: the counters stand at 0 and the timestamp is ABSENT
+	// rather than 0. A 0 would make `time() - last_success` read fifty-six
+	// years, which pages every quiet install that has simply had nothing to
+	// say yet; absent() is how a rule asks about that case on purpose.
+	never := Render(Snapshot{Alerts: &AlertDeliveries{}})
+	if !strings.Contains(never, `polyemesis_alert_deliveries_total{result="failed"} 0`) {
+		t.Errorf("the counters are missing before the first delivery:\n%s", never)
+	}
+	for _, line := range strings.Split(never, "\n") {
+		if strings.HasPrefix(line, "polyemesis_alert_last_success_timestamp_seconds ") {
+			t.Errorf("a last-success sample exists before any success: %q", line)
+		}
+	}
+
+	// No notifier at all -- a build with no manager -- says nothing, rather
+	// than a zero that reads as "nothing failed".
+	if none := Render(Snapshot{}); strings.Contains(none, "polyemesis_alert_") {
+		t.Errorf("alert families rendered with no notifier to count:\n%s", none)
 	}
 }
