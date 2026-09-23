@@ -453,6 +453,8 @@
   "dash.pipeline": "处理链路",
   "dash.pushToPlatforms": "推送到平台",
   "dash.pushing": "推送中…",
+  "dash.pushStatusLost": "服务器已丢失此次推送的状态，很可能是因为它重启了。仍在推送中的行可能已到达平台，也可能没有；请在平台上核实，或重新推送。",
+  "dash.pushStatusUnknown": "未知",
   "dash.reconnects": "重连次数",
   "dash.reconnects.hint": "本次会话中编码器断开又恢复的次数。任何大于零的值都指向网络，而不是服务器。",
   "dash.relaySubscribers": "中继订阅者",

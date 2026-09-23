@@ -453,6 +453,8 @@
   "dash.pipeline": "Cadena de proceso",
   "dash.pushToPlatforms": "Enviar a las plataformas",
   "dash.pushing": "Enviando…",
+  "dash.pushStatusLost": "El servidor perdió el seguimiento de este envío, probablemente porque se reinició. Las filas que aún se estaban enviando pueden o no haber llegado a la plataforma; compruébalo allí o vuelve a enviar.",
+  "dash.pushStatusUnknown": "Desconocido",
   "dash.reconnects": "Reconexiones",
   "dash.reconnects.hint": "Cuántas veces se ha caído y vuelto el codificador durante esta sesión. Cualquier valor sobre cero apunta a la red, no al servidor.",
   "dash.relaySubscribers": "Suscriptores del relé",

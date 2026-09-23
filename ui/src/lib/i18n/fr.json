@@ -453,6 +453,8 @@
   "dash.pipeline": "Chaîne de traitement",
   "dash.pushToPlatforms": "Envoyer aux plateformes",
   "dash.pushing": "Envoi…",
+  "dash.pushStatusLost": "Le serveur a perdu la trace de cet envoi, probablement à cause d'un redémarrage. Les lignes encore en cours d'envoi ont pu ou non atteindre la plateforme ; vérifiez-y ou renvoyez.",
+  "dash.pushStatusUnknown": "Inconnu",
   "dash.reconnects": "Reconnexions",
   "dash.reconnects.hint": "Combien de fois l'encodeur est tombé et revenu pendant cette session. Toute valeur au-dessus de zéro désigne le réseau plutôt que le serveur.",
   "dash.relaySubscribers": "Abonnés au relais",

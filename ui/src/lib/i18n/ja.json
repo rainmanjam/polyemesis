@@ -453,6 +453,8 @@
   "dash.pipeline": "パイプライン",
   "dash.pushToPlatforms": "プラットフォームへ送信",
   "dash.pushing": "送信中…",
+  "dash.pushStatusLost": "サーバーがこの送信の状況を見失いました。再起動した可能性があります。送信中だった行はプラットフォームに届いていない可能性があります。プラットフォーム側で確認するか、もう一度送信してください。",
+  "dash.pushStatusUnknown": "不明",
   "dash.reconnects": "再接続回数",
   "dash.reconnects.hint": "このセッション中にエンコーダーが切断して復帰した回数。ゼロより大きければサーバーではなくネットワークを疑ってください。",
   "dash.relaySubscribers": "リレーの購読数",

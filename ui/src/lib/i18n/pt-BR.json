@@ -453,6 +453,8 @@
   "dash.pipeline": "Pipeline",
   "dash.pushToPlatforms": "Enviar às plataformas",
   "dash.pushing": "Enviando…",
+  "dash.pushStatusLost": "O servidor perdeu o acompanhamento deste envio, provavelmente porque reiniciou. As linhas que ainda estavam sendo enviadas podem ou não ter chegado à plataforma; confira lá ou envie novamente.",
+  "dash.pushStatusUnknown": "Desconhecido",
   "dash.reconnects": "Reconexões",
   "dash.reconnects.hint": "Quantas vezes o codificador caiu e voltou nesta sessão. Qualquer valor acima de zero aponta para a rede, não para o servidor.",
   "dash.relaySubscribers": "Assinantes do relay",

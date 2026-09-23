@@ -453,6 +453,8 @@
   "dash.pipeline": "파이프라인",
   "dash.pushToPlatforms": "플랫폼으로 전송",
   "dash.pushing": "전송 중…",
+  "dash.pushStatusLost": "서버가 이 전송의 상태를 잃었습니다. 재시작되었을 가능성이 큽니다. 전송 중이던 행은 플랫폼에 도달했을 수도, 아닐 수도 있습니다. 플랫폼에서 확인하거나 다시 전송하세요.",
+  "dash.pushStatusUnknown": "알 수 없음",
   "dash.reconnects": "재연결 횟수",
   "dash.reconnects.hint": "이번 세션에서 인코더가 끊겼다 돌아온 횟수. 0보다 크면 서버가 아니라 네트워크를 가리킵니다.",
   "dash.relaySubscribers": "릴레이 구독자",

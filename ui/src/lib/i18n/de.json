@@ -453,6 +453,8 @@
   "dash.pipeline": "Verarbeitungskette",
   "dash.pushToPlatforms": "An die Plattformen übertragen",
   "dash.pushing": "Wird übertragen…",
+  "dash.pushStatusLost": "Der Server hat den Stand dieser Übertragung verloren, vermutlich wegen eines Neustarts. Zeilen, die noch übertragen wurden, haben die Plattform möglicherweise nicht erreicht; prüfe es dort oder übertrage erneut.",
+  "dash.pushStatusUnknown": "Unbekannt",
   "dash.reconnects": "Neuverbindungen",
   "dash.reconnects.hint": "Wie oft der Encoder in dieser Sitzung abgebrochen ist und zurückkam. Alles über null deutet auf das Netz hin, nicht auf den Server.",
   "dash.relaySubscribers": "Relay-Abonnenten",

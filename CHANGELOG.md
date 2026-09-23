@@ -27,6 +27,16 @@ its first tagged release.
   on any request now signs the console out and says why. A wrong password at
   sign-in or on a password change is still reported in place, because those
   401s are about what was typed, not the session.
+- **A go-live push no longer looks in flight for ever after a server
+  restart.** Push jobs live in the server's memory, so a restart mid-push lost
+  the job and the composer polled a 404 every 1.2 seconds, holding Push
+  disabled on "Pushing…" until the tab was reloaded. A 404, or ten failed polls
+  in a row, now ends the poll: the composer says the push's status was lost,
+  marks unfinished rows Unknown, and Push works again. The composer's requests
+  also go through the console's shared client now, so a reverse proxy's HTML
+  error page reads as "request failed (502)" rather than a JSON parse error,
+  and an expired session on this card signs the console out like everywhere
+  else.
 
 ## [0.10.0] — 2026-09-23
 

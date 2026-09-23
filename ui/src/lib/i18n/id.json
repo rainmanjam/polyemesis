@@ -453,6 +453,8 @@
   "dash.pipeline": "Pipeline",
   "dash.pushToPlatforms": "Kirim ke platform",
   "dash.pushing": "Mengirim…",
+  "dash.pushStatusLost": "Server kehilangan jejak pengiriman ini, kemungkinan besar karena dimulai ulang. Baris yang masih dikirim mungkin sudah atau belum sampai ke platform; periksa di sana, atau kirim lagi.",
+  "dash.pushStatusUnknown": "Tidak diketahui",
   "dash.reconnects": "Penyambungan ulang",
   "dash.reconnects.hint": "Berapa kali encoder terputus dan kembali selama sesi ini. Nilai di atas nol menunjuk ke jaringan, bukan ke server.",
   "dash.relaySubscribers": "Pelanggan relai",

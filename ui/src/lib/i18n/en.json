@@ -453,6 +453,8 @@
   "dash.pipeline": "Pipeline",
   "dash.pushToPlatforms": "Push to platforms",
   "dash.pushing": "Pushing…",
+  "dash.pushStatusLost": "The server lost track of this push, most likely because it restarted. Rows that were still pushing may or may not have reached the platform; check there, or push again.",
+  "dash.pushStatusUnknown": "Unknown",
   "dash.reconnects": "Reconnects",
   "dash.reconnects.hint": "How many times the encoder has dropped and come back during this session. Anything above zero points at the network rather than at the server.",
   "dash.relaySubscribers": "Relay subscribers",

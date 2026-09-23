@@ -453,6 +453,8 @@
   "dash.pipeline": "Potok",
   "dash.pushToPlatforms": "Wyślij na platformy",
   "dash.pushing": "Wysyłanie…",
+  "dash.pushStatusLost": "Serwer utracił stan tej wysyłki, najpewniej z powodu restartu. Wiersze, które były jeszcze wysyłane, mogły nie dotrzeć do platformy; sprawdź to tam albo wyślij ponownie.",
+  "dash.pushStatusUnknown": "Nieznany",
   "dash.reconnects": "Ponowne połączenia",
   "dash.reconnects.hint": "Ile razy koder zerwał połączenie i wrócił w tej sesji. Cokolwiek powyżej zera wskazuje na sieć, nie na serwer.",
   "dash.relaySubscribers": "Subskrybenci przekaźnika",

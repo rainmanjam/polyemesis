@@ -453,6 +453,8 @@
   "dash.pipeline": "İşlem hattı",
   "dash.pushToPlatforms": "Platformlara gönder",
   "dash.pushing": "Gönderiliyor…",
+  "dash.pushStatusLost": "Sunucu bu gönderimin durumunu kaybetti, büyük olasılıkla yeniden başlatıldığı için. Hâlâ gönderilmekte olan satırlar platforma ulaşmış olabilir ya da olmayabilir; orada kontrol edin veya yeniden gönderin.",
+  "dash.pushStatusUnknown": "Bilinmiyor",
   "dash.reconnects": "Yeniden bağlanmalar",
   "dash.reconnects.hint": "Bu oturumda kodlayıcının kaç kez düşüp geri geldiği. Sıfırın üstündeki her değer sunucuyu değil ağı işaret eder.",
   "dash.relaySubscribers": "Aktarım aboneleri",

@@ -32,6 +32,13 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
 import { api, isNoSource } from "@/lib/api";
+import {
+  pollVerdict,
+  type BroadcastWindowRow,
+  type MetaJob,
+  type MetaState,
+  type MetaTarget,
+} from "@/lib/metadataPush";
 import { duration, kbps } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
 import type { SignalTone } from "@/lib/signal";
@@ -61,109 +68,13 @@ const PreviewPlayer = lazy(() =>
 // ---------------------------------------------------------- go-live composer
 //
 // Set the title, description and category once and push them to every
-// connected account. The shapes below mirror internal/api/metadata.go; they
-// live here rather than in lib/types.ts because nothing else renders them.
+// connected account. The wire shapes, which mirror internal/api/metadata.go,
+// and the rule for when to stop polling a push live in lib/metadataPush.ts, so
+// lib/api.ts can type the routes and the rule can be tested without a page.
 //
-// MetaField is the exception and now lives in lib/types.ts: a push RESULT names
-// those fields, so the union is an API contract rather than a detail of this
-// page -- and internal/oauth has a drift guard that reads it there.
-
-/** What YouTube will still accept on the current broadcast.
- *
- *  Fetched when the composer opens, never polled: every row is a live platform
- *  call. A row that failed to read disables nothing -- the write still happens
- *  and the platform's 403 remains the authority. */
-interface BroadcastWindowRow {
-  accountId: number;
-  platform: string;
-  accountName: string;
-  window?: {
-    broadcastId: string;
-    title: string;
-    lifeCycleStatus: string;
-    contentDetailsLocked: boolean;
-    lockedReason?: string;
-  };
-  /** false for a platform with no broadcast concept, which is not an error. */
-  supported: boolean;
-  error?: string;
-}
-type MetaState = "pending" | "ok" | "partial" | "error";
-
-interface MetaCaps {
-  fields: MetaField[];
-  categoryLabel?: string;
-  categoryHint?: string;
-  titleMax?: number;
-  descriptionMax?: number;
-}
-
-interface MetaTarget {
-  accountId: number;
-  platform: string;
-  accountName: string;
-  caps: MetaCaps;
-  /** Obligation metadata resolved from this account's destinations, sent on
-   *  every push whether or not anything is typed here. Absent when no
-   *  destination on the account set any. Mirrors internal/api's metadataTarget;
-   *  the stream key it resolves alongside is deliberately never serialised. */
-  compliance?: {
-    privacy?: string;
-    madeForKids?: boolean;
-    labels?: Record<string, boolean>;
-    facebookPrivacy?: string;
-  };
-}
-
-interface MetaOutcome {
-  accountId: number;
-  platform: string;
-  accountName: string;
-  state: MetaState;
-  message?: string;
-  applied: MetaField[];
-  skipped?: MetaField[];
-  target?: string;
-  category?: string;
-  warnings?: string[];
-}
-
-interface MetaJob {
-  id: string;
-  done: boolean;
-  results: MetaOutcome[];
-  metadata: { title: string; description: string; category: string };
-}
-
-/** The double-submit CSRF token, read the way lib/api.ts reads it. */
-function csrfToken(): string {
-  const match = document.cookie.match(/(?:^|;\s*)polyemesis_csrf=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
-
-async function metaFetch<T>(path: string, body?: unknown): Promise<T> {
-  const headers = new Headers();
-  if (body !== undefined) {
-    headers.set("Content-Type", "application/json");
-    headers.set("X-CSRF-Token", csrfToken());
-  }
-  const resp = await fetch("/api/v1" + path, {
-    method: body === undefined ? "GET" : "POST",
-    headers,
-    credentials: "same-origin",
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await resp.text();
-  const parsed: unknown = text ? JSON.parse(text) : null;
-  if (!resp.ok) {
-    const msg =
-      parsed && typeof parsed === "object" && "error" in parsed
-        ? String((parsed as { error: unknown }).error)
-        : `request failed (${resp.status})`;
-    throw new Error(msg);
-  }
-  return parsed as T;
-}
+// MetaField lives in lib/types.ts: a push RESULT names those fields, so the
+// union is an API contract rather than a detail of this page -- and
+// internal/oauth has a drift guard that reads it there.
 
 // A push is reported per platform, never as one boolean, so each state needs
 // its own place in the signal language: still working, done, done with
@@ -182,7 +93,7 @@ const metaLabel: Record<MetaState, string> = {
   error: "Failed",
 };
 
-function GoLiveComposer() {
+export function GoLiveComposer() {
   const t = useT();
   const [targets, setTargets] = useState<MetaTarget[] | null>(null);
   const [title, setTitle] = useState("");
@@ -203,7 +114,8 @@ function GoLiveComposer() {
 
   useEffect(() => {
     let live = true;
-    metaFetch<{ targets: MetaTarget[]; last?: MetaJob }>("/metadata")
+    api
+      .metadata()
       .then((data) => {
         if (!live) return;
         setTargets(data.targets);
@@ -226,7 +138,8 @@ function GoLiveComposer() {
     // What is still editable, read once when the composer opens. Deliberately
     // not polled: each row is a live platform call, and a broadcast that goes
     // live mid-edit is caught by the write's own 403 rather than by a timer.
-    metaFetch<{ accounts: BroadcastWindowRow[] }>("/metadata/broadcast-window")
+    api
+      .metadataBroadcastWindow()
       .then((data) => {
         if (live) setWindows(data.accounts ?? []);
       })
@@ -242,17 +155,32 @@ function GoLiveComposer() {
 
   // The push is a job precisely so a slow platform API cannot hold the page,
   // so the page has to poll it back.
+  //
+  // Until it cannot: jobs live in the server's memory, so a restart mid-push
+  // loses this one and every poll after it fails. pollVerdict decides when
+  // that is final, and `lostJob` is the job the composer has given up on --
+  // keyed by id, so starting a new push clears it without a reset to forget.
   const jobId = job?.id;
-  const jobDone = job?.done ?? true;
+  const [lostJob, setLostJob] = useState<string | null>(null);
+  const jobLost = jobId !== undefined && lostJob === jobId;
+  const jobDone = (job?.done ?? true) || jobLost;
   useEffect(() => {
     if (!jobId || jobDone) return;
     let live = true;
+    let failures = 0;
     const timer = window.setInterval(() => {
-      metaFetch<MetaJob>(`/metadata/push/${jobId}`)
+      api
+        .metadataPushJob(jobId)
         .then((next) => {
-          if (live) setJob(next);
+          if (!live) return;
+          failures = 0;
+          setJob(next);
         })
-        .catch(() => {});
+        .catch((err: unknown) => {
+          if (!live) return;
+          failures++;
+          if (pollVerdict(err, failures) === "lost") setLostJob(jobId);
+        });
     }, 1200);
     return () => {
       live = false;
@@ -365,7 +293,7 @@ function GoLiveComposer() {
         enableAutoStart: contentDetailsLocked ? undefined : boolOrUndef(autoStart),
         enableAutoStop: contentDetailsLocked ? undefined : boolOrUndef(autoStop),
       };
-      const started = await metaFetch<MetaJob>("/metadata/push", {
+      const started = await api.pushMetadata({
         title,
         description,
         category,
@@ -397,7 +325,7 @@ function GoLiveComposer() {
   const empty =
     !title.trim() && !description.trim() && !category.trim() && !broadcastTouched &&
     withCompliance.length === 0;
-  const busy = pushing || (job !== null && !job.done);
+  const busy = pushing || (job !== null && !jobDone);
 
   return (
     // The testid scopes ui/e2e/go-live-composer.spec.ts to this card. "Title"
@@ -605,8 +533,22 @@ function GoLiveComposer() {
                 Results appear here, one row per platform.
               </p>
             ) : (
-              job.results.map((res) => {
-                const tone = metaTone[res.state];
+              <>
+              {/* Said once, above the rows, because it is about all of them:
+                  whatever had not finished when the server lost the job may or
+                  may not have reached the platform, and only the platform can
+                  say which now. */}
+              {jobLost && (
+                <p role="status" className="text-micro text-warn">
+                  {t("dash.pushStatusLost")}
+                </p>
+              )}
+              {job.results.map((res) => {
+                // A row still "pending" on a lost job is not pushing any more:
+                // nothing is watching it. Unknown, not a green or a red it has
+                // not earned.
+                const unknown = jobLost && res.state === "pending";
+                const tone = unknown ? "idle" : metaTone[res.state];
                 return (
                   <div
                     key={res.accountId}
@@ -620,7 +562,9 @@ function GoLiveComposer() {
                           {res.accountName}
                         </span>
                       </div>
-                      <Badge variant={toneBadge[tone]}>{metaLabel[res.state]}</Badge>
+                      <Badge variant={toneBadge[tone]}>
+                        {unknown ? t("dash.pushStatusUnknown") : metaLabel[res.state]}
+                      </Badge>
                     </div>
 
                     {res.applied.length > 0 && (
@@ -643,7 +587,8 @@ function GoLiveComposer() {
                     ))}
                   </div>
                 );
-              })
+              })}
+              </>
             )}
           </div>
         </CardContent>

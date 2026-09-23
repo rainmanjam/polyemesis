@@ -453,6 +453,8 @@
   "dash.pipeline": "Verwerkingsketen",
   "dash.pushToPlatforms": "Naar platforms sturen",
   "dash.pushing": "Versturen…",
+  "dash.pushStatusLost": "De server is deze push kwijtgeraakt, waarschijnlijk door een herstart. Rijen die nog bezig waren, hebben het platform mogelijk niet bereikt; controleer het daar of push opnieuw.",
+  "dash.pushStatusUnknown": "Onbekend",
   "dash.reconnects": "Herverbindingen",
   "dash.reconnects.hint": "Hoe vaak de encoder tijdens deze sessie is weggevallen en teruggekomen. Alles boven nul wijst op het netwerk, niet op de server.",
   "dash.relaySubscribers": "Relay-abonnees",
