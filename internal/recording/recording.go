@@ -299,10 +299,16 @@ func (m *Manager) Scan() (bool, error) {
 		// would be wrong the moment it was recorded.
 		if m.ffprobe != "" && rec.Filename != live && !measured[rec.Filename] &&
 			!m.knownUnprobeable(rec) {
-			if err := m.measure(rec); err != nil {
-				m.noteUnprobeable(rec, err)
-			} else {
+			switch err := m.measure(rec); {
+			case err == nil:
 				m.forgetUnprobeable(rec.Filename)
+			case errors.Is(err, errNoDuration):
+				m.noteUnprobeable(rec, err)
+			default:
+				// ffprobe timed out, could not be run, or failed in a way that
+				// says nothing settled about the bytes. Not remembered: the
+				// next scan asks again, as it always did.
+				m.log.Warn("probe recording", "file", rec.Filename, "err", err)
 			}
 		}
 		// The programme this manager belongs to, stamped at index time. It is
@@ -339,8 +345,16 @@ func (m *Manager) Scan() (bool, error) {
 	return changed, nil
 }
 
-// knownUnprobeable reports that rec has already failed a probe at its current
-// size.
+// errNoDuration is the one probe failure that is a fact about the file rather
+// than about this attempt: ffprobe ran to completion, exited 0, and found no
+// duration in it. Only that outcome is remembered by noteUnprobeable. A
+// timeout on a loaded host, an exec failure or a crash could go the other way
+// on the next scan, and caching one would leave a good segment at 0 ms / 0
+// tracks, with a WARN calling it unfinalised, until the process restarts.
+var errNoDuration = errors.New("ffprobe reported no duration")
+
+// knownUnprobeable reports that rec has already failed a probe, with
+// errNoDuration, at its current size.
 //
 // Row 32. A segment the recorder never finalised -- a crash, a kill -9, a
 // SIGKILL at the end of a stop's grace -- has no duration for ffprobe to find,
@@ -358,7 +372,8 @@ func (m *Manager) knownUnprobeable(rec *db.Recording) bool {
 	return ok && size == rec.Bytes
 }
 
-// noteUnprobeable records a failed probe and says so ONCE, in words that name
+// noteUnprobeable records a probe that found no duration (errNoDuration; Scan
+// sends nothing else here) and says so ONCE, in words that name
 // what it means -- an unfinalised file -- rather than only what ffprobe said.
 func (m *Manager) noteUnprobeable(rec *db.Recording, err error) {
 	m.unprobeableMu.Lock()
@@ -440,7 +455,7 @@ func (m *Manager) measure(rec *db.Recording) error {
 	}
 	secs, err := strconv.ParseFloat(p.Format.Duration, 64)
 	if err != nil || secs <= 0 {
-		return fmt.Errorf("ffprobe reported no duration for %s", rec.Filename)
+		return fmt.Errorf("%w for %s", errNoDuration, rec.Filename)
 	}
 	tracks := 0
 	for _, s := range p.Streams {

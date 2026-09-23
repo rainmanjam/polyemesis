@@ -27,7 +27,9 @@ its first tagged release.
   The recordings scanner re-probed an unmeasurable segment on every pass for
   the life of the process. It now asks once per file size and says once, in
   plain words, that the file was most likely never finalised and how to remux
-  it.
+  it. Only a probe that ran and found no duration is remembered; a timeout or
+  an ffprobe that could not start is retried on the next scan, so a good
+  segment is not stuck at 0 ms by one slow moment.
 
 ## [0.10.0] — 2026-09-23
 

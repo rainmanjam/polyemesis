@@ -85,3 +85,51 @@ func TestAnUnprobeableSegmentIsProbedOnceNotEveryScan(t *testing.T) {
 		t.Errorf("ffprobe ran %d times after the file changed, want it asked again (2)", n)
 	}
 }
+
+// A probe that failed for a reason unrelated to the file -- ffprobe timed out on
+// a loaded host, could not be exec'd, crashed -- says nothing about the bytes,
+// so it must not be remembered as "this file has no duration". The next scan
+// asks again, and a good segment gets its duration then instead of staying at
+// 0 ms / 0 tracks until the process restarts.
+func TestATransientProbeFailureIsRetriedNextScan(t *testing.T) {
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "ffprobe")
+	// First call fails the way a killed or crashing ffprobe does; every later
+	// call measures the file.
+	script := "#!/bin/sh\necho x >> '" + calls + "'\n" +
+		"if [ \"$(wc -l < '" + calls + "')\" -eq 1 ]; then echo 'boom' >&2; exit 1; fi\n" +
+		"echo '{\"streams\":[{\"codec_type\":\"video\"},{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"12.5\"}}'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	segDir := t.TempDir()
+	store := dbtest.Open(t)
+	m := New(slog.New(slog.NewTextHandler(&logs, nil)), store, segDir, nil, WithFFprobe(bin))
+
+	now := time.Now()
+	names := writeSegments(t, segDir, now, []time.Duration{2 * time.Hour, time.Hour}, []int{524288, 1000})
+	good := names[0]
+
+	for i := 0; i < 2; i++ {
+		if _, err := m.Scan(); err != nil {
+			t.Fatalf("scan %d: %v", i+1, err)
+		}
+	}
+	if n := countLines(t, calls); n != 2 {
+		t.Errorf("ffprobe ran %d times over two scans after a transient failure, want 2 (retried)", n)
+	}
+	recs, err := store.ListRecordings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range recs {
+		if r.Filename == good && (r.DurationMS != 12500 || r.Tracks != 1) {
+			t.Errorf("%s indexed as %d ms / %d tracks after the retry, want 12500 ms / 1", good, r.DurationMS, r.Tracks)
+		}
+	}
+	if strings.Contains(logs.String(), "never finalised") {
+		t.Errorf("a transient failure was reported as an unfinalised file:\n%s", logs.String())
+	}
+}
