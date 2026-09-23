@@ -323,8 +323,9 @@ type onDisk struct {
 	EnhancedRTMP yaml.Node `yaml:"enhancedRtmp"`
 }
 
-// unknownFieldRE matches the one line yaml.v3 writes per unknown key.
-var unknownFieldRE = regexp.MustCompile(`field (\S+) not found in type`)
+// unknownFieldRE matches the one line yaml.v3 writes per unknown key, e.g.
+// "line 2: field Binary not found in type config.FFmpeg".
+var unknownFieldRE = regexp.MustCompile(`^(line \d+): field (\S+) not found in type (\S+)$`)
 
 // decodeStrict decodes config.yaml into cfg and REFUSES A KEY IT DOES NOT KNOW,
 // at any depth. See onDisk for why, and for the retired keys it still accepts.
@@ -344,25 +345,90 @@ func decodeStrict(b []byte, cfg *Config) error {
 	return nil
 }
 
-// explainUnknownKey turns yaml.v3's "field X not found in type config.onDisk"
-// into a sentence an operator can act on: why the server stopped, the key it
-// stopped on, a case-insensitive near miss if there is one, and the keys that
-// do exist. Any other decode error is returned as it came.
+// explainUnknownKey turns yaml.v3's "field X not found in type config.FFmpeg"
+// lines into sentences an operator can act on: the key the server stopped on,
+// the block it sits in, a case-insensitive near miss if there is one, and the
+// keys that ARE valid at that spot. Any other decode error is returned as it
+// came.
+//
+// WHERE THE KEY SITS DECIDES THE LIST. yaml.v3 names the Go type it was
+// decoding into, and that is the only record of the depth: `Binary:` under
+// ffmpeg must be matched against ffmpeg's keys -- so the hint is "binary" --
+// and listing the top-level keys there would send the operator to the wrong
+// place. The Go type names are internal and are not repeated to the operator.
 func explainUnknownKey(err error) error {
-	m := unknownFieldRE.FindStringSubmatch(err.Error())
-	if m == nil {
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
 		return err
 	}
-	known := yamlKeyList(reflect.TypeOf(Config{}))
+	blocks := keyBlocks()
+	lines := make([]string, 0, len(te.Errors))
+	matched := false
+	for _, line := range te.Errors {
+		m := unknownFieldRE.FindStringSubmatch(line)
+		if m == nil {
+			lines = append(lines, line)
+			continue
+		}
+		matched = true
+		lines = append(lines, describeUnknownKey(m[1], m[2], blocks[m[3]]))
+	}
+	if !matched {
+		return err
+	}
+	return fmt.Errorf("%s. Refusing to start: an unrecognised key would otherwise be "+
+		"ignored and its setting silently left at the default",
+		strings.Join(lines, "; "))
+}
+
+// keyBlock is one place in config.yaml that holds keys: its name as the
+// operator writes it ("" for the top level) and the keys valid there.
+type keyBlock struct {
+	name string
+	keys []string
+}
+
+// keyBlocks maps each yaml.v3 type name ("config.FFmpeg") to the block it
+// decodes. It is derived from Config's own fields, so a new nested block is
+// covered the day it is added. tls is listed for completeness; its
+// UnmarshalYAML refuses its own unknown keys before this is reached.
+func keyBlocks() map[string]keyBlock {
+	ct := reflect.TypeOf(Config{})
+	top := keyBlock{keys: yamlKeyList(ct)}
+	blocks := map[string]keyBlock{
+		reflect.TypeOf(onDisk{}).String(): top,
+		ct.String():                       top,
+	}
+	for i := 0; i < ct.NumField(); i++ {
+		f := ct.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+		if f.Type.Kind() != reflect.Struct || name == "" || name == "-" {
+			continue
+		}
+		blocks[f.Type.String()] = keyBlock{name: name, keys: yamlKeyList(f.Type)}
+	}
+	return blocks
+}
+
+// describeUnknownKey writes one unknown key as a sentence. A block the map does
+// not know (a zero keyBlock) still names the key and line; it only loses the
+// list, rather than borrowing one from the wrong level.
+func describeUnknownKey(line, key string, b keyBlock) string {
+	where, valid := "at the top level", "Valid top-level keys"
+	if b.name != "" {
+		where, valid = "under "+b.name, "Valid keys under "+b.name
+	}
+	if b.keys == nil {
+		return fmt.Sprintf("%s: unknown key %q", line, key)
+	}
 	hint := ""
-	for _, name := range known {
-		if strings.EqualFold(name, m[1]) {
+	for _, name := range b.keys {
+		if strings.EqualFold(name, key) {
 			hint = fmt.Sprintf(" (did you mean %q? keys are case-sensitive)", name)
 		}
 	}
-	return fmt.Errorf("%w%s. Refusing to start: an unrecognised key would otherwise be "+
-		"ignored and its setting silently left at the default. Top-level keys are: %s",
-		err, hint, strings.Join(known, ", "))
+	return fmt.Sprintf("%s: unknown key %q %s%s. %s: %s",
+		line, key, where, hint, valid, strings.Join(b.keys, ", "))
 }
 
 // checkHostnameWithoutMode refuses a tls block that names a host but never

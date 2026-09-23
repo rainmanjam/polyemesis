@@ -490,7 +490,7 @@ its first tagged release.
   example `trustProxyhHeaders: true` (cookies lose `Secure` behind a proxy) or
   `DataDir:` (the database goes to `./data`). The whole file is now decoded
   strictly, nested blocks included, and the error names the key, its line and
-  the valid keys. The retired `enhancedRtmp` key is still accepted. A
+  the keys valid in that block. The retired `enhancedRtmp` key is still accepted. A
   `tls.hostname` with no `tls.mode` is also refused, because it meant plain
   HTTP. See [docs/UPGRADING.md](docs/UPGRADING.md).
 - **`-reset-admin` and `-verify-backup` no longer create a data directory where
