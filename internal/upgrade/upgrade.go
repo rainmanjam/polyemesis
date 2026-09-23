@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -205,10 +206,37 @@ func PreviousPath(binary string) string { return binary + ".previous" }
 // moved with it.
 func RescuedPath(binary string) string { return binary + ".previous-rescued" }
 
+// Image is the published image, without a tag.
+const Image = "rainmanjam/polyemesis"
+
+// releaseVersion is the shape a release build carries: `v1.2.3` or
+// `v1.2.3-rc1`. The pre-release may not contain a hyphen, which is what keeps a
+// `git describe` string (`v0.9.0-12-gabcdef1`) out -- that is a build from
+// source naming the tag it is past, not a release.
+var releaseVersion = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$`)
+
+// ImageTag is the Docker tag a release is published under, or "" when tag is
+// not a release.
+//
+// NOT the release tag. release.yml derives image tags with metadata-action's
+// `type=semver,pattern={{version}}`, which drops the leading v: the release
+// `v0.10.0` is the image `:0.10.0`, and `:v0.10.0` does not exist. A plan that
+// printed the feed's tag verbatim told every Docker operator to pull a tag
+// that answers "not found". The one place that spelling is decided, so the
+// command cannot be built from the raw tag by accident.
+func ImageTag(tag string) string {
+	tag = strings.TrimSpace(tag)
+	if !releaseVersion.MatchString(tag) {
+		return ""
+	}
+	return strings.TrimPrefix(tag, "v")
+}
+
 // PlanFor builds the plan for this box.
 //
 // version is the tag being offered, used only to render a command an operator
-// can paste. It is never used to decide anything.
+// can paste. It is never used to decide anything. It is "" before any update
+// check has run, and every command must still be one a person can paste.
 func PlanFor(m Method, binary, version string) Plan {
 	p := Plan{Method: m}
 	// Beside the RESOLVED binary, because that is where Stage put it.
@@ -221,10 +249,24 @@ func PlanFor(m Method, binary, version string) Plan {
 		// The image tag, not `docker pull` alone: pulling changes nothing until
 		// something recreates the container, and an operator who runs only the
 		// pull will reasonably believe they have upgraded.
-		p.Command = fmt.Sprintf("docker compose pull && docker compose up -d   # or: docker pull rainmanjam/polyemesis:%s", version)
+		p.Command = "docker compose pull && docker compose up -d"
+		// No tag, no suffix: `polyemesis:` with nothing after it is not a
+		// command, and it is what a plan asked for before any check printed.
+		if tag := ImageTag(version); tag != "" {
+			p.Command += fmt.Sprintf("   # or: docker pull %s:%s", Image, tag)
+		}
 		return p
 
 	case MethodManual:
+		if strings.TrimSpace(version) == "" {
+			// Before any check there is no tag to name, and
+			// `polyemesis--linux-amd64` is not a file anyone can download.
+			p.Command = fmt.Sprintf("re-run scripts/install.sh, or download the %s-%s build from the release page",
+				runtime.GOOS, runtime.GOARCH)
+			return p
+		}
+		// The release ASSET keeps the v (see artefact in internal/api), unlike
+		// the image tag above.
 		p.Command = fmt.Sprintf("re-run scripts/install.sh, or download polyemesis-%s-%s-%s from the release page",
 			version, runtime.GOOS, runtime.GOARCH)
 		return p

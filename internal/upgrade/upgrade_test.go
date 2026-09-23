@@ -840,3 +840,47 @@ func TestAnUnexecutableInstallStillYieldsARunnableBinary(t *testing.T) {
 			st.Mode().Perm())
 	}
 }
+
+// The release feed's tag is `v0.10.0`; the image tags release.yml publishes
+// (metadata-action, `type=semver,pattern={{version}}`) are `0.10.0`, `0.10`
+// and `latest`. A command naming `:v0.10.0` answers "not found".
+func TestDockerCommandNamesTheImageTagThatExists(t *testing.T) {
+	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", "v0.10.0")
+	if want := "docker pull " + Image + ":0.10.0"; !strings.Contains(p.Command, want) {
+		t.Errorf("command = %q, want it to contain %q", p.Command, want)
+	}
+	if strings.Contains(p.Command, ":v0.10.0") {
+		t.Errorf("names an image tag that does not exist: %q", p.Command)
+	}
+}
+
+// Before any update check the offered tag is "". Every command must still be
+// one a person can paste, not `polyemesis:` or `polyemesis--linux-amd64`.
+func TestCommandsBeforeAnyCheckNameNoEmptyTag(t *testing.T) {
+	d := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", "")
+	if strings.HasSuffix(strings.TrimSpace(d.Command), ":") || strings.Contains(d.Command, Image+":") {
+		t.Errorf("docker command names an empty tag: %q", d.Command)
+	}
+	if !strings.Contains(d.Command, "up -d") {
+		t.Errorf("docker command lost its recreate: %q", d.Command)
+	}
+	m := PlanFor(MethodManual, "/usr/local/bin/polyemesis", "")
+	if strings.Contains(m.Command, "polyemesis--") {
+		t.Errorf("manual command names an empty tag: %q", m.Command)
+	}
+}
+
+func TestImageTag(t *testing.T) {
+	for in, want := range map[string]string{
+		"v0.10.0":            "0.10.0",
+		"0.10.0":             "0.10.0",
+		" v1.2.3-rc1 ":       "1.2.3-rc1",
+		"":                   "",
+		"compose":            "",
+		"v0.9.0-12-gabcdef1": "",
+	} {
+		if got := ImageTag(in); got != want {
+			t.Errorf("ImageTag(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -8,6 +8,16 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Docker upgrade command named an image tag that does not exist.**
+  `GET /upgrade/plan` printed `docker pull rainmanjam/polyemesis:v0.10.0`, the
+  release feed's spelling, but release.yml publishes images as `:0.10.0` (the
+  `v` is dropped), so the pull answered "not found". Before any update check it
+  printed `rainmanjam/polyemesis:` with an empty tag, and the manual install
+  plan named a `polyemesis--linux-amd64` file. The image tag now comes from one
+  function, `upgrade.ImageTag`, and a plan with no tag names none.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added
