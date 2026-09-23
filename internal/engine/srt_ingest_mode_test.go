@@ -15,7 +15,8 @@ import (
 // SRT port accepted a publish into an RTMP source -- whose hub the RTMP ingest
 // child is already writing, so two muxers interleave into one stream -- into a
 // pull source, and into a source whose ingest was never chosen, which is what
-// the console's create form makes. Meanwhile the API reported those same
+// the console's create form made through 0.10.0 (an upgrade now sets those to
+// SRT; see TestAnUpgradedConsoleSourceStillAdmitsSRT). Meanwhile the API reported those same
 // sources tokenEnforced:false with no publish URL, and the Sources page told the
 // operator the token protected nothing, while it was in fact the credential for
 // an ingest the operator had never turned on.

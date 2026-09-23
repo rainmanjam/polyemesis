@@ -236,13 +236,12 @@ func findSource(name string) sourceRow {
 // addSource creates the SECOND source this suite publishes back into.
 //
 // THE INGEST BLOCK IS SPELLED OUT rather than left to the server's defaults.
-// db.DefaultSettings().Ingest carries db.IngestUnset, and handleCreateSource
-// falls back to it for a payload with no ingest -- deliberately, because a
-// fresh install must not pick a transport on the operator's behalf. A source in
-// that state spawns no ingest child at all (engine.reconcileIngest returns
-// early on IngestUnset), so the listener would find its target permanently
-// not-ready and refuse every publish to it. Naming the mode here is what makes
-// this source a far end rather than a black hole.
+// handleCreateSource makes an SRT source from a payload with no ingest, and
+// this suite publishes back over RTMP: an SRT source spawns no RTMP ingest
+// child (engine.reconcileIngest returns early for SRT), so the RTMP listener
+// would find its target permanently not-ready and refuse every publish to it.
+// Naming the mode here is what makes this source a far end rather than a
+// black hole.
 //
 // NO DESTINATIONS ARE CREATED FOR IT, HERE OR ANYWHERE. That is the whole
 // safety property of the loopback: a source that fans out is a source that can

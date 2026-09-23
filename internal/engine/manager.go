@@ -720,10 +720,16 @@ func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
 		// was admitted into an RTMP source (whose hub its RTMP ingest child is
 		// already writing -- two muxers interleaved into one stream), into a
 		// pull source, and into one whose ingest was never chosen, which is
-		// what the console's create form makes. The API meanwhile reported all
-		// three tokenEnforced:false with no publish URL. A nil Sink is refused
-		// with REJ_RESOURCE, the same as a source with no pipeline, which from
-		// an SRT encoder's side is exactly what it is.
+		// what the console's create form made through 0.10.0. The API meanwhile
+		// reported all three tokenEnforced:false with no publish URL. A nil Sink
+		// is refused with REJ_RESOURCE, the same as a source with no pipeline,
+		// which from an SRT encoder's side is exactly what it is.
+		//
+		// Those unchosen sources were in practice SRT sources -- this port was
+		// the only way anything reached them -- so refusing them here would have
+		// cut off their encoders on upgrade. db.MigrateUnsetSourceIngestMode
+		// sets them to SRT on Open, and handleCreateSource now makes SRT from
+		// {name}; this gate keeps refusing unset for anything that bypasses both.
 		if eng := m.Engine(s.ID); eng != nil && s.Ingest.Mode == db.IngestSRT {
 			sink = eng.Hub()
 		}

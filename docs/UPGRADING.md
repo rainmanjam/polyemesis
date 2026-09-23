@@ -221,6 +221,50 @@ instead.
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading past 0.10.0 (unreleased, on `main`): sources with no ingest mode become SRT
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`. It becomes that release's note when it is cut.
+
+**What changed.** The shared SRT port (6000/udp) now admits a publisher only
+into a source whose ingest mode is **SRT**. On 0.10.0 it admitted any source,
+so an SRT encoder could publish into an RTMP source (two muxers into one
+stream) or a pull source. That is fixed, and RTMP and pull sources now refuse
+SRT.
+
+**Who it would have hit.** Every source added from the **Sources** page on
+0.10.0 or earlier. The create form sends only a name, so those sources were
+stored with **no ingest mode** — and SRT was the only ingest that could ever
+reach them, so that is what their encoders were using. Without the migration
+below, the first boot after upgrading would refuse those encoders with
+`srt publish refused: no SRT pipeline for source`, and nothing on screen would
+say why. The `Main` source an install gets from its original single-ingest
+configuration normally carries that configuration's mode and is left alone.
+
+**What the upgrade does, automatically, on its first boot.** Every source whose
+ingest mode is unset is set to `srt`. Nothing else in the source changes — the
+token, latency and passphrase are kept, so the encoder needs no change. The
+boot logs which sources it changed, once:
+
+```
+level=WARN msg="sources with no ingest mode were set to SRT" sources=[...]
+```
+
+The migration only ever finds sources with no mode; a source already set to
+SRT, RTMP or pull is not touched, and later boots find nothing to do. There is
+no schema change (the schema version stays `1`), so a rollback to 0.10.0 reads
+these sources as the ordinary SRT sources they now are.
+
+**New sources.** A source created from its name alone — the Sources page's
+**Add source** — is now an SRT source with an SRT publish URL from the start.
+The API refuses `"ingest": {"mode": ""}` on create, and refuses clearing the
+mode of a source that has one, with `choose an ingest mode: srt, rtmp or pull`.
+
+**What you might need to do.** Only if one of the sources named in that log
+line was meant for RTMP or pull: change its **Ingest** on the Sources page.
+It could not have been receiving RTMP or pulling while it had no mode, so
+nothing that worked before stops working.
+
 ### Upgrading to 0.10.0
 
 **No schema change.** `internal/db` is identical between `v0.9.0` and

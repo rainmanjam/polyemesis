@@ -25,6 +25,8 @@ its first tagged release.
   production feed hop and runs the production destination command on it,
   with a 30 s one-track outage.
 
+- **Sources added from the console keep their SRT encoder across the upgrade.** The shared SRT port now admits only sources set to SRT, which rightly shuts out RTMP and pull sources -- but every source the Sources page created on 0.10.0 and earlier was stored with no ingest mode (the create form sends only a name), and SRT was the only ingest that ever reached them. On the first boot after upgrading, their encoders were refused with "no SRT pipeline for source". The upgrade now sets those sources to `srt` (only the mode; token, latency and passphrase are kept) and logs which it changed, once. A source created from its name alone is now SRT from the start, and the API refuses an explicitly unset mode. See [docs/UPGRADING.md](docs/UPGRADING.md). Verified in Docker: a source created with `{name}` on the v0.10.0 image, then booted on this build, accepts the same SRT encoder.
+
 - **A clean restart of an idle server no longer logs three ERROR lines.** Shutdown unsubscribed the recorder, preview and meters from the relay hub whether or not they had ever started. On an idle engine none had, so the hub reported three removals of names it never held -- at ERROR, because since #711 that message means a teardown named the wrong subscriber and left a real one feeding a dead process. It now unsubscribes only consumers that hold a relay port, which they do exactly when they subscribed; a real mismatch still logs. Seen on the staging box on its first restart after the exploratory-testing fixes.
 
 - **The Docker upgrade command named an image tag that does not exist.**
