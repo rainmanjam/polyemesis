@@ -29,15 +29,24 @@ test.afterAll(async ({ playwright, baseURL }) => {
   try {
     const res = await ctx.get(`${API}/sources`);
     if (!res.ok()) return;
-    const sources = (await res.json()) as Array<{ id?: number; name?: string }>;
+    const sources = (await res.json()) as Array<{ id?: number; name?: string; destinations?: number }>;
     const csrf = (await ctx.storageState()).cookies.find((c) => c.name === "polyemesis_csrf");
     for (const s of sources) {
       if (!s.id || !s.name?.includes(PROBE)) continue;
-      await ctx
+      // A source delete must be confirmed in the body, with the destination
+      // count GET /sources reported -- a bare DELETE is a 400 that deletes
+      // nothing. request.delete does not throw on a 4xx, so log the status:
+      // otherwise a future change to that contract leaves probe rows on a
+      // shared install and nothing says so.
+      const del = await ctx
         .delete(`${API}/sources/${s.id}`, {
           headers: csrf ? { "X-CSRF-Token": decodeURIComponent(csrf.value) } : {},
+          data: { confirm: true, destinations: s.destinations ?? 0 },
         })
         .catch(() => undefined);
+      if (del && !del.ok()) {
+        console.warn(`cleanup: DELETE source ${s.id} (${s.name}) -> ${del.status()} ${await del.text()}`);
+      }
     }
   } finally {
     await ctx.dispose();

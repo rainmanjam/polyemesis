@@ -376,7 +376,8 @@ func TestTheLastSourceCanBeDeletedAndTheSourcesPageStillAnswers(t *testing.T) {
 
 	only := listSources(t, h, sign)[0]
 	send(t, h, sign, http.MethodDelete,
-		"/api/v1/sources/"+strconv.FormatInt(only.ID, 10), nil, http.StatusNoContent)
+		"/api/v1/sources/"+strconv.FormatInt(only.ID, 10),
+		map[string]any{"confirm": true, "destinations": 0}, http.StatusNoContent)
 
 	if rows := listSources(t, h, sign); len(rows) != 0 {
 		t.Fatalf("got %d sources after deleting the only one, want 0", len(rows))
@@ -397,7 +398,8 @@ func TestDeletingASourceIsAllowedOnceASecondExists(t *testing.T) {
 		map[string]any{"name": "Vertical"}, http.StatusCreated), &extra)
 
 	send(t, h, sign, http.MethodDelete,
-		"/api/v1/sources/"+strconv.FormatInt(extra.ID, 10), nil, http.StatusNoContent)
+		"/api/v1/sources/"+strconv.FormatInt(extra.ID, 10),
+		map[string]any{"confirm": true, "destinations": 0}, http.StatusNoContent)
 
 	if rows := listSources(t, h, sign); len(rows) != 1 {
 		t.Fatalf("got %d sources after deleting one, want 1", len(rows))

@@ -32,7 +32,7 @@ vi.mock("@/lib/api", async () => {
   return { ...actual, api: { ...actual.api, listSources: vi.fn(), deleteSource: vi.fn() } };
 });
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 const source: SourceView = {
   id: asSourceId(1),
@@ -94,7 +94,7 @@ describe("SourcesPage, deleting a source", () => {
     // promise is deliberately held open. Without the fix this button stays
     // enabled the whole time, because remove() never told the row it was
     // busy.
-    await waitFor(() => expect(api.deleteSource).toHaveBeenCalledWith(source.id));
+    await waitFor(() => expect(api.deleteSource).toHaveBeenCalledWith(source.id, source.destinations));
     await waitFor(() => expect(deleteButton.disabled).toBe(true));
 
     vi.mocked(api.listSources).mockResolvedValue([]);
@@ -104,5 +104,43 @@ describe("SourcesPage, deleting a source", () => {
     // button -- is gone rather than merely re-enabled, which is the only way
     // to confirm remove()'s finally actually ran.
     await waitFor(() => expect(screen.queryByLabelText("Delete Main")).toBeNull());
+  });
+  it("a refused delete (409, stale count) closes the dialog and reloads, so a retry sends the current count", async () => {
+    // The dialog was opened when the source had no destinations; one was
+    // added from another tab before Confirm, so the server refuses the stale
+    // count. Left open, the dialog resent 0 on every retry and was refused
+    // every time -- the console had no way to show the new count.
+    const stale: SourceView = { ...source, destinations: 0 };
+    const current: SourceView = { ...source, destinations: 1 };
+    vi.mocked(api.listSources).mockResolvedValueOnce([stale]).mockResolvedValue([current]);
+    vi.mocked(api.deleteSource)
+      .mockRejectedValueOnce(new ApiError(409, "the source has 1 destination, not 0"))
+      .mockResolvedValue(undefined);
+
+    render(
+      <MemoryRouter>
+        <LiveDataProvider>
+          <SourcesPage />
+        </LiveDataProvider>
+      </MemoryRouter>,
+    );
+
+    const confirmDelete = async () => {
+      fireEvent.click(await screen.findByLabelText("Delete Main"));
+      fireEvent.change(await screen.findByLabelText(/Type/), { target: { value: "Main" } });
+      fireEvent.click(screen.getByRole("button", { name: "Delete source" }));
+    };
+
+    await confirmDelete();
+    await waitFor(() => expect(api.deleteSource).toHaveBeenCalledWith(source.id, 0));
+
+    // The refusal re-reads the list and takes the dialog down.
+    await waitFor(() => expect(vi.mocked(api.listSources).mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Delete source" })).toBeNull());
+
+    // Reopened from the refreshed row, the retry carries the current count.
+    vi.mocked(api.listSources).mockResolvedValue([]);
+    await confirmDelete();
+    await waitFor(() => expect(api.deleteSource).toHaveBeenLastCalledWith(source.id, 1));
   });
 });

@@ -45,6 +45,14 @@ its first tagged release.
   no such record and is refused too: a 0.6.x binary opens the same schema but
   cannot read the stream keys 0.7.0 sealed, and nothing tells it from a 0.7.x
   one. Roll back through the backup instead, as `docs/UPGRADING.md` describes.
+- **A `[redacted]` placeholder written back is refused instead of stored over
+  the real credential.** A `read` token is shown `[redacted]` in place of a
+  destination's backup stream key, expert arguments and the secret part of its
+  URLs, and in place of ingest and failover credentials in settings and
+  sources. That document PUT back with an admin credential stored the
+  placeholder — sealing `[redacted]` as the backup key — and nothing failed
+  until a failover needed it. Every such field now refuses a value containing
+  the placeholder with a `400` that names the field.
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer
   tracks was tested with a 5 s gap. In the field, with a 30 s outage, track 2
@@ -520,6 +528,16 @@ its first tagged release.
   and so is the CA whenever `tls.hostname` changes; the start logs a `WARN`
   naming the new CA's file and fingerprint. Remove the old CA from every trust
   store and install the new one: see `docs/UPGRADING.md`.
+- **Deleting a source, or a destination that is on air, has to be confirmed in
+  the request.** `DELETE /sources/{id}` cascades to every destination and
+  rendition on the programme, destroying their stream keys and ending any live
+  YouTube broadcast among them, and `DELETE /destinations/{id}` ends its
+  broadcast — both permanently, and both reachable with an admin API token
+  that never sees the console's dialog. A source delete now needs
+  `{"confirm": true, "destinations": N}` matching the current count (`409` on
+  a stale count), and a destination in `testing` or `live` needs
+  `{"confirm": true}`. The console sends both. API scripts that delete sources
+  must change; see `docs/UPGRADING.md`.
 - **Upgrading from 0.6.x no longer leaves plaintext stream keys in
   `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
   and every release before 0.7.0 ran without it: a real 0.6.0 install with five

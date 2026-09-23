@@ -80,14 +80,18 @@ test.describe("a source pulling from an upload nothing inspected says so", () =>
     // Purge first, for the reason destinations.ts records: a run that fails
     // part-way leaves a row behind, and the next run finds two cards with the
     // same name and dies on a strict-mode violation naming neither.
-    const existing = await apiFetch<Array<{ id: number; name: string }>>(
+    const existing = await apiFetch<Array<{ id: number; name: string; destinations: number }>>(
       page,
       "GET",
       "/api/v1/sources",
     );
     for (const row of existing) {
       if (row.name === "e2e unchecked pull") {
-        await apiFetch(page, "DELETE", `/api/v1/sources/${row.id}`);
+        // A source delete must say how many destinations it takes with it.
+        await apiFetch(page, "DELETE", `/api/v1/sources/${row.id}`, {
+          confirm: true,
+          destinations: row.destinations,
+        });
       }
     }
 
@@ -160,7 +164,12 @@ test.describe("a source pulling from an upload nothing inspected says so", () =>
           "cannot tell a server-side inspection failure from a bad upload",
       ).toContainText(REASON);
     } finally {
-      if (created) await apiFetch(page, "DELETE", `/api/v1/sources/${created.id}`);
+      // This test never gives the source a destination, so the count is zero.
+      if (created)
+        await apiFetch(page, "DELETE", `/api/v1/sources/${created.id}`, {
+          confirm: true,
+          destinations: 0,
+        });
       removeUpload();
     }
 

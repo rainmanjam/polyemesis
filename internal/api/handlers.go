@@ -2658,6 +2658,19 @@ func (s *Server) handleReorderDestinations(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"ids": ids})
 }
 
+// deleteDestinationRequest is DELETE /destinations/{id}'s optional body.
+//
+// Confirm is required only when the row carries a broadcast this process
+// confirmed on air (testing or live). Deleting such a row is the "removed"
+// reason in lifecycle.go, and the coordinator then sends `complete` -- terminal
+// on YouTube. The UI's dialog was the only gate, and an admin API token never
+// sees it. A row with nothing on air deletes with no body, as it always has:
+// asking there would train every caller to send the confirmation by reflex,
+// which is the one thing that makes it worthless where it counts.
+type deleteDestinationRequest struct {
+	Confirm bool `json:"confirm"`
+}
+
 func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
@@ -2671,7 +2684,34 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	//
 	// It does NOT remove the platform's ingest stream, and the long comment at
 	// noteOrphanedIngestStream says why that is the answer rather than a gap.
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+	var req deleteDestinationRequest
+	// An absent body is the ordinary delete of a row with nothing on air, and
+	// must stay that: acceptance scripts and e2e cleanups delete their own rows
+	// this way. A body that IS present is decoded strictly, so a misspelt
+	// "confirmed" is refused rather than read as silence.
+	if len(body) > 0 {
+		if err := decodeJSONInto(body, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	if dest, err := s.store.GetDestination(id); err == nil {
+		// THE SAME PREDICATE endOrphan ACTS ON, so the question asked here is
+		// exactly "will this delete end a broadcast" -- not a local notion of
+		// "live" that could drift from what the coordinator then does.
+		if endableFromPhase(dest.Lifecycle.Phase) && !req.Confirm {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"%q is carrying a broadcast in the %q phase, and deleting it ends that "+
+					"broadcast on the platform -- a completed YouTube broadcast cannot return "+
+					"to live. Repeat this request with a JSON body of "+
+					`{"confirm": true} once that is intended.`,
+				dest.Name, dest.Lifecycle.Phase))
+			return
+		}
 		s.noteOrphanedIngestStream(dest)
 	}
 	if err := s.store.DeleteDestination(id); err != nil {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -544,10 +545,75 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 	writeMutation(w, http.StatusOK, rw, s.viewSource(r, &row, defaultID))
 }
 
+// deleteSourceRequest is DELETE /sources/{id}'s only accepted body, and it is
+// required.
+//
+// A source delete is the largest single delete in the API: it CASCADEs to
+// every destination and rendition on the programme (schema.sql), destroying
+// their sealed stream keys, and each destination it removes is one the
+// broadcast-lifecycle coordinator ends as "removed" -- a completed YouTube
+// broadcast cannot return to live. Its only gate was the UI's dialog, and an
+// admin API token reaches this route without ever seeing that dialog. Same
+// reasoning, and the same field, as stop-all's bulkStopRequest.
+//
+// Destinations is Shingo's fixed-value check, which sourceView.Destinations
+// was added to support: the caller states how many destinations it expects to
+// take with it, and a mismatch is refused. "confirm: true" alone is a reflex
+// that a script copies once; a number has to be read from the install it is
+// about. A pointer, because zero is a real count and must not be what an
+// omitted field reads as.
+type deleteSourceRequest struct {
+	Confirm      bool `json:"confirm"`
+	Destinations *int `json:"destinations"`
+}
+
 func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// The row first, so a retried delete of a source that is already gone is
+	// told so rather than asked to confirm something that no longer exists.
+	if _, err := s.store.GetSource(id); err != nil {
+		writeError(w, sourceStatus(err), err.Error())
+		return
+	}
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+	var req deleteSourceRequest
+	// An absent body is a caller who confirmed nothing, not a malformed
+	// request: answer with the refusal rather than "invalid request body: EOF".
+	if len(body) > 0 {
+		if err := decodeJSONInto(body, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if !req.Confirm || req.Destinations == nil {
+		writeError(w, http.StatusBadRequest,
+			"deleting a programme also deletes every destination and rendition on it, "+
+				"their stream keys with them, and ends any live YouTube broadcast among them "+
+				"permanently. Repeat this request with a JSON body of "+
+				`{"confirm": true, "destinations": N}, where N is the "destinations" count `+
+				"GET /api/v1/sources reports for it.")
+		return
+	}
+	// Counted the same way viewSource counts it for the dialog, so the number
+	// the operator read is the number compared here. A failed count refuses:
+	// "could not ask" is not "matches".
+	dests, err := s.store.ListDestinationsBySource(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if len(dests) != *req.Destinations {
+		writeError(w, http.StatusConflict, fmt.Sprintf(
+			"this programme has %d destination(s), not the %d this delete was confirmed "+
+				"against -- something changed since the count was read. Read it again and "+
+				"confirm the current number.", len(dests), *req.Destinations))
 		return
 	}
 	// Deleting a source takes its destinations and renditions with it, which
