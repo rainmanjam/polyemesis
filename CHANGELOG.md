@@ -8,6 +8,15 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Multi-source playout: every source's playout muxer wrote the same
+  `<dataDir>/playout/<variant>/`, so two programmes overwrote each other's
+  segments, either one's teardown cleared the other's live window, and
+  `playout.sourceId` changed nothing. Each source now packages into
+  `playout/<sourceId>/`; the public URL is unchanged. A top-level
+  `playout/<variant>/` left by an earlier release can be deleted.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

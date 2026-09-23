@@ -714,8 +714,11 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		recording.WithStorageGuard(e.onStorage),
 	)
 	e.play = playout.New(playout.Deps{
-		Log:   log,
-		Dir:   cfg.PlayoutDir(),
+		Log: log,
+		// This programme's own root, never the shared one. See
+		// Config.PlayoutDirFor: two engines muxing into one directory overwrote
+		// each other's segments and made playout.sourceId meaningless.
+		Dir:   cfg.PlayoutDirFor(sourceID),
 		Ports: e.alloc,
 		// The manager never imports internal/supervisor; it asks for a child
 		// and the engine decides what a child is. That is what keeps a playout

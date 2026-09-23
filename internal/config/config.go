@@ -567,6 +567,24 @@ func (c Config) ModelsDir() string { return filepath.Join(c.DataDir, "models", "
 // TestPlayoutDirMatchesThePlayoutPackage pins the two against each other.
 func (c Config) PlayoutDir() string { return filepath.Join(c.DataDir, "playout") }
 
+// PlayoutDirFor is one source's playout root: its master playlist, one
+// directory per variant, and the live-caption sidecar.
+//
+// PER SOURCE FOR THE REASON HLSDirFor IS. Every engine runs its own playout
+// manager, and while each was handed PlayoutDir() itself, two programmes with
+// the default "main" variant both muxed into <root>/main/: the segments
+// overwrote each other, either engine's teardown cleared the other's live
+// window, and playout.sourceId -- which picks the engine whose handler serves
+// -- chose between two handlers serving the same files.
+//
+// Siblings under the shared root, never the root itself for one of them: the
+// sweeper walks its directory recursively, so a programme nested inside
+// another's root would have its window pruned under the other's limit. The
+// public URL does not change -- the handler serves relative to this directory.
+func (c Config) PlayoutDirFor(sourceID int64) string {
+	return filepath.Join(c.PlayoutDir(), strconv.FormatInt(sourceID, 10))
+}
+
 // FontsDir holds the fonts text overlays draw with: the two polyemesis embeds
 // and writes at startup, and any the operator drops in beside them.
 //

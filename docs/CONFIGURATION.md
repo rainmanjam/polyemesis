@@ -459,7 +459,7 @@ and can be ignored.
   secret.key        decrypts stored OAuth tokens and client secrets
   recordings/       segments, stems/, clips/, exports/
   hls/              PREVIEW segments, one numbered subdirectory per source
-  playout/          the public HLS/DASH origin, one directory per variant
+  playout/          the public HLS/DASH origin, one numbered subdirectory per source
   fonts/            fonts text overlays draw with (0755, deliberately not private)
   models/whisper/   downloaded speech models
   tls/              generated CA and certificates (dir 0700, keys 0600)
@@ -471,7 +471,11 @@ engine clears its own directory when a preview starts and again when it stops,
 so two engines sharing one directory deleted each other's live playlist. (The
 bare `hls/` still backs the legacy unscoped `/hls` route for the default
 source, so an existing player keeps working.) `playout/` is the public origin
-that viewers are actually served from.
+that viewers are actually served from. It is per source for the same reason —
+`playout/3/hd/` is source 3's `hd` variant — and `playout.sourceId` picks which
+of them `/playout/` serves; the URL itself carries no source number. A
+`playout/<variant>/` directory left at the top level by a release before this
+layout is no longer written or served and can be deleted.
 
 The server creates `recordings/`, `hls/`, `playout/` and `fonts/` at every
 startup; `models/whisper/` appears the first time a speech model is
