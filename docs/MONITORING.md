@@ -350,8 +350,8 @@ The `json` format's envelope:
 
 **`alerts` is an array, and a receiver written as though it holds one item
 silently ignores every coalesced sibling.** Coalescing groups by *subject*:
-`key` is the subject — `ingest`, `disk`, `destination:3`, `destination:3:speed`,
-`loudness:3`, `clipping:track1` — and `count` is how many times it was raised
+`key` is the subject — `ingest:1`, `disk`, `destination:3`, `destination:3:speed`,
+`loudness:3`, `failover:1`, `clipping:track1:1` — and `count` is how many times it was raised
 inside the debounce window, so one delivery routinely carries several unrelated
 subjects at once. At most ten items fit; `overflow` is how many subjects did
 not, stated rather than quietly lost — it is `omitempty`, so the key is absent
@@ -366,6 +366,16 @@ function of its delivery and comparable in a test — so in a single-item payloa
 `sentAt` and that item's `lastAt` are always the identical timestamp, as above.
 It cannot be subtracted from anything to measure delivery lag; use your
 receiver's own arrival time for that.
+
+**Every stream condition names its programme.** Each programme is watched
+separately, so on an install with more than one, `ingest.lost`,
+`failover.switched` and `audio.clipping` would otherwise read the same for every
+one of them. Their `key` ends in the programme's id (`ingest:1`, `failover:1`,
+`clipping:track1:1`), their `title` ends in its name (`Ingest lost: Studio B`),
+and every stream condition carries `sourceId` and `sourceName` in `fields`.
+`disk.low` and `disk.recovered` are the exception: the recordings volume
+belongs to the whole install, so they carry no programme, keep the key `disk`,
+and are delivered **once per install** however many programmes are running.
 
 `text` and `fields` are omitted when empty, and `fields` is an object rather
 than a list because the consumer of a generic webhook is a script and a script

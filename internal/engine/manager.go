@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
@@ -180,6 +181,11 @@ type engineSettings struct {
 	alertAttempts int
 	hooks         *hooks.Dispatcher
 	lifecycle     LifecycleObserver
+	// alertGate is not a setting anybody saves: NewManager builds it once.
+	// It rides here anyway because this is the one path every engine is
+	// configured through, and an engine that missed it would publish its own
+	// copy of every disk.low -- the duplicate the gate exists to remove.
+	alertGate *alerts.InstallGate
 }
 
 // engineSettingsSnapshot reads the settings block WHOLE, in one acquisition of
@@ -225,6 +231,7 @@ func (m *Manager) applyEngineSettings(eng *Engine, s engineSettings) {
 	eng.SetAlertRetry(s.alertAttempts)
 	eng.SetHooks(s.hooks)
 	eng.SetLifecycle(s.lifecycle)
+	eng.SetAlertGate(s.alertGate)
 }
 
 // applyEngineSettingsAll is the other half: every save ends here rather than
@@ -302,6 +309,7 @@ func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg
 		engines: map[int64]*Engine{},
 		host:    stats.NewHost(),
 	}
+	m.settings.alertGate = alerts.NewInstallGate()
 	// NO ffprobe and NO storage guard, and both omissions are the point.
 	// This instance answers reads — usage, resolve, delete — for the API,
 	// which must be able to ask them on an install where no engine is

@@ -265,6 +265,22 @@ line was meant for RTMP or pull: change its **Ingest** on the Sources page.
 It could not have been receiving RTMP or pulling while it had no mode, so
 nothing that worked before stops working.
 
+### Upgrading past 0.10.0 (unreleased, on `main`): alert keys name their programme
+
+> Not yet in a tag, like the note above.
+
+**What changed.** An alert rule's `json` payload gives each alert a `key`.
+Three of them now end in the programme's id: `ingest` is now `ingest:<id>`,
+`failover` is now `failover:<id>`, and `clipping:track<N>` is now
+`clipping:track<N>:<id>`. Their titles now end in the programme's name, and
+every stream condition has `sourceId` and `sourceName` fields.
+`disk.low` and `disk.recovered` keep the key `disk` and are now sent once per
+install, not once per programme.
+
+**What you might need to do.** Only if a script that receives alerts matches
+on `key`: match on the prefix (`ingest:`), or on `type`, which has not
+changed. Discord and Slack rules need nothing.
+
 ### Upgrading to 0.10.0
 
 **No schema change.** `internal/db` is identical between `v0.9.0` and

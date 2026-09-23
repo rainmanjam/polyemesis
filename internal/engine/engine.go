@@ -364,6 +364,11 @@ type Engine struct {
 	// field by field, which is how the tests build one; every use is nil-safe.
 	lifecycle  LifecycleObserver
 	alertWatch *alerts.Watcher
+	// alertGate is SHARED across every engine, like hooks, and handed in by
+	// the manager: it is what lets one engine speak for the install on the
+	// recording volume, which every engine measures. Under e.mu; nil on an
+	// engine assembled field by field, which admits everything.
+	alertGate *alerts.InstallGate
 	// sched flips destinations' enabled flags on a timetable, through the same
 	// path a human uses.
 
@@ -5157,9 +5162,9 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			}
 			snap := e.alertSnapshot(now, live)
 			snap.Disk = disk
-			for _, ev := range e.alertWatch.Observe(snap) {
-				e.alerter.Publish(ev)
-			}
+			// Re-stamped every sweep, for the reason hookWatch is below.
+			e.alertWatch.SetSource(alerts.SourceRef{ID: e.sourceID, Name: e.SourceName()})
+			e.publishAlerts(e.alertWatch.Observe(snap))
 			if e.hookWatch != nil {
 				// Re-stamped every sweep: the source row is named after the
 				// engine is built, and an event carrying only an id tells a
@@ -5190,6 +5195,28 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// publishAlerts hands one sweep's events to this engine's notifier, less any
+// install-wide edge another engine has already published. See
+// alerts.InstallGate.
+func (e *Engine) publishAlerts(evs []alerts.Event) {
+	e.mu.RLock()
+	gate := e.alertGate
+	e.mu.RUnlock()
+	for _, ev := range evs {
+		if gate.Admit(ev) {
+			e.alerter.Publish(ev)
+		}
+	}
+}
+
+// SetAlertGate attaches the install's shared gate. A setter for the reason
+// SetHooks is one: engines are built whenever a source is added.
+func (e *Engine) SetAlertGate(g *alerts.InstallGate) {
+	e.mu.Lock()
+	e.alertGate = g
+	e.mu.Unlock()
 }
 
 // alertSnapshot flattens the status snapshot into the shape the watcher judges.

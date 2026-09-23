@@ -20,6 +20,16 @@ its first tagged release.
   scrape reports the programme as a stopped ingest, and a new gauge,
   `polyemesis_source_engine_up`, is 0 for it.
 
+- **Alerts say which programme they are about, and a filling disk alerts
+  once.** On an install with more than one programme, `ingest.lost`,
+  `failover.switched` and `audio.clipping` read the same for every programme:
+  same title, same `key`, and nothing saying which one. A receiver that
+  deduplicated on `key` dropped the second programme's outage as a repeat.
+  They now carry the programme's id in `key` (`ingest:1`), its name in the
+  title, and `sourceId` and `sourceName` fields. `disk.low` and
+  `disk.recovered` were sent once per programme, because every programme
+  measures the same recordings volume; they are now sent once per install.
+
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer
   tracks was tested with a 5 s gap. In the field, with a 30 s outage, track 2
