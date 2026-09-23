@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
@@ -56,6 +56,7 @@ class FakeWebSocket {
 afterEach(() => {
   cleanup();
   FakeWebSocket.instances = [];
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -94,7 +95,7 @@ describe("useChatFeed's socket", () => {
     const Wrapper = ({ children }: { children: ReactNode }) => (
       <LiveDataContext.Provider value={live as LiveData}>{children}</LiveDataContext.Provider>
     );
-    const { rerender, unmount } = renderHook(() => useChatFeed(), { wrapper: Wrapper });
+    const { result, rerender, unmount } = renderHook(() => useChatFeed(), { wrapper: Wrapper });
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
 
     live = { programme: 9, programmeKnown: true };
@@ -103,10 +104,20 @@ describe("useChatFeed's socket", () => {
     expect(FakeWebSocket.instances[0].closed).toBe(true);
     expect(FakeWebSocket.instances[1].url).toMatch(/\?source=9$/);
 
-    // The retired socket's close must not clobber the live one or schedule a
-    // reconnect aimed at the programme the operator left.
-    FakeWebSocket.instances[0].onclose?.();
-    await new Promise((r) => setTimeout(r, 20));
+    // The replacement is up. Fake timers from here, so the reconnect backoff
+    // (1 s at least, 15 s at most) can be run out inside the test rather than
+    // outlasting it.
+    vi.useFakeTimers();
+    act(() => FakeWebSocket.instances[1].onopen?.());
+    expect(result.current.connected).toBe(true);
+
+    // The retired socket's close arrives late, as a real one does. Unguarded,
+    // it would null out the LIVE socket's slot, report the feed offline while
+    // socket #2 is still delivering, and schedule a reconnect that opens a
+    // third socket beside it: two feeds, every message twice.
+    act(() => FakeWebSocket.instances[0].onclose?.());
+    expect(result.current.connected).toBe(true);
+    act(() => vi.advanceTimersByTime(16_000));
     expect(FakeWebSocket.instances).toHaveLength(2);
     unmount();
   });

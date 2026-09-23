@@ -189,8 +189,10 @@ function openSocket() {
 
   // Every handler first asks whether this is still THE socket. A socket
   // retired by a programme switch closes asynchronously, and its onclose would
-  // otherwise null out the replacement and schedule a reconnect aimed at the
-  // programme the operator had just left.
+  // otherwise null out the slot while the replacement is still open, report
+  // the feed offline, and schedule a reconnect that opens a THIRD socket beside
+  // the live one -- two feeds, and every message delivered twice. The socket
+  // it leaks is never closed, because nothing holds a reference to it.
   ws.onopen = () => {
     if (socket !== ws) return;
     retries = 0;
