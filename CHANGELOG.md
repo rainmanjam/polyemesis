@@ -23,6 +23,11 @@ its first tagged release.
   0.25s. Measured: 8.0s and `duration=N/A` before, 0.3s and a finalised file
   after. The no-timeout rule is untouched: a running destination still rides
   through silence.
+- **A segment that was never finalised no longer logs a WARN every 30 seconds.**
+  The recordings scanner re-probed an unmeasurable segment on every pass for
+  the life of the process. It now asks once per file size and says once, in
+  plain words, that the file was most likely never finalised and how to remux
+  it.
 
 ## [0.10.0] — 2026-09-23
 

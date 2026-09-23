@@ -48,6 +48,11 @@ type Manager struct {
 
 	storageMu sync.Mutex
 	storage   StorageState
+
+	// unprobeable remembers each segment ffprobe could not measure, by name,
+	// with the size it had when it failed. See Scan.
+	unprobeableMu sync.Mutex
+	unprobeable   map[string]int64
 }
 
 // StorageState is the free-space guard's verdict on whether the volume can
@@ -292,9 +297,12 @@ func (m *Manager) Scan() (bool, error) {
 		// Probing costs an ffprobe per file, so it happens once per segment,
 		// and never on the one the recorder is still writing: its duration
 		// would be wrong the moment it was recorded.
-		if m.ffprobe != "" && rec.Filename != live && !measured[rec.Filename] {
+		if m.ffprobe != "" && rec.Filename != live && !measured[rec.Filename] &&
+			!m.knownUnprobeable(rec) {
 			if err := m.measure(rec); err != nil {
-				m.log.Warn("probe recording", "file", rec.Filename, "err", err)
+				m.noteUnprobeable(rec, err)
+			} else {
+				m.forgetUnprobeable(rec.Filename)
 			}
 		}
 		// The programme this manager belongs to, stamped at index time. It is
@@ -310,6 +318,14 @@ func (m *Manager) Scan() (bool, error) {
 		changed = true
 	}
 
+	m.unprobeableMu.Lock()
+	for name := range m.unprobeable {
+		if !onDisk[name] {
+			delete(m.unprobeable, name)
+		}
+	}
+	m.unprobeableMu.Unlock()
+
 	for _, r := range indexed {
 		if !onDisk[r.Filename] {
 			if err := m.store.DeleteRecordingByFilename(r.Filename); err != nil {
@@ -321,6 +337,47 @@ func (m *Manager) Scan() (bool, error) {
 		}
 	}
 	return changed, nil
+}
+
+// knownUnprobeable reports that rec has already failed a probe at its current
+// size.
+//
+// Row 32. A segment the recorder never finalised -- a crash, a kill -9, a
+// SIGKILL at the end of a stop's grace -- has no duration for ffprobe to find,
+// and it never will, because nothing rewrites it. The only thing Scan used to
+// remember about a file was "has a duration", so it probed that one again every
+// 30s for the life of the process and logged the same WARN each time: noise
+// that trains an operator to stop reading the log. Probing unchanged bytes
+// cannot give a different answer, so the question is asked once per size. A
+// file that changes -- remuxed by hand, or still being flushed -- is asked
+// again.
+func (m *Manager) knownUnprobeable(rec *db.Recording) bool {
+	m.unprobeableMu.Lock()
+	defer m.unprobeableMu.Unlock()
+	size, ok := m.unprobeable[rec.Filename]
+	return ok && size == rec.Bytes
+}
+
+// noteUnprobeable records a failed probe and says so ONCE, in words that name
+// what it means -- an unfinalised file -- rather than only what ffprobe said.
+func (m *Manager) noteUnprobeable(rec *db.Recording, err error) {
+	m.unprobeableMu.Lock()
+	if m.unprobeable == nil {
+		m.unprobeable = map[string]int64{}
+	}
+	m.unprobeable[rec.Filename] = rec.Bytes
+	m.unprobeableMu.Unlock()
+	m.log.Warn("a finished recording segment could not be measured, most likely because it "+
+		"was never finalised (the recorder was killed before writing its index). It is "+
+		"indexed with no duration and will not be probed again unless the file changes; "+
+		"remuxing it with ffmpeg -i <file> -c copy <new>.mkv usually recovers the footage",
+		"file", rec.Filename, "bytes", rec.Bytes, "err", err)
+}
+
+func (m *Manager) forgetUnprobeable(name string) {
+	m.unprobeableMu.Lock()
+	delete(m.unprobeable, name)
+	m.unprobeableMu.Unlock()
 }
 
 // newestSegment names the segment the recorder is presumably still appending
