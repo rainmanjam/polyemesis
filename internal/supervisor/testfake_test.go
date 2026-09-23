@@ -186,6 +186,36 @@ func runFakeChild(mode string, args []string) int {
 		}
 		return 0
 
+	case "flood":
+		// A RUN WITH NO NEWLINE IN IT, larger than any line buffer the
+		// supervisor keeps. FFmpeg writes exactly this when its interactive
+		// stats line is on: each update ends in \r, never \n, so at a raised
+		// -loglevel stderr is one "line" that grows for as long as the child
+		// lives. A reader that gives up on it stops draining the pipe, the
+		// child blocks in write(), and cmd.Wait() never returns.
+		//
+		// args: which stream ("stdout" or "stderr"), how many bytes, and a
+		// line written to stderr afterwards, so a test can see whether the
+		// reader was still reading once the run was over.
+		n, err := strconv.Atoi(args[1])
+		if err != nil {
+			return 2
+		}
+		w := os.Stderr
+		if args[0] == "stdout" {
+			w = os.Stdout
+		}
+		chunk := []byte(strings.Repeat("x", 32*1024))
+		for n > 0 {
+			k := min(n, len(chunk))
+			if _, err := w.Write(chunk[:k]); err != nil {
+				return 3
+			}
+			n -= k
+		}
+		fmt.Fprintf(os.Stderr, "\n%s\n", args[2])
+		return 0
+
 	default:
 		fmt.Fprintf(os.Stderr, "fake child: unknown mode %q\n", mode)
 		return 2
@@ -258,6 +288,12 @@ func fakeStall(moveFor, every time.Duration) fake {
 
 // fakeStderr spawns a child that writes n lines to stderr and exits cleanly.
 func fakeStderr(n int) fake { return newFake("stderr", strconv.Itoa(n)) }
+
+// fakeFlood spawns a child that writes n bytes with no newline to stream
+// ("stdout" or "stderr"), then the line after on stderr, then exits cleanly.
+func fakeFlood(stream string, n int, after string) fake {
+	return newFake("flood", stream, strconv.Itoa(n), after)
+}
 
 const (
 	// orphanPIDPrefix introduces the pid of the grandchild an "orphan" child

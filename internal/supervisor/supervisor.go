@@ -8,6 +8,7 @@ package supervisor
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -990,6 +991,14 @@ func (p *Process) runOnce(ctx context.Context) error {
 		if err := handler(stdout); err != nil && ctx.Err() == nil {
 			p.log.Debug("stdout handler ended", "err", err)
 		}
+		// KEEP READING AFTER THE HANDLER HAS STOPPED. A handler that returns
+		// early -- the -progress parser refusing a line over its 1 MiB buffer,
+		// or any handler's own error -- would otherwise leave the pipe with no
+		// reader: it fills, the child blocks in write(), and cmd.Wait() below
+		// never returns. The child then reads Running while doing nothing, and
+		// no amount of waiting fixes it. Discarding costs nothing and ends at
+		// EOF, or at the close the bounded drain below makes.
+		_, _ = io.Copy(io.Discard, stdout)
 	}()
 
 	// FFmpeg's last words before dying are on stderr, so the tail of this
@@ -998,7 +1007,13 @@ func (p *Process) runOnce(ctx context.Context) error {
 	go func() {
 		defer wg.Done()
 		sc := bufio.NewScanner(stderr)
-		sc.Buffer(make([]byte, 0, 64*1024), 512*1024)
+		sc.Buffer(make([]byte, 0, 64*1024), stderrLineMax)
+		sc.Split(scanLogLines)
+		// The same reason as the io.Copy after the stdout handler: whatever
+		// ends this loop early, the pipe must go on being read or the child
+		// wedges. scanLogLines never refuses a token, so what is left is a
+		// read error, and discarding the rest is the only safe answer to it.
+		defer func() { _, _ = io.Copy(io.Discard, stderr) }()
 		for sc.Scan() {
 			line := strings.TrimRight(sc.Text(), "\r\n")
 			if line == "" {
@@ -1116,6 +1131,37 @@ func (p *Process) defaultStdout(r io.Reader) error {
 			p.spec.OnProgress(pr)
 		}
 	})
+}
+
+// stderrLineMax is the longest stderr line kept as one log line. Anything
+// longer is cut into pieces of this size rather than refused.
+const stderrLineMax = 512 * 1024
+
+// scanLogLines is bufio.ScanLines for FFmpeg's stderr, with two differences
+// that both exist so the drain can never stop reading.
+//
+// It ends a line at \r as well as \n. FFmpeg's interactive stats update ends
+// in a bare \r so a terminal overwrites it in place; split on \n alone, a
+// child with stats on writes one "line" that grows for as long as it runs.
+// "\r\n" yields an empty token between its halves, which the caller skips.
+//
+// And it never returns ErrTooLong. A run of stderrLineMax bytes with no
+// terminator in it is handed back as a line of its own. bufio.Scanner calls
+// the split function before it decides the buffer is too small, so with the
+// buffer's ceiling set to stderrLineMax a full buffer reaches this cut first.
+// A scanner that refused the run would end the drain, and a drain that ends
+// early wedges the child on a full pipe.
+func scanLogLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if len(data) >= stderrLineMax {
+		return stderrLineMax, data[:stderrLineMax], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 // terminate asks the child's whole process group to exit, then escalates.
