@@ -41,7 +41,19 @@ version had shipped when it had not (#499), so this is not ceremony.
    database. "If it needs one" let 0.9.0 ship two changed defaults with no
    note. `TestDocEveryReleaseHasAnUpgradeNote` in `internal/testenv` fails the
    release commit without it.
-4. The rehearsal above is green.
+4. `internal/db/testdata/release-vX.Y.Z.db` exists: the new release's empty
+   database, written by its own `db.Open` so every later release's CI opens it
+   and checks the upgrade converges on a fresh install. On the commit you are
+   tagging, and only there, run
+
+   ```sh
+   POLY_WRITE_UPGRADE_FIXTURE=vX.Y.Z go test ./internal/db -run TestDocEveryReleaseHasAnUpgradeFixture
+   ```
+
+   and commit the file. The single fixture this replaced carried a note to
+   re-point it "at the next release" and stayed on v0.6.0 for four of them.
+   `TestDocEveryReleaseHasAnUpgradeFixture` fails the release commit without it.
+5. The rehearsal above is green.
 
 ## Cutting it
 

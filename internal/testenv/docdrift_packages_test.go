@@ -48,6 +48,7 @@ var canonicalDriftTests = []string{
 	"TestDocServiceInstallStepsMatchTheUnitHeader",
 	"TestDocManualUpgradeCarriesUpdateShGuards",
 	"TestDocEveryReleaseHasAnUpgradeNote",
+	"TestDocEveryReleaseHasAnUpgradeFixture",
 	"TestDocProxyExamplesServeTheConsoleFromARoot",
 	"TestAPIDocRefusedRouteTableIsReadScopeDeniedPatterns",
 	"TestAPIDocStopAllStatesItsConfirmBodyAndScope",
