@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // A failover to a source with fewer tracks takes the missing tracks off the
@@ -67,10 +69,8 @@ func threeTrackTS(t *testing.T, bin, keep string) string {
 }
 
 func TestATrackThatGoesMissingComesBackOnItsOwnTimeline(t *testing.T) {
-	bin, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg not installed")
-	}
+	bin := testenv.FFmpegBinary(t, "ffmpeg",
+		"ffmpeg not on PATH: lost the real-FFmpeg check that a missing track rejoins the mix on its own timeline")
 	src := Source{Tracks: []Track{
 		{Index: 0, Channels: 2, Codec: "aac", Layout: "stereo"},
 		{Index: 1, Channels: 2, Codec: "aac", Layout: "stereo"},
