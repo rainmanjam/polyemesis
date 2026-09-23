@@ -100,6 +100,29 @@ its first tagged release.
   state (database, `secret.key`, `tls/`), removes the newer `-wal`/`-shm`,
   leaves the media directories alone, puts the previous binary back and starts
   the service. `docs/UPGRADING.md` describes it.
+- **Every destination start cost about 15 seconds of dead air.** The relay
+  consumers' 15s `-analyzeduration` was documented as a ceiling that probing
+  leaves early, but the ffmpeg CLI forces the MPEG-TS demuxer's `scan_all_pmts`
+  to 1. With it set, the demuxer never declares its header complete, so every
+  destination, recorder, preview and meter read the whole window before writing
+  anything: 15.5s to first output on a 2s GOP, on 8.1.2 and 9.0.1. Relay
+  consumers now pass `-scan_all_pmts 0` and start in about one GOP. A late
+  joiner still waits for the next keyframe (#460). All four consumers now take
+  their input options from the one function, so none can miss this again.
+  `docs/investigations/398-e-probe-window.sh`, which had "shown" the ceiling
+  behaviour, stopped its consumer with SIGTERM. The signal flushes the probe,
+  so the result was an artefact. The script now measures time to first output.
+- **A short-segment recording lost its first segment.** A recorder started
+  before the encoder connected held the whole 15s probe window of media. It
+  then passed all of it to the segment muxer at once. With `segmentSeconds`
+  below about 15, segment 1 opened in the same wall-clock second as segment 0.
+  Both got the same `rec-%Y%m%d-%H%M%S` name, and segment 1 overwrote segment 0,
+  so the first ten seconds were gone. The probe fix above removes the backlog
+  in the usual case, but not in every case. If a declared track sends nothing
+  for 15s, for example an audio track that stays silent (#674), the probe still
+  runs its full window. The backlog then comes back. With `segmentSeconds`
+  below about 16, the first segment can still be overwritten. Segment names
+  are still only unique to the second.
 
 ## [0.10.0] — 2026-09-23
 
