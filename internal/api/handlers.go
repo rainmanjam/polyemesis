@@ -1121,28 +1121,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, d := range dests {
-		md := metrics.Destination{
-			// A destination that is not running has no supervised process at
-			// all; reporting it as stopped keeps its state series meaningful
-			// instead of leaving every state at zero.
-			Process:  metrics.Process{State: string(supervisor.StateStopped)},
-			ID:       d.ID,
-			Name:     d.Name,
-			Kind:     string(d.Kind),
-			Platform: string(d.Platform),
-			Enabled:  d.Enabled,
-		}
-		if d.Process != nil {
-			md.Process = metrics.Process{
-				State:       string(d.Process.State),
-				Restarts:    d.Process.Restarts,
-				BitrateKbps: d.Process.Progress.BitrateKbps,
-				DropFrames:  d.Process.Progress.DropFrames,
-			}
-			md.OutTimeMS = d.Process.Progress.OutTimeMS
-			md.OutputBytes = d.Process.Progress.TotalSize
-		}
-		snap.Destinations = append(snap.Destinations, md)
+		snap.Destinations = append(snap.Destinations, metricsDestination(d))
 	}
 
 	// A scrape reports what it can. Failing the whole endpoint because the
@@ -1172,6 +1151,37 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", metrics.ContentType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = io.WriteString(w, metrics.Render(snap))
+}
+
+// metricsDestination is one destination's scrape row. It is separate from
+// handleMetrics so a test can hand it a running process's progress: the
+// engine's statuses come from supervised FFmpeg children, and a copy that
+// forgot a field here (the output counters read zero for exactly that reason
+// until row 7) would otherwise pass every test that renders a snapshot built
+// by hand.
+func metricsDestination(d engine.DestStatus) metrics.Destination {
+	md := metrics.Destination{
+		// A destination that is not running has no supervised process at
+		// all; reporting it as stopped keeps its state series meaningful
+		// instead of leaving every state at zero.
+		Process:  metrics.Process{State: string(supervisor.StateStopped)},
+		ID:       d.ID,
+		Name:     d.Name,
+		Kind:     string(d.Kind),
+		Platform: string(d.Platform),
+		Enabled:  d.Enabled,
+	}
+	if d.Process != nil {
+		md.Process = metrics.Process{
+			State:       string(d.Process.State),
+			Restarts:    d.Process.Restarts,
+			BitrateKbps: d.Process.Progress.BitrateKbps,
+			DropFrames:  d.Process.Progress.DropFrames,
+		}
+		md.OutTimeMS = d.Process.Progress.OutTimeMS
+		md.OutputBytes = d.Process.Progress.TotalSize
+	}
+	return md
 }
 
 // ingestSnapshots is one ingest-and-relay reading per running programme.
