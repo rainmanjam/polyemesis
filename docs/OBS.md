@@ -191,8 +191,9 @@ See `evidence/enhanced-rtmp-multitrack.md`.
 
 `config.yaml` used to declare an `enhancedRtmp` key. It has been removed: it
 was an inert placeholder that read as a switch, and it was kept on the belief
-that old config files needed it to keep parsing. They do not — unknown keys are
-ignored — so the key is gone and a config that still names it loads fine.
+that old config files needed it to keep parsing. A config that still names it
+does load fine: `enhancedRtmp` is on the short list of retired keys that
+`config.yaml` accepts and ignores, while any other unknown key stops the server.
 
 For multiple audio tracks, use SRT ingest.
 

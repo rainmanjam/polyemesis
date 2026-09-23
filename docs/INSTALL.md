@@ -186,8 +186,22 @@ can check, as root, is not a reasonable default. If you are deliberately
 installing a release that has no published sums, `--allow-unverified` says so
 explicitly.
 
+### Installing a specific release
+
+Binary mode installs the **latest release** unless told otherwise, and says
+which tag it picked. GitHub never calls a pre-release "latest", so a release
+candidate can only be installed by name:
+
+```sh
+sudo bash install.sh --mode binary --version v0.11.0-rc.1
+```
+
+The tag must look like `v1.2.3` or `v1.2.3-rc.1` and must exist. A tag with no
+release is refused rather than replaced by the latest one. Docker mode refuses
+`--version`: pin the image tag in `docker-compose.yml` instead.
+
 What it gets right that a hand-rolled `docker run` usually does not: `/udp` on
-the SRT port, `stop_grace_period: 30s` so a recording is finalised rather than
+the SRT port, `stop_grace_period: 45s` so a recording is finalised rather than
 truncated, a firewall rule for **udp**/6000, and `CAP_NET_BIND_SERVICE` on the
 unit when you choose ACME, without which the `:80` bind fails and issuance
 never completes.
@@ -201,11 +215,14 @@ handle. In binary mode it verifies the download against the release's published
 new one and signs out every existing session; it touches only the database and
 exits before anything binds a port, so it is safe to run against a live server.
 On a systemd install, run it as the service user and point it at the same
-config, or it will look for the database somewhere else:
+config and data directory the unit uses. A hand-installed unit passes the data
+directory as `--data` while a copied `config.yaml` still says `./data`, so pass
+`-data` too. If no database is there, the command stops and prints the path it
+looked in. It does not create anything:
 
 ```bash
 sudo -u polyemesis /usr/local/bin/polyemesis \
-  -config /etc/polyemesis/config.yaml -reset-admin
+  -config /etc/polyemesis/config.yaml -data /var/lib/polyemesis -reset-admin
 ```
 
 What that does **not** do is end API tokens. Tokens carry no session epoch, so
@@ -217,7 +234,7 @@ change does not end them:`. To end them in the same run, add the second flag:
 
 ```bash
 sudo -u polyemesis /usr/local/bin/polyemesis \
-  -config /etc/polyemesis/config.yaml -reset-admin -revoke-api-tokens
+  -config /etc/polyemesis/config.yaml -data /var/lib/polyemesis -reset-admin -revoke-api-tokens
 ```
 
 which prints `N API token(s) revoked.` It is opt-in rather than implied because
@@ -1032,15 +1049,16 @@ tls mode=… hostname=…
 >
 > **On a systemd install, `addr:` in `config.yaml` changes nothing.** The
 > warning says to set `addr: ":443"` in `config.yaml`, and on the installs most
-> people have that is not where the port comes from. Both units pass the
-> address as a flag — `deploy/polyemesis.service` has `--addr :8080`, and the
-> unit `install.sh` writes has `--addr :<the port you chose>` — and a flag
-> beats the file (`main.go` applies `-addr` after loading `config.yaml`). Edit
-> the file, restart, and the server comes back on the same port with the same
-> warning. **Change the flag instead:** `sudo systemctl edit --full polyemesis`
-> and change `--addr` on the `ExecStart` line. (`install.sh` also writes the
-> same port into `config.yaml` as `addr:`, so the two agree until you edit one
-> of them; edit both.)
+> people have that is not where the port comes from. `deploy/polyemesis.service`
+> passes the address as a flag, `--addr :8080`. So does a unit `install.sh`
+> wrote before the release after 0.10.0 (`--addr :<the port you chose>`). A
+> flag beats the file, because `main.go` applies `-addr` after loading
+> `config.yaml`. Edit the file, restart, and the server comes back on the same
+> port. The warning then ends by saying the address came from `--addr`.
+> **Change the flag instead:** `sudo systemctl edit --full polyemesis` and
+> change `--addr` on the `ExecStart` line, or delete it and let `addr:` decide.
+> A unit `install.sh` writes now has no `--addr`: there `addr:` in
+> `config.yaml` is the one setting, and editing it is enough.
 >
 > The containers split. The repository's `docker-compose.yml` runs the image's
 > own `CMD`, which is `-addr :8080`, so there too the flag wins — override

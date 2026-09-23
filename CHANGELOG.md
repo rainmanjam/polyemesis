@@ -8,6 +8,22 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- **`install.sh --version` and `update.sh --binary`: install a named release,
+  and only a binary that is that release.** Binary installs always took
+  `releases/latest`, and GitHub never marks a pre-release as latest, so a
+  staging box could not install a release candidate. It silently got the
+  previous release. `--version vX.Y.Z[-rc.N]` asks for the tag by name,
+  refuses one that does not exist, and the installer now says which tag it is
+  installing and why. The generated `update.sh` used to end by printing
+  `sudo install ./polyemesis`, and nothing checked the file. A wrong-arch or
+  `VERSION=dev` build would install and then crash-loop. `update.sh --binary
+  PATH --version TAG` now refuses before stopping anything unless the file's
+  sha256 matches `SHA256SUMS` for this host's architecture and its `-version`
+  prints the tag. It then backs up, installs, starts the service and checks it
+  stayed up. Deploys are still run by hand.
+
 ### Fixed
 
 - **A process no longer freezes while showing Running after a long run of
@@ -516,6 +532,45 @@ its first tagged release.
   backup taken before the rollback". That backup is the newer database again,
   and it is refused the same way. The message now says to restore the backup
   taken before the upgrade, which is the one `update.sh` makes.
+- **A misspelled `config.yaml` key stops the server instead of being ignored.**
+  Only the `tls:` block refused unknown keys. Anywhere else, a typo was
+  dropped and its setting stayed at the default, with nothing logged: for
+  example `trustProxyhHeaders: true` (cookies lose `Secure` behind a proxy) or
+  `DataDir:` (the database goes to `./data`). The whole file is now decoded
+  strictly, nested blocks included, and the error names the key, its line and
+  the keys valid in that block. The retired `enhancedRtmp` key is still accepted. A
+  `tls.hostname` with no `tls.mode` is also refused, because it meant plain
+  HTTP. See [docs/UPGRADING.md](docs/UPGRADING.md).
+- **`-reset-admin` and `-verify-backup` no longer create a data directory where
+  they are run.** Both ran after the server made its directories. So on a hand
+  install, whose unit passes `--data` while the copied config says `./data`,
+  `-reset-admin` created `./data/…` and an empty database in the current
+  directory. It then told the operator of a working install to "complete
+  first-run setup". Both now run before anything is created. `-reset-admin`
+  refuses when there is no database, and names the absolute path it looked
+  in. The reset commands in INSTALL.md and the FAQ now pass `-data`.
+- **Editing `addr:` in config.yaml now moves the port on an `install.sh`
+  install.** The unit the installer wrote passed `--addr` as well, and the
+  flag beats the file. So an operator who followed the docs or the server's
+  ":443" warning restarted onto the same port. The generated unit no longer
+  passes `--addr`. Where a flag does set the address (the shipped
+  `deploy/polyemesis.service`, the image's `CMD`, an older generated unit),
+  the startup warnings now say it came from `--addr` and where to change it.
+  See [docs/UPGRADING.md](docs/UPGRADING.md).
+- **Docker no longer kills a shutdown before its recordings are finalised.**
+  The server allows itself 35 s to shut down, and systemd waits 45 s. The
+  repository's `docker-compose.yml` (including its GPU variants) and the one
+  `install.sh --mode docker` writes set `stop_grace_period: 30s`. So a
+  shutdown that used its budget was SIGKILLed mid-teardown, which truncates
+  recordings. This is the #645 failure, fixed for systemd but not for Docker.
+  All compose files now say `45s`, and a test holds every compose grace
+  period and every `TimeoutStopSec` to the budget plus its margin. An existing
+  compose file keeps `30s` until you edit it or re-run `install.sh`.
+- **An unknown `--log` value stops the server instead of meaning `info`.**
+  `--log warning` or `--log trace` used to start a server logging at `info`,
+  and nothing said the value had been ignored. The server now refuses to
+  start and lists the accepted values: `debug`, `info`, `warn`, `error`. Case
+  is still ignored.
 
 ### Security
 

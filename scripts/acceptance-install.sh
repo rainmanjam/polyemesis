@@ -1225,6 +1225,20 @@ EOF
     || bad "the data directory is left at mkdir's 0755 — it holds secret.key and the recordings (#297)"
 fi
 
+# ONE PLACE FOR THE LISTENER. The generated unit passed --addr as well as
+# writing addr: into config.yaml, and the flag wins -- so an operator who
+# followed the docs and the :443 warning, edited config.yaml and restarted,
+# came back on the old port. Staging-readiness row 25.
+execstart="$(grep -m1 '^ExecStart=' "$INSTALL")"
+case "$execstart" in
+  *--addr*) bad "the generated unit's ExecStart passes --addr, which overrides addr: in the config.yaml it writes: $execstart" ;;
+  "") bad "no ExecStart line found in install.sh's unit heredoc" ;;
+  *) ok "the generated unit leaves the listener to config.yaml (no --addr in ExecStart)" ;;
+esac
+grep -q "printf 'addr: \":%s\"\\\\n' \"\$HTTP_PORT\"" "$INSTALL" \
+  && ok "and the binary-mode config.yaml carries the chosen port as addr:" \
+  || bad "the config writer no longer writes addr: -- with no --addr either, the server would fall back to 127.0.0.1:8080"
+
 step "17. The docker update.sh refuses to upgrade a broadcast that is on air"
 #
 # uninstall.sh has asked this question since it was written; update.sh did not,
@@ -1490,8 +1504,12 @@ step "22. The binary update.sh restarts what it stopped, and its way back keeps 
 sysd_stub="$work/sysd-bin"; mkdir -p "$sysd_stub"
 cat > "$sysd_stub/systemctl" <<'SYSTEMCTLSTUB'
 #!/usr/bin/env bash
+# STUB_DIES_AFTER_START: active until something starts it, then not -- a new
+# binary that exits as soon as it has read its config.
 case "${1:-}" in
-  is-active) [ "${STUB_ACTIVE:-false}" = true ]; exit $? ;;
+  is-active)
+    if [ "${STUB_DIES_AFTER_START:-false}" = true ] && grep -qx start "$STUB_SYSTEMCTL_LOG" 2>/dev/null; then exit 3; fi
+    [ "${STUB_ACTIVE:-false}" = true ]; exit $? ;;
   start) echo start >> "$STUB_SYSTEMCTL_LOG"; [ "${STUB_START_FAILS:-false}" != true ]; exit $? ;;
   *) echo "$1" >> "$STUB_SYSTEMCTL_LOG"; exit 0 ;;
 esac
@@ -1705,6 +1723,149 @@ case "$out" in
   *"backup-"*".tar.gz"*) ok "and it names the verified archive as the way back" ;;
   *) bad "a failure after the pull does not name the verified archive" ;;
 esac
+
+step "25. update.sh --binary installs only the release it was named as, and only on this host"
+#
+# update.sh used to end by printing `sudo install -m 0755 ./polyemesis ...` and
+# nothing checked what ./polyemesis was. A wrong-architecture build, a
+# VERSION=dev build or a half download all install cleanly and then crash-loop
+# under Restart=on-failure, with the old binary gone. --binary answers three
+# questions BEFORE the service is stopped -- sha256 against SHA256SUMS for this
+# host's asset, runs here, -version prints the tag -- then installs and starts.
+# --sums keeps the suite off the network; the download path is the same awk.
+case "$(uname -m)" in
+  x86_64|amd64) host_arch=amd64; other_arch=arm64 ;;
+  *)            host_arch=arm64; other_arch=amd64 ;;
+esac
+tag=v9.9.9-rc.1
+asset="polyemesis-${tag}-linux-${host_arch}"
+
+bin_setup() { # bin_setup <name> <version line the new binary prints> -> sets root, data, newbin
+  root="$work/bin-$1"; data="$root/data"; mkdir -p "$data" "$root/new"
+  printf 'SQLite format 3\000db' > "$data/polyemesis.db"
+  printf 'key\n' > "$data/secret.key"
+  gen_binary_update "$root/opt" "$data"
+  newbin="$root/new/polyemesis"
+  printf '#!/usr/bin/env bash\n[ "${1:-}" = -version ] && { echo "%s"; exit 0; }\nexit 1\n' "$2" > "$newbin"
+  chmod +x "$newbin"
+}
+sum_of() { sha256sum "$1" | awk '{print $1}'; }
+untouched() { # untouched <label> -- the service was never stopped, nothing was copied or replaced
+  local log; log="$(tr '\n' ' ' < "$root/log")"
+  if [ -z "$log" ] && [ "$(backups_under "$root")" = 0 ] && grep -q 'stub polyemesis' "$root/opt/polyemesis"; then
+    ok "$1: refused before the stop -- no systemctl call, no backup, BIN_PATH unchanged"
+  else
+    bad "$1: the refusal came too late (systemctl: ${log:-nothing}, backups: $(backups_under "$root"))"
+  fi
+}
+
+# (a) --binary alone: nothing to check the file against.
+bin_setup alone "polyemesis $tag"
+out="$(SETTLE_SECONDS=0 run_sysd "$root/log" bash "$root/opt/update.sh" --binary "$newbin")"; st=$?
+check_refusal "--binary without --version is refused" "$st" "$out" "go together"
+untouched "--binary without --version"
+
+# (b) A tag that is not a tag.
+out="$(SETTLE_SECONDS=0 run_sysd "$root/log" bash "$root/opt/update.sh" --binary "$newbin" --version latest)"; st=$?
+check_refusal "--version latest is refused" "$st" "$out" "must look like"
+
+# (c) The right release for the OTHER architecture: SHA256SUMS vouches for the
+#     file, but under the other asset's name.
+bin_setup arch "polyemesis $tag"
+printf '%s  polyemesis-%s-linux-%s\n' "$(sum_of "$newbin")" "$tag" "$other_arch" > "$root/SHA256SUMS"
+out="$(SETTLE_SECONDS=0 run_sysd "$root/log" bash "$root/opt/update.sh" --binary "$newbin" --version "$tag" --sums "$root/SHA256SUMS")"; st=$?
+check_refusal "a binary whose hash is published only for $other_arch is refused on $host_arch" "$st" "$out" "lists no $asset"
+untouched "the wrong-architecture binary"
+
+# (d) A hash that does not match -- another version, a partial download.
+bin_setup hash "polyemesis $tag"
+printf '%s  %s\n' "0000000000000000000000000000000000000000000000000000000000000000" "$asset" > "$root/SHA256SUMS"
+out="$(SETTLE_SECONDS=0 run_sysd "$root/log" bash "$root/opt/update.sh" --binary "$newbin" --version "$tag" --sums "$root/SHA256SUMS")"; st=$?
+check_refusal "a binary whose sha256 is not the release's is refused" "$st" "$out" "is not $asset"
+untouched "the mismatched binary"
+
+# (e) The hash matches but the binary says it is something else: the sums file
+#     and the tag disagree about what this file is.
+bin_setup dev "polyemesis dev"
+printf '%s  %s\n' "$(sum_of "$newbin")" "$asset" > "$root/SHA256SUMS"
+out="$(SETTLE_SECONDS=0 run_sysd "$root/log" bash "$root/opt/update.sh" --binary "$newbin" --version "$tag" --sums "$root/SHA256SUMS")"; st=$?
+check_refusal "a binary whose -version is not the tag is refused" "$st" "$out" "-version says"
+untouched "the VERSION=dev binary"
+
+# (f) Everything agrees: back up, install, start, and say so. The file is 0644,
+#     as a curl -fLO download arrives; update.sh checks and installs its own
+#     0755 copy rather than reporting that the release "does not run".
+bin_setup happy "polyemesis $tag"
+chmod 0644 "$newbin"
+printf '%s  %s\n' "$(sum_of "$newbin")" "$asset" > "$root/SHA256SUMS"
+out="$(SETTLE_SECONDS=0 run_sysd "$root/log" bash "$root/opt/update.sh" --binary "$newbin" --version "$tag" --sums "$root/SHA256SUMS")"; st=$?
+log="$(tr '\n' ' ' < "$root/log")"
+if [ "$st" -eq 0 ] && [ "$log" = "stop start " ] && cmp -s "$newbin" "$root/opt/polyemesis"; then
+  ok "a verified binary is installed at BIN_PATH and the service is started (systemctl: $log)"
+else
+  bad "the happy path: exit $st, systemctl: ${log:-nothing}, BIN_PATH replaced: $(cmp -s "$newbin" "$root/opt/polyemesis" && echo yes || echo no)"
+  printf '        got: %s\n' "$(printf '%s' "$out" | tail -4 | tr '\n' ' ')"
+fi
+[ "$(backups_under "$root")" = 1 ] \
+  && ok "and the verified backup is kept as the way back" \
+  || bad "the happy path left $(backups_under "$root") backups, want 1"
+
+# (g) Installed, started, and dead a moment later. The backup is now the way
+#     back, so it must survive, and the message must not claim nothing changed.
+bin_setup dies "polyemesis $tag"
+printf '%s  %s\n' "$(sum_of "$newbin")" "$asset" > "$root/SHA256SUMS"
+out="$(STUB_DIES_AFTER_START=true SETTLE_SECONDS=0 run_sysd "$root/log" bash "$root/opt/update.sh" --binary "$newbin" --version "$tag" --sums "$root/SHA256SUMS")"; st=$?
+log="$(tr '\n' ' ' < "$root/log")"
+case "$st:$out" in
+  0:*) bad "a binary that did not stay up was reported as a successful upgrade" ;;
+  *"Nothing was upgraded"*) bad "after the swap, the failure still says nothing was upgraded" ;;
+  *"did not come up"*"rollback.sh"*) ok "a binary that dies after the start is reported, with rollback.sh as the way back" ;;
+  *) bad "a binary that died after the start was not explained: $(printf '%s' "$out" | tail -3 | tr '\n' ' ')" ;;
+esac
+[ "$(backups_under "$root")" = 1 ] \
+  && ok "and the verified backup is kept, not removed as unverified" \
+  || bad "the backup the way back depends on was removed ($(backups_under "$root") left)"
+[ "$log" = "stop start " ] \
+  && ok "and the exit trap did not restart the new binary a second time" \
+  || bad "systemctl after a post-swap failure: ${log:-nothing}, want 'stop start '"
+
+step "26. install.sh --version asks for that tag by name, and never falls back to latest"
+#
+# releases/latest skips every prerelease, and release.yml marks each -rc tag
+# one, so a staging box could not install the candidate it was built to test.
+# curl is stubbed: it answers releases/tags/<tag> for one tag only, and
+# releases/latest with an older one.
+curl_stub="$work/curl-bin"; mkdir -p "$curl_stub"
+cat > "$curl_stub/curl" <<'CURLSTUB'
+#!/usr/bin/env bash
+url="${*: -1}"
+case "$url" in
+  */releases/tags/v9.9.9-rc.1) echo '{ "tag_name": "v9.9.9-rc.1", "prerelease": true }' ;;
+  */releases/latest)           echo '{ "tag_name": "v9.9.8" }' ;;
+  *) echo '{"message": "Not Found"}'; exit 22 ;;
+esac
+CURLSTUB
+chmod +x "$curl_stub/curl"
+resolve() { # resolve <VERSION_PIN> -> resolve_release_tag's output and status
+  ( load_install_defs || exit 1
+    # shellcheck disable=SC2034 # read by resolve_release_tag, via the eval
+    VERSION_PIN="$1"
+    PATH="$curl_stub:$PATH" resolve_release_tag ) 2>&1
+}
+got="$(resolve v9.9.9-rc.1)"; st=$?
+[ "$st" -eq 0 ] && [ "$got" = "v9.9.9-rc.1" ] \
+  && ok "--version v9.9.9-rc.1 resolves the prerelease by name" \
+  || bad "--version v9.9.9-rc.1 resolved to '$got' (exit $st)"
+got="$(resolve v9.9.7)"; st=$?
+case "$st:$got" in
+  0:*) bad "a --version tag with no release resolved to '$got' instead of refusing" ;;
+  *"no published release v9.9.7"*) ok "a --version tag with no release is refused, not replaced by latest" ;;
+  *) bad "a missing --version tag was refused without naming it: $got" ;;
+esac
+got="$(resolve "")"; st=$?
+[ "$st" -eq 0 ] && [ "$got" = "v9.9.8" ] \
+  && ok "with no --version, the latest release is still what installs" \
+  || bad "with no --version, resolved '$got' (exit $st), want v9.9.8"
 
 # ------------------------------------------------------------- vacuity guard
 #

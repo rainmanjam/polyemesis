@@ -132,6 +132,16 @@ func run(h *hooks) error {
 		return nil
 	}
 
+	// A LOG LEVEL THE SERVER DOES NOT KNOW STOPS IT. parseLevel mapped anything
+	// unrecognised to info, so `--log warning` or `--log=trace` in a unit file
+	// started a server logging at a level nobody chose, and nothing said so --
+	// the operator who asked for quieter logs got the default, and the one
+	// who asked for trace got less than debug. Refused here, before anything
+	// is opened, naming the four accepted values.
+	if _, err := levelFromFlag(*logLevel); err != nil {
+		return err
+	}
+
 	// DEBUG MODE, WIRED HERE BECAUSE THE LOGGER IS BUILT HERE. The switch shares
 	// its level with the handler, so changing it at runtime reaches every
 	// component that was handed this logger at startup -- the engine, the
@@ -158,6 +168,10 @@ func run(h *hooks) error {
 	// paths without rewriting config.yaml.
 	if *addr != "" {
 		cfg.Addr = *addr
+		// Recorded so the startup warnings name the flag, not the addr: line it
+		// just overrode. See config.Config.AddrFromFlag.
+		cfg.AddrFromFlag = true
+		cfg.AddrDefaulted = false
 	}
 	if *dataDir != "" {
 		cfg.DataDir = *dataDir
@@ -171,6 +185,32 @@ func run(h *hooks) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+
+	// BEFORE anything is started. A reset touches only the database and then
+	// exits, so it must not bind a port, spawn a child or write a log file --
+	// this is run on a box where the real server is usually already running, and
+	// a second instance racing it for the listener would fail for a reason that
+	// has nothing to do with the password.
+	// Before anything else that touches state. update.sh calls this on the copy
+	// it just took, and the whole point is that it answers about THAT
+	// directory: it opens the file, walks it, and reads the schema, without
+	// running a migration -- migrating the backup would move the copy forward
+	// to the schema the operator is keeping a way back from. #643.
+	//
+	// AND ABOVE EnsureDirs, WHICH IS NOT READ-ONLY. Both commands used to run
+	// after it, so `-config config.example.yaml -reset-admin` on a manual
+	// install -- whose unit supplies the real directory with --data, not the
+	// file -- created ./data/{fonts,hls,tls,...} and an empty polyemesis.db in
+	// whatever directory the operator stood in, then said "complete first-run
+	// setup". Neither command needs a directory made: -verify-backup reads the
+	// one it is given, and resetAdmin refuses a database that is not there.
+	if *verifyBak != "" {
+		return verifyBackup(*verifyBak, os.Stdout)
+	}
+	if *resetPass {
+		return resetAdmin(cfg, os.Stdin, os.Stdout, *resetRevoke)
+	}
+
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
 	}
@@ -191,23 +231,6 @@ func run(h *hooks) error {
 	// which reads this package's sources and names the file and line of any call
 	// that is not inside an init.
 
-	// BEFORE anything is started. A reset touches only the database and then
-	// exits, so it must not bind a port, spawn a child or write a log file --
-	// this is run on a box where the real server is usually already running, and
-	// a second instance racing it for the listener would fail for a reason that
-	// has nothing to do with the password.
-	// Before anything else that touches state. update.sh calls this on the copy
-	// it just took, and the whole point is that it answers about THAT
-	// directory: it opens the file, walks it, and reads the schema, without
-	// running a migration -- migrating the backup would move the copy forward
-	// to the schema the operator is keeping a way back from. #643.
-	if *verifyBak != "" {
-		return verifyBackup(*verifyBak, os.Stdout)
-	}
-
-	if *resetPass {
-		return resetAdmin(cfg, os.Stdin, os.Stdout, *resetRevoke)
-	}
 	// Text overlays need a font FILE, and the image polyemesis ships has no
 	// system fonts at all -- fontconfig is installed and finds nothing. The
 	// embedded copies are written out here so drawtext has a real path to open.
@@ -1040,17 +1063,35 @@ func newLogger(level string) *slog.Logger {
 	}))
 }
 
+// parseLevel is levelFromFlag for callers that hold a value already known to be
+// valid -- run() refuses a bad --log before any of them is reached -- and
+// falls back to info for anything else.
 func parseLevel(level string) slog.Level {
-	switch strings.ToLower(level) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
+	l, err := levelFromFlag(level)
+	if err != nil {
 		return slog.LevelInfo
 	}
+	return l
+}
+
+// logLevels are the values --log accepts, in the order the flag help names them.
+var logLevels = []string{"debug", "info", "warn", "error"}
+
+// levelFromFlag maps a --log value to its slog level, case-insensitively, and
+// refuses anything else rather than guessing. See the check in run().
+func levelFromFlag(level string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info":
+		return slog.LevelInfo, nil
+	case "warn":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	}
+	return slog.LevelInfo, fmt.Errorf("--log %q is not a log level; use one of %s",
+		level, strings.Join(logLevels, ", "))
 }
 
 // verifyBackup answers whether a backup directory can be restored from.

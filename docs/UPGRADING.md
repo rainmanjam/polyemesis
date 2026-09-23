@@ -21,11 +21,21 @@ missing `secret.key` or does not open, and then:
 
 - **docker mode:** pulls the new image and brings the container back up. That
   is the whole upgrade.
-- **binary mode:** stops there, **with the service still stopped**, and prints
-  the two commands that finish it — install the new binary, start the service.
-  It does not download anything; fetch the release asset first
-  (`polyemesis-<tag>-linux-<arch>`, checked against `SHA256SUMS`) and use its
-  name where the printed command says `./polyemesis`.
+- **binary mode:** fetch the release asset first
+  (`polyemesis-<tag>-linux-<arch>`) and pass it with its tag:
+
+  ```sh
+  sudo /opt/polyemesis/update.sh --binary ./polyemesis-v0.10.0-linux-amd64 --version v0.10.0
+  ```
+
+  Before stopping anything it refuses a file whose sha256 is not the one the
+  release's `SHA256SUMS` publishes for this host's architecture, one that will
+  not run here, and one whose `-version` is not the tag. It then takes the
+  backup, installs the file, starts the service and checks it stayed up; if it
+  did not, it names `rollback.sh`. `--sums FILE` checks against a local
+  `SHA256SUMS` on a host without GitHub access. Without `--binary`, it stops
+  after the backup **with the service still stopped** and prints the two
+  commands that finish it by hand.
 
 If you installed with `install.sh`, run `sudo <installDir>/update.sh` rather
 than the manual steps below — including for a binary you copied in by hand
@@ -189,9 +199,11 @@ there is much easier to deal with before you start streaming on it.
 ## Before you upgrade
 
 - **Read the [CHANGELOG](../CHANGELOG.md).**
-- **Stop cleanly.** Recordings are finalised during shutdown, which takes up to
-  about 30 seconds. Killing the process truncates whatever was being written.
-  `stop_grace_period: 30s` is already set in the compose file — do not lower it.
+- **Stop cleanly.** Recordings are finalised during shutdown, which can take
+  up to 35 seconds. Killing the process truncates whatever was being written.
+  The compose files set `stop_grace_period: 45s` and the systemd unit sets
+  `TimeoutStopSec=45`. Do not lower either. A compose file written before the
+  release after 0.10.0 says `30s`: raise it to `45s`.
 - **Check the FFmpeg floor.** It is 6.0 today. If a future release raises it,
   the server refuses to start rather than failing later in a confusing way.
 
@@ -336,6 +348,48 @@ that deletes its own idle or test destinations keeps working unchanged.
 **What to do.** Read the source's `destinations` count and send it with the
 delete, as in [the API reference](API.md#sources). Add `{"confirm": true}` to a
 destination delete that is meant to end its broadcast.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): config.yaml refuses a key it does not know
+
+> Not yet in a tag — this note is here ahead of the release that carries it.
+
+**What changed.** A key `config.yaml` does not define — at the top level or
+inside `ffmpeg:` and `transcription:`, as `tls:` already did — now stops the
+server at startup with the key and its line. Keys are case-sensitive. Until now
+such a key was dropped silently and its setting stayed at the default: a
+misspelled `trustProxyHeaders` left session cookies without `Secure`, a
+misspelled `dataDir` put the database in `./data`. The retired `enhancedRtmp`
+key is still accepted and ignored.
+
+Also refused: a `tls.hostname` with no `tls.mode`. That meant `off` — plain
+HTTP — while it looked like HTTPS was configured. Write the mode you meant, or
+`mode: "off"` if something in front terminates TLS.
+
+**What you might need to do.** Before upgrading, check `config.yaml` against
+[CONFIGURATION.md](CONFIGURATION.md). If the new binary refuses to start,
+`journalctl -u polyemesis` names the key to fix. Files written by
+`install.sh` use only known keys and always write a mode.
+
+The same applies to `--log`. A value other than `debug`, `info`, `warn` or
+`error` now stops the server instead of meaning `info`. If your unit or
+container command passes `--log warning` or similar, change it to `warn`
+before upgrading.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): the unit `install.sh` writes no longer passes `--addr`
+
+> Not yet in a tag — this note is here ahead of the release that carries it.
+
+**What changed.** The unit `install.sh` generates used to set the web port
+twice. It passed `--addr :<port>` in `ExecStart` and also wrote
+`addr: ":<port>"` into `config.yaml`. The flag wins, so editing `addr:` did
+nothing. The generated unit now leaves the port to `config.yaml`. An existing
+unit keeps its `--addr` until `install.sh` is re-run. The startup warnings now
+say when the address came from `--addr`.
+
+**What you might need to do.** Nothing, unless you moved the port by editing
+`--addr` in the unit (for example to `:443`). Re-running `install.sh` rewrites
+the unit and `config.yaml` with the port you answer, so answer with the port you
+use. After that, change the port only in `config.yaml`.
 
 ### Upgrading to 0.10.0
 

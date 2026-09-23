@@ -207,10 +207,12 @@ unchanged. It confirms rather than undermines the removal — the key was declar
 as a placeholder and kept on the belief that config files already carrying it
 would otherwise fail to parse.
 
-That belief was wrong: config loading ignores unrecognised keys, so the
-declaration was buying nothing while presenting a knob an operator could set and
-watch have no effect. **A config file that still names `enhancedRtmp` loads
-exactly as before.** For multitrack ingest that is actually operated, use SRT:
+The declaration was buying nothing while presenting a knob an operator could
+set and watch have no effect. **A config file that still names `enhancedRtmp`
+loads exactly as before**: it is a *retired* key, accepted and ignored. Any
+other key `config.yaml` does not know stops the server at startup, naming the
+key and its line — a misspelled `trustProxyHeaders` or `dataDir` used to be
+dropped silently and leave that setting at its default. For multitrack ingest that is actually operated, use SRT:
 Enhanced RTMP's version dependency is real, and OBS does not send multitrack
 audio over it — measured against OBS 30.2.3, which emitted only legacy
 single-track tags. See `evidence/enhanced-rtmp-multitrack.md`.
@@ -258,10 +260,12 @@ once, and the machinery is already here.
 
    **If the line is still there after you set `addr`, something is passing
    `--addr`.** The flag wins over the file — `main.go` applies it after loading
-   `config.yaml` — and both systemd units (`deploy/polyemesis.service` and the
-   one `install.sh` writes) and the image's `CMD` pass it. On those, change the
+   `config.yaml` — and `deploy/polyemesis.service`, the image's `CMD`, and units
+   written by `install.sh` before the release after 0.10.0 pass it. The line
+   then ends by saying the address came from `--addr`. On those, change the
    port on the `ExecStart` line (`sudo systemctl edit --full polyemesis`) or in
-   compose's `command:`. See
+   compose's `command:`. A unit `install.sh` writes now has no `--addr`, so
+   `addr:` in `config.yaml` is the only listener setting there. See
    [TLS.md → Binding, and the SSH tunnel](TLS.md#binding-and-the-ssh-tunnel).
 
    Binding 443 needs privilege. A systemd unit running as a non-root user also

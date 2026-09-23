@@ -176,7 +176,7 @@ jobs:
           set -euo pipefail
           bash -n scripts/install.sh
           bash -n scripts/acceptance-install.sh
-          for bad in "--mode wat" "--tls wat" "--http-port abc" "--http-port 70000" "--srt-port 0" "--rtmp-port 70000" "--unknown"; do
+          for bad in "--mode wat" "--tls wat" "--http-port abc" "--http-port 70000" "--srt-port 0" "--rtmp-port 70000" "--version latest" "--version 0.10.0" "--version v0.10" "--mode docker --version v0.10.0" "--unknown"; do
             # shellcheck disable=SC2086
             if bash scripts/install.sh $bad >/dev/null 2>&1; then
               echo "::error::install.sh accepted '${bad}'. The argument validator is what stands between an operator's typo and a half-configured host."
