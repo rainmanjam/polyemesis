@@ -1147,6 +1147,16 @@ func (e *Engine) StopWithin(ctx context.Context) {
 		}
 	}
 	for i, p := range auxPorts {
+		// ONLY WHAT SUBSCRIBED. A consumer holds its relay port exactly when it
+		// subscribed, so port 0 means it never started -- the normal case on an
+		// idle engine, where nothing was publishing. Unsubscribing it anyway
+		// asked the hub to remove a name it never had, which the hub reports at
+		// ERROR (#711: that is how a subscription used to outlive its process),
+		// so every clean restart of an idle server raised three false alarms on
+		// the one line that must stay trustworthy.
+		if p == 0 {
+			continue
+		}
 		if sub := auxSubs[i]; sub.hub != nil {
 			sub.hub.Unsubscribe(sub.name)
 		}
