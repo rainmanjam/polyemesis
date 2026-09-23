@@ -39,7 +39,7 @@ func TestVerifyBackupCommandAcceptsARealBackupAndSaysSo(t *testing.T) {
 	if err := d.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("00"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte(strings.Repeat("ab", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

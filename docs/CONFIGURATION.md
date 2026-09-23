@@ -107,14 +107,19 @@ forward to the schema you are keeping a way back *from*.
 
 ```
 polyemesis -verify-backup /var/backups/polyemesis-2026-09-16
-backup at /var/backups/polyemesis-2026-09-16 opens, passes integrity_check and holds this server's schema
+backup at /var/backups/polyemesis-2026-09-16 opens, passes integrity_check, holds this server's schema and has a secret.key that opens it
 ```
 
 Anything else is a non-zero exit and a line naming what is wrong: `backup has
 no polyemesis.db`, `backup's polyemesis.db is zero bytes`, `backup's
-polyemesis.db failed its integrity check: …`, or `backup has no secret.key, so
+polyemesis.db failed its integrity check: …`, `backup has no secret.key, so
 every destination would come back disabled and the restore would read as
-successful until go-live`. Every failure it catches leaves a file of plausible
+successful until go-live`, `backup's secret.key is not a key the server can
+start with` (empty, not hex, the wrong length, or not a file), or `backup's
+secret.key opens none of the … sealed value(s) in <table>.<column>` — a
+well-formed key from another install. The key is read with the same parser the
+server uses at boot, then tried against the values the database sealed: for
+each sealed column that holds any, it must open at least one. Every failure it catches leaves a file of plausible
 size — a database copied while the server was writing to it, a truncated file,
 an archive unpacked into the wrong shape, a disk that filled halfway through —
 which is why existence checks do not find them. Run this when you take the

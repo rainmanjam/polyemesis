@@ -1015,7 +1015,7 @@ func verifyBackup(dir string, out io.Writer) error {
 	if err := db.VerifyBackup(dir); err != nil {
 		return fmt.Errorf("backup at %s is not usable: %w", dir, err)
 	}
-	fmt.Fprintf(out, "backup at %s opens, passes integrity_check and holds this server's schema\n", dir)
+	fmt.Fprintf(out, "backup at %s opens, passes integrity_check, holds this server's schema and has a secret.key that opens it\n", dir)
 	return nil
 }
 

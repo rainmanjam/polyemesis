@@ -62,12 +62,9 @@ type Box struct {
 func LoadOrCreate(path string) (*Box, error) {
 	b, err := os.ReadFile(path)
 	if err == nil {
-		raw, err := hex.DecodeString(string(trimSpace(b)))
+		box, err := parseKey(path, b)
 		if err != nil {
-			return nil, fmt.Errorf("secret key %s is not valid hex: %w", path, err)
-		}
-		if len(raw) != keySize {
-			return nil, fmt.Errorf("secret key %s is %d bytes, want %d", path, len(raw), keySize)
+			return nil, err
 		}
 		// AFTER the content checks, so a file that is not a key at all is
 		// reported as such rather than having its permissions quietly changed
@@ -76,8 +73,6 @@ func LoadOrCreate(path string) (*Box, error) {
 		if err := fsperm.SecureFile(path); err != nil {
 			return nil, fmt.Errorf("restrict secret key %s: %w", path, err)
 		}
-		box := &Box{}
-		copy(box.key[:], raw)
 		return box, nil
 	}
 	if !os.IsNotExist(err) {
@@ -105,6 +100,45 @@ func LoadOrCreate(path string) (*Box, error) {
 	if err := fsperm.SecureFile(path); err != nil {
 		return nil, fmt.Errorf("restrict secret key %s: %w", path, err)
 	}
+	return box, nil
+}
+
+// Load reads an existing key file and does nothing else: no key is minted when
+// the file is absent, and the file's permissions are left as found.
+//
+// It exists for -verify-backup, which used to check secret.key with os.Stat and
+// so passed a key from another install, an empty file, or a directory -- each
+// of which the restored server then either refused to boot on or booted with
+// every sealed credential unreadable. Verification has to accept exactly what
+// boot accepts, so the parse is the one LoadOrCreate uses, not a second copy
+// that could drift from it. And it must not have LoadOrCreate's side effects:
+// minting a key would turn "the backup has no key" into "the backup has a
+// fresh, useless key", and narrowing the file's mode is a write to a backup
+// that may sit on a read-only mount.
+func Load(path string) (*Box, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read secret key %s: %w", path, err)
+	}
+	return parseKey(path, b)
+}
+
+// parseKey is the single definition of a well-formed key file: hex, surrounding
+// whitespace tolerated, exactly keySize bytes once decoded.
+func parseKey(path string, b []byte) (*Box, error) {
+	body := trimSpace(b)
+	if len(body) == 0 {
+		return nil, fmt.Errorf("secret key %s is empty", path)
+	}
+	raw, err := hex.DecodeString(string(body))
+	if err != nil {
+		return nil, fmt.Errorf("secret key %s is not valid hex: %w", path, err)
+	}
+	if len(raw) != keySize {
+		return nil, fmt.Errorf("secret key %s is %d bytes, want %d", path, len(raw), keySize)
+	}
+	box := &Box{}
+	copy(box.key[:], raw)
 	return box, nil
 }
 

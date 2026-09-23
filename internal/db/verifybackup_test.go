@@ -26,7 +26,7 @@ func goodBackup(t *testing.T) string {
 	if err := d.Close(); err != nil {
 		t.Fatalf("closing: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("00"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte(strings.Repeat("ab", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -112,7 +112,7 @@ func TestVerifyBackupRefusesAnEmptyDatabaseSQLiteJustCreated(t *testing.T) {
 	// destination: a valid, empty, useless SQLite file. It passes
 	// integrity_check, which is why existence and integrity are not enough.
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("00"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte(strings.Repeat("ab", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	empty := filepath.Join(dir, "polyemesis.db")
@@ -126,7 +126,7 @@ func TestVerifyBackupRefusesAnEmptyDatabaseSQLiteJustCreated(t *testing.T) {
 
 func TestVerifyBackupRefusesSomeoneElsesDatabase(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("00"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte(strings.Repeat("ab", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	other := filepath.Join(dir, "polyemesis.db")
@@ -152,7 +152,7 @@ func TestVerifyBackupRefusesABackupWhereTheCopyNeverRan(t *testing.T) {
 	// backup again before upgrading, and the message has to say so rather than
 	// implying the file needs repair.
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("00"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte(strings.Repeat("ab", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	err := VerifyBackup(dir)

@@ -16,6 +16,14 @@ its first tagged release.
   read-only directory or mount — how the Docker `update.sh` hands it the backup
   — it could not create the `-shm` and refused a good backup. It now verifies a
   private copy in the temporary directory and leaves the backup byte-identical.
+- `-verify-backup` no longer accepts any `secret.key`. It checked only that the
+  file existed, so a key from another install, an empty file, a non-hex or
+  wrong-length one, or a directory all passed — and the restore then either
+  refused to boot or brought every credential back unreadable. It now reads the
+  key with the parser the server boots with, and tries it on the values the
+  database sealed: for each sealed column holding any, the key must open at
+  least one, or the backup is refused naming the table. The success line now
+  says so.
 
 ## [0.10.0] — 2026-09-23
 

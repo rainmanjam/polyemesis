@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
 // VerifyBackup answers the only question a backup has to answer: does it open.
@@ -58,9 +60,19 @@ func VerifyBackup(dir string) error {
 	// differs: a missing key is unrecoverable and means taking the backup
 	// again, while a failing integrity check may mean stopping the server
 	// first. See the note in the generated update.sh.
-	if _, err := os.Stat(keyPath); err != nil {
+	if _, err := os.Stat(keyPath); errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("backup has no secret.key, so every destination would "+
 			"come back disabled and the restore would read as successful until go-live: %w", err)
+	}
+	// PRESENT IS NOT ENOUGH. This was the whole key check, so an empty file, a
+	// directory, or another install's key all passed. secrets.Load is the parser
+	// boot uses, so what passes here is what the restored server will start
+	// with; whether it is THIS database's key is asked below, of the rows it
+	// sealed.
+	box, err := secrets.Load(keyPath)
+	if err != nil {
+		return fmt.Errorf("backup's secret.key is not a key the server can start with, "+
+			"so the restore would refuse to boot: %w", err)
 	}
 
 	scratch, err := os.MkdirTemp("", "polyemesis-verify-*")
@@ -122,6 +134,85 @@ func VerifyBackup(dir string) error {
 	if tables == 0 {
 		return errors.New("backup's polyemesis.db holds none of polyemesis's tables, " +
 			"so it is not this server's database")
+	}
+	return checkKeyOpensSealedValues(sqldb, box)
+}
+
+// sealedColumn names one column this package writes with secrets.Box.Seal.
+type sealedColumn struct{ table, column string }
+
+// sealedColumns is every column holding secretbox ciphertext.
+// TestVerifyBackupKnowsEverySealedColumn holds it to the schema, so a new
+// sealed column cannot be added without the key check covering it.
+var sealedColumns = []sealedColumn{
+	{"destinations", "stream_key_enc"},
+	{"destinations", "backup_stream_key_enc"},
+	{"mqtt_creds", "password_enc"},
+	{"automod_creds", "key_enc"},
+	{"platform_creds", "client_secret_enc"},
+	{"platform_accounts", "access_token_enc"},
+	{"platform_accounts", "refresh_token_enc"},
+	{"hooks", "secret"},
+}
+
+// checkKeyOpensSealedValues trial-decrypts the backup's sealed values with its
+// secret.key, and refuses when a sealed column has values and the key opens
+// none of them.
+//
+// "OPENS NONE", NOT "FAILS ONE". A live database can already hold a row its own
+// key cannot open -- a destination keyUnreadable since an earlier bad restore
+// is the case that shipped -- and refusing the backup over that row would
+// refuse the only good copy. A key from another install opens nothing at all,
+// so one success per column is proof enough and one failure is proof of
+// nothing. Per column rather than once overall, because a restore needs every
+// kind of credential back, not just the first one the check happens to try.
+//
+// A backup with no sealed values anywhere -- a fresh install, or one with no
+// credentials yet -- has nothing to try the key on, and passes on the parse
+// alone: there is nothing it could fail to open.
+//
+// A table or column the backup's schema does not have yet is skipped, not an
+// error: an older backup is still a backup.
+func checkKeyOpensSealedValues(sqldb *sql.DB, box *secrets.Box) error {
+	for _, c := range sealedColumns {
+		var present int
+		if err := sqldb.QueryRow(
+			`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, c.table, c.column,
+		).Scan(&present); err != nil {
+			return fmt.Errorf("backup's polyemesis.db schema could not be read: %w", err)
+		}
+		if present == 0 {
+			continue
+		}
+		// Identifiers come from the fixed list above, never from input.
+		rows, err := sqldb.Query(`SELECT "` + c.column + `" FROM "` + c.table +
+			`" WHERE "` + c.column + `" IS NOT NULL AND length("` + c.column + `") > 0`)
+		if err != nil {
+			return fmt.Errorf("backup's %s.%s could not be read: %w", c.table, c.column, err)
+		}
+		tried, opened := 0, false
+		for rows.Next() && !opened {
+			var sealed []byte
+			if err := rows.Scan(&sealed); err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("backup's %s.%s could not be read: %w", c.table, c.column, err)
+			}
+			tried++
+			if _, err := box.Open(sealed); err == nil {
+				opened = true
+			}
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return fmt.Errorf("backup's %s.%s could not be read: %w", c.table, c.column, err)
+		}
+		if tried > 0 && !opened {
+			return fmt.Errorf("backup's secret.key opens none of the %d sealed value(s) in %s.%s, "+
+				"so it is not the key this database was sealed with -- a restore would bring "+
+				"every one of those credentials back unreadable. Take the backup again with "+
+				"this server's own secret.key", tried, c.table, c.column)
+		}
 	}
 	return nil
 }

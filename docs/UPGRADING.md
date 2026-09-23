@@ -116,6 +116,14 @@ there is no error to notice — just a new key that cannot open the old rows.
 tar tzf backup-<stamp>.tar.gz | grep secret.key
 ```
 
+That proves the file is there, not that it is the right key: one copied from
+another install, or an empty file, lists just the same. `polyemesis
+-verify-backup <unpacked dir>` answers the second question too — it reads the
+key with the parser the server boots with and tries it on the values the
+database sealed, refusing a key that opens none of them. It writes nothing to
+the backup, so it is safe on the copy you are keeping. See
+[Removing it](INSTALL.md#removing-it) in INSTALL.md for the Docker form.
+
 **Rolling back to 0.6.0 blanks every stream key.** The sealing migration clears
 the plaintext column, and 0.6.0 has no concept of the encrypted one — so the
 older binary reads every destination as having an empty key while still marked
