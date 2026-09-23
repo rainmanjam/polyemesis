@@ -34,6 +34,10 @@ var schemaSQL string
 type DB struct {
 	sql *sql.DB
 
+	// faults is what the statements run through sql have said about the
+	// storage under them. See StorageFault.
+	faults *faultLog
+
 	// passwordCost is the bcrypt cost every password hash in this package uses.
 	// Open sets it to bcrypt.DefaultCost; only a test ever lowers it, through
 	// WithPasswordCost.
@@ -167,10 +171,14 @@ func Open(path string, opts ...Option) (*DB, error) {
 	// reports this bug as refuted.
 	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)" +
 		"&_pragma=foreign_keys(1)&_pragma=secure_delete(ON)"
-	sqldb, err := sql.Open("sqlite", dsn)
+	// Through the observing connector rather than sql.Open, so every
+	// statement's storage failure reaches StorageFault. See storagefault.go.
+	faults := &faultLog{}
+	conn, err := newObservedConnector(dsn, faults)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite %s: %w", path, err)
 	}
+	sqldb := sql.OpenDB(conn)
 	// modernc's driver is not safe to hammer with many concurrent writers;
 	// one connection removes a whole class of lock contention and this
 	// workload is nowhere near needing more.
@@ -252,7 +260,7 @@ func Open(path string, opts ...Option) (*DB, error) {
 	}
 	// The default is applied BEFORE the options, so an install that passes none
 	// gets the production cost and a test that passes one wins.
-	d := &DB{sql: sqldb, passwordCost: bcrypt.DefaultCost}
+	d := &DB{sql: sqldb, passwordCost: bcrypt.DefaultCost, faults: faults}
 	for _, o := range opts {
 		if o != nil {
 			o(d)

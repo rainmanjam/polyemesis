@@ -393,13 +393,20 @@ Anything else answers with a `status` of `degraded` or `unhealthy` and a
 
 The three checks are always all three, in that order. `database` is a real
 query, not a nil check — the failures it catches are a file that has gone away
-and a volume unmounted under a running process. `engine` fails when sources are
+and a volume unmounted under a running process. It also reports what the
+server's own statements have been told about the storage: writes failing
+because the volume is full or read-only (cleared by the next write that
+succeeds), and a damaged database file (which stays reported until the server
+restarts, because nothing the process does repairs it). Those two answer
+`degraded` with a `200`, not `503`: a restart cannot add disk or mend a page,
+and opening the database on boot writes, so a restart over a full disk would
+take the programme off the air and not bring it back. `engine` fails when sources are
 configured and not one engine is running, which is "nothing is being
 published"; no sources at all is a fresh install and passes. `recordingDisk`
 fails when the free-space floor has halted recording.
 
-**Only `database` and `engine` are fatal, and only those two make the status
-`503`.** A `recordingDisk` failure answers `200` with `"status": "degraded"`,
+**Only `database` (when it cannot be read at all) and `engine` are fatal, and
+only those make the status `503`.** A `recordingDisk` failure answers `200` with `"status": "degraded"`,
 deliberately: a box that has stopped writing recordings is still broadcasting,
 and taking it out of a load balancer over it would end the stream to fix the
 files. The consequence for whoever wires up the monitoring is that **a full

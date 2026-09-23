@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // GET /api/v1/health USED TO BE A CONSTANT, AND THREE MECHANISMS TREAT IT AS
@@ -55,6 +56,25 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	dbCheck := check{Name: "database", OK: true}
 	if err := s.store.Ping(); err != nil {
 		dbCheck.OK, dbCheck.Detail, fatal = false, err.Error(), true
+	} else if f, bad := s.store.StorageFault(); bad {
+		// PAGE ONE READING IS NOT THE DATABASE WORKING. A full volume serves
+		// the Ping above perfectly well while every save fails, and so does a
+		// file with a corrupt page further in -- this said "ok" through both.
+		// The store records what its real statements were told about the
+		// storage, and that is reported here.
+		//
+		// NOT FATAL. Neither a restart nor a 503 adds disk or mends a page,
+		// and opening the database on boot writes, so an orchestrator that
+		// restarted a live programme over a full disk would take it off the
+		// air and then fail to bring it back. Degraded, like recordingDisk.
+		dbCheck.OK = false
+		if f.Damaged {
+			dbCheck.Detail = "the database file is damaged: " + f.Err +
+				"; restore from a backup (last seen " + f.At.UTC().Format(time.RFC3339) + ")"
+		} else {
+			dbCheck.Detail = "writes are failing: " + f.Err +
+				" (last seen " + f.At.UTC().Format(time.RFC3339) + ")"
+		}
 	}
 	checks = append(checks, dbCheck)
 
