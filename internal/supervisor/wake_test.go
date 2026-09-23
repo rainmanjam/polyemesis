@@ -72,12 +72,11 @@ func TestAStoppingChildThatNeedsWakingIsWokenInsteadOfWaitingOutTheGrace(t *test
 	}
 }
 
-// One wake can be lost -- a dropped loopback datagram, or a wake that lands
-// before the child registered the signal -- so it repeats until the child goes
-// or the grace does. The grace stays the backstop.
+// One wake can be lost -- a dropped loopback datagram -- so it repeats until the
+// child goes or the grace does. The grace stays the backstop.
 func TestTheWakeRepeatsUntilTheGraceAndTheGraceStillKills(t *testing.T) {
 	skipWithoutSIGTERM(t)
-	const grace = 1400 * time.Millisecond // wakes at 0.3s, 0.8s and 1.3s
+	const grace = 1600 * time.Millisecond // wakes at 0.75s and 1.25s
 
 	var calls atomic.Int32
 	p := testProcess(t, fakeDeaf(60*time.Second), Spec{WakeOnStop: func() { calls.Add(1) }})
@@ -113,5 +112,25 @@ func TestAChildThatAnswersSIGTERMIsNeverWoken(t *testing.T) {
 	p.escalators.Wait()
 	if n := calls.Load(); n != 0 {
 		t.Errorf("WakeOnStop was called %d times for a child that exited on SIGTERM", n)
+	}
+}
+
+// The first wake is the only one with a real packet to release, so it must not
+// arrive before FFmpeg has registered the SIGTERM. On Linux that happens at the
+// next -stats_period tick, up to ffmpegStatsPeriod after the signal (see
+// wakeAfter). A wakeAfter at or under that period passes on macOS, where the
+// signal is noticed at once, and fails about half the time on Linux: the
+// recorder is SIGKILLed with its file unfinalised.
+func TestTheFirstWakeWaitsOutFFmpegsStatsPeriod(t *testing.T) {
+	if wakeAfter < ffmpegStatsPeriod+200*time.Millisecond {
+		t.Errorf("wakeAfter is %v; FFmpeg on Linux can take its whole %v stats period to act "+
+			"on SIGTERM, and a wake before then is spent on a child that has not yet stopped",
+			wakeAfter, ffmpegStatsPeriod)
+	}
+	// The recorder's grace -- the case this exists for -- still has room for
+	// the first wake and a repeat.
+	if g := graceFor("recorder"); wakeAfter+wakeEvery >= g {
+		t.Errorf("wakeAfter %v + wakeEvery %v leaves no repeat inside the %v recorder grace",
+			wakeAfter, wakeEvery, g)
 	}
 }
