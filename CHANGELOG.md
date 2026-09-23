@@ -38,6 +38,13 @@ its first tagged release.
 
 ### Fixed
 
+- **An install stopped by a signal is rolled back instead of reported as a success.**
+  `install.sh` decided success from `$?`, and a SIGINT or SIGTERM sent to the
+  script itself (by `timeout`, `kill` or systemd) is handled only after the
+  running command returns -- usually with 0. The rollback handler then exited 0
+  and undid nothing, leaving a half-made install that looked finished. The INT
+  and TERM traps now pass 130 and 143, so a signal always rolls back.
+
 - **A process no longer freezes while showing Running after a long run of
   output with no newline in it.** The supervisor read a child's stderr one
   line at a time and gave up on a line over 512 KiB, and it stopped reading
