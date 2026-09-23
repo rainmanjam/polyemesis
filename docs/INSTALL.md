@@ -914,7 +914,11 @@ curl -s http://localhost:8080/api/v1/health
 ```
 
 The health endpoint is unauthenticated on purpose, so it works before you have
-signed in and from a container healthcheck.
+signed in and from a container healthcheck. Point monitoring at this exact
+path. `/healthz`, `/health`, `/livez` and `/readyz` are not health checks here:
+they answer `404` with a body naming `/api/v1/health`, so a monitor pointed at
+one of them fails on its first probe instead of passing without checking
+anything.
 
 Then confirm in the UI what polyemesis actually detected. *Settings → Ingest*
 carries three badges: the FFmpeg version, `srt yes/no`, and `x264 yes/no`. If

@@ -37,6 +37,31 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 	return w
 }
 
+// A MONITOR POINTED AT A CONVENTIONAL PROBE PATH MUST NOT PASS. /healthz,
+// /health, /livez and /readyz are what an operator, a load balancer or a
+// Kubernetes manifest tries first. They matched no route, fell through to the
+// SPA, and answered 200 with index.html -- so an uptime check on /healthz went
+// green for a server whose database was gone, because it checked nothing. The
+// real check is /api/v1/health. These paths now fail with a 404 that says so,
+// which a monitor reports on its first probe instead of never.
+func TestConventionalProbePathsAreA404NamingTheRealHealthEndpoint(t *testing.T) {
+	h := HandlerFor(builtDist())
+	for _, path := range []string{"/healthz", "/health", "/livez", "/readyz", "/healthz/"} {
+		t.Run(path, func(t *testing.T) {
+			rec := get(t, h, path)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404: a probe path must not answer the SPA's 200", rec.Code)
+			}
+			if !strings.Contains(rec.Body.String(), "/api/v1/health") {
+				t.Fatalf("body = %q, want it to name /api/v1/health", rec.Body.String())
+			}
+			if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+				t.Fatalf("Content-Type = %q, want JSON", ct)
+			}
+		})
+	}
+}
+
 // The SPA fallback used to answer every unmatched path with index.html,
 // including the ones under /api. A caller that asked for JSON got 200 and a
 // page of HTML, so `res.ok` was true, `JSON.parse` failed on '<', and a

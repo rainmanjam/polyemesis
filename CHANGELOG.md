@@ -17,6 +17,10 @@ its first tagged release.
   now answers 500 with an error and is logged, rather than a silent empty 200,
   and an unencodable WebSocket event is dropped and logged instead of closing
   every open console.
+- **`/healthz`, `/health`, `/livez` and `/readyz` no longer answer 200.** They
+  fell through to the console's HTML page, so an uptime monitor pointed at them
+  stayed green while checking nothing. They now answer `404` with a body naming
+  the real check, `/api/v1/health`.
 
 ## [0.10.0] — 2026-09-23
 
