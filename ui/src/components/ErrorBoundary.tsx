@@ -74,7 +74,7 @@ function CrashNotice({ error, fullScreen }: { error: unknown; fullScreen?: boole
 /** A lazy chunk's boundary and loading state, together.
  *
  *  Together on purpose: a <Suspense> for a lazy chunk with no boundary around
- *  it is the blank page this file exists to prevent, and App.boundary.test.ts
+ *  it is the blank page this file exists to prevent, and lib/chunkReload.test.ts
  *  refuses a bare <Suspense> anywhere in src/ outside this file. */
 export function LazyBoundary({ children, fallback }: { children: ReactNode; fallback: ReactNode }) {
   return (
