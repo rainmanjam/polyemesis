@@ -223,8 +223,12 @@ func TestDocEveryReleaseHasAnUpgradeFixture(t *testing.T) {
 }
 
 var (
-	fixtureVersion  = regexp.MustCompile(`^(?:release|schema)-v(\d+\.\d+\.\d+)\.(?:db|sql)$`)
-	releasedHeading = regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+)\]`)
+	fixtureVersion = regexp.MustCompile(`^(?:release|schema)-v(\d+\.\d+\.\d+)\.(?:db|sql)$`)
+	// A heading is a release only once it carries a date -- the same shape
+	// changelog-freshness.yml calls "dated". A version staged ahead as
+	// "## [x.y.z] — unreleased" is not released yet, and its fixture must come
+	// from the release commit's code, not from whatever is on main today.
+	releasedHeading = regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+)\] — \d{4}-\d{2}-\d{2}`)
 )
 
 // missingUpgradeFixtures returns each version CHANGELOG.md has released, from
@@ -294,7 +298,8 @@ func writeReleaseFixture(t *testing.T, v string) {
 }
 
 func TestMissingUpgradeFixtures(t *testing.T) {
-	const cl = "## [Unreleased]\n\n## [0.10.0] — x\n\n## [0.9.0] — x\n\n## [0.6.0] — x\n\n## [0.5.0] — x\n"
+	const cl = "## [Unreleased]\n\n## [0.10.0] — 2026-09-23\n\n## [0.9.0] — 2026-09-06\n\n" +
+		"## [0.6.0] — 2026-08-20\n\n## [0.5.0] — 2026-08-08\n"
 	for _, tc := range []struct {
 		name string
 		have map[string]bool
@@ -311,6 +316,14 @@ func TestMissingUpgradeFixtures(t *testing.T) {
 				t.Errorf("missingUpgradeFixtures = %q, want %q", got, tc.want)
 			}
 		})
+	}
+	// A version staged ahead of its release commit -- the shape 719d9143 gave
+	// 0.7.0, dated later by 892de914 -- has no release yet. Reporting it would
+	// fail every PR for the whole staging window, and the message's own remedy
+	// would write the fixture with pre-release code.
+	staged := "## [Unreleased]\n\n## [0.11.0] — unreleased\n\n" + cl[len("## [Unreleased]\n\n"):]
+	if got := strings.Join(missingUpgradeFixtures(staged, map[string]bool{"0.6.0": true, "0.9.0": true, "0.10.0": true}), ","); got != "" {
+		t.Errorf("an undated heading is not a release, got %q reported", got)
 	}
 	if got := missingUpgradeFixtures("## [Unreleased]\n", nil); len(got) != 1 ||
 		!strings.Contains(got[0], "no released version") {
