@@ -28,6 +28,13 @@ its first tagged release.
   stayed raised for most of an hour, never sent `caught_up`, and a second stall
   could not alert. It now measures how fast the output time advances over the
   last 20 seconds, and says nothing while the ingest itself is lost.
+- **`destination.up` means the destination is delivering, not that its process
+  exists.** It fired on every spawn, so a destination pointed at a closed port
+  announced "delivering" and flapped without sending a byte. It now waits for
+  FFmpeg's output time to move. A sink that stops reading, which leaves the
+  process running, now produces `destination.down` with `reason: "stalled"`
+  after the 10s dwell, and `destination.up` when data flows again. Broadcast
+  lifecycle automation does not end a broadcast on a stall.
 
 ## [0.10.0] — 2026-09-23
 

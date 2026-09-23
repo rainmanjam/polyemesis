@@ -109,6 +109,10 @@ type Watcher struct {
 	cfg  WatchConfig
 	ing  edgeState
 	dest map[int64]*edgeState
+	// lastOut is each destination's output time at the previous observation,
+	// in milliseconds. It is how "delivering" is told apart from "has a
+	// process"; see delivering.
+	lastOut map[int64]int64
 	// names remembers what a destination was called, so a row that disappears
 	// between two snapshots can still be identified in the event that says so.
 	names map[int64]DestinationRef
@@ -117,10 +121,11 @@ type Watcher struct {
 // NewWatcher creates a watcher for one source.
 func NewWatcher(src SourceRef, cfg WatchConfig) *Watcher {
 	return &Watcher{
-		src:   src,
-		cfg:   cfg.normalized(),
-		dest:  map[int64]*edgeState{},
-		names: map[int64]DestinationRef{},
+		src:     src,
+		cfg:     cfg.normalized(),
+		dest:    map[int64]*edgeState{},
+		lastOut: map[int64]int64{},
+		names:   map[int64]DestinationRef{},
 	}
 }
 
@@ -188,7 +193,27 @@ func (w *Watcher) watchDestinations(s alerts.Snapshot, now time.Time) []Event {
 		// because nobody should be woken for a switch somebody flipped. A hook
 		// is a fact: a script mirroring what is live needs the edge whoever
 		// caused it.
-		up, down := st.observe(d.Enabled && d.Running, now, w.cfg.DestinationDownAfter)
+		//
+		// AND "ON" MEANS DELIVERING, NOT SPAWNED. This used to be Enabled &&
+		// Running, and Running is true from the moment the child exists. A
+		// destination pointed at a closed port was therefore announced as
+		// "delivering" on every spawn -- one exploratory run saw the up hook
+		// 14s before a byte left for anywhere -- and a sink that stopped
+		// reading was never announced at all, because the blocked child stays
+		// Running for as long as its TCP connection does.
+		flowing := w.delivering(d)
+		stalled := d.Enabled && d.Running && !flowing
+		if stalled && s.IngestConfigured && !s.IngestLive {
+			// NOTHING ARRIVING IS NOT A DESTINATION STALLING. With the source
+			// gone every destination's output time stops, and that is
+			// ingest.disconnected's news; a down per destination on top of it
+			// would tell a script that every platform had failed when none had.
+			// Hold whatever edge the destination is on, and restart the dwell
+			// so the gap is not counted against it once the source returns.
+			st.offSince = time.Time{}
+			continue
+		}
+		up, down := st.observe(d.Enabled && d.Running && flowing, now, w.cfg.DestinationDownAfter)
 		switch {
 		case up:
 			out = append(out, Event{
@@ -197,8 +222,14 @@ func (w *Watcher) watchDestinations(s alerts.Snapshot, now time.Time) []Event {
 			})
 		case down:
 			reason := "stopped"
-			if !d.Enabled {
+			switch {
+			case !d.Enabled:
 				reason = "disabled"
+			case stalled:
+				// The process is up and its output is not moving: the sink
+				// stopped taking data. Not "stopped", which a script (and
+				// the lifecycle coordinator) reads as a crash.
+				reason = "stalled"
 			}
 			out = append(out, Event{
 				Trigger: TriggerDestinationDown, At: now, Source: w.src,
@@ -226,7 +257,29 @@ func (w *Watcher) watchDestinations(s alerts.Snapshot, now time.Time) []Event {
 			})
 		}
 		delete(w.dest, id)
+		delete(w.lastOut, id)
 		delete(w.names, id)
 	}
 	return out
+}
+
+// delivering reports whether d's output has moved since the previous
+// observation, and records where it is now.
+//
+// FFmpeg reports progress every half second and the sweep runs every two, so a
+// destination moving media always shows a different output time from one sweep
+// to the next, and one whose write is blocked shows the same one. Zero is a
+// child that has not moved anything yet. A value BELOW the last one is a
+// respawned child that has already moved media, which is delivering too. The
+// very first observation of a destination already carrying media counts as
+// delivering, so a server restarted mid-show replays its live destinations
+// straight away, as documented.
+func (w *Watcher) delivering(d alerts.DestState) bool {
+	last := w.lastOut[d.ID]
+	if !d.Running {
+		w.lastOut[d.ID] = 0
+		return false
+	}
+	w.lastOut[d.ID] = d.OutTimeMS
+	return d.OutTimeMS > 0 && d.OutTimeMS != last
 }
