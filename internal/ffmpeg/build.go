@@ -824,8 +824,43 @@ func RelayInputArgs() []string {
 		// mid-GOP joiner waiting for a keyframe (#460), audio that has not
 		// arrived -- still holds the probe open, up to the same window.
 		"-scan_all_pmts", "0",
+		// Believe the relay's timestamps when they jump FORWARD. The ffmpeg CLI
+		// checks every MPEG-TS packet against the previous packet on the same
+		// stream, and when the jump is bigger than this threshold (10 s by
+		// default) it assumes the source is broken. It then subtracts the jump
+		// from the offset of the WHOLE INPUT, so every stream moves, not only
+		// the one that jumped.
+		//
+		// On the relay, a jump like that is a real gap. The selector's
+		// -output_ts_offset keeps the timeline moving forward at wall-clock
+		// pace (see selector.go), so a stream that goes quiet and comes back
+		// comes back at the right time. A failover to a backup or slate with
+		// fewer tracks is that case: track 2 is off the relay for the length
+		// of the outage and returns an outage later. With the default, a 30 s
+		// outage made FFmpeg pull track 0 and the video back 30 s as well.
+		// Track 0's next packet then looked 30 s in the past and was pushed
+		// forward again, and the two streams swapped the offset on every
+		// packet from then on. The routed mix put the returning track on the
+		// outage's timeline, and its audio froze while the video kept going,
+		// until the destination restarted. Under the threshold nothing
+		// happens, which is why a 5 s test gap never showed any of this. See
+		// engine's TestARoutedTrackRejoinsOnItsOwnTimelineAfterAThirtySecondOutage.
+		//
+		// FFmpeg has no "off" for this, so the value is one no real outage can
+		// reach: a year, in seconds. Backward jumps are not affected, because
+		// FFmpeg corrects those by a separate rule that ignores this threshold.
+		// The 33-bit PTS wrap is not affected either, because libavformat
+		// unwraps it before this check sees the packet. The option is a GLOBAL
+		// one, which the CLI accepts before -i like any input option. It only
+		// acts on formats that declare timestamp discontinuities (MPEG-TS
+		// among them), so a builder that gives it a file loses nothing.
+		"-dts_delta_threshold", relayDTSDeltaThreshold,
 	}
 }
+
+// relayDTSDeltaThreshold is the -dts_delta_threshold every relay consumer
+// reads with, in seconds. See RelayInputArgs for why it is effectively off.
+const relayDTSDeltaThreshold = "31536000"
 
 // relayInputArgsFor is RelayInputArgs for the input actually being read, and it
 // is what every builder in this file calls.
@@ -835,7 +870,7 @@ func RelayInputArgs() []string {
 // found", exit 8, before a byte is read. The relay is always MPEG-TS over UDP
 // (RelayOutputURL sizes its datagrams in TS packets), so a udp:// input gets
 // the whole set. Anything else -- a file handed to the same builder, as the
-// package tests do -- gets the two budgets alone, which every
+// package tests do -- gets the rest without it, which every
 // demuxer accepts, rather than a command that cannot start.
 func relayInputArgsFor(input string) []string {
 	args := RelayInputArgs()

@@ -282,6 +282,12 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 // sample rather than from where it sits. See track_gap_test.go, which runs both
 // shapes through real FFmpeg.
 //
+// All of this depends on the gap reaching the graph. An outage longer than
+// FFmpeg's -dts_delta_threshold used to be removed by the demuxer before any
+// filter saw it, which is why ffmpeg.RelayInputArgs raises that threshold.
+// engine's TestARoutedTrackRejoinsOnItsOwnTimelineAfterAThirtySecondOutage
+// tests the two together.
+//
 // A single track has nothing to be aligned against, and the final resample
 // already fills its gaps, so a one-track graph stays exactly the shape it was.
 //

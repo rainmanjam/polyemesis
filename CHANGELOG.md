@@ -10,6 +10,21 @@ its first tagged release.
 
 ### Fixed
 
+- **Routed tracks stay in step after a real-length failover outage.**
+  The per-track realignment added for a failover to a source with fewer
+  tracks was tested with a 5 s gap. In the field, with a 30 s outage, track 2
+  came back summed with the backup's audio from the outage, and then the
+  routed audio froze while the video kept going until the destination
+  restarted. The graph was not the cause. The ffmpeg CLI treats any MPEG-TS
+  timestamp jump over 10 s as a broken source and moves the whole input back
+  by the jump. So track 2's return pulled track 0 and the video back 30 s,
+  and the two streams then swapped the correction on every packet. Relay
+  consumers (destinations, recorder, preview, meters) now read with
+  `-dts_delta_threshold` set to a year, so they keep the relay's
+  forward-only timeline as it is. A new engine test builds the relay with the
+  production feed hop and runs the production destination command on it,
+  with a 30 s one-track outage.
+
 - **A clean restart of an idle server no longer logs three ERROR lines.** Shutdown unsubscribed the recorder, preview and meters from the relay hub whether or not they had ever started. On an idle engine none had, so the hub reported three removals of names it never held -- at ERROR, because since #711 that message means a teardown named the wrong subscriber and left a real one feeding a dead process. It now unsubscribes only consumers that hold a relay port, which they do exactly when they subscribed; a real mismatch still logs. Seen on the staging box on its first restart after the exploratory-testing fixes.
 
 - **The Docker upgrade command named an image tag that does not exist.**
