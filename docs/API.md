@@ -93,14 +93,26 @@ route serves them.
 A `kind: file` destination's `url` is a **filename**, not a URL, and it comes
 back intact. Redacting it would delete a field that never held a credential.
 
-**Values are blanked or masked, not removed** — so a client that reads, edits
-and PUTs the document straight back still works, and the JSON path of every
-redacted field is the same for a `read` token as for an admin. Note the
+**Values are blanked or masked, not removed** — so the document a `read` token
+gets has the same shape as an admin's, and the JSON path of every redacted
+field is the same for both. Note the
 consequence for the fields tagged `omitempty`: `backupStreamKey`,
 `legacyRtmpKey`, `extraInputArgs` and `extraOutputArgs` come back as the literal
 string `[redacted]` rather than as `""`, because an empty string would make the
 key vanish and change the shape of the document. A field that was genuinely
 empty stays absent for everyone.
+
+**A write carrying `[redacted]` in a credential field is refused**, with a `400`
+that names the field. The placeholder is what a `read` token is shown instead
+of the value, so a redacted document PUT back with an admin credential would
+otherwise store the placeholder over the real key — and nothing would fail
+until that key was needed. When you round-trip a document read with a `read`
+token, drop the redacted fields (a destination or settings `PUT` keeps what
+you leave out) or send the real values. This applies to a destination's
+`streamKey`, `backupStreamKey`, `url`, `backupUrl`, `extraInputArgs` and
+`extraOutputArgs`; to `ingest.{srt.passphrase,rtmp.streamKey,pull.url}` on a
+source or in settings; and to `failover.backup.{srt.passphrase,rtmp.streamKey,pull.url}`,
+`mqtt.brokerUrl` and `automod.model.endpoint` in settings.
 
 The one place the shape does differ is `publishUrls` on `GET /sources`, which is
 `null` for a `read` token. Each entry is a publish URL in which the token *is*

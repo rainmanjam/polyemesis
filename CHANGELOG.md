@@ -10,6 +10,14 @@ its first tagged release.
 
 ### Fixed
 
+- **A `[redacted]` placeholder written back is refused instead of stored over
+  the real credential.** A `read` token is shown `[redacted]` in place of a
+  destination's backup stream key, expert arguments and the secret part of its
+  URLs, and in place of ingest and failover credentials in settings and
+  sources. That document PUT back with an admin credential stored the
+  placeholder — sealing `[redacted]` as the backup key — and nothing failed
+  until a failover needed it. Every such field now refuses a value containing
+  the placeholder with a `400` that names the field.
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer
   tracks was tested with a 5 s gap. In the field, with a 30 s outage, track 2

@@ -253,7 +253,10 @@ func readSafeDestination(d db.Destination) db.Destination {
 // nothing would invent a credential that does not exist.
 //
 // alerts.Mask rather than a sentinel of this package's own, so the string an
-// operator sees here is the string they already see in a log line and an alert.
+// operator sees here is the string they already see in a log line and an alert
+// -- and the string the write side refuses: db's redactionPlaceholderProblems
+// checks this same constant, so a read token's document PUT back cannot store
+// it over the real credential.
 func redactInPlace(s string) string {
 	if s == "" {
 		return s
