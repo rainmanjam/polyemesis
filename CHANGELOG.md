@@ -37,7 +37,9 @@ its first tagged release.
   They now carry the programme's id in `key` (`ingest:1`), its name in the
   title, and `sourceId` and `sourceName` fields. `disk.low` and
   `disk.recovered` were sent once per programme, because every programme
-  measures the same recordings volume; they are now sent once per install.
+  measures the same recordings volume; they are now sent once per install,
+  with a second `disk.low` only if a later programme sees the recorder halt
+  after the first reported a warning.
 
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer

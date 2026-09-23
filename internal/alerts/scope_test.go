@@ -90,37 +90,106 @@ func TestAnUnscopedWatcherKeepsTheOldKeys(t *testing.T) {
 
 // ONE disk.low PER INSTALL, however many engines measure the volume.
 //
-// Mutation: drop the `g.last[ev.Key] == ev.Type` refusal from Admit. Observed
-// to fail with "the second engine's disk.low was admitted".
+// Mutation: return true for every low in Admit. Observed to fail with "the second engine's disk.low
+// was admitted".
 func TestTheInstallGateLetsOneEngineSpeakForTheDisk(t *testing.T) {
 	g := NewInstallGate()
-	low := Event{Type: TypeDiskLow, Key: "disk"}
-	rec := Event{Type: TypeDiskRecovered, Key: "disk"}
+	low := Event{Type: TypeDiskLow, Severity: SeverityWarning, Key: "disk"}
+	rec := Event{Type: TypeDiskRecovered, Severity: SeverityInfo, Key: "disk"}
 
-	if !g.Admit(low) {
+	if !g.Admit("a", low) {
 		t.Fatal("the first disk.low was refused; nobody hears the disk filling")
 	}
-	if g.Admit(low) {
+	if g.Admit("b", low) {
 		t.Error("the second engine's disk.low was admitted: every rule gets one copy per programme")
 	}
-	if !g.Admit(rec) {
-		t.Error("the first disk.recovered was refused; the install is never told it cleared")
+	if g.Admit("a", rec) {
+		t.Error("disk.recovered was admitted while another engine still measures the disk low")
 	}
-	if g.Admit(rec) {
-		t.Error("the second engine's disk.recovered was admitted")
+	if !g.Admit("b", rec) {
+		t.Error("the last holder's disk.recovered was refused; the install is never told it cleared")
 	}
-	if !g.Admit(low) {
+	if g.Admit("b", rec) {
+		t.Error("a recovery from an engine holding nothing was admitted")
+	}
+	if !g.Admit("a", low) {
 		t.Error("a second episode was refused as a repeat of the first")
 	}
 
 	// Programme events are never the gate's business, however alike they are.
 	lost := Event{Type: TypeIngestLost, Key: "ingest:1"}
-	if !g.Admit(lost) || !g.Admit(lost) {
+	if !g.Admit("a", lost) || !g.Admit("b", lost) {
 		t.Error("the gate refused a programme-scoped event")
 	}
 	// And no gate is the old behaviour, for an engine built by hand.
 	var none *InstallGate
-	if !none.Admit(low) || !none.Admit(low) {
+	if !none.Admit("a", low) || !none.Admit("b", low) {
 		t.Error("a nil gate refused an event")
+	}
+	none.Release("a") // nil-safe, like Admit
+}
+
+// A DELETED PROGRAMME TOOK THE DISK ALERT WITH IT.
+//
+// The gate remembered "the install was told low" for the life of the process.
+// Delete the only programme while the disk is low, free the space, add a
+// programme: the new engine's watcher says nothing while the disk is fine (a
+// recovery is only reported after a fire), and when the disk filled again the
+// gate dropped the new disk.low -- the critical "Recording has been stopped"
+// form included -- as a repeat. Until restart.
+//
+// Mutation: make Release a no-op. Observed to fail with "the fresh engine's
+// disk.low was refused".
+func TestAReleasedHolderDoesNotSwallowTheNextDiskLow(t *testing.T) {
+	g := NewInstallGate()
+	warn := Event{Type: TypeDiskLow, Severity: SeverityWarning, Key: "disk"}
+
+	a := NewWatcher(WatchConfig{})
+	evs := a.Observe(Snapshot{At: base, Disk: DiskState{FreeBytes: 1, TotalBytes: 1 << 40}})
+	if len(evs) != 1 || !g.Admit("a", evs[0]) {
+		t.Fatalf("engine A's disk.low = %+v, want one, admitted", evs)
+	}
+	g.Release("a") // its programme is deleted while the disk is still low
+
+	b := NewWatcher(WatchConfig{})
+	if evs := b.Observe(Snapshot{At: base.Add(time.Minute),
+		Disk: DiskState{FreeBytes: 1 << 39, TotalBytes: 1 << 40}}); len(evs) != 0 {
+		t.Fatalf("a fresh watcher on a healthy disk said %+v, want nothing", evs)
+	}
+	// The same warning A gave, so severity cannot be what lets it through.
+	evs = b.Observe(Snapshot{At: base.Add(2 * time.Minute),
+		Disk: DiskState{FreeBytes: 1, TotalBytes: 1 << 40}})
+	if len(evs) != 1 || evs[0].Type != TypeDiskLow || evs[0].Severity != SeverityWarning {
+		t.Fatalf("engine B's watcher said %+v, want one warning disk.low", evs)
+	}
+	if !g.Admit("b", evs[0]) {
+		t.Error("the fresh engine's disk.low was refused: the disk is filling and nobody was told")
+	}
+	// And B now holds it like any engine: a third copy is the same news.
+	if g.Admit("c", warn) {
+		t.Error("a second copy while engine B holds the disk low was admitted")
+	}
+}
+
+// A CRITICAL disk.low WAS DROPPED BEHIND A WARNING.
+//
+// The first engine to see the volume filling reports the warning; a later
+// engine that sees the recorder halt reports the critical. Dropping it as the
+// same edge means a rule floored at critical never hears recording stopped.
+//
+// Mutation: drop the severity comparison from Admit. Observed to fail with
+// "the critical disk.low was dropped".
+func TestAMoreSevereDiskLowIsAdmitted(t *testing.T) {
+	g := NewInstallGate()
+	warn := Event{Type: TypeDiskLow, Severity: SeverityWarning, Key: "disk"}
+	crit := Event{Type: TypeDiskLow, Severity: SeverityCritical, Key: "disk"}
+	if !g.Admit("a", warn) {
+		t.Fatal("the first disk.low was refused")
+	}
+	if !g.Admit("b", crit) {
+		t.Error("the critical disk.low was dropped behind a warning")
+	}
+	if g.Admit("c", crit) || g.Admit("d", warn) {
+		t.Error("a copy no more severe than what the install was told was admitted")
 	}
 }

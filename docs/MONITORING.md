@@ -403,7 +403,12 @@ one of them. Their `key` ends in the programme's id (`ingest:1`, `failover:1`,
 and every stream condition carries `sourceId` and `sourceName` in `fields`.
 `disk.low` and `disk.recovered` are the exception: the recordings volume
 belongs to the whole install, so they carry no programme, keep the key `disk`,
-and are delivered **once per install** however many programmes are running.
+and are delivered **once per install** however many programmes are running:
+one `disk.low` when the first programme sees the volume fill (and another if a
+later one sees the recorder halt, so a `critical` floor still hears it), and
+one `disk.recovered` when the last programme that saw it low sees it clear.
+Deleting a programme while the disk is low does not use up the alert: the next
+fill is reported as usual.
 
 `text` and `fields` are omitted when empty, and `fields` is an object rather
 than a list because the consumer of a generic webhook is a script and a script

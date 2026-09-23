@@ -1190,6 +1190,11 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	}
 
 	e.wg.Wait()
+	// After observeLoop has returned, so no sweep can claim the disk again
+	// behind this. A stopped engine's watcher will never report the recovery,
+	// and a claim it left on the shared gate would swallow the next disk.low
+	// from an engine that is alive. See alerts.InstallGate.
+	e.releaseAlertGate()
 	_ = e.hub.Close()
 	// After every child is gone, so the queued tail of their stderr is flushed
 	// rather than dropped.
@@ -5162,9 +5167,7 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			}
 			snap := e.alertSnapshot(now, live)
 			snap.Disk = disk
-			// Re-stamped every sweep, for the reason hookWatch is below.
-			e.alertWatch.SetSource(alerts.SourceRef{ID: e.sourceID, Name: e.SourceName()})
-			e.publishAlerts(e.alertWatch.Observe(snap))
+			e.observeAlerts(snap)
 			if e.hookWatch != nil {
 				// Re-stamped every sweep: the source row is named after the
 				// engine is built, and an event carrying only an id tells a
@@ -5197,18 +5200,44 @@ func (e *Engine) observeLoop(ctx context.Context) {
 	}
 }
 
+// observeAlerts is one sweep of the alert watcher: stamp it with this
+// programme, judge the snapshot, publish what changed. It returns what it
+// published.
+//
+// Its own function so a test drives the path observeLoop drives. The stamp is
+// the line that makes a two-programme install's alerts say WHICH programme;
+// without it every engine's watcher is unscoped, writing key "ingest" and
+// title "Ingest lost" for every studio alike.
+func (e *Engine) observeAlerts(snap alerts.Snapshot) []alerts.Event {
+	// Re-stamped every sweep, for the reason hookWatch is in observeLoop: the
+	// source row is named after the engine is built.
+	e.alertWatch.SetSource(alerts.SourceRef{ID: e.sourceID, Name: e.SourceName()})
+	return e.publishAlerts(e.alertWatch.Observe(snap))
+}
+
 // publishAlerts hands one sweep's events to this engine's notifier, less any
-// install-wide edge another engine has already published. See
-// alerts.InstallGate.
-func (e *Engine) publishAlerts(evs []alerts.Event) {
+// install-wide edge another engine has already published, and returns what
+// it handed on. See alerts.InstallGate.
+func (e *Engine) publishAlerts(evs []alerts.Event) []alerts.Event {
 	e.mu.RLock()
 	gate := e.alertGate
 	e.mu.RUnlock()
+	var out []alerts.Event
 	for _, ev := range evs {
-		if gate.Admit(ev) {
+		if gate.Admit(e, ev) {
 			e.alerter.Publish(ev)
+			out = append(out, ev)
 		}
 	}
+	return out
+}
+
+// releaseAlertGate withdraws this engine's claims on the shared gate.
+func (e *Engine) releaseAlertGate() {
+	e.mu.RLock()
+	gate := e.alertGate
+	e.mu.RUnlock()
+	gate.Release(e)
 }
 
 // SetAlertGate attaches the install's shared gate. A setter for the reason
