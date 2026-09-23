@@ -178,12 +178,27 @@ func unsignedToken(t *testing.T, alg string) string {
 	return enc(header) + "." + enc(payload) + "."
 }
 
+// CheckCSRF compares the header to the value BOUND TO THE SESSION COOKIE, and
+// never to the polyemesis_csrf cookie: that cookie is the one thing an attacker
+// who can write cookies for this host controls (exploratory run, row 34), so
+// the cases that set it to match an attacker's header must still be refused.
 func TestCheckCSRF(t *testing.T) {
-	const token = "kZ8pQ2r_TokenValue"
+	m := testManager(t, 0x2a)
+	session, err := m.Issue(1, "admin")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	other, err := m.Issue(1, "admin")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	bound := m.csrfFor(session)
+	const planted = "kZ8pQ2r_AttackerChosen"
 
 	tests := []struct {
 		name    string
 		method  string
+		session string
 		cookie  string
 		header  string
 		wantErr bool
@@ -192,46 +207,49 @@ func TestCheckCSRF(t *testing.T) {
 		{name: "HEAD is exempt even with no token at all", method: http.MethodHead},
 		{name: "OPTIONS is exempt even with no token at all", method: http.MethodOptions},
 		{
-			name:   "POST with a matching cookie and header is allowed",
-			method: http.MethodPost, cookie: token, header: token,
+			name:   "POST with the session's bound token is allowed",
+			method: http.MethodPost, session: session, header: bound,
 		},
 		{
-			name:   "DELETE with a matching cookie and header is allowed",
-			method: http.MethodDelete, cookie: token, header: token,
+			name:   "DELETE with the session's bound token is allowed",
+			method: http.MethodDelete, session: session, header: bound,
 		},
 		{
-			name:   "POST with no cookie is rejected",
-			method: http.MethodPost, header: token, wantErr: true,
+			name:   "PATCH with the bound token is allowed whatever the CSRF cookie holds",
+			method: http.MethodPatch, session: session, cookie: planted, header: bound,
 		},
 		{
-			name:   "POST with an empty cookie is rejected",
-			method: http.MethodPost, cookie: "", header: token, wantErr: true,
+			name:   "POST whose header matches a planted CSRF cookie is rejected",
+			method: http.MethodPost, session: session, cookie: planted, header: planted, wantErr: true,
+		},
+		{
+			name:   "POST with another session's token is rejected",
+			method: http.MethodPost, session: session, header: m.csrfFor(other), wantErr: true,
+		},
+		{
+			name:   "POST with no session cookie is rejected",
+			method: http.MethodPost, cookie: bound, header: bound, wantErr: true,
 		},
 		{
 			name:   "POST with no header is rejected",
-			method: http.MethodPost, cookie: token, wantErr: true,
+			method: http.MethodPost, session: session, cookie: bound, wantErr: true,
 		},
 		{
-			name:   "POST where the header does not match the cookie is rejected",
-			method: http.MethodPost, cookie: token, header: "kZ8pQ2r_TokenValu3", wantErr: true,
+			name:   "POST where the header is a prefix of the bound token is rejected",
+			method: http.MethodPost, session: session, header: bound[:8], wantErr: true,
 		},
 		{
-			name:   "POST where the header is a prefix of the cookie is rejected",
-			method: http.MethodPost, cookie: token, header: token[:8], wantErr: true,
-		},
-		{
-			name:   "PUT with neither cookie nor header is rejected",
+			name:   "PUT with nothing at all is rejected",
 			method: http.MethodPut, wantErr: true,
-		},
-		{
-			name:   "PATCH with a matching cookie and header is allowed",
-			method: http.MethodPatch, cookie: token, header: token,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := httptest.NewRequest(tt.method, "/api/destinations", nil)
+			if tt.session != "" {
+				r.AddCookie(&http.Cookie{Name: SessionCookie, Value: tt.session})
+			}
 			if tt.cookie != "" {
 				r.AddCookie(&http.Cookie{Name: CSRFCookie, Value: tt.cookie})
 			}
@@ -239,7 +257,7 @@ func TestCheckCSRF(t *testing.T) {
 				r.Header.Set(CSRFHeader, tt.header)
 			}
 
-			err := CheckCSRF(r)
+			err := m.CheckCSRF(r)
 			if tt.wantErr && err == nil {
 				t.Fatal("CheckCSRF() = nil, want an error")
 			}

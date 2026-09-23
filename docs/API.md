@@ -190,7 +190,12 @@ a `403` inside unattended automation. Revoke and re-mint to narrow one.
 
 `POST /auth/login` sets an `HttpOnly`, `SameSite=Lax` session cookie and a
 readable `polyemesis_csrf` cookie. **Every state-changing request must echo that
-value in the `X-CSRF-Token` header.**
+value in the `X-CSRF-Token` header.** The value is derived from the session
+(an HMAC of it under the server key), so it only works with the session cookie
+it was issued alongside; the server checks the header against the session, not
+against the `polyemesis_csrf` cookie, so a cookie planted by anything else that
+can write cookies for the host authorises nothing. A browser holding a stale
+value is sent the right one on its next authenticated request.
 
 ```sh
 curl -c jar -X POST https://host:8080/api/v1/auth/login \

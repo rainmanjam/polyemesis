@@ -609,7 +609,7 @@ internal/
                URL, stream key included, when an endpoint refuses it
   stats/       ring buffers (30 min bitrate), host CPU/RAM
   metrics/     Prometheus text exposition, rendered from the engine's status
-  auth/        bcrypt, JWT cookie, CSRF double-submit, API tokens, login throttle
+  auth/        bcrypt, JWT cookie, session-bound CSRF token, API tokens, login throttle
   tlsx/        certificate layer: tls.Config, local CA + leaf, autocert, expiry
                introspection. Takes an already-resolved mode; knows no yaml.
   secrets/     NaCl secretbox token encryption at rest

@@ -15,6 +15,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
@@ -558,9 +559,45 @@ func TestTheSharedRecordingManagerIsNotAnEnginesOwn(t *testing.T) {
 				"takes the database with it", eng.SourceID())
 		}
 	}
+	// The shared manager answers the API's deletes, and its live-segment guard
+	// needs to know whether any recorder is alive: recording.enabled stays on
+	// when the free-space floor stops one. Without the probe it falls back to
+	// the setting, silently, and refuses the last segment for an hour.
+	if !m.Recordings().RecorderProbed() {
+		t.Error("the manager's shared recording manager has no recorder probe, so its " +
+			"delete guard reads recording.enabled and refuses a segment no recorder holds")
+	}
 	if m.Recordings().StorageGuarded() {
 		t.Error("the manager's shared recording manager grew a storage guard: whatever it " +
 			"halts is either every programme on the box or none of them, and neither is " +
 			"what a full volume means")
+	}
+}
+
+// THE FREE-SPACE HALT EMPTIES THE RECORDER SLOT WITH RECORDING STILL ON, and
+// that is the whole reason the shared manager's delete guard asks
+// RecorderRunning instead of reading recording.enabled. Pinned here from the
+// engine's side: a recorder in the slot reads as running, the floor halts it
+// through the real guard and reconcile, and the answer turns false while the
+// settings the reconcile was handed still say recording is enabled.
+func TestRecorderRunningGoesFalseWhenTheFreeSpaceFloorHaltsARecorder(t *testing.T) {
+	e := lifeEngine(t)
+	e.recman = recording.New(e.log, e.store, t.TempDir(), nil,
+		recording.WithStorageGuard(func(recording.StorageState) {}))
+	e.recorder = loudTestProc()
+	if !e.RecorderRunning() {
+		t.Fatal("RecorderRunning() = false with a recorder in the slot")
+	}
+
+	// A floor no real volume clears: the guard halts on the real temp dir.
+	if !e.recman.CheckFreeSpace(db.RecordingSettings{MinFreeGB: 1 << 40}) || e.recman.RecordingAllowed() {
+		t.Skip("this platform reports no free-space figures, so the floor cannot halt")
+	}
+	on := e.Settings()
+	on.Recording.Enabled = true
+	e.reconcileRecorder(on)
+
+	if e.RecorderRunning() {
+		t.Error("RecorderRunning() = true after the free-space floor stopped the recorder")
 	}
 }

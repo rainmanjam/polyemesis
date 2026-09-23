@@ -1595,6 +1595,14 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "not signed in")
 			return
 		}
+		// A cookie session gets its CSRF cookie re-sent whenever the one the
+		// browser holds is not the value bound to the session: one minted
+		// before the binding (every browser signed in across that upgrade), or
+		// one somebody planted. Before requireCSRF, so even a write refused for
+		// a stale cookie carries the fix and the SPA's next attempt succeeds.
+		if p.token == nil {
+			s.sessions.RefreshCSRFCookie(w, r)
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalKey, p)))
 	})
 }
@@ -1843,7 +1851,7 @@ func (s *Server) requireCSRF(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if err := auth.CheckCSRF(r); err != nil {
+		if err := s.sessions.CheckCSRF(r); err != nil {
 			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}

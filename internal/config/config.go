@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -109,6 +110,67 @@ type TLS struct {
 	HSTS bool `yaml:"hsts"`
 	// Enabled is the legacy on/off switch, kept for backwards compatibility.
 	Enabled bool `yaml:"enabled"`
+}
+
+// UnmarshalYAML decodes the tls block and REFUSES A KEY IT DOES NOT KNOW.
+//
+// The rest of config.yaml ignores unknown keys (see the enhancedRtmp note
+// above), and inside this block that leniency had the worst possible failure
+// mode. `mdoe: selfsigned` -- or `Mode:`, since yaml keys are case-sensitive --
+// leaves mode absent, normalizeTLS maps absent to off, and the server starts on
+// plain HTTP with session cookies missing their Secure flag. On a loopback bind
+// nothing was logged at all. A typo that silently turns TLS off is not one to
+// warn about; it is one to stop at, naming the key.
+//
+// Only this block, deliberately: every key it has ever had is still a field
+// below, so no existing file breaks. Tightening the top level would need an
+// allowlist of retired keys first.
+func (t *TLS) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.MappingNode {
+		known := tlsKeys()
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := n.Content[i].Value
+			if _, ok := known[k]; ok {
+				continue
+			}
+			hint := ""
+			for name := range known {
+				if strings.EqualFold(name, k) {
+					hint = fmt.Sprintf(" (did you mean %q? keys are case-sensitive)", name)
+				}
+			}
+			return fmt.Errorf("line %d: tls has no key %q%s. Refusing to start: an "+
+				"unrecognised tls key would otherwise be ignored, and a misspelled "+
+				"mode falls back to off -- plain HTTP, cookies without Secure. Valid "+
+				"keys: %s", n.Content[i].Line, k, hint, strings.Join(tlsKeyList(), ", "))
+		}
+	}
+	// The alias has TLS's fields and none of its methods, so this Decode does
+	// not recurse back into UnmarshalYAML.
+	type plain TLS
+	return n.Decode((*plain)(t))
+}
+
+// tlsKeyList is every yaml key TLS declares, read from its struct tags so a
+// field added later is accepted without anyone remembering to list it here.
+func tlsKeyList() []string {
+	rt := reflect.TypeOf(TLS{})
+	keys := make([]string, 0, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		name, _, _ := strings.Cut(rt.Field(i).Tag.Get("yaml"), ",")
+		if name != "" && name != "-" {
+			keys = append(keys, name)
+		}
+	}
+	return keys
+}
+
+func tlsKeys() map[string]struct{} {
+	m := map[string]struct{}{}
+	for _, k := range tlsKeyList() {
+		m[k] = struct{}{}
+	}
+	return m
 }
 
 // FFmpeg lets an operator pin specific binaries instead of relying on $PATH.

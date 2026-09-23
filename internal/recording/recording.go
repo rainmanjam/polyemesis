@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,6 +46,10 @@ type Manager struct {
 	// sourceID is the programme these segments came from, stamped onto every
 	// row this manager indexes. Nil on a manager with no programme.
 	sourceID *int64
+	// recorderRunning answers whether any recorder process is alive right now.
+	// Nil means "not wired up", and Delete then falls back to recording.enabled.
+	// See WithRecorderProbe.
+	recorderRunning func() bool
 
 	storageMu sync.Mutex
 	storage   StorageState
@@ -91,6 +96,28 @@ func WithSourceID(id int64) Option {
 func WithStorageGuard(fn func(StorageState)) Option {
 	return func(m *Manager) { m.onStorage = fn }
 }
+
+// WithRecorderProbe supplies the question Delete's live-segment guard really
+// means to ask: is a recorder process alive, anywhere on the box, that could
+// still hold one of the recorder's segments open?
+//
+// recording.enabled is not that question, and the gap is the free-space floor.
+// When the volume drops below it the engine stops the recorder
+// (reconcileRecorder, on RecordingAllowed) while recording.enabled stays true --
+// so, read off the setting, the last segment stayed undeletable for up to one
+// segment length plus two minutes, with a 409 blaming a recorder that no longer
+// existed, at exactly the moment the operator was deleting to free the disk.
+// The halt lives on each ENGINE's own manager, not on the shared one that
+// answers the API's deletes, so this manager cannot read it off itself either.
+// The owner of the recorder processes can, and this is how it says so.
+func WithRecorderProbe(fn func() bool) Option {
+	return func(m *Manager) { m.recorderRunning = fn }
+}
+
+// RecorderProbed reports whether a recorder probe is wired. Exported for the
+// engine's wiring test, for the same reason as StorageGuarded: a missing probe
+// is silent, and the only symptom is the false 409 it exists to prevent.
+func (m *Manager) RecorderProbed() bool { return m.recorderRunning != nil }
 
 // New creates a Manager.
 func New(log *slog.Logger, store *db.DB, dir string, onChange func(), opts ...Option) *Manager {
@@ -598,13 +625,45 @@ func liveWindow(segmentSeconds int) time.Duration {
 // liveWindow's default, which protects MORE rather than less -- the direction
 // where the cost is a delete the operator has to retry after a rollover
 // instead of footage that no longer exists.
-func (m *Manager) segmentSeconds() int {
+//
+// The second result is whether recording is switched on, and an unreadable row
+// answers true for the same reason: see Delete for what it lifts.
+func (m *Manager) segmentSeconds() (int, bool) {
 	s, err := m.store.GetSettings()
 	if err != nil {
 		m.log.Warn("recording settings unreadable; live-segment guard assumes the default segment length", "err", err)
-		return 0
+		return 0, true
 	}
-	return s.Recording.SegmentSeconds
+	return s.Recording.SegmentSeconds, s.Recording.Enabled
+}
+
+// recorderSegment matches the names the recorder writes and nothing else: the
+// strftime pattern rec-%Y%m%d-%H%M%S.mkv the engine hands ffmpeg.
+var recorderSegment = regexp.MustCompile(`^rec-[0-9]{8}-[0-9]{6}\.mkv$`)
+
+// destinationOutput names the file destination, if any, that can be writing
+// name: its own URL, or the stem-TIMESTAMP rollover ResolveForWrite picks when
+// that path is taken. Every destination is considered, enabled or not, running
+// or not -- this answers "could a live process hold this open", and a false
+// yes costs a retry where a false no costs footage.
+func (m *Manager) destinationOutput(name string) (string, error) {
+	dests, err := m.store.ListDestinations()
+	if err != nil {
+		return "", err
+	}
+	for _, d := range dests {
+		// A URL with a separator in it cannot resolve into this directory at
+		// all (Resolve refuses it), and a network URL always has one.
+		if d.URL == "" || strings.ContainsAny(d.URL, `/\`) {
+			continue
+		}
+		ext := filepath.Ext(d.URL)
+		stem := strings.TrimSuffix(d.URL, ext)
+		if name == d.URL || (strings.HasPrefix(name, stem+"-") && strings.HasSuffix(name, ext)) {
+			return d.Name, nil
+		}
+	}
+	return "", nil
 }
 
 // liveSegments names every recording no deletion path may touch: the ones a
@@ -743,13 +802,28 @@ func (m *Manager) delete(r db.Recording, reason string) bool {
 // It unwraps to db.ErrStateConflict so the HTTP surface answers 409 without
 // having to learn about this package: writeStoreError already maps that
 // sentinel, and passes the sentence below through to the operator unchanged.
+//
+// dest names the file destination whose output it is, when it is one: the
+// advice differs, and the old single sentence told an operator to stop a
+// recording that had nothing to do with the file.
 var ErrSegmentLive error = liveSegmentError{}
 
-type liveSegmentError struct{}
+type liveSegmentError struct{ dest string }
 
-func (liveSegmentError) Error() string {
-	return "the recorder is still writing this segment; stop the recording, or wait for it to roll " +
-		"over into the next file, and then delete it"
+func (e liveSegmentError) Error() string {
+	if e.dest != "" {
+		return fmt.Sprintf("file destination %q may still be writing this file; stop that "+
+			"destination (or wait until the file is older than one recording segment length), "+
+			"and then delete it", e.dest)
+	}
+	return "the recorder is still writing this segment; turn recording off, or wait for it to " +
+		"roll over into the next file, and then delete it"
+}
+
+// Is makes every liveSegmentError match ErrSegmentLive, whichever writer it names.
+func (liveSegmentError) Is(target error) bool {
+	_, ok := target.(liveSegmentError)
+	return ok
 }
 
 func (liveSegmentError) Unwrap() error { return db.ErrStateConflict }
@@ -774,12 +848,42 @@ func (m *Manager) Delete(id int64) error {
 	//
 	// Refusing costs at most a segment: the recorder rolls over on its own and
 	// the file becomes deletable, which is what the message tells the operator.
+	//
+	// The window is a proxy for "a recorder holds it open", and a proxy that
+	// outlives the recorder: with recording switched off the engine has stopped
+	// it, yet its last segment stayed undeletable for up to segmentSeconds + 2
+	// min, refused with advice -- stop the recording -- the operator had already
+	// taken (exploratory run, row 35). So with no recorder running the
+	// recorder's own files are exempt. Only its own: a file destination writes
+	// into this same directory whether recording is on or not, and its outputs
+	// keep the guard. The engine clears its recorder slot before the child has
+	// finished exiting, so a delete in those few seconds unlinks a file the
+	// operator asked to be rid of, whose last bytes are the only thing lost,
+	// and the inode goes when ffmpeg exits.
 	recs, err := m.store.ListRecordings()
 	if err != nil {
 		return err
 	}
-	if liveSegments(recs, liveWindow(m.segmentSeconds()), time.Now())[r.Filename] {
-		return fmt.Errorf("cannot delete %s: %w", r.Filename, ErrSegmentLive)
+	segSeconds, recorderLive := m.segmentSeconds()
+	// The setting is only a stand-in for the fact. When the owner of the
+	// recorders can answer directly it does, both ways: the free-space floor
+	// stops the recorder with recording.enabled still on, and a recorder is
+	// still alive between the setting going off and the engine's reconcile
+	// acting on it. See WithRecorderProbe.
+	if m.recorderRunning != nil {
+		recorderLive = m.recorderRunning()
+	}
+	if liveSegments(recs, liveWindow(segSeconds), time.Now())[r.Filename] {
+		dest, err := m.destinationOutput(r.Filename)
+		if err != nil {
+			return err
+		}
+		if dest != "" {
+			return fmt.Errorf("cannot delete %s: %w", r.Filename, liveSegmentError{dest: dest})
+		}
+		if recorderLive || !recorderSegment.MatchString(r.Filename) {
+			return fmt.Errorf("cannot delete %s: %w", r.Filename, ErrSegmentLive)
+		}
 	}
 
 	path, err := m.Resolve(r.Filename)
