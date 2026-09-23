@@ -252,10 +252,10 @@ func TestResidueFromAnEarlierBindCannotFakeASuccessfulStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not bind %s to stage the residue: %v", staleAddr, err)
 	}
-	t.Cleanup(func() { leftover.Shutdown() })
+	t.Cleanup(func() { leftover.Close() })
 
 	s := New(quietLog(), unbindableAddr, lookup)
-	s.srvs = []*srt.Server{leftover}
+	s.srvs = []srt.Listener{leftover}
 
 	if err := s.Start(); err == nil {
 		s.Stop()
@@ -277,7 +277,7 @@ func TestResidueFromAnEarlierBindCannotFakeASuccessfulStart(t *testing.T) {
 	res := testenv.ReserveUDP(t)
 	goodAddr := fmt.Sprintf("127.0.0.1:%d", res.Port())
 	ok := New(quietLog(), goodAddr, lookup)
-	ok.srvs = []*srt.Server{leftover}
+	ok.srvs = []srt.Listener{leftover}
 	res.Release()
 	if err := ok.Start(); err != nil {
 		t.Fatalf("control: Start on a free loopback port failed with residue in "+

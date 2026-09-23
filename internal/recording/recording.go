@@ -43,9 +43,6 @@ type Manager struct {
 	// freeSpace is diskFree in production; tests substitute a volume they can
 	// fill on demand, which no real temp directory lets them do.
 	freeSpace func(string) (uint64, uint64, error)
-	// sourceID is the programme these segments came from, stamped onto every
-	// row this manager indexes. Nil on a manager with no programme.
-	sourceID *int64
 	// recorderRunning answers whether any recorder process is alive right now.
 	// Nil means "not wired up", and Delete then falls back to recording.enabled.
 	// See WithRecorderProbe.
@@ -78,21 +75,6 @@ func WithFFprobe(bin string) Option {
 
 // WithStorageGuard registers the callback fired when the free-space floor
 // halts recording, and again when recovered space lets it resume.
-// WithSourceID names the programme whose segments this manager indexes.
-//
-// Without it every recording row was written with a NULL source_id, and the
-// clip editor then labelled every clip with the DEFAULT programme's track
-// names -- including clips cut from somebody else's show. Unset stays nil,
-// which is the honest answer for a manager that is not attached to a
-// programme at all (see engine.New's storeless construction in tests).
-func WithSourceID(id int64) Option {
-	return func(m *Manager) {
-		if id > 0 {
-			m.sourceID = &id
-		}
-	}
-}
-
 func WithStorageGuard(fn func(StorageState)) Option {
 	return func(m *Manager) { m.onStorage = fn }
 }
@@ -338,11 +320,21 @@ func (m *Manager) Scan() (bool, error) {
 				m.log.Warn("probe recording", "file", rec.Filename, "err", err)
 			}
 		}
-		// The programme this manager belongs to, stamped at index time. It is
-		// the only moment anything knows it: the filename does not carry it and
-		// a later reader cannot work it out.
-		if rec.SourceID == nil {
-			rec.SourceID = m.sourceID
+		// The programme that RECORDED the file, read from the name its
+		// recorder gave it -- never the programme of the manager doing the
+		// scan. Every engine's manager scans this one shared directory, and
+		// while each stamped its own programme on every file it saw, the
+		// upsert's "a non-null source_id wins" let each re-label the others'
+		// recordings in turn: source 1's segment read 3, 1, 1, 3 as the scans
+		// interleaved, and clipTracks named a clip's tracks after whichever
+		// programme had scanned last. The filename is the one input every
+		// scanner sees identically.
+		//
+		// A segment an earlier release wrote names no programme. It is left
+		// nil, which the upsert treats as "no opinion": whatever attribution
+		// the row already has stands, and none is invented.
+		if id, ok := SourceFromName(rec.Filename); ok {
+			rec.SourceID = &id
 		}
 		if err := m.store.UpsertRecording(rec); err != nil {
 			m.log.Warn("index recording", "file", rec.Filename, "err", err)
@@ -679,13 +671,12 @@ func (m *Manager) destinationOutput(name string) (string, error) {
 // vanishing from Usage(), which is index-derived, so the operator loses the
 // tail of a live archive and the space it was costing does not come back.
 //
-// Keyed on the window rather than on Manager.sourceID even though a sourceID is
-// now to hand: the segments share one directory and Scan stamps its OWN
-// manager's programme on any row that has none yet, so a row's source_id says
-// which manager indexed the file first, not which recorder wrote it. Grouping
-// by it would protect one segment per programme -- the same undercount in a
-// costume. It also assumes one recorder per programme, which nothing enforces.
-// Start time is the property the recorder actually determines.
+// Keyed on the window rather than on a row's source_id even though the
+// filename now carries the programme: a segment written by an earlier release
+// has none, and grouping by programme would protect one segment per programme --
+// the same undercount in a costume. It also assumes one recorder per programme,
+// which nothing enforces. Start time is the property the recorder actually
+// determines.
 //
 // Measured against NOW rather than against the newest row in the index. The
 // index-relative version reads as the more conservative of the two and is
@@ -1063,6 +1054,51 @@ func (m *Manager) Usage() (DiskUsage, error) {
 		u.FreeBytes, u.TotalBytes = free, total
 	}
 	return u, nil
+}
+
+// segmentPrefix starts every master segment's name; sourceTag follows it for
+// segments written since the name began carrying the programme.
+const (
+	segmentPrefix = "rec-"
+	sourceTag     = "s"
+)
+
+// SegmentPattern is the strftime output pattern one programme's recorder
+// writes master segments to: rec-s<sourceID>-%Y%m%d-%H%M%S.mkv.
+//
+// THE PROGRAMME IS IN THE NAME because the directory is install-wide and every
+// engine's recording manager scans all of it; the name is the only thing every
+// scanner reads the same way. See Scan. It also keeps two programmes that start
+// recording in the same second from opening the same file.
+//
+// The timestamp stays the last two hyphen-separated fields, which is what
+// startTimeFromName, the stem pattern and ParseStemFilename already key on.
+func SegmentPattern(dir string, sourceID int64) string {
+	return filepath.Join(dir, segmentPrefix+sourceTag+strconv.FormatInt(sourceID, 10)+"-%Y%m%d-%H%M%S.mkv")
+}
+
+// SourceFromName reads the programme out of a master segment's filename, and
+// reports false for a name that does not carry one -- a segment written before
+// names did, or anything the recorder did not write. It never guesses.
+func SourceFromName(name string) (int64, bool) {
+	rest, ok := strings.CutPrefix(filepath.Base(name), segmentPrefix+sourceTag)
+	if !ok {
+		return 0, false
+	}
+	digits, _, ok := strings.Cut(rest, "-")
+	if !ok || digits == "" {
+		return 0, false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+	}
+	id, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
 }
 
 func isRecording(name string) bool {

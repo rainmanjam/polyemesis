@@ -51,6 +51,7 @@ import { SecretCode } from "@/components/SecretCode";
 import { useLiveData } from "@/hooks/useLiveData";
 import { copyToClipboard as copy } from "@/lib/clipboard";
 import { urlCarriesCredential } from "@/lib/credential-url";
+import { tokenNotEnforcedKey } from "@/lib/tokenNotice";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
 import { publishRows } from "@/lib/publish-url";
@@ -707,9 +708,10 @@ export function SourceCard({
               <Info className="mt-0.5 h-3 w-3 shrink-0" />
               <span>
                 <strong className="font-semibold">{t("sources.tokenNotEnforced")}</strong>{" "}
-                {ing.mode === "rtmp"
-                  ? t("sources.tokenNotEnforcedRtmp")
-                  : t("sources.tokenNotEnforcedSrt")}
+                {/* By mode, because "not enforced" covers a listener that is
+                    down, a pull source, and an unchosen ingest whose token the
+                    shared port refuses outright. See tokenNotEnforcedKey. */}
+                {t(tokenNotEnforcedKey(ing.mode))}
               </span>
             </p>
           )}

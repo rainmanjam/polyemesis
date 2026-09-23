@@ -212,6 +212,35 @@ its first tagged release.
   recording, so the last segment was refused for up to an hour and two minutes
   exactly when the operator was deleting to free the disk. It now asks the
   engines whether any recorder process is running.
+- Multi-source playout: every source's playout muxer wrote the same
+  `<dataDir>/playout/<variant>/`, so two programmes overwrote each other's
+  segments, either one's teardown cleared the other's live window, and
+  `playout.sourceId` changed nothing. Each source now packages into
+  `playout/<sourceId>/`; the public URL is unchanged. A top-level
+  `playout/<variant>/` left by an earlier release can be deleted.
+- A recording's `sourceId` flapped between programmes: every source's recording
+  manager scans the shared recordings directory and stamped its own source on
+  every file it saw, so the last scanner won and the clip editor named a clip's
+  tracks after the wrong programme. Master segments are now named
+  `rec-s<sourceId>-<date>-<time>.mkv` and attributed from the name; a segment
+  written by an earlier release keeps whatever attribution it already had.
+  The name also stops two sources that start recording in the same second
+  from writing the same file.
+- One-port SRT refusals now reach the encoder with their typed reason
+  (`REJ_BADSECRET`, `REJ_CLOSE`, `REJ_RESOURCE`, `REJ_ROGUE`, `REJ_UNSECURE`), as
+  [TROUBLESHOOTING](docs/TROUBLESHOOTING.md) already described. Every refusal
+  used to arrive as the generic `REJ_PEER`, because gosrt's server loop
+  overwrote the reason; the listener now runs its own accept loop.
+- The one-port SRT listener admits a publisher only into a source whose ingest
+  is set to SRT. It used to accept any source's token, so an SRT publish was
+  admitted into an RTMP or pull source beside the ingest already writing its
+  stream, and into a source created from its name alone -- which the API
+  reported `tokenEnforced: false` with no publish URL. Such a publish is now
+  refused with `REJ_RESOURCE`; choose SRT on the source first. `POST /sources`
+  now fills unspecified ingest fields from the defaults, so
+  `{"name": "…", "ingest": {"mode": "srt"}}` is a complete request, and the
+  Sources page explains an unchosen or pull source's token instead of pointing
+  at a one-port setting that no longer exists.
 
 ## [0.10.0] — 2026-09-23
 
