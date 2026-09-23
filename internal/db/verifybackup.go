@@ -141,28 +141,43 @@ func VerifyBackup(dir string) error {
 // sealedColumn names one column this package writes with secrets.Box.Seal,
 // and what an operator does to re-seal a value in it that this server's own
 // key cannot open (see checkKeyOpensSealedValues for why that is needed).
-type sealedColumn struct{ table, column, remedy string }
+type sealedColumn struct{ table, column, query, remedy string }
 
 // sealedColumns is every column holding secretbox ciphertext.
+//
+// Each entry carries its own query as a LITERAL rather than building one from
+// table and column at run time. The names were never input, but a query
+// assembled by concatenation is the shape SQL injection takes, and the next
+// person to extend this list should not have to prove the difference to a
+// scanner or a reviewer. TestEverySealedColumnQueryReadsItsOwnColumn holds each
+// literal to its table and column, so the two cannot drift apart.
 // TestVerifyBackupKnowsEverySealedColumn holds it to the schema, so a new
 // sealed column cannot be added without the key check covering it, and
 // TestEverySealedColumnSaysHowToReseal holds each to a remedy.
 var sealedColumns = []sealedColumn{
 	{"destinations", "stream_key_enc",
+		`SELECT "stream_key_enc" FROM "destinations" WHERE "stream_key_enc" IS NOT NULL AND length("stream_key_enc") > 0`,
 		"re-enter the stream key on each affected destination (Dashboard, edit the destination), or remove it"},
 	{"destinations", "backup_stream_key_enc",
+		`SELECT "backup_stream_key_enc" FROM "destinations" WHERE "backup_stream_key_enc" IS NOT NULL AND length("backup_stream_key_enc") > 0`,
 		"re-enter the backup stream key on each affected destination (Dashboard, edit the destination), or remove it"},
 	{"mqtt_creds", "password_enc",
+		`SELECT "password_enc" FROM "mqtt_creds" WHERE "password_enc" IS NOT NULL AND length("password_enc") > 0`,
 		"re-enter or clear the MQTT broker password in Settings"},
 	{"automod_creds", "key_enc",
+		`SELECT "key_enc" FROM "automod_creds" WHERE "key_enc" IS NOT NULL AND length("key_enc") > 0`,
 		"re-enter or clear the automod model API key in Settings"},
 	{"platform_creds", "client_secret_enc",
+		`SELECT "client_secret_enc" FROM "platform_creds" WHERE "client_secret_enc" IS NOT NULL AND length("client_secret_enc") > 0`,
 		"re-enter or remove the platform's client secret in Settings"},
 	{"platform_accounts", "access_token_enc",
+		`SELECT "access_token_enc" FROM "platform_accounts" WHERE "access_token_enc" IS NOT NULL AND length("access_token_enc") > 0`,
 		"reconnect the platform account in Settings, or disconnect it"},
 	{"platform_accounts", "refresh_token_enc",
+		`SELECT "refresh_token_enc" FROM "platform_accounts" WHERE "refresh_token_enc" IS NOT NULL AND length("refresh_token_enc") > 0`,
 		"reconnect the platform account in Settings, or disconnect it"},
 	{"hooks", "secret",
+		`SELECT "secret" FROM "hooks" WHERE "secret" IS NOT NULL AND length("secret") > 0`,
 		"set a new secret on the hook in Automation, or delete the hook"},
 }
 
@@ -207,9 +222,7 @@ func checkKeyOpensSealedValues(sqldb *sql.DB, box *secrets.Box) error {
 		if present == 0 {
 			continue
 		}
-		// Identifiers come from the fixed list above, never from input.
-		rows, err := sqldb.Query(`SELECT "` + c.column + `" FROM "` + c.table +
-			`" WHERE "` + c.column + `" IS NOT NULL AND length("` + c.column + `") > 0`)
+		rows, err := sqldb.Query(c.query)
 		if err != nil {
 			return fmt.Errorf("backup's %s.%s could not be read: %w", c.table, c.column, err)
 		}

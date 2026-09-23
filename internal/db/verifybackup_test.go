@@ -209,3 +209,17 @@ func TestVerifyBackupRefusesADatabaseSQLiteCannotEvenWalk(t *testing.T) {
 // than five distinct problems, and how many rows it emits for a given byte
 // pattern is SQLite's business. A test pinning that would assert SQLite's
 // internals, break on a version bump, and tell us nothing about this function.
+
+// TestEverySealedColumnQueryReadsItsOwnColumn holds each sealedColumns entry's
+// literal query to the table and column it names. The query is written out by
+// hand so no SQL is built at run time; this is what stops a copied line from
+// checking one column while reporting on another.
+func TestEverySealedColumnQueryReadsItsOwnColumn(t *testing.T) {
+	for _, c := range sealedColumns {
+		want := `SELECT "` + c.column + `" FROM "` + c.table + `" WHERE "` + c.column +
+			`" IS NOT NULL AND length("` + c.column + `") > 0`
+		if c.query != want {
+			t.Errorf("%s.%s: query is\n  %s\nwant\n  %s", c.table, c.column, c.query, want)
+		}
+	}
+}
