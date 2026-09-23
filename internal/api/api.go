@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -1856,14 +1857,28 @@ func (s *Server) requireCSRF(next http.Handler) http.Handler {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.WriteHeader(status)
 	if v == nil {
+		w.WriteHeader(status)
 		return
 	}
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		// The status line is already written, so this can only be logged.
+	// ENCODE FIRST, THEN COMMIT THE STATUS. This used to write the status line
+	// and then encode straight onto the wire, discarding the error -- so a value
+	// encoding/json refuses (a NaN from a loudness meter reading digital
+	// silence was the one that happened) went out as "200" with an empty body,
+	// which a client can parse as neither the payload nor an error, and nobody
+	// was told. json.Encoder buffers the whole value before writing anyway, so
+	// encoding into a buffer here costs nothing extra and leaves the status
+	// still ours to choose when the encode fails.
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		slog.Error("a response body could not be encoded; answering 500 instead of an empty success",
+			"status", status, "type", fmt.Sprintf("%T", v), "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(apiError{Error: "the response could not be encoded; this is a server bug and has been logged"})
 		return
 	}
+	w.WriteHeader(status)
+	_, _ = w.Write(buf.Bytes())
 }
 
 // apiError is the single error shape the SPA handles.

@@ -8,6 +8,16 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`/api/v1/status` and `/api/v1/loudness` no longer answer 200 with an empty
+  body after the audio falls silent.** ebur128 prints `nan`/`-inf` for a
+  loudness window with no signal; the parser now reads those as the -70 LUFS
+  "not measured" floor. Separately, any response body that cannot be encoded
+  now answers 500 with an error and is logged, rather than a silent empty 200,
+  and an unencodable WebSocket event is dropped and logged instead of closing
+  every open console.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added
