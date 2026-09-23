@@ -72,8 +72,9 @@ func TestEveryScannerAttributesASegmentToTheProgrammeThatRecordedIt(t *testing.T
 
 // The pattern the recorder is handed carries the programme, and parses back.
 func TestSegmentPatternRoundTripsTheProgramme(t *testing.T) {
-	p := SegmentPattern("/rec", 42)
-	if filepath.Dir(p) != "/rec" {
+	dir := filepath.Join(string(filepath.Separator), "rec") // "/rec", or "\\rec" on Windows
+	p := SegmentPattern(dir, 42)
+	if filepath.Dir(p) != dir {
 		t.Fatalf("SegmentPattern put the file in %s", filepath.Dir(p))
 	}
 	name := "rec-s42-" + time.Date(2024, 1, 15, 14, 30, 0, 0, time.Local).Format("20060102-150405") + ".mkv"

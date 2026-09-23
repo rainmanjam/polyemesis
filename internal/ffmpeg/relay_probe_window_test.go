@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -242,7 +241,22 @@ func TestARecorderStartedBeforeThePublishKeepsItsFirstSegment(t *testing.T) {
 		OutputPattern:  filepath.Join(dir, "rec-%Y%m%d-%H%M%S.mkv"),
 		SegmentSeconds: 10,
 	})
-	rec := exec.CommandContext(ctx, bin, args...)
+	// Stopped with ffmpeg's own "q" on stdin rather than SIGINT, which Windows
+	// does not deliver to a child (os.Interrupt is refused there), so this test
+	// runs on every platform CI covers. What it proves is the first segment's
+	// survival, not how a recorder is stopped, so it drops -nostdin -- which
+	// production keeps -- purely to have a portable way to end it cleanly.
+	var recArgs []string
+	for _, a := range args {
+		if a != "-nostdin" {
+			recArgs = append(recArgs, a)
+		}
+	}
+	rec := exec.CommandContext(ctx, bin, recArgs...)
+	quit, err := rec.StdinPipe()
+	if err != nil {
+		t.Fatalf("recorder stdin: %v", err)
+	}
 	if err := rec.Start(); err != nil {
 		t.Fatalf("starting the recorder: %v", err)
 	}
@@ -254,7 +268,8 @@ func TestARecorderStartedBeforeThePublishKeepsItsFirstSegment(t *testing.T) {
 	const recorded = 24
 	publishTestSource(t, ctx, bin, port, 60, recorded+10)
 	time.Sleep(recorded * time.Second)
-	_ = rec.Process.Signal(os.Interrupt)
+	_, _ = quit.Write([]byte("q"))
+	_ = quit.Close()
 	done := make(chan struct{})
 	go func() { _ = rec.Wait(); close(done) }()
 	select {
@@ -262,7 +277,7 @@ func TestARecorderStartedBeforeThePublishKeepsItsFirstSegment(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		_ = rec.Process.Kill()
 		<-done
-		t.Fatal("the recorder did not stop on SIGINT, so its last segment cannot be measured")
+		t.Fatal("the recorder did not stop on q, so its last segment cannot be measured")
 	}
 
 	files, _ := filepath.Glob(filepath.Join(dir, "rec-*.mkv"))
