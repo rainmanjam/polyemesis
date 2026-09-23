@@ -48,6 +48,7 @@ var canonicalDriftTests = []string{
 	"TestDocServiceInstallStepsMatchTheUnitHeader",
 	"TestDocManualUpgradeCarriesUpdateShGuards",
 	"TestDocEveryReleaseHasAnUpgradeNote",
+	"TestDocProxyExamplesServeTheConsoleFromARoot",
 }
 
 func TestTheDocsOnlyPathStillRunsTheDriftGuards(t *testing.T) {

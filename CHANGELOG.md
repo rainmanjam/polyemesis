@@ -87,6 +87,12 @@ its first tagged release.
   one), and every release from here on must have an `Upgrading to X.Y.Z`
   section, held by a test and by `RELEASE-RUNBOOK.md`.
 
+- **Nothing said the console must be served from the root of its own
+  hostname.** It requests its API, assets, WebSocket and HLS preview by
+  absolute path, so behind `location /polyemesis/` on a shared host it loads
+  blank. `deploy/nginx.conf.example`, `INSTALL.md` and `TLS.md` now say to give
+  it a hostname of its own and proxy `/`.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

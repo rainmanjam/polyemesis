@@ -717,6 +717,13 @@ does not bind `:80` and does not compete with the proxy for ACME challenges.
 There is a worked config in
 [`deploy/nginx.conf.example`](../deploy/nginx.conf.example).
 
+**Give polyemesis a hostname of its own and proxy `/`.** It cannot be served
+from a sub-path of another site (`https://example.com/polyemesis/`): the
+console requests its API, assets, WebSocket and HLS preview by absolute path,
+so behind a prefix those requests land on the other site's root and the page
+loads blank. `polyemesis.example.com` with `location /` works; see
+[TLS.md → Behind a reverse proxy](TLS.md#behind-a-reverse-proxy).
+
 SRT and RTMP ingest are **not HTTP** and cannot be proxied by nginx's HTTP
 server. Open those ports on the firewall so encoders reach polyemesis directly.
 

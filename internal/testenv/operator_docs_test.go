@@ -494,3 +494,49 @@ func TestDocEveryReleaseHasAnUpgradeNote(t *testing.T) {
 		t.Error("no release from 0.9.0 on was found in CHANGELOG.md; this guard checked nothing")
 	}
 }
+
+// TestDocProxyExamplesServeTheConsoleFromARoot: the console cannot live under a
+// sub-path. Its API base is the absolute "/api/v1" (ui/src/lib/api.ts), Vite is
+// built with no `base`, and the WebSocket, the assets and the /hls/ preview are
+// requested by absolute path -- so behind `location /polyemesis/` every request
+// goes to the other site's root. Nothing said so: not deploy/nginx.conf.example,
+// not INSTALL.md, not TLS.md. Staging-readiness row 48.
+func TestDocProxyExamplesServeTheConsoleFromARoot(t *testing.T) {
+	// The fact, from the code, so the guard retires the day a base path works.
+	if !strings.Contains(readDoc(t, "ui/src/lib/api.ts"), `const BASE = "/api/v1";`) {
+		t.Skip(`ui/src/lib/api.ts no longer hard-codes BASE = "/api/v1"; if the console can now ` +
+			"be served under a prefix, the sub-path warnings this guards may be obsolete")
+	}
+	if regexp.MustCompile(`(?m)^\s*base\s*:`).MatchString(readDoc(t, "ui/vite.config.ts")) {
+		t.Skip("ui/vite.config.ts sets a base; revisit the sub-path warnings")
+	}
+
+	nginx := readDoc(t, "deploy/nginx.conf.example")
+	// Every proxy_pass must sit in `location /`.
+	loc := regexp.MustCompile(`(?s)location\s+(\S+)\s*\{([^}]*)\}`)
+	proxied := 0
+	for _, m := range loc.FindAllStringSubmatch(nginx, -1) {
+		if !strings.Contains(m[2], "proxy_pass") {
+			continue
+		}
+		proxied++
+		if m[1] != "/" {
+			t.Errorf("deploy/nginx.conf.example proxies polyemesis at `location %s`; the console "+
+				"requests everything by absolute path and only works from `/` of its own hostname", m[1])
+		}
+	}
+	if proxied == 0 {
+		t.Fatal("deploy/nginx.conf.example has no proxy_pass location; this guard would check nothing")
+	}
+
+	for _, where := range []struct{ rel, text string }{
+		{"deploy/nginx.conf.example", nginx},
+		{"docs/INSTALL.md", docSection(t, readDoc(t, "docs/INSTALL.md"), "docs/INSTALL.md", "Behind a reverse proxy")},
+		{"docs/TLS.md", docSection(t, readDoc(t, "docs/TLS.md"), "docs/TLS.md", "Behind a reverse proxy")},
+	} {
+		if !strings.Contains(strings.ToLower(where.text), "sub-path") {
+			t.Errorf("%s's reverse-proxy guidance does not say the console cannot be served from "+
+				"a sub-path. An operator will try `location /polyemesis/` and get a blank page.", where.rel)
+		}
+	}
+}

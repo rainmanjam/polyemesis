@@ -577,7 +577,7 @@ no HSTS. The proxy owns all three. That is the intended interaction, not a
 limitation: two things fighting over port 80 for ACME is a much worse day than
 one.
 
-Four things matter:
+Five things matter:
 
 1. **Set `trustProxyHeaders: true`.** polyemesis then honours
    `X-Forwarded-Proto` and `X-Forwarded-Host` when marking session cookies
@@ -592,6 +592,14 @@ Four things matter:
    a long `proxy_read_timeout`.
 4. **Do not proxy the ingest.** SRT is UDP and RTMP is not HTTP; neither travels
    through an HTTP reverse proxy. Open those ports directly on the firewall.
+5. **Give it a hostname of its own, served from `/`.** The console cannot live
+   under a sub-path such as `https://example.com/polyemesis/`. Its API base is
+   the absolute `/api/v1` (`ui/src/lib/api.ts`), its assets and WebSocket are
+   requested from the root, and the HLS preview (`/hls/…`), the public watch
+   page (`/watch`) and platform webhooks are mounted at the root too. Behind a
+   `location /polyemesis/` the page loads blank or half-loads, and every
+   request it makes goes to the other site's root. Use
+   `polyemesis.example.com`, with `location /`.
 
 Also turn buffering off (`proxy_buffering off`) or the HLS preview will lag, and
 set `client_max_body_size 0` so multi-gigabyte recording downloads work.
