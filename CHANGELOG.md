@@ -10,6 +10,16 @@ its first tagged release.
 
 ### Fixed
 
+- **The in-app rollback refuses a binary that would not start on the
+  database.** It swaps binaries only, so after a release that raises the
+  schema version it would have put back a binary that refuses the migrated
+  database at boot: a bad upgrade turned into a service that does not start.
+  Staging now records, beside `<binary>.previous`, the schema the outgoing
+  binary opens; the upgrade plan reports `rollbackAvailable: false` with the
+  reason in `rollbackBlocked`, and `POST /api/v1/upgrade/rollback` answers
+  `409` and moves nothing. A rollback point staged by an earlier release is
+  taken to open schema 1, which every earlier release did. Roll back through
+  the backup instead, as `docs/UPGRADING.md` describes.
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer
   tracks was tested with a 5 s gap. In the field, with a 30 s outage, track 2

@@ -579,6 +579,18 @@ migrated, and the older binary will not understand it.
 database alone is not enough to publish, and the failure is silent until you go
 live. See [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back).
 
+**The in-app rollback (`POST /api/v1/upgrade/rollback`) swaps the binary and
+nothing else.** It does not restore the database or `secret.key`. It is safe
+while the release you roll back from has not changed the schema version — true
+of every release so far — and it **refuses** once the database is on a schema
+the previous binary would not open, because that binary would refuse to start
+on it. The staged binary is recorded with the schema it opens
+(`<binary>.previous.schema`); `GET /api/v1/upgrade/plan` then reports
+`rollbackAvailable: false` with the reason in `rollbackBlocked`. When that
+happens, roll back with the four steps above. Either way, take and verify a
+backup before the first start of a new release: it is the only rollback that
+covers the database.
+
 ## Verifying an upgrade
 
 Set `POLYEMESIS_URL` to where this install answers. It is not `localhost:8080`

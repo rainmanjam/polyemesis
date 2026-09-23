@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/upgrade"
 )
@@ -209,13 +210,39 @@ func (s *Server) handleUpgradePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) upgradePlan(tag string) upgradePlanView {
+	schema, schemaErr := s.upgradeSchema()
 	v := upgradePlanView{
-		Plan:    upgrade.PlanFor(s.upgradeMethod, s.execPath, upgrade.Versions{Running: s.version, Offered: tag, Variant: upgrade.DetectVariant(nil)}),
+		Plan: upgrade.PlanFor(s.upgradeMethod, s.execPath, upgrade.Versions{
+			Running: s.version, Offered: tag, Variant: upgrade.DetectVariant(nil), LiveSchema: schema.Live,
+		}),
 		Version: tag,
 		OnAir:   surveyOnAir(s),
 	}
+	if schemaErr != nil && v.RollbackAvailable {
+		// Not knowing the database's schema is not knowing whether the previous
+		// binary would start on it. Refuse rather than guess.
+		v.RollbackAvailable = false
+		v.RollbackBlocked = "cannot read the database's schema version (" + schemaErr.Error() +
+			"); restore the backup taken before the upgrade instead"
+	}
 	v.OnAirSummary = v.OnAir.Summary()
 	return v
+}
+
+// upgradeSchema is what a binary swap records and checks; see upgrade.Schema.
+// A server with no store (a handler test that builds &Server{} directly) has
+// no database to have migrated, so it reports this binary's own version.
+func (s *Server) upgradeSchema() (upgrade.Schema, error) {
+	sc := upgrade.Schema{Live: db.SchemaVersion(), Understood: db.SchemaVersion()}
+	if s.store == nil {
+		return sc, nil
+	}
+	live, err := s.store.UserVersion()
+	if err != nil {
+		return sc, err
+	}
+	sc.Live = live
+	return sc, nil
 }
 
 // cachedLatestTag is the tag the last check found, or "" if none has run. Read
@@ -284,7 +311,10 @@ func (s *Server) handleUpgradeStage(w http.ResponseWriter, r *http.Request) {
 	}
 	defer os.RemoveAll(filepath.Dir(staged))
 
-	if err := upgrade.Stage(s.execPath, staged, sum); err != nil {
+	// A schema read error does not stop a stage: Stage records only what THIS
+	// binary understands, which it knows without asking the database.
+	schema, _ := s.upgradeSchema()
+	if err := upgrade.Stage(s.execPath, staged, sum, schema); err != nil {
 		s.log.Error("upgrade failed", "version", tag, "err", err)
 		// 500 rather than 409: a checksum mismatch and a failed rename are both
 		// "the server could not do this", and upgrade.Stage's own message says
@@ -325,6 +355,10 @@ func (s *Server) handleUpgradeRollback(w http.ResponseWriter, r *http.Request) {
 		refuse(w, plan, notAutomatic(plan))
 		return
 	}
+	if plan.RollbackBlocked != "" {
+		refuse(w, plan, plan.RollbackBlocked)
+		return
+	}
 	if !plan.RollbackAvailable {
 		refuse(w, plan, "there is no previous binary to roll back to")
 		return
@@ -337,7 +371,15 @@ func (s *Server) handleUpgradeRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := upgrade.Rollback(s.execPath); err != nil {
+	// A read error here was already a refusal in the plan above.
+	schema, _ := s.upgradeSchema()
+	if err := upgrade.Rollback(s.execPath, schema); err != nil {
+		if errors.Is(err, upgrade.ErrRollbackRefused) {
+			// The schema moved between the plan and here. Upgrade's own check
+			// is the one that counts; the plan's is the early answer.
+			refuse(w, plan, err.Error())
+			return
+		}
 		s.log.Error("rollback failed", "err", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

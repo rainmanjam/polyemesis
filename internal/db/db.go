@@ -477,6 +477,23 @@ func (d *DB) MigrateSchemaVersion() error {
 	return nil
 }
 
+// SchemaVersion is the newest schema this binary opens: the PRAGMA
+// user_version above which refuseNewerSchema refuses to start. The upgrade
+// path records it beside the rollback binary, so a later rollback can tell
+// whether that binary would still open the database. See
+// internal/upgrade.Schema.
+func SchemaVersion() int { return currentSchemaVersion }
+
+// UserVersion reads the schema version stamped in the open database -- the
+// number an older binary's refuseNewerSchema compares against its own.
+func (d *DB) UserVersion() (int, error) {
+	var v int
+	if err := d.sql.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return 0, fmt.Errorf("read schema version: %w", err)
+	}
+	return v, nil
+}
+
 // SQL exposes the underlying handle for the rare query that does not warrant
 // a typed store method.
 func (d *DB) SQL() *sql.DB { return d.sql }

@@ -1757,8 +1757,14 @@ export interface UpgradePlan {
   /** What the operator should run when `automatic` is false. Shown verbatim. */
   command?: string;
   binaryPath?: string;
-  /** A previous binary is staged and could be restored. */
+  /** A previous binary is staged and could be restored. False, with
+   *  `rollbackBlocked` set, when one is staged but would refuse the database
+   *  as it now stands. */
   rollbackAvailable: boolean;
+  /** Why the staged previous binary cannot be rolled back to -- the database
+   *  is on a newer schema than it opens. Shown verbatim; it names the backup
+   *  as the way back. */
+  rollbackBlocked?: string;
   /** Why an upgrade is refused for a reason that is not about being on air --
    *  an unwritable directory, an install nothing could identify. */
   reason?: string;
