@@ -137,6 +137,13 @@ Nothing is deleted either way. The static build lands in `/usr/local/bin` ahead
 of `/usr/bin` on a default `PATH`, your distribution's package is left where it
 is, and the way back is `rm /usr/local/bin/ffmpeg /usr/local/bin/ffprobe`.
 
+**It is always the same build.** The installer downloads one dated BtbN release,
+named by `FFMPEG_BTBN_TAG` in `install.sh`, and refuses the file unless its
+SHA-256 matches the hash written next to that tag. It does not use BtbN's
+rolling `latest` release or the checksum file published beside the download.
+So two hosts installed a week apart get the same bytes, and a replaced tarball
+is refused before it is extracted or run.
+
 **And `PATH` order does not decide the outcome.** When the installer installs
 FFmpeg itself, it writes the absolute path into the config it generates:
 

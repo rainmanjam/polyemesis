@@ -496,6 +496,15 @@ its first tagged release.
   Browsers signed in across the upgrade are re-sent the bound value on their
   next request instead of being locked out of writes. Sessions now also carry a
   random ID, so two logins in the same second are distinct sessions.
+- **`install.sh` installs one pinned FFmpeg build, checked against a hash in
+  the script.** The static FFmpeg it offers came from BtbN's rolling `latest`
+  release, which changes daily, and was checked against the
+  `checksums.sha256` in that same release. Two installs a day apart got
+  different builds, and anyone able to replace the tarball could replace its
+  checksum too; the result was then run as root. The installer now downloads
+  one dated release (`FFMPEG_BTBN_TAG`) and refuses any file whose sha256 is
+  not the one written in `install.sh`. A test rejects `latest`, an undated tag
+  or a missing hash.
 
 ## [0.10.0] — 2026-09-23
 

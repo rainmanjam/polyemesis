@@ -607,11 +607,48 @@ ALLOW_UNVERIFIED=false
 FFMPEG_PINNED_BIN=""
 FFMPEG_PINNED_PROBE=""
 
+# THE STATIC FFMPEG IS ONE BUILD, NAMED BY A DATED TAG AND A HASH IN THIS FILE.
+#
+# This used to download BtbN's `latest` release, which BtbN moves to a new build
+# every day, and check it against the checksums.sha256 in that same release. So
+# two installs a day apart got two different FFmpeg builds under one asset name,
+# and the check could only catch a corrupt download: whoever could replace the
+# tarball could replace the checksum file next to it -- and the result is then
+# extracted and run as root. The hashes below come from this repository and are
+# reviewed in a pull request; the server that serves the tarball has no say in
+# what it is checked against.
+#
+# TO BUMP: pick a dated tag from https://github.com/BtbN/FFmpeg-Builds/releases,
+# then change the tag, both asset names and both hashes TOGETHER, in one PR:
+#   gh release download <tag> -R BtbN/FFmpeg-Builds -p checksums.sha256
+#   grep -E 'linux(arm)?64-gpl-8\.1\.tar\.xz' checksums.sha256
+# and cross-check against the digest GitHub computed itself:
+#   gh api repos/BtbN/FFmpeg-Builds/releases/tags/<tag> \
+#     --jq '.assets[] | select(.name|test("linux(arm)?64-gpl-8.1.tar")) | "\(.digest) \(.name)"'
+# BtbN keeps dated releases for roughly two years (the oldest listed on
+# 2026-09-23 was autobuild-2024-10-31-12-59), so a pin keeps working long after
+# it stops being current. internal/testenv/installer_ffmpeg_pin_test.go refuses
+# `latest`, an undated tag, or a missing hash.
+FFMPEG_BTBN_TAG=autobuild-2026-09-23-14-55
+
 ffmpeg_static_asset() {
-  # BtbN publishes per-architecture GPL tarballs. Only these two are built.
+  # BtbN publishes per-architecture GPL tarballs. Only these two are built. A
+  # dated release names the exact point release (n8.1.3); only the rolling
+  # release uses the n8.1-latest names.
   case "$ARCH" in
-    amd64) echo "ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz" ;;
-    arm64) echo "ffmpeg-n8.1-latest-linuxarm64-gpl-8.1.tar.xz" ;;
+    amd64) echo "ffmpeg-n8.1.3-linux64-gpl-8.1.tar.xz" ;;
+    arm64) echo "ffmpeg-n8.1.3-linuxarm64-gpl-8.1.tar.xz" ;;
+    *)     echo "" ;;
+  esac
+}
+
+# ffmpeg_static_sha256 is the sha256 of ffmpeg_static_asset in FFMPEG_BTBN_TAG.
+# Checked 2026-09-23 against both BtbN's checksums.sha256 and GitHub's own asset
+# digest for that release.
+ffmpeg_static_sha256() {
+  case "$ARCH" in
+    amd64) echo "8f8d9df68e0b12f401047c244f50ff411f533eb2d306173e73d6a16fb29b320d" ;;
+    arm64) echo "cf0ff6547cc76197fdd5f8377e0b53c9bdd8006d082113149d8909e3b5f36643" ;;
     *)     echo "" ;;
   esac
 }
@@ -635,7 +672,7 @@ ffmpeg_static_asset() {
 # DEFAULT path and not on every host, and an install that put a good binary
 # somewhere PATH does not reach is a failure that used to report success.
 offer_ffmpeg_upgrade() {
-  local have="$1" need="${2:-optional}" asset answer tmp label default_answer
+  local have="$1" need="${2:-optional}" asset want answer tmp label default_answer
   asset="$(ffmpeg_static_asset)"
   # "6.x" reads wrong when there is no FFmpeg at all.
   if [ -n "$have" ]; then label="$have.x"; else label="no FFmpeg"; fi
@@ -719,40 +756,30 @@ offer_ffmpeg_upgrade() {
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" RETURN
 
-  echo "     Fetching $asset ..."
-  if ! fetch_https "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$asset" \
+  echo "     Fetching $asset (BtbN ${FFMPEG_BTBN_TAG}) ..."
+  if ! fetch_https "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BTBN_TAG}/$asset" \
         "$tmp/ff.tar.xz"; then
     warn "download failed — staying on ${label}. Nothing was changed."
-    warn "(needs one of curl, wget or python3; this host appears to have none)"
+    warn "(needs one of curl, wget or python3 and a route to github.com; or BtbN no"
+    warn " longer serves ${FFMPEG_BTBN_TAG}, and a newer install.sh pins a newer build)"
     return 1
   fi
 
   # VERIFY BEFORE EXTRACTING, AND BEFORE RUNNING IT AS ROOT.
   #
   # This installer refuses its OWN binary without a matching SHA256SUMS, and
-  # fetched a third-party FFmpeg with no integrity check at all -- then
-  # extracted it and EXECUTED it as root to probe for libsrt. Whatever was
-  # published at that moment ran on the operator's box. The asymmetry was the
-  # finding: strict about us, silent about them.
-  #
-  # BtbN publishes one checksums.sha256 per release covering every asset, in
-  # the `<hash>  <name>` form sha256sum -c reads directly -- the same idiom
-  # install_binary_mode uses for our own download.
-  if ! fetch_https "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/checksums.sha256" \
-        "$tmp/checksums.sha256"; then
-    warn "could not fetch BtbN's checksums.sha256 — refusing to install an"
-    warn "unverified FFmpeg. Staying on ${label}. Nothing was changed."
-    warn "Install FFmpeg 6.0+ with libsrt by hand if you need it sooner."
-    return 1
-  fi
-  mv "$tmp/ff.tar.xz" "$tmp/$asset"
-  if ! (cd "$tmp" && grep " ${asset}\$" checksums.sha256 | sha256sum -c --status -); then
-    warn "CHECKSUM MISMATCH for $asset — refusing it. Staying on ${label}."
+  # once fetched a third-party FFmpeg with no integrity check at all -- then
+  # extracted it and EXECUTED it as root to probe for libsrt. The expected hash
+  # is the one pinned above, never one downloaded alongside the file: see
+  # FFMPEG_BTBN_TAG for why a same-origin checksum file is not a check.
+  want="$(ffmpeg_static_sha256)"
+  if [ -z "$want" ] || ! printf '%s  %s\n' "$want" "$tmp/ff.tar.xz" | sha256sum -c --status -; then
+    warn "CHECKSUM MISMATCH for $asset — it is not the build this installer pins"
+    warn "(${FFMPEG_BTBN_TAG}). Refusing it; staying on ${label}."
     warn "Nothing was changed, and nothing from that download was run."
     return 1
   fi
-  mv "$tmp/$asset" "$tmp/ff.tar.xz"
-  echo "     checksum verified"
+  echo "     checksum verified against the hash pinned in install.sh"
 
   mkdir -p "$tmp/x"
   if ! tar xf "$tmp/ff.tar.xz" --strip-components=1 -C "$tmp/x" 2>/dev/null; then
