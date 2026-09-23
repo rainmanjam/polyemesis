@@ -100,3 +100,116 @@ func TestFallingBehindStaysQuietAtRealtime(t *testing.T) {
 		t.Fatalf("a destination delivering at realtime raised %v", got)
 	}
 }
+
+// closedOnce checks the pairing an operator's channel depends on: every
+// falling_behind is closed by exactly one caught_up or destination.recovered,
+// and nothing closes a falling_behind that is not open.
+func closedOnce(t *testing.T, got []timedEvent) {
+	t.Helper()
+	open := false
+	for _, e := range got {
+		switch e.typ {
+		case TypeDestinationFallingBehind:
+			if open {
+				t.Fatalf("a second falling_behind at %ds while the first was never closed: %+v", e.sec, got)
+			}
+			open = true
+		case TypeDestinationCaughtUp:
+			if !open {
+				t.Fatalf("caught_up at %ds closes nothing: %+v", e.sec, got)
+			}
+			open = false
+		case TypeDestinationRecovered:
+			open = false
+		}
+	}
+	if open {
+		t.Fatalf("a falling_behind was never closed: %+v", got)
+	}
+}
+
+// The exploratory row-7 timeline as it was measured in Docker. The sink is
+// paused for 90s: FFmpeg keeps running with a frozen out_time, so
+// falling_behind fires. When the sink is unpaused it resets the connection,
+// the child exits, and the supervisor respawns it -- a sweep with no process,
+// then a new run whose out_time starts again from zero at realtime.
+//
+// That sweep with no process used to DROP the falling_behind latch silently,
+// and destination.down never fired because the gap was far shorter than its
+// dwell. So the stall was announced and never closed: no caught_up, no
+// recovered, ever. The second stall, healed in place without a respawn, closed
+// normally, which is why the defect hid behind a passing test.
+func TestAStallThatEndsInARespawnIsStillClosed(t *testing.T) {
+	w := NewWatcher(WatchConfig{})
+	var got []timedEvent
+	var out float64
+	for sec := 0; sec <= 450; sec += 2 {
+		d := DestState{ID: 1, Name: "D-default", Enabled: true, Running: true}
+		switch {
+		case sec > 110 && sec < 200:
+			// Paused sink: out_time frozen where it stopped.
+		case sec == 200:
+			// The sink resets the connection; the child is gone for a sweep,
+			// and its successor counts from zero.
+			d.Running, out = false, 0
+		case sec > 290 && sec < 350:
+			// Second pause, healed in place.
+		case sec > 0:
+			out += 2
+		}
+		d.OutTimeMS = int64(out * 1000)
+		for _, ev := range w.Observe(Snapshot{At: base.Add(time.Duration(sec) * time.Second), Destinations: []DestState{d}}) {
+			got = append(got, timedEvent{sec, ev.Type, ev.Key})
+		}
+	}
+	wantTypes(t, got, TypeDestinationFallingBehind, TypeDestinationCaughtUp,
+		TypeDestinationFallingBehind, TypeDestinationCaughtUp)
+	closedOnce(t, got)
+	if got[1].sec <= 200 || got[1].sec > 240 {
+		t.Errorf("caught_up at %ds; want it once the respawned run has shown realtime, within a window of 200s", got[1].sec)
+	}
+}
+
+// A stall that ends in a real outage -- no process for longer than
+// destination.down's dwell -- is closed by destination.recovered, once. A
+// caught_up as well would close the same incident twice.
+func TestAStallThatBecomesAnOutageIsClosedByTheRecovery(t *testing.T) {
+	w := NewWatcher(WatchConfig{DownFor: 20 * time.Second})
+	got := drive(w, 300, []int64{3}, func(_ int64, sec int) destPlan {
+		switch {
+		case sec < 20:
+			return destPlan{enabled: true, running: true, speed: 1}
+		case sec < 80:
+			return destPlan{enabled: true, running: true, speed: 0}
+		case sec < 140:
+			return destPlan{enabled: true, running: false}
+		default:
+			return destPlan{enabled: true, running: true, speed: 1}
+		}
+	})
+	wantTypes(t, got, TypeDestinationFallingBehind, TypeDestinationDown, TypeDestinationRecovered)
+	closedOnce(t, got)
+}
+
+// A respawn that comes back still slow has not caught up, and says nothing
+// until it does.
+func TestARespawnThatIsStillSlowDoesNotCatchUp(t *testing.T) {
+	w := NewWatcher(WatchConfig{})
+	got := drive(w, 400, []int64{5}, func(_ int64, sec int) destPlan {
+		switch {
+		case sec < 20:
+			return destPlan{enabled: true, running: true, speed: 1}
+		case sec == 100:
+			return destPlan{enabled: true, running: false}
+		case sec < 300:
+			return destPlan{enabled: true, running: true, speed: 0.5}
+		default:
+			return destPlan{enabled: true, running: true, speed: 1}
+		}
+	})
+	wantTypes(t, got, TypeDestinationFallingBehind, TypeDestinationCaughtUp)
+	closedOnce(t, got)
+	if got[1].sec < 300 {
+		t.Errorf("caught_up at %ds, while the respawned run was still at half speed", got[1].sec)
+	}
+}

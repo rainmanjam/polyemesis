@@ -51,6 +51,11 @@ const (
 	// Deliberately NOT TypeDestinationRecovered, which already exists and pairs
 	// with TypeDestinationDown. One message closing out two different
 	// conditions would leave a reader unable to tell which had ended.
+	//
+	// The one overlap is an outage: a falling_behind still open when the
+	// destination went down is closed by that outage's destination.recovered
+	// and gets no caught_up of its own. Either way every falling_behind is
+	// closed by exactly one message (Watcher.watchDestinations).
 	TypeDestinationCaughtUp Type = "destination.caught_up"
 	// TypeIngestLost fires when the source stops arriving.
 	TypeIngestLost Type = "ingest.lost"

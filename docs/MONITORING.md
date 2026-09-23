@@ -375,6 +375,16 @@ lost, because every destination stops then and `ingest.lost` already says so.
 Each stall raises its own `falling_behind`, and each recovery its own
 `caught_up`.
 
+**Every `falling_behind` is closed by exactly one message.** A stall often ends
+with the platform resetting the connection, so the process exits and is
+respawned within a couple of seconds — far too briefly for `destination.down`.
+The alert stays open across that gap, and `caught_up` closes it once the new
+run has been measured at realtime (about ten seconds of output). If the gap
+lasts long enough to be a `destination.down`, then `destination.recovered`
+closes both, and no `caught_up` follows. A respawned run that is still slow
+sends nothing until it catches up. Only disabling or deleting the destination
+closes the alert without a message, because you did that yourself.
+
 The same numbers are on each destination's card, live.
 
 ### A broadcast that will not start or end
