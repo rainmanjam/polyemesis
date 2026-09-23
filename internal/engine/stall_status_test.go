@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,12 +20,18 @@ import (
 // advances every block, which is a feed delivering.
 func progressChild(t *testing.T, name string, moving bool) *supervisor.Process {
 	t.Helper()
-	script := `while :; do printf 'out_time_us=1000000\ntotal_size=1000\nbitrate=2000.0kbits/s\nspeed=1.0x\nprogress=continue\n'; sleep 0.2; done`
+	// This test binary, re-run as the child (TestMain in dest_stop_outcome_test.go),
+	// so the test runs on Windows too.
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	mode := engineFakeChildProgressFrozen
 	if moving {
-		script = `i=0; while :; do i=$((i+200000)); printf 'out_time_us=%d\ntotal_size=%d\nprogress=continue\n' $i $i; sleep 0.2; done`
+		mode = engineFakeChildProgressMoving
 	}
 	p := supervisor.New(slog.New(slog.NewTextHandler(io.Discard, nil)),
-		supervisor.Spec{Name: name, Kind: "destination", Bin: "/bin/sh", Args: []string{"-c", script}})
+		supervisor.Spec{Name: name, Kind: "destination", Bin: self, Args: []string{engineFakeChildFlag, mode}})
 	p.Start()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

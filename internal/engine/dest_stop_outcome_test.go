@@ -47,6 +47,14 @@ const engineFakeChildStderr = "POLYEMESIS_ENGINE_FAKE_CHILD_STDERR"
 // last path segment of its own final argument. See the branch that reads it.
 const engineFakeChildEchoLast = "POLYEMESIS_ENGINE_FAKE_CHILD_ECHO_LAST"
 
+// The second argument after engineFakeChildFlag that turns the fake child into
+// an FFmpeg -progress writer, frozen or moving. Arguments, not environment,
+// because one test runs both kinds at once.
+const (
+	engineFakeChildProgressFrozen = "progress-frozen"
+	engineFakeChildProgressMoving = "progress-moving"
+)
+
 func TestMain(m *testing.M) {
 	// KEYED ON THE ENVIRONMENT, NOT ON argv[1], and that is what makes it
 	// usable as a stand-in FFmpeg. The branch below needs the flag first on the
@@ -75,6 +83,21 @@ func TestMain(m *testing.M) {
 		}
 		fmt.Fprintln(os.Stderr, prefix+last)
 		os.Exit(1)
+	}
+	if len(os.Args) > 2 && os.Args[1] == engineFakeChildFlag &&
+		(os.Args[2] == engineFakeChildProgressFrozen || os.Args[2] == engineFakeChildProgressMoving) {
+		// FFmpeg -progress blocks on stdout, every 200ms, for stall_status_test.go.
+		// Frozen repeats one out_time, which is what a destination whose sink
+		// stopped reading prints; moving advances it, which is a feed
+		// delivering. A shell loop did this until Windows CI had no /bin/sh.
+		moving := os.Args[2] == engineFakeChildProgressMoving
+		for us := int64(1_000_000); ; {
+			if moving {
+				us += 200_000
+			}
+			fmt.Printf("out_time_us=%d\ntotal_size=%d\nbitrate=2000.0kbits/s\nspeed=1.0x\nprogress=continue\n", us, us)
+			time.Sleep(200 * time.Millisecond)
+		}
 	}
 	if len(os.Args) > 1 && os.Args[1] == engineFakeChildFlag {
 		// A child that says something and dies, for the tests that need the
