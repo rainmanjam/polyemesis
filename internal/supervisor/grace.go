@@ -65,15 +65,33 @@ const fastGrace = 1 * time.Second
 // SIGTERM by itself before it is woken, and wakeEvery how often the wake is
 // repeated after that.
 //
-// wakeAfter sits above the 0.105s a healthy FFmpeg takes with its input still
-// flowing, so the ordinary stop never reaches it. It is repeated rather than
-// sent once because a single loopback datagram can be dropped, and because the
-// signal is delivered asynchronously: a wake that lands before FFmpeg has
-// registered the SIGTERM just completes a packet, and the next one finishes the
-// job. Both are far inside the 8s grace, which remains the backstop.
+// THE FIRST WAKE MUST LAND AFTER FFMPEG HAS REGISTERED THE SIGTERM, because it
+// is the only one that can do anything. A wake releases the last real PES the
+// demuxer is holding; it opens an empty one in its place, and every later wake
+// only completes an empty PES, which the demuxer never emits. So a wake that
+// arrives while FFmpeg still thinks it is transcoding hands it a packet it
+// simply forwards, the demux thread goes back to its timeout-less read, and no
+// later wake can reach it again: SIGKILL at the grace, no trailer.
+//
+// When FFmpeg registers the signal is platform-dependent. Its handler only
+// counts the signal; the main thread reads that count when sch_wait returns,
+// and sch_wait is a pthread_cond_timedwait on the -stats_period tick (0.5s by
+// default; nothing here overrides it). On macOS the signal cuts that wait
+// short and FFmpeg acts in ~30ms. On Linux, glibc resumes the wait after the
+// handler -- and the signal may land on any of FFmpeg's threads anyway -- so
+// FFmpeg notices at the next tick, anywhere up to 0.5s later. Measured with
+// input flowing, FFmpeg 8.1: Linux 14-446ms, macOS 9-34ms. The first wakeAfter
+// here was 0.3s, which on Linux lost that race about half the time.
+//
+// So wakeAfter is FFmpeg's stats period plus a margin for the main thread to
+// be scheduled after the tick. It is still far above the ~0.1s of an ordinary
+// stop, which never reaches it, and far inside the 8s grace, which remains the
+// backstop. The repeats cover a dropped loopback datagram, the one case in
+// which a later wake still has a real packet to release.
 const (
-	wakeAfter = 300 * time.Millisecond
-	wakeEvery = 500 * time.Millisecond
+	ffmpegStatsPeriod = 500 * time.Millisecond
+	wakeAfter         = ffmpegStatsPeriod + 250*time.Millisecond
+	wakeEvery         = 500 * time.Millisecond
 )
 
 // graceFor returns the shutdown grace for a process kind. Unknown kinds -- and

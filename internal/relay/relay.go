@@ -592,6 +592,13 @@ const quietAfter = 250 * time.Millisecond
 // repeated wake that completes it gives the muxer nothing. Continuity counters
 // continue each PID's own sequence, so the reader logs no discontinuity for it.
 //
+// ONE SHOT PER STOP. The same property means only the first wake that arrives
+// releases a packet; a repeat completes an empty PES, which the demuxer never
+// emits. If that first packet reaches FFmpeg before it has registered the
+// SIGTERM, it is forwarded like any other and the read blocks again for good.
+// The supervisor's wakeAfter is timed for that: FFmpeg on Linux registers the
+// signal only at its next -stats_period tick.
+//
 // ONLY INTO SILENCE, and only to the one named consumer. A feed still
 // delivering wakes its readers by itself, and every other subscriber on the hub
 // is still running. Returns whether anything was sent; false is normal for a

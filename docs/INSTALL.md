@@ -342,7 +342,7 @@ a recorder or file destination stopped *after* its publisher had already left â€
 the last segment once an ingest ended, turning recording off, `docker stop` on
 an idle server, the Stop button on a file destination. The feed was quiet
 before any signal was sent. Now, when a stopping consumer has not exited within
-0.3s on a silent feed, the relay sends it the packet it is waiting for. It exits
+0.75s on a silent feed, the relay sends it the packet it is waiting for. It exits
 in a fraction of a second with its file finalised
 (`TestARecorderStoppedOnAQuietFeedFinalisesItsFileInsteadOfBeingKilled`,
 `TestAFileDestinationStoppedOnAQuietFeedFinalisesItsFile`). What

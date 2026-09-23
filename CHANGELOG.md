@@ -130,12 +130,16 @@ its first tagged release.
   SIGKILLed. That left an MKV with no duration and no cues. Affected: the last
   segment when an ingest ended, `recording.enabled=false`, `docker stop` on an
   idle server, and the Stop button on a file destination. The supervisor now
-  wakes a stopping relay consumer that has not exited after 0.3s. The relay
+  wakes a stopping relay consumer that has not exited after 0.75s. The relay
   sends that consumer alone one empty PES start per stream, which completes the
   packet FFmpeg is holding, and only into a feed that has been silent for
-  0.25s. Measured: 8.0s and `duration=N/A` before, 0.3s and a finalised file
-  after. The no-timeout rule is untouched: a running destination still rides
-  through silence.
+  0.25s. The 0.75s is FFmpeg's 0.5s stats period plus a margin: on Linux FFmpeg
+  registers a SIGTERM only at its next stats tick, and a wake that lands before
+  then is forwarded as ordinary media and cannot be repeated. A 0.3s wake passed
+  on macOS, where the signal is noticed at once, and failed about half the time
+  on Linux. Measured: 8.0s and `duration=N/A` before, 0.75s and a finalised file
+  after, on both. The no-timeout rule is untouched: a running destination still
+  rides through silence.
 - **A segment that was never finalised no longer logs a WARN every 30 seconds.**
   The recordings scanner re-probed an unmeasurable segment on every pass for
   the life of the process. It now asks once per file size and says once, in
