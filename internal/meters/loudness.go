@@ -159,6 +159,22 @@ func Parse(r io.Reader, fn func(Frame)) error {
 			if err != nil {
 				continue
 			}
+			// NON-FINITE IS "NO READING", AND IT IS SETTLED HERE, AT THE ONE
+			// PLACE A NUMBER ENTERS. ebur128 prints `nan` for a momentary window
+			// after the signal falls to digital silence and `-inf` for one that
+			// never saw a sample, and strconv.ParseFloat accepts both without an
+			// error. encoding/json does not: one such frame made /api/v1/status
+			// and /api/v1/loudness answer 200 with an empty body and closed every
+			// WebSocket the loudness event reached. A loudness value becomes the
+			// floor -- the documented "not measured" reading -- and anything else
+			// becomes zero, so no Frame this function hands out can fail to
+			// encode.
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				v = 0 // LRA; and DBTP floors a zero true_peak
+				if key == "M" || key == "S" || key == "I" {
+					v = LUFSFloor
+				}
+			}
 			switch key {
 			case "M":
 				cur.MomentaryLUFS, have = v, true
@@ -194,7 +210,9 @@ func ptsTime(line string) float64 {
 
 // DBTP converts ebur128's linear true-peak amplitude to dBTP.
 func DBTP(linear float64) float64 {
-	if linear <= 0 {
+	// Written as !(linear > 0) so NaN floors too; an infinite amplitude is not
+	// a peak anyone measured either.
+	if !(linear > 0) || math.IsInf(linear, 1) {
 		return TruePeakFloor
 	}
 	db := 20 * math.Log10(linear)

@@ -102,11 +102,23 @@ is what lets you write the alert before the first source exists.
 polyemesis_ingest_up == 0 and on() polyemesis_sources > 0   # nobody is streaming
 polyemesis_destination_up == 0 and polyemesis_destination_enabled == 1
 rate(polyemesis_destination_restarts_total[15m]) > 0        # a flapping output
+rate(polyemesis_destination_output_seconds_total[1m]) < 0.5
+  and polyemesis_destination_up == 1                        # a stalled output
 polyemesis_recording_free_bytes < 20e9                      # disk filling up
 ```
 
 The second is the one worth alerting on first: a destination that is enabled but
 not up is a platform you think you are streaming to and are not.
+
+It does not catch everything. A platform that stops taking data leaves the
+FFmpeg process running, so `_up` stays 1, restarts stay flat, and
+`polyemesis_destination_bitrate_bits_per_second` keeps the last figure FFmpeg
+printed — an average over the whole run, which never falls to zero. The fourth
+query is the one that sees a stall: `polyemesis_destination_output_seconds_total`
+is the media time delivered, so its `rate()` is about 1 while a destination
+keeps up and 0 while it is stuck. `polyemesis_destination_output_bytes_total`
+does the same in bytes, and `rate()` of it times 8 is the bitrate actually being
+sent now. Both reset with the process, which `rate()` handles.
 
 **The first needs its guard.** Bare `polyemesis_ingest_up == 0` cannot tell a
 broadcast that ended from an install nobody has configured yet — every series
@@ -300,11 +312,20 @@ swallows teaches the operator nothing — and is not subscribable.
 `destination.down`: a destination is usually degraded for a while before its
 FFmpeg child gives up.
 
-The measurement is FFmpeg's own speed ratio for that destination — output time
-over wall-clock time. What makes it useful here is that video is passed through
-untouched, so there is barely any encoding work to be slow at. **A passthrough
-destination sitting under 1.0 means FFmpeg is blocking on the write to the
-platform.**
+The measurement is how fast that destination's output time advances against
+the wall clock, over the last **20 seconds**. What makes it useful here is that
+video is passed through untouched, so there is barely any encoding work to be
+slow at. **A passthrough destination sitting under 1.0 means FFmpeg is blocking
+on the write to the platform** — and one whose sink has stopped reading
+entirely reads 0, so a stalled destination is caught while its process is still
+`running`.
+
+It is deliberately *not* the `speed=` FFmpeg prints. That figure is averaged
+over the whole run, so it barely moves during a stall — and it arrives in the
+same progress report that stops arriving when a sink stalls. Judged on it, the
+alert fired only after a stall had healed, then stayed raised for most of an
+hour while the average recovered, so `caught_up` never came and the next stall
+could not alert.
 
 That is close to the question a platform's own health API would answer, and it
 is answered for *every* destination — including one configured from a pasted
@@ -320,11 +341,15 @@ the diagnosis to you. The two frame counters are what tell the two apart:
 | dropped frames | FFmpeg is discarding to keep up — the **output** is congested |
 | duplicated frames | FFmpeg is padding — the **source** is starving |
 
-Thresholds are `speed < 0.95` sustained for 30 seconds. Both are deliberately
-conservative: a dip at a keyframe boundary is normal and an alert that fires on
-one is an alert you mute. A destination with no process reports a speed of zero,
-which is treated as *unknown* rather than slow, so nothing fires while a
-destination is starting up or after it has stopped.
+Thresholds are a rate under `0.95` sustained for 30 seconds. Both are
+deliberately conservative: a dip at a keyframe boundary is normal and an alert
+that fires on one is an alert you mute. Nothing is measured until a
+destination's process has moved some media, or while it is not running — so
+nothing fires while a destination is starting up or after it has stopped
+(`destination.down` covers that) — and nothing is measured while the ingest is
+lost, because every destination stops then and `ingest.lost` already says so.
+Each stall raises its own `falling_behind`, and each recovery its own
+`caught_up`.
 
 The same numbers are on each destination's card, live.
 

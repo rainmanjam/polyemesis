@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -266,7 +267,14 @@ func writeEvent(conn *websocket.Conn, ev events.Event, readOnly bool) error {
 	}
 	b, err := json.Marshal(view)
 	if err != nil {
-		return err
+		// Dropped and logged, not returned. Both callers close the socket on
+		// any error, so returning this made one unencodable frame (a NaN
+		// loudness reading was the one seen) disconnect every open console at
+		// once -- and they reconnected into the next such frame. The fault is
+		// in the event, not the connection.
+		slog.Error("a WebSocket event could not be encoded and was dropped",
+			"type", ev.Type, "err", err)
+		return nil
 	}
 	if err := conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
 		return err

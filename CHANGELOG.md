@@ -241,6 +241,47 @@ its first tagged release.
   `{"name": "…", "ingest": {"mode": "srt"}}` is a complete request, and the
   Sources page explains an unchosen or pull source's token instead of pointing
   at a one-port setting that no longer exists.
+- **`/api/v1/status` and `/api/v1/loudness` no longer answer 200 with an empty
+  body after the audio falls silent.** ebur128 prints `nan`/`-inf` for a
+  loudness window with no signal; the parser now reads those as the -70 LUFS
+  "not measured" floor. Separately, any response body that cannot be encoded
+  now answers 500 with an error and is logged, rather than a silent empty 200,
+  and an unencodable WebSocket event is dropped and logged instead of closing
+  every open console.
+- **`/healthz`, `/health`, `/livez` and `/readyz` no longer answer 200.** They
+  fell through to the console's HTML page, so an uptime monitor pointed at them
+  stayed green while checking nothing. They now answer `404` with a body naming
+  the real check, `/api/v1/health`.
+- **`destination.falling_behind` now fires during a stall, and clears after it.**
+  It judged FFmpeg's `speed=`, an average over the whole run carried in the
+  progress report that stops arriving when a sink stops reading. A stalled
+  destination therefore read ~1.00x while stalled, alerted only after the heal,
+  stayed raised for most of an hour, never sent `caught_up`, and a second stall
+  could not alert. It now measures how fast the output time advances over the
+  last 20 seconds, and says nothing while the ingest itself is lost.
+- **`destination.up` means the destination is delivering, not that its process
+  exists.** It fired on every spawn, so a destination pointed at a closed port
+  announced "delivering" and flapped without sending a byte. It now waits for
+  FFmpeg's output time to move. A sink that stops reading, which leaves the
+  process running, now produces `destination.down` with `reason: "stalled"`
+  after the 10s dwell, and `destination.up` when data flows again. Broadcast
+  lifecycle automation does not end a broadcast on a stall.
+- **A stalled destination is visible on `/metrics`.** New counters
+  `polyemesis_destination_output_seconds_total` and
+  `polyemesis_destination_output_bytes_total` stop advancing when delivery does;
+  nothing else on the scrape moved, since the process stays running and the
+  bitrate gauge is FFmpeg's whole-run average. That gauge's help text now says
+  so.
+- **`/api/v1/health` no longer says the database is fine while it is failing.**
+  The check read page one, which a full volume and a file with a corrupt page
+  elsewhere both serve. So health said `ok` while every save failed with
+  "database or disk is full", and on a database with a damaged hooks table it
+  said `ok` while `/hooks` answered 500 and hooks had stopped. The store now
+  records the storage errors its real statements get, including a corrupt page
+  met partway through reading a table and a write through a prepared
+  statement, and health reports them as `degraded`: a full or read-only volume
+  until the next successful write or committed transaction, a damaged file
+  until restart.
 
 ## [0.10.0] — 2026-09-23
 

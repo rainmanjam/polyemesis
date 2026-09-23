@@ -412,7 +412,9 @@ func TestTheDownReasonsAreTheOnesTheWatcherActuallyEmits(t *testing.T) {
 
 	up := func(at time.Time) alerts.Snapshot {
 		return alerts.Snapshot{At: at, Destinations: []alerts.DestState{
-			{ID: 3, Name: "yt", Platform: "youtube", Enabled: true, Running: true},
+			// Output time non-zero: the watcher's UP edge means delivering,
+			// not merely spawned.
+			{ID: 3, Name: "yt", Platform: "youtube", Enabled: true, Running: true, OutTimeMS: 1000},
 		}}
 	}
 
@@ -446,6 +448,18 @@ func TestTheDownReasonsAreTheOnesTheWatcherActuallyEmits(t *testing.T) {
 	if got != lifecycleReasonDisabled {
 		t.Errorf("a deliberate disable reads as %q, but this package switches on %q -- no "+
 			"broadcast would ever be ended", got, lifecycleReasonDisabled)
+	}
+
+	// A stalled sink: still enabled, still running, output frozen. Whatever the
+	// watcher calls it, it must not be a reason this package ENDS a broadcast
+	// on -- a platform that stops reading for ten seconds is not the operator
+	// deciding the show is over.
+	w4 := hooks.NewWatcher(hooks.SourceRef{ID: 1}, hooks.WatchConfig{DestinationDownAfter: immediateDown})
+	w4.Observe(up(base))
+	got = reasonOf(w4.Observe(up(base.Add(time.Second))))
+	if got == lifecycleReasonDisabled || got == lifecycleReasonRemoved {
+		t.Errorf("a stalled sink reads as %q, which this package treats as the operator "+
+			"ending the broadcast", got)
 	}
 
 	// The row being deleted.

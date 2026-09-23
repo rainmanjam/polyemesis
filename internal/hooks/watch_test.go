@@ -112,7 +112,7 @@ func TestAFlappingDestinationDoesNotStorm(t *testing.T) {
 	dest := func(running bool) alerts.Snapshot {
 		return alerts.Snapshot{
 			At: time.Time{}, IngestConfigured: true, IngestLive: true,
-			Destinations: []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: running}},
+			Destinations: []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: running, OutTimeMS: 1000}},
 		}
 	}
 	first := dest(true)
@@ -147,7 +147,7 @@ func TestDisablingADestinationIsADownWithAReason(t *testing.T) {
 	w := NewWatcher(SourceRef{ID: 1}, WatchConfig{DestinationDownAfter: noDwell})
 	up := alerts.Snapshot{
 		At: at(0), IngestConfigured: true, IngestLive: true,
-		Destinations: []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: true}},
+		Destinations: []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: true, OutTimeMS: 1000}},
 	}
 	w.Observe(up)
 
@@ -168,7 +168,7 @@ func TestARemovedDestinationGoesDownRatherThanVanishing(t *testing.T) {
 	w := NewWatcher(SourceRef{ID: 1}, WatchConfig{DestinationDownAfter: noDwell})
 	up := alerts.Snapshot{
 		At: at(0), IngestConfigured: true, IngestLive: true,
-		Destinations: []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: true}},
+		Destinations: []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: true, OutTimeMS: 1000}},
 	}
 	w.Observe(up)
 
@@ -193,9 +193,9 @@ func TestDestinationEventsAreOrderedByID(t *testing.T) {
 	s := alerts.Snapshot{
 		At: at(0), IngestConfigured: true, IngestLive: true,
 		Destinations: []alerts.DestState{
-			{ID: 9, Name: "c", Enabled: true, Running: true},
-			{ID: 2, Name: "a", Enabled: true, Running: true},
-			{ID: 5, Name: "b", Enabled: true, Running: true},
+			{ID: 9, Name: "c", Enabled: true, Running: true, OutTimeMS: 1000},
+			{ID: 2, Name: "a", Enabled: true, Running: true, OutTimeMS: 1000},
+			{ID: 5, Name: "b", Enabled: true, Running: true, OutTimeMS: 1000},
 		},
 	}
 	got := w.Observe(s)
@@ -255,7 +255,7 @@ func TestASupervisorReconnectInsideTheDwellPublishesNothing(t *testing.T) {
 	w := NewWatcher(SourceRef{ID: 1}, WatchConfig{})
 	live := alerts.Snapshot{
 		At: at(0), IngestConfigured: true, IngestLive: true,
-		Destinations: []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: true}},
+		Destinations: []alerts.DestState{{ID: 3, Name: "Twitch", Enabled: true, Running: true, OutTimeMS: 1000}},
 	}
 	w.Observe(live)
 
