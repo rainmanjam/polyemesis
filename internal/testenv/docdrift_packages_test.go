@@ -51,6 +51,7 @@ var canonicalDriftTests = []string{
 	"TestDocProxyExamplesServeTheConsoleFromARoot",
 	"TestAPIDocRefusedRouteTableIsReadScopeDeniedPatterns",
 	"TestAPIDocStopAllStatesItsConfirmBodyAndScope",
+	"TestDocBackupIngestAddressIsDocumented",
 }
 
 func TestTheDocsOnlyPathStillRunsTheDriftGuards(t *testing.T) {

@@ -540,3 +540,32 @@ func TestDocProxyExamplesServeTheConsoleFromARoot(t *testing.T) {
 		}
 	}
 }
+
+// TestDocBackupIngestAddressIsDocumented: the failover standby is reached at
+// "<token>.backup" on the primary's port (engine.backupTokenSuffix), and no
+// user-facing page said so -- it was in two design documents, and the Sources
+// page's publishUrls do not include it. Meanwhile the settings carry
+// failover.backup.rtmp.streamKey, which looks like the backup's address and is
+// ignored (exploratory SE-4). The design doc also promised that "reconnect after
+// a blip becomes immediate", which srtserver.StaleAfter makes a three-second
+// wait (SE-3).
+func TestDocBackupIngestAddressIsDocumented(t *testing.T) {
+	if !strings.Contains(readDoc(t, "internal/engine/manager.go"), `const backupTokenSuffix = ".backup"`) {
+		t.Fatal(`engine.backupTokenSuffix is no longer ".backup"; update docs/OBS.md and this guard together`)
+	}
+	obs := docSection(t, readDoc(t, "docs/OBS.md"), "docs/OBS.md", "A backup encoder for failover")
+	for _, want := range []string{"streamid=<token>.backup", "/live/<token>.backup", "failover.backup.rtmp.streamKey"} {
+		if !strings.Contains(obs, want) {
+			t.Errorf("docs/OBS.md's backup-encoder section does not mention %q", want)
+		}
+	}
+
+	if !strings.Contains(readDoc(t, "internal/srtserver/srtserver.go"), "StaleAfter = 3 * time.Second") {
+		t.Fatal("srtserver.StaleAfter is no longer three seconds; update docs/DESIGN-ONE-PORT-INGEST.md and this guard")
+	}
+	design := readDoc(t, "docs/DESIGN-ONE-PORT-INGEST.md")
+	if strings.Contains(design, "Reconnect after a blip becomes immediate") {
+		t.Error("docs/DESIGN-ONE-PORT-INGEST.md still promises an immediate reconnect; " +
+			"srtserver.StaleAfter refuses one for three seconds")
+	}
+}

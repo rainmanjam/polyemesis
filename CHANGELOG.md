@@ -102,6 +102,14 @@ its first tagged release.
   mounted at the root, and what `POST /routing/compile` takes: the profile,
   wrapped in `{"profile": …}`.
 
+- **The failover backup encoder's address was in no user-facing page.** It is
+  the source's publish token plus `.backup`, on the primary's port, for SRT and
+  RTMP alike; `docs/OBS.md` now says so, and that
+  `failover.backup.rtmp.streamKey` — which looks like the backup's address —
+  addresses nothing. `DESIGN-ONE-PORT-INGEST.md` no longer promises an
+  immediate reconnect after a blip: a new publisher is refused for three
+  seconds (`srtserver.StaleAfter`) after the old one's last packet.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added
