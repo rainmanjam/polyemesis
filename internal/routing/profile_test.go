@@ -68,19 +68,19 @@ func legacyCases(t *testing.T) []legacyCase {
 			name: "two tracks auto limits",
 			p:    simple(NormAuto, 0, 1),
 			src:  stereoSource(6),
-			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
 		},
 		{
 			name: "tracks 1 2 4",
 			p:    simple(NormAuto, 0, 1, 3),
 			src:  stereoSource(6),
-			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[0:a:3]pan=stereo|c0=1*c0|c1=1*c1[a_t3];[a_t0][a_t1][a_t3]amix=inputs=3:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];[0:a:3]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t3];[a_t0][a_t1][a_t3]amix=inputs=3:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
 		},
 		{
 			name: "two tracks with normalization off",
 			p:    simple(NormOff, 0, 1),
 			src:  stereoSource(6),
-			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]aresample=48000:async=1:first_pts=0[aout]",
 		},
 		{
 			name: "single track forced limiter",
@@ -94,13 +94,13 @@ func legacyCases(t *testing.T) []legacyCase {
 			name: "loudnorm keeps its original fixed parameters",
 			p:    simple(NormLoudnorm, 0, 1),
 			src:  stereoSource(6),
-			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]loudnorm=I=-16:TP=-1.5:LRA=11[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]loudnorm=I=-16:TP=-1.5:LRA=11[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
 		},
 		{
 			name: "all six tracks",
 			p:    simple(NormAuto, 0, 1, 2, 3, 4, 5),
 			src:  stereoSource(6),
-			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[0:a:2]pan=stereo|c0=1*c0|c1=1*c1[a_t2];[0:a:3]pan=stereo|c0=1*c0|c1=1*c1[a_t3];[0:a:4]pan=stereo|c0=1*c0|c1=1*c1[a_t4];[0:a:5]pan=stereo|c0=1*c0|c1=1*c1[a_t5];[a_t0][a_t1][a_t2][a_t3][a_t4][a_t5]amix=inputs=6:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];[0:a:2]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t2];[0:a:3]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t3];[0:a:4]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t4];[0:a:5]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t5];[a_t0][a_t1][a_t2][a_t3][a_t4][a_t5]amix=inputs=6:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
 		},
 		{
 			name: "44100 destination",
@@ -112,31 +112,31 @@ func legacyCases(t *testing.T) []legacyCase {
 			name: "non-unity per-track gains",
 			p:    gains,
 			src:  stereoSource(6),
-			want: "[0:a:0]pan=stereo|c0=0.5*c0|c1=0.5*c1[a_t0];[0:a:2]pan=stereo|c0=1.25*c0|c1=1.25*c1[a_t2];[a_t0][a_t2]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+			want: "[0:a:0]pan=stereo|c0=0.5*c0|c1=0.5*c1,aresample=async=1:first_pts=0[a_t0];[0:a:2]pan=stereo|c0=1.25*c0|c1=1.25*c1,aresample=async=1:first_pts=0[a_t2];[a_t0][a_t2]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
 		},
 		{
 			name: "matrix mode",
 			p:    matrix,
 			src:  stereoSource(6),
-			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[0:a:1]pan=stereo|c0=0.5*c0|c1=0.5*c1[a_t1];[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];[0:a:1]pan=stereo|c0=0.5*c0|c1=0.5*c1,aresample=async=1:first_pts=0[a_t1];[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
 		},
 		{
 			name: "5.1 downmix summed with a stereo track",
 			p:    simple(NormAuto, 0, 1),
 			src:  surroundSource(),
-			want: "[0:a:0]pan=stereo|c0=0.4143*c0+0.2929*c2+0.2929*c4|c1=0.4143*c1+0.2929*c2+0.2929*c5[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+			want: "[0:a:0]pan=stereo|c0=0.4143*c0+0.2929*c2+0.2929*c4|c1=0.4143*c1+0.2929*c2+0.2929*c5,aresample=async=1:first_pts=0[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
 		},
 		{
 			name: "preset everything",
 			p:    preset(PresetEverything, stereoSource(6)),
 			src:  stereoSource(6),
-			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[0:a:2]pan=stereo|c0=1*c0|c1=1*c1[a_t2];[0:a:3]pan=stereo|c0=1*c0|c1=1*c1[a_t3];[0:a:4]pan=stereo|c0=1*c0|c1=1*c1[a_t4];[0:a:5]pan=stereo|c0=1*c0|c1=1*c1[a_t5];[a_t0][a_t1][a_t2][a_t3][a_t4][a_t5]amix=inputs=6:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];[0:a:2]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t2];[0:a:3]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t3];[0:a:4]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t4];[0:a:5]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t5];[a_t0][a_t1][a_t2][a_t3][a_t4][a_t5]amix=inputs=6:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
 		},
 		{
 			name: "preset no music",
 			p:    preset(PresetNoMusic, stereoSource(6)),
 			src:  stereoSource(6),
-			want: "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[0:a:2]pan=stereo|c0=1*c0|c1=1*c1[a_t2];[0:a:3]pan=stereo|c0=1*c0|c1=1*c1[a_t3];[0:a:4]pan=stereo|c0=1*c0|c1=1*c1[a_t4];[0:a:5]pan=stereo|c0=1*c0|c1=1*c1[a_t5];[a_t1][a_t2][a_t3][a_t4][a_t5]amix=inputs=5:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+			want: "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];[0:a:2]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t2];[0:a:3]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t3];[0:a:4]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t4];[0:a:5]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t5];[a_t1][a_t2][a_t3][a_t4][a_t5]amix=inputs=5:duration=longest:normalize=0[a_mix];[a_mix]alimiter=limit=0.95:level=disabled[a_norm];[a_norm]aresample=48000:async=1:first_pts=0[aout]",
 		},
 		{
 			name: "preset mic only",
@@ -157,6 +157,12 @@ func legacyCases(t *testing.T) []legacyCase {
 // user has ever saved was built from the fields these cases use; if adding
 // roles, loudness, delay, ducking or denoise moves a single byte of any of
 // these strings, someone's stream changed without them asking.
+//
+// These strings HAVE moved once, on purpose: every multi-track case gained
+// trackAlign on each leg, because the old graph put a track that went missing
+// during a failover permanently out of step with the rest (see
+// track_gap_test.go). That was a correctness fix to every such stream, made in
+// the open with a CHANGELOG entry -- not a byte a new feature moved by accident.
 func TestLegacyProfilesCompileToTheExactSameFilterString(t *testing.T) {
 	for _, tc := range legacyCases(t) {
 		t.Run(tc.name, func(t *testing.T) {

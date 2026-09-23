@@ -8,6 +8,19 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A failover to a source with fewer tracks no longer leaves the routed tracks
+  out of step.** A slate or a one-track backup carries only track 0, so tracks 2
+  and up vanish from the relay for the length of the outage. `amix` and the
+  duck's sidechain pair their inputs by sample count, not timestamp, so when the
+  primary returned, the missing track picked up where it stopped and was summed
+  with track 0 from an outage earlier: audio from before and after the outage in
+  one mix, offset by the outage (18 s measured) until the destination restarted.
+  Every track's chain in a multi-track graph now ends with
+  `aresample=async=1:first_pts=0`, which fills the gap with silence and anchors
+  every track at the same origin. One-track graphs are unchanged.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added
