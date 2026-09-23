@@ -784,6 +784,19 @@ func TestMetersArgsMergesTracksIntoOneStream(t *testing.T) {
 	}
 }
 
+// The meters sidecar is the one long-running child that does not take
+// progressArgs (its stdout carries levels), and so the one that did not get
+// -nostats with them. Without it, FFmpeg prints its interactive stats line to
+// stderr at any -loglevel from info up -- one \r-terminated update after
+// another, never a \n -- which is noise in the log at best, and at worst was a
+// single "line" that outgrew the supervisor's stderr buffer.
+func TestMetersArgsSuppressesInteractiveStats(t *testing.T) {
+	args := MetersArgs(MetersSpec{RelayURL: "udp://127.0.0.1:1", TrackChannels: []int{2}})
+	if !has(args, "-nostats") {
+		t.Errorf("meters argv lacks -nostats: %q", args)
+	}
+}
+
 func TestMetersArgsSingleTrackSkipsAmerge(t *testing.T) {
 	args := MetersArgs(MetersSpec{RelayURL: "udp://127.0.0.1:1", TrackChannels: []int{2}})
 	fc, _ := argsAfter(args, "-filter_complex")

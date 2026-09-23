@@ -10,6 +10,30 @@ its first tagged release.
 
 ### Fixed
 
+- **A process no longer freezes while showing Running after a long run of
+  output with no newline in it.** The supervisor read a child's stderr one
+  line at a time and gave up on a line over 512 KiB, and it stopped reading
+  stdout once the progress parser gave up on a line over 1 MiB. After that
+  nothing read the pipe, it filled, FFmpeg blocked writing to it, and the
+  process stayed Running while doing nothing until someone restarted it. The
+  audio-meter sidecar triggered this when `POLYEMESIS_FFMPEG_LOGLEVEL` was
+  raised to `info` or above: it was the one long-running child without
+  `-nostats`, and FFmpeg's stats line ends each update in `\r`, never `\n`, so
+  it grew into one line that filled the buffer in about 40 minutes. The
+  meters sidecar now passes `-nostats`. Stderr is split at `\r` as well as
+  `\n`, and a longer run is cut into 512 KiB log lines. Both pipes are
+  drained to the end whatever their reader does.
+
+- **Restarting a destination whose child would not stop can no longer run two
+  copies or show a live stream as Stopped.** When a restart's stop reached
+  its deadline and killed the child, the new supervisor started at once,
+  while the old one was still waiting for the killed child to be reaped. For
+  that time two FFmpeg processes could push to the same stream key. When the
+  old supervisor finished it wrote Stopped over the new one's Running, and
+  the card showed Stopped while the destination was live. The new child now
+  starts only when the old supervisor has finished, so the destination shows
+  Stopped for that short gap. A Stop in the gap still cancels the restart.
+
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer
   tracks was tested with a 5 s gap. In the field, with a 30 s outage, track 2
