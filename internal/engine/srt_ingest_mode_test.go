@@ -94,3 +94,56 @@ func TestTheSRTListenerAdmitsOnlySRTModeSources(t *testing.T) {
 		}
 	}
 }
+
+// The standby's positive control, which the test above only has for the
+// primary: a source whose failover.backup.mode IS srt must still be reachable
+// at "<token>.backup" on the shared port. Without it, a standby gate that
+// admits nobody -- `&& false` on the condition in lookupToken -- passes every
+// refusal above while leaving every SRT failover encoder with nowhere to
+// publish.
+//
+// Mutation: append `&& false` to the standby condition in lookupToken.
+// Observed to fail with "SRT standby is unreachable".
+func TestTheSRTListenerAdmitsAnSRTModeStandby(t *testing.T) {
+	m, store := managerFixture(t)
+
+	ing := db.DefaultSettings().Ingest
+	ing.Mode = db.IngestSRT
+	src := &db.Source{Name: "SRT", Enabled: true, Ingest: ing}
+	if err := store.CreateSource(src); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	st.Listeners.SRTPort = freeUDPPort(t)
+	st.Listeners.RTMPPort = freeTCPPort(t)
+	st.Failover.Enabled = true
+	st.Failover.Backup.Enabled = true
+	st.Failover.Backup.Mode = db.IngestSRT
+	if err := store.PutSettings(st); err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	eng := m.Engine(src.ID)
+	if eng == nil {
+		t.Fatal("control: the SRT source has no engine")
+	}
+	// The standby hub is what the gate hands out, so its absence would make the
+	// lookup below fail for a reason that has nothing to do with the mode gate.
+	waitUntil(t, func() bool { return eng.BackupHub() != nil }, "the standby's hub")
+
+	got, ok := m.lookupToken(src.Token + backupTokenSuffix)
+	if !ok || got.Sink == nil {
+		t.Fatalf("the SRT standby is unreachable (%+v, %v): failover.backup.mode is srt, "+
+			"so a backup encoder publishing to <token>.backup has nowhere to go", got, ok)
+	}
+	if !got.Backup || got.SourceID != src.ID {
+		t.Errorf("standby target = %+v, want the backup slot of source %d", got, src.ID)
+	}
+}
