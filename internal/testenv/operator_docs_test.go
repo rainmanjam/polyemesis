@@ -108,6 +108,9 @@ func TestDocVerifyCommandsFailLoudlyAndNameTheirURL(t *testing.T) {
 	cases := []struct{ rel, section string }{
 		{"docs/INSTALL.md", "Verifying the install"},
 		{"docs/UPGRADING.md", "Verifying an upgrade"},
+		// Same class, found in the sweep that fixed the two above: the
+		// encoder-verdict check an operator runs while debugging hardware.
+		{"docs/HARDWARE.md", "Checking it yourself"},
 	}
 	for _, c := range cases {
 		sec := docSection(t, readDoc(t, c.rel), c.rel, c.section)

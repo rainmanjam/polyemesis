@@ -20,8 +20,9 @@ its first tagged release.
   `$POLYEMESIS_URL`, and `jq` lists the affected destinations by name, so `[]` is
   the all-clear and no output is a failed request. `INSTALL.md`'s health check
   had the same hard-coded `http://localhost:8080`, which fails on every default
-  `install.sh` install; it now has a table of the three install shapes. Both are
-  held by `internal/testenv/operator_docs_test.go`.
+  `install.sh` install; it now has a table of the three install shapes, and
+  `HARDWARE.md`'s encoder-verdict check had the same `curl -s localhost:8080`.
+  All three are held by `internal/testenv/operator_docs_test.go`.
 
 - **The Prometheus example sent its bearer token in cleartext.**
   `docs/MONITORING.md` gave no `scheme`, and Prometheus defaults to `http` on
