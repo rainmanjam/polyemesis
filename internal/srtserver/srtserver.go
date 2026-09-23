@@ -625,9 +625,12 @@ func (s *Server) handleConnect(req srt.ConnRequest) verdict {
 		return refuse(srt.REJ_CLOSE)
 	}
 	if target.Sink == nil {
-		// The source exists but no engine is running for it. Accepting would
-		// swallow the stream silently, which is worse than refusing.
-		s.log.Warn("srt publish refused: no pipeline for source", "peer", peer, "source", target.Name)
+		// The source exists but has no SRT pipeline: no engine is running for
+		// it, or its ingest is set to something other than SRT (see
+		// engine.Manager.lookupToken). Accepting would swallow the stream
+		// silently, or interleave it with the ingest that IS running.
+		s.log.Warn("srt publish refused: no SRT pipeline for source (not running, or its ingest mode is not srt)",
+			"peer", peer, "source", target.Name)
 		return refuse(srt.REJ_RESOURCE)
 	}
 

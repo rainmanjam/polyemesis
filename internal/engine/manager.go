@@ -709,7 +709,18 @@ func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
 		// lookup has to be spelled out rather than assigned straight through --
 		// otherwise a source with no engine would present a non-nil Sink and the
 		// listener would accept a stream into nothing.
-		if eng := m.Engine(s.ID); eng != nil {
+		//
+		// AND ONLY FOR A SOURCE SET TO SRT, the counterpart of the RTMP
+		// listener's Ready. This used to hand every running engine's hub to the
+		// shared SRT port whatever the source's ingest mode, so an SRT publish
+		// was admitted into an RTMP source (whose hub its RTMP ingest child is
+		// already writing -- two muxers interleaved into one stream), into a
+		// pull source, and into one whose ingest was never chosen, which is
+		// what the console's create form makes. The API meanwhile reported all
+		// three tokenEnforced:false with no publish URL. A nil Sink is refused
+		// with REJ_RESOURCE, the same as a source with no pipeline, which from
+		// an SRT encoder's side is exactly what it is.
+		if eng := m.Engine(s.ID); eng != nil && s.Ingest.Mode == db.IngestSRT {
 			sink = eng.Hub()
 		}
 		targets = append(targets, srtserver.Target{
@@ -726,7 +737,11 @@ func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
 		// listener. Derived rather than stored: one secret per source is one
 		// thing to rotate, one thing to leak, and one thing to explain -- and
 		// rotating the source's token moves the backup's address with it.
-		if eng := m.Engine(s.ID); eng != nil {
+		//
+		// Only when the standby is configured for SRT, for the reason the
+		// primary's Sink above is: an RTMP standby's hub is fed by its RTMP
+		// backup child, and lookupStreamKey already gates it the same way.
+		if eng := m.Engine(s.ID); eng != nil && eng.Settings().Failover.Backup.Mode == db.IngestSRT {
 			if bh := eng.BackupHub(); bh != nil {
 				suffixed := make([]string, 0, len(valid))
 				for _, t := range valid {

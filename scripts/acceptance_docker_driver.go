@@ -206,7 +206,9 @@ func setup() {
 	// The programme every step below acts on. A fresh install has none since
 	// #387; see acceptance_driver.go for the full reason.
 	if code, out := do(http.MethodPost, "/sources",
-		map[string]any{"name": "Main", "enabled": true}); code != http.StatusOK &&
+		// SRT, because every step publishes through the shared SRT port, and it
+		// admits a publisher only into a source whose ingest is SRT.
+		map[string]any{"name": "Main", "enabled": true, "ingest": map[string]any{"mode": "srt"}}); code != http.StatusOK &&
 		code != http.StatusCreated {
 		die(fmt.Sprintf("create the first source: %d %s", code, out))
 	}
@@ -377,7 +379,9 @@ func all(action string) {
 // printed because the server may have moved it off a clash, and the publisher
 // has to be pointed at the one actually in use rather than the one requested.
 func addSource(name string) {
-	code, out := do(http.MethodPost, "/sources", map[string]any{"name": name})
+	// SRT for the reason setup's source is: the shared port refuses a token
+	// whose source has no ingest chosen.
+	code, out := do(http.MethodPost, "/sources", map[string]any{"name": name, "ingest": map[string]any{"mode": "srt"}})
 	if code != http.StatusOK && code != http.StatusCreated {
 		die(fmt.Sprintf("create source failed: %d %s", code, out))
 	}

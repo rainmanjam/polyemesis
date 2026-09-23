@@ -148,7 +148,7 @@ With one-port ingest the refusal is typed and says which:
 |---|---|
 | `REJ_BADSECRET` | Wrong passphrase, a token matching no source, or a peer currently rate-limited for repeated wrong tokens (see below) |
 | `REJ_CLOSE` | The source exists but is disabled |
-| `REJ_RESOURCE` | Something is already publishing to that source, or no pipeline is running for it |
+| `REJ_RESOURCE` | Something is already publishing to that source, no pipeline is running for it, or its ingest is not set to SRT (RTMP, pull, or not chosen yet) |
 | `REJ_ROGUE` | The `streamid` is empty or over the length limit |
 | `REJ_UNSECURE` | The source requires a passphrase and none was offered — or the publisher encrypted and the source has no passphrase set |
 
@@ -156,9 +156,14 @@ A token that does not exist and a token for a source that does not exist give
 the same answer deliberately, so a caller cannot use the refusal to enumerate
 sources. Neither token value is ever logged.
 
-The two `REJ_RESOURCE` cases are worth telling apart, and the server log does:
-*already publishing* names the incumbent peer, *no pipeline for source* means
-the source is enabled but nothing is running to receive it.
+The `REJ_RESOURCE` cases are worth telling apart, and the server log does:
+*already publishing* names the incumbent peer, *no SRT pipeline for source*
+means nothing is running to receive it over SRT — the source's engine is down,
+or its ingest is set to RTMP or pull, or no protocol has been chosen for it. A
+source created from its name alone has none chosen: pick **SRT** on its card
+before publishing. (Earlier releases admitted an SRT publish into any source,
+whatever its mode, which put a second writer into an RTMP or pull source's
+stream.)
 
 #### The third `REJ_BADSECRET`: the peer is rate-limited
 

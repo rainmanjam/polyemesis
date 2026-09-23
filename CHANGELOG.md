@@ -29,6 +29,16 @@ its first tagged release.
   [TROUBLESHOOTING](docs/TROUBLESHOOTING.md) already described. Every refusal
   used to arrive as the generic `REJ_PEER`, because gosrt's server loop
   overwrote the reason; the listener now runs its own accept loop.
+- The one-port SRT listener admits a publisher only into a source whose ingest
+  is set to SRT. It used to accept any source's token, so an SRT publish was
+  admitted into an RTMP or pull source beside the ingest already writing its
+  stream, and into a source created from its name alone -- which the API
+  reported `tokenEnforced: false` with no publish URL. Such a publish is now
+  refused with `REJ_RESOURCE`; choose SRT on the source first. `POST /sources`
+  now fills unspecified ingest fields from the defaults, so
+  `{"name": "…", "ingest": {"mode": "srt"}}` is a complete request, and the
+  Sources page explains an unchosen or pull source's token instead of pointing
+  at a one-port setting that no longer exists.
 
 ## [0.10.0] — 2026-09-23
 
