@@ -21,11 +21,21 @@ missing `secret.key` or does not open, and then:
 
 - **docker mode:** pulls the new image and brings the container back up. That
   is the whole upgrade.
-- **binary mode:** stops there, **with the service still stopped**, and prints
-  the two commands that finish it — install the new binary, start the service.
-  It does not download anything; fetch the release asset first
-  (`polyemesis-<tag>-linux-<arch>`, checked against `SHA256SUMS`) and use its
-  name where the printed command says `./polyemesis`.
+- **binary mode:** fetch the release asset first
+  (`polyemesis-<tag>-linux-<arch>`) and pass it with its tag:
+
+  ```sh
+  sudo /opt/polyemesis/update.sh --binary ./polyemesis-v0.10.0-linux-amd64 --version v0.10.0
+  ```
+
+  Before stopping anything it refuses a file whose sha256 is not the one the
+  release's `SHA256SUMS` publishes for this host's architecture, one that will
+  not run here, and one whose `-version` is not the tag. It then takes the
+  backup, installs the file, starts the service and checks it stayed up; if it
+  did not, it names `rollback.sh`. `--sums FILE` checks against a local
+  `SHA256SUMS` on a host without GitHub access. Without `--binary`, it stops
+  after the backup **with the service still stopped** and prints the two
+  commands that finish it by hand.
 
 If you installed with `install.sh`, run `sudo <installDir>/update.sh` rather
 than the manual steps below — including for a binary you copied in by hand

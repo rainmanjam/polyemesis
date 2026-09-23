@@ -186,6 +186,20 @@ can check, as root, is not a reasonable default. If you are deliberately
 installing a release that has no published sums, `--allow-unverified` says so
 explicitly.
 
+### Installing a specific release
+
+Binary mode installs the **latest release** unless told otherwise, and says
+which tag it picked. GitHub never calls a pre-release "latest", so a release
+candidate can only be installed by name:
+
+```sh
+sudo bash install.sh --mode binary --version v0.11.0-rc.1
+```
+
+The tag must look like `v1.2.3` or `v1.2.3-rc.1` and must exist. A tag with no
+release is refused rather than replaced by the latest one. Docker mode refuses
+`--version`: pin the image tag in `docker-compose.yml` instead.
+
 What it gets right that a hand-rolled `docker run` usually does not: `/udp` on
 the SRT port, `stop_grace_period: 30s` so a recording is finalised rather than
 truncated, a firewall rule for **udp**/6000, and `CAP_NET_BIND_SERVICE` on the

@@ -592,6 +592,10 @@ FFMPEG_UPGRADE=ask   # ask | skip | force
 # exception is a flag somebody typed.
 ALLOW_UNVERIFIED=false
 
+# --version: the release tag to install instead of releases/latest. Empty means
+# latest. See resolve_release_tag.
+VERSION_PIN=""
+
 # Set when this run installs the static FFmpeg, and consumed by the config
 # writer.
 #
@@ -1566,6 +1570,7 @@ gather_configuration() {
 confirm_plan() {
   header "=== About to do this ==="
   echo "  mode          ${MODE}"
+  [ "$MODE" = binary ] && echo "  release       ${VERSION_PIN:-the latest release}"
   echo "  web UI        tcp/${HTTP_PORT}"
   echo "  SRT ingest    udp/${SRT_PORT}"
   [ "$ENABLE_RTMP" = yes ] && echo "  RTMP ingest   tcp/${RTMP_PORT}"
@@ -1768,17 +1773,64 @@ install_docker_mode() {
 # --------------------------------------------------------------- binary mode
 
 latest_release_tag() {
-  curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+  release_tag_from "https://api.github.com/repos/${REPO}/releases/latest"
+}
+
+release_tag_from() { # release_tag_from <api url> -> the tag_name it reports
+  curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL "$1" 2>/dev/null \
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
+}
+
+# VERSION_RE is what --version accepts: a release tag, optionally a release
+# candidate. Anything else -- "latest", "0.10.0" without the v, a branch name --
+# is refused in parse_args, before a question is asked.
+VERSION_RE='^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
+
+# resolve_release_tag is the tag this run installs.
+#
+# releases/latest is the newest NON-prerelease, and release.yml marks every
+# -rc tag a prerelease, so a staging box could never install the candidate it
+# existed to test: it silently got the previous release instead. --version
+# asks for a tag by name, through releases/tags/<tag>, and the answer must
+# name that tag back -- a tag that does not exist is a refusal, never a
+# quiet fall-back to latest.
+resolve_release_tag() {
+  local tag
+  if [ -n "$VERSION_PIN" ]; then
+    # `|| true`: a 404 fails the pipeline, and under set -e that would end the
+    # run right here, silently, instead of at the refusal that names the tag.
+    tag="$(release_tag_from "https://api.github.com/repos/${REPO}/releases/tags/${VERSION_PIN}")" || true
+    [ "$tag" = "$VERSION_PIN" ] || die "no published release ${VERSION_PIN} for ${REPO} (--version). Check the tag on https://github.com/${REPO}/releases."
+    printf '%s\n' "$tag"
+    return 0
+  fi
+  tag="$(latest_release_tag)" || true
+  [ -n "$tag" ] || die "no published release found for ${REPO}. Build from source, or use the docker mode."
+  printf '%s\n' "$tag"
+}
+
+# --version picks a release BINARY. Docker mode installs ${IMAGE}:latest and its
+# update.sh pulls that tag again, so honouring the flag there would mean
+# rewriting how docker installs upgrade; accepting it and installing latest
+# anyway would be the silent substitution the flag exists to end. Refused, from
+# parse_args when --mode was given and again once the interview has chosen.
+refuse_version_in_docker_mode() {
+  [ -n "$VERSION_PIN" ] && [ "$MODE" = docker ] || return 0
+  die "--version pins a release binary and applies to --mode binary only. For docker, set the image tag in docker-compose.yml (e.g. ${IMAGE}:${VERSION_PIN#v})."
 }
 
 install_binary_mode() {
   check_ffmpeg || die "FFmpeg preflight failed — fix the above, or re-run and choose docker."
 
   local tag asset url tmp
-  tag="$(latest_release_tag)"
-  [ -n "$tag" ] || die "no published release found for ${REPO}. Build from source, or use the docker mode."
-  ok "latest release: $tag"
+  tag="$(resolve_release_tag)" || exit 1
+  # Said loudly, and with WHERE the tag came from: "latest" on a box meant to
+  # run a release candidate is the mistake this line exists to surface.
+  if [ -n "$VERSION_PIN" ]; then
+    ok "${BOLD}installing ${tag}${NC} (pinned by --version)"
+  else
+    ok "${BOLD}installing ${tag}${NC} (the latest release; pass --version to pin another)"
+  fi
 
   asset="polyemesis-${tag}-linux-${ARCH}"
   url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
@@ -2031,18 +2083,118 @@ set -euo pipefail
 DATA_DIR="$DATA_DIR"
 BIN_PATH="$BIN_PATH"
 SERVICE_NAME="$SERVICE_NAME"
+REPO="$REPO"
+# How long a newly installed binary gets to come up before it is judged. The
+# unit is Type=simple, so \`systemctl start\` returns before the server has read
+# its config; a binary that exits at once is only visible a moment later.
+SETTLE_SECONDS="\${SETTLE_SECONDS:-5}"
 
 FORCE=false
+NEW_BINARY=""
+WANT_VERSION=""
+SUMS_FILE=""
+usage() {
+	echo "usage: update.sh [--force] [--binary PATH --version vX.Y.Z[-rc.N] [--sums FILE]]"
+	echo "  --force           do not refuse while a broadcast is on air"
+	echo "  --binary PATH     after the verified backup, install PATH and start the service."
+	echo "                    Refused unless its sha256 matches the release's SHA256SUMS"
+	echo "                    for this host's architecture and PATH -version prints the tag."
+	echo "  --version TAG     the release PATH claims to be; required with --binary"
+	echo "  --sums FILE       check against this SHA256SUMS instead of downloading the"
+	echo "                    release's own (for a host without GitHub access)"
+}
 while [ \$# -gt 0 ]; do
 	case "\$1" in
 		--force) FORCE=true; shift ;;
-		-h|--help)
-			echo "usage: update.sh [--force]"
-			echo "  --force  do not refuse while a broadcast is on air"
-			exit 0 ;;
-		*) echo "unknown option: \$1" >&2; exit 2 ;;
+		--binary)  [ \$# -ge 2 ] || { echo "missing value for --binary" >&2; exit 2; }; NEW_BINARY="\$2"; shift 2 ;;
+		--version) [ \$# -ge 2 ] || { echo "missing value for --version" >&2; exit 2; }; WANT_VERSION="\$2"; shift 2 ;;
+		--sums)    [ \$# -ge 2 ] || { echo "missing value for --sums" >&2; exit 2; }; SUMS_FILE="\$2"; shift 2 ;;
+		-h|--help) usage; exit 0 ;;
+		*) echo "unknown option: \$1" >&2; usage >&2; exit 2 ;;
 	esac
 done
+
+# --binary: PROVE THE FILE IS THE RELEASE, ON THIS HOST, BEFORE ANYTHING STOPS.
+#
+# This script used to end by printing \`sudo install -m 0755 ./polyemesis
+# \$BIN_PATH\` and leave the operator to find the file. Nothing checked what
+# ./polyemesis was: an arm64 build on an amd64 box, a \`make build\` stamped
+# VERSION=dev, a download that stopped halfway. Each installs cleanly and then
+# crash-loops under Restart=on-failure, with the old binary already gone and
+# the service already down.
+#
+# So three questions are answered first, while the running service is still
+# untouched:
+#   - its sha256 is the one SHA256SUMS publishes for polyemesis-TAG-linux-ARCH,
+#     with ARCH read from THIS host -- which also refuses the right release
+#     built for the wrong machine, since that asset has a different hash;
+#   - it executes here at all;
+#   - \`-version\` prints the tag, so the file and the tag agree.
+# The deploy stays manual: an operator still decides when, and which file.
+if [ -n "\$NEW_BINARY\$WANT_VERSION\$SUMS_FILE" ]; then
+	if [ -z "\$NEW_BINARY" ] || [ -z "\$WANT_VERSION" ]; then
+		echo "ERROR: --binary and --version go together: the tag is what the file is checked against." >&2
+		exit 2
+	fi
+	if ! printf '%s\n' "\$WANT_VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?\$'; then
+		echo "ERROR: --version must look like v1.2.3 or v1.2.3-rc.1, not \$WANT_VERSION" >&2
+		exit 2
+	fi
+	if [ ! -f "\$NEW_BINARY" ]; then
+		echo "ERROR: --binary \$NEW_BINARY is not a file." >&2
+		exit 1
+	fi
+	case "\$(uname -m)" in
+		x86_64|amd64) host_arch=amd64 ;;
+		aarch64|arm64) host_arch=arm64 ;;
+		*) echo "ERROR: no polyemesis release is built for \$(uname -m)." >&2; exit 1 ;;
+	esac
+	asset="polyemesis-\${WANT_VERSION}-linux-\${host_arch}"
+	sums_tmp=""
+	if [ -z "\$SUMS_FILE" ]; then
+		sums_tmp="\$(mktemp)"
+		if ! curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "\$sums_tmp" \\
+			"https://github.com/\${REPO}/releases/download/\${WANT_VERSION}/SHA256SUMS"; then
+			rm -f "\$sums_tmp"
+			echo "ERROR: could not fetch SHA256SUMS for \$WANT_VERSION. Refusing to install a binary" >&2
+			echo "nothing can vouch for. Pass --sums FILE with the release's SHA256SUMS." >&2
+			exit 1
+		fi
+		SUMS_FILE="\$sums_tmp"
+	fi
+	want_sum="\$(awk -v a="\$asset" '\$2 == a || \$2 == "*" a { print \$1; exit }' "\$SUMS_FILE")"
+	[ -z "\$sums_tmp" ] || rm -f "\$sums_tmp"
+	if [ -z "\$want_sum" ]; then
+		echo "ERROR: SHA256SUMS for \$WANT_VERSION lists no \$asset, so there is no" >&2
+		echo "published hash for this host (\$host_arch). Refusing to install." >&2
+		exit 1
+	fi
+	# CHECK A PRIVATE COPY, AND INSTALL THAT COPY. The file named on the command
+	# line can change between this check and the install a minute later; the
+	# copy cannot. It is also made executable here, because a curl -fLO or
+	# browser download arrives 0644 and would otherwise read as "does not run".
+	VERIFIED_BIN="\$(mktemp)"
+	trap 'rm -f "\$VERIFIED_BIN"' EXIT
+	cp "\$NEW_BINARY" "\$VERIFIED_BIN"
+	chmod 0755 "\$VERIFIED_BIN"
+	got_sum="\$(sha256sum "\$VERIFIED_BIN" | awk '{print \$1}')"
+	if [ "\$got_sum" != "\$want_sum" ]; then
+		echo "ERROR: \$NEW_BINARY is not \$asset: its sha256 is \$got_sum," >&2
+		echo "the release publishes \$want_sum. A different version, another architecture" >&2
+		echo "or a partial download all look like this. Refusing to install." >&2
+		exit 1
+	fi
+	if ! got_version="\$("\$VERIFIED_BIN" -version 2>&1)"; then
+		echo "ERROR: \$NEW_BINARY does not run on this host: \$got_version" >&2
+		exit 1
+	fi
+	if [ "\$got_version" != "polyemesis \$WANT_VERSION" ]; then
+		echo "ERROR: \$NEW_BINARY -version says '\$got_version', not 'polyemesis \$WANT_VERSION'." >&2
+		echo "Refusing to install a binary that is not the release it was named as." >&2
+		exit 1
+	fi
+	echo "verified \$NEW_BINARY: \$asset, sha256 matches the release, and it runs here"
+fi
 
 # IS ANYTHING ON AIR? The compose updater has refused this since it was written;
 # the binary one did not, so the SAME operation was safe in one install mode and
@@ -2128,9 +2280,22 @@ fi
 # disk goes on holding the space that stopped it.
 STOPPED_BY_US=false
 DEST_CREATED=false
+BINARY_REPLACED=false
 on_exit() {
   local rc=\$?
+  [ -z "\${VERIFIED_BIN:-}" ] || rm -f "\$VERIFIED_BIN"
   [ "\$rc" -eq 0 ] && return 0
+  # PAST THE SWAP, THE STORY CHANGES. The backup is verified and is now the way
+  # back, so it is kept; and a start here would only start the new binary
+  # again, so this says what is true instead of "nothing was upgraded".
+  if [ "\$BINARY_REPLACED" = true ]; then
+    echo >&2
+    echo "!!! \$BIN_PATH is now \$WANT_VERSION and \$SERVICE_NAME did not come up on it." >&2
+    echo "!!! See: journalctl -u \$SERVICE_NAME -n 50" >&2
+    echo "!!! The way back, which restores the state and the previous binary:" >&2
+    echo "!!!     sudo $INSTALL_DIR/rollback.sh \$dest" >&2
+    return "\$rc"
+  fi
   if [ "\$DEST_CREATED" = true ] && [ -e "\$dest" ]; then
     rm -rf "\$dest" && echo "removed the unverified backup \$dest" >&2
   fi
@@ -2210,6 +2375,25 @@ fi
 
 echo "backup verified: it opens, passes integrity_check and holds the schema"
 echo
+
+if [ -n "\$NEW_BINARY" ]; then
+  sudo install -m 0755 "\$VERIFIED_BIN" "\$BIN_PATH"
+  BINARY_REPLACED=true
+  echo "installed \$WANT_VERSION at \$BIN_PATH; starting \$SERVICE_NAME"
+  sudo systemctl start "\$SERVICE_NAME"
+  sleep "\$SETTLE_SECONDS"
+  if ! systemctl is-active --quiet "\$SERVICE_NAME"; then
+    echo "ERROR: \$SERVICE_NAME is not running \$SETTLE_SECONDS s after the start." >&2
+    exit 1
+  fi
+  echo "\$SERVICE_NAME is running \$WANT_VERSION."
+  echo
+  echo "If it misbehaves, the way back is:"
+  echo
+  echo "    sudo $INSTALL_DIR/rollback.sh \$dest"
+  exit 0
+fi
+
 if [ "\$STOPPED_BY_US" = true ]; then
   echo "The service is STOPPED. Replace the binary and start it:"
 else
@@ -2218,6 +2402,9 @@ fi
 echo
 echo "    sudo install -m 0755 ./polyemesis \$BIN_PATH"
 echo "    sudo systemctl start \$SERVICE_NAME"
+echo
+echo "(Next time, \`update.sh --binary ./polyemesis --version vX.Y.Z\` checks the file"
+echo "against the release before it installs it, and starts the service for you.)"
 echo
 # THE WAY BACK IS A SCRIPT, NOT A PASTE. This printed
 #   sudo rm -rf \$DATA_DIR && sudo cp -a \$dest \$DATA_DIR
@@ -3061,7 +3248,12 @@ Options:
                          Never installs under --check.
   --allow-unverified     install a release binary even when the release has no
                          published SHA256SUMS to check it against
-  --yes, -y              accept defaults; never prompt
+  --version vX.Y.Z[-rc.N]
+                         binary mode: install this release instead of the
+                         latest one. The only way to install a release
+                         candidate, which is never "latest". Refused in docker
+                         mode, where the image tag in docker-compose.yml pins it.
+  --yes, -y             accept defaults; never prompt
   --check                run the preflight checks and exit, changing nothing
   --help, -h             this text
 
@@ -3113,7 +3305,9 @@ parse_args() {
                     case "$2" in ask|skip|force) FFMPEG_UPGRADE="$2" ;;
                       *) die "--ffmpeg takes ask, skip or force" ;; esac; shift 2 ;;
       --allow-unverified) ALLOW_UNVERIFIED=true; shift ;;
-      -y|--yes)     ASSUME_YES=true; shift ;;
+      --version)    [ $# -ge 2 ] || die "missing value for --version"; VERSION_PIN="$2"; shift 2 ;;
+      --version=*)  VERSION_PIN="${1#*=}"; shift ;;
+      -y|--yes)    ASSUME_YES=true; shift ;;
       --check)      CHECK_ONLY=true; ASSUME_YES=true; shift ;;
       -h|--help)    usage; trap - EXIT INT TERM; exit 0 ;;
       *)            usage; echo; die "unknown option: $1" ;;
@@ -3128,6 +3322,11 @@ parse_args() {
     off|selfsigned|acme) ;;
     *) die "--tls must be off, selfsigned or acme, not $TLS_MODE" ;;
   esac
+  if [ -n "$VERSION_PIN" ]; then
+    printf '%s\n' "$VERSION_PIN" | grep -Eq "$VERSION_RE" \
+      || die "--version must be a release tag like v1.2.3 or v1.2.3-rc.1, not $VERSION_PIN"
+    refuse_version_in_docker_mode
+  fi
   # RTMP_PORT IS IN THE LIST. It was the one port that skipped this, so
   # `--rtmp-port 70000` reached docker-compose.yml as a port mapping and failed
   # at `compose up` -- which is loud, but it fails INSIDE the install, so the
@@ -3182,6 +3381,7 @@ main() {
   fi
 
   gather_configuration
+  refuse_version_in_docker_mode
   confirm_plan
 
   require_systemd || die "cannot install a service without systemd — see above"

@@ -8,6 +8,22 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- **`install.sh --version` and `update.sh --binary`: install a named release,
+  and only a binary that is that release.** Binary installs always took
+  `releases/latest`, and GitHub never marks a pre-release as latest, so a
+  staging box could not install a release candidate. It silently got the
+  previous release. `--version vX.Y.Z[-rc.N]` asks for the tag by name,
+  refuses one that does not exist, and the installer now says which tag it is
+  installing and why. The generated `update.sh` used to end by printing
+  `sudo install ./polyemesis`, and nothing checked the file. A wrong-arch or
+  `VERSION=dev` build would install and then crash-loop. `update.sh --binary
+  PATH --version TAG` now refuses before stopping anything unless the file's
+  sha256 matches `SHA256SUMS` for this host's architecture and its `-version`
+  prints the tag. It then backs up, installs, starts the service and checks it
+  stayed up. Deploys are still run by hand.
+
 ### Fixed
 
 - **Routed tracks stay in step after a real-length failover outage.**
