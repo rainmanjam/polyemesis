@@ -10,6 +10,8 @@ its first tagged release.
 
 ### Fixed
 
+- **A clean restart of an idle server no longer logs three ERROR lines.** Shutdown unsubscribed the recorder, preview and meters from the relay hub whether or not they had ever started. On an idle engine none had, so the hub reported three removals of names it never held -- at ERROR, because since #711 that message means a teardown named the wrong subscriber and left a real one feeding a dead process. It now unsubscribes only consumers that hold a relay port, which they do exactly when they subscribed; a real mismatch still logs. Seen on the staging box on its first restart after the exploratory-testing fixes.
+
 - **The Docker upgrade command named an image tag that does not exist.**
   `GET /upgrade/plan` printed `docker pull rainmanjam/polyemesis:v0.10.0`, the
   release feed's spelling, but release.yml publishes images as `:0.10.0` (the
