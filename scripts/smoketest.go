@@ -13,6 +13,7 @@ import (
 	"net/http/cookiejar"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -41,7 +42,7 @@ func main() {
 	waitUp()
 
 	step("first-run setup")
-	do("POST", "/setup", map[string]any{"username": "admin", "password": "hunter2hunter2", "setupCode": os.Getenv("POLYEMESIS_SETUP_CODE")})
+	do("POST", "/setup", map[string]any{"username": "admin", "password": "hunter2hunter2", "setupCode": smokeSetupCode("data")})
 	grabCSRF()
 
 	// The programme everything below hangs off.
@@ -769,6 +770,27 @@ func ffmpegPath() string {
 		fail("ffmpeg is not on PATH: %v", err)
 	}
 	return p
+}
+
+// smokeSetupCode is the one-time code POST /setup demands on a fresh install.
+//
+// POLYEMESIS_SETUP_CODE wins when it is set, because that is how ci.yml presets
+// the code on the server it starts. Without it, the code is read from the file
+// the server wrote into its data directory at boot, which is the path an
+// operator takes and the one that keeps this driver working when somebody
+// starts the smoke binary by hand without knowing the variable exists. The
+// first version sent only the variable, and ci.yml's broadcast step did not set
+// it: every matrix OS got a 403 from /setup, with nothing in the message to say
+// why a code was even involved.
+func smokeSetupCode(dataDir string) string {
+	if v := strings.TrimSpace(os.Getenv("POLYEMESIS_SETUP_CODE")); v != "" {
+		return v
+	}
+	b, err := os.ReadFile(filepath.Join(dataDir, "setup-code"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 func step(s string) { fmt.Printf("\n>> %s\n", s) }

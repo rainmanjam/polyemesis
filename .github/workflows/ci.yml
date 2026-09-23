@@ -1107,6 +1107,13 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         timeout-minutes: 8
         shell: bash
+        # A fresh install refuses POST /setup without the one-time setup code.
+        # Presetting it here reaches both the server started below and
+        # `go run scripts/smoketest.go`, which sends it. The driver would also
+        # find the code in ./data/setup-code, but naming it is the contract the
+        # acceptance suites use (lib-preflight.sh), so this step reads the same.
+        env:
+          POLYEMESIS_SETUP_CODE: ci-smoke-setup-code
         run: |
           set -uo pipefail
           rm -rf ./data
