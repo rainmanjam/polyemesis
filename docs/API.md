@@ -485,6 +485,13 @@ used to have three samplers of the host disagreeing by a tick.
 `PUT /settings` takes the whole blob. Read it, change what you want, write it
 back — a partial object will clear what it omits.
 
+**`ingest` is the default source's ingest, not a copy of it.** Once a source
+exists, `GET /settings` serves that source's `ingest` block and `PUT /settings`
+merges over it and writes it back to the source, so a document read and written
+back unchanged changes nothing — including after the Sources page has changed
+the mode. With no source, the blob's own block is served, and a change to it is
+refused because there is nothing for it to configure.
+
 `GET /tls/acme-preflight?hostname=…` reports what Let's Encrypt would need from
 this host — a name it can issue for, a DNS record, port 80, a contact address —
 and, in `acme` mode, what it said the last time it refused. Each check is

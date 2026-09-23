@@ -1742,9 +1742,9 @@
         "/mqtt/brokerUrl"
       ],
       "sentinels": [
-        "SENTINEL-settings-srt-passphrase-9f3a",
-        "SENTINEL-settings-rtmp-streamkey-9f3a",
-        "SENTINEL-settings-pull-password-9f3a",
+        "SENTINEL-source-srt-passphrase-9f3a",
+        "SENTINEL-source-rtmp-streamkey-9f3a",
+        "SENTINEL-source-pull-password-9f3a",
         "SENTINEL-backup-srt-passphrase-9f3a",
         "SENTINEL-backup-rtmp-streamkey-9f3a",
         "SENTINEL-backup-pull-password-9f3a",

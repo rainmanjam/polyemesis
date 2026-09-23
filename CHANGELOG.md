@@ -8,6 +8,16 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Saving the Settings page no longer unsets the ingest mode chosen on the
+  Sources page.** `GET /settings` served the settings blob's copy of `ingest`,
+  which the Sources page never updates, and the page PUTs the whole document
+  back on every save — so the write-through copied the stale block over the
+  live source. Publishes were refused while `/health` said ok. `settings.ingest`
+  is now read from the default source on both GET and PUT, so an unchanged
+  round-trip is a no-op by construction.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

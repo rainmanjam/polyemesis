@@ -133,21 +133,19 @@ func nonGetDifferentialCensus() []nonGetDifferentialRow {
 			Method: http.MethodPut, Pattern: "/api/v1/settings",
 			Body: map[string]any{},
 			Sentinels: []string{
-				sentinelSetSRT, sentinelSetRTMP, sentinelSetPullPwd,
+				sentinelSourceSRT, sentinelSourceRTMP, sentinelSourcePullPwd,
 				sentinelBackupSRT, sentinelBackupRTMP, sentinelBackupPullPwd,
 				sentinelMQTTPwd, sentinelAutomodKey,
 			},
-			// THE ONE ROW WITH A SIDE EFFECT, and it is a documented one. The
-			// ingest block reaches the default SOURCE as well as the settings
-			// document, because before sources existed settings.ingest WAS the
-			// ingest and the editor on the settings page would otherwise be
-			// dead. This fixture plants a different credential in each of the
-			// two places, so ingestEqual is false and the write-through fires
-			// on an empty body; a production install where the two already
-			// agree sees no write at all.
-			Destroys: []string{
-				sentinelSourceSRT, sentinelSourceRTMP, sentinelSourcePullPwd,
-			},
+			// No Destroys. This row used to declare that an EMPTY body wiped
+			// the default source's three credentials: the write-through
+			// compared the request against the settings blob's own, stale,
+			// ingest copy, so a PUT that asked for nothing overwrote the live
+			// source with whatever the blob held. That was the bug, not a side
+			// effect -- the settings page PUTs the whole document on every
+			// save. settings.ingest is now read from the source at both ends
+			// (overlayDefaultSourceIngest), so an empty body changes nothing
+			// and the source's credentials are what it echoes.
 			Why: "inlines the whole stored db.Settings at the top level of the 200",
 		},
 		{

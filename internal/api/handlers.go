@@ -1228,6 +1228,12 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// The ingest the server is USING, not the blob's copy of it. Before the
+	// redaction below, so a read-scoped token is blanked on the served block.
+	if err := s.overlayDefaultSourceIngest(&settings); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	// HasPassword is derived, never stored in the settings blob.
 	//
 	// The blob is served straight to the settings page, so a password in it
@@ -1255,6 +1261,46 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	principalVaryingResponse(w)
 	writeJSON(w, http.StatusOK, settings)
+}
+
+// overlayDefaultSourceIngest makes settings.ingest a VIEW of the default
+// source's ingest rather than a second copy of it.
+//
+// The engine reads its ingest from the source row, and the Sources page writes
+// that row directly without touching the settings blob. So the blob's ingest
+// block drifts: the source runs rtmp while the blob still says what it said
+// before -- on most installs the unset mode. Serving the blob showed the
+// settings page an ingest the server was not using, and because the page PUTs
+// the whole document on every save, the write-through in handlePutSettings saw
+// "blob != source" and copied the stale block over the live one. Saving a
+// recording retention unset the ingest mode; publishes were refused while
+// /health said ok.
+//
+// Reading the source at both ends -- what GET serves and what PUT merges over
+// -- makes an unchanged round-trip an identity by construction, instead of
+// relying on two stores staying in step. The blob copy is rewritten from the
+// source on the next save, which is harmless: nothing reads it while a source
+// exists.
+//
+// With no source there is nothing to view, and the blob stays authoritative;
+// that is the install handlePutSettings refuses ingest changes on anyway.
+func (s *Server) overlayDefaultSourceIngest(settings *db.Settings) error {
+	id, err := s.store.DefaultSourceID()
+	if errors.Is(err, db.ErrSourceNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	src, err := s.store.GetSource(id)
+	if errors.Is(err, db.ErrSourceNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	settings.Ingest = src.Ingest
+	return nil
 }
 
 // handlePutMQTTPassword sets or clears the broker password.
@@ -1362,6 +1408,14 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var storedIngest db.IngestSettings
 	ingestRefused := false
 	settings, err := s.store.UpdateSettings(func(settings *db.Settings) error {
+		// The merge base for ingest is the SOURCE, not the blob -- before
+		// anything below snapshots "what was stored". See
+		// overlayDefaultSourceIngest: with the blob as the base, a client that
+		// PUT back exactly what it GOT wrote the blob's stale ingest over the
+		// live source.
+		if err := s.overlayDefaultSourceIngest(settings); err != nil {
+			return err
+		}
 		storedJSON, _ = json.Marshal(settings)
 		// The stored playlist, copied BEFORE the decode overwrites it.
 		//
