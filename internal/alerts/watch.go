@@ -368,6 +368,15 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 		}
 		fire, recovered := st.observe(!d.Running, now, w.cfg.DownFor)
 		key := "destination:" + strconv.FormatInt(d.ID, 10)
+		if recovered {
+			// destination.recovered CLOSES A falling_behind THAT WAS OPEN ACROSS
+			// THE OUTAGE. The incident the operator was told about -- this
+			// destination is not delivering -- is over, and the recovery says
+			// so; a caught_up a window later would close it a second time. The
+			// new run starts with no latch, so if it is slow too, that is a
+			// new falling_behind, not the old one held.
+			*slow = downState{}
+		}
 
 		// The rate is only judged while the destination is up, the source is
 		// arriving, and there is a measurement to judge.
@@ -379,10 +388,20 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 			// is UNOBSERVABLE rather than recovered. Feeding "not slow" into
 			// observe() here would announce that it caught up, at the exact
 			// moment it actually gave up -- and it would do so ahead of
-			// destination.down, which has its own longer dwell to serve. The
-			// latch is dropped silently and destination.down does the
-			// reporting.
-			*slow = downState{}
+			// destination.down, which has its own longer dwell to serve.
+			//
+			// A latch that already FIRED is HELD, never dropped. Dropping it
+			// was silent, and a stall usually ends exactly here: the sink
+			// resets the connection, the child exits and is respawned inside
+			// one sweep, far short of destination.down's dwell. With the latch
+			// gone nothing was ever sent -- no caught_up, no recovered -- for a
+			// falling_behind the operator had been paged with (exploratory row
+			// 7). Held, it is closed by exactly one message: caught_up once
+			// the new run is measured at realtime, or destination.recovered if
+			// this turns into an outage long enough to be reported as one.
+			if !slow.fired {
+				*slow = downState{}
+			}
 			rate.reset()
 		case s.IngestConfigured && !s.IngestLive:
 			// NOTHING TO DELIVER IS NOT FALLING BEHIND. With the source gone

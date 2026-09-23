@@ -12,6 +12,8 @@ package engine
 import (
 	"maps"
 	"slices"
+	"strconv"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -19,6 +21,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -38,6 +41,21 @@ type DestStatus struct {
 	Warnings      []string           `json:"warnings"`
 	Error         string             `json:"error,omitempty"`
 	Process       *supervisor.Status `json:"process,omitempty"`
+	// Stalled is the destination's own stall: its process is running and its
+	// output has not moved (Process.Stalled), AND the source it reads has been
+	// arriving for supervisor.StallAfter (sourceLiveFor), so the thing not
+	// taking data is this destination's platform or network.
+	//
+	// A SEPARATE VERDICT FROM Process.Stalled because the two differ exactly
+	// when the ingest is lost. Every destination's output freezes then and the
+	// supervisor, which cannot see the source, marks each process stalled --
+	// which is true of the process and says nothing about the platform. Read
+	// as a destination fault it would put up=0 on every destination on the
+	// scrape and a warning on every card for what the ingest already reports
+	// once, the reading the hooks and alerts watchers have always refused
+	// ("nothing arriving is not a destination stalling"). Decided here, once,
+	// so the card's warning and polyemesis_destination_up cannot disagree.
+	Stalled bool `json:"stalled,omitempty"`
 	// StopWarning is set when the LAST stop of this destination ended on Stop's
 	// deadline arm: SIGKILL issued, not waited for, the child possibly still
 	// running and still publishing.
@@ -375,6 +393,16 @@ func (e *Engine) Status() Status {
 	st.Silence = e.Silence()
 	st.Failover = e.Failover()
 
+	// How long the source the destinations read has been arriving decides
+	// whether a stalled process is the destination's stall; see
+	// destinationStalled. Read once, not per row.
+	var primary []stats.Sample
+	if e.mon != nil {
+		primary = e.mon.Bitrate()
+	}
+	sourceLive := sourceLiveFor(primary, st.Failover, time.Now())
+	ingestConfigured := st.Ingest != nil
+
 	names := make(map[int64]string, len(st.Renditions))
 	for _, r := range st.Renditions {
 		names[r.ID] = r.Name
@@ -519,10 +547,93 @@ func (e *Engine) Status() Status {
 			if w := passthroughCodecWarning(row.Kind, row.Platform, row.RenditionID, source.Video); w != "" {
 				ds.Warnings = append(slices.Clip(ds.Warnings), w)
 			}
+			ds.Stalled = destinationStalled(ds.Process, ingestConfigured, sourceLive)
+			if w := stallWarning(ds); w != "" {
+				ds.Warnings = append(slices.Clip(ds.Warnings), w)
+			}
 			st.Destinations = append(st.Destinations, ds)
 		}
 	}
 	return st
+}
+
+// destinationStalled is DestStatus.Stalled: the process is running with its
+// output frozen, and that is this destination's doing rather than the source's.
+//
+// Not stalled while an ingest is configured and nothing is arriving -- the same
+// rule as the hooks watcher (IngestConfigured && !IngestLive), so a lost source
+// is one ingest event and not a destination fault per platform. With no ingest
+// configured there is no source to blame, so the process's flag stands.
+//
+// AND NOT UNTIL THE SOURCE HAS BEEN ARRIVING FOR supervisor.StallAfter. The
+// process's stall runs from its output's last movement, which for a
+// destination frozen by an outage is the start of the outage -- so on the
+// ingest's return every destination read stalled, up=0 and warned, until its
+// next progress block. Requiring the source to have been back as long as the
+// stall threshold measures the destination's stall from the later of the two:
+// its last movement, or the source's return.
+func destinationStalled(p *supervisor.Status, ingestConfigured bool, sourceLive time.Duration) bool {
+	if p == nil || p.State != supervisor.StateRunning || !p.Stalled {
+		return false
+	}
+	return !ingestConfigured || sourceLive >= supervisor.StallAfter
+}
+
+// sourceLiveFor is how long the stream the destinations read has been arriving
+// without a break, 0 while it is not arriving.
+//
+// NORMALLY THE PRIMARY HUB, read off its 1 Hz bitrate samples: the start of
+// the trailing run of non-zero samples, if the last one is live (ingestLive).
+//
+// THE FAILOVER FEED while failover has switched away from the primary. The
+// destinations then read the selector's hub, which a backup, playlist or slate
+// feed is publishing into, and the primary hub is silent by definition -- read
+// alone, it called every destination's stall a lost ingest and hid a platform
+// that had stopped taking data for as long as failover was on air. A feed that
+// is running and not itself stalled is arriving, for as long as it has moved
+// media. Not while the primary is active: the feed then only copies the
+// primary hub and freezes with it, a StallAfter later than the destinations
+// do, so it would briefly vouch for a source that is gone.
+func sourceLiveFor(primary []stats.Sample, fo *FailoverStatus, now time.Time) time.Duration {
+	if fo != nil && fo.Active != "" && fo.Active != sourcePrimary {
+		f := fo.Feed
+		if f == nil || f.State != supervisor.StateRunning || f.Stalled {
+			return 0
+		}
+		return time.Duration(f.UptimeSec * float64(time.Second))
+	}
+	if !ingestLive(primary, now) {
+		return 0
+	}
+	i := len(primary) - 1
+	for i > 0 && primary[i-1].Kbps > 0 {
+		i--
+	}
+	return now.Sub(primary[i].Time)
+}
+
+// stallWarning is the card's warning for a destination that is stalled
+// (DestStatus.Stalled): its process is running but its output has stopped
+// moving, with the source still arriving.
+//
+// A WARNING, because the process state cannot say it: the child is alive and
+// connected, so it reads "running", and before this the only other things on
+// the card were FFmpeg's bitrate and speed -- run averages, frozen non-zero --
+// so a destination the platform had stopped taking data from looked healthy
+// for as long as the stall lasted (exploratory row 7). Warnings is the field
+// the card already renders as "needs attention".
+//
+// Nothing while the source itself is not arriving, because Stalled is false
+// then: every destination's output stops, the ingest's own status is what is
+// wrong, and one warning per destination would point the operator at the
+// platforms instead of the encoder. Process.Stalled and the zero bitrate still
+// say what is true of the process.
+func stallWarning(ds DestStatus) string {
+	if !ds.Stalled || ds.Process == nil {
+		return ""
+	}
+	return "Stalled: nothing has been delivered for " + strconv.Itoa(int(ds.Process.StalledSec)) +
+		"s although the connection is still open. The platform or the network is not taking data."
 }
 
 func (e *Engine) destByID(list []*destination, id int64) *destination {

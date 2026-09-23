@@ -104,7 +104,10 @@ require restarting the server.
   can run several, and `polyemesis_ingest_up`, `polyemesis_ingest_state`,
   `polyemesis_ingest_bitrate_bits_per_second`, `polyemesis_ingest_restarts_total`
   and all five `polyemesis_relay_*` families carry one series per programme.
-- `polyemesis_destination_info` carries `kind` and `platform` for joining.
+- `polyemesis_destination_info` carries `kind`, `platform` and `source_id` for
+  joining. `source_id` is the `id` of the programme's ingest series, so it is how
+  a destination query asks about its own programme's ingest (see the slow-output
+  query below). It is empty for a destination that belongs to no programme.
 - `polyemesis_ingest_state` and `polyemesis_destination_state` carry a `state`
   label, and emit **every** state for **every** process — `stopped`, `starting`,
   `running`, `reconnecting`, `failed` — with the four a process is not in
@@ -123,28 +126,81 @@ is what lets you write the alert before the first source exists.
 ## Queries to start from
 
 ```promql
-polyemesis_ingest_up == 0 and on() polyemesis_sources > 0   # nobody is streaming
+polyemesis_ingest_bitrate_bits_per_second == 0
+  and on() polyemesis_sources > 0                           # nobody is streaming
 polyemesis_destination_up == 0 and polyemesis_destination_enabled == 1
 rate(polyemesis_destination_restarts_total[15m]) > 0        # a flapping output
-rate(polyemesis_destination_output_seconds_total[1m]) < 0.5
-  and polyemesis_destination_up == 1                        # a stalled output
+polyemesis_destination_stalled == 1                         # connected, not delivering
+rate(polyemesis_destination_output_seconds_total[1m]) < 0.9
+  and polyemesis_destination_up == 1
+  and on(id) (polyemesis_destination_info
+    and on(source_id) label_replace(
+      min_over_time(polyemesis_ingest_bitrate_bits_per_second[1m]) > 0,
+      "source_id", "$1", "id", "(.*)"))                     # moving, but slowly
 polyemesis_recording_free_bytes < 20e9                      # disk filling up
 ```
 
 The second is the one worth alerting on first: a destination that is enabled but
 not up is a platform you think you are streaming to and are not.
 
-It does not catch everything. A platform that stops taking data leaves the
-FFmpeg process running, so `_up` stays 1, restarts stay flat, and
-`polyemesis_destination_bitrate_bits_per_second` keeps the last figure FFmpeg
-printed — an average over the whole run, which never falls to zero. The fourth
-query is the one that sees a stall: `polyemesis_destination_output_seconds_total`
-is the media time delivered, so its `rate()` is about 1 while a destination
-keeps up and 0 while it is stuck. `polyemesis_destination_output_bytes_total`
-does the same in bytes, and `rate()` of it times 8 is the bitrate actually being
-sent now. Both reset with the process, which `rate()` handles.
+**`_up` means delivering, not just running.** A platform that stops taking data
+leaves the FFmpeg process running and connected, with its output frozen. That
+destination reads `polyemesis_destination_up` 0 and
+`polyemesis_destination_stalled` 1 once its output has not advanced for
+5 seconds. `polyemesis_destination_state{state="running"}` stays 1, because the
+process is still running, and restarts stay flat.
+`polyemesis_destination_bitrate_bits_per_second` reads 0 while the stall lasts.
+Otherwise it is FFmpeg's average over the whole run, so it only ever falls
+slowly. The same stall shows in `/api/v1/status`: the destination has
+`"stalled": true`, its `process` has `"stalled": true` and `stalledSec`,
+`progress.bitrateKbps` and `progress.speed` read 0, and `warnings` says it is
+stalled. A destination that
+has not moved any media yet, for example one still in its probe window, is not
+stalled.
 
-**The first needs its guard.** Bare `polyemesis_ingest_up == 0` cannot tell a
+**A lost ingest is not a destination stalling.** While the ingest is lost,
+every destination's output stops because there is nothing to send. That is
+`polyemesis_ingest_bitrate_bits_per_second` 0 for that programme, said once.
+It is not `polyemesis_ingest_up` 0: `_up` says the ingest process is running,
+and an SRT or RTMP listener goes on running while it waits for a publisher
+that has gone away. A destination stays `_up` 1 and
+`_stalled` 0 through it, and it has no warning, so the alert above does not
+fire once per destination for one missing source. The process itself still
+reports `"stalled": true` in `/api/v1/status`, and its bitrate reads 0, because
+both are true of the process. The destination's own `"stalled"` field, which
+`_up`, `_stalled` and the warning follow, stays false. This is the same rule
+the `destination.down` hook and the `falling_behind` alert apply. When the
+source comes back, a destination whose output has not resumed is counted as
+stalled only once the source has been arriving for those 5 seconds, so a
+returning ingest does not flash every destination stalled while each one
+catches up.
+
+`polyemesis_destination_output_seconds_total` is the media time delivered, so
+its `rate()` is about 1 while a destination keeps up, below 1 while it is falling
+behind without stopping, and 0 while it is stuck. The fifth query uses it,
+with two guards so that it means *this destination* is moving but slowly.
+`_up == 1` leaves out every disabled or stopped destination, whose rate is 0,
+and every stall that the stall query already reports. The join leaves out every
+destination whose programme's ingest has not been arriving for the whole last
+minute. Without it, a lost ingest would fire the query once per destination,
+because `_up` stays 1 through a lost ingest by design. The same happens for the
+minute after the ingest returns, while `rate()` still averages over the gap.
+The `[1m]` in `min_over_time` matches the `[1m]` in `rate()`; if you widen one,
+widen both. `label_replace` renames the ingest's `id` to `source_id`, because
+destination and ingest series both have `id`, but for different things.
+
+`polyemesis_destination_output_bytes_total` is the same counter in bytes, and `rate()`
+of it times 8 is the bitrate actually being sent now. Both reset with the
+process, which `rate()` handles.
+
+**The first watches the bitrate, not `polyemesis_ingest_up`.** `_up` is 1 while
+the ingest process is running, and an SRT or RTMP listener runs the whole time
+it waits for OBS. A publisher that disconnects leaves it at 1, so
+`polyemesis_ingest_up == 0` never fires for the most common way a stream ends.
+The bitrate is what arrives at the relay, sampled every second, and it reads 0
+when nothing does.
+
+**The first also needs its guard.** A bare bitrate `== 0` cannot tell a
 broadcast that ended from an install nobody has configured yet — every series
 here reads zero in both cases — which is what `polyemesis_sources`, the count of
 programmes on this install, is for. That series is *omitted* rather than
@@ -374,6 +430,16 @@ nothing fires while a destination is starting up or after it has stopped
 lost, because every destination stops then and `ingest.lost` already says so.
 Each stall raises its own `falling_behind`, and each recovery its own
 `caught_up`.
+
+**Every `falling_behind` is closed by exactly one message.** A stall often ends
+with the platform resetting the connection, so the process exits and is
+respawned within a couple of seconds — far too briefly for `destination.down`.
+The alert stays open across that gap, and `caught_up` closes it once the new
+run has been measured at realtime (about ten seconds of output). If the gap
+lasts long enough to be a `destination.down`, then `destination.recovered`
+closes both, and no `caught_up` follows. A respawned run that is still slow
+sends nothing until it catches up. Only disabling or deleting the destination
+closes the alert without a message, because you did that yourself.
 
 The same numbers are on each destination's card, live.
 

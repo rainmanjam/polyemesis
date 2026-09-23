@@ -72,6 +72,15 @@ const (
 	// and only ever paid at all when a descendant is holding the pipe.
 	drainGrace  = 2 * time.Second
 	logRingSize = 400
+	// StallAfter is how long a running process's output time may stand still,
+	// once it has moved at all, before Status calls the process stalled.
+	//
+	// FFmpeg reports progress every half second and out_time advances in every
+	// report while media is flowing -- audio alone moves it -- so ten reports
+	// in a row with no advance is not jitter. It is short on purpose: this is
+	// a reading of what is happening now, not an alert, and the alert and hook
+	// watchers put their own dwell on top of the same signal.
+	StallAfter = 5 * time.Second
 )
 
 // LogLine is one captured stderr line.
@@ -228,6 +237,21 @@ type Status struct {
 	LastError   string          `json:"lastError,omitempty"`
 	NextRetryIn float64         `json:"nextRetryIn,omitempty"`
 	Progress    ffmpeg.Progress `json:"progress"`
+	// Stalled is set while the process is running and has moved media, but
+	// its output time has not advanced for StallAfter. StalledSec is how long
+	// it has stood still.
+	//
+	// It exists because nothing else in a status says so. A sink that stops
+	// reading leaves the child running, and FFmpeg goes on printing progress
+	// blocks with the same out_time, the same bitrate= and a speed= that only
+	// decays -- both of those are averages over the whole run. The status an
+	// operator read during a stall was "running", a healthy bitrate and no
+	// warning, for as long as the stall lasted (exploratory row 7). While
+	// Stalled is set, Progress.BitrateKbps and Progress.Speed read 0, because
+	// 0 is how fast it is going; the counters stay, because they are how far
+	// it got.
+	Stalled    bool    `json:"stalled,omitempty"`
+	StalledSec float64 `json:"stalledSec,omitempty"`
 }
 
 // Process is one supervised child.
@@ -254,7 +278,10 @@ type Process struct {
 	// Zero while a spawned process has not yet seen media. Reset on every
 	// respawn, because a reconnect starts a new stream from the platform's
 	// point of view and continuing the old total would hide the gap.
-	mediaAt   time.Time
+	mediaAt time.Time
+	// movedAt is when this run's output time last advanced. Zero with mediaAt,
+	// and reset with it on every respawn. Status reads the stall off it.
+	movedAt   time.Time
 	lastErr   string
 	nextRetry time.Time
 	progress  ffmpeg.Progress
@@ -301,6 +328,8 @@ type Process struct {
 	// state that a concurrent test would see.
 	grace time.Duration
 	drain time.Duration
+	// stallAfter is StallAfter, a field for the same reason grace is.
+	stallAfter time.Duration
 
 	runMu   sync.Mutex
 	cancel  context.CancelFunc
@@ -346,15 +375,16 @@ func New(log *slog.Logger, spec Spec) *Process {
 	}.Normalised()
 	spec.MinBackoff, spec.MaxBackoff = pol.MinBackoff, pol.MaxBackoff
 	return &Process{
-		spec:    spec,
-		pol:     pol,
-		retune:  make(chan struct{}, 1),
-		log:     log.With("process", spec.Name),
-		state:   StateStopped,
-		logs:    newRing(logRingSize),
-		secrets: alerts.NewSecretSet(log, spec.Secrets...),
-		grace:   graceFor(spec.Kind),
-		drain:   drainGrace,
+		spec:       spec,
+		pol:        pol,
+		retune:     make(chan struct{}, 1),
+		log:        log.With("process", spec.Name),
+		state:      StateStopped,
+		logs:       newRing(logRingSize),
+		secrets:    alerts.NewSecretSet(log, spec.Secrets...),
+		grace:      graceFor(spec.Kind),
+		drain:      drainGrace,
+		stallAfter: StallAfter,
 	}
 }
 
@@ -935,6 +965,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	p.pid = cmd.Process.Pid
 	p.startedAt = time.Now()
 	p.mediaAt = time.Time{}
+	p.movedAt = time.Time{}
 	p.progress = ffmpeg.Progress{}
 	p.mu.Unlock()
 	p.setState(StateRunning, "")
@@ -1062,6 +1093,16 @@ func (p *Process) runOnce(ctx context.Context) error {
 func (p *Process) noteProgress(pr ffmpeg.Progress) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// Advancing, not merely reported: a stalled FFmpeg keeps printing blocks
+	// with the same out_time, so the arrival of a block proves nothing.
+	//
+	// `!=`, not `>`: a stall is one out_time repeated, and any other value is
+	// media moving. Output time can step backwards on a timestamp discontinuity
+	// FFmpeg passes through; counted only on a rise, a child delivering below
+	// its old high read stalled until it climbed past it.
+	if pr.OutTimeMS != p.progress.OutTimeMS {
+		p.movedAt = time.Now()
+	}
 	p.progress = pr
 	if p.mediaAt.IsZero() && pr.OutTimeMS > 0 {
 		p.mediaAt = time.Now()
@@ -1272,6 +1313,17 @@ func (p *Process) Status() Status {
 		// with no uptime, which is exactly what it is doing.
 		if !p.mediaAt.IsZero() {
 			st.UptimeSec = time.Since(p.mediaAt).Seconds()
+		}
+		// Only once media has moved: before that the process is waiting (a
+		// destination in its probe window, an ingest listening for OBS), and
+		// waiting is not stuck.
+		if !p.movedAt.IsZero() {
+			if still := time.Since(p.movedAt); still >= p.stallAfter {
+				st.Stalled, st.StalledSec = true, still.Seconds()
+				// Progress is a copy, so this changes what is reported and
+				// nothing that is stored.
+				st.Progress.BitrateKbps, st.Progress.Speed = 0, 0
+			}
 		}
 	}
 	if p.state == StateReconnecting && !p.nextRetry.IsZero() {

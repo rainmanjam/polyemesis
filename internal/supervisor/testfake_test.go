@@ -141,6 +141,41 @@ func runFakeChild(mode string, args []string) int {
 		fmt.Fprintln(os.Stderr, orphanLastWords)
 		return code
 
+	case "stall":
+		// AN FFMPEG WHOSE SINK STOPS READING, as a real one was measured doing
+		// it (exploratory row 7, docker pause of the sink): progress blocks keep
+		// arriving every half second, but out_time and total_size freeze, the
+		// run-average bitrate= freezes with them, and the cumulative speed=
+		// decays slowly because wall time keeps passing. Nothing in one block
+		// says "stalled"; only out_time failing to advance does.
+		//
+		// args: how long to deliver before stalling, and the block interval.
+		moveFor, err := time.ParseDuration(args[0])
+		if err != nil {
+			return 2
+		}
+		every, err := time.ParseDuration(args[1])
+		if err != nil {
+			return 2
+		}
+		start := time.Now()
+		var outUS, size int64
+		for frame := 1; ; frame++ {
+			wall := time.Since(start)
+			if wall < moveFor {
+				outUS = wall.Microseconds()
+				size = outUS * 330 / 1000 // ~2640 kbit/s
+			}
+			speed := 1.0
+			if wall > 0 {
+				speed = float64(outUS) / float64(wall.Microseconds())
+			}
+			fmt.Fprintf(os.Stdout, "frame=%d\nfps=30.00\nbitrate=2651.6kbits/s\ntotal_size=%d\n"+
+				"out_time_us=%d\ndup_frames=0\ndrop_frames=0\nspeed=%.3fx\nprogress=continue\n",
+				frame, size, outUS, speed)
+			time.Sleep(every)
+		}
+
 	case "stderr":
 		n, err := strconv.Atoi(args[0])
 		if err != nil {
@@ -213,6 +248,12 @@ func waitForDeaf(t *testing.T, p *Process) {
 		}
 		return false
 	})
+}
+
+// fakeStall spawns a child that reports advancing progress for moveFor and then
+// keeps reporting, every block interval, a frozen out_time -- a stalled sink.
+func fakeStall(moveFor, every time.Duration) fake {
+	return newFake("stall", moveFor.String(), every.String())
 }
 
 // fakeStderr spawns a child that writes n lines to stderr and exits cleanly.

@@ -105,7 +105,7 @@ func TestSnapshotIsExposedAsPrometheusSamples(t *testing.T) {
 		{"ingest restarts are counted", `polyemesis_ingest_restarts_total{id="1",name="Main"}`, "2"},
 		{"the second programme's restarts are its own", `polyemesis_ingest_restarts_total{id="2",name="Studio B"}`, "9"},
 
-		{"destination labels are on info", `polyemesis_destination_info{id="9",name="Twitch",kind="rtmp",platform="twitch"}`, "1"},
+		{"destination labels are on info", `polyemesis_destination_info{id="9",name="Twitch",kind="rtmp",platform="twitch",source_id=""}`, "1"},
 		{"a running destination is enabled", `polyemesis_destination_enabled{id="9",name="Twitch"}`, "1"},
 		{"a reconnecting destination is not up", `polyemesis_destination_up{id="9",name="Twitch"}`, "0"},
 		{"destination kbps is exposed as bits per second", `polyemesis_destination_bitrate_bits_per_second{id="9",name="Twitch"}`, "4.5e+06"},
