@@ -35,7 +35,8 @@ version had shipped when it had not (#499), so this is not ceremony.
 
 **Checklist, in order:**
 
-1. `main` is green — `ci-gate` requires a *successful* `ci.yml` run for the exact
+1. `main` is green — `ci-gate` requires a *successful* `ci.yml` run **and** a
+   successful `security.yml` run, both from a push to `main`, for the exact
    commit you are tagging, not merely a recent one.
 2. `CHANGELOG.md`'s top heading is `## [X.Y.Z] — YYYY-MM-DD` with today's date
    and no `[Unreleased]` content beneath it.
@@ -63,7 +64,7 @@ The tag push is what publishes. There is no button.
 
 | Gate | Refuses when | What to do |
 |---|---|---|
-| `ci-gate` | no successful `ci.yml` run exists for this commit | do not re-run the release; fix the commit and tag again |
+| `ci-gate` | no successful push-to-`main` run of `ci.yml`, or of `security.yml`, exists for this commit | do not re-run the release; fix the commit and tag again. A red `security.yml` with no code change is usually a new advisory: fix it on `main` first |
 | `installer-gate` | `install.sh` does not parse, or its argument validator accepts bad input | a real defect in the installer — fix it, it is what operators run |
 | `changelog-gate` | the tag and `CHANGELOG.md`'s top dated heading disagree | correct the CHANGELOG, delete the tag, re-tag |
 | `[Unreleased] must be empty` | unreleased notes remain | move them under the dated heading |

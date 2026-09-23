@@ -103,7 +103,7 @@ jobs:
   # This asks the platform directly, by commit SHA, rather than trusting
   # branch protection: even if the required-checks list drifts, or the tag
   # targets a commit that was never main's HEAD, a commit with no successful
-  # ci.yml run cannot publish. FAILS CLOSED -- an API error, a rate limit, an
+  # ci.yml AND security.yml run cannot publish. FAILS CLOSED -- an API error, a rate limit, an
   # empty result all read as "not proven green" and block everything below.
   ci-gate:
     name: CI gate (fail closed)
@@ -114,7 +114,7 @@ jobs:
       actions: read
     timeout-minutes: 5
     steps:
-      - name: Require a successful ci.yml run for this commit before publishing
+      - name: Require successful ci.yml and security.yml runs for this commit before publishing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -132,35 +132,57 @@ jobs:
             exit 0
           fi
 
-          echo "Looking for a successful ci.yml run against ${SHA}..."
-          runs_json=$(gh api \
-            "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=20") || {
-            echo "::error::Could not reach the Actions API to check CI status for ${SHA}. Refusing to publish an unverified release."
-            exit 1
-          }
+          # BOTH WORKFLOWS THAT RUN ON A PUSH TO MAIN, not ci.yml alone.
+          # security.yml is where gitleaks, govulncheck, npm-audit and semgrep
+          # run, and it is kept out of ci.yml so a new CVE does not block
+          # unrelated merges -- which is right for a merge and wrong for a
+          # release. Branch protection is not strict, so a commit whose
+          # security.yml run on main was red could be tagged, and this gate,
+          # asking only about ci.yml, published it. Staging-readiness row 37.
+          #
+          # Every workflow is checked and every missing one named before
+          # refusing, so one run of the gate says everything that is wrong.
+          missing=""
+          for wf in ci.yml security.yml; do
+            echo "Looking for a successful ${wf} run against ${SHA}..."
+            if ! runs_json=$(gh api \
+              "repos/${REPO}/actions/workflows/${wf}/runs?head_sha=${SHA}&per_page=20"); then
+              echo "::error::Could not reach the Actions API to check ${wf} for ${SHA}. Refusing to publish an unverified release."
+              missing="${missing} ${wf}"
+              continue
+            fi
 
-          # AS MAIN, ON A PUSH. A bare "some green ci.yml run exists" was
-          # narrower than its name: ci.yml's suite picker keeps the full
-          # acceptance set only for `schedule` or REF = refs/heads/main, and
-          # every other ref falls through to `suites=[]`. The container matrix
-          # is then empty, those jobs are skipped, and the run's conclusion is
-          # still `success`. So a commit whose only ci.yml run was a manual
-          # workflow_dispatch on a hotfix branch satisfied this gate having
-          # never run the acceptance suites at all.
-          successes=$(echo "${runs_json}" | jq '[.workflow_runs[]? | select(.status == "completed" and .conclusion == "success" and .event == "push" and .head_branch == "main")] | length')
+            # AS MAIN, ON A PUSH. A bare "some green ci.yml run exists" was
+            # narrower than its name: ci.yml's suite picker keeps the full
+            # acceptance set only for `schedule` or REF = refs/heads/main, and
+            # every other ref falls through to `suites=[]`. The container matrix
+            # is then empty, those jobs are skipped, and the run's conclusion is
+            # still `success`. So a commit whose only ci.yml run was a manual
+            # workflow_dispatch on a hotfix branch satisfied this gate having
+            # never run the acceptance suites at all. security.yml also runs on
+            # a push to main, so the same selector holds it to the same bar.
+            successes=$(echo "${runs_json}" | jq '[.workflow_runs[]? | select(.status == "completed" and .conclusion == "success" and .event == "push" and .head_branch == "main")] | length')
 
-          if [ "${successes:-0}" -lt 1 ]; then
-            echo "::error::No successful ci.yml run found for commit ${SHA} from a push to main. A version tag must point at a commit that passed CI *as main* -- a workflow_dispatch or branch run skips the acceptance matrix and still reports success. Merge to main and let CI run there, then tag. Refusing to publish."
+            if [ "${successes:-0}" -lt 1 ]; then
+              echo "::error::No successful ${wf} run found for commit ${SHA} from a push to main. A version tag must point at a commit that passed ${wf} *as main* -- a workflow_dispatch or branch run is not the same run, and may skip what main runs. Merge to main, let it go green there, then tag."
+              missing="${missing} ${wf}"
+              continue
+            fi
+            echo "Found ${successes} successful ${wf} run(s) for ${SHA}."
+          done
+
+          if [ -n "${missing}" ]; then
+            echo "::error::Not proven green on main:${missing}. Refusing to publish."
             exit 1
           fi
-
-          echo "Found ${successes} successful ci.yml run(s) for ${SHA}. Proceeding."
+          echo "ci.yml and security.yml are both green on main for ${SHA}. Proceeding."
 
   # THE INSTALLER WAS NOT ON THE RELEASE'S CRITICAL PATH (#559). installer.yml
   # runs on push/pull_request filtered to scripts/install.sh,
   # scripts/acceptance-install.sh and its own file -- and a tag push matches no
   # `paths` filter at all -- so the release published without the installer
-  # suite having run against the released commit. ci-gate requires ci.yml only.
+  # suite having run against the released commit. ci-gate requires ci.yml and
+  # security.yml, and neither runs the installer suite.
   # install.sh is what every operator uses.
   #
   # RUN HERE RATHER THAN LOOKED FOR ELSEWHERE. Asking the API for a green

@@ -209,6 +209,62 @@ else
   fi
 fi
 
+step "7b. ci-gate requires security.yml as well as ci.yml, driven for real"
+# Staging-readiness row 37. ci-gate asked about ci.yml alone, and branch
+# protection is not strict, so a commit whose security.yml run on main was
+# red -- a new CVE in a dependency, a secret that gitleaks caught -- could be
+# tagged and published. The step is extracted and run against a stub `gh` that
+# answers per workflow file, so what is tested is the gate, not a copy of it.
+CIGATE="$work/ci-gate.sh"
+extract_step "Require successful ci.yml and security.yml runs for this commit before publishing" > "$CIGATE"
+if [ ! -s "$CIGATE" ]; then
+  bad "could not extract ci-gate's step from release.yml"
+elif ! command -v jq >/dev/null 2>&1; then
+  bad "jq is not installed, so ci-gate cannot be driven"
+else
+  stub="$work/stub-bin"; mkdir -p "$stub" "$work/runs"
+  # A stand-in for `gh api <url>`: prints $work/runs/<workflow file>.json, or
+  # fails like the API does when that file is absent.
+  cat > "$stub/gh" <<STUB
+#!/usr/bin/env bash
+url="\$2"
+wf="\${url#*/actions/workflows/}"; wf="\${wf%%/*}"
+f="$work/runs/\$wf.json"
+[ -f "\$f" ] || { echo "HTTP 404" >&2; exit 1; }
+cat "\$f"
+STUB
+  chmod +x "$stub/gh"
+  green='{"workflow_runs":[{"status":"completed","conclusion":"success","event":"push","head_branch":"main"}]}'
+  red='{"workflow_runs":[{"status":"completed","conclusion":"failure","event":"push","head_branch":"main"}]}'
+  none='{"workflow_runs":[]}'
+  run_cigate() { # run_cigate <ci.yml json> <security.yml json>
+    printf '%s' "$1" > "$work/runs/ci.yml.json"
+    printf '%s' "$2" > "$work/runs/security.yml.json"
+    ( PATH="$stub:$PATH" PUBLISH=true REPO=o/r SHA=abc123 GH_TOKEN=x bash "$CIGATE" ) > "$work/cigate.out" 2>&1
+    GATE_RC=$?
+    GATE_OUT="$(cat "$work/cigate.out")"
+  }
+
+  run_cigate "$green" "$green"
+  [ "$GATE_RC" -eq 0 ] && ok "both green on main: the gate passes" \
+                       || bad "both workflows green and the gate still refused: $GATE_OUT"
+
+  run_cigate "$green" "$red"
+  expect_refusal "ci.yml green but security.yml red" "$GATE_OUT" "Not proven green on main: security.yml"
+
+  run_cigate "$green" "$none"
+  expect_refusal "ci.yml green and no security.yml run at all" "$GATE_OUT" "Not proven green on main: security.yml"
+
+  run_cigate "$red" "$green"
+  expect_refusal "security.yml green but ci.yml red" "$GATE_OUT" "Not proven green on main: ci.yml"
+
+  rm -f "$work/runs/security.yml.json"
+  printf '%s' "$green" > "$work/runs/ci.yml.json"
+  ( PATH="$stub:$PATH" PUBLISH=true REPO=o/r SHA=abc123 GH_TOKEN=x bash "$CIGATE" ) > "$work/cigate.out" 2>&1
+  GATE_RC=$?; GATE_OUT="$(cat "$work/cigate.out")"
+  expect_refusal "the API failing for security.yml (fails closed)" "$GATE_OUT" "Could not reach the Actions API to check security.yml"
+fi
+
 # -------------------------------------------------------------- GPU image tags
 
 step "8. The floating GPU tags are withheld from a prerelease, like :latest"

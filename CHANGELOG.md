@@ -524,6 +524,12 @@ its first tagged release.
   run). `release.yml` now also runs as a dry run every Tuesday on `main` and
   publishes nothing. `scripts/test-release-gates.sh` checks that `PUBLISH`
   is false for a scheduled run.
+- **A release needs `security.yml` green on `main` as well as `ci.yml`.**
+  `ci-gate` asked only whether `ci.yml` passed for the tagged commit. Branch
+  protection is not strict, so a commit whose `security.yml` run (gitleaks,
+  govulncheck, npm-audit, semgrep) was red on `main` could still be tagged and
+  published. The gate now requires a successful push-to-`main` run of both
+  workflows and names each one that is missing.
 
 ## [0.10.0] — 2026-09-23
 
