@@ -485,6 +485,17 @@ used to have three samplers of the host disagreeing by a tick.
 `PUT /settings` takes the whole blob. Read it, change what you want, write it
 back — a partial object will clear what it omits.
 
+**A save from a stale read is refused, not merged.** `GET /settings` carries a
+`version`. Send it back unchanged in the `PUT` body, and if anyone has saved
+the document since — another operator, the scheduler flipping the playlist,
+`PUT /jobs/policy` — the save is refused with `409` and
+`{"code": "settings_conflict"}`, and **nothing in it is stored**. Read again,
+reapply your change, and save. The `PUT` response carries the new `version`, so
+you can save twice in a row without reading in between. A body with no
+`version` is not checked, which keeps older scripts working and also means they
+still overwrite whatever was saved since they read. The console always sends
+it.
+
 **`ingest` is the default source's ingest, not a copy of it.** Once a source
 exists, `GET /settings` serves that source's `ingest` block and `PUT /settings`
 merges over it and writes it back to the source, so a document read and written

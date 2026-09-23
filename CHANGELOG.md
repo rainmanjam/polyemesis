@@ -30,6 +30,14 @@ its first tagged release.
   irreversible action was armed. Once someone configured the model, the ban
   went live. `PUT /settings` now refuses to switch on such a cell and names
   it. `/automod/matrix` and the console banner count only cells that can fire.
+- **A Settings save from a stale page no longer undoes other operators'
+  changes.** The page PUTs the whole document, so the last save won on every
+  field. A tab opened before someone disarmed an auto-ban re-armed it by saving
+  an unrelated retention change. `GET /settings` now carries a `version`, and a
+  `PUT` that sends back an out-of-date one is refused with `409
+  settings_conflict` and nothing is stored. The console sends it on every save
+  and, on a conflict, keeps your draft and offers a reload. Clients that send no
+  `version` are not checked.
 
 ## [0.10.0] — 2026-09-23
 

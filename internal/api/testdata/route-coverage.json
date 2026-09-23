@@ -1739,7 +1739,8 @@
         "/ingest/pull/url",
         "/ingest/rtmp/streamKey",
         "/ingest/srt/passphrase",
-        "/mqtt/brokerUrl"
+        "/mqtt/brokerUrl",
+        "/version"
       ],
       "sentinels": [
         "SENTINEL-source-srt-passphrase-9f3a",

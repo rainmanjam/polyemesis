@@ -3,6 +3,8 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1257,12 +1259,90 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	// automod key already were, except that they cannot be moved out of the
 	// blob -- the settings page reads and writes them -- so they are blanked on
 	// the way out for a read-scoped token instead. See internal/api/redact.go.
+	//
+	// The version is taken of the UNREDACTED document and then withheld from
+	// a read-scoped token: it is a digest of a document that holds ingest
+	// credentials, and a client that cannot save has no use for it.
+	version := settingsVersion(settings)
 	if readScopeCannotSeePublishTokens(r) {
 		settings = readSafeSettings(settings)
+		version = ""
 	}
 	principalVaryingResponse(w)
-	writeJSON(w, http.StatusOK, settings)
+	writeJSON(w, http.StatusOK, versionedSettings{Settings: settings, Version: version})
 }
+
+// versionedSettings is what GET /settings serves: the document, plus the
+// version a save must send back to be checked against it.
+//
+// EMBEDDED, for the reason settingsResponse is: the fields stay at the top
+// level, and every page that round-trips the document carries `version` back
+// on its next PUT without knowing it exists. That is the point -- a check the
+// client has to remember to opt into is one the next page forgets.
+type versionedSettings struct {
+	db.Settings
+	Version string `json:"version,omitempty"`
+}
+
+// settingsVersion is a digest of the settings document as GET /settings serves
+// it -- after the ingest overlay, before the derived "is a secret set" flags,
+// which are not part of the blob and change through their own routes.
+//
+// A DIGEST rather than a stored counter, so no writer can forget to bump it:
+// the scheduler's playlist flip, PUT /jobs/policy and PUT /settings all write
+// the same blob by different doors, and each of them changes this by changing
+// the bytes. Truncated because it identifies a document, and 96 bits is far
+// beyond any chance of two versions of one install colliding.
+func settingsVersion(st db.Settings) string {
+	st.MQTT.HasPassword = false
+	st.Automod.Model.HasAPIKey = false
+	b, err := json.Marshal(st)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:12])
+}
+
+// takeSettingsVersion removes `version` from a PUT body and returns it.
+//
+// Removed, not merely read, because the body is then decoded into db.Settings
+// with unknown fields refused, and version is not a setting.
+func takeSettingsVersion(body []byte) ([]byte, string, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
+		// Not an object: leave it for decodeJSONInto to refuse in its own words.
+		return body, "", nil
+	}
+	raw, ok := fields["version"]
+	if !ok {
+		return body, "", nil
+	}
+	delete(fields, "version")
+	var version string
+	if string(raw) != "null" {
+		if err := json.Unmarshal(raw, &version); err != nil {
+			return nil, "", badRequestError{"version must be the string GET /settings returned"}
+		}
+	}
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return nil, "", err
+	}
+	return out, version, nil
+}
+
+// settingsConflictMsg is the sentence a stale save is refused with. It says
+// that NOTHING was saved, because the operator's next question is whether half
+// of their change landed.
+const settingsConflictMsg = "these settings were changed by someone else after this page loaded them, " +
+	"so nothing was saved. Reload to see the current settings, then make your change again"
+
+// errSettingsConflict is returned from inside the UpdateSettings closure so the
+// refusal happens under the store's lock, against the document about to be
+// replaced -- checking before taking the lock would leave a window for exactly
+// the interleaving this exists to stop.
+var errSettingsConflict = errors.New("settings conflict")
 
 // overlayDefaultSourceIngest makes settings.ingest a VIEW of the default
 // source's ingest rather than a second copy of it.
@@ -1372,6 +1452,17 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The version the client read, if it sent one. See versionedSettings.
+	body, sentVersion, err := takeSettingsVersion(body)
+	if err != nil {
+		var badRequest badRequestError
+		if errors.As(err, &badRequest) {
+			writeError(w, http.StatusBadRequest, badRequest.Error())
+		} else {
+			writeStoreError(w, err)
+		}
+		return
+	}
 
 	// settingsMu -- see its declaration on Server. Held for the whole
 	// handler rather than trimmed to just the store call: the only cost of
@@ -1416,6 +1507,21 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// live source.
 		if err := s.overlayDefaultSourceIngest(settings); err != nil {
 			return err
+		}
+		// A SAVE FROM A STALE READ IS REFUSED, not merged.
+		//
+		// The page PUTs the whole document, so without this the last writer
+		// won on every field: a tab opened with an auto-ban armed, another
+		// operator disarmed it, the first tab saved a recording retention --
+		// and the ban was armed again under a success toast. Refused rather
+		// than merged field by field, because only the client knows which
+		// fields it meant to change; a merge would have to guess, and the
+		// guess that re-arms a ban is the one this is for.
+		//
+		// Only when a version was SENT. Scripts and older clients that send
+		// none keep last-writer-wins, which is what they were written against.
+		if sentVersion != "" && sentVersion != settingsVersion(*settings) {
+			return errSettingsConflict
 		}
 		storedJSON, _ = json.Marshal(settings)
 		// The stored playlist, copied BEFORE the decode overwrites it.
@@ -1620,6 +1726,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var invalid db.InvalidSettingsError
 	var badRequest badRequestError
 	switch {
+	case errors.Is(err, errSettingsConflict):
+		writeErrorCode(w, http.StatusConflict, codeSettingsConflict, settingsConflictMsg)
+		return
 	case errors.As(err, &badRequest):
 		writeError(w, http.StatusBadRequest, badRequest.Error())
 		return
@@ -1761,8 +1870,14 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// (`setSettings(await api.putSettings(next))` in three pages), so nesting
 	// would silently blank every form on the page. Embedding inlines the
 	// settings fields and puts reload alongside them, which is additive.
+	//
+	// With the version of what was just stored, so the page can save again
+	// without reloading. Taken from `settings`, whose ingest block is by now
+	// the default source's too (the write-through above), so it is the digest
+	// the next GET will serve.
 	writeJSON(w, http.StatusOK, settingsResponse{
 		Settings: settings,
+		Version:  settingsVersion(settings),
 		Reload:   s.mgr.LastReload(),
 	})
 }
@@ -1777,7 +1892,8 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 // additive and older clients ignore it.
 type settingsResponse struct {
 	db.Settings
-	Reload []engine.ReloadReport `json:"reload"`
+	Version string                `json:"version,omitempty"`
+	Reload  []engine.ReloadReport `json:"reload"`
 }
 
 // ApplyChatRetention pushes the stored bounds into a running Hub.

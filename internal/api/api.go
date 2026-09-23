@@ -1905,6 +1905,12 @@ const codeSourceRequired = "source_required"
 
 const codeNoSource = "no_source"
 
+// codeSettingsConflict: the settings document was saved by somebody else after
+// this client read it, so its save was refused rather than reverting theirs.
+// The console branches on it to offer a reload instead of a retry, since a
+// retry would conflict again. See handlePutSettings.
+const codeSettingsConflict = "settings_conflict"
+
 // noSourceMsg is the sentence, written once so that twenty routes cannot drift
 // into twenty wordings of it.
 //

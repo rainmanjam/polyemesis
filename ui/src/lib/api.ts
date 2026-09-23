@@ -186,6 +186,21 @@ export function isNoSource(e: unknown): boolean {
   return e instanceof ApiError && e.code === NO_SOURCE;
 }
 
+/** The code a settings save is refused with when the stored document changed
+ *  after the page read it. Mirrors codeSettingsConflict in internal/api/api.go;
+ *  lib/settings-version.test.ts holds the two together. */
+export const SETTINGS_CONFLICT = "settings_conflict";
+
+/** Whether a settings save was refused because somebody else saved first.
+ *
+ *  Not a fault and not retryable: the same save sent again conflicts again,
+ *  because the page is still holding the old document. The answer is a reload,
+ *  and a screen that treats this like any other error offers a retry that
+ *  cannot work. */
+export function isSettingsConflict(e: unknown): boolean {
+  return e instanceof ApiError && e.code === SETTINGS_CONFLICT;
+}
+
 /** The code the server sends when a disconnect would cut destinations loose.
  *
  *  Written here beside NO_SOURCE and for the same reason: a screen branches on
@@ -564,7 +579,10 @@ export const api = {
    *  can be made true -- every caller downstream is entitled to believe it.
    *
    *  `reload` is discarded rather than surfaced because nothing reads it today.
-   *  A caller that wants it should take it from a response type that says so. */
+   *  A caller that wants it should take it from a response type that says so.
+   *
+   *  `version` is NOT discarded, and must not be: it is what the next save
+   *  from the same page is checked against. See Settings.version. */
   putSettings: async (s: Settings): Promise<Settings> => {
     const { reload: _reload, ...saved } = await put<Settings & { reload?: unknown }>(
       "/settings",
