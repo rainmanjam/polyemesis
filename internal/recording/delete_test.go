@@ -402,3 +402,66 @@ func TestDeleteLiftsTheLiveGuardOnRecorderSegmentsOnceRecordingIsOff(t *testing.
 		})
 	}
 }
+
+// THE SETTING IS NOT THE RECORDER. recording.enabled says what the operator
+// asked for; whether a recorder process is alive is a different fact, and the
+// free-space floor is where they part: it stops the recorder and leaves the
+// setting on. Reading the setting refused the last segment with "the recorder
+// is still writing this segment" for up to one segment length plus two minutes
+// -- while no recorder existed, and exactly when the operator was deleting to
+// get back above the floor. So when the owner of the recorders wires a probe,
+// the probe decides, in both directions: a recorder still alive while the
+// setting already reads off (before the engine's reconcile acts on it) keeps
+// its segment guarded too.
+//
+// Mutation: ignore m.recorderRunning in Delete. Observed to fail the "floor
+// halted" row with ErrSegmentLive and the "still stopping" row with a delete.
+func TestDeleteAsksTheRecorderProbeRatherThanTheSetting(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		enabled    bool
+		running    bool
+		wantRefuse bool
+	}{
+		{"recording on, recorder stopped by the free-space floor: deletable", true, false, false},
+		{"recording on, recorder running: guarded", true, true, true},
+		{"recording off, recorder not yet stopped: guarded", false, true, true},
+		{"recording off, recorder gone: deletable", false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, dir, store := newManager(t)
+			WithRecorderProbe(func() bool { return tc.running })(m)
+			if !m.RecorderProbed() {
+				t.Fatal("RecorderProbed() = false with WithRecorderProbe passed")
+			}
+			setRecording(t, store, tc.enabled)
+
+			started := time.Now().Add(-5 * time.Minute)
+			name := segmentName(started)
+			writeFile(t, dir, name, 16)
+			if err := store.UpsertRecording(&db.Recording{Filename: name, StartedAt: started}); err != nil {
+				t.Fatalf("index %s: %v", name, err)
+			}
+			recs, err := store.ListRecordings()
+			if err != nil || len(recs) != 1 {
+				t.Fatalf("ListRecordings = %d rows (err %v), want 1", len(recs), err)
+			}
+
+			err = m.Delete(recs[0].ID)
+			if tc.wantRefuse {
+				if !errors.Is(err, ErrSegmentLive) {
+					t.Fatalf("Delete(%s) = %v, want ErrSegmentLive: a segment a live "+
+						"recorder may still hold open was deleted", name, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Delete(%s) = %v with no recorder running: the 409 blames a "+
+					"recorder that no longer exists", name, err)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(statErr) {
+				t.Errorf("Delete(%s) succeeded and left the file on disk (%v)", name, statErr)
+			}
+		})
+	}
+}

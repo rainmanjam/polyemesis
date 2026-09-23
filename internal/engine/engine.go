@@ -866,6 +866,20 @@ func (e *Engine) IngestLive() bool {
 	return ingestLive(e.mon.Bitrate(), time.Now())
 }
 
+// RecorderRunning reports whether this engine has a recorder child right now.
+//
+// The slot, not recording.enabled: reconcileRecorder empties it when the
+// setting goes off AND when the free-space floor halts recording with the
+// setting still on, which is the case the setting cannot see. It is what the
+// shared recording manager's delete guard asks through Manager.RecorderRunning
+// -- see recording.WithRecorderProbe.
+func (e *Engine) RecorderRunning() bool {
+	e.requireEngine("RecorderRunning")
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.recorder != nil
+}
+
 // ingestLive is the decision on its own, so every boundary of it is a table
 // test rather than a two-second sleep against a real monitor.
 func ingestLive(samples []stats.Sample, now time.Time) bool {

@@ -47,6 +47,11 @@ its first tagged release.
   already stopped. With recording off the recorder's own segments are now
   deletable at once. A file destination's output keeps the guard either way,
   and its refusal now names the destination instead of the recorder.
+- **The same delete works when the free-space floor has stopped the recorder.**
+  The guard read `recording.enabled`, which stays on when `minFreeGb` halts
+  recording, so the last segment was refused for up to an hour and two minutes
+  exactly when the operator was deleting to free the disk. It now asks the
+  engines whether any recorder process is running.
 
 ## [0.10.0] — 2026-09-23
 

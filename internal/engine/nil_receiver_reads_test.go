@@ -83,16 +83,17 @@ var nilEngineAnswers = map[string]bool{
 	// STATE THAT IS NOT THIS ENGINE'S TO INVENT -- the settings snapshot is the
 	// store's (the API reads it there), and the rest describe children that
 	// only exist while a programme is running.
-	"Clips":        false,
-	"ClipUsage":    false,
-	"IngestLive":   false,
-	"OutputLive":   false,
-	"LastReload":   false,
-	"LiveCaptions": false,
-	"Renditions":   false,
-	"Settings":     false,
-	"Silence":      false,
-	"SourceName":   false,
+	"Clips":           false,
+	"ClipUsage":       false,
+	"IngestLive":      false,
+	"RecorderRunning": false,
+	"OutputLive":      false,
+	"LastReload":      false,
+	"LiveCaptions":    false,
+	"Renditions":      false,
+	"Settings":        false,
+	"Silence":         false,
+	"SourceName":      false,
 }
 
 // argumentlessEngineMethods is every exported method on *Engine that takes

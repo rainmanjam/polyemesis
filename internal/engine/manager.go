@@ -301,16 +301,20 @@ func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg
 		alloc:   relay.NewPortAllocator(relayPortBase, relayPortSpan),
 		engines: map[int64]*Engine{},
 		host:    stats.NewHost(),
-		// NO ffprobe and NO storage guard, and both omissions are the point.
-		// This instance answers reads — usage, resolve, delete — for the API,
-		// which must be able to ask them on an install where no engine is
-		// running. Measuring a segment belongs to the engine that recorded it,
-		// and halting a recorder belongs to the engine that owns the child;
-		// see the pair of comments on Engine's own recman in engine.go.
-		recman: recording.New(log, store, cfg.RecordingsDir(), func() {
-			bus.Publish(events.TypeRecordings, nil)
-		}),
 	}
+	// NO ffprobe and NO storage guard, and both omissions are the point.
+	// This instance answers reads — usage, resolve, delete — for the API,
+	// which must be able to ask them on an install where no engine is
+	// running. Measuring a segment belongs to the engine that recorded it,
+	// and halting a recorder belongs to the engine that owns the child;
+	// see the pair of comments on Engine's own recman in engine.go.
+	//
+	// It DOES get the recorder probe, which is why it is built after m: its
+	// delete guard has to know whether any recorder is alive, and the halt that
+	// stops one with recording.enabled still on lives on the engines, not here.
+	m.recman = recording.New(log, store, cfg.RecordingsDir(), func() {
+		bus.Publish(events.TypeRecordings, nil)
+	}, recording.WithRecorderProbe(m.RecorderRunning))
 	// Built here rather than in Start so a Manager that is never started still
 	// answers Scheduler() with a real runner: the runs page reads Last() and
 	// renders an empty report rather than nothing at all.
@@ -1336,6 +1340,22 @@ func (m *Manager) SetAlertRetry(attempts int) {
 func (m *Manager) IngestLive() bool {
 	for _, eng := range m.Engines() {
 		if eng.IngestLive() {
+			return true
+		}
+	}
+	return false
+}
+
+// RecorderRunning reports whether ANY programme has a recorder child alive.
+//
+// Any, because every programme's recorder writes rec-YYYYMMDD-HHMMSS.mkv into
+// the one recordings directory, and the name does not say whose it is: a
+// segment is only safe to unlink when no recorder on the box could hold it.
+// Engines() is read first and released, so no engine's lock is ever taken
+// under m.mu.
+func (m *Manager) RecorderRunning() bool {
+	for _, eng := range m.Engines() {
+		if eng.RecorderRunning() {
 			return true
 		}
 	}

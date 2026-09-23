@@ -46,6 +46,10 @@ type Manager struct {
 	// sourceID is the programme these segments came from, stamped onto every
 	// row this manager indexes. Nil on a manager with no programme.
 	sourceID *int64
+	// recorderRunning answers whether any recorder process is alive right now.
+	// Nil means "not wired up", and Delete then falls back to recording.enabled.
+	// See WithRecorderProbe.
+	recorderRunning func() bool
 
 	storageMu sync.Mutex
 	storage   StorageState
@@ -87,6 +91,28 @@ func WithSourceID(id int64) Option {
 func WithStorageGuard(fn func(StorageState)) Option {
 	return func(m *Manager) { m.onStorage = fn }
 }
+
+// WithRecorderProbe supplies the question Delete's live-segment guard really
+// means to ask: is a recorder process alive, anywhere on the box, that could
+// still hold one of the recorder's segments open?
+//
+// recording.enabled is not that question, and the gap is the free-space floor.
+// When the volume drops below it the engine stops the recorder
+// (reconcileRecorder, on RecordingAllowed) while recording.enabled stays true --
+// so, read off the setting, the last segment stayed undeletable for up to one
+// segment length plus two minutes, with a 409 blaming a recorder that no longer
+// existed, at exactly the moment the operator was deleting to free the disk.
+// The halt lives on each ENGINE's own manager, not on the shared one that
+// answers the API's deletes, so this manager cannot read it off itself either.
+// The owner of the recorder processes can, and this is how it says so.
+func WithRecorderProbe(fn func() bool) Option {
+	return func(m *Manager) { m.recorderRunning = fn }
+}
+
+// RecorderProbed reports whether a recorder probe is wired. Exported for the
+// engine's wiring test, for the same reason as StorageGuarded: a missing probe
+// is silent, and the only symptom is the false 409 it exists to prevent.
+func (m *Manager) RecorderProbed() bool { return m.recorderRunning != nil }
 
 // New creates a Manager.
 func New(log *slog.Logger, store *db.DB, dir string, onChange func(), opts ...Option) *Manager {
@@ -755,17 +781,26 @@ func (m *Manager) Delete(id int64) error {
 	// outlives the recorder: with recording switched off the engine has stopped
 	// it, yet its last segment stayed undeletable for up to segmentSeconds + 2
 	// min, refused with advice -- stop the recording -- the operator had already
-	// taken (exploratory run, row 35). So with recording off the recorder's own
-	// files are exempt. Only its own: a file destination writes into this same
-	// directory whether recording is on or not, and its outputs keep the guard.
-	// Stopping takes the recorder a few seconds; a delete in those seconds
-	// unlinks a file the operator asked to be rid of, whose last bytes are the
-	// only thing lost, and the inode goes when ffmpeg exits.
+	// taken (exploratory run, row 35). So with no recorder running the
+	// recorder's own files are exempt. Only its own: a file destination writes
+	// into this same directory whether recording is on or not, and its outputs
+	// keep the guard. The engine clears its recorder slot before the child has
+	// finished exiting, so a delete in those few seconds unlinks a file the
+	// operator asked to be rid of, whose last bytes are the only thing lost,
+	// and the inode goes when ffmpeg exits.
 	recs, err := m.store.ListRecordings()
 	if err != nil {
 		return err
 	}
-	segSeconds, recordingOn := m.segmentSeconds()
+	segSeconds, recorderLive := m.segmentSeconds()
+	// The setting is only a stand-in for the fact. When the owner of the
+	// recorders can answer directly it does, both ways: the free-space floor
+	// stops the recorder with recording.enabled still on, and a recorder is
+	// still alive between the setting going off and the engine's reconcile
+	// acting on it. See WithRecorderProbe.
+	if m.recorderRunning != nil {
+		recorderLive = m.recorderRunning()
+	}
 	if liveSegments(recs, liveWindow(segSeconds), time.Now())[r.Filename] {
 		dest, err := m.destinationOutput(r.Filename)
 		if err != nil {
@@ -774,7 +809,7 @@ func (m *Manager) Delete(id int64) error {
 		if dest != "" {
 			return fmt.Errorf("cannot delete %s: %w", r.Filename, liveSegmentError{dest: dest})
 		}
-		if recordingOn || !recorderSegment.MatchString(r.Filename) {
+		if recorderLive || !recorderSegment.MatchString(r.Filename) {
 			return fmt.Errorf("cannot delete %s: %w", r.Filename, ErrSegmentLive)
 		}
 	}
