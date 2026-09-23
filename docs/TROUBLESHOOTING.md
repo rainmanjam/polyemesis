@@ -159,11 +159,13 @@ sources. Neither token value is ever logged.
 The `REJ_RESOURCE` cases are worth telling apart, and the server log does:
 *already publishing* names the incumbent peer, *no SRT pipeline for source*
 means nothing is running to receive it over SRT — the source's engine is down,
-or its ingest is set to RTMP or pull, or no protocol has been chosen for it. A
-source created from its name alone has none chosen: pick **SRT** on its card
-before publishing. (Earlier releases admitted an SRT publish into any source,
-whatever its mode, which put a second writer into an RTMP or pull source's
-stream.)
+or its ingest is set to RTMP or pull, or no protocol has been chosen for it. If
+the source is meant for this encoder, pick **SRT** on its card. A source added
+from the Sources page is SRT from the start, and sources that 0.10.0 and
+earlier created with no protocol are set to SRT by the upgrade (see
+[UPGRADING.md](UPGRADING.md)). (Earlier releases admitted an SRT publish into
+any source, whatever its mode, which put a second writer into an RTMP or pull
+source's stream.)
 
 #### The third `REJ_BADSECRET`: the peer is rate-limited
 

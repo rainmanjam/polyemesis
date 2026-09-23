@@ -62,6 +62,12 @@ type DB struct {
 	// 0.6.0 install runs 0.6.0's update.sh. See #557.
 	sealedOnOpen int
 
+	// sourcesGivenSRTOnOpen names the sources this Open moved from an unset
+	// ingest mode to SRT (MigrateUnsetSourceIngestMode), for the same reason
+	// sealedOnOpen exists: the change is made on the operator's behalf, and
+	// the first boot on the new code is the one place that can say so.
+	sourcesGivenSRTOnOpen []string
+
 	// box seals and opens the destination stream keys. nil is a supported
 	// configuration and means "store them in plaintext, exactly as before".
 	//
@@ -338,6 +344,15 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// AFTER MigrateSources, which can create Main with an unset mode. A source
+	// the console created on 0.10.0 or earlier has mode "" and received SRT on
+	// the shared port; the port now admits only SRT-mode sources, so the mode
+	// they ran with is written down or their encoders are refused on the first
+	// boot after the upgrade. See MigrateUnsetSourceIngestMode.
+	if err := d.MigrateUnsetSourceIngestMode(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// BEFORE the backfill below, because a key this clears is a key that does
 	// not then need sealing, and because both of them end in the same
 	// checkpoint. Also before anything can READ a destination: Validate now
@@ -500,3 +515,8 @@ func (d *DB) Ping() error {
 // guard. The one place that can say it is the first boot on the new code, which
 // is here.
 func (d *DB) SealedOnOpen() int { return d.sealedOnOpen }
+
+// SourcesGivenSRTOnOpen names the sources whose unset ingest mode this Open
+// set to SRT. Empty on every boot but the upgrading one. See
+// MigrateUnsetSourceIngestMode.
+func (d *DB) SourcesGivenSRTOnOpen() []string { return d.sourcesGivenSRTOnOpen }

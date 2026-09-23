@@ -1018,3 +1018,72 @@ func (d *DB) MigrateSources() error {
 	}
 	return nil
 }
+
+// MigrateUnsetSourceIngestMode gives every source whose ingest mode was never
+// chosen the one it has always had in practice: SRT.
+//
+// WHY THESE SOURCES EXIST AT ALL. The console's create form sends {name} and
+// nothing else, and the server filled the ingest in from
+// DefaultSettings().Ingest -- whose mode is deliberately unset, so that a fresh
+// install's FIRST-RUN choice is not made for the operator. Every source added
+// through the Sources page on 0.10.0 and earlier therefore stored mode "".
+//
+// WHY SRT, AND WHY IT IS NOT A GUESS. Until the shared SRT port learned to
+// admit only sources set to SRT (engine.Manager.lookupToken), it admitted any
+// source with a running engine, and SRT was the only ingest an unset source
+// could ever receive -- reconcileIngest spawns nothing for IngestUnset, and
+// the RTMP listener already asked the mode. So these were SRT sources in all
+// but the stored word, with SRT encoders pointed at them, and the listener fix
+// that correctly shut RTMP and pull sources off the SRT port shut these off
+// too: the first boot after an upgrade disconnected their encoders with
+// nothing on screen to say why. Writing down the mode they ran with is what
+// keeps that fix's refusal of rtmp and pull intact without taking an
+// operator's working ingest away.
+//
+// ONLY THE MODE IS WRITTEN, with json_set, so the rest of the blob -- latency,
+// passphrase, any key this build does not model -- is carried through byte for
+// byte rather than re-marshalled through IngestSettings. A blob that does not
+// parse is left alone: scanSource already lists such a row with the defaults
+// so the operator can fix it, and json_extract on it would fail the statement
+// and stop the server booting over a row it never needed to read. The CASE is
+// what guarantees json_extract is not evaluated on it; SQLite does not promise
+// to short-circuit AND.
+//
+// IDEMPOTENT, and one-time in effect: the WHERE matches nothing once it has
+// run, and no path this build ships creates an unset source any more
+// (handleCreateSource defaults a create to SRT and refuses an explicit "").
+// It runs on every Open for the reason backfillDestinationStreamKeys does --
+// guarded by "is there still an unset source", not by a version stamp -- so an
+// interrupted boot is finished by the next one. Not a reason to bump
+// currentSchemaVersion: an older binary reads "srt" exactly as it reads any
+// source an operator set to SRT by hand.
+//
+// AFTER MigrateSources, which is what can create a source (Main, from the
+// stored settings) and so must have finished first.
+func (d *DB) MigrateUnsetSourceIngestMode() error {
+	rows, err := d.sql.Query(
+		`UPDATE sources SET ingest = json_set(ingest, '$.mode', ?), updated_at = ?
+		 WHERE CASE WHEN json_valid(ingest)
+		            THEN COALESCE(json_extract(ingest, '$.mode'), '') = ''
+		            ELSE 0 END
+		 RETURNING name`,
+		string(IngestSRT), time.Now().Unix())
+	if err != nil {
+		return fmt.Errorf("set unset source ingest mode to srt: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return fmt.Errorf("read migrated source name: %w", err)
+		}
+		names = append(names, n)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("set unset source ingest mode to srt: %w", err)
+	}
+	// Recorded so the boot can say what it changed. See sourcesGivenSRTOnOpen.
+	d.sourcesGivenSRTOnOpen = append(d.sourcesGivenSRTOnOpen, names...)
+	return nil
+}

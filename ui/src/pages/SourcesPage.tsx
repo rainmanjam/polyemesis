@@ -108,7 +108,10 @@ export function SourcesPage() {
     if (!name) return;
     try {
       // Name only: the server fills in a default ingest, so adding a programme
-      // does not require choosing ports before you have one to configure.
+      // does not require choosing ports before you have one to configure. That
+      // default is SRT (handleCreateSource), not "unset": the shared SRT port
+      // admits only SRT-mode sources, and an unset one is refused on every
+      // port. The card's select changes it afterwards.
       await api.createSource({ name });
       setCreating(false);
       setNewName("");

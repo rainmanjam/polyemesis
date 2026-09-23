@@ -754,6 +754,19 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 				"a backup of polyemesis.db alone will restore these destinations with empty keys",
 			"issue", "https://github.com/rainmanjam/polyemesis/issues/557")
 	}
+	// The other change an upgrade makes on the operator's behalf: sources the
+	// console created with no ingest mode, which the shared SRT port used to
+	// admit and now would refuse, were set to SRT so their encoders keep
+	// connecting. Said once, on the boot that did it, so an operator who meant
+	// one of them for RTMP knows which card to change. See
+	// db.MigrateUnsetSourceIngestMode and UPGRADING.md.
+	if names := store.SourcesGivenSRTOnOpen(); len(names) > 0 {
+		log.Warn("sources with no ingest mode were set to SRT",
+			"sources", names,
+			"why", "the shared SRT port now admits only sources set to SRT; these had no mode "+
+				"and were reachable only over SRT, so SRT is what they already were",
+			"action", "if one of them was meant for RTMP or pull, change its ingest on the Sources page")
+	}
 
 	settings, err := store.GetSettings()
 	if err != nil {

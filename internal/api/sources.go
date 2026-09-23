@@ -455,11 +455,34 @@ func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
 	// which made naming the transport -- the one thing the one-port SRT
 	// listener needs chosen before it admits a publisher -- the request that
 	// failed.
-	row := db.Source{Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	//
+	// AND THE MODE DEFAULTS TO SRT, not to DefaultSettings' unset. Unset is
+	// right for an install's first-run choice and wrong for a source: the
+	// console's create form sends {name} and nothing else, so every source it
+	// made was stored with no mode, and once the shared SRT port stopped
+	// admitting sources that are not set to SRT (engine.Manager.lookupToken)
+	// every one of them became a source nothing can publish to -- made by the
+	// only button the Sources page has. SRT because it is what those sources
+	// already were (the port admitted them; MigrateUnsetSourceIngestMode writes
+	// that down for the ones that exist), and because it is the default that
+	// fails loudly: IngestUnset's warning is about RTMP, whose wrong choice
+	// arrives as a working stream missing five of its six tracks, while an
+	// RTMP-only encoder pointed at an SRT source is refused outright and the
+	// operator changes the select on the card.
+	ingest := db.DefaultSettings().Ingest
+	ingest.Mode = db.IngestSRT
+	row := db.Source{Enabled: true, Ingest: ingest}
 	if !decodeJSON(w, r, &row) {
 		return
 	}
 	row.ID = 0
+	// Asked for by name, unset is refused rather than stored. A source with no
+	// mode is one both shared ports refuse, and saying so now is the only
+	// moment the request that made it is still in front of someone.
+	if row.Ingest.Mode == db.IngestUnset {
+		writeError(w, http.StatusBadRequest, "choose an ingest mode: srt, rtmp or pull")
+		return
+	}
 	// The gate #255 found missing. A create introduces everything, so the
 	// stored-URL argument is empty: there is no inherited state on a row that
 	// does not exist yet.
@@ -496,6 +519,14 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row.ID = id
+	// Clearing a chosen mode is refused, for the reason the create refuses
+	// unset and scoped the way handlePutSettings scopes it: to CLEARING. A row
+	// already unset -- one whose ingest blob will not parse reads back with the
+	// defaults (scanSource) -- must stay renameable while the operator fixes it.
+	if row.Ingest.Mode == db.IngestUnset && existing.Ingest.Mode != db.IngestUnset {
+		writeError(w, http.StatusBadRequest, "choose an ingest mode: srt, rtmp or pull")
+		return
+	}
 	// Against the URL that was ALREADY on the row, captured from the stored
 	// copy above before decodeJSON wrote over `row`. `existing` is the store's
 	// own value and `row` started as a copy of it, so the two are separate
