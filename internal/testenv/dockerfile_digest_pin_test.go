@@ -76,3 +76,59 @@ func TestPublishedDockerfilesPinBaseImagesByDigest(t *testing.T) {
 			"(three stages each); the FROM pattern has stopped matching", froms)
 	}
 }
+
+// THE COMMENT ABOVE A PINNED FROM DESCRIBES THE PIN.
+//
+// Pinning Dockerfile.vaapi's runtime stage left the comment directly above it
+// saying "Floating at 24.04, not pinned to a point release, so rebuilds collect
+// security updates" -- over `FROM ubuntu:26.04@sha256:...`. Wrong twice: a
+// digest collects nothing on rebuild, and the tag is 26.04. A reader deciding
+// whether a rebuild picks up a CVE fix reads that comment, not the digest.
+//
+// Two checks on the comment block that runs contiguously into each FROM: it
+// does not describe the image as floating, and any Ubuntu release it names is
+// the one in the FROM reference.
+func TestDockerfileFromCommentsMatchThePin(t *testing.T) {
+	root := repoRootFromTest(t)
+	matches, err := filepath.Glob(filepath.Join(root, "Dockerfile*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromRe := regexp.MustCompile(`(?i)^FROM\s+(?:--platform=\S+\s+)?(\S+)`)
+	floating := regexp.MustCompile(`(?i)floating at|not pinned to|rebuilds collect`)
+	ubuntuRel := regexp.MustCompile(`(?i)\bubuntu[: ]?(\d{2}\.\d{2})\b`)
+	checked := 0
+	for _, path := range matches {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := filepath.Base(path)
+		lines := strings.Split(string(b), "\n")
+		for i, line := range lines {
+			m := fromRe.FindStringSubmatch(strings.TrimSpace(line))
+			if m == nil || !strings.Contains(m[1], "@sha256:") {
+				continue
+			}
+			checked++
+			for j := i - 1; j >= 0 && strings.HasPrefix(strings.TrimSpace(lines[j]), "#"); j-- {
+				c := lines[j]
+				if floating.MatchString(c) {
+					t.Errorf("%s:%d: the comment above the digest-pinned FROM on line %d says %q; "+
+						"a digest does not float and a rebuild collects nothing. Describe the pin.",
+						name, j+1, i+1, strings.TrimSpace(c))
+				}
+				for _, rel := range ubuntuRel.FindAllStringSubmatch(c, -1) {
+					if !strings.Contains(m[1], rel[1]) {
+						t.Errorf("%s:%d: the comment above the FROM on line %d names Ubuntu %s, "+
+							"but the FROM is %s.", name, j+1, i+1, rel[1], m[1])
+					}
+				}
+			}
+		}
+	}
+	// POSITIVE CONTROL: three published Dockerfiles, three stages each.
+	if checked < 9 {
+		t.Errorf("checked only %d digest-pinned FROM lines, expected at least 9", checked)
+	}
+}

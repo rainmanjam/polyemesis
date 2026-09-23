@@ -77,15 +77,23 @@ RUN CGO_ENABLED=0 go build -trimpath \
 
 # ---------- stage 3: runtime ----------
 #
-# Ubuntu 24.04 rather than Alpine: the VA-API driver stack that matters here
+# Ubuntu rather than Alpine: the VA-API driver stack that matters here
 # (intel-media-driver for Gen9 and newer, Mesa's radeonsi for AMD) is packaged,
-# current and tested on Ubuntu, and its FFmpeg 6.1.1 keeps this image on the
-# same 6.1.x series as the default image. Alpine has libva but a much thinner
-# driver selection, and building the Intel media driver by hand is not a thing
-# to inherit from a base-image choice.
+# current and tested on Ubuntu, and its FFmpeg (8.0.x, pinned below) keeps this
+# image on the same 8.x major as the default image. Alpine has libva but a much
+# thinner driver selection, and building the Intel media driver by hand is not
+# a thing to inherit from a base-image choice.
 #
-# Floating at 24.04, not pinned to a point release, so rebuilds collect
-# security updates. Verified to exist on 2026-07-26.
+# PINNED AS tag@digest (the multi-arch index digest, checked 2026-09-23), like
+# every FROM in the root Dockerfile and for the same reason: a floating tag let
+# two builds of one commit start from different bytes. A rebuild therefore
+# collects no security updates on its own; they arrive as a dependabot PR
+# (.github/dependabot.yml, docker ecosystem), which reads the tag to know what
+# to track and proposes the new digest. Keep the tag when you bump by hand -- a
+# bare @sha256 gives dependabot nothing to track -- and re-pin FFMPEG_VERSION
+# below in the same commit if the tag's release changes.
+# internal/testenv/dockerfile_digest_pin_test.go fails a FROM without a digest,
+# and a comment here that calls it floating or names another Ubuntu release.
 FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
 ARG VERSION=dev
