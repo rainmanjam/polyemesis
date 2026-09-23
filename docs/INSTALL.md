@@ -215,11 +215,14 @@ handle. In binary mode it verifies the download against the release's published
 new one and signs out every existing session; it touches only the database and
 exits before anything binds a port, so it is safe to run against a live server.
 On a systemd install, run it as the service user and point it at the same
-config, or it will look for the database somewhere else:
+config and data directory the unit uses. A hand-installed unit passes the data
+directory as `--data` while a copied `config.yaml` still says `./data`, so pass
+`-data` too. If no database is there, the command stops and prints the path it
+looked in. It does not create anything:
 
 ```bash
 sudo -u polyemesis /usr/local/bin/polyemesis \
-  -config /etc/polyemesis/config.yaml -reset-admin
+  -config /etc/polyemesis/config.yaml -data /var/lib/polyemesis -reset-admin
 ```
 
 What that does **not** do is end API tokens. Tokens carry no session epoch, so
@@ -231,7 +234,7 @@ change does not end them:`. To end them in the same run, add the second flag:
 
 ```bash
 sudo -u polyemesis /usr/local/bin/polyemesis \
-  -config /etc/polyemesis/config.yaml -reset-admin -revoke-api-tokens
+  -config /etc/polyemesis/config.yaml -data /var/lib/polyemesis -reset-admin -revoke-api-tokens
 ```
 
 which prints `N API token(s) revoked.` It is opt-in rather than implied because

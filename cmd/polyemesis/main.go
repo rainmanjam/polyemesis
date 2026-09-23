@@ -171,6 +171,32 @@ func run(h *hooks) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+
+	// BEFORE anything is started. A reset touches only the database and then
+	// exits, so it must not bind a port, spawn a child or write a log file --
+	// this is run on a box where the real server is usually already running, and
+	// a second instance racing it for the listener would fail for a reason that
+	// has nothing to do with the password.
+	// Before anything else that touches state. update.sh calls this on the copy
+	// it just took, and the whole point is that it answers about THAT
+	// directory: it opens the file, walks it, and reads the schema, without
+	// running a migration -- migrating the backup would move the copy forward
+	// to the schema the operator is keeping a way back from. #643.
+	//
+	// AND ABOVE EnsureDirs, WHICH IS NOT READ-ONLY. Both commands used to run
+	// after it, so `-config config.example.yaml -reset-admin` on a manual
+	// install -- whose unit supplies the real directory with --data, not the
+	// file -- created ./data/{fonts,hls,tls,...} and an empty polyemesis.db in
+	// whatever directory the operator stood in, then said "complete first-run
+	// setup". Neither command needs a directory made: -verify-backup reads the
+	// one it is given, and resetAdmin refuses a database that is not there.
+	if *verifyBak != "" {
+		return verifyBackup(*verifyBak, os.Stdout)
+	}
+	if *resetPass {
+		return resetAdmin(cfg, os.Stdin, os.Stdout, *resetRevoke)
+	}
+
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
 	}
@@ -191,23 +217,6 @@ func run(h *hooks) error {
 	// which reads this package's sources and names the file and line of any call
 	// that is not inside an init.
 
-	// BEFORE anything is started. A reset touches only the database and then
-	// exits, so it must not bind a port, spawn a child or write a log file --
-	// this is run on a box where the real server is usually already running, and
-	// a second instance racing it for the listener would fail for a reason that
-	// has nothing to do with the password.
-	// Before anything else that touches state. update.sh calls this on the copy
-	// it just took, and the whole point is that it answers about THAT
-	// directory: it opens the file, walks it, and reads the schema, without
-	// running a migration -- migrating the backup would move the copy forward
-	// to the schema the operator is keeping a way back from. #643.
-	if *verifyBak != "" {
-		return verifyBackup(*verifyBak, os.Stdout)
-	}
-
-	if *resetPass {
-		return resetAdmin(cfg, os.Stdin, os.Stdout, *resetRevoke)
-	}
 	// Text overlays need a font FILE, and the image polyemesis ships has no
 	// system fonts at all -- fontconfig is installed and finds nothing. The
 	// embedded copies are written out here so drawtext has a real path to open.

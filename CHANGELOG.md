@@ -493,6 +493,14 @@ its first tagged release.
   the valid keys. The retired `enhancedRtmp` key is still accepted. A
   `tls.hostname` with no `tls.mode` is also refused, because it meant plain
   HTTP. See [docs/UPGRADING.md](docs/UPGRADING.md).
+- **`-reset-admin` and `-verify-backup` no longer create a data directory where
+  they are run.** Both ran after the server made its directories. So on a hand
+  install, whose unit passes `--data` while the copied config says `./data`,
+  `-reset-admin` created `./data/…` and an empty database in the current
+  directory. It then told the operator of a working install to "complete
+  first-run setup". Both now run before anything is created. `-reset-admin`
+  refuses when there is no database, and names the absolute path it looked
+  in. The reset commands in INSTALL.md and the FAQ now pass `-data`.
 
 ### Security
 

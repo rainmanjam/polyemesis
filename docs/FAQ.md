@@ -193,7 +193,7 @@ Turn it on when you have a publicly trusted certificate and intend to keep one.
 With shell access to the box, set a new one and exit:
 
 ```bash
-sudo -u polyemesis polyemesis -reset-admin --config /etc/polyemesis/config.yaml
+sudo -u polyemesis polyemesis -reset-admin --config /etc/polyemesis/config.yaml --data /var/lib/polyemesis
 ```
 
 It asks for the new password twice, without echoing it, then signs out every
@@ -204,7 +204,7 @@ It is safe to run while the service is up: it touches only the database and
 never binds a port. To script it, pipe the password twice:
 
 ```bash
-printf '%s\n%s\n' "$NEW" "$NEW" | sudo -u polyemesis polyemesis -reset-admin --config /etc/polyemesis/config.yaml
+printf '%s\n%s\n' "$NEW" "$NEW" | sudo -u polyemesis polyemesis -reset-admin --config /etc/polyemesis/config.yaml --data /var/lib/polyemesis
 ```
 
 **Not as a command-line flag, deliberately.** A password in argv is visible in
