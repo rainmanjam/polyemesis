@@ -8,6 +8,23 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Re-running `install.sh` no longer moves a working install off its own
+  ports.** Every port it checked was already held by the service it was about
+  to restart, so under `--yes` it accepted its own offer: the web UI moved
+  8080 -> 8081. A port held by the polyemesis process (binary mode) or published
+  by the polyemesis container (docker mode) is now recognised as ours. The port
+  check also reads only the local-address column, so `10.0.0.80:5000` is no
+  longer taken for a listener on port 80.
+- **`--srt-port` / `--rtmp-port` now mean something, or are refused.** The
+  server's SRT and RTMP listeners are database settings (Settings -> Listeners),
+  and nothing the installer writes reaches them. In binary mode the flags only
+  opened a firewall port and printed an address nothing listened on; they are
+  now refused with a pointer to Settings -> Listeners. In docker mode the chosen
+  host port is published onto the server's 6000/1935 inside the container,
+  instead of `N:N`, which published a port nothing inside listened on.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

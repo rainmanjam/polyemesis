@@ -51,6 +51,22 @@ HTTP_PORT=8080
 SRT_PORT=6000
 RTMP_PORT=1935
 
+# WHERE THE SERVER ITSELF LISTENS FOR INGEST, which is not the same thing as the
+# two ports above. The SRT and RTMP listeners are runtime settings (Settings ->
+# Listeners, stored in the database), and a new install binds these defaults
+# -- ListenerSettings{SRTPort: 6000, RTMPPort: 1935} in internal/db/settings.go.
+# Nothing this script writes reaches them: config.yaml has no such key and the
+# binary has no such flag.
+#
+# So --srt-port/--rtmp-port used to be a promise nobody kept. In binary mode
+# they changed only the firewall rule and the printed address; in docker mode
+# they published host N onto container N, where nothing listens either. Docker
+# can honour them, by mapping the chosen HOST port onto these; binary mode
+# cannot, and refuses them (see refuse_unappliable_ports). Pinned against the
+# Go source by scripts/acceptance-install.sh.
+SERVER_SRT_PORT=6000
+SERVER_RTMP_PORT=1935
+
 MODE=""            # docker | binary
 TLS_MODE="off"     # off | selfsigned | acme
 CHECK_PUBLIC_IP=false  # --check-public-ip: ask a third party what the world sees
@@ -549,7 +565,7 @@ require_systemd() {
   echo "     On a container, WSL without systemd, or an OpenRC/runit distribution,"
   echo "     run the image directly instead:"
   echo "       docker run -d --name polyemesis -p ${HTTP_PORT}:8080 \\"
-  echo "         -p ${SRT_PORT}:${SRT_PORT}/udp -v polyemesis-data:/data ${IMAGE}"
+  echo "         -p ${SRT_PORT}:${SERVER_SRT_PORT}/udp -v polyemesis-data:/data ${IMAGE}"
   return 1
 }
 
@@ -1007,15 +1023,50 @@ install_docker() {
   ok "using: $COMPOSE_CMD"
 }
 
+# listeners_on prints the ss lines for sockets bound to a port, with the
+# owning process when -p can see it (it can: this runs as root).
+#
+# COLUMN 4, NOT THE WHOLE LINE. This used to grep "[:.]PORT\b" anywhere, which
+# read `10.0.0.80:5000` as a listener on port 80 -- the dot in an address is as
+# good as the colon before a port to a regex that does not know which is which.
+listeners_on() { # listeners_on <port> <tcp|udp>
+  local port="$1" proto="${2:-tcp}" flags=-lntp
+  [ "$proto" = udp ] && flags=-lnup
+  command -v ss >/dev/null 2>&1 || return 0
+  ss "$flags" 2>/dev/null | awk -v p="$port" 'NR > 1 { n = split($4, a, ":"); if (a[n] == p) print }'
+}
+
 # port_in_use reports whether anything already holds a port, so a collision is
 # named here rather than discovered as an opaque bind error on first start.
 port_in_use() {
   local port="$1" proto="${2:-tcp}"
-  if command -v ss >/dev/null 2>&1; then
-    if [ "$proto" = udp ]; then ss -lnu 2>/dev/null | grep -qE "[:.]${port}\b"
-    else ss -lnt 2>/dev/null | grep -qE "[:.]${port}\b"; fi
+  [ -n "$(listeners_on "$port" "$proto")" ]
+}
+
+# port_held_by_this_install reports whether the thing holding a port is the
+# polyemesis this run is about to replace.
+#
+# A RE-RUN IS HOW THIS INSTALLER IS USED TO CHANGE ANYTHING, and on a re-run
+# every port it asks about is already held -- by the service it is about to
+# restart. warn_if_taken called that a collision and, under --yes, accepted its
+# own offer: a working install's web UI moved 8080 -> 8081 and the summary
+# advertised an SRT port nothing listened on. The service lets go of the port
+# when it is restarted onto the new config, so it is not a collision.
+#
+# Asked per mode, because the two holders look different and neither can stand
+# in for the other: in binary mode it is a process named polyemesis (ss -p), and
+# in docker mode it is a port the polyemesis container publishes (docker port).
+# A bare polyemesis PROCESS in docker mode still collides -- nothing this run
+# does restarts it, and the container cannot bind over it.
+port_held_by_this_install() { # port_held_by_this_install <port> <tcp|udp>
+  local port="$1" proto="${2:-tcp}"
+  if [ "$MODE" = docker ]; then
+    command -v docker >/dev/null 2>&1 || return 1
+    # `8080/tcp -> 0.0.0.0:8080` -- container port/proto, then the host side.
+    docker port polyemesis 2>/dev/null \
+      | awk -v p="$port" -v pr="$proto" '{ split($1, c, "/"); n = split($3, h, ":"); if (c[2] == pr && h[n] == p) f = 1 } END { exit !f }'
   else
-    return 1
+    listeners_on "$port" "$proto" | grep -q 'users:(("polyemesis"'
   fi
 }
 
@@ -1044,6 +1095,10 @@ next_free_port() {
 warn_if_taken() {
   local port="$1" proto="$2" what="$3" var="${4:-}" free answer
   port_in_use "$port" "$proto" || return 0
+  if port_held_by_this_install "$port" "$proto"; then
+    info "${proto}/${port} (${what}) is held by the polyemesis this run replaces — keeping it"
+    return 0
+  fi
 
   warn "${proto}/${port} (${what}) is already in use — polyemesis would fail to bind it"
   # Nothing to offer, or nowhere to put the answer: fall back to the old
@@ -1058,6 +1113,29 @@ warn_if_taken() {
     ok "${what} moved to ${proto}/${free}"
   else
     echo "     Keeping ${proto}/${port}. Stop whatever is holding it before starting polyemesis."
+  fi
+}
+
+# refuse_unappliable_ports stops a binary-mode install that was told to use an
+# ingest port it has no way to set.
+#
+# The server binds SERVER_SRT_PORT and SERVER_RTMP_PORT until somebody changes
+# them under Settings -> Listeners; see the note beside those constants. In
+# binary mode there is no port mapping in between, so `--srt-port 6001` used to
+# open udp/6001 in the firewall, print srt://host:6001 in the summary, and
+# leave the server on 6000 behind a closed port -- an install that looked
+# configured and could not be reached. A refusal before anything is written is
+# the only honest answer: the operator learns where the setting really lives.
+#
+# --rtmp-port 0 stays allowed. It does not stop the server binding RTMP; it
+# leaves the firewall closed to it, which is a choice this script CAN carry out.
+refuse_unappliable_ports() {
+  [ "$MODE" = binary ] || return 0
+  if [ "$SRT_PORT" != "$SERVER_SRT_PORT" ]; then
+    die "--srt-port ${SRT_PORT} cannot be applied in binary mode: the server's SRT port is a setting in its database (Settings -> Listeners, ${SERVER_SRT_PORT} on a new install), not something this installer writes. Install on ${SERVER_SRT_PORT}, then change it under Settings -> Listeners and open the new port in the firewall."
+  fi
+  if [ "$RTMP_PORT" != 0 ] && [ "$RTMP_PORT" != "$SERVER_RTMP_PORT" ]; then
+    die "--rtmp-port ${RTMP_PORT} cannot be applied in binary mode: the server's RTMP port is a setting in its database (Settings -> Listeners, ${SERVER_RTMP_PORT} on a new install), not something this installer writes. Install on ${SERVER_RTMP_PORT} (or pass --rtmp-port 0 to keep it closed in the firewall), then change it under Settings -> Listeners."
   fi
 }
 
@@ -1196,19 +1274,37 @@ gather_configuration() {
   fi
   ok "mode: $MODE"
 
+  # The mode may only have been decided just now, at the prompt above.
+  refuse_unappliable_ports
+
   header "=== Ports ==="
   [ "$HTTP_PORT_SET" = true ] || ask "Web UI port (tcp)" "$HTTP_PORT" HTTP_PORT
-  [ "$SRT_PORT_SET" = true ]  || ask "SRT ingest port (UDP — this is the one people forget)" "$SRT_PORT" SRT_PORT
-  [ "$RTMP_SET" = true ]      || ask "RTMP ingest port (tcp — 0 to decline it)" "$RTMP_PORT" RTMP_PORT
+  if [ "$MODE" = binary ]; then
+    # Not asked: see refuse_unappliable_ports. Asking for a number that is then
+    # only written into a firewall rule is how the SRT address in the summary
+    # came to name a port nothing listened on.
+    info "SRT udp/${SRT_PORT} and RTMP tcp/${SERVER_RTMP_PORT} are the server's own listeners;"
+    info "change them after sign-in under Settings -> Listeners."
+  else
+    [ "$SRT_PORT_SET" = true ]  || ask "SRT ingest port (UDP — this is the one people forget)" "$SRT_PORT" SRT_PORT
+    [ "$RTMP_SET" = true ]      || ask "RTMP ingest port (tcp — 0 to decline it)" "$RTMP_PORT" RTMP_PORT
+  fi
   # The port IS the switch, server-side too: internal/engine binds both
   # listeners and treats 0 as off. Asking a yes/no here and a port there meant
   # two different ways to say the same thing.
   case "$RTMP_PORT" in 0|"") ENABLE_RTMP="no" ;; *) ENABLE_RTMP="yes" ;; esac
 
   # The variable name goes in so an accepted alternative comes back out.
+  # Except in binary mode for the two ingest ports: there is no alternative to
+  # offer, because nothing here can move the server's listener. Warn only.
   warn_if_taken "$HTTP_PORT" tcp "web UI"      HTTP_PORT
-  warn_if_taken "$SRT_PORT"  udp "SRT ingest"  SRT_PORT
-  [ "$ENABLE_RTMP" = yes ] && warn_if_taken "$RTMP_PORT" tcp "RTMP ingest" RTMP_PORT
+  if [ "$MODE" = binary ]; then
+    warn_if_taken "$SRT_PORT"  udp "SRT ingest"
+    [ "$ENABLE_RTMP" = yes ] && warn_if_taken "$RTMP_PORT" tcp "RTMP ingest"
+  else
+    warn_if_taken "$SRT_PORT"  udp "SRT ingest"  SRT_PORT
+    [ "$ENABLE_RTMP" = yes ] && warn_if_taken "$RTMP_PORT" tcp "RTMP ingest" RTMP_PORT
+  fi
 
   header "=== TLS ==="
   echo "  Plain HTTP sends the login form and session cookie in clear text."
@@ -1523,8 +1619,15 @@ install_docker_mode() {
     # port of the same number instead: the container starts, the UI works, and
     # the ingest silently receives nothing. It is the single most common
     # first-run failure.
-    printf '      - "%s:%s/udp"\n' "$SRT_PORT" "$SRT_PORT"
-    [ "$ENABLE_RTMP" = yes ] && printf '      - "%s:%s"\n' "$RTMP_PORT" "$RTMP_PORT"
+    #
+    # HOST PORT ONTO THE SERVER'S PORT. The container side is where the server
+    # actually binds (SERVER_SRT_PORT/SERVER_RTMP_PORT, the database defaults);
+    # the host side is what the operator chose. This was "N:N", which for any
+    # N but the default published a port nothing inside the container listened
+    # on. If the listener is later moved under Settings -> Listeners, the
+    # container side here has to follow it.
+    printf '      - "%s:%s/udp"\n' "$SRT_PORT" "$SERVER_SRT_PORT"
+    [ "$ENABLE_RTMP" = yes ] && printf '      - "%s:%s"\n' "$RTMP_PORT" "$SERVER_RTMP_PORT"
     [ "$TLS_MODE" = acme ] && printf '      - "80:80"\n'
     printf '    volumes:\n'
     printf '      - polyemesis-data:/data\n'
@@ -2579,6 +2682,10 @@ print_summary() {
 
   echo "  ${BOLD}Point your encoder at${NC}"
   echo "    srt://${hostpart}:${SRT_PORT}?streamid=<token>"
+  if [ "$MODE" != docker ]; then
+    echo "  (the server's SRT port is set under Settings -> Listeners; if it was changed"
+    echo "  there, that number is the one to use, and the one to open in the firewall)"
+  fi
   echo "  The Sources page shows the token. It is the address, so every source"
   echo "  shares this one port — adding another needs no new port and no restart."
   echo
@@ -2625,8 +2732,12 @@ it gets tested.
 Options:
   --mode docker|binary   install mode (default: ask, then docker)
   --http-port N          web UI port (default 8080)
-  --srt-port N           SRT ingest port, UDP (default 6000)
-  --rtmp-port N          RTMP ingest port, tcp (default 1935; 0 declines it)
+  --srt-port N           SRT ingest port, UDP (default 6000). Docker mode maps
+                         this host port onto the server's 6000; binary mode
+                         refuses anything else -- the server's own port is set
+                         under Settings -> Listeners after sign-in.
+  --rtmp-port N          RTMP ingest port, tcp (default 1935; 0 declines it).
+                         Same rule as --srt-port.
   --rtmp                 accepted for compatibility; RTMP is published by default
   --tls off|selfsigned|acme
                          TLS mode. Not passing it takes the interactive
@@ -2731,6 +2842,9 @@ parse_args() {
       die "$pv must be between 1 and 65535, not ${!pv}"
     fi
   done
+  # Here as well as in the interview, so `--mode binary --srt-port N --check`
+  # says so before anything else runs.
+  refuse_unappliable_ports
 }
 
 main() {

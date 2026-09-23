@@ -1283,6 +1283,154 @@ for opt in 'max-size' 'max-file'; do
     || bad "the logging section does not set $opt, so it still has no ceiling"
 done
 
+step "20. A re-run does not read the install's own ports as taken"
+#
+# Re-running install.sh over a working install is the documented way to change
+# TLS or a port, and every port it asked about was already held -- by the very
+# service it was about to restart. warn_if_taken saw a listener, called it a
+# collision, and under --yes accepted its own offer: the web UI moved 8080 ->
+# 8081 and the summary advertised an SRT port nothing listened on. Measured on a
+# hand install adopted with `install.sh --mode binary --yes`.
+#
+# `ss` and `docker` are stubbed with the shapes the real tools print, so what is
+# under test is the installer's reading of them. The real `ss -p` output was
+# checked against a process named polyemesis in an ubuntu container.
+ports_stub="$work/ports-bin"; mkdir -p "$ports_stub"
+cat > "$ports_stub/ss" <<'SSSTUB'
+#!/usr/bin/env bash
+# Answers from fixture files. Without -p, ss prints no Process column, so the
+# users:(...) tail is stripped exactly as the real tool would omit it.
+flags="${1:-}"
+case "$flags" in *u*) f="${STUB_SS_UDP:-/dev/null}" ;; *) f="${STUB_SS_TCP:-/dev/null}" ;; esac
+case "$flags" in *p*) cat "$f" ;; *) sed 's/ *users:.*$//' "$f" ;; esac
+SSSTUB
+cat > "$ports_stub/docker" <<'DOCKERSTUB'
+#!/usr/bin/env bash
+# Only `docker port polyemesis`, which is how the installer asks whether a
+# published port is its own container's.
+if [ "${1:-}" = port ] && [ "${2:-}" = polyemesis ]; then
+  [ -n "${STUB_DOCKER_PORTS:-}" ] || { echo "Error: No such container: polyemesis" >&2; exit 1; }
+  printf '%s\n' "$STUB_DOCKER_PORTS"
+  exit 0
+fi
+exit 1
+DOCKERSTUB
+chmod +x "$ports_stub/ss" "$ports_stub/docker"
+
+ss_hdr='State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process'
+printf '%s\n%s\n%s\n' "$ss_hdr" \
+  'LISTEN 0      4096   *:8080            *:*    users:(("polyemesis",pid=4242,fd=9))' \
+  'LISTEN 0      4096   *:1935            *:*    users:(("polyemesis",pid=4242,fd=11))' > "$work/ss-tcp-ours"
+printf '%s\n%s\n' "$ss_hdr" \
+  'UNCONN 0      0      *:6000            *:*    users:(("polyemesis",pid=4242,fd=10))' > "$work/ss-udp-ours"
+printf '%s\n%s\n' "$ss_hdr" \
+  'LISTEN 0      511    0.0.0.0:8080      0.0.0.0:*    users:(("nginx",pid=77,fd=6))' > "$work/ss-tcp-nginx"
+printf '%s\n%s\n' "$ss_hdr" \
+  'LISTEN 0      4096   0.0.0.0:8080      0.0.0.0:*    users:(("docker-proxy",pid=90,fd=4))' > "$work/ss-tcp-proxy"
+# A listener on some OTHER port whose address happens to end in .8080-ish
+# digits must not count: 10.0.0.80 is an address, not port 80.
+printf '%s\n%s\n' "$ss_hdr" \
+  'LISTEN 0      4096   10.0.0.80:5000    0.0.0.0:*    users:(("sshd",pid=5,fd=3))' > "$work/ss-tcp-addr80"
+
+port_after() { # port_after <mode> <port> <proto> -> the port warn_if_taken leaves behind
+  ( load_install_defs || exit 1
+    MODE="$1"
+    ASSUME_YES=true
+    p="$2"
+    warn_if_taken "$2" "$3" "probe" p >/dev/null 2>&1
+    printf '%s' "$p" )
+}
+
+got="$(STUB_SS_TCP="$work/ss-tcp-ours" PATH="$ports_stub:$PATH" port_after binary 8080 tcp)"
+[ "$got" = 8080 ] \
+  && ok "binary re-run: tcp/8080 held by the running polyemesis stays 8080" \
+  || bad "binary re-run: the web UI was moved to $got because polyemesis itself holds 8080"
+got="$(STUB_SS_UDP="$work/ss-udp-ours" PATH="$ports_stub:$PATH" port_after binary 6000 udp)"
+[ "$got" = 6000 ] \
+  && ok "binary re-run: udp/6000 held by the running polyemesis stays 6000" \
+  || bad "binary re-run: SRT was moved to $got because polyemesis itself holds 6000"
+got="$(STUB_SS_TCP="$work/ss-tcp-proxy" STUB_DOCKER_PORTS=$'8080/tcp -> 0.0.0.0:8080\n6000/udp -> 0.0.0.0:6000' \
+  PATH="$ports_stub:$PATH" port_after docker 8080 tcp)"
+[ "$got" = 8080 ] \
+  && ok "docker re-run: tcp/8080 published by the polyemesis container stays 8080" \
+  || bad "docker re-run: the web UI was moved to $got because the polyemesis container publishes 8080"
+
+# The guard still has to guard. Somebody else's listener is a real collision.
+got="$(STUB_SS_TCP="$work/ss-tcp-nginx" PATH="$ports_stub:$PATH" port_after binary 8080 tcp)"
+[ "$got" = 8081 ] \
+  && ok "a port held by another program (nginx) is still reported and moved" \
+  || bad "a port held by nginx was left at $got -- the collision check stopped working"
+got="$(STUB_SS_TCP="$work/ss-tcp-proxy" STUB_DOCKER_PORTS='' PATH="$ports_stub:$PATH" port_after docker 8080 tcp)"
+[ "$got" = 8081 ] \
+  && ok "a docker-proxy that is NOT the polyemesis container is still a collision" \
+  || bad "any docker-proxy on the port was taken for ours (left at $got)"
+got="$(STUB_SS_TCP="$work/ss-tcp-ours" PATH="$ports_stub:$PATH" port_after docker 8080 tcp)"
+[ "$got" = 8081 ] \
+  && ok "in docker mode a bare polyemesis PROCESS still collides -- the container cannot bind over it" \
+  || bad "docker mode treated a host polyemesis process as its own container (left at $got)"
+got="$(STUB_SS_TCP="$work/ss-tcp-addr80" PATH="$ports_stub:$PATH" port_after binary 80 tcp)"
+[ "$got" = 80 ] \
+  && ok "an address ending in .80 is not read as port 80" \
+  || bad "10.0.0.80:5000 was read as a listener on port 80 (moved to $got)"
+
+step "21. SRT and RTMP ports only go where the server will actually listen"
+#
+# The server's SRT and RTMP listeners are runtime settings (Settings ->
+# Listeners, stored in the database, 6000 and 1935 on a new install). Nothing
+# install.sh writes reaches them. In binary mode --srt-port/--rtmp-port changed
+# only the firewall rule and the printed address; in docker mode they published
+# host N to container N, where nothing listens either.
+out="$(bash "$INSTALL" --mode binary --srt-port 6001 --check 2>&1)"
+case "$out" in
+  *"--srt-port"*"Listeners"*) ok "binary mode refuses --srt-port 6001 and says where the port is really set" ;;
+  *) bad "binary mode accepted --srt-port 6001, which the server never reads"
+     printf '        got: %s\n' "$(printf '%s' "$out" | head -3 | tr '\n' ' ')" ;;
+esac
+out="$(bash "$INSTALL" --mode binary --rtmp-port 1936 --check 2>&1)"
+case "$out" in
+  *"--rtmp-port"*"Listeners"*) ok "binary mode refuses --rtmp-port 1936 the same way" ;;
+  *) bad "binary mode accepted --rtmp-port 1936, which the server never reads" ;;
+esac
+out="$(bash "$INSTALL" --mode binary --srt-port 6000 --rtmp-port 0 --check 2>&1)"
+case "$out" in
+  *"Listeners"*) bad "binary mode refused the defaults (or --rtmp-port 0), which ARE what the server binds" ;;
+  *) ok "binary mode still accepts the default ports and --rtmp-port 0" ;;
+esac
+out="$(bash "$INSTALL" --mode docker --srt-port 6001 --check 2>&1)"
+case "$out" in
+  *"Listeners"*) bad "docker mode refused --srt-port, which it can honour by mapping the host port" ;;
+  *) ok "docker mode accepts --srt-port 6001" ;;
+esac
+
+# And docker mode honours it by publishing the chosen HOST port onto the port
+# the server binds INSIDE the container. Generated for real, with compose and
+# docker stubbed so nothing is pulled or started.
+compose_dir="$work/compose-ports"
+( load_install_defs || exit 1
+  INSTALL_DIR="$compose_dir"; MODE=docker; TLS_MODE=off
+  SRT_PORT=6001; RTMP_PORT=1936; ENABLE_RTMP=yes; COMPOSE_CMD=true
+  PATH="$ports_stub:$PATH" install_docker_mode >/dev/null 2>&1 )
+if grep -q '"6001:6000/udp"' "$compose_dir/docker-compose.yml" 2>/dev/null; then
+  ok "docker: --srt-port 6001 publishes host udp/6001 onto the server's udp/6000"
+else
+  bad "docker: --srt-port 6001 is not mapped onto the server's udp/6000: $(grep -h '/udp' "$compose_dir/docker-compose.yml" 2>/dev/null | tr -d ' ')"
+fi
+if grep -q '"1936:1935"' "$compose_dir/docker-compose.yml" 2>/dev/null; then
+  ok "docker: --rtmp-port 1936 publishes host tcp/1936 onto the server's tcp/1935"
+else
+  bad "docker: --rtmp-port 1936 is not mapped onto the server's tcp/1935"
+fi
+
+# The two numbers install.sh maps onto are the server's defaults. Pinned against
+# the Go source so the day the default moves, this fails instead of the ingest.
+srv_srt="$(sed -n 's/^SERVER_SRT_PORT=\([0-9]*\).*/\1/p' "$INSTALL")"
+srv_rtmp="$(sed -n 's/^SERVER_RTMP_PORT=\([0-9]*\).*/\1/p' "$INSTALL")"
+if grep -q "ListenerSettings{SRTPort: ${srv_srt:-x}, RTMPPort: ${srv_rtmp:-x}}" "$SCRIPTS/../internal/db/settings.go"; then
+  ok "install.sh's SERVER_SRT_PORT/SERVER_RTMP_PORT ($srv_srt/$srv_rtmp) match the server's listener defaults"
+else
+  bad "install.sh's server listener ports (${srv_srt:-unset}/${srv_rtmp:-unset}) do not match internal/db/settings.go's defaults"
+fi
+
 # ------------------------------------------------------------- vacuity guard
 #
 # THE VERDICT ABOVE IS DERIVED FROM COUNTERS, AND COUNTERS CANNOT SEE A STEP
