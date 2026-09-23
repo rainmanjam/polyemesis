@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
@@ -553,20 +554,43 @@ func (s *Server) setPlayoutTokenCookie(w http.ResponseWriter, token string, cros
 // playoutHandler serves the public origin: the access check above, then the
 // manager's own file handler.
 func (s *Server) playoutHandler() http.Handler {
-	// Built once. The inner handler consults settings per request, so a
-	// manager that is nil at route-build time is the only thing that has to be
-	// re-checked here.
-	var (
-		once  sync.Once
-		inner http.Handler
-	)
+	// WHICH MANAGER is resolved per request; only the handler built for it is
+	// remembered, keyed by that manager.
+	//
+	// This used to be a sync.Once, on the reasoning that the inner handler reads
+	// its settings per request. It does -- but its DIRECTORY is the manager's,
+	// and which manager serves the public page is itself a setting
+	// (playout.sourceId, filed ClassOnDemand in engine/reload.go: "resolved per
+	// request"). The Once froze that answer at the first public request after
+	// boot, so a PUT /settings naming another programme saved, showed in the
+	// console, and changed nothing an audience saw until a restart (exploratory
+	// row #4). It also froze a nil: a request that arrived before any engine was
+	// up pinned 503 for the life of the process, which the old comment here
+	// believed was "re-checked".
+	//
+	// Keyed on the manager rather than rebuilt per request because the handler
+	// is the manager's view onto its own directory and nothing else, so reusing
+	// it for the same manager is exact, and a switch is caught by the pointer
+	// comparing unequal. atomic rather than a mutex: two requests racing across
+	// a switch each build a handler for the manager THEY resolved and serve
+	// with it, and whichever Store lands last is merely the next cache hit --
+	// no request can be handed a handler for a manager it did not resolve.
+	type built struct {
+		m *playout.Manager
+		h http.Handler
+	}
+	var last atomic.Pointer[built]
 	resolve := func() http.Handler {
-		once.Do(func() {
-			if m := s.playoutManager(); m != nil {
-				inner = m.Handler(PlayoutPrefix)
-			}
-		})
-		return inner
+		m := s.playoutManager()
+		if m == nil {
+			return nil
+		}
+		if b := last.Load(); b != nil && b.m == m {
+			return b.h
+		}
+		b := &built{m: m, h: m.Handler(PlayoutPrefix)}
+		last.Store(b)
+		return b.h
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
