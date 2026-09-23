@@ -83,7 +83,7 @@ install or the data. They block v1.0 outright.
 
 ## Stage 6 — the backlog that is still open
 
-- #440 Windows heap abort — reopened, cause unexplained.
+- ~~#440 Windows heap abort~~ — closed 2026-09-04; fixed in 0.9.0 by making the engine's nil-receiver refusals explicit checks rather than hardware faults (CHANGELOG 0.9.0).
 - #398 respawn cause — original reading refuted; three parked branches hold the measurements (`fix/398-relay-probe-window`, `measure/398-rtmp`, `fix/398-seam-pin`).
 - #627 HEVC → RTMP — the most shippable of the three.
 - #628 / #631 grace-period kills and children outliving shutdown — both become tractable once #645 gives shutdown one budget.

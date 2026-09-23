@@ -230,3 +230,32 @@ func TestDocPrometheusExampleScrapesOverTLS(t *testing.T) {
 			"would pick 443, which is right only for some installs -- say it:\n%s", rel, body)
 	}
 }
+
+// TestDocWindowsAbortIsDescribedAsFixed: #440, the intermittent Windows runtime
+// abort, was traced and fixed in 0.9.0 and the issue closed on 2026-09-04. Two
+// releases later INSTALL.md's platform table, its Windows notes and the release
+// body release.yml publishes still called it a known unresolved defect -- and
+// scripts/test-release-gates.sh REQUIRED the release body to name it, so the
+// stale warning was enforced. Staging-readiness row 39. A warning about a fixed
+// bug costs twice: the operator avoids a platform for a reason that is gone,
+// and learns to skim the warnings that are still true.
+//
+// The property: every sentence that names #440 in operator-facing text says it
+// is fixed. Mentioning it at all stays allowed -- someone on 0.8.x needs to
+// know it exists.
+func TestDocWindowsAbortIsDescribedAsFixed(t *testing.T) {
+	sentenceEnd := regexp.MustCompile(`[.!?](\s|$)`)
+	for _, rel := range []string{"docs/INSTALL.md", "README.md", ".github/workflows/release.yml"} {
+		// Paragraphs, with their lines joined, so a sentence that wraps is
+		// still one sentence.
+		for _, para := range regexp.MustCompile(`\n\s*\n`).Split(readDoc(t, rel), -1) {
+			joined := strings.Join(strings.Fields(para), " ")
+			for _, s := range sentenceEnd.Split(joined, -1) {
+				if strings.Contains(s, "#440") && !strings.Contains(s, "fixed") {
+					t.Errorf("%s names #440 without saying it is fixed. It was fixed in 0.9.0 "+
+						"(issue closed 2026-09-04):\n    %s", rel, s)
+				}
+			}
+		}
+	}
+}

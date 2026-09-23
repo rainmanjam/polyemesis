@@ -43,6 +43,7 @@ var canonicalDriftTests = []string{
 	"TestOperatorDocsCiteSymbolsNotLineNumbers",
 	"TestDocAddrAdviceNamesTheFlagThatBeatsIt",
 	"TestDocTLSWarnsTheImageHealthcheckIsPlainHTTP",
+	"TestDocWindowsAbortIsDescribedAsFixed",
 }
 
 func TestTheDocsOnlyPathStillRunsTheDriftGuards(t *testing.T) {

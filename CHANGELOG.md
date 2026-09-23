@@ -44,6 +44,12 @@ its first tagged release.
   two of them ranges that ran backwards — are symbol names now, and a guard
   refuses a `file:line` citation in the operator docs.
 
+- **The release notes and `INSTALL.md` still called the Windows runtime abort
+  (#440) unresolved.** It was fixed in 0.9.0 and the issue is closed; the
+  release-gate test had been requiring the release body to name it, which kept
+  the stale warning in place. The Windows warning now names the defect that is
+  still open — a service stop truncates the recording in progress.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added
