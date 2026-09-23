@@ -1141,6 +1141,14 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("metrics: recordings usage unavailable", "err", err)
 	}
 
+	// The same install-wide sums GET /alerts/meta serves, so the scrape and
+	// the automation page cannot disagree. Only with a manager: without one
+	// there is no notifier, and zeros would read as "nothing has failed".
+	if s.mgr != nil {
+		st := s.alertStats()
+		snap.Alerts = &metrics.AlertDeliveries{Sent: st.Sent, Failed: st.Failed, LastSent: st.LastSent}
+	}
+
 	sys := s.hostSystem()
 	snap.Host = metrics.Host{
 		CPUPercent:     sys.CPUPercent,

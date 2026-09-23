@@ -33,7 +33,8 @@ machine-wide numbers, not the process's. Three scalars round the exposition out:
 `polyemesis_build_info`, always 1 and carrying a `version` label to join onto a
 dashboard or to alert on after a staged upgrade went somewhere unexpected;
 `polyemesis_uptime_seconds`; and `polyemesis_recording_files`, the segment count
-beside the byte counts.
+beside the byte counts. The alert rules' own delivery outcome is there too —
+see [When the alerts themselves stop arriving](#when-the-alerts-themselves-stop-arriving).
 
 **The endpoint requires authentication.** It accepts an API token, which is what
 a scraper should use — create one under *Settings → API tokens* and point
@@ -274,6 +275,33 @@ right. Any other 4xx is the endpoint saying the request itself is wrong and is
 not retried at all. Raising the number is how you tolerate an endpoint that is
 down rather than slow; the backoff curve underneath is not exposed, and a saved
 change is applied to the running notifier of every programme without a restart.
+
+#### When the alerts themselves stop arriving
+
+An endpoint that refuses every delivery (a rotated Slack URL, a deleted
+Discord channel) cannot tell you so through itself. The *Automation → Alerts*
+page shows the failure count, but only to somebody who opens it. The scrape
+carries it too, summed over every programme:
+
+- `polyemesis_alert_deliveries_total{result="sent"}` and `{result="failed"}`
+  count deliveries, not events: one delivery carries everything coalesced into
+  it, and a failure is counted once the retry budget above is spent. Each
+  programme's count starts again from 0 when its engine restarts, which
+  `increase()` and `rate()` treat as a counter reset.
+- `polyemesis_alert_last_success_timestamp_seconds` is the Unix time of the
+  newest delivery that succeeded. It is **absent** until one has, not 0: a 0
+  would make every quiet install look decades overdue.
+
+The alert to write on it is the failure, not the silence, because a quiet
+night sends nothing either:
+
+```promql
+increase(polyemesis_alert_deliveries_total{result="failed"}[30m]) > 0
+  and increase(polyemesis_alert_deliveries_total{result="sent"}[30m]) == 0
+```
+
+That is "deliveries are being attempted and none is getting through". Route it
+somewhere other than the webhooks it is about.
 
 #### A receiver on your own network
 

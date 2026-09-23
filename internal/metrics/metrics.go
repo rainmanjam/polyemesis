@@ -71,6 +71,29 @@ type Snapshot struct {
 	Destinations []Destination
 	Recordings   Recordings
 	Host         Host
+
+	// Alerts is what the alert notifiers have delivered. Nil when there is no
+	// notifier to ask -- a process with no engine manager -- and then the
+	// families are omitted rather than published as zeros that would read as
+	// "nothing has failed".
+	Alerts *AlertDeliveries
+}
+
+// AlertDeliveries is the alert-rule delivery outcome, summed over every
+// engine's notifier (alert rules are install-wide; see api.alertStats).
+//
+// On the scrape because a webhook that has stopped accepting deliveries is the
+// one failure the alert path cannot report through itself. Only the
+// automation page showed it, and only to somebody who opened it.
+type AlertDeliveries struct {
+	// Sent and Failed count deliveries, not events: one delivery carries every
+	// event coalesced into it, and a failure is after the whole retry budget.
+	// Each notifier restarts from zero with its engine, which Prometheus reads
+	// as a counter reset.
+	Sent, Failed int64
+	// LastSent is the newest successful delivery, zero when there has been
+	// none. Zero omits the sample: see renderAlerts.
+	LastSent time.Time
 }
 
 // Process is one supervised FFmpeg child.
@@ -187,6 +210,7 @@ func Render(s Snapshot) string {
 	renderRelay(&d, s.Ingests)
 	renderRecordings(&d, s.Recordings)
 	renderHost(&d, s.Host)
+	renderAlerts(&d, s.Alerts)
 
 	return d.b.String()
 }
@@ -408,6 +432,26 @@ func renderRecordings(d *doc, r Recordings) {
 		"Free space on the volume holding the recordings directory.", float64(r.FreeBytes))
 	d.scalar("polyemesis_recording_total_bytes", "gauge",
 		"Size of the volume holding the recordings directory.", float64(r.TotalBytes))
+}
+
+// renderAlerts emits the delivery counters, and the last success only once
+// there has been one. A timestamp of 0 would make `time() - last_success` read
+// as fifty-odd years on every install that has simply had nothing to say yet;
+// an absent sample is a state a rule can ask about with absent() on purpose.
+func renderAlerts(d *doc, a *AlertDeliveries) {
+	if a == nil {
+		return
+	}
+	d.family("polyemesis_alert_deliveries_total", "counter",
+		"Alert-rule deliveries since the server started, by outcome. A failure is counted after the retry budget.")
+	d.sample("polyemesis_alert_deliveries_total", float64(a.Sent), label{"result", "sent"})
+	d.sample("polyemesis_alert_deliveries_total", float64(a.Failed), label{"result", "failed"})
+
+	d.family("polyemesis_alert_last_success_timestamp_seconds", "gauge",
+		"Unix time of the newest alert-rule delivery that succeeded; absent until one has.")
+	if !a.LastSent.IsZero() {
+		d.sample("polyemesis_alert_last_success_timestamp_seconds", float64(a.LastSent.Unix()))
+	}
 }
 
 func renderHost(d *doc, h Host) {

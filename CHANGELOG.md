@@ -8,6 +8,15 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- **Alert delivery failures are on the metrics endpoint.** A webhook that
+  stopped accepting deliveries showed only on the Automation page.
+  `/api/v1/metrics` now has `polyemesis_alert_deliveries_total{result="sent"|"failed"}`
+  and `polyemesis_alert_last_success_timestamp_seconds`, and MONITORING.md
+  gives the Prometheus rule for "deliveries are failing and none is getting
+  through".
+
 ### Fixed
 
 - **A programme whose engine failed to start is no longer invisible.** When
