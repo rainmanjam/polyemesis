@@ -78,6 +78,12 @@ its first tagged release.
   its `|| exit 1` closed the terminal it was pasted into. The page also no longer
   says a binary-mode `update.sh` "pulls": it stops at a verified backup, with the
   service stopped, and prints the two commands that finish the job.
+  It accepts the release asset as downloaded (mode 0644) rather than refusing it
+  as "no executable"; checks the copy with the new binary when the installed one
+  predates 0.9.0's `-verify-backup` (it would otherwise exit on an undefined
+  flag and call a good backup bad); and its way back restores the state —
+  database, `secret.key`, `tls/` — while keeping `recordings/`, `uploads/` and
+  the other media directories, instead of `rm -rf` of the whole data directory.
 
 - **`UPGRADING.md` had no note for 0.9.0 or 0.10.0.** 0.9.0 changed two
   defaults an existing install can hit — the loopback default bind, and a

@@ -49,7 +49,8 @@ sudo sh -eu -s -- "$PWD/polyemesis-v0.10.0-linux-amd64" <<'EOF'
 NEW="$1"                               # the binary you downloaded, as an absolute path
 DATA=/var/lib/polyemesis
 BIN=/usr/local/bin/polyemesis
-test -x "$NEW" || { echo "no executable at $NEW" >&2; exit 1; }
+test -f "$NEW" || { echo "no file at $NEW" >&2; exit 1; }
+chmod 0755 "$NEW"                      # a curl -fLO or browser download arrives 0644
 dest="$DATA.bak-$(date +%F-%H%M)"      # minutes, so a second upgrade today gets its own copy
 if [ -e "$dest" ]; then                # cp -a would nest the copy INSIDE the old one
   echo "refusing: $dest already exists" >&2; exit 1
@@ -61,7 +62,12 @@ if [ ! -f "$dest/secret.key" ]; then
   echo "refusing: $dest has no secret.key. Service is stopped: systemctl start polyemesis" >&2
   exit 1
 fi
-if ! "$BIN" -verify-backup "$dest"; then   # the RUNNING version checks its own schema
+V="$BIN"                               # the installed version checks the copy...
+if ! "$BIN" -help 2>&1 | grep -q -- -verify-backup; then
+  V="$NEW"                             # ...unless it predates 0.9.0, which has no -verify-backup
+  echo "installed binary predates -verify-backup (0.9.0); checking the copy with $NEW"
+fi
+if ! "$V" -verify-backup "$dest"; then
   echo "refusing: $dest does not verify. Service is stopped: systemctl start polyemesis" >&2
   exit 1
 fi
@@ -71,17 +77,48 @@ echo "upgraded; backup and previous binary in $dest"
 EOF
 ```
 
-`-verify-backup` runs before the binary is replaced, deliberately: the
-installed version is the one whose schema the copy should hold, and if the
-check fails you still have a working binary and an intact data directory. To go
-back afterwards:
+`-verify-backup` runs before the binary is replaced, deliberately: if the check
+fails you still have a working binary and an intact data directory. It uses the
+installed binary when that has the flag, and the new one when it does not:
+`-verify-backup` first shipped in 0.9.0, so an 0.8.x or older install would
+otherwise stop on `flag provided but not defined` and report a good backup as
+bad. Checking with the newer binary is sound because the check never migrates
+and never reads the schema version; it opens the copy read-only, runs SQLite's
+`integrity_check`, and looks for polyemesis's tables, which every release has.
+
+To go back afterwards, restore the **state** from the backup and leave the
+media alone. The data directory also holds `recordings/`, `uploads/`, `hls/`,
+`playout/`, `models/`, `fonts/` and `logs/`; deleting it and copying the backup
+over it would lose everything written there since the upgrade. The restored
+database does not list those newer files, but they stay on disk.
 
 ```sh
-sudo systemctl stop polyemesis
-sudo rm -rf /var/lib/polyemesis && sudo cp -a /var/lib/polyemesis.bak-<stamp> /var/lib/polyemesis
-sudo install -m 0755 /var/lib/polyemesis.bak-<stamp>/polyemesis.previous /usr/local/bin/polyemesis
-sudo systemctl start polyemesis
+sudo sh -eu -s -- /var/lib/polyemesis.bak-<stamp> <<'EOF'
+BAK="${1%/}"
+DATA=/var/lib/polyemesis
+for f in polyemesis.db secret.key polyemesis.previous; do
+  test -f "$BAK/$f" || { echo "refusing: $BAK has no $f" >&2; exit 1; }
+done
+systemctl stop polyemesis
+# the newer database's log must not be replayed into the older file
+rm -f "$DATA/polyemesis.db-wal" "$DATA/polyemesis.db-shm"
+for src in "$BAK"/* "$BAK"/.[!.]*; do
+  [ -e "$src" ] || continue
+  name="${src##*/}"
+  case "$name" in
+    polyemesis.previous|recordings|uploads|hls|playout|models|fonts|logs) continue ;;
+  esac
+  rm -rf "${DATA:?}/$name"             # polyemesis.db, secret.key, tls/ and other state
+  cp -a "$src" "$DATA/$name"
+done
+install -m 0755 "$BAK/polyemesis.previous" /usr/local/bin/polyemesis
+systemctl start polyemesis
+echo "rolled back to $BAK; media directories kept as they were"
+EOF
 ```
+
+Always restore `secret.key` with the database; see
+[Rolling back](#rolling-back).
 
 **The manual procedure, Docker.** Two shapes, and they upgrade differently:
 

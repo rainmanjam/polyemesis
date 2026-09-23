@@ -454,6 +454,50 @@ func TestDocManualUpgradeCarriesUpdateShGuards(t *testing.T) {
 			"passed; a failed check must leave the old binary in place", rel)
 	}
 
+	// PRE-0.9 INSTALLS. -verify-backup first shipped in 0.9.0, and this page
+	// sends exactly the operators who predate it here (no update.sh before
+	// 0.7.0; the 0.7.0 remediation). An installed binary without the flag
+	// exits 2 on "flag provided but not defined", which read as "your backup
+	// does not verify" and left the service stopped, every time.
+	if !strings.Contains(binary, "-help") || !strings.Contains(binary, "0.9.0") {
+		t.Errorf("%s's manual binary upgrade runs -verify-backup only with the installed binary; "+
+			"before 0.9.0 that binary has no such flag, so the procedure refuses every older "+
+			"install. It must detect the flag (-help) and fall back to the new binary", rel)
+	}
+	// A release asset fetched with curl -fLO or a browser is mode 0644. A
+	// `test -x` refused the documented download on its first run, with a
+	// message that pointed at the path rather than the mode.
+	if strings.Contains(binary, `test -x "$NEW"`) || !strings.Contains(binary, `chmod`) {
+		t.Errorf("%s's manual binary upgrade refuses a downloaded asset for lacking the execute "+
+			"bit; check it is a file and chmod it instead", rel)
+	}
+
+	// RESTORE THE STATE, NOT THE MEDIA. The data directory also holds
+	// recordings/, uploads/, hls/, playout/...; `rm -rf` of it followed by a
+	// copy of the backup deleted everything recorded since the upgrade.
+	wholeDir := regexp.MustCompile(`rm -rf\s+("?\$\{?DATA(:\?)?\}?"?|/var/lib/polyemesis)(\s|&|;|$)`)
+	var rollback string
+	for _, b := range fencedBlocks(sec) {
+		body := strings.Join(b, "\n")
+		if loc := wholeDir.FindString(body); loc != "" {
+			t.Errorf("%s: a block in \"The short version\" runs %q, which deletes every recording "+
+				"and upload made since the backup; restore the state and leave the media:\n%s", rel, loc, body)
+		}
+		if body != binary && strings.Contains(body, "polyemesis.previous") && strings.Contains(body, "systemctl stop") {
+			rollback = body
+		}
+	}
+	if rollback == "" {
+		t.Errorf("%s: the manual binary upgrade has no way back after it", rel)
+	} else {
+		for _, m := range []string{"recordings", "uploads", "polyemesis.db-wal"} {
+			if !strings.Contains(rollback, m) {
+				t.Errorf("%s's manual rollback does not mention %q: it must keep the media "+
+					"directories and drop the newer database's -wal/-shm", rel, m)
+			}
+		}
+	}
+
 	if !strings.Contains(docker, "--build") || !strings.Contains(docker, "git pull") {
 		t.Errorf("%s's Docker upgrade for a clone must `git pull` and `up -d --build`: the "+
 			"repository's compose service has build:, so `pull` fetches nothing", rel)
