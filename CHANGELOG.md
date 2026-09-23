@@ -37,7 +37,11 @@ its first tagged release.
   `PUT` that sends back an out-of-date one is refused with `409
   settings_conflict` and nothing is stored. The console sends it on every save
   and, on a conflict, keeps your draft and offers a reload. Clients that send no
-  `version` are not checked.
+  `version` are not checked. A save that is stored and then answers with an
+  error (`503 no_source` for an ingest change before any source exists, or a
+  failed reconcile) returns the stored `version` in the error body. The console
+  sends that version on its next save, so that save is not refused as a
+  conflict with your own change.
 
 ## [0.10.0] — 2026-09-23
 

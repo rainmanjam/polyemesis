@@ -58,6 +58,34 @@ describe("the settings version", () => {
     expect(isSettingsConflict(new ApiError(409, "other", "account_in_use"))).toBe(false);
   });
 
+  /* A save that the server STORED and then refused -- no_source for the
+   * ingest half of a first-time operator's save, or a failed reconcile -- comes
+   * back as an error carrying the version now stored. The page holds the
+   * document it read and never sees that version, so without this its next
+   * save sent the old one and was refused as "changed by someone else": a
+   * conflict with the operator's own change. putSettings carries it forward
+   * itself, so no page can forget to. */
+  it("follows the version an error-after-store handed back, so a retry does not conflict with itself", async () => {
+    respondWith(503, { error: "no source", code: "no_source", version: "v2" });
+    const err = await api.putSettings({ version: "v1" } as Settings).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+
+    const fetchMock = respondWith(200, { version: "v3", reload: [] });
+    await api.putSettings({ version: "v1" } as Settings);
+    const sent = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(sent.version, "the retry sent the version the page read, which the server has since replaced with its own save").toBe("v2");
+  });
+
+  it("does not move a version forward for an error that stored nothing", async () => {
+    respondWith(409, { error: "changed by someone else", code: "settings_conflict" });
+    await api.putSettings({ version: "w1" } as Settings).catch(() => undefined);
+
+    const fetchMock = respondWith(200, { version: "w2", reload: [] });
+    await api.putSettings({ version: "w1" } as Settings);
+    const sent = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(sent.version).toBe("w1");
+  });
+
   it("agrees with the constant the server emits", () => {
     const src = readFileSync(
       join(fileURLToPath(new URL("../../../", import.meta.url)), "internal/api/api.go"),

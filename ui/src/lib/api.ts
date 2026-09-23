@@ -77,6 +77,7 @@ import type {
   StreamHealthView,
   DebugState,
   SystemInfo,
+  SettingsVersion,
   SystemStats,
   TlsStatus,
   TourState,
@@ -152,17 +153,28 @@ export class ApiError extends Error {
    *  that breaks the error path. */
   readonly destinations: AccountDestination[];
 
+  /** The settings version the server STORED before refusing, `""` when it
+   *  stored nothing.
+   *
+   *  Only PUT /settings sends this, on the errors that come after its store
+   *  -- a refused ingest on an install with no source, a failed reconcile.
+   *  Lifted here for the reason `destinations` is: the body is gone by the
+   *  time a caller sees the throw. putSettings is its one reader. */
+  readonly storedVersion: string;
+
   constructor(
     status: number,
     message: string,
     code = "",
     destinations: AccountDestination[] = [],
+    storedVersion = "",
   ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.destinations = destinations;
+    this.storedVersion = storedVersion;
   }
 }
 
@@ -274,7 +286,11 @@ async function request<T>(
       body && typeof body === "object" && "code" in body
         ? String((body as { code: unknown }).code)
         : "";
-    throw new ApiError(resp.status, msg, code, refusedDestinations(body));
+    const storedVersion =
+      body && typeof body === "object" && "version" in body
+        ? String((body as { version: unknown }).version)
+        : "";
+    throw new ApiError(resp.status, msg, code, refusedDestinations(body), storedVersion);
   }
   reportReconcileFailure(body);
   return body as T;
@@ -432,6 +448,22 @@ export function uploadMedia(
   });
 }
 
+/** Settings versions that a save FROM THIS PAGE replaced even though it
+ *  answered with an error: read-at version -> the version then stored.
+ *
+ *  PUT /settings stores the document before it can refuse the ingest half of
+ *  it (no source yet) or fail to apply it (a reconcile), and says so by
+ *  putting the stored version on the error. The page that saved is still
+ *  holding the document it READ, whose version the server has now moved on
+ *  from -- by this page's own hand. Sending that old version on the next save
+ *  was refused as "changed by someone else", which is false.
+ *
+ *  Kept HERE rather than in each of the four pages that save settings, so
+ *  none of them can forget: every save goes through putSettings. Only a
+ *  version this client itself replaced is followed; a change made anywhere
+ *  else moves the stored version past the one recorded, and still conflicts. */
+const settingsVersionsReplacedHere = new Map<string, SettingsVersion>();
+
 export const api = {
   // --- automod ---
   automodMatrix: () => get<AutomodMatrixView>("/automod/matrix"),
@@ -584,10 +616,23 @@ export const api = {
    *  `version` is NOT discarded, and must not be: it is what the next save
    *  from the same page is checked against. See Settings.version. */
   putSettings: async (s: Settings): Promise<Settings> => {
-    const { reload: _reload, ...saved } = await put<Settings & { reload?: unknown }>(
-      "/settings",
-      s,
-    );
+    // A version this client's OWN earlier save replaced, followed forward --
+    // see settingsVersionsReplacedHere.
+    const sent = s.version;
+    const current = sent ? settingsVersionsReplacedHere.get(sent) : undefined;
+    let result: Settings & { reload?: unknown };
+    try {
+      result = await put<Settings & { reload?: unknown }>(
+        "/settings",
+        current ? { ...s, version: current } : s,
+      );
+    } catch (err) {
+      if (sent && err instanceof ApiError && err.storedVersion) {
+        settingsVersionsReplacedHere.set(sent, err.storedVersion as SettingsVersion);
+      }
+      throw err;
+    }
+    const { reload: _reload, ...saved } = result;
     // The screen that made the change reads in the new zone immediately,
     // rather than at the next reload -- see getSettings above.
     setDisplayTimeZone((saved as Settings).display?.timeZone);

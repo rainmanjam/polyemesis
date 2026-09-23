@@ -491,7 +491,12 @@ the document since — another operator, the scheduler flipping the playlist,
 `PUT /jobs/policy` — the save is refused with `409` and
 `{"code": "settings_conflict"}`, and **nothing in it is stored**. Read again,
 reapply your change, and save. The `PUT` response carries the new `version`, so
-you can save twice in a row without reading in between. A body with no
+you can save twice in a row without reading in between. So does an error that
+comes AFTER the document was stored -- the `503 no_source` for an ingest change
+on an install with no source (the rest of the document is saved), a failed
+ingest write-through, a failed reconcile: its body carries the `version` now
+stored, and your next save should send that one, or it will conflict with
+your own change. A body with no
 `version` is not checked, which keeps older scripts working and also means they
 still overwrite whatever was saved since they read. The console always sends
 it.

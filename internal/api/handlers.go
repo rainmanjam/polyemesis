@@ -1755,6 +1755,26 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// basis. UpdateSettings has just serialised this same document into SQLite,
 	// so neither call can realistically fail anyway.
 	savedJSON, _ := json.Marshal(settings)
+	// failStored is the only way to answer an error from here down, because
+	// every exit from here down happens AFTER the document was stored.
+	//
+	// It carries the version of what is now stored. Without it the page keeps
+	// the version it read, and its next save is refused with settings_conflict
+	// -- "changed by someone else" -- about the change the operator just made:
+	// a first-time operator who touched the ingest and a recording setting on
+	// the default tab got a 503 for the ingest and then a 409 for the retry.
+	//
+	// `version` is what the conflict check will compare the next save against,
+	// so it has to be the digest GET /settings would serve NOW. Each caller
+	// passes the document that is true at its exit; "" when the handler cannot
+	// know, which leaves the page on its old version -- a false conflict, never
+	// a missed one.
+	failStored := func(status int, code, msg, version string) {
+		writeJSON(w, status, storedSettingsError{
+			apiError: apiError{Error: msg, Code: code},
+			Version:  version,
+		})
+	}
 	if sections := changedSections(storedJSON, savedJSON); len(sections) > 0 {
 		s.publishAudit(auditSettingsChanged(sections, s.clientIP(r)))
 	}
@@ -1796,14 +1816,21 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	switch id, err := s.store.DefaultSourceID(); {
 	case err == nil:
 		if src, err := s.store.GetSource(id); err == nil && !ingestEqual(src.Ingest, settings.Ingest) {
+			// What GET will serve if the write-through fails: the blob as
+			// stored, with the source's ingest -- which is still the old one --
+			// overlaid on it.
+			served := settings
+			served.Ingest = src.Ingest
 			src.Ingest = settings.Ingest
 			if err := s.store.UpdateSource(src); err != nil {
-				writeError(w, http.StatusBadRequest, "ingest settings: "+err.Error())
+				failStored(http.StatusBadRequest, "", "ingest settings: "+err.Error(), settingsVersion(served))
 				return
 			}
 		}
 	case errors.Is(err, db.ErrSourceNotFound):
 	default:
+		// No version here, deliberately: the store cannot say which source GET
+		// would overlay, so the page is left on its old one (see failStored).
 		writeStoreError(w, err)
 		return
 	}
@@ -1816,7 +1843,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// ingest returned 200 while no listener ever bound, which is exactly the
 	// kind of silent no-op that is worse than an error.
 	if rw := s.reconcileNow("the settings"); rw != "" {
-		writeError(w, http.StatusInternalServerError, rw)
+		failStored(http.StatusInternalServerError, "", rw, settingsVersion(settings))
 		return
 	}
 	// Chat retention is not the manager's to reconcile -- the Hub owns it -- and
@@ -1856,7 +1883,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// fresh-install empty state, not a fault, and the dashboard branches on the
 	// code rather than reading the English.
 	if ingestRefused {
-		writeNoSource(w)
+		// The refused ingest was put back to the stored one inside the
+		// closure, and with no source there is nothing to overlay, so
+		// `settings` is exactly the document GET now serves.
+		writeNoSourceStored(w, settingsVersion(settings))
 		return
 	}
 
@@ -1894,6 +1924,16 @@ type settingsResponse struct {
 	db.Settings
 	Version string                `json:"version,omitempty"`
 	Reload  []engine.ReloadReport `json:"reload"`
+}
+
+// storedSettingsError is an error from PUT /settings that arrives after the
+// document was stored: the usual {error, code} plus the version now stored.
+// See failStored in handlePutSettings. apiError is embedded so the body is the
+// shape every other refusal has, and a client that ignores `version` reads it
+// exactly as before.
+type storedSettingsError struct {
+	apiError
+	Version string `json:"version,omitempty"`
 }
 
 // ApplyChatRetention pushes the stored bounds into a running Hub.

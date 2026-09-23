@@ -1937,6 +1937,18 @@ func writeNoSource(w http.ResponseWriter) {
 	writeErrorCode(w, http.StatusServiceUnavailable, codeNoSource, noSourceMsg)
 }
 
+// writeNoSourceStored is the same refusal from PUT /settings, which answers it
+// AFTER storing the rest of the document and so has to hand back the version
+// it stored -- see failStored in handlePutSettings. A named helper rather than
+// an inline body so TestEveryNoSourceRefusalIsAGuardOrIsRecorded still finds
+// the site by name.
+func writeNoSourceStored(w http.ResponseWriter, version string) {
+	writeJSON(w, http.StatusServiceUnavailable, storedSettingsError{
+		apiError: apiError{Error: noSourceMsg, Code: codeNoSource},
+		Version:  version,
+	})
+}
+
 // requireSource refuses a request that needs a running programme when there is
 // none.
 //

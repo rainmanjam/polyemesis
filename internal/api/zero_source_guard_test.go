@@ -152,7 +152,7 @@ func TestEveryNoSourceRefusalIsAGuardOrIsRecorded(t *testing.T) {
 			}
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				id, isIdent := n.(*ast.Ident)
-				if isIdent && (id.Name == "writeNoSource" || id.Name == "errNoSource") {
+				if isIdent && (id.Name == "writeNoSource" || id.Name == "writeNoSourceStored" || id.Name == "errNoSource") {
 					found[fn.Name.Name] = true
 				}
 				return true
