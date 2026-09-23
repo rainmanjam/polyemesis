@@ -3,24 +3,34 @@
 ## The short version
 
 polyemesis migrates its own database on startup. In the normal case, upgrading
-is: stop, replace the binary or pull the image, start.
+is: stop, replace the binary or pull the image (rebuild it, from a clone), start.
 
 **Back up `<dataDir>` first, and check that the backup contains `secret.key`.**
 Migrations run forward only — there is no downgrade path, and a backup is the
 only way back. **From 0.7.0 onward a backup without that one file is not a
 backup**, because the stream keys in the database are sealed with it and nothing
-else can open them. 0.7.0 (2026-08-28) and 0.8.0 (2026-09-01) are both released,
-so this applies to you now; see
+else can open them. 0.7.0 was released on 2026-08-28 and every release since
+carries the same rule, so this applies to you now; see
 [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back)
 before you start, including its **mandatory** remediation if you have already
 upgraded.
 
-**`install.sh` writes a guarded `update.sh` that does all of this for you** — it
-takes the backup, refuses to proceed if the archive is empty or missing
-`secret.key`, and only then pulls. If you installed with `install.sh`, run
-`<installDir>/update.sh` rather than the manual steps below. Operators who
-installed before 0.7.0 do not have it: re-run `install.sh` to regenerate it, or
-follow the manual procedure and do the `secret.key` check by hand.
+**`install.sh` writes a guarded `update.sh` that does most of this for you** —
+it stops the service, takes the backup, refuses to proceed if the copy is
+missing `secret.key` or does not open, and then:
+
+- **docker mode:** pulls the new image and brings the container back up. That
+  is the whole upgrade.
+- **binary mode:** stops there, **with the service still stopped**, and prints
+  the two commands that finish it — install the new binary, start the service.
+  It does not download anything; fetch the release asset first
+  (`polyemesis-<tag>-linux-<arch>`, checked against `SHA256SUMS`) and use its
+  name where the printed command says `./polyemesis`.
+
+If you installed with `install.sh`, run `sudo <installDir>/update.sh` rather
+than the manual steps below — including for a binary you copied in by hand
+afterwards. Operators who installed before 0.7.0 do not have it: re-run
+`install.sh` to regenerate it, or follow the manual procedure.
 
 > This page had said 0.7.0 was *"not yet released"* here while saying seventy
 > lines further down that it was tagged and that its remediation was mandatory.
@@ -28,31 +38,135 @@ follow the manual procedure and do the `secret.key` check by hand.
 > requirement was not theirs yet. Corrected 2026-09-03; the version-specific
 > notes below have been the authority throughout.
 
-```sh
-# Binary
-systemctl stop polyemesis
-cp -a /var/lib/polyemesis /var/lib/polyemesis.bak-$(date +%F)
-# ... replace the binary ...
-systemctl start polyemesis
+**The manual procedure, binary install.** The same guards `update.sh` applies,
+in a form you can paste: it runs in its own shell, so a refusal stops the
+procedure without closing your terminal, and nothing after a failed check runs.
+Put the name of the binary you downloaded on the first line; the paths inside
+are the defaults `install.sh` and the shipped unit use.
 
-# Docker
-docker compose down
-docker volume inspect polyemesis-data >/dev/null || exit 1   # see the warning below
-docker run --rm -v polyemesis-data:/data -v "$PWD:/backup" alpine \
-  tar czf /backup/polyemesis-$(date +%F).tar.gz -C /data .
-tar tzf polyemesis-$(date +%F).tar.gz | wc -l                # more than 1 = real
-docker compose pull && docker compose up -d                  # image: rainmanjam/polyemesis (install.sh)
-# or, for the repo's own docker-compose.yml, which BUILDS the image:
-git pull && docker compose up -d --build
+```sh
+sudo sh -eu -s -- "$PWD/polyemesis-v0.10.0-linux-amd64" <<'EOF'
+NEW="$1"                               # the binary you downloaded, as an absolute path
+DATA=/var/lib/polyemesis
+BIN=/usr/local/bin/polyemesis
+test -f "$NEW" || { echo "no file at $NEW" >&2; exit 1; }
+chmod 0755 "$NEW"                      # a curl -fLO or browser download arrives 0644
+dest="$DATA.bak-$(date +%F-%H%M)"      # minutes, so a second upgrade today gets its own copy
+if [ -e "$dest" ]; then                # cp -a would nest the copy INSIDE the old one
+  echo "refusing: $dest already exists" >&2; exit 1
+fi
+systemctl stop polyemesis              # a live WAL database does not copy consistently
+cp -a "$DATA" "$dest"
+cp -a "$BIN" "$dest/polyemesis.previous"   # the way back, kept beside the data
+if [ ! -f "$dest/secret.key" ]; then
+  echo "refusing: $dest has no secret.key. Service is stopped: systemctl start polyemesis" >&2
+  exit 1
+fi
+V="$BIN"                               # the installed version checks the copy...
+if ! "$BIN" -help 2>&1 | grep -q -- -verify-backup; then
+  V="$NEW"                             # ...unless it predates 0.9.0, which has no -verify-backup
+  echo "installed binary predates -verify-backup (0.9.0); checking the copy with $NEW"
+fi
+if ! "$V" -verify-backup "$dest"; then
+  echo "refusing: $dest does not verify. Service is stopped: systemctl start polyemesis" >&2
+  exit 1
+fi
+install -m 0755 "$NEW" "$BIN"
+systemctl start polyemesis
+echo "upgraded; backup and previous binary in $dest"
+EOF
 ```
 
-> **A compose file with `build:` is not upgraded by `docker compose pull`.** The
-> pull skips a service that has no `image:`, `up -d` restarts the image already
-> on disk, and both exit 0. The repo's `docker-compose.yml` is that shape, and
-> such a build reports its version as `compose` — which is why its update check
-> says the versions cannot be compared, and why `GET /upgrade/plan` tells it to
-> rebuild. To get a version the update check can compare, switch the service to
-> `image: rainmanjam/polyemesis:<version>` (the tag has no leading `v`).
+`-verify-backup` runs before the binary is replaced, deliberately: if the check
+fails you still have a working binary and an intact data directory. It uses the
+installed binary when that has the flag, and the new one when it does not:
+`-verify-backup` first shipped in 0.9.0, so an 0.8.x or older install would
+otherwise stop on `flag provided but not defined` and report a good backup as
+bad. Checking with the newer binary is sound because the check never migrates
+and never reads the schema version; it opens the copy read-only, runs SQLite's
+`integrity_check`, and looks for polyemesis's tables, which every release has.
+
+To go back afterwards, restore the **state** from the backup and leave the
+media alone. The data directory also holds `recordings/`, `uploads/`, `hls/`,
+`playout/`, `models/`, `fonts/` and `logs/`; deleting it and copying the backup
+over it would lose everything written there since the upgrade. The restored
+database does not list those newer files, but they stay on disk.
+
+```sh
+sudo sh -eu -s -- /var/lib/polyemesis.bak-<stamp> <<'EOF'
+BAK="${1%/}"
+DATA=/var/lib/polyemesis
+for f in polyemesis.db secret.key polyemesis.previous; do
+  test -f "$BAK/$f" || { echo "refusing: $BAK has no $f" >&2; exit 1; }
+done
+systemctl stop polyemesis
+# the newer database's log must not be replayed into the older file
+rm -f "$DATA/polyemesis.db-wal" "$DATA/polyemesis.db-shm"
+for src in "$BAK"/* "$BAK"/.[!.]*; do
+  [ -e "$src" ] || continue
+  name="${src##*/}"
+  case "$name" in
+    polyemesis.previous|recordings|uploads|hls|playout|models|fonts|logs) continue ;;
+  esac
+  rm -rf "${DATA:?}/$name"             # polyemesis.db, secret.key, tls/ and other state
+  cp -a "$src" "$DATA/$name"
+done
+install -m 0755 "$BAK/polyemesis.previous" /usr/local/bin/polyemesis
+systemctl start polyemesis
+echo "rolled back to $BAK; media directories kept as they were"
+EOF
+```
+
+Always restore `secret.key` with the database; see
+[Rolling back](#rolling-back).
+
+**The manual procedure, Docker.** Two shapes, and they upgrade differently:
+
+- **`install.sh --mode docker`** runs a published image, so the new version
+  arrives with `docker compose pull`. Use its `update.sh`.
+- **`docker compose` from a clone of this repository** *builds* its image — the
+  service has `build:`, not `image:` — so `docker compose pull` fetches nothing
+  and `up -d` restarts the version you already had, with no error. The new
+  version arrives with `git pull`, and reaches the container only with
+  `up -d --build`.
+
+  Such a build reports its version as `compose`, so the in-app update check
+  says the versions cannot be compared and `GET /upgrade/plan` tells it to
+  rebuild rather than pull. For an update check that can compare versions,
+  switch the service to `image: rainmanjam/polyemesis:<version>` -- image tags
+  have no leading `v` (`0.10.0`, not `v0.10.0`).
+
+For the clone, from its directory:
+
+```sh
+sh -eu <<'EOF'
+backups="$HOME/polyemesis-backups"     # OUTSIDE the clone -- see below
+vol=polyemesis-data                    # check with `docker volume ls` -- see the warning below
+docker volume inspect "$vol" >/dev/null
+mkdir -p "$backups"
+archive="$backups/polyemesis-$(date +%F-%H%M).tar.gz"
+[ ! -e "$archive" ] || { echo "refusing: $archive already exists" >&2; exit 1; }
+docker compose down                    # stopped, so the database is not copied mid-write
+docker run --rm -v "$vol:/data:ro" -v "$backups:/backup" alpine \
+  tar czf "/backup/${archive##*/}" -C /data .
+tar tzf "$archive" | grep -qx './secret.key' || {
+  echo "refusing: $archive has no secret.key. Bring it back with: docker compose up -d" >&2
+  exit 1; }
+git pull --ff-only
+docker compose up -d --build
+echo "upgraded; backup at $archive"
+EOF
+```
+
+**Keep the archive out of the clone.** The image build is `COPY . .` from the
+clone, and `.dockerignore` does not know about backup tarballs — an archive
+written into the working directory (as this page used to say, with
+`-v "$PWD:/backup"`) is copied into the build stage on the next `--build`,
+`secret.key` and all.
+
+The paste-safe `sh -eu <<'EOF'` form matters here too: the old snippet's
+`docker volume inspect … || exit 1` closed the terminal it was pasted into when
+the volume was missing — the moment you most need that terminal.
 
 > **Check the volume name before you trust the backup.** `docker run -v` creates
 > a missing volume instead of failing, so backing up a name that does not exist
@@ -98,13 +212,59 @@ instead.
 
 ## Version-specific notes
 
-> **Everything in this section is released and applies to you.** `v0.7.0`
-> (2026-08-28) and `v0.8.0` (2026-09-01) are both tagged; the newest heading in
-> [CHANGELOG.md](../CHANGELOG.md) is the authority on what a tag contains, and
-> `.github/workflows/release.yml`'s changelog-gate refuses to let a tag publish
-> unless that heading agrees with it. If you are coming from 0.6.0 or earlier,
-> the 0.7.0 note below — including its **mandatory** remediation — is work you
-> still have to do.
+> **Everything in this section is released and applies to you.** Read every
+> note between the version you run and the one you are moving to, newest
+> first. The newest heading in [CHANGELOG.md](../CHANGELOG.md) is the authority
+> on what a tag contains, and `.github/workflows/release.yml`'s changelog-gate
+> refuses to let a tag publish unless that heading agrees with it; every
+> released version has a note here, even when the note is "nothing to do". If
+> you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
+> **mandatory** remediation — is work you still have to do.
+
+### Upgrading to 0.10.0
+
+**No schema change.** `internal/db` is identical between `v0.9.0` and
+`v0.10.0` apart from a test, and the schema version stamped into the database
+is still `1`. So a 0.9.0 binary opens a database 0.10.0 has run against, and a
+rollback from 0.10.0 to 0.9.0 is the one step on this page where reinstalling
+the old binary is enough — though restoring the backup you took is still the
+path this page recommends, because it is the one you can check.
+
+Nothing to do beyond the short version above. Read the
+[CHANGELOG](../CHANGELOG.md) for what changed in behaviour.
+
+### Upgrading to 0.9.0
+
+Three changes an existing install can notice, none of which touch the data:
+
+- **The default listen address is loopback.** With no `config.yaml` and no
+  `--addr`, 0.9.0 binds `127.0.0.1:8080` instead of every interface. The
+  shipped systemd unit, the unit `install.sh` writes, every Dockerfile and
+  `config.example.yaml` all pass or set an address explicitly and are
+  unaffected. A bare binary started with no config, or a `config.yaml` with no
+  `addr` key, is now reachable only from the box itself — set `addr` or pass
+  `--addr` to widen it. See
+  [TLS.md → Binding, and the SSH tunnel](TLS.md#binding-and-the-ssh-tunnel).
+- **An explicit `--config` that does not exist refuses to start.** It used to
+  boot a second, empty install beside the real one — a new `secret.key`, an
+  empty database, and an open `POST /setup` — while looking healthy (#644).
+  A unit or launchd job that names a config file must now have one.
+- **A container with sources and no running engine fails its `HEALTHCHECK`**
+  where it used to pass.
+
+And one that is only good news: **a restored data directory without
+`secret.key` is no longer silent.** Boot still mints a fresh key, but it now
+logs an `ERROR` naming how many destinations cannot be read, and which.
+
+The generated `update.sh` also changed in 0.9.0 (it stops the service before
+copying, verifies the copy with `-verify-backup`, and keeps
+`polyemesis.previous`). It is written at install time, so re-run `install.sh`
+to get it on an older install.
+
+The schema version stamp is `1` in both 0.8.0 and 0.9.0, so a 0.8.0 binary
+does not refuse a database 0.9.0 has opened. That is not the same as the
+rollback being safe: 0.9.0 added migrations an 0.8.0 binary knows nothing
+about. Restore the backup.
 
 ### Upgrading to 0.7.0: sealed stream keys — **breaking to roll back**
 
@@ -117,22 +277,17 @@ comes back **disabled**, because a key that will not decrypt disables its
 destination rather than failing open with a wrong key. Nothing is wrong until
 you go live, which is the worst moment to find out.
 
-It is easy to get wrong, because `secret.key` is generated silently when it is
-absent. Restore the database without it and the server mints a fresh one, so
-there is no error to notice — just a new key that cannot open the old rows.
+It is easy to get wrong, because `secret.key` is generated when it is absent.
+Restore the database without it and the server mints a fresh one — a new key
+that cannot open the old rows. Through 0.8.x that happened with no error at
+all. From 0.9.0 boot logs an `ERROR` naming the destinations that cannot be
+read, but the server still starts and serves, so it is a line in a log, not a
+refusal: look for it.
 
 ```sh
 # Check your backup before you rely on it.
 tar tzf backup-<stamp>.tar.gz | grep secret.key
 ```
-
-That proves the file is there, not that it is the right key: one copied from
-another install, or an empty file, lists just the same. `polyemesis
--verify-backup <unpacked dir>` answers the second question too — it reads the
-key with the parser the server boots with and tries it on the values the
-database sealed, refusing a key that opens none of them. It writes nothing to
-the backup, so it is safe on the copy you are keeping. See
-[Removing it](INSTALL.md#removing-it) in INSTALL.md for the Docker form.
 
 **Rolling back to 0.6.0 blanks every stream key.** The sealing migration clears
 the plaintext column, and 0.6.0 has no concept of the encrypted one — so the
@@ -174,27 +329,10 @@ kill, a restart landing in the wrong second — used to come back, find no work 
 do, return before the checkpoint, and never truncate the log again.
 
 So an install that upgrades now gets its `-wal` cleared on the next start,
-whether or not the migration itself was interrupted.
-
-**`secure_delete` was not enough on its own either, and this section used to say
-it was.** It only governs writes made after it is set, and every release before
-0.7.0 ran without it. Measured by upgrading a real 0.6.0 install with five
-destinations to 0.10.0: two plaintext keys were still in `polyemesis.db` after a
-clean start and stop, in the unallocated space of the destinations table's first
-page, where SQLite left them when the third destination split that page. The
-migration never writes to those bytes. **From the release after 0.10.0 the
-upgrade runs `VACUUM` itself** whenever it seals keys, or opens a file last
-written by a release before 0.7.0, and then truncates the log — so upgrading
-straight from 0.6.x or earlier needs nothing by hand. `VACUUM` needs free disk
-space for a second copy of the database; if it fails the server refuses to
-start and says so, and the next start tries again.
-
-What upgrading cannot do is reach a database whose keys were already sealed by
-an earlier release: by then nothing is left to seal and the file is no longer a
-pre-0.7.0 one, so there is no signal to scrub on. **Any install that already ran
-the sealing migration under 0.7.0 through 0.10.0 — whether it started on 0.6.x
-or earlier — still needs `VACUUM` once by hand.** Run the pair, which remains the
-safe order:
+whether or not the migration itself was interrupted. What upgrading cannot do is
+undo the freed pages: `secure_delete` only governs writes made after it is set,
+so **an install that already ran the 0.7.0 migration still needs `VACUUM` once by
+hand.** Run the pair, which remains the safe order:
 
 ```sh
 systemctl stop polyemesis                      # or: docker compose down
@@ -342,38 +480,25 @@ you can stop.
 Restoring the data directory is not optional. The database will have been
 migrated, and the older binary will not understand it.
 
-**Binary installs made with `install.sh`: run the `rollback.sh` beside
-`update.sh`,** with the backup directory `update.sh` named:
-
-```sh
-sudo <installDir>/rollback.sh /var/lib/polyemesis.bak-<stamp>
-```
-
-It stops the service, restores the state from the backup (the database,
-`secret.key`, `tls/` and anything else that is not media), deletes the newer
-database's `-wal`/`-shm` so they cannot be replayed into the older file, puts
-the kept `polyemesis.previous` back as the binary, and starts the service. It
-refuses a directory that is not one of `update.sh`'s backups.
-
-**Restore the state, not the media.** `update.sh` used to print
-`rm -rf <dataDir> && cp -a <backup> <dataDir>`, which deleted every recording
-and upload made since the upgrade, since the data directory holds them all.
-`rollback.sh` leaves `recordings/`, `uploads/`, `hls/`, `playout/`, `models/`,
-`fonts/` and `logs/` alone and tells you how many files were written there since
-the backup. The restored database does not list those files, but they stay on
-disk. Doing it by hand, copy everything in the backup except those directories
-and `polyemesis.previous`.
-
-**Always restore `secret.key` with the database.** Restoring only
+**Restore the whole directory, including `secret.key`.** Restoring only
 `polyemesis.db` is the mistake this section exists to prevent: from 0.7.0 the
 database alone is not enough to publish, and the failure is silent until you go
 live. See [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back).
 
 ## Verifying an upgrade
 
+Set `POLYEMESIS_URL` to where this install answers. It is not `localhost:8080`
+for most installs: `install.sh` defaults to self-signed TLS on 443 in both
+modes. The table in
+[INSTALL.md → Verifying the install](INSTALL.md#verifying-the-install) lists
+each install shape; in short, `https://localhost` for an `install.sh` install
+that took the defaults, and `http://localhost:8080` for `docker compose` from a
+clone.
+
 ```sh
+export POLYEMESIS_URL=https://localhost      # see above
 polyemesis -version
-curl -s localhost:8080/api/v1/health
+curl -fsSk "${POLYEMESIS_URL:?set it first}/api/v1/health"
 ```
 
 **Check no destination came back disabled.** From 0.7.0 this is the first thing
@@ -381,18 +506,26 @@ to look at after an upgrade or a restore, because it is the one failure that
 looks like success:
 
 ```sh
-curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/v1/destinations \
-  | grep -o keyUnreadable | wc -l
+curl -fsSk -H "Authorization: Bearer $TOKEN" "${POLYEMESIS_URL:?set it first}/api/v1/destinations" \
+  | jq '[.[] | select(.destination.keyUnreadable) | .destination.name]'
 ```
 
 `$TOKEN` is an API token from **Settings → API tokens** (see
-[API.md](API.md)). Unauthenticated this endpoint answers `401`, and the count
-would be a meaningless zero — which reads as an all-clear for the very failure
-this check exists to find.
+[API.md](API.md)); a `read` token is enough.
 
-Anything above zero means those destinations could not decrypt their stream key
-— almost always a restore that omitted `secret.key`. Re-enter the key on each,
-or restore the file and restart.
+**`[]` is the all-clear, and it is the only one.** A list of names is the
+destinations that could not decrypt their stream key — almost always a restore
+that omitted `secret.key`. Re-enter the key on each, or restore the file and
+restart. **No output at all means the request failed**, and `curl` has said why
+on the line above: the wrong address, a certificate it would not accept, or a
+`401` for a missing token.
+
+This used to be `curl -s localhost:8080/… | grep -o keyUnreadable | wc -l`, and
+that form is worth recognising if you have it in a runbook. On an install
+serving HTTPS on 443 the request fails, `-s` hides the failure, and `wc -l`
+prints `0` — the all-clear, for the one failure this check exists to find. The
+exploratory test that caught it restored a data directory without `secret.key`
+and watched the old command report zero.
 
 Then, in the UI: the ingest goes live, each destination reports running, and the
 **Meters** page shows loudness after routing. That last one is the real check —

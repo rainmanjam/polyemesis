@@ -783,11 +783,12 @@ jobs:
       #     The update.sh that checks for this is generated at install time, so
       #     a 0.6.0 install is running the 0.6.0 helper, which does not check;
       #     re-running install.sh first is what regenerates it.
-      #   * WINDOWS SHIPS WITH KNOWN ABORTS (#584). windows/amd64 and
-      #     windows/arm64 are published here, and #440 is an intermittent Go
-      #     runtime abort that takes the whole process down mid-broadcast --
-      #     a different failure from the recording truncation docs/INSTALL.md
-      #     already names.
+      #   * WINDOWS IS TESTED, NOT OPERATED (#584). windows/amd64 and
+      #     windows/arm64 are published here with a known defect: a service
+      #     stop truncates the recording in progress. This bullet also named
+      #     #440, the intermittent Go runtime abort, as unresolved for two
+      #     releases after 0.9.0 fixed it and the issue closed -- a release
+      #     note that warns about a fixed bug is one operators learn to skip.
       #
       # generate_release_notes stays on: this is prepended to it, not instead
       # of it.
@@ -820,9 +821,9 @@ jobs:
             installer regenerates them. See
             [docs/UPGRADING.md](https://github.com/rainmanjam/polyemesis/blob/main/docs/UPGRADING.md).
 
-            **Windows is tested, not operated.** Two known unresolved defects:
-            recordings are truncated on service stop, and #440 — an intermittent
-            Go runtime abort that ends the process mid-broadcast. See
+            **Windows is tested, not operated.** One known unresolved defect:
+            recordings are truncated on service stop. (#440, the intermittent Go
+            runtime abort, was fixed in 0.9.0.) See
             [docs/INSTALL.md](https://github.com/rainmanjam/polyemesis/blob/main/docs/INSTALL.md#windows).
 
             Verify your download against `SHA256SUMS`, published below.

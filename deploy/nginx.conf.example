@@ -31,6 +31,14 @@
 # commented ":80" mapping commented — nginx owns port 80 here, including the
 # ACME challenge path below.
 #
+# ONE HOSTNAME, SERVED FROM ITS ROOT. Proxy `location /` of a server_name that
+# is polyemesis's alone, as below. A sub-path -- `location /polyemesis/` on a
+# host that serves something else -- does not work and cannot be made to with
+# rewrites: the console asks for /api/v1/..., its assets, its WebSocket and the
+# /hls/ preview by ABSOLUTE path (no Vite `base` is set, and the API base is a
+# hard-coded "/api/v1"), so behind a prefix they all go to the other site's
+# root. Give it its own name, e.g. polyemesis.example.com.
+#
 # Per-platform install and service setup: ../docs/INSTALL.md
 
 server {

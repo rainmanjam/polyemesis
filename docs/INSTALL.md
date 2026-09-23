@@ -266,24 +266,33 @@ requirement. Verified by building in a Linux container with the release's own
 flags and running the result on Apple Silicon:
 
 ```console
-$ codesign -dv polyemesis-darwin-arm64
+$ codesign -dv polyemesis-v0.9.0-darwin-arm64
 CodeDirectory v=20400 ... flags=0x20002(adhoc,linker-signed)
-$ ./polyemesis-darwin-arm64 -version
+$ ./polyemesis-v0.9.0-darwin-arm64 -version
 polyemesis v0.9.0
 ```
+
+The release assets carry the version in their name —
+`polyemesis-<tag>-darwin-arm64`, `polyemesis-<tag>-darwin-amd64` — so
+substitute the one you downloaded wherever this page says `./polyemesis`.
 
 What is *not* signed is a Developer ID, so the binary is not notarized.
 `spctl -a -t execute` reports `rejected` — that answers "would Gatekeeper
 approve this for distribution", not "will this run". Gatekeeper enforces on
 files carrying `com.apple.quarantine`, which a browser download sets and `curl`
-does not. If you hit it:
+does not. **Download with `curl`, or clear the flag before the first run:**
 
 ```bash
-xattr -d com.apple.quarantine ./polyemesis
+xattr -l ./polyemesis-v0.10.0-darwin-arm64          # com.apple.quarantine listed?
+xattr -d com.apple.quarantine ./polyemesis-v0.10.0-darwin-arm64
 ```
 
-A freshly quarantined binary can also sit for a minute or two on its first run
-while macOS scans it; the result is cached, and subsequent runs are immediate.
+Do it before you launch the file, not after. A quarantined binary does not
+always put up a dialog: in exploratory testing of 0.10.0 one sat silently in
+`_dyld_start` — no output, no error — and clearing the attribute after that
+blocked launch did not free it. If a first run prints nothing at all, stop it,
+fetch the asset again with `curl -fLO`, check it against `SHA256SUMS`, and run
+that copy.
 
 **Windows.** The `.exe` is unsigned, so SmartScreen shows a warning on first
 run — *More info → Run anyway*, once. It does not prevent the service from
@@ -315,7 +324,7 @@ Everything past that floor is where they diverge:
 | **Linux (server)** | The race detector, 13 acceptance suites and 3 container suites — none of which run on any other OS | **Primary.** Developed against, deployed, exercised |
 | **Docker** | The 3 container suites run against this exact image | **Primary.** Built from this repo, bundling a pinned FFmpeg |
 | **macOS** | Nothing further | **Daily driver.** Fine as a workstation and test rig. Homebrew's FFmpeg has no SRT — see below |
-| **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and two known unresolved defects — recording truncation on service stop, and an intermittent Go runtime abort (#440) — see the notes below |
+| **Windows** | Nothing further | **Unproven.** No live broadcast to a real platform, no exercise of the service wrapper or installer on a real host, and one known unresolved defect — recording truncation on service stop. The intermittent Go runtime abort (#440) this row used to name was traced and fixed in 0.9.0 — see the notes below |
 
 **On the recording truncation.** This table filed it as Windows-only, and that
 was wrong: it happened on Linux too, and had since the shared SRT listener was
@@ -637,18 +646,36 @@ the default.
 ### Run it as a service
 
 A hardened systemd unit ships in
-[`deploy/polyemesis.service`](../deploy/polyemesis.service):
+[`deploy/polyemesis.service`](../deploy/polyemesis.service). Run this from the
+clone you built in — it copies three files out of it:
 
 ```bash
 sudo cp polyemesis /usr/local/bin/
 sudo useradd --system --home /var/lib/polyemesis --shell /usr/sbin/nologin polyemesis
 sudo mkdir -p /var/lib/polyemesis /etc/polyemesis
+sudo chmod 0750 /var/lib/polyemesis    # holds stream keys -- see #297
 sudo chown polyemesis:polyemesis /var/lib/polyemesis
 sudo cp config.example.yaml /etc/polyemesis/config.yaml
 sudo cp deploy/polyemesis.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now polyemesis
 journalctl -u polyemesis -f
 ```
+
+**With a downloaded release binary instead of a clone,** the file is named
+`polyemesis-<tag>-linux-<arch>`, not `polyemesis`, so the first line becomes
+`sudo install -m 0755 polyemesis-v0.10.0-linux-amd64 /usr/local/bin/polyemesis`
+(with your tag and architecture). Take `config.example.yaml` and
+`deploy/polyemesis.service` from the same tag.
+
+**The `chmod 0750` is not decoration.** `mkdir` makes the directory `0755`
+under the usual umask, and it holds `secret.key` and a database of sealed stream
+keys. The unit's `UMask=0077` covers what the service creates *inside* it, not
+the directory you made by hand.
+
+The unit passes `--addr :8080` and `config.example.yaml` sets `tls.mode: auto`,
+which resolves to self-signed — so this install answers on
+`https://<host>:8080`, with a certificate warning until you
+[install the CA](TLS.md#trusting-the-self-signed-ca).
 
 Three details in that unit are load-bearing:
 
@@ -698,6 +725,13 @@ login throttling read client addresses out of a header — and leave `tls.mode: 
 does not bind `:80` and does not compete with the proxy for ACME challenges.
 There is a worked config in
 [`deploy/nginx.conf.example`](../deploy/nginx.conf.example).
+
+**Give polyemesis a hostname of its own and proxy `/`.** It cannot be served
+from a sub-path of another site (`https://example.com/polyemesis/`): the
+console requests its API, assets, WebSocket and HLS preview by absolute path,
+so behind a prefix those requests land on the other site's root and the page
+loads blank. `polyemesis.example.com` with `location /` works; see
+[TLS.md → Behind a reverse proxy](TLS.md#behind-a-reverse-proxy).
 
 SRT and RTMP ingest are **not HTTP** and cannot be proxied by nginx's HTTP
 server. Open those ports on the firewall so encoders reach polyemesis directly.
@@ -759,7 +793,27 @@ itself](#install-the-binary) above for why, and for `-addr :8080` /
 
 ### Run it at login, or at boot
 
-launchd. For a per-user agent that starts at login, write
+launchd. The job below points at two files that nothing above creates — the
+binary in `/usr/local/bin` and a `config.yaml` — so make both first. **The
+config file is not optional:** a `-config` path given explicitly and missing
+is a refusal to start (since 0.9.0, so a typo cannot boot a second, empty
+install), and under `KeepAlive` that refusal is a crash loop, logged once
+every ten seconds to `/tmp/polyemesis.log`.
+
+```bash
+# From the clone you built in (use the release asset's name if you downloaded one)
+sudo mkdir -p /usr/local/bin
+sudo install -m 0755 ./polyemesis /usr/local/bin/polyemesis
+mkdir -p "$HOME/Library/Application Support/polyemesis"
+cp config.example.yaml "$HOME/Library/Application Support/polyemesis/config.yaml"
+```
+
+`config.example.yaml` binds `127.0.0.1:8080` with `tls.mode: auto`, which on a
+Mac with no public hostname resolves to self-signed — so the console is at
+<https://localhost:8080>, not `http://`. `-data` in the plist overrides the
+example's `dataDir`.
+
+For a per-user agent that starts at login, write
 `~/Library/LaunchAgents/dev.polyemesis.plist`:
 
 ```xml
@@ -890,12 +944,15 @@ fails the first time it writes a recording.
 
 Four Windows-specific things worth knowing up front:
 
-- **An intermittent Go runtime abort on this platform (#440).** The process has
-  ended with `fatal error: found pointer to free object` on windows-latest,
-  during the test suite rather than in a broadcast, and it has not been
-  root-caused. It does not reproduce reliably and has not been observed on Linux
-  or macOS. Recorded here because a defect an operator can hit is one they are
-  entitled to know about before choosing this platform, not after.
+- **The intermittent Go runtime abort (#440) is fixed, from 0.9.0.** The
+  process had ended with `fatal error: found pointer to free object` on
+  windows-latest, during the test suite rather than in a broadcast. It was
+  traced to engine methods that refused a nil receiver by dereferencing it: on
+  Windows that is a hardware access violation, and Go's recovery from one can
+  write into the adjacent heap. Those methods now refuse with an explicit check,
+  and the issue is closed. It is named here because earlier versions of this
+  page, and of the release notes, listed it as unresolved — if you are running
+  0.8.x or older on Windows, it still applies to you.
 
 - **A service stop truncates an in-progress recording.** The graceful stop is a
   `CTRL_BREAK_EVENT`, and Windows delivers those only through a console, which a
@@ -916,11 +973,25 @@ Four Windows-specific things worth knowing up front:
 
 ## Verifying the install
 
-Same on every platform.
+Same on every platform — but **not the same address on every install**, so set
+it first. Pick the row that matches how you installed:
+
+| You installed with | `POLYEMESIS_URL` |
+|---|---|
+| `install.sh`, either mode, taking its defaults (self-signed TLS, offered 443) | `https://localhost` |
+| `install.sh` where you kept port 8080, or the hand-installed unit in [Run it as a service](#run-it-as-a-service) with `config.example.yaml` (`tls.mode: auto` resolves to self-signed) | `https://localhost:8080` |
+| `./polyemesis` with no `config.yaml`, or `docker compose` from a clone of this repository | `http://localhost:8080` |
 
 ```bash
-curl -s http://localhost:8080/api/v1/health
+export POLYEMESIS_URL=https://localhost      # from the table above
+curl -fsSk "${POLYEMESIS_URL:?set it from the table above}/api/v1/health"
 ```
+
+`-f` is the part that matters: without it a refused connection or an error
+status prints nothing and exits 0, which is easy to read as "fine". `-k`
+accepts the self-signed certificate — reasonable for a check made on the box
+itself; from elsewhere, install `<dataDir>/tls/ca.crt` instead (see
+[TLS.md](TLS.md)). An `http://` address ignores it.
 
 The health endpoint is unauthenticated on purpose, so it works before you have
 signed in and from a container healthcheck. Point monitoring at this exact
@@ -955,19 +1026,38 @@ tls mode=… hostname=…
 
 > **The startup warning about `:443` is not an error.** `internal/config`'s
 > `TLSPortWarning` prints it once at startup whenever TLS is being served and
-> the port read out of `addr` is neither `443` nor absent
-> (`internal/config/config.go:414-406`) — so `addr: "0.0.0.0:443"` silences it
-> just as `":443"` does, and nothing else does.
+> the port read out of the listen address is neither `443` nor absent (see
+> `TLSPortWarning` and `ListenPort` in `internal/config/config.go`) — so
+> `0.0.0.0:443` silences it just as `:443` does, and nothing else does.
 >
-> **Setting `addr: ":443"` is only half the fix on a systemd install.** The unit
-> runs unprivileged and cannot bind a port below 1024 without
-> `AmbientCapabilities=CAP_NET_BIND_SERVICE`, and `install.sh` grants that
-> **conditionally** — only when `tls.mode` is `acme`, or the port chosen *at
-> install time* is 443 or 80 (`scripts/install.sh:1508-1480`). So an operator
-> who declined the installer's "Serve HTTPS on 443?" offer and later edits
-> `config.yaml` gets a unit with no capability and a service that fails to bind.
-> Add both lines to the unit yourself, or use one of the alternatives
-> `deploy/polyemesis.service:51-57` lists (the
+> **On a systemd install, `addr:` in `config.yaml` changes nothing.** The
+> warning says to set `addr: ":443"` in `config.yaml`, and on the installs most
+> people have that is not where the port comes from. Both units pass the
+> address as a flag — `deploy/polyemesis.service` has `--addr :8080`, and the
+> unit `install.sh` writes has `--addr :<the port you chose>` — and a flag
+> beats the file (`main.go` applies `-addr` after loading `config.yaml`). Edit
+> the file, restart, and the server comes back on the same port with the same
+> warning. **Change the flag instead:** `sudo systemctl edit --full polyemesis`
+> and change `--addr` on the `ExecStart` line. (`install.sh` also writes the
+> same port into `config.yaml` as `addr:`, so the two agree until you edit one
+> of them; edit both.)
+>
+> The containers split. The repository's `docker-compose.yml` runs the image's
+> own `CMD`, which is `-addr :8080`, so there too the flag wins — override
+> `command:`. The compose file `install.sh --mode docker` writes replaces the
+> command with `-config /config.yaml` alone, so there `addr:` in `config.yaml`
+> *is* what counts; change it together with the `ports:` mapping and the
+> `healthcheck:` port beside it.
+>
+> **Then the capability.** The unit runs unprivileged and cannot bind a port
+> below 1024 without `AmbientCapabilities=CAP_NET_BIND_SERVICE`, and
+> `install.sh` grants that **conditionally** — only when `tls.mode` is `acme`,
+> or the port chosen *at install time* is 443 or 80 (the `caps` case in
+> `install_binary_mode`, `scripts/install.sh`). So an operator who declined the
+> installer's "Serve HTTPS on 443?" offer and later moves `--addr` to `:443`
+> gets a unit with no capability and a service that fails to bind. Add both
+> lines to the unit in the same edit, or use one of the alternatives the
+> `--- TLS ---` comment block in `deploy/polyemesis.service` lists (the
 > `net.ipv4.ip_unprivileged_port_start` sysctl, or a port forward).
 >
 > The operator this warning is really for is the one with a hand-written unit,

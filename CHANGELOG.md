@@ -360,6 +360,112 @@ its first tagged release.
   meter rows' status words (a family keyed together or not at all), the
   engine's own status sentence, and the model's default instruction, which is
   a setting sent to the model verbatim.
+- **The upgrade check for keys that did not survive a restore said "0" when it
+  had not run.** `docs/UPGRADING.md` counted `keyUnreadable` with
+  `curl -s localhost:8080/… | grep -o keyUnreadable | wc -l`. An `install.sh`
+  install serves HTTPS on 443, so the request failed, `-s` hid it, and `wc -l`
+  printed `0` — the all-clear, confirmed against a data directory restored
+  without `secret.key`. It also read a path the response does not have: rows are
+  `{"destination": {...}}`. The check is now `curl -f` against the operator's own
+  `$POLYEMESIS_URL`, and `jq` lists the affected destinations by name, so `[]` is
+  the all-clear and no output is a failed request. `INSTALL.md`'s health check
+  had the same hard-coded `http://localhost:8080`, which fails on every default
+  `install.sh` install; it now has a table of the three install shapes, and
+  `HARDWARE.md`'s encoder-verdict check had the same `curl -s localhost:8080`.
+  All three are held by `internal/testenv/operator_docs_test.go`.
+
+- **The Prometheus example sent its bearer token in cleartext.**
+  `docs/MONITORING.md` gave no `scheme`, and Prometheus defaults to `http` on
+  port 80 — which, on an install terminating TLS itself, is the HTTP→HTTPS
+  redirect. The token crossed the network once per scrape before the redirect
+  answered, and the scrape then failed against the self-signed certificate. The
+  example now says `scheme: https`, names `:443`, and verifies with
+  `tls_config.ca_file` pointing at the install's local CA.
+
+- **The docs told systemd operators to move to 443 by editing a line that
+  cannot move them.** `INSTALL.md`, `TLS.md` and `CONFIGURATION.md` all said to
+  set `addr: ":443"` in `config.yaml`, but both systemd units and the image's
+  `CMD` pass `--addr`, and `main.go` applies the flag after loading the file:
+  the server came back on the same port with the same warning. They now say
+  where the port actually comes from on each install shape, including that the
+  compose file `install.sh --mode docker` writes is the one where the file does
+  win. `TLS.md` also now warns that the image's `HEALTHCHECK` is plain HTTP, so
+  turning TLS on inside the container marks a healthy server unhealthy, and
+  gives the HTTPS replacement. `INSTALL.md`'s code citations by line number —
+  two of them ranges that ran backwards — are symbol names now, and a guard
+  refuses a `file:line` citation in the operator docs.
+
+- **The release notes and `INSTALL.md` still called the Windows runtime abort
+  (#440) unresolved.** It was fixed in 0.9.0 and the issue is closed; the
+  release-gate test had been requiring the release body to name it, which kept
+  the stale warning in place. The Windows warning now names the defect that is
+  still open — a service stop truncates the recording in progress.
+
+- **The macOS launchd job in `INSTALL.md` crash-looped as written.** It ran
+  `/usr/local/bin/polyemesis -config …/config.yaml`, and no step created either
+  file; a missing explicit `-config` refuses to start, and `KeepAlive` repeats
+  that forever. The section now installs the binary and copies
+  `config.example.yaml` first, and says the console is then on `https://`.
+  The Gatekeeper note uses the release asset's real name
+  (`polyemesis-<tag>-darwin-<arch>`) and says to clear the quarantine flag
+  before the first launch — a quarantined binary was seen to hang silently.
+
+- **`INSTALL.md`'s systemd steps left the data directory world-readable.** The
+  unit's own install notes had gained `chmod 0750 /var/lib/polyemesis` (the
+  directory holds `secret.key`); the page had not. It now has it, says the block
+  runs from a clone, gives the command for a downloaded release binary (whose
+  name carries the tag), and says the result answers on `https://<host>:8080`.
+
+- **`UPGRADING.md`'s manual upgrade now has `update.sh`'s guards, and its
+  Docker half upgrades.** The binary procedure is a paste-safe script that
+  stamps the backup to the minute, refuses an existing destination (a second
+  same-day upgrade used to nest its copy inside the first), keeps
+  `polyemesis.previous`, and runs `-verify-backup` before the binary is
+  replaced. The Docker half ran `docker compose pull` against the repository's
+  compose file, which *builds* its image — so it restarted the old version; a
+  clone now does `git pull` and `up -d --build`. Its backup tarball was written
+  into the clone, where the next build's `COPY . .` took it into the image, and
+  its `|| exit 1` closed the terminal it was pasted into. The page also no longer
+  says a binary-mode `update.sh` "pulls": it stops at a verified backup, with the
+  service stopped, and prints the two commands that finish the job.
+  It accepts the release asset as downloaded (mode 0644) rather than refusing it
+  as "no executable"; checks the copy with the new binary when the installed one
+  predates 0.9.0's `-verify-backup` (it would otherwise exit on an undefined
+  flag and call a good backup bad); and its way back restores the state —
+  database, `secret.key`, `tls/` — while keeping `recordings/`, `uploads/` and
+  the other media directories, instead of `rm -rf` of the whole data directory.
+
+- **`UPGRADING.md` had no note for 0.9.0 or 0.10.0.** 0.9.0 changed two
+  defaults an existing install can hit — the loopback default bind, and a
+  missing explicit `--config` refusing to start — and the page's banner still
+  named 0.8.0 as the newest release. Both versions now have a note (0.10.0: no
+  schema change, and a 0.9.0 binary opens its database), the 0.7.0 note no
+  longer says a missing `secret.key` produces "no error to notice" (0.9.0 logs
+  one), and every release from here on must have an `Upgrading to X.Y.Z`
+  section, held by a test and by `RELEASE-RUNBOOK.md`.
+
+- **Nothing said the console must be served from the root of its own
+  hostname.** It requests its API, assets, WebSocket and HLS preview by
+  absolute path, so behind `location /polyemesis/` on a shared host it loads
+  blank. `deploy/nginx.conf.example`, `INSTALL.md` and `TLS.md` now say to give
+  it a hostname of its own and proxy `/`.
+
+- **`API.md` described `stop-all` as unscoped and never mentioned its
+  confirmation body.** It is scoped by `?source=` when one is given, and it
+  refuses without `{"confirm": true}` — so a script written from the page got a
+  `400` on every call. Both are documented now, with an example. The page also
+  says the refused-route table has fifteen rows of which thirteen are `GET`s
+  (a test computes both from `readScopeDeniedPatterns`), that `/hls/*` is
+  mounted at the root, and what `POST /routing/compile` takes: the profile,
+  wrapped in `{"profile": …}`.
+
+- **The failover backup encoder's address was in no user-facing page.** It is
+  the source's publish token plus `.backup`, on the primary's port, for SRT and
+  RTMP alike; `docs/OBS.md` now says so, and that
+  `failover.backup.rtmp.streamKey` — which looks like the backup's address —
+  addresses nothing. `DESIGN-ONE-PORT-INGEST.md` no longer promises an
+  immediate reconnect after a blip: a new publisher is refused for three
+  seconds (`srtserver.StaleAfter`) after the old one's last packet.
 
 ## [0.10.0] — 2026-09-23
 

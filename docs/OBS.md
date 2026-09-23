@@ -198,6 +198,35 @@ For multiple audio tracks, use SRT ingest.
 
 ---
 
+## A backup encoder for failover
+
+With failover on and a backup ingest enabled, a second encoder can stand by for
+the same programme. **Its address is the source's publish token with `.backup`
+on the end**, on the same port as the primary:
+
+| Protocol | Backup encoder publishes to |
+|---|---|
+| SRT | `srt://<server>:6000?streamid=<token>.backup` |
+| RTMP | `rtmp://<server>:1935/live/<token>.backup` — Server `rtmp://<server>:1935/live`, Stream Key `<token>.backup` |
+
+`<token>` is the one in the primary's publish URL on the Sources page; the
+backup's address is derived from it rather than shown separately, so rotating
+the token moves the backup's address too — give the backup encoder the new one.
+The primary and the backup cannot take each other's slot: a publisher holding
+`<token>` is never accepted as the backup, nor the other way round.
+
+Two settings look like they configure this and do not:
+
+- **`failover.backup.rtmp.streamKey` addresses nothing.** Stream keys stopped
+  being addresses when RTMP moved to one port addressed by token; the field is
+  kept so an older settings blob loads, and the backup's RTMP address is
+  `<token>.backup` whatever it says. (The `live` path element is cosmetic — the
+  server accepts a publisher that omits it.)
+- **`failover.backup.srt.passphrase` is honoured** — it is the backup's own SRT
+  passphrase, and the primary's is used when it is empty.
+
+---
+
 ## See also
 
 - [QUICKSTART.md](QUICKSTART.md) — first stream in about five minutes

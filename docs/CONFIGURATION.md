@@ -256,6 +256,14 @@ once, and the machinery is already here.
    If you are debugging a certificate that never arrives, look for that line
    before you look at DNS.
 
+   **If the line is still there after you set `addr`, something is passing
+   `--addr`.** The flag wins over the file — `main.go` applies it after loading
+   `config.yaml` — and both systemd units (`deploy/polyemesis.service` and the
+   one `install.sh` writes) and the image's `CMD` pass it. On those, change the
+   port on the `ExecStart` line (`sudo systemctl edit --full polyemesis`) or in
+   compose's `command:`. See
+   [TLS.md → Binding, and the SSH tunnel](TLS.md#binding-and-the-ssh-tunnel).
+
    Binding 443 needs privilege. A systemd unit running as a non-root user also
    needs `AmbientCapabilities=CAP_NET_BIND_SERVICE` in its unit file, which
    `install.sh` grants for you. Keep a higher port only when something in

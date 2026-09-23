@@ -37,6 +37,21 @@ var canonicalDriftTests = []string{
 	"TestTheAPIDocumentDescribesNoRouteThatIsGone",
 	"TestEveryCapabilityCellAgreesWithTheCodeThatImplementsIt",
 	"TestThePagesHeadersRestateEverySecurityHeaderTheNginxConfigDeclares",
+	"TestDocVerifyCommandsFailLoudlyAndNameTheirURL",
+	"TestDocKeyUnreadableCountReadsTheWireShape",
+	"TestDocPrometheusExampleScrapesOverTLS",
+	"TestOperatorDocsCiteSymbolsNotLineNumbers",
+	"TestDocAddrAdviceNamesTheFlagThatBeatsIt",
+	"TestDocTLSWarnsTheImageHealthcheckIsPlainHTTP",
+	"TestDocWindowsAbortIsDescribedAsFixed",
+	"TestDocLaunchdJobHasEveryFileItNames",
+	"TestDocServiceInstallStepsMatchTheUnitHeader",
+	"TestDocManualUpgradeCarriesUpdateShGuards",
+	"TestDocEveryReleaseHasAnUpgradeNote",
+	"TestDocProxyExamplesServeTheConsoleFromARoot",
+	"TestAPIDocRefusedRouteTableIsReadScopeDeniedPatterns",
+	"TestAPIDocStopAllStatesItsConfirmBodyAndScope",
+	"TestDocBackupIngestAddressIsDocumented",
 }
 
 func TestTheDocsOnlyPathStillRunsTheDriftGuards(t *testing.T) {

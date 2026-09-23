@@ -80,8 +80,15 @@ the air and cannot get back on until a timeout they cannot see.
 polyemesis compares liveness before refusing. If the incumbent has delivered no
 data within a grace window it is evicted and the newcomer accepted; if the
 incumbent is genuinely live, the newcomer is refused with a rejection code that
-says so. Reconnect after a blip becomes immediate, and real double-publishing
-is still refused.
+says so. Real double-publishing is still refused.
+
+A reconnect is **not** immediate, and cannot be: the window is
+`srtserver.StaleAfter`, three seconds. An encoder that reconnects within three
+seconds of the incumbent's last packet is indistinguishable from a second
+publisher and is refused; its next attempt after the window is accepted.
+(Exploratory testing of 0.10.0 saw the refusal inside the window; this page
+had promised that a reconnect after a blip "becomes immediate".) The difference from Core is that the wait is bounded and
+short, not that there is none.
 
 This is the difference between "my stream came back" and "my stream is down and
 the server will not let me in".
