@@ -265,6 +265,28 @@ line was meant for RTMP or pull: change its **Ingest** on the Sources page.
 It could not have been receiving RTMP or pulling while it had no mode, so
 nothing that worked before stops working.
 
+### Upgrading past 0.10.0 (unreleased, on `main`): API deletes of a source, or of an on-air destination, must be confirmed
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`. It becomes that release's note when it is cut.
+
+**What changed.** `DELETE /api/v1/sources/{id}` now refuses (`400`) unless the
+request carries `{"confirm": true, "destinations": N}`, with `N` the source's
+current `destinations` count from `GET /api/v1/sources`; a count that no longer
+matches is `409` and deletes nothing. `DELETE /api/v1/destinations/{id}` now
+refuses (`400`) without `{"confirm": true}` when the destination is carrying a
+broadcast in `testing` or `live`. The console sends both itself; nothing
+changes for someone deleting from the web UI.
+
+**Who it hits.** Scripts and integrations that delete sources over the API
+with an admin token — every one of them, because the body is required on every
+source delete. Destination deletes are affected only for rows on air; a script
+that deletes its own idle or test destinations keeps working unchanged.
+
+**What to do.** Read the source's `destinations` count and send it with the
+delete, as in [the API reference](API.md#sources). Add `{"confirm": true}` to a
+destination delete that is meant to end its broadcast.
+
 ### Upgrading to 0.10.0
 
 **No schema change.** `internal/db` is identical between `v0.9.0` and

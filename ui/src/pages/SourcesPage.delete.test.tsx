@@ -94,7 +94,7 @@ describe("SourcesPage, deleting a source", () => {
     // promise is deliberately held open. Without the fix this button stays
     // enabled the whole time, because remove() never told the row it was
     // busy.
-    await waitFor(() => expect(api.deleteSource).toHaveBeenCalledWith(source.id));
+    await waitFor(() => expect(api.deleteSource).toHaveBeenCalledWith(source.id, source.destinations));
     await waitFor(() => expect(deleteButton.disabled).toBe(true));
 
     vi.mocked(api.listSources).mockResolvedValue([]);

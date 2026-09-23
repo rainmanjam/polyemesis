@@ -182,7 +182,10 @@ export function SourcesPage() {
     // open to a second delete of a row already gone. busyId disables it too.
     setBusyId(deleting.id);
     try {
-      await api.deleteSource(deleting.id);
+      // The count the dialog showed, which the server checks is still the
+      // count: a destination added since the dialog opened refuses the delete
+      // (409) and the toast says so, rather than taking a row nobody saw.
+      await api.deleteSource(deleting.id, deleting.destinations);
       toast.success(t(wasOnly ? "sources.deletedLast" : "sources.deleted", { name: deleting.name }));
       setDeleting(null);
       await load();

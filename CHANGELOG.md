@@ -470,6 +470,16 @@ its first tagged release.
 
 ### Security
 
+- **Deleting a source, or a destination that is on air, has to be confirmed in
+  the request.** `DELETE /sources/{id}` cascades to every destination and
+  rendition on the programme, destroying their stream keys and ending any live
+  YouTube broadcast among them, and `DELETE /destinations/{id}` ends its
+  broadcast — both permanently, and both reachable with an admin API token
+  that never sees the console's dialog. A source delete now needs
+  `{"confirm": true, "destinations": N}` matching the current count (`409` on
+  a stale count), and a destination in `testing` or `live` needs
+  `{"confirm": true}`. The console sends both. API scripts that delete sources
+  must change; see `docs/UPGRADING.md`.
 - **Upgrading from 0.6.x no longer leaves plaintext stream keys in
   `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
   and every release before 0.7.0 ran without it: a real 0.6.0 install with five

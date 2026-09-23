@@ -549,8 +549,22 @@ could contradict.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` `POST` | `/sources` | |
-| `GET` `PUT` `DELETE` | `/sources/{id}` | Delete cascades to its destinations and renditions |
+| `GET` `PUT` `DELETE` | `/sources/{id}` | Delete cascades to its destinations and renditions, and needs a confirming body |
 | `POST` | `/sources/{id}/token` | Rotate. The old token keeps working for five minutes |
+
+**`DELETE /sources/{id}` needs a body of `{"confirm": true, "destinations": N}`**,
+where `N` is the `destinations` count `GET /sources` reports for that source.
+The delete takes every destination and rendition on the programme with it,
+their stream keys included, and ends any YouTube broadcast among them that is
+in `testing` or `live` — permanently. Without the body, or with `"confirm":
+false`, it answers `400`; with a count that no longer matches (a destination
+was added or removed since it was read) it answers `409` and deletes nothing.
+A source that does not exist is `404` whatever the body.
+
+```sh
+curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"confirm": true, "destinations": 3}' "$POLYEMESIS_URL/api/v1/sources/2"
+```
 
 Send only stored fields on a `PUT`. Server-computed ones (`publishUrls`,
 `publishing`, `tokenEnforced`) are rejected.
@@ -607,6 +621,13 @@ of the per-destination button and can never be more destructive than it.
 it — no body, an empty object, or `"confirm": false`. It ends live broadcasts
 (below), and a dialog in the console is a confirmation a script or a replayed
 request never sees. `start-all` takes no body.
+
+**`DELETE /destinations/{id}` needs `{"confirm": true}` when the destination is
+carrying a broadcast in `testing` or `live`** (its `lifecycle.phase`), and
+answers `400` without it. Deleting that row ends the broadcast on the platform,
+and a completed YouTube broadcast cannot return to live. Any other destination
+deletes with no body, as before. A body that is sent is read strictly, so an
+unknown field is `400` rather than ignored.
 
 ```sh
 curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \

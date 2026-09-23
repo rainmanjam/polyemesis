@@ -25,7 +25,7 @@ function idsAreNotInterchangeable(sourceId: ReturnType<typeof asSourceId>, desti
   // @ts-expect-error a SourceId must not satisfy a DestinationId parameter
   api.deleteDestination(sourceId);
   // @ts-expect-error a DestinationId must not satisfy a SourceId parameter
-  api.deleteSource(destinationId);
+  api.deleteSource(destinationId, 0);
 }
 void idsAreNotInterchangeable;
 
