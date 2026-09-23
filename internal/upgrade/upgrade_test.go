@@ -457,7 +457,7 @@ func TestOnlySystemdUpgradesItself(t *testing.T) {
 		{MethodManual, false},
 		{MethodSystemd, true},
 	} {
-		p := PlanFor(tc.m, bin, "v0.6.0")
+		p := PlanFor(tc.m, bin, Versions{Running: "v0.5.0", Offered: "v0.6.0"})
 		if p.Automatic != tc.automatic {
 			t.Errorf("%s: Automatic = %v, want %v", tc.m, p.Automatic, tc.automatic)
 		}
@@ -473,7 +473,7 @@ func TestOnlySystemdUpgradesItself(t *testing.T) {
 // The docker command must recreate, not merely pull. An operator who runs only
 // `docker pull` has changed nothing and will reasonably believe otherwise.
 func TestDockerCommandRecreatesRatherThanOnlyPulling(t *testing.T) {
-	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", "v0.6.0")
+	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: "v0.5.0", Offered: "v0.6.0"})
 	if !strings.Contains(p.Command, "up -d") {
 		t.Errorf("the docker command does not recreate the container: %q", p.Command)
 	}
@@ -483,7 +483,7 @@ func TestSystemdRefusesAnUnwritableDirectory(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root, which can write anywhere")
 	}
-	p := PlanFor(MethodSystemd, "/proc/definitely-not-writable/polyemesis", "v0.6.0")
+	p := PlanFor(MethodSystemd, "/proc/definitely-not-writable/polyemesis", Versions{Running: "v0.5.0", Offered: "v0.6.0"})
 	if p.Automatic {
 		t.Error("offered an automatic upgrade into a directory it cannot write; it would fail half way")
 	}
@@ -845,7 +845,7 @@ func TestAnUnexecutableInstallStillYieldsARunnableBinary(t *testing.T) {
 // (metadata-action, `type=semver,pattern={{version}}`) are `0.10.0`, `0.10`
 // and `latest`. A command naming `:v0.10.0` answers "not found".
 func TestDockerCommandNamesTheImageTagThatExists(t *testing.T) {
-	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", "v0.10.0")
+	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: "v0.5.0", Offered: "v0.10.0"})
 	if want := "docker pull " + Image + ":0.10.0"; !strings.Contains(p.Command, want) {
 		t.Errorf("command = %q, want it to contain %q", p.Command, want)
 	}
@@ -857,14 +857,14 @@ func TestDockerCommandNamesTheImageTagThatExists(t *testing.T) {
 // Before any update check the offered tag is "". Every command must still be
 // one a person can paste, not `polyemesis:` or `polyemesis--linux-amd64`.
 func TestCommandsBeforeAnyCheckNameNoEmptyTag(t *testing.T) {
-	d := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", "")
+	d := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: "v0.5.0", Offered: ""})
 	if strings.HasSuffix(strings.TrimSpace(d.Command), ":") || strings.Contains(d.Command, Image+":") {
 		t.Errorf("docker command names an empty tag: %q", d.Command)
 	}
 	if !strings.Contains(d.Command, "up -d") {
 		t.Errorf("docker command lost its recreate: %q", d.Command)
 	}
-	m := PlanFor(MethodManual, "/usr/local/bin/polyemesis", "")
+	m := PlanFor(MethodManual, "/usr/local/bin/polyemesis", Versions{Running: "v0.5.0", Offered: ""})
 	if strings.Contains(m.Command, "polyemesis--") {
 		t.Errorf("manual command names an empty tag: %q", m.Command)
 	}
@@ -882,5 +882,31 @@ func TestImageTag(t *testing.T) {
 		if got := ImageTag(in); got != want {
 			t.Errorf("ImageTag(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// An image BUILT FROM SOURCE -- the shipped docker-compose.yml's `build:`
+// service, stamped "compose" -- is not moved by `docker compose pull`: the pull
+// skips a build service and `up -d` restarts the image on disk, both exiting 0.
+// Offering that as the upgrade is a command that silently does nothing.
+func TestASourceBuiltImageIsToldToRebuildNotPull(t *testing.T) {
+	for _, running := range []string{"compose", "docker", "v0.9.0-12-gabcdef1", "dev", ""} {
+		p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: running, Offered: "v0.10.0"})
+		if !strings.Contains(p.Command, "--build") {
+			t.Errorf("running %q: the command does not rebuild, so it changes nothing: %q", running, p.Command)
+		}
+		if strings.HasPrefix(p.Command, "docker compose pull") {
+			t.Errorf("running %q: still leads with the no-op pull: %q", running, p.Command)
+		}
+		// The published image is the way out of an incomparable version, so
+		// it is named -- by the tag that exists.
+		if !strings.Contains(p.Command, Image+":0.10.0") {
+			t.Errorf("running %q: does not name the published image: %q", running, p.Command)
+		}
+	}
+	// And a release image is still told to pull.
+	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: "v0.9.0", Offered: "v0.10.0"})
+	if strings.Contains(p.Command, "--build") || !strings.HasPrefix(p.Command, "docker compose pull") {
+		t.Errorf("a release image is told to rebuild: %q", p.Command)
 	}
 }

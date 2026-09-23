@@ -41,8 +41,18 @@ docker volume inspect polyemesis-data >/dev/null || exit 1   # see the warning b
 docker run --rm -v polyemesis-data:/data -v "$PWD:/backup" alpine \
   tar czf /backup/polyemesis-$(date +%F).tar.gz -C /data .
 tar tzf polyemesis-$(date +%F).tar.gz | wc -l                # more than 1 = real
-docker compose pull && docker compose up -d
+docker compose pull && docker compose up -d                  # image: rainmanjam/polyemesis (install.sh)
+# or, for the repo's own docker-compose.yml, which BUILDS the image:
+git pull && docker compose up -d --build
 ```
+
+> **A compose file with `build:` is not upgraded by `docker compose pull`.** The
+> pull skips a service that has no `image:`, `up -d` restarts the image already
+> on disk, and both exit 0. The repo's `docker-compose.yml` is that shape, and
+> such a build reports its version as `compose` — which is why its update check
+> says the versions cannot be compared, and why `GET /upgrade/plan` tells it to
+> rebuild. To get a version the update check can compare, switch the service to
+> `image: rainmanjam/polyemesis:<version>` (the tag has no leading `v`).
 
 > **Check the volume name before you trust the backup.** `docker run -v` creates
 > a missing volume instead of failing, so backing up a name that does not exist

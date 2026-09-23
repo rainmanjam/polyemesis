@@ -232,29 +232,37 @@ func ImageTag(tag string) string {
 	return strings.TrimPrefix(tag, "v")
 }
 
+// Versions are the two versions a plan is about. NAMED rather than positional
+// because both are strings and swapping them compiles: the command would then
+// offer the running version as the upgrade, and the source-build test would be
+// asked about the release.
+type Versions struct {
+	// Running is this process's own version as the build stamped it: a release
+	// tag for a release artefact, and something else -- "compose", "docker", a
+	// `git describe` string -- for anything built from source.
+	Running string
+	// Offered is the tag the last update check found, in the release feed's
+	// spelling (`v0.10.0`). "" before any check has run.
+	Offered string
+}
+
 // PlanFor builds the plan for this box.
 //
-// version is the tag being offered, used only to render a command an operator
-// can paste. It is never used to decide anything. It is "" before any update
-// check has run, and every command must still be one a person can paste.
-func PlanFor(m Method, binary, version string) Plan {
+// The versions are used only to render a command an operator can paste --
+// which command, for a container, and which tag it names. Neither decides
+// whether anything is automatic. Offered is "" before any update check has
+// run, and every command must still be one a person can paste.
+func PlanFor(m Method, binary string, v Versions) Plan {
 	p := Plan{Method: m}
 	// Beside the RESOLVED binary, because that is where Stage put it.
 	if _, err := os.Stat(PreviousPath(resolve(binary))); err == nil {
 		p.RollbackAvailable = true
 	}
+	version := v.Offered
 
 	switch m {
 	case MethodDocker:
-		// The image tag, not `docker pull` alone: pulling changes nothing until
-		// something recreates the container, and an operator who runs only the
-		// pull will reasonably believe they have upgraded.
-		p.Command = "docker compose pull && docker compose up -d"
-		// No tag, no suffix: `polyemesis:` with nothing after it is not a
-		// command, and it is what a plan asked for before any check printed.
-		if tag := ImageTag(version); tag != "" {
-			p.Command += fmt.Sprintf("   # or: docker pull %s:%s", Image, tag)
-		}
+		p.Command = dockerCommand(v)
 		return p
 
 	case MethodManual:
@@ -292,6 +300,40 @@ func PlanFor(m Method, binary, version string) Plan {
 	}
 	p.Reason = "unrecognised install method"
 	return p
+}
+
+// dockerCommand is the command for a container, which depends on where its
+// image came from.
+//
+// A RELEASE IMAGE is upgraded by pulling a newer one and recreating the
+// container. The recreate is the point: pulling changes nothing until
+// something recreates the container, and an operator who runs only the pull
+// will reasonably believe they have upgraded.
+//
+// AN IMAGE BUILT FROM SOURCE cannot be upgraded by a pull at all. The shipped
+// docker-compose.yml has `build:` and no `image:`, so `docker compose pull`
+// skips the service, `up -d` restarts the image already on disk, and both exit
+// 0. That no-op is what the plan used to offer every compose install. Such a
+// build is recognised by its version, which is never a release tag -- compose
+// stamps "compose", a bare `docker build` "docker", `make docker` a `git
+// describe` string -- and the only command that moves it is a newer checkout
+// and a rebuild. The published image is named as the alternative, because it
+// is the one path on which the update check can ever be comparable.
+func dockerCommand(v Versions) string {
+	tag := ImageTag(v.Offered)
+	if !releaseVersion.MatchString(strings.TrimSpace(v.Running)) {
+		cmd := "git pull && docker compose up -d --build   # built from source, so a pull changes nothing"
+		if tag != "" {
+			cmd += fmt.Sprintf("; or switch the service to image: %s:%s", Image, tag)
+		}
+		return cmd
+	}
+	// No tag, no suffix: `polyemesis:` with nothing after it is not a command,
+	// and it is what a plan asked for before any check printed.
+	if tag == "" {
+		return "docker compose pull && docker compose up -d"
+	}
+	return fmt.Sprintf("docker compose pull && docker compose up -d   # or: docker pull %s:%s", Image, tag)
 }
 
 // writable reports whether this process can create a file in dir.

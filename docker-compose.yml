@@ -13,8 +13,14 @@ services:
     build:
       context: .
       args:
+        # Deliberately NOT a release tag. This is a build of whatever is checked
+        # out, and the update check must not order it against the release feed
+        # as though it were one; "compose" is also how /upgrade/plan knows to
+        # say `git pull && docker compose up -d --build` rather than a pull,
+        # which skips a build service and changes nothing. See docs/UPGRADING.md.
         VERSION: compose
-    # Or, once published: image: polyemesis:latest
+    # Or the published image, which reports a real version (no leading v):
+    # image: rainmanjam/polyemesis:latest
     container_name: polyemesis
     restart: unless-stopped
     # Docker's default is 10s, and a measured shutdown with three destinations

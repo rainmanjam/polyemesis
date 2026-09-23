@@ -17,6 +17,17 @@ its first tagged release.
   printed `rainmanjam/polyemesis:` with an empty tag, and the manual install
   plan named a `polyemesis--linux-amd64` file. The image tag now comes from one
   function, `upgrade.ImageTag`, and a plan with no tag names none.
+- **A compose-built install was told to upgrade with a command that does
+  nothing.** The repo's `docker-compose.yml` builds the image from source and
+  stamps version `compose`, so the update check can never compare it — and
+  `/upgrade/plan` offered `docker compose pull && docker compose up -d`, which
+  skips a `build:` service and restarts the same image, exiting 0. An image
+  whose version is not a release tag (`compose`, `docker`, a `git describe`
+  string) is now told `git pull && docker compose up -d --build`, with the
+  published image named as the way to a comparable version. `upgrade.PlanFor`
+  takes the running and offered versions as named fields, so the two strings
+  cannot be passed the wrong way round. docs/UPGRADING.md said the same no-op
+  pull and is corrected.
 
 ## [0.10.0] — 2026-09-23
 
