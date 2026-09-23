@@ -36,10 +36,22 @@ import { noteResponseStatus } from "@/lib/session";
 
 afterEach(() => cleanup());
 
+// "the console" is in the DOM from the render that commits it, but App starts
+// listening for a lost session in an effect of that same render, and findByText
+// can resolve from its DOM observer before React has run that effect. A 401
+// fired in the gap reaches no listener: the first test then times out waiting
+// for a login screen that was never asked for (seen in CI at 1102 ms), and the
+// second passes without having tested anything. Settling the pending effects
+// first makes the premise, "App is listening", true rather than likely.
+async function consoleIsListening() {
+  await screen.findByText("the console");
+  await act(async () => {});
+}
+
 describe("App, when the session ends mid-use", () => {
   it("returns to the login screen on a 401", async () => {
     render(<App />);
-    await screen.findByText("the console");
+    await consoleIsListening();
 
     act(() => noteResponseStatus("/destinations", 401));
 
@@ -49,7 +61,7 @@ describe("App, when the session ends mid-use", () => {
 
   it("stays put on a wrong current password", async () => {
     render(<App />);
-    await screen.findByText("the console");
+    await consoleIsListening();
 
     act(() => noteResponseStatus("/auth/password", 401));
 
