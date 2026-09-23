@@ -78,6 +78,15 @@ its first tagged release.
   says a binary-mode `update.sh` "pulls": it stops at a verified backup, with the
   service stopped, and prints the two commands that finish the job.
 
+- **`UPGRADING.md` had no note for 0.9.0 or 0.10.0.** 0.9.0 changed two
+  defaults an existing install can hit — the loopback default bind, and a
+  missing explicit `--config` refusing to start — and the page's banner still
+  named 0.8.0 as the newest release. Both versions now have a note (0.10.0: no
+  schema change, and a 0.9.0 binary opens its database), the 0.7.0 note no
+  longer says a missing `secret.key` produces "no error to notice" (0.9.0 logs
+  one), and every release from here on must have an `Upgrading to X.Y.Z`
+  section, held by a test and by `RELEASE-RUNBOOK.md`.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

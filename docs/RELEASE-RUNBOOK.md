@@ -33,9 +33,14 @@ version had shipped when it had not (#499), so this is not ceremony.
    commit you are tagging, not merely a recent one.
 2. `CHANGELOG.md`'s top heading is `## [X.Y.Z] — YYYY-MM-DD` with today's date
    and no `[Unreleased]` content beneath it.
-3. `docs/UPGRADING.md` has a section for the version **if** it needs one — a
-   migration that cannot be rolled back, a mandatory remediation, a changed
-   default. 0.7.0's sealed stream keys are the worked example.
+3. `docs/UPGRADING.md` has a `### Upgrading to X.Y.Z` section for the version
+   — always, not only when it needs one. A migration that cannot be rolled
+   back, a mandatory remediation or a changed default is what the section is
+   for (0.7.0's sealed stream keys are the worked example); when there is none,
+   the section says so, and whether the previous binary still opens the
+   database. "If it needs one" let 0.9.0 ship two changed defaults with no
+   note. `TestDocEveryReleaseHasAnUpgradeNote` in `internal/testenv` fails the
+   release commit without it.
 4. The rehearsal above is green.
 
 ## Cutting it

@@ -460,3 +460,37 @@ func TestDocManualUpgradeCarriesUpdateShGuards(t *testing.T) {
 			"the next build's `COPY . .` copies it, secret.key included, into the image", rel)
 	}
 }
+
+// TestDocEveryReleaseHasAnUpgradeNote: docs/RELEASE-RUNBOOK.md requires an
+// upgrade note for a changed default, and 0.9.0 changed two (the loopback
+// default bind, and a missing explicit --config now refusing to start) with no
+// note in UPGRADING.md; 0.10.0 had none either, and the page's banner still
+// named 0.8.0 as the newest release. Staging-readiness row 30. The rule held
+// here: every release in CHANGELOG.md from 0.9.0 on has a "### Upgrading to
+// X.Y.Z" heading -- even when its body is "nothing to do", which is itself the
+// answer an operator came to the page for.
+func TestDocEveryReleaseHasAnUpgradeNote(t *testing.T) {
+	released := regexp.MustCompile(`(?m)^## \[(\d+)\.(\d+)\.(\d+)\]`).FindAllStringSubmatch(readDoc(t, "CHANGELOG.md"), -1)
+	if len(released) == 0 {
+		t.Fatal("found no released version headings in CHANGELOG.md; this guard would check nothing")
+	}
+	upgrading := readDoc(t, "docs/UPGRADING.md")
+	checked := 0
+	for _, m := range released {
+		major, minor := m[1], m[2]
+		// Per-release notes start at 0.9.0; older releases are covered by the
+		// topical notes (0.7.0's sealed keys, multi-source, one-port ingest...).
+		if major == "0" && len(minor) == 1 && minor < "9" {
+			continue
+		}
+		v := m[1] + "." + m[2] + "." + m[3]
+		checked++
+		if !regexp.MustCompile(`(?m)^### Upgrading to ` + regexp.QuoteMeta(v) + `\b`).MatchString(upgrading) {
+			t.Errorf("docs/UPGRADING.md has no \"### Upgrading to %s\" note. Every release gets "+
+				"one, even if it says there is nothing to do.", v)
+		}
+	}
+	if checked == 0 {
+		t.Error("no release from 0.9.0 on was found in CHANGELOG.md; this guard checked nothing")
+	}
+}

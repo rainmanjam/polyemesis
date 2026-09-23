@@ -9,8 +9,8 @@ is: stop, replace the binary or pull the image (rebuild it, from a clone), start
 Migrations run forward only — there is no downgrade path, and a backup is the
 only way back. **From 0.7.0 onward a backup without that one file is not a
 backup**, because the stream keys in the database are sealed with it and nothing
-else can open them. 0.7.0 (2026-08-28) and 0.8.0 (2026-09-01) are both released,
-so this applies to you now; see
+else can open them. 0.7.0 was released on 2026-08-28 and every release since
+carries the same rule, so this applies to you now; see
 [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back)
 before you start, including its **mandatory** remediation if you have already
 upgraded.
@@ -169,13 +169,59 @@ instead.
 
 ## Version-specific notes
 
-> **Everything in this section is released and applies to you.** `v0.7.0`
-> (2026-08-28) and `v0.8.0` (2026-09-01) are both tagged; the newest heading in
-> [CHANGELOG.md](../CHANGELOG.md) is the authority on what a tag contains, and
-> `.github/workflows/release.yml`'s changelog-gate refuses to let a tag publish
-> unless that heading agrees with it. If you are coming from 0.6.0 or earlier,
-> the 0.7.0 note below — including its **mandatory** remediation — is work you
-> still have to do.
+> **Everything in this section is released and applies to you.** Read every
+> note between the version you run and the one you are moving to, newest
+> first. The newest heading in [CHANGELOG.md](../CHANGELOG.md) is the authority
+> on what a tag contains, and `.github/workflows/release.yml`'s changelog-gate
+> refuses to let a tag publish unless that heading agrees with it; every
+> released version has a note here, even when the note is "nothing to do". If
+> you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
+> **mandatory** remediation — is work you still have to do.
+
+### Upgrading to 0.10.0
+
+**No schema change.** `internal/db` is identical between `v0.9.0` and
+`v0.10.0` apart from a test, and the schema version stamped into the database
+is still `1`. So a 0.9.0 binary opens a database 0.10.0 has run against, and a
+rollback from 0.10.0 to 0.9.0 is the one step on this page where reinstalling
+the old binary is enough — though restoring the backup you took is still the
+path this page recommends, because it is the one you can check.
+
+Nothing to do beyond the short version above. Read the
+[CHANGELOG](../CHANGELOG.md) for what changed in behaviour.
+
+### Upgrading to 0.9.0
+
+Three changes an existing install can notice, none of which touch the data:
+
+- **The default listen address is loopback.** With no `config.yaml` and no
+  `--addr`, 0.9.0 binds `127.0.0.1:8080` instead of every interface. The
+  shipped systemd unit, the unit `install.sh` writes, every Dockerfile and
+  `config.example.yaml` all pass or set an address explicitly and are
+  unaffected. A bare binary started with no config, or a `config.yaml` with no
+  `addr` key, is now reachable only from the box itself — set `addr` or pass
+  `--addr` to widen it. See
+  [TLS.md → Binding, and the SSH tunnel](TLS.md#binding-and-the-ssh-tunnel).
+- **An explicit `--config` that does not exist refuses to start.** It used to
+  boot a second, empty install beside the real one — a new `secret.key`, an
+  empty database, and an open `POST /setup` — while looking healthy (#644).
+  A unit or launchd job that names a config file must now have one.
+- **A container with sources and no running engine fails its `HEALTHCHECK`**
+  where it used to pass.
+
+And one that is only good news: **a restored data directory without
+`secret.key` is no longer silent.** Boot still mints a fresh key, but it now
+logs an `ERROR` naming how many destinations cannot be read, and which.
+
+The generated `update.sh` also changed in 0.9.0 (it stops the service before
+copying, verifies the copy with `-verify-backup`, and keeps
+`polyemesis.previous`). It is written at install time, so re-run `install.sh`
+to get it on an older install.
+
+The schema version stamp is `1` in both 0.8.0 and 0.9.0, so a 0.8.0 binary
+does not refuse a database 0.9.0 has opened. That is not the same as the
+rollback being safe: 0.9.0 added migrations an 0.8.0 binary knows nothing
+about. Restore the backup.
 
 ### Upgrading to 0.7.0: sealed stream keys — **breaking to roll back**
 
@@ -188,9 +234,12 @@ comes back **disabled**, because a key that will not decrypt disables its
 destination rather than failing open with a wrong key. Nothing is wrong until
 you go live, which is the worst moment to find out.
 
-It is easy to get wrong, because `secret.key` is generated silently when it is
-absent. Restore the database without it and the server mints a fresh one, so
-there is no error to notice — just a new key that cannot open the old rows.
+It is easy to get wrong, because `secret.key` is generated when it is absent.
+Restore the database without it and the server mints a fresh one — a new key
+that cannot open the old rows. Through 0.8.x that happened with no error at
+all. From 0.9.0 boot logs an `ERROR` naming the destinations that cannot be
+read, but the server still starts and serves, so it is a line in a log, not a
+refusal: look for it.
 
 ```sh
 # Check your backup before you rely on it.
