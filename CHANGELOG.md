@@ -470,6 +470,14 @@ its first tagged release.
 
 ### Security
 
+- **A refused Kick webhook no longer writes its secret to the log.** The
+  request log recorded the full path of every 4xx and 5xx, and
+  `/api/v1/chat/kick/{secret}` answers a wrong method, a non-JSON body or a
+  bad signature with one, so the webhook secret reached journald on exactly
+  the requests that were not Kick's. The request log now records the route
+  pattern a request matched, which redacts every path parameter; a request
+  that matched no route is still logged with its path.
+
 - **One IPv6 host can no longer dodge the login throttle by rotating
   addresses.** The login and setup throttles keyed on the full client
   address, and a VPS routinely gets a whole /64, so each of its addresses got

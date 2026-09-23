@@ -1515,9 +1515,35 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 			level = slog.LevelWarn
 		}
 		s.log.Log(r.Context(), level, "http",
-			"method", r.Method, "path", r.URL.Path,
+			"method", r.Method, "path", loggedPath(r),
 			"status", ww.Status(), "dur", time.Since(start).Round(time.Millisecond))
 	})
+}
+
+// loggedPath is the path a request log line may carry: the ROUTE PATTERN it
+// matched, not the path it arrived on.
+//
+// A path can be a credential. /api/v1/chat/kick/{secret} is how Kick's webhook
+// proves it is Kick, and every 4xx or 5xx on it -- a GET instead of a POST, a
+// body that is not JSON, a signature that does not verify -- is logged at WARN
+// or ERROR, so the secret went into journald on exactly the requests that were
+// not Kick's, contradicting SECURITY.md's promise that it is never logged.
+// Logging the pattern redacts every path parameter by construction, so the
+// next route with a secret in its path cannot repeat it.
+//
+// A request that matched no route, or only a wildcard, has no pattern that
+// says anything, and there the raw path is logged: which unknown URL is being
+// asked for is the one thing a 404 line is for.
+func loggedPath(r *http.Request) string {
+	rc := chi.RouteContext(r.Context())
+	if rc == nil {
+		return r.URL.Path
+	}
+	p := rc.RoutePattern()
+	if p == "" || strings.HasSuffix(p, "*") {
+		return r.URL.Path
+	}
+	return p
 }
 
 // tokenRevoked reports whether an open socket's API token has been revoked.

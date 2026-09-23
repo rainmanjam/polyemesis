@@ -135,7 +135,9 @@ the software actually promises.
   mechanism that can reach it.
 - **Secrets in transit to you.** No stream key, client secret, API token or TLS
   private key is ever returned by an API or written to a log. Webhook URLs — which
-  carry their credential in the path — are masked in every response.
+  carry their credential in the path — are masked in every response. The request
+  log records the route a request matched (`/api/v1/chat/kick/{secret}`), not the
+  path it arrived on, so a secret in a path never reaches it.
 - **Path confinement.** File destinations, `file://` pull sources, slate images,
   recording and clip downloads are all confined to the data directory. Paths
   that come from the database are never trusted as filesystem paths.
