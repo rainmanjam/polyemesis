@@ -50,6 +50,15 @@ its first tagged release.
   the stale warning in place. The Windows warning now names the defect that is
   still open — a service stop truncates the recording in progress.
 
+- **The macOS launchd job in `INSTALL.md` crash-looped as written.** It ran
+  `/usr/local/bin/polyemesis -config …/config.yaml`, and no step created either
+  file; a missing explicit `-config` refuses to start, and `KeepAlive` repeats
+  that forever. The section now installs the binary and copies
+  `config.example.yaml` first, and says the console is then on `https://`.
+  The Gatekeeper note uses the release asset's real name
+  (`polyemesis-<tag>-darwin-<arch>`) and says to clear the quarantine flag
+  before the first launch — a quarantined binary was seen to hang silently.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

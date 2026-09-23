@@ -266,24 +266,33 @@ requirement. Verified by building in a Linux container with the release's own
 flags and running the result on Apple Silicon:
 
 ```console
-$ codesign -dv polyemesis-darwin-arm64
+$ codesign -dv polyemesis-v0.9.0-darwin-arm64
 CodeDirectory v=20400 ... flags=0x20002(adhoc,linker-signed)
-$ ./polyemesis-darwin-arm64 -version
+$ ./polyemesis-v0.9.0-darwin-arm64 -version
 polyemesis v0.9.0
 ```
+
+The release assets carry the version in their name —
+`polyemesis-<tag>-darwin-arm64`, `polyemesis-<tag>-darwin-amd64` — so
+substitute the one you downloaded wherever this page says `./polyemesis`.
 
 What is *not* signed is a Developer ID, so the binary is not notarized.
 `spctl -a -t execute` reports `rejected` — that answers "would Gatekeeper
 approve this for distribution", not "will this run". Gatekeeper enforces on
 files carrying `com.apple.quarantine`, which a browser download sets and `curl`
-does not. If you hit it:
+does not. **Download with `curl`, or clear the flag before the first run:**
 
 ```bash
-xattr -d com.apple.quarantine ./polyemesis
+xattr -l ./polyemesis-v0.10.0-darwin-arm64          # com.apple.quarantine listed?
+xattr -d com.apple.quarantine ./polyemesis-v0.10.0-darwin-arm64
 ```
 
-A freshly quarantined binary can also sit for a minute or two on its first run
-while macOS scans it; the result is cached, and subsequent runs are immediate.
+Do it before you launch the file, not after. A quarantined binary does not
+always put up a dialog: in exploratory testing of 0.10.0 one sat silently in
+`_dyld_start` — no output, no error — and clearing the attribute after that
+blocked launch did not free it. If a first run prints nothing at all, stop it,
+fetch the asset again with `curl -fLO`, check it against `SHA256SUMS`, and run
+that copy.
 
 **Windows.** The `.exe` is unsigned, so SmartScreen shows a warning on first
 run — *More info → Run anyway*, once. It does not prevent the service from
@@ -750,7 +759,27 @@ itself](#install-the-binary) above for why, and for `-addr :8080` /
 
 ### Run it at login, or at boot
 
-launchd. For a per-user agent that starts at login, write
+launchd. The job below points at two files that nothing above creates — the
+binary in `/usr/local/bin` and a `config.yaml` — so make both first. **The
+config file is not optional:** a `-config` path given explicitly and missing
+is a refusal to start (since 0.9.0, so a typo cannot boot a second, empty
+install), and under `KeepAlive` that refusal is a crash loop, logged once
+every ten seconds to `/tmp/polyemesis.log`.
+
+```bash
+# From the clone you built in (use the release asset's name if you downloaded one)
+sudo mkdir -p /usr/local/bin
+sudo install -m 0755 ./polyemesis /usr/local/bin/polyemesis
+mkdir -p "$HOME/Library/Application Support/polyemesis"
+cp config.example.yaml "$HOME/Library/Application Support/polyemesis/config.yaml"
+```
+
+`config.example.yaml` binds `127.0.0.1:8080` with `tls.mode: auto`, which on a
+Mac with no public hostname resolves to self-signed — so the console is at
+<https://localhost:8080>, not `http://`. `-data` in the plist overrides the
+example's `dataDir`.
+
+For a per-user agent that starts at login, write
 `~/Library/LaunchAgents/dev.polyemesis.plist`:
 
 ```xml

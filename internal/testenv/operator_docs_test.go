@@ -259,3 +259,70 @@ func TestDocWindowsAbortIsDescribedAsFixed(t *testing.T) {
 		}
 	}
 }
+
+// TestDocLaunchdJobHasEveryFileItNames: INSTALL.md's launchd plist ran
+// /usr/local/bin/polyemesis with -config ".../Application Support/polyemesis/
+// config.yaml", and no step on the page put a binary or a config file at either
+// path. An explicit -config that is missing is a refusal to start (#644, main.go's
+// configLoaderFor), and KeepAlive turns that into a crash loop -- exploratory
+// IU-9 followed the page literally and got exactly that. The guard reads every
+// <string> path the plist hands the program and requires a shell step in the
+// same section that writes it.
+func TestDocLaunchdJobHasEveryFileItNames(t *testing.T) {
+	const rel = "docs/INSTALL.md"
+	sec := docSection(t, readDoc(t, rel), rel, "Run it at login, or at boot")
+
+	// The fact the guard depends on: an explicit --config that is absent refuses.
+	if !strings.Contains(readDoc(t, "cmd/polyemesis/main.go"), "configLoaderFor(flag.Visit)") {
+		t.Fatal("main.go no longer loads the config through configLoaderFor(flag.Visit); if a " +
+			"missing -config no longer refuses to start, revisit this guard.")
+	}
+
+	lines := fencedLines(sec)
+	var shell []string
+	for _, l := range lines {
+		if !strings.Contains(l, "<") {
+			shell = append(shell, l)
+		}
+	}
+	// The plist is XML inside the section; resolve its $HOME-relative paths the
+	// way the shell steps write them.
+	norm := func(p string) string {
+		p = strings.ReplaceAll(p, "/Users/YOU", "$HOME")
+		return strings.ReplaceAll(p, `"`, "")
+	}
+	written := func(path string) bool {
+		for _, l := range shell {
+			l = norm(l)
+			if (strings.Contains(l, "cp ") || strings.Contains(l, "install ") || strings.Contains(l, "> ")) &&
+				strings.Contains(l, path) {
+				return true
+			}
+		}
+		return false
+	}
+	want := map[string]bool{}
+	for _, m := range regexp.MustCompile(`<string>(/[^<]*/(polyemesis|config\.yaml))</string>`).FindAllStringSubmatch(sec, -1) {
+		want[norm(m[1])] = true
+	}
+	if len(want) < 2 {
+		t.Fatalf("expected the plist in %s to name the binary and a config.yaml; found %v -- "+
+			"this guard would check nothing", rel, want)
+	}
+	for p := range want {
+		if !written(p) {
+			t.Errorf("%s's launchd plist names %s and no command in that section puts a file "+
+				"there. A missing -config is a refusal to start, and KeepAlive makes it a crash loop.",
+				rel, p)
+		}
+	}
+
+	// The release assets carry the tag: polyemesis-<tag>-darwin-<arch>.
+	for i, l := range strings.Split(readDoc(t, rel), "\n") {
+		if strings.Contains(l, "polyemesis-darwin-") {
+			t.Errorf("%s:%d names a darwin asset without its version; the release publishes "+
+				"polyemesis-<tag>-darwin-<arch> (Makefile's release target):\n    %s",
+				rel, i+1, strings.TrimSpace(l))
+		}
+	}
+}

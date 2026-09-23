@@ -44,6 +44,7 @@ var canonicalDriftTests = []string{
 	"TestDocAddrAdviceNamesTheFlagThatBeatsIt",
 	"TestDocTLSWarnsTheImageHealthcheckIsPlainHTTP",
 	"TestDocWindowsAbortIsDescribedAsFixed",
+	"TestDocLaunchdJobHasEveryFileItNames",
 }
 
 func TestTheDocsOnlyPathStillRunsTheDriftGuards(t *testing.T) {
