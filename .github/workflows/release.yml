@@ -40,9 +40,11 @@ on:
   schedule:
     - cron: "37 7 * * 2"
 
-# ONE PUBLISH PER REF AT A TIME. Delete and re-push v0.7.0 to fix a wrong
-# CHANGELOG date, or press "Re-run all jobs" on a run whose images job failed,
-# and two runs executed the same publish steps concurrently:
+# ONE PUBLISH PER REF AT A TIME. Move v0.7.0 to a new commit (delete it and
+# push it again on the commit that re-dated the CHANGELOG -- re-pushing it to
+# the same commit fixes nothing, since changelog-gate reads the tagged commit),
+# or press "Re-run all jobs" on a run whose images job failed, and two runs
+# executed the same publish steps concurrently:
 # softprops/action-gh-release UPDATES an existing release rather than refusing
 # one, so both runs uploaded dist/* to the same release and the asset set could
 # end up half from each. Every other workflow here already has a group --
