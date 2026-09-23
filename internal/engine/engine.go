@@ -705,12 +705,10 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		bus.Publish(events.TypeRecordings, nil)
 	},
 		recording.WithFFprobe(tools.FFprobe),
-		// The programme, so every row this manager indexes carries it. Nothing
-		// else ever knows: the filename does not encode it and a later reader
-		// cannot work it out, which is why source_id was NULL on every
-		// recording ever written and the clip editor labelled every clip with
-		// the default programme's track names.
-		recording.WithSourceID(sourceID),
+		// No programme is handed to the manager: a recording's programme is in
+		// the filename startRecorder gives it (recording.SegmentPattern). A
+		// per-manager one was stamped on every file in the SHARED directory by
+		// every engine's scan, so attributions flapped between programmes.
 		recording.WithStorageGuard(e.onStorage),
 	)
 	e.play = playout.New(playout.Deps{
@@ -1846,7 +1844,9 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		return
 	}
 
-	pattern := filepath.Join(e.cfg.RecordingsDir(), "rec-%Y%m%d-%H%M%S.mkv")
+	// The programme rides in the name, because the directory is shared and
+	// the name is what every engine's scan attributes the file by.
+	pattern := recording.SegmentPattern(e.cfg.RecordingsDir(), e.sourceID)
 	rs := ffmpeg.RecorderSpec{
 		RelayURL:       url,
 		OutputPattern:  pattern,

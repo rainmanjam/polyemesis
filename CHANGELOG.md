@@ -16,6 +16,14 @@ its first tagged release.
   `playout.sourceId` changed nothing. Each source now packages into
   `playout/<sourceId>/`; the public URL is unchanged. A top-level
   `playout/<variant>/` left by an earlier release can be deleted.
+- A recording's `sourceId` flapped between programmes: every source's recording
+  manager scans the shared recordings directory and stamped its own source on
+  every file it saw, so the last scanner won and the clip editor named a clip's
+  tracks after the wrong programme. Master segments are now named
+  `rec-s<sourceId>-<date>-<time>.mkv` and attributed from the name; a segment
+  written by an earlier release keeps whatever attribution it already had.
+  The name also stops two sources that start recording in the same second
+  from writing the same file.
 
 ## [0.10.0] — 2026-09-23
 
