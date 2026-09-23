@@ -15,13 +15,12 @@ import (
 )
 
 // relayConsumers is every builder in this file that reads the relay with the
-// consumer probe budgets. One list, so a builder added later is one line here
-// rather than a copy of the assertion.
-func relayConsumers() []struct {
+// consumer probe budgets, each built to read relay. One list, so a builder
+// added later is one line here rather than a copy of the assertion.
+func relayConsumers(relay string) []struct {
 	name string
 	args []string
 } {
-	relay := "udp://127.0.0.1:21000"
 	rec := RecorderSpec{RelayURL: relay, OutputPattern: "/rec/rec-%Y%m%d-%H%M%S.mkv", SegmentSeconds: 3600}
 	return []struct {
 		name string
@@ -52,7 +51,7 @@ func relayConsumers() []struct {
 // track the encoder declared can be missed; a stream whose parameters are not
 // yet known still holds the probe open up to the full window, exactly as before.
 func TestEveryRelayConsumerEndsItsProbeWhenTheLayoutIsKnown(t *testing.T) {
-	for _, tc := range relayConsumers() {
+	for _, tc := range relayConsumers("udp://127.0.0.1:21000") {
 		iAt, flagAt := -1, -1
 		for i, a := range tc.args {
 			if a == "-i" && iAt < 0 {
@@ -72,6 +71,47 @@ func TestEveryRelayConsumerEndsItsProbeWhenTheLayoutIsKnown(t *testing.T) {
 		if flagAt > iAt {
 			t.Errorf("%s: -scan_all_pmts appears after -i, where it is an output option "+
 				"and FFmpeg refuses the command", tc.name)
+		}
+	}
+}
+
+// EVERY RELAY CONSUMER BELIEVES A FORWARD TIMESTAMP JUMP.
+//
+// A failover to a source with fewer tracks takes a track off the relay for the
+// length of the outage, and it comes back an outage later on the wall-clock
+// timeline. Under FFmpeg's default -dts_delta_threshold a 30 s outage made the
+// demuxer treat that jump as a discontinuity and shift the other streams back
+// by it, and a routed track froze until the destination restarted (see
+// RelayInputArgs). Every builder must carry the option before -i, or that
+// consumer reads with the default again. They get it from relayInputArgsFor
+// today, so this is what notices a builder that stops calling it.
+//
+// Unlike -scan_all_pmts the option is a global one, so a file input keeps it:
+// both input kinds are checked.
+func TestEveryRelayConsumerBelievesAForwardTimestampJump(t *testing.T) {
+	for _, input := range []string{"udp://127.0.0.1:21000", "/data/in.mkv"} {
+		for _, tc := range relayConsumers(input) {
+			iAt, flagAt := -1, -1
+			for i, a := range tc.args {
+				if a == "-i" && iAt < 0 {
+					iAt = i
+				}
+				if a == "-dts_delta_threshold" && i+1 < len(tc.args) &&
+					tc.args[i+1] == relayDTSDeltaThreshold && flagAt < 0 {
+					flagAt = i
+				}
+			}
+			if flagAt < 0 {
+				t.Errorf("%s reading %s: no -dts_delta_threshold %s. With FFmpeg's default, a "+
+					"track returning from an outage longer than the threshold shifts the other "+
+					"streams back by the gap, and a routed track freezes until a restart: %q",
+					tc.name, input, relayDTSDeltaThreshold, tc.args)
+				continue
+			}
+			if flagAt > iAt {
+				t.Errorf("%s reading %s: -dts_delta_threshold appears after -i, where it no "+
+					"longer applies to the input: %q", tc.name, input, tc.args)
+			}
 		}
 	}
 }

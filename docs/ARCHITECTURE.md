@@ -194,6 +194,19 @@ of the outage, and stay that way until the destination restarts. The per-track
 resample fills the gap with silence and anchors every track at the same origin.
 A one-track graph has nothing to align and does not get it.
 
+That only works if the returning track's timestamps reach the graph as they are.
+By default the ffmpeg CLI does not pass them through: when an MPEG-TS stream
+jumps more than 10 s (`-dts_delta_threshold`), the CLI decides the source is
+broken and moves the whole input's timeline back by the jump. After a real
+30 s outage, track 2's return pulled track 0 and the video back 30 s. The
+two streams then swapped the correction on every packet, so the routed mix
+froze while the video carried on. The relay's timeline only moves forward at
+wall-clock pace (the selector's `-output_ts_offset`), so a jump on it is time
+that really passed. Every relay consumer therefore reads the relay with the
+threshold set to a year (`RelayInputArgs`), which turns the correction off.
+Backward jumps and the 33-bit PTS wrap are handled by other mechanisms and do
+not change.
+
 Then sum and finish:
 
 ```
