@@ -201,7 +201,7 @@ release is refused rather than replaced by the latest one. Docker mode refuses
 `--version`: pin the image tag in `docker-compose.yml` instead.
 
 What it gets right that a hand-rolled `docker run` usually does not: `/udp` on
-the SRT port, `stop_grace_period: 30s` so a recording is finalised rather than
+the SRT port, `stop_grace_period: 45s` so a recording is finalised rather than
 truncated, a firewall rule for **udp**/6000, and `CAP_NET_BIND_SERVICE` on the
 unit when you choose ACME, without which the `:80` bind fails and issuance
 never completes.

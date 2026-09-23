@@ -509,6 +509,15 @@ its first tagged release.
   `deploy/polyemesis.service`, the image's `CMD`, an older generated unit),
   the startup warnings now say it came from `--addr` and where to change it.
   See [docs/UPGRADING.md](docs/UPGRADING.md).
+- **Docker no longer kills a shutdown before its recordings are finalised.**
+  The server allows itself 35 s to shut down, and systemd waits 45 s. The
+  repository's `docker-compose.yml` (including its GPU variants) and the one
+  `install.sh --mode docker` writes set `stop_grace_period: 30s`. So a
+  shutdown that used its budget was SIGKILLed mid-teardown, which truncates
+  recordings. This is the #645 failure, fixed for systemd but not for Docker.
+  All compose files now say `45s`, and a test holds every compose grace
+  period and every `TimeoutStopSec` to the budget plus its margin. An existing
+  compose file keeps `30s` until you edit it or re-run `install.sh`.
 
 ### Security
 

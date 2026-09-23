@@ -199,9 +199,11 @@ there is much easier to deal with before you start streaming on it.
 ## Before you upgrade
 
 - **Read the [CHANGELOG](../CHANGELOG.md).**
-- **Stop cleanly.** Recordings are finalised during shutdown, which takes up to
-  about 30 seconds. Killing the process truncates whatever was being written.
-  `stop_grace_period: 30s` is already set in the compose file — do not lower it.
+- **Stop cleanly.** Recordings are finalised during shutdown, which can take
+  up to 35 seconds. Killing the process truncates whatever was being written.
+  The compose files set `stop_grace_period: 45s` and the systemd unit sets
+  `TimeoutStopSec=45`. Do not lower either. A compose file written before the
+  release after 0.10.0 says `30s`: raise it to `45s`.
 - **Check the FFmpeg floor.** It is 6.0 today. If a future release raises it,
   the server refuses to start rather than failing later in a confusing way.
 

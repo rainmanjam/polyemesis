@@ -1695,8 +1695,10 @@ install_docker_mode() {
     printf '      - ./config.yaml:/config.yaml:ro\n'
     printf '    command: ["-config", "/config.yaml"]\n'
     # Recordings are finalised on the way down. A shorter grace period truncates
-    # whatever was being written, so this matches the project's own compose file.
-    printf '    stop_grace_period: 30s\n'
+    # whatever was being written, so this matches the project's own compose file
+    # and the unit's TimeoutStopSec: engine.ShutdownBudget (35s) plus 10s.
+    # internal/testenv's shutdown budget test reads this line.
+    printf '    stop_grace_period: 45s\n'
 
     # LOGS HAVE NO CEILING UNLESS ONE IS WRITTEN HERE. Docker's default
     # json-file driver keeps every line the container ever wrote, forever, in
