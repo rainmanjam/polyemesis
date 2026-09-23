@@ -2407,6 +2407,38 @@ docker volume inspect polyemesis-data >/dev/null 2>&1 || {
   exit 1
 }
 
+# A FAILURE AFTER THE STOP BELOW MUST NOT LEAVE THE SERVER DOWN IN SILENCE.
+# Every refusal from here on used to exit under set -e with the container
+# stopped, and only one of them said so -- so a broadcast host that failed its
+# upgrade check was simply off the air until somebody noticed. Nothing has been
+# pulled or replaced until the backup is verified, so the right answer to a
+# failure is to start what we stopped, and to say it either way.
+#
+# The archive this run started goes too: a failed run's archive is by
+# definition not a verified way back, and a half-written one from a full disk
+# goes on holding the space that stopped it.
+STOPPED_BY_US=false
+ARCHIVE_CREATED=false
+on_exit() {
+  local rc=\$?
+  [ "\$rc" -eq 0 ] && return 0
+  if [ "\$ARCHIVE_CREATED" = true ] && [ -e "\$dest" ]; then
+    rm -f "\$dest" && echo "removed the unverified archive \$dest" >&2
+  fi
+  if [ "\$STOPPED_BY_US" = true ]; then
+    echo "this script stopped the container; starting it again" >&2
+    if \$COMPOSE_CMD start >&2; then
+      echo "The container is running again on the image it had. Nothing was upgraded." >&2
+    else
+      echo >&2
+      echo "!!! THE CONTAINER IS STOPPED and could not be started again. Start it with:" >&2
+      echo "!!!     cd $INSTALL_DIR && \$COMPOSE_CMD start" >&2
+    fi
+  fi
+  return "\$rc"
+}
+trap on_exit EXIT
+
 # STOP BEFORE ARCHIVING. tar of a live WAL database reads the main file, the
 # -wal and the -shm at three different instants, so the archive can hold a torn
 # transaction and is not guaranteed to open -- and it is the ONLY way back,
@@ -2417,10 +2449,25 @@ docker volume inspect polyemesis-data >/dev/null 2>&1 || {
 # \`stop\`, not \`down\`: down removes the container, and the operator may want it
 # back untouched if the checks below refuse the upgrade.
 echo "stopping the container so the archive is consistent"
+STOPPED_BY_US=true
 \$COMPOSE_CMD stop
 
-docker run --rm -v polyemesis-data:/data -v "$INSTALL_DIR:/backup" alpine \\
-  tar czf "/backup/backup-\${stamp}.tar.gz" -C /data .
+# THE ARCHIVE HOLDS secret.key AND tls/ca.key, SO ONLY ROOT MAY READ IT.
+# It used to be written by tar INSIDE the alpine container into a bind mount of
+# this directory, so its mode came from the container's umask, not the
+# operator's: 0644, in a 0755 directory, and any local account could
+# \`tar xzOf backup-*.tar.gz ./secret.key\`. Now the container writes the
+# archive to stdout and this shell creates the file -- 0600 under umask 077,
+# and with noclobber, so a file that appeared since the check above is refused
+# rather than truncated.
+if ! ( umask 077; set -C; : > "\$dest" ) 2>/dev/null; then
+  echo "ERROR: could not create \$dest (it exists, or the directory is not writable)." >&2
+  exit 1
+fi
+ARCHIVE_CREATED=true
+docker run --rm -v polyemesis-data:/data:ro alpine tar czf - -C /data . > "\$dest"
+# Archives written before this change are 0644. Close them too.
+chmod 0600 "$INSTALL_DIR"/backup-*.tar.gz 2>/dev/null || true
 
 # LIST ONCE, THEN TEST THE LISTING. Never pipe tar into a reader that can exit
 # early. \`tar tzf … | grep -q\` looks obviously correct and is not: grep -q
@@ -2462,21 +2509,28 @@ fi
 # carries the same SQLite driver the server runs on. It opens the file, walks
 # it and reads the schema; it runs no migration, because migrating the backup
 # would move the copy forward to the schema being kept a way back from. #643.
+#
+# THE ARCHIVE GOES IN ON STDIN AND IS UNPACKED INSIDE THE CONTAINER, into a
+# directory the image's own user made and can write. This used to unpack on
+# the host into a root-owned 0700 mktemp directory and bind it in at
+# /backup:ro, and every real upgrade was refused: the image runs as uid 10001,
+# and SQLite opening a WAL database needs to create its -shm beside it, which a
+# read-only mount forbids -- \`unable to open database file (14)\`, with the
+# container left stopped. The stub docker in acceptance-install.sh accepted the
+# mount, so nothing red ever said so. No host directory means no host
+# ownership, mode or mount flag for the check to trip over, and secret.key is
+# never unpacked onto the host at all.
 echo "checking the backup opens..."
-verify_dir="\$(mktemp -d)"
-trap 'rm -rf "\$verify_dir"' EXIT
-if ! tar xzf "\$dest" -C "\$verify_dir"; then
-  echo "ERROR: the backup archive will not unpack. Refusing to upgrade." >&2
-  exit 1
-fi
-if ! docker run --rm -v "\$verify_dir:/backup:ro" "$IMAGE" -verify-backup /backup; then
+if ! docker run -i --rm --entrypoint sh "$IMAGE" \\
+    -c 'd="\$(mktemp -d)" && tar xzf - -C "\$d" && exec polyemesis -verify-backup "\$d"' \\
+    < "\$dest"; then
   echo "ERROR: the backup at \$dest is not usable. Refusing to upgrade." >&2
-  echo "The container is still stopped; bring it back with:" >&2
-  echo "    \$COMPOSE_CMD start" >&2
   exit 1
 fi
 
 echo "backup verified: \${entries} entries, and the database opens"
+# From here the archive is the way back, and a failed pull or start must keep it.
+ARCHIVE_CREATED=false
 \$COMPOSE_CMD pull
 \$COMPOSE_CMD up -d
 echo "updated. Watch the first minute: \$COMPOSE_CMD logs -f"

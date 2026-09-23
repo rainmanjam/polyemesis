@@ -536,31 +536,49 @@ case "${1:-}" in
       ls)      echo "DRIVER  VOLUME NAME"; echo "local   some-other-volume"; exit 0 ;;
     esac ;;
   run)
-    # TWO shapes now. The second one is the backup check added for #643:
-    #   docker run --rm -v DIR:/backup:ro IMAGE -verify-backup /backup
-    # It is matched first because both carry a /backup path and the tar branch
-    # below would otherwise swallow it and archive nothing.
+    # THE BACKUP CHECK (#643). The stub models the one property of the real
+    # image that decided whether it worked: a database handed in on a
+    # READ-ONLY bind mount does not open. SQLite has to create the -shm beside
+    # a WAL database, the mount forbids it, and the real server answers
+    # `unable to open database file (14)`. This stub used to accept that mount,
+    # and so the suite was green over a verify step that refused every real
+    # docker upgrade -- measured on a real install with the 0.10.0 image.
+    # Any host bind mount is refused here, not just :ro: its owner and mode
+    # are the host's, which the image's uid 10001 does not share.
     for a in "$@"; do
-      if [ "$a" = "-verify-backup" ]; then
-        # The unpacked copy is the host directory bound at /backup:ro.
-        mount=""
-        for m in "$@"; do case "$m" in *:/backup:ro) mount="${m%%:/backup:ro}" ;; esac; done
-        [ -n "$mount" ] || { echo "stub docker: no :/backup:ro mount in: $*" >&2; exit 1; }
-        [ -f "$mount/polyemesis.db" ] || { echo "stub: no polyemesis.db in the archive" >&2; exit 1; }
-        [ -f "$mount/secret.key" ]    || { echo "stub: no secret.key in the archive" >&2; exit 1; }
-        case "$(head -c 15 "$mount/polyemesis.db" 2>/dev/null)" in
+      if [ "$a" = "-verify-backup" ] || [ "$a" = "--entrypoint" ]; then
+        for m in "$@"; do
+          case "$m" in
+            *:/backup:ro|*:/backup)
+              echo "polyemesis: backup at /backup is not usable: backup's polyemesis.db could not be read: unable to open database file (14)" >&2
+              exit 1 ;;
+          esac
+        done
+        # The supported shape: the archive on stdin, unpacked by the container.
+        vdir="$(mktemp -d)"
+        tar xzf - -C "$vdir" || { echo "stub: the archive on stdin will not unpack" >&2; exit 1; }
+        [ -f "$vdir/polyemesis.db" ] || { echo "stub: no polyemesis.db in the archive" >&2; exit 1; }
+        [ -f "$vdir/secret.key" ]    || { echo "stub: no secret.key in the archive" >&2; exit 1; }
+        case "$(head -c 15 "$vdir/polyemesis.db" 2>/dev/null)" in
           "SQLite format 3") ;;
           *) echo "stub: the archived polyemesis.db is not a SQLite database" >&2; exit 1 ;;
         esac
+        rm -rf "$vdir"
         echo "backup opens, passes integrity_check and holds this server's schema"
         exit 0
       fi
     done
-    # ... -v polyemesis-data:/data -v DIR:/backup alpine tar czf /backup/NAME -C /data .
+    # The archive: `alpine tar czf - -C /data .` to stdout, which the script
+    # redirects into the file it created. The older shape wrote
+    # /backup/NAME through a bind mount; still understood, so a revert of the
+    # script is caught by the assertions below rather than by this stub.
     archive=""
     for a in "$@"; do case "$a" in /backup/*) archive="${a#/backup/}" ;; esac; done
-    [ -n "$archive" ] || { echo "stub docker: no /backup path in: $*" >&2; exit 1; }
-    tar czf "$STUB_BACKUP_DIR/$archive" -C "$STUB_VOLUME" . || exit 1
+    if [ -n "$archive" ]; then
+      tar czf "$STUB_BACKUP_DIR/$archive" -C "$STUB_VOLUME" . || exit 1
+    else
+      tar czf - -C "$STUB_VOLUME" . || exit 1
+    fi
     exit 0 ;;
 esac
 echo "stub docker: unexpected invocation: $*" >&2
@@ -580,8 +598,11 @@ gen_docker_update() { # gen_docker_update <install_dir> [compose_cmd]
 
 run_docker_update() { # run_docker_update <install_dir> <volume_dir> [args...]
   local dir="$1" vol="$2"; shift 2
-  STUB_VOLUME="$vol" STUB_BACKUP_DIR="$dir" PATH="$stub:$PATH" \
-    bash "$dir/update.sh" "$@" 2>&1
+  # umask 022, the common default, so an archive mode that only came out right
+  # because the suite's own umask was strict cannot pass.
+  ( umask 022
+    STUB_VOLUME="$vol" STUB_BACKUP_DIR="$dir" PATH="$stub:$PATH" \
+      bash "$dir/update.sh" "$@" 2>&1 )
 }
 
 # A compose stub that can answer `top` two ways, so the on-air guard has
@@ -631,6 +652,17 @@ case "$out" in
   *disabled*) ok "and it says what that costs: every destination back disabled" ;;
   *) bad "the docker secret.key refusal no longer explains the consequence" ;;
 esac
+# That refusal came AFTER `compose stop`. It used to exit there under set -e,
+# leaving a broadcast host off the air with one line of explanation at best.
+case "$out" in
+  *"[stub compose] start"*) ok "and it starts the container it stopped, rather than leaving the host off the air" ;;
+  *) bad "the refusal left the container stopped: update.sh never ran \`compose start\`" ;;
+esac
+if [ -z "$(find "$docker_dir" -maxdepth 1 -name 'backup-*.tar.gz')" ]; then
+  ok "and the unverified archive it wrote is removed, not left holding the disk"
+else
+  bad "a refused run left its unverified archive behind: $(ls "$docker_dir"/backup-*.tar.gz)"
+fi
 
 rm -f "$docker_dir"/backup-*.tar.gz
 
@@ -648,6 +680,15 @@ case "$out" in
   *"[stub compose] pull"*) ok "and only then does it reach the pull" ;;
   *) bad "the happy path never reached \`compose pull\`" ;;
 esac
+# The archive holds secret.key and tls/ca.key. Written by tar inside the
+# container it took the container's umask -- 0644, readable by every local
+# account. Run under a permissive umask on purpose: the mode must not depend on
+# the operator's.
+archive="$(find "$docker_dir" -maxdepth 1 -name 'backup-*.tar.gz' | head -1)"
+mode="$(ls -l "$archive" 2>/dev/null | cut -c1-10)"
+[ "$mode" = "-rw-------" ] \
+  && ok "the backup archive is 0600: it holds secret.key, so only its owner may read it" \
+  || bad "the backup archive is ${mode:-missing}, so any local account can read secret.key out of it"
 
 step "9. A second docker update in the same minute does not overwrite the backup"
 # Same stamp, same dest -- tar czf would otherwise TRUNCATE the archive from

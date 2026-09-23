@@ -24,6 +24,23 @@ its first tagged release.
   now refused with a pointer to Settings -> Listeners. In docker mode the chosen
   host port is published onto the server's 6000/1935 inside the container,
   instead of `N:N`, which published a port nothing inside listened on.
+- **The docker-mode `update.sh` refused every real upgrade.** Its backup check
+  unpacked the archive into a root-owned 0700 directory and bound it into the
+  image read-only; the image runs as uid 10001 and SQLite cannot open a WAL
+  database without creating its `-shm`, so the check failed with
+  `unable to open database file (14)` and left the container stopped. The
+  archive now goes in on stdin and is unpacked inside the container. The
+  acceptance stub that had accepted the read-only mount now models it.
+- **Docker backups are 0600.** `backup-*.tar.gz` holds `secret.key` and
+  `tls/ca.key`, and was written 0644 by tar inside the container, so any local
+  account could read the key out of it. The script now creates the file itself
+  under `umask 077` (and with noclobber), and tightens archives left by earlier
+  runs.
+- **A failed docker `update.sh` no longer leaves the container stopped in
+  silence.** It stops the container before the backup, and every refusal after
+  that point used to exit with it down. It now starts what it stopped, says so,
+  and removes the unverified archive; if the start fails, it says the container
+  is STOPPED and prints the command.
 
 ## [0.10.0] — 2026-09-23
 
