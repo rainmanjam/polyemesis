@@ -195,6 +195,15 @@ export function SourcesPage() {
       await refreshSources();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("sources.deleteFailed"));
+      // Close the dialog and re-read the list. The commonest failure here is
+      // the 409 above, and the dialog is holding the stale count that caused
+      // it: left open, every retry sends that same number and is refused
+      // again, while the toast tells the operator to confirm a count the
+      // console never shows them. Reopening from the refreshed row shows the
+      // current count, and a source someone else already deleted (404) drops
+      // out of the list instead of staying clickable.
+      setDeleting(null);
+      await load();
     } finally {
       setBusyId(null);
     }
