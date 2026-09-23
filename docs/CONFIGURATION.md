@@ -39,6 +39,7 @@ The keys, in brief:
 | `tls.certFile` / `tls.keyFile` | `""` | `manual` mode only |
 | `tls.hsts` | `false` | Opt-in on purpose — see below |
 | `trustProxyHeaders` | `false` | Set **only** behind a reverse proxy you control |
+| `trustedProxies` | `[]` | With `trustProxyHeaders`, the proxies besides loopback whose `X-Forwarded-For` / `X-Real-IP` are believed: addresses or CIDRs, e.g. `["172.17.0.1"]` for nginx on the Docker host. From any other peer the headers are ignored. A malformed entry stops startup |
 | `ffmpeg.binary` / `ffmpeg.probe` | `""` | Pin specific binaries instead of searching `$PATH` |
 | `transcription.binary` | `""` | Pin the whisper.cpp CLI (`whisper-cli`, or the older `main`) instead of searching `$PATH`. Deliberately not validated — an unusable path degrades transcription and never stops the server serving a live stream |
 
@@ -530,6 +531,12 @@ with three mechanisms it stops being obvious which one won, so a variable has
 to earn its place. The ones that have earned it are a credential with nowhere
 else to live, and a set of escape hatches an operator reaches for while
 standing at a terminal reading an error.
+
+### First-run setup
+
+| Variable | What it does |
+|---|---|
+| `POLYEMESIS_SETUP_CODE` | The one-time code first-run setup needs, instead of one the server makes. For unattended provisioning, where whoever set up the box already knows it. 12 characters or more, or the server refuses to start. Read only while no admin account exists. See [INSTALL.md](INSTALL.md#the-first-run-setup-code) |
 
 ### Rumble chat
 

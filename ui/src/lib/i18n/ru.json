@@ -9,6 +9,8 @@
   "auth.createAccount": "Создать учётную запись",
   "auth.firstRun": "Первоначальная настройка",
   "auth.firstRunDesc": "Выберите учётные данные администратора для этого сервера. Восстановления учётной записи нет, поэтому храните их в надёжном месте.",
+  "auth.setupCode": "Код настройки",
+  "auth.setupCodeHint": "Сервер вывел его при запуске и сохранил в файле setup-code в своём каталоге данных. В Linux: sudo journalctl -u polyemesis | grep -A2 'setup code' или sudo cat /var/lib/polyemesis/setup-code. В Docker: docker logs polyemesis или docker exec polyemesis cat /data/setup-code.",
   "auth.sessionEnded": "Сеанс завершён. Войдите снова, чтобы продолжить.",
   "auth.password": "Пароль",
   "auth.passwordMismatch": "Пароли не совпадают.",

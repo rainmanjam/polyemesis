@@ -295,6 +295,10 @@ func run(h *hooks) error {
 	// the product ever removes a staged file a killed process left behind. See
 	// sweepUploadLeftovers.
 	sweepUploadLeftovers(cfg.DataDir, log)
+	setupCode, err := prepareSetupCode(cfg, store)
+	if err != nil {
+		return err
+	}
 
 	bus := events.NewBroker()
 
@@ -392,6 +396,7 @@ func run(h *hooks) error {
 		Chat:          hub,
 		AutomodBudget: automodBudget,
 		Hooks:         hookd,
+		SetupCode:     setupCode,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
 		// disk out from under the running listener.
@@ -460,6 +465,7 @@ func run(h *hooks) error {
 	if err := reportStartup(log, cfg, provider, store, tools); err != nil {
 		return err
 	}
+	reportSetupCode(os.Stdout, log, setupCode)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -904,11 +910,17 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 		fmt.Printf("\n  WARNING: %s\n", warn)
 		log.Warn("tls on a non-standard port", "detail", warn)
 	}
+	// trustProxyHeaders on a listener clients can reach without the proxy.
+	// See config.ProxyHeaderWarning for why it names --addr versus the file.
+	if warn := cfg.ProxyHeaderWarning(); warn != "" {
+		fmt.Printf("\n  WARNING: %s\n", warn)
+		log.Warn("proxy headers trusted on a directly reachable listener", "detail", warn)
+	}
 	if _, warn := cfg.HSTSPolicy(); warn != "" {
 		fmt.Printf("\n  WARNING: %s\n", warn)
 	}
 	if !hasUser {
-		fmt.Printf("\n  First run: open the web UI to set an admin password.\n")
+		fmt.Printf("\n  First run: open the web UI and create the admin account with the setup code below.\n")
 	}
 	if !api.UIBuilt() {
 		fmt.Printf("\n  WARNING: no web UI is embedded in this binary.\n")

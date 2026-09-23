@@ -54,6 +54,7 @@ export function AuthScreen({
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [setupCode, setSetupCode] = useState("");
   const [busy, setBusy] = useState(false);
 
   const isSetup = mode === "setup";
@@ -76,7 +77,7 @@ export function AuthScreen({
     setBusy(true);
     try {
       if (isSetup) {
-        await api.setup(username.trim() || "admin", password);
+        await api.setup(username.trim() || "admin", password, setupCode.trim());
         toast.success(t("auth.accountCreated"));
       } else {
         await api.login(username.trim(), password);
@@ -109,6 +110,31 @@ export function AuthScreen({
           </CardHeader>
           <CardContent>
             <form onSubmit={submit} className="flex flex-col gap-3">
+              {/* FIRST, AND REQUIRED. Whoever reached a fresh install's port
+                  first used to become its admin; the code proves the person
+                  at this form can also read the box. It is not a secret to
+                  hide from its owner -- a plain text input, so it can be
+                  checked against the terminal it was copied from. */}
+              {isSetup && (
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="setupCode">{t("auth.setupCode")}</Label>
+                  <Input
+                    id="setupCode"
+                    value={setupCode}
+                    autoComplete="off"
+                    spellCheck={false}
+                    autoCapitalize="characters"
+                    placeholder="XXXX-XXXX-XXXX-XXXX"
+                    aria-describedby="setupCode-hint"
+                    onChange={(e) => setSetupCode(e.target.value)}
+                    required
+                    autoFocus
+                  />
+                  <span id="setupCode-hint" className="text-[10px] leading-relaxed text-muted-foreground">
+                    {t("auth.setupCodeHint")}
+                  </span>
+                </div>
+              )}
               <div className="flex flex-col gap-1">
                 <Label htmlFor="username">{t("auth.username")}</Label>
                 <Input

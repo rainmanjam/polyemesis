@@ -21,7 +21,10 @@
 #
 # This script never asks for, stores, or writes an admin password. polyemesis
 # has no admin account until you open the UI and create one on the first-run
-# screen, so there is no credential for an installer to mishandle.
+# screen, so there is no credential for an installer to mishandle. That screen
+# asks for the one-time setup code the server wrote to <data dir>/setup-code;
+# the summary at the end prints it, because whoever ran this script is exactly
+# the person it is for.
 
 set -euo pipefail
 
@@ -3172,15 +3175,51 @@ verify_acme_redirect() {
   return 1
 }
 
+# read_setup_code prints the one-time setup code the server wrote at boot, or
+# nothing when there is none -- an install that already has an admin, whose
+# server deleted the file when that admin was created.
+#
+# Read from the server's own file rather than scraped from its log: the file is
+# the one place the code is guaranteed to be, and it is written before the
+# listener opens, so by the time /health has answered it exists. The container
+# runs as its own user and the file is 0600, so the docker half reads it
+# through the container rather than from the volume.
+read_setup_code() {
+  if [ "$MODE" = docker ]; then
+    (cd "$INSTALL_DIR" && $COMPOSE_CMD exec -T polyemesis cat /data/setup-code) 2>/dev/null | tr -d '\r' || true
+  else
+    cat "$DATA_DIR/setup-code" 2>/dev/null || true
+  fi
+}
+
 print_summary() {
-  local scheme="http" hostpart="localhost"
+  local scheme="http" hostpart="localhost" setup_code
   [ "$TLS_MODE" = "off" ] || scheme="https"
   [ -n "$DOMAIN_NAME" ] && hostpart="$DOMAIN_NAME"
+  setup_code="$(read_setup_code)"
 
   header "polyemesis is running"
   echo
-  echo "  ${BOLD}Open ${scheme}://${hostpart}:${HTTP_PORT}${NC} and create your admin password."
-  echo "  There is no account until you do — that first screen is the only way to make one."
+  if [ -n "$setup_code" ]; then
+    # THE PORT IS ALREADY OPEN, and first-run setup is what makes someone the
+    # admin. The code is what stops that someone being whoever finds the port
+    # first: the first-run screen refuses to create the account without it.
+    echo "  ${BOLD}Open ${scheme}://${hostpart}:${HTTP_PORT}${NC} and create your admin account."
+    echo "  It asks for this one-time setup code:"
+    echo
+    echo "      ${BOLD}${setup_code}${NC}"
+    echo
+    if [ "$MODE" = docker ]; then
+      echo "  It is also in the server log (cd $INSTALL_DIR && $COMPOSE_CMD logs polyemesis)"
+      echo "  and in /data/setup-code inside the container. It stops working once the account exists."
+    else
+      echo "  It is also in the server log (journalctl -u $SERVICE_NAME) and in"
+      echo "  $DATA_DIR/setup-code. It stops working once the account exists."
+    fi
+  else
+    echo "  ${BOLD}Open ${scheme}://${hostpart}:${HTTP_PORT}${NC} and sign in."
+    echo "  This install already has an admin account, so there is no setup code."
+  fi
   echo
 
   if [ "$TLS_MODE" = "selfsigned" ]; then

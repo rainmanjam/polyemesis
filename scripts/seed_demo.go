@@ -94,7 +94,7 @@ func main() {
 	// First run or a re-run against the same volume. Both have to work, because
 	// capturing is something you do repeatedly while adjusting a shot.
 	if setupNeeded() {
-		post("/setup", map[string]any{"username": "admin", "password": password})
+		post("/setup", map[string]any{"username": "admin", "password": password, "setupCode": os.Getenv("POLYEMESIS_SETUP_CODE")})
 	} else {
 		post("/auth/login", map[string]any{"username": "admin", "password": password})
 	}

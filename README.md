@@ -159,7 +159,9 @@ docker run -d --name polyemesis \
   rainmanjam/polyemesis:latest
 ```
 
-Open <http://localhost:8080> and set an admin password on the first-run screen.
+Open <http://localhost:8080> and create the admin account on the first-run
+screen. It asks for the one-time **setup code** the server prints at startup:
+`docker logs polyemesis` shows it, and it is saved in `/data/setup-code`.
 
 > Note the `/udp` on port 6000. SRT is UDP, and omitting the suffix is the
 > classic reason an ingest silently receives nothing.

@@ -158,7 +158,7 @@ func login() {
 }
 
 func setup() {
-	code, out := do(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass})
+	code, out := do(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass, "setupCode": os.Getenv("POLYEMESIS_SETUP_CODE")})
 	if code != http.StatusOK && code != http.StatusCreated {
 		die(fmt.Sprintf("setup failed: %d %s", code, out))
 	}

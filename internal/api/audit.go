@@ -102,10 +102,10 @@ const (
 // there costs an attacker a bucket of their own and nothing else. Here the same
 // string is rendered into a Slack or Discord message raised from
 // POST /api/v1/auth/login, which is UNAUTHENTICATED. With trustProxyHeaders on,
-// auth.ClientIP returns the leftmost X-Forwarded-For segment after nothing but
-// a TrimSpace -- so without this check anyone who can reach the login endpoint
-// can put arbitrary text of their choosing into the operator's channel, from
-// off the internet, without credentials.
+// auth.ClientIP returns an X-Forwarded-For segment after nothing but a
+// TrimSpace -- and although only a trusted proxy's header is read now, a proxy
+// that appends passes the client's own bytes along -- so without this check
+// text of an attacker's choosing could reach the operator's channel.
 //
 // alerts.Redact is not a backstop for this. It matches syntax -- URLs, k=v
 // pairs, Bearer headers -- and a plain sentence passes through it untouched.
@@ -115,7 +115,7 @@ const (
 // proxy is a small loss; relaying an attacker's prose to the operator as though
 // it were a client address is not.
 func (s *Server) clientIP(r *http.Request) string {
-	if addr := auth.ClientIP(r, s.cfg.TrustProxyHeaders); net.ParseIP(addr) != nil {
+	if addr := auth.ClientIP(r, s.proxies); net.ParseIP(addr) != nil {
 		return addr
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

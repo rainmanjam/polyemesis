@@ -632,6 +632,57 @@ its first tagged release.
   `INFO` line (name, redacted URL, client address) and raises a new event,
   `alerts.rule_changed`. A deleted rule is sent that event itself before it
   stops receiving anything.
+- **A read-scoped API token no longer reads viewer chat.** `read` means
+  metadata, not content, and recordings and transcripts were already refused,
+  but `GET /chat`, `/chat/messages`, `/chat/search` and `/chat/users` answered
+  a read token with the scrollback, and `/ws` sent it every chat message.
+  Those four routes now answer `403`, and a read-scoped socket is not sent
+  `chat` events (connection state still arrives). A monitoring script that
+  read chat needs an `admin` token.
+
+- **A refused Kick webhook no longer writes its secret to the log.** The
+  request log recorded the full path of every 4xx and 5xx, and
+  `/api/v1/chat/kick/{secret}` answers a wrong method, a non-JSON body or a
+  bad signature with one, so the webhook secret reached journald on exactly
+  the requests that were not Kick's. The request log now records the route
+  pattern a request matched, which redacts every path parameter; a request
+  that matched no route is still logged with its path.
+
+- **One IPv6 host can no longer dodge the login throttle by rotating
+  addresses.** The login and setup throttles keyed on the full client
+  address, and a VPS routinely gets a whole /64, so each of its addresses got
+  its own five free attempts. An IPv6 client is now counted by its /64, and
+  an IPv4-mapped address as its IPv4 address. Each throttle also has a
+  budget that all addresses share (100 attempts in a burst, then one a
+  second), charged when an attempt is let through rather than when it fails,
+  so a large pool of addresses cannot guess without limit either, however many
+  requests it has in flight. A correct password gives its charge back.
+
+- **A client that reaches the port directly can no longer choose its own
+  throttle key.** With `trustProxyHeaders: true`, `X-Forwarded-For` and
+  `X-Real-IP` were believed from any peer. The docs say to bind 127.0.0.1
+  behind the proxy, but the shipped unit's `--addr :8080` overrides
+  `config.yaml`, so the port was often public. A direct client could then pick
+  a fresh login and setup throttle key per request and write any address into
+  the audit log. The headers are now believed only from loopback and from the
+  new `trustedProxies` list (addresses or CIDRs). The server logs once when it
+  ignores a forwarded header from an unlisted peer, and warns at startup when
+  `trustProxyHeaders` is on and the listener is public, saying whether
+  `--addr` or `config.yaml` set it. A proxy that is not on the same host must
+  now be listed; see [docs/UPGRADING.md](docs/UPGRADING.md).
+
+- **A fresh install can no longer be claimed by whoever reaches its port
+  first.** `install.sh` starts the service and opens the firewall before the
+  operator has a browser open, and `POST /api/v1/setup` made the first caller
+  the admin. While no admin exists, the server now makes a one-time setup code
+  at startup, writes it to `<dataDir>/setup-code` (mode 0600), and prints it
+  once in the startup banner. Setup refuses without it (`403`). The code is
+  used up when the admin is created, and a restart before then keeps it. The
+  first-run screen has a field for it and says where to find it, and
+  `install.sh` prints it at the end. `POLYEMESIS_SETUP_CODE` presets it for
+  unattended installs. Installs that already have an admin are unaffected. See
+  [docs/UPGRADING.md](docs/UPGRADING.md) and
+  [docs/INSTALL.md](docs/INSTALL.md#the-first-run-setup-code).
 
 - **Upgrading from 0.6.x no longer leaves plaintext stream keys in
   `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,

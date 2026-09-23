@@ -60,7 +60,7 @@ echo "  image built"
 docker volume create "$VOL" >/dev/null 2>&1
 # No ingest ports published: this suite never streams, and binding them would
 # collide with any other polyemesis running on the machine.
-docker run -d --name "$CTR" -p "$PORT:8080" -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
+docker run -d --name "$CTR" -e POLYEMESIS_SETUP_CODE -p "$PORT:8080" -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
 
 for _ in $(seq 1 60); do
   [ "$(docker inspect --format '{{.State.Health.Status}}' "$CTR" 2>/dev/null)" = "healthy" ] && break

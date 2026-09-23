@@ -9,6 +9,8 @@
   "auth.createAccount": "Crear cuenta",
   "auth.firstRun": "Configuración inicial",
   "auth.firstRunDesc": "Elija las credenciales de administrador de este servidor. No hay recuperación de cuenta, así que guárdelas en un lugar seguro.",
+  "auth.setupCode": "Código de configuración",
+  "auth.setupCodeHint": "El servidor lo mostró al arrancar y lo guardó en el archivo setup-code de su directorio de datos. En Linux: sudo journalctl -u polyemesis | grep -A2 'setup code' o sudo cat /var/lib/polyemesis/setup-code. En Docker: docker logs polyemesis o docker exec polyemesis cat /data/setup-code.",
   "auth.sessionEnded": "Tu sesión ha terminado. Inicia sesión de nuevo para continuar.",
   "auth.password": "Contraseña",
   "auth.passwordMismatch": "Las contraseñas no coinciden.",

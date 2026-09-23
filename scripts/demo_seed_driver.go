@@ -609,6 +609,7 @@ func authenticate() {
 	if setupNeeded() {
 		if code, out := send("POST", "/setup", map[string]any{
 			"username": "admin", "password": password,
+			"setupCode": os.Getenv("POLYEMESIS_SETUP_CODE"),
 		}); code >= 300 {
 			die("first-run setup: %d %s", code, out)
 		}

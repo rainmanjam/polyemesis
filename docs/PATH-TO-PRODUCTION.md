@@ -47,7 +47,7 @@ install or the data. They block v1.0 outright.
 | — | Password change revokes API tokens, or says at that moment that it does not (`api_tokens` are hash-only, `tokens.go:182`) | Warning | UI names surviving tokens on the password-change screen |
 | — | No `config.yaml` → refuse plaintext on `0.0.0.0`, or bind loopback until TLS is configured (`config.go:129`, mode `""` → off) | Control | fresh start without config does not listen on all interfaces in the clear |
 | — | Pull URLs go through `netguard` like webhooks do (`ValidatePullURL` checks scheme only) | Control | a pull of `http://169.254.169.254/` is refused |
-| — | `POST /setup` throttled and, when the box has any listener bound before first login, documented as a first-boot window | Warning | rate-limited; INSTALL.md says to complete setup before exposing the port |
+| — | `POST /setup` needs a one-time setup code minted at boot into `<dataDir>/setup-code`, and is throttled | Control | done: a fresh install refuses setup without the code (`internal/api/setup_code_test.go`) |
 
 ## Stage 3 — the console tells the truth
 

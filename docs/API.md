@@ -41,7 +41,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the thirteen `GET`s among the fifteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the seventeen `GET`s among the nineteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 
 The middleware also lets `HEAD` through, and no route in this API is registered
@@ -123,10 +123,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Fifteen routes are refused outright**, for three different reasons. Masking
+**Nineteen routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next five, which
-are `403` because of what they *do*. The last eight are `403` because of what
+are `403` because of what they *do*. The last twelve are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -146,9 +146,17 @@ are `403` because of what they *do*. The last eight are `403` because of what
 | `GET /clipper/recordings/{id}/transcript` | the verbatim transcript |
 | `GET /library/recordings/{id}/transcript` | the same, by the library's route |
 | `GET /library/search` | hits carry the segment `text`, its `context` and the `speaker` |
+| `GET /chat` | the chat overview carries the recent messages, not only each platform's connection state |
+| `GET /chat/messages` | the chat scrollback: what each viewer wrote, under their name |
+| `GET /chat/search` | hits are chat messages; iterating common words rebuilds the scrollback |
+| `GET /chat/users` | everything one viewer has said |
 
-The last of those is the one worth reading twice. `GET /library/search` looks
-like a metadata query and is not: iterating common words would rebuild whole
+Chat is refused on the WebSocket as well: a `read` token may open `/ws`, and it
+is sent every event type except `chat` (connection state and retractions still
+arrive).
+
+`GET /library/search` is the one worth reading twice. It looks like a metadata
+query and is not: iterating common words would rebuild whole
 transcripts without ever requesting a route with `transcript` in its path. The
 list is drawn from what the bytes are, not from what the URL says.
 
@@ -370,7 +378,7 @@ tokens are for.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/setup` | Whether first-run setup is still needed |
-| `POST` | `/setup` | Create the admin. Refused once one exists. Throttled per client address |
+| `POST` | `/setup` | Create the admin. Needs the one-time `setupCode`; `409` once an admin exists. Throttled per client address |
 | `POST` | `/auth/login` | Throttled per client address |
 | `GET` | `/health` | Three named checks. Not every failure is a `503` — see below |
 | `GET` | `/tls/ca` | The generated CA, for trusting a self-signed instance |
@@ -435,13 +443,37 @@ files. The consequence for whoever wires up the monitoring is that **a full
 recording volume is invisible to a check keyed on the HTTP status** — key on
 the `status` field instead, and alert on `degraded` as well as on `unhealthy`.
 
+#### First-run setup
+
+`POST /setup` takes `{"username", "password", "setupCode"}`. `setupCode` is the
+one-time code the server writes to `<dataDir>/setup-code` at startup while no
+admin exists, and prints once in its startup banner; case, spaces and dashes
+are ignored. See [INSTALL.md](INSTALL.md#the-first-run-setup-code).
+
+| Status | When |
+|---|---|
+| `201` | The admin was created and signed in. The code is used up |
+| `403` | The code is missing or wrong |
+| `409` | An admin already exists |
+| `503` | The server has no code to check against; restart it |
+
 #### The two throttles
 
 `POST /setup` and `POST /auth/login` are rate-limited per client address, and
 both answer `429` with a `Retry-After` header carrying whole seconds. The
 policy is the same for each: five free attempts, then a delay starting at two
 seconds and doubling with every further one to a five-minute ceiling, and the
-counter for an address is forgotten after an hour of quiet. The bodies are
+counter for an address is forgotten after an hour of quiet. An IPv6 client is
+counted by its **/64**, since one host owns the whole block, and an
+IPv4-mapped address (`::ffff:192.0.2.1`) counts as the IPv4 address.
+
+Each throttle also has one budget that every address shares: 100 counted
+attempts in a burst, then one more a second. It exists so that a pool of
+addresses, each inside its own free allowance, cannot guess without limit. An
+attempt is charged as it is let through, so requests in flight together cannot
+overdraw it, and a correct password or completed setup gives its charge back. When
+it is spent, the next attempt from any address gets a `429` with a
+`Retry-After` of about a second. The bodies are
 `{"error": "too many setup attempts, try again later"}` and `{"error": "too
 many failed attempts, try again later"}`.
 

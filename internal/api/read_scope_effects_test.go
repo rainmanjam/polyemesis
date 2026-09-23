@@ -78,6 +78,16 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 		{http.MethodGet, "/api/v1/library/search?q=the", nil,
 			"db.TranscriptHit carries Text, Context and Speaker, so iterating common " +
 				"words reconstructs the transcript without naming a /transcript route"},
+
+		// Staging-readiness row 32: content, not metadata. What viewers wrote.
+		{http.MethodGet, "/api/v1/chat", nil,
+			"the overview carries the recent messages, not only the connection states"},
+		{http.MethodGet, "/api/v1/chat/messages", nil,
+			"the scrollback: every viewer's message, with their name"},
+		{http.MethodGet, "/api/v1/chat/search?q=the", nil,
+			"iterating common words rebuilds the scrollback, as /library/search would a transcript"},
+		{http.MethodGet, "/api/v1/chat/users?platform=twitch&authorId=someone", nil,
+			"everything one viewer has said"},
 	}
 
 	// EVERY denied pattern must appear above. The deny list is subtractive, so

@@ -115,6 +115,14 @@ tls:
 # front, a client could forge those headers.
 trustProxyHeaders: false
 
+# The proxies whose X-Forwarded-For / X-Real-IP are believed for login throttling
+# and the audit log, besides loopback, which is always trusted when
+# trustProxyHeaders is on. Addresses or CIDRs. A request from any other peer is
+# keyed on its own address, so a client that reaches the port directly cannot
+# pick its own. List your proxy here when it is not on this host, e.g. nginx on
+# the Docker host talking to this container: ["172.17.0.1"].
+trustedProxies: []
+
 # Pin specific binaries instead of searching $PATH. Leave empty to autodetect.
 ffmpeg:
   binary: ""

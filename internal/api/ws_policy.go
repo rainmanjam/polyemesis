@@ -40,10 +40,8 @@ const (
 	// RESIDUAL pass, preserving the wire shape. For payloads carrying text
 	// somebody else authored. Best-effort, and claimed as nothing more.
 	wsRedactText
-	// wsDrop sends nothing to a read scope. Nothing uses it today; it is here
-	// because the honest answer for some future payload is "not to this
-	// principal", and a table with no way to say that would get an entry it
-	// does not mean.
+	// wsDrop sends nothing to a read scope: the payload is content a read
+	// token was decided not to have, not merely a field to scrub.
 	wsDrop
 )
 
@@ -85,10 +83,14 @@ var wsEventPolicy = map[events.Type]wsPolicy{
 	// to chat.
 	events.TypeSource: wsRedactText,
 
-	// Text authored elsewhere and passed through. A chat message or a caption
-	// can contain anything a viewer typed, including a key pasted into the
-	// wrong window.
-	events.TypeChat:    wsRedactText,
+	// A chat message is what a viewer wrote, under their name: content, which
+	// a read token does not get (staging-readiness row 32). The REST
+	// scrollback is denied in readScopeDeniedPatterns; this is the live copy
+	// of the same messages, and redacting it would still have sent every
+	// word.
+	events.TypeChat: wsDrop,
+	// Text authored elsewhere and passed through. A caption can contain
+	// anything that was said, including a key read out loud.
 	events.TypeCaption: wsRedactText,
 
 	// A platform name, a state word, a reason string, and message ids.

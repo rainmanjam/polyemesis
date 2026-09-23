@@ -197,3 +197,13 @@ poly_verdict_trap() {
   poly_verdict "$rc"
   exit "$rc"
 }
+
+# ---------------------------------------------------------------- setup code
+# First-run setup refuses without the one-time code the server mints at boot
+# (internal/auth/setupcode.go). Every suite here starts a fresh server and
+# drives first-run setup, so the code is PRESET rather than read back: the
+# server honours POLYEMESIS_SETUP_CODE, and the drivers send the same variable.
+# Exported here, where every suite already passes before it starts anything,
+# so a suite cannot start its server without it. A suite that runs the server
+# in a container must still pass it in with `-e POLYEMESIS_SETUP_CODE`.
+export POLYEMESIS_SETUP_CODE="${POLYEMESIS_SETUP_CODE:-acceptance-setup-code}"

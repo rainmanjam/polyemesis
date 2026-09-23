@@ -136,9 +136,10 @@ func TestEveryAuditEventIsCoveredByTheRedactionTest(t *testing.T) {
 // here rather than in somebody's Slack.
 // A forged X-Forwarded-For must never reach a payload.
 //
-// POST /api/v1/auth/login is unauthenticated, so with trustProxyHeaders on
-// anyone who can reach it controls what auth.ClientIP returns -- that function
-// takes the leftmost segment after a TrimSpace and validates nothing, which is
+// POST /api/v1/auth/login is unauthenticated, so with trustProxyHeaders on a
+// client behind a trusted proxy controls what auth.ClientIP returns -- that
+// function takes the rightmost segment after a TrimSpace and validates nothing,
+// which is
 // correct for the throttle (the value is only ever a map key there) and wrong
 // the moment the same string is rendered into an operator's channel.
 //
@@ -151,18 +152,22 @@ func TestAForgedForwardedForCannotReachAPayload(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		trustProxy bool
+		peer       string
 		header     string
 		want       string
 	}{
-		{"forged header, proxy trusted", true, forged, "203.0.113.9"},
-		{"forged header, proxy not trusted", false, forged, "203.0.113.9"},
-		{"real address, proxy trusted", true, "198.51.100.4", "198.51.100.4"},
-		{"no header at all", true, "", "203.0.113.9"},
+		// Through a proxy on this host, so the header IS read: the payload
+		// check below is what stops the forged text.
+		{"forged header, proxy trusted", true, "127.0.0.1", forged, "127.0.0.1"},
+		{"forged header, proxy not trusted", false, "203.0.113.9", forged, "203.0.113.9"},
+		{"forged header, trusted but a direct client", true, "203.0.113.9", forged, "203.0.113.9"},
+		{"real address, proxy trusted", true, "127.0.0.1", "198.51.100.4", "198.51.100.4"},
+		{"no header at all", true, "203.0.113.9", "", "203.0.113.9"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, _ := testServer(t, config.Config{TrustProxyHeaders: tc.trustProxy})
 			r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
-			r.RemoteAddr = "203.0.113.9:51234"
+			r.RemoteAddr = tc.peer + ":51234"
 			if tc.header != "" {
 				r.Header.Set("X-Forwarded-For", tc.header)
 			}

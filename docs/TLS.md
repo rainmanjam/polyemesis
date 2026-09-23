@@ -636,8 +636,18 @@ Five things matter:
    no proxy — otherwise a client can forge those headers.
 2. **Bind polyemesis to loopback** (`addr: "127.0.0.1:8080"`). With a proxy in
    front there is no reason for the plaintext port to be reachable from anywhere
-   else, and `trustProxyHeaders` suppresses the exposure warning that would
-   otherwise have told you about it.
+   else. **A `--addr` flag beats `addr` in `config.yaml`**, and
+   `deploy/polyemesis.service` passes `--addr :8080`: on a systemd install,
+   change it in the unit's `ExecStart` (`--addr 127.0.0.1:8080`), then
+   `systemctl daemon-reload` and restart. The server warns at startup when
+   `trustProxyHeaders` is on and the listener is public, and says whether the
+   flag or the file set it.
+   `X-Forwarded-For` and `X-Real-IP` are believed only from loopback and from
+   the addresses in `trustedProxies`, so if nginx is not on the same host (nginx
+   on the Docker host in front of this container, say), list it:
+   `trustedProxies: ["172.17.0.1"]`. Otherwise every client behind it is
+   throttled as one address, and the server logs once that it ignored a
+   forwarded header from that peer.
 3. **Proxy the WebSocket.** Live status, meters and logs all arrive over
    `/api/v1/ws`: `proxy_http_version 1.1`, `Upgrade`/`Connection "upgrade"`, and
    a long `proxy_read_timeout`.

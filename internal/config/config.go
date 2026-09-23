@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -48,12 +49,23 @@ type Config struct {
 	// AddrDefaulted it is not a setting. It exists so the startup warnings tell
 	// the operator to change the flag -- in the unit's ExecStart or the
 	// container's command -- rather than an addr: line the flag overrides.
+	// ProxyHeaderWarning uses it too: the answer to "I set addr: 127.0.0.1 and
+	// it still listens publicly" is almost always the unit's --addr.
 	AddrFromFlag bool `yaml:"-"`
 	// TrustProxyHeaders makes the server honour X-Forwarded-Proto when
 	// deciding whether to set the Secure flag on the session cookie. Only
 	// enable it when polyemesis really is behind a reverse proxy, otherwise a
 	// client can forge the header.
 	TrustProxyHeaders bool `yaml:"trustProxyHeaders"`
+	// TrustedProxies lists the proxies, besides loopback, whose
+	// X-Forwarded-For and X-Real-IP are believed when TrustProxyHeaders is on:
+	// CIDRs ("172.16.0.0/12") or single addresses ("172.17.0.1"). A request
+	// from any other peer is keyed on its own socket address, so a client
+	// that reaches the listener directly cannot choose the address the login
+	// throttle and the audit log see. Empty means loopback only, which is
+	// right for a proxy on the same host and wrong for one in another
+	// container or on another machine -- list that one here.
+	TrustedProxies []string `yaml:"trustedProxies"`
 }
 
 // An `enhancedRtmp` key used to live here as a declared-but-inert placeholder
@@ -569,6 +581,9 @@ func (t TLS) EffectiveHostname() (string, error) {
 
 // Validate checks the invariants that would otherwise fail confusingly later.
 func (c Config) Validate() error {
+	if _, err := c.TrustedProxyPrefixes(); err != nil {
+		return err
+	}
 	if !c.TLS.Mode.Valid() {
 		return fmt.Errorf("tls.mode %q is not one of %v", c.TLS.Mode, Modes)
 	}
@@ -691,6 +706,62 @@ func (c Config) addrFlagNote() string {
 		"systemd unit's ExecStart or the container's command -- and that flag overrides addr: "+
 		"in config.yaml, so change the address there (sudo systemctl edit --full polyemesis), "+
 		"or remove the flag and let config.yaml decide.", c.Addr)
+}
+
+// TrustedProxyPrefixes parses TrustedProxies. A bare address is that one
+// address; an entry that is neither an address nor a CIDR is an error naming
+// it, because a typo here would silently trust nobody -- or somebody else.
+func (c Config) TrustedProxyPrefixes() ([]netip.Prefix, error) {
+	out := make([]netip.Prefix, 0, len(c.TrustedProxies))
+	for _, raw := range c.TrustedProxies {
+		s := strings.TrimSpace(raw)
+		var (
+			p   netip.Prefix
+			err error
+		)
+		if strings.Contains(s, "/") {
+			p, err = netip.ParsePrefix(s)
+			p = p.Masked()
+		} else {
+			var a netip.Addr
+			if a, err = netip.ParseAddr(s); err == nil {
+				a = a.Unmap()
+				p = netip.PrefixFrom(a, a.BitLen())
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("trustedProxies: %q is not an address or a CIDR", raw)
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// ProxyHeaderWarning returns a message when trustProxyHeaders is on but the
+// listener can be reached without going through the proxy, or "" otherwise.
+//
+// Forwarding headers are believed only from loopback and trustedProxies, so a
+// direct client can no longer pick its own throttle key -- but a listener that
+// is public, or that terminates TLS itself, is still a sign the deployment is
+// not the one trustProxyHeaders describes. The usual cause is the systemd
+// unit's --addr :8080, which beats addr: 127.0.0.1 in config.yaml, so the
+// message says which of the two set the address.
+func (c Config) ProxyHeaderWarning() string {
+	if !c.TrustProxyHeaders || (!BindsPublicly(c.Addr) && !c.ServesTLS()) {
+		return ""
+	}
+	var why string
+	switch {
+	case BindsPublicly(c.Addr) && c.AddrFromFlag:
+		why = fmt.Sprintf("the listener %s, set by the --addr flag (which overrides addr in config.yaml; "+
+			"on a systemd install it is in the unit's ExecStart), is reachable without going through the proxy", c.Addr)
+	case BindsPublicly(c.Addr):
+		why = fmt.Sprintf("the listener %s, set by addr in config.yaml, is reachable without going through the proxy", c.Addr)
+	default:
+		why = fmt.Sprintf("this server terminates TLS itself on %s (tls.mode %s), so clients reach it directly", c.Addr, c.ResolvedTLSMode())
+	}
+	return fmt.Sprintf("trustProxyHeaders is on, but %s. Forwarding headers are believed only from loopback and trustedProxies, "+
+		"so direct clients are keyed on their own address; if the reverse proxy is meant to be the only way in, bind 127.0.0.1.", why)
 }
 
 // TLSPortWarning returns a message when TLS is on but the listener is not on

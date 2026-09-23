@@ -112,7 +112,7 @@ docker network create "$NET" >/dev/null 2>&1
 docker volume create "$VOL" >/dev/null 2>&1
 # Both ingest ports published. 6001 is where the second source lands once the
 # server moves it off the first source's 6000.
-docker run -d --name "$CTR" --network "$NET" \
+docker run -d --name "$CTR" -e POLYEMESIS_SETUP_CODE --network "$NET" \
   -p "$PORT:8080" -p "6000:6000/udp" -p "6001:6001/udp" -p "6100:6100/udp" \
   -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
 
@@ -216,7 +216,7 @@ step "5. Survives a container replacement"
 # install against itself rather than against a number typed into this file.
 BEFORE_SOURCES=$(drive tokens "$BASE" | grep -c . || true)
 docker rm -f "$CTR" >/dev/null 2>&1
-docker run -d --name "$CTR" --network "$NET" \
+docker run -d --name "$CTR" -e POLYEMESIS_SETUP_CODE --network "$NET" \
   -p "$PORT:8080" -p "6000:6000/udp" -p "6001:6001/udp" -p "6100:6100/udp" \
   -v "$VOL:/data" "$IMAGE" >/dev/null 2>&1
 sleep 14

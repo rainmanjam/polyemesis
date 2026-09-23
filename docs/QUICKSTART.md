@@ -58,6 +58,12 @@ Open <http://localhost:8080>.
 The first page asks you to create one. There is one user — see
 [SECURITY.md](../SECURITY.md) for what that does and does not protect.
 
+It also asks for a **setup code**. The server printed it in the terminal when
+it started, and saved it in `setup-code` in the data directory (`./data`
+here). It works once. See
+[INSTALL.md](INSTALL.md#the-first-run-setup-code) for where it is on other
+installs.
+
 If you are reaching this over anything other than localhost, the server will
 have warned you at startup that the password crosses the network in clear text.
 It is right. Set `tls.mode: auto` or use an SSH tunnel.
