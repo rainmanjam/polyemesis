@@ -1,4 +1,5 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { LazyBoundary } from "@/components/ErrorBoundary";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
 import type { ReactNode } from "react";
@@ -1452,7 +1453,7 @@ export function Dashboard() {
       <div className={cn("grid gap-3", topRow.gridClass)}>
         {/* ---------- preview + ingest ---------- */}
         <div className="flex flex-col gap-3">
-          <Suspense
+          <LazyBoundary
             fallback={
               // Same max-h as PreviewPlayer, and it has to be: this stands in for
               // it before a stream arrives, so a taller box here would make the
@@ -1486,7 +1487,7 @@ export function Dashboard() {
                 {...preview.panes[0].player}
               />
             )}
-          </Suspense>
+          </LazyBoundary>
 
           <Card>
             <CardHeader className="flex-row items-center justify-between">
@@ -1780,7 +1781,7 @@ export function Dashboard() {
                     </span>
                   </h3>
                   <div className="grid gap-3 lg:grid-cols-3">
-                    <Suspense
+                    <LazyBoundary
                       fallback={
                         <div className="aspect-video w-full rounded-md border border-border bg-black" />
                       }
@@ -1796,7 +1797,7 @@ export function Dashboard() {
                           {t("dash.laneNoPreview")}
                         </div>
                       )}
-                    </Suspense>
+                    </LazyBoundary>
                     <div className="grid gap-3 lg:col-span-2 xl:grid-cols-2">
                       {lane.destinations.length === 0 ? (
                         <p className="text-tiny text-muted-foreground">{t("dash.destNoneHere")}</p>

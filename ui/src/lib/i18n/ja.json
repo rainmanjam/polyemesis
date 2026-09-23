@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "このページを読み込めませんでした。",
+  "app.crashBody": "ページ内の処理がエラーで停止しました。コンソールのほかの部分は動作しています。再読み込みでたいてい解消します。",
+  "app.staleTitle": "コンソールが更新されました。",
+  "app.staleBody": "このタブはサーバーの更新前に開かれたため、要求したページはもう存在しません。再読み込みして新しいバージョンを取得してください。",
+  "app.reload": "再読み込み",
   "auth.accountCreated": "管理者アカウントを作成しました。",
   "auth.confirmPassword": "パスワードの確認",
   "auth.createAccount": "アカウントを作成",

@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "This page failed to load.",
+  "app.crashBody": "Something on it stopped with an error. The rest of the console still works; reloading usually clears it.",
+  "app.staleTitle": "The console was updated.",
+  "app.staleBody": "This tab was opened before the server was upgraded, and the page it asked for no longer exists. Reload to get the new version.",
+  "app.reload": "Reload",
   "auth.accountCreated": "Admin account created.",
   "auth.confirmPassword": "Confirm password",
   "auth.createAccount": "Create account",

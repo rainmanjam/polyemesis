@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "이 페이지를 불러오지 못했습니다.",
+  "app.crashBody": "페이지의 일부가 오류로 멈췄습니다. 콘솔의 나머지 부분은 계속 작동합니다. 새로고침하면 대개 해결됩니다.",
+  "app.staleTitle": "콘솔이 업데이트되었습니다.",
+  "app.staleBody": "이 탭은 서버가 업그레이드되기 전에 열려서, 요청한 페이지가 더 이상 존재하지 않습니다. 새로고침하여 새 버전을 받으세요.",
+  "app.reload": "새로고침",
   "auth.accountCreated": "관리자 계정을 만들었습니다.",
   "auth.confirmPassword": "비밀번호 확인",
   "auth.createAccount": "계정 만들기",

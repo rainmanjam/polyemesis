@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "Diese Seite konnte nicht geladen werden.",
+  "app.crashBody": "Etwas darauf ist mit einem Fehler abgebrochen. Der Rest der Konsole funktioniert weiter; ein Neuladen behebt es meist.",
+  "app.staleTitle": "Die Konsole wurde aktualisiert.",
+  "app.staleBody": "Dieser Tab wurde vor dem Server-Update geöffnet, und die angeforderte Seite existiert nicht mehr. Lade neu, um die neue Version zu erhalten.",
+  "app.reload": "Neu laden",
   "auth.accountCreated": "Administratorkonto erstellt.",
   "auth.confirmPassword": "Kennwort bestätigen",
   "auth.createAccount": "Konto erstellen",

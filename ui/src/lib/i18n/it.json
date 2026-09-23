@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "Impossibile caricare questa pagina.",
+  "app.crashBody": "Qualcosa si è interrotto con un errore. Il resto della console funziona ancora; di solito ricaricare risolve.",
+  "app.staleTitle": "La console è stata aggiornata.",
+  "app.staleBody": "Questa scheda è stata aperta prima dell'aggiornamento del server e la pagina richiesta non esiste più. Ricarica per ottenere la nuova versione.",
+  "app.reload": "Ricarica",
   "auth.accountCreated": "Account amministratore creato.",
   "auth.confirmPassword": "Conferma password",
   "auth.createAccount": "Crea account",

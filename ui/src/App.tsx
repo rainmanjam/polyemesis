@@ -1,8 +1,9 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { lazy, useCallback, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { Toaster, toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LiveDataProvider } from "@/components/LiveDataProvider";
+import { LazyBoundary } from "@/components/ErrorBoundary";
 import { api, ApiError } from "@/lib/api";
 import { onSessionEnded } from "@/lib/session";
 import { useT } from "@/lib/i18n";
@@ -148,9 +149,9 @@ export default function App() {
   // socket. A viewer following a shared link gets the player and nothing else.
   if (watching) {
     return (
-      <Suspense fallback={<RouteFallback />}>
+      <LazyBoundary fallback={<RouteFallback />}>
         <PublicPlayer />
-      </Suspense>
+      </LazyBoundary>
     );
   }
 
@@ -188,9 +189,9 @@ export default function App() {
               <Route
                 path="/playout"
                 element={
-                  <Suspense fallback={<RouteFallback />}>
+                  <LazyBoundary fallback={<RouteFallback />}>
                     <PlayoutPage />
-                  </Suspense>
+                  </LazyBoundary>
                 }
               />
               <Route path="/library" element={<LibraryPage />} />
@@ -201,34 +202,34 @@ export default function App() {
               <Route
                 path="/clips/:id"
                 element={
-                  <Suspense fallback={<RouteFallback />}>
+                  <LazyBoundary fallback={<RouteFallback />}>
                     <ClipEditor />
-                  </Suspense>
+                  </LazyBoundary>
                 }
               />
               <Route
                 path="/jobs"
                 element={
-                  <Suspense fallback={<RouteFallback />}>
+                  <LazyBoundary fallback={<RouteFallback />}>
                     <JobsPage />
-                  </Suspense>
+                  </LazyBoundary>
                 }
               />
               <Route
                 path="/chat"
                 element={
-                  <Suspense fallback={<RouteFallback />}>
+                  <LazyBoundary fallback={<RouteFallback />}>
                     <ChatPage />
-                  </Suspense>
+                  </LazyBoundary>
                 }
               />
               <Route path="/automation" element={<AutomationPage />} />
               <Route
                 path="/monitoring"
                 element={
-                  <Suspense fallback={<RouteFallback />}>
+                  <LazyBoundary fallback={<RouteFallback />}>
                     <MonitoringPage />
-                  </Suspense>
+                  </LazyBoundary>
                 }
               />
               <Route path="/settings" element={<SettingsPage />} />

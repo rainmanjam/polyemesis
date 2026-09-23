@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "Bu sayfa yüklenemedi.",
+  "app.crashBody": "Sayfadaki bir şey hatayla durdu. Konsolun geri kalanı çalışmaya devam ediyor; yeniden yüklemek genellikle düzeltir.",
+  "app.staleTitle": "Konsol güncellendi.",
+  "app.staleBody": "Bu sekme sunucu yükseltilmeden önce açıldı ve istediği sayfa artık yok. Yeni sürümü almak için yeniden yükleyin.",
+  "app.reload": "Yeniden yükle",
   "auth.accountCreated": "Yönetici hesabı oluşturuldu.",
   "auth.confirmPassword": "Parolayı doğrula",
   "auth.createAccount": "Hesap oluştur",

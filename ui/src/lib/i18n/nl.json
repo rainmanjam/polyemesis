@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "Deze pagina kon niet worden geladen.",
+  "app.crashBody": "Er is iets op deze pagina met een fout gestopt. De rest van de console werkt nog; herladen lost het meestal op.",
+  "app.staleTitle": "De console is bijgewerkt.",
+  "app.staleBody": "Dit tabblad is geopend vóór de serverupgrade en de gevraagde pagina bestaat niet meer. Herlaad om de nieuwe versie te krijgen.",
+  "app.reload": "Herladen",
   "auth.accountCreated": "Beheerdersaccount aangemaakt.",
   "auth.confirmPassword": "Wachtwoord bevestigen",
   "auth.createAccount": "Account aanmaken",

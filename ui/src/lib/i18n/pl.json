@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "Nie udało się załadować tej strony.",
+  "app.crashBody": "Coś na tej stronie zatrzymało się z błędem. Reszta konsoli działa; ponowne załadowanie zwykle pomaga.",
+  "app.staleTitle": "Konsola została zaktualizowana.",
+  "app.staleBody": "Ta karta została otwarta przed aktualizacją serwera, a żądana strona już nie istnieje. Załaduj ponownie, aby pobrać nową wersję.",
+  "app.reload": "Załaduj ponownie",
   "auth.accountCreated": "Utworzono konto administratora.",
   "auth.confirmPassword": "Potwierdź hasło",
   "auth.createAccount": "Utwórz konto",

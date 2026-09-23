@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "Halaman ini gagal dimuat.",
+  "app.crashBody": "Ada bagian yang berhenti karena galat. Bagian konsol lainnya tetap berjalan; memuat ulang biasanya mengatasinya.",
+  "app.staleTitle": "Konsol telah diperbarui.",
+  "app.staleBody": "Tab ini dibuka sebelum server ditingkatkan, dan halaman yang dimintanya sudah tidak ada. Muat ulang untuk mendapatkan versi baru.",
+  "app.reload": "Muat ulang",
   "auth.accountCreated": "Akun administrator dibuat.",
   "auth.confirmPassword": "Konfirmasi kata sandi",
   "auth.createAccount": "Buat akun",

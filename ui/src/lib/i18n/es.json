@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "No se pudo cargar esta página.",
+  "app.crashBody": "Algo en ella se detuvo con un error. El resto de la consola sigue funcionando; recargar suele resolverlo.",
+  "app.staleTitle": "La consola se actualizó.",
+  "app.staleBody": "Esta pestaña se abrió antes de actualizar el servidor y la página que pidió ya no existe. Recarga para obtener la nueva versión.",
+  "app.reload": "Recargar",
   "auth.accountCreated": "Cuenta de administrador creada.",
   "auth.confirmPassword": "Confirmar contraseña",
   "auth.createAccount": "Crear cuenta",

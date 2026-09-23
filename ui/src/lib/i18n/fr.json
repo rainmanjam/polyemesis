@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "Cette page n'a pas pu se charger.",
+  "app.crashBody": "Un élément s'est arrêté sur une erreur. Le reste de la console fonctionne ; recharger règle généralement le problème.",
+  "app.staleTitle": "La console a été mise à jour.",
+  "app.staleBody": "Cet onglet a été ouvert avant la mise à jour du serveur, et la page demandée n'existe plus. Rechargez pour obtenir la nouvelle version.",
+  "app.reload": "Recharger",
   "auth.accountCreated": "Compte administrateur créé.",
   "auth.confirmPassword": "Confirmer le mot de passe",
   "auth.createAccount": "Créer le compte",

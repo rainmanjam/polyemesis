@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "Não foi possível carregar esta página.",
+  "app.crashBody": "Algo nela parou com um erro. O resto do console continua funcionando; recarregar geralmente resolve.",
+  "app.staleTitle": "O console foi atualizado.",
+  "app.staleBody": "Esta aba foi aberta antes da atualização do servidor, e a página que ela pediu não existe mais. Recarregue para obter a nova versão.",
+  "app.reload": "Recarregar",
   "auth.accountCreated": "Conta de administrador criada.",
   "auth.confirmPassword": "Confirmar senha",
   "auth.createAccount": "Criar conta",

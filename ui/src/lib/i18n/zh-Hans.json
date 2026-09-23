@@ -1,4 +1,9 @@
 {
+  "app.crashTitle": "此页面加载失败。",
+  "app.crashBody": "页面上的某部分因错误而停止。控制台的其余部分仍可使用；重新加载通常可以解决。",
+  "app.staleTitle": "控制台已更新。",
+  "app.staleBody": "此标签页是在服务器升级前打开的，它请求的页面已不存在。请重新加载以获取新版本。",
+  "app.reload": "重新加载",
   "auth.accountCreated": "管理员账号已创建。",
   "auth.confirmPassword": "确认密码",
   "auth.createAccount": "创建账号",

@@ -37,6 +37,14 @@ its first tagged release.
   error page reads as "request failed (502)" rather than a JSON parse error,
   and an expired session on this card signs the console out like everywhere
   else.
+- **A tab left open across an upgrade no longer goes blank.** The lazy pages
+  (Jobs, Chat, Monitoring, Playout, the clip editor) are separate files named
+  by content hash, and an upgrade replaces them, so an old tab's first visit to
+  one failed to load it -- and with no error boundary the whole console
+  unmounted to an empty page that Back did not fix. The console now reloads
+  itself once when that happens, to pick up the new version. If a page still
+  fails, only that page is replaced by a notice with a Reload button; the
+  navigation and every other page keep working.
 
 ## [0.10.0] — 2026-09-23
 
