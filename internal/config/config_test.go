@@ -644,3 +644,63 @@ func TestEachSourcePreviewsIntoItsOwnDirectory(t *testing.T) {
 		}
 	}
 }
+
+// A MISSPELLED tls KEY USED TO MEAN PLAINTEXT, SILENTLY.
+//
+// Load ignores unknown keys, and inside the tls block that turns a typo into
+// the most dangerous outcome available: `mdoe: selfsigned` leaves mode absent,
+// normalizeTLS maps absent to off, and the server comes up on plain HTTP with
+// session cookies missing their Secure flag -- on a loopback bind without a
+// word in the log. yaml.v3 keys are case-sensitive, so `Mode:` does the same.
+// Reproduced in the exploratory run (row 26): `tls: {mdoe: selfsigned,
+// hostname: staging.example}` started as mode=off, https failed, http 200.
+//
+// Every key the tls block has ever had is still a field (git log shows none
+// retired), so refusing an unknown one breaks no existing file.
+//
+// Mutation: drop the UnmarshalYAML method on TLS. Observed to fail with every
+// case below loading without error, as mode "off".
+func TestAnUnknownTLSKeyRefusesToLoadRatherThanFallingBackToPlaintext(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, wantKey, wantHint string
+	}{
+		{"transposed", "tls:\n  mdoe: selfsigned\n  hostname: staging.example\n", "mdoe", ""},
+		{"wrong case", "tls:\n  Mode: selfsigned\n", "Mode", "mode"},
+		{"wrong case hostname", "tls:\n  mode: selfsigned\n  HostName: box.lan\n", "HostName", "hostname"},
+		{"flow style", "tls: {mdoe: acme, hostname: example.com, acmeEmail: a@b.c}\n", "mdoe", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, tc.body))
+			if err == nil {
+				t.Fatalf("loaded with tls.mode=%q: a misspelled tls key was silently "+
+					"ignored -- for mode, that means plaintext without Secure cookies",
+					cfg.TLS.Mode)
+			}
+			if !strings.Contains(err.Error(), tc.wantKey) {
+				t.Errorf("error %q does not name the key %q", err, tc.wantKey)
+			}
+			if tc.wantHint != "" && !strings.Contains(err.Error(), `"`+tc.wantHint+`"`) {
+				t.Errorf("error %q does not suggest %q", err, tc.wantHint)
+			}
+		})
+	}
+}
+
+// The strictness is the tls block's alone: every correctly spelled key still
+// loads, and an unknown TOP-LEVEL key (the retired enhancedRtmp, say) is still
+// ignored -- TestOldConfigWithEnhancedRtmpStillParses pins that separately.
+func TestEveryKnownTLSKeyStillLoads(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "tls:\n  mode: \"off\"\n  hostname: box.lan\n"+
+		"  acmeEmail: a@b.c\n  certFile: /c.pem\n  keyFile: /k.pem\n  hsts: true\n  enabled: true\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.TLS.Mode != ModeOff || cfg.TLS.Hostname != "box.lan" || cfg.TLS.ACMEEmail != "a@b.c" ||
+		cfg.TLS.CertFile != "/c.pem" || cfg.TLS.KeyFile != "/k.pem" || !cfg.TLS.HSTS || !cfg.TLS.Enabled {
+		t.Errorf("a key was dropped: %+v", cfg.TLS)
+	}
+	// An empty block is still just "no TLS settings".
+	if cfg, err := Load(writeConfig(t, "tls:\n")); err != nil || cfg.TLS.Mode != ModeOff {
+		t.Errorf("an empty tls block: mode %q, err %v; want off, nil", cfg.TLS.Mode, err)
+	}
+}

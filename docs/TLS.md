@@ -33,6 +33,13 @@ interface is the single biggest practical exposure this product has.
 | `manual` | `certFile` / `keyFile` you supply | none, if their issuer is trusted | those two files |
 | `off` | nothing — plain HTTP | n/a | something else terminating TLS |
 
+**A key the `tls:` block does not know stops the server at startup**, naming
+the key and the line. Keys are case-sensitive, so `Mode:` is as wrong as
+`mdoe:`. The rest of `config.yaml` still ignores unknown keys, but here that
+leniency meant a misspelled `mode` fell back to `off` — plain HTTP, cookies
+without `Secure` — with nothing logged on a loopback bind. The valid keys are
+`mode`, `hostname`, `acmeEmail`, `certFile`, `keyFile`, `hsts` and `enabled`.
+
 Whenever polyemesis is terminating TLS, the listener pins **TLS 1.2 as the
 floor** and prefers X25519, then P-256 and P-384. Go's server default already
 floors at 1.2; pinning it means a future toolchain default cannot quietly change

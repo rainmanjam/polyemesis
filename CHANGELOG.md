@@ -21,6 +21,12 @@ its first tagged release.
   now says so for every such install, not only 0.7.0 ones. The regression test
   writes its pre-upgrade history with `secure_delete` off, as 0.6.0 did; the
   earlier fixture wrote it through the fixed code and could not see this.
+- **A misspelled key in the `tls:` block now stops startup.** `mdoe:` or
+  `Mode:` (keys are case-sensitive) used to be ignored, so `mode` fell back to
+  `off`: plain HTTP and session cookies without `Secure`, logged nowhere on a
+  loopback bind. The error names the key, its line, the case-correct spelling
+  when there is one, and the valid keys. Every key the block has ever had is
+  still valid; the rest of `config.yaml` still ignores unknown keys.
 
 ## [0.10.0] — 2026-09-23
 
