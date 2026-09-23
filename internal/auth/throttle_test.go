@@ -47,22 +47,22 @@ func TestAttemptIsRefusedUntilThePenaltyHasElapsed(t *testing.T) {
 			t.Fatalf("failure %d imposed %v, want no delay inside the free allowance", i+1, d)
 		}
 	}
-	if d := tr.Retry("1.2.3.4"); d != 0 {
+	if d := tr.Try("1.2.3.4"); d != 0 {
 		t.Fatalf("Retry inside the free allowance = %v, want 0", d)
 	}
 
 	tr.Fail("1.2.3.4")
-	if d := tr.Retry("1.2.3.4"); d != throttleBaseDelay {
+	if d := tr.Try("1.2.3.4"); d != throttleBaseDelay {
 		t.Fatalf("Retry = %v, want %v", d, throttleBaseDelay)
 	}
 
 	clock.advance(throttleBaseDelay - time.Millisecond)
-	if d := tr.Retry("1.2.3.4"); d != time.Millisecond {
+	if d := tr.Try("1.2.3.4"); d != time.Millisecond {
 		t.Errorf("Retry just before expiry = %v, want 1ms", d)
 	}
 
 	clock.advance(time.Millisecond)
-	if d := tr.Retry("1.2.3.4"); d != 0 {
+	if d := tr.Try("1.2.3.4"); d != 0 {
 		t.Errorf("Retry after the penalty elapsed = %v, want 0", d)
 	}
 }
@@ -73,10 +73,10 @@ func TestThrottleIsKeyedPerAddress(t *testing.T) {
 	for i := 0; i < throttleFreeAttempts+4; i++ {
 		tr.Fail("1.2.3.4")
 	}
-	if tr.Retry("1.2.3.4") == 0 {
+	if tr.Try("1.2.3.4") == 0 {
 		t.Fatal("the failing address should be waiting")
 	}
-	if d := tr.Retry("5.6.7.8"); d != 0 {
+	if d := tr.Try("5.6.7.8"); d != 0 {
 		t.Errorf("Retry for an untouched address = %v, want 0", d)
 	}
 }
@@ -107,7 +107,7 @@ func TestPenaltyIsCappedSoTheAdminIsNeverLockedOutForever(t *testing.T) {
 	}
 
 	clock.advance(throttleMaxDelay)
-	if d := tr.Retry("1.2.3.4"); d != 0 {
+	if d := tr.Try("1.2.3.4"); d != 0 {
 		t.Errorf("Retry after waiting the cap = %v, want the admin let back in", d)
 	}
 }
@@ -120,7 +120,7 @@ func TestAnIdleCounterIsForgotten(t *testing.T) {
 	}
 	clock.advance(throttleIdleTTL)
 
-	if d := tr.Retry("1.2.3.4"); d != 0 {
+	if d := tr.Try("1.2.3.4"); d != 0 {
 		t.Errorf("Retry after the idle TTL = %v, want 0", d)
 	}
 	if d := tr.Fail("1.2.3.4"); d != 0 {

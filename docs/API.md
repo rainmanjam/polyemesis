@@ -454,7 +454,9 @@ IPv4-mapped address (`::ffff:192.0.2.1`) counts as the IPv4 address.
 
 Each throttle also has one budget that every address shares: 100 counted
 attempts in a burst, then one more a second. It exists so that a pool of
-addresses, each inside its own free allowance, cannot guess without limit. When
+addresses, each inside its own free allowance, cannot guess without limit. An
+attempt is charged as it is let through, so requests in flight together cannot
+overdraw it, and a correct password or completed setup gives its charge back. When
 it is spent, the next attempt from any address gets a `429` with a
 `Retry-After` of about a second. The bodies are
 `{"error": "too many setup attempts, try again later"}` and `{"error": "too

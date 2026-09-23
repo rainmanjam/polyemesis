@@ -130,27 +130,41 @@ func (t *Throttle) globalWaitLocked(now time.Time) time.Duration {
 	return time.Duration((1 - t.tokens) * float64(throttleGlobalRefill))
 }
 
-// Retry reports how long key must wait before its next attempt. Zero means
-// the attempt may proceed now.
+// Try is the gate in front of a credential check. It reports how long key
+// must wait; zero means the attempt may proceed now, AND that the attempt has
+// already been charged to the shared budget.
 //
-// The longer of two waits: key's own penalty, and the shared budget's (see
-// throttleGlobalBurst), so a pool of addresses cannot out-guess the limit
+// The wait is the longer of two: key's own penalty, and the shared budget's
+// (see throttleGlobalBurst), so a pool of addresses cannot out-guess the limit
 // that stops one.
-func (t *Throttle) Retry(key string) time.Duration {
+//
+// WHY THE CHECK ALSO TAKES THE TOKEN. This used to be Retry, a pure query, with
+// the token taken later by Fail. The handlers call Fail only after bcrypt has
+// answered, so every request that arrived while one token was left passed the
+// check -- two hundred parallel requests from two hundred addresses all saw
+// "tokens >= 1" -- and Fail's floor at zero then forgave the overdraw. Under
+// concurrency the budget bounded nothing: an address pool got (request rate x
+// bcrypt time) guesses per refill instead of one. Taking the token here, under
+// the same lock as the check, makes "at most one per refill" hold however many
+// requests are in flight. Succeed hands it back, so a correct password costs
+// the budget nothing.
+func (t *Throttle) Try(key string) time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	key = throttleKey(key)
 	now := t.now()
 	wait := t.globalWaitLocked(now)
-	a := t.attempts[key]
-	if a == nil || now.Sub(a.seen) >= throttleIdleTTL {
+	if a := t.attempts[key]; a != nil && now.Sub(a.seen) < throttleIdleTTL {
+		if d := a.until.Sub(now); d > wait {
+			wait = d
+		}
+	}
+	if wait > 0 {
 		return wait
 	}
-	if d := a.until.Sub(now); d > wait {
-		return d
-	}
-	return wait
+	t.tokens--
+	return 0
 }
 
 // Fail records a rejected credential check and returns the delay now imposed
@@ -161,13 +175,9 @@ func (t *Throttle) Fail(key string) time.Duration {
 
 	key = throttleKey(key)
 	now := t.now()
-	t.refillLocked(now)
-	// Floored at zero: the handlers only call Fail for an attempt Retry let
-	// through, so a debt could only come from a caller that skipped Retry,
-	// and it must not lock everyone out for longer than one refill.
-	if t.tokens -= 1; t.tokens < 0 {
-		t.tokens = 0
-	}
+	// No token is taken here: Try took it when it let this attempt through.
+	// Taking it again would charge every failure twice, and taking it only
+	// here is the overdraw Try's comment describes.
 	a := t.attempts[key]
 	if a == nil || now.Sub(a.seen) >= throttleIdleTTL {
 		t.evictLocked(now)
@@ -193,7 +203,7 @@ func (t *Throttle) Fail(key string) time.Duration {
 // one that follows none, which is a distinction only this counter holds and
 // only until Succeed clears it.
 //
-// Idle expiry is honoured for the same reason Retry honours it: throttleIdleTTL
+// Idle expiry is honoured for the same reason Try honours it: throttleIdleTTL
 // is the promise that walking away and coming back is a clean slate, and a
 // count that outlived it would attribute yesterday's guessing to today's
 // sign-in.
@@ -209,11 +219,17 @@ func (t *Throttle) Failures(key string) int {
 }
 
 // Succeed clears the counter for key, so a correct password immediately
-// restores full speed.
+// restores full speed, and returns the shared-budget token Try took for the
+// attempt: a correct password is not a guess, and the admin signing in should
+// not spend what a guesser is rationed to.
 func (t *Throttle) Succeed(key string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.attempts, throttleKey(key))
+	t.refillLocked(t.now())
+	if t.tokens++; t.tokens > throttleGlobalBurst {
+		t.tokens = throttleGlobalBurst
+	}
 }
 
 // penalty is the wait after n consecutive failures.

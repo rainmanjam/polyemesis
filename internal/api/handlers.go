@@ -92,7 +92,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	// Before the body is read and long before CreateUser pays for a bcrypt
 	// hash, for the same reason the login throttle sits where it does.
 	ip := auth.ClientIP(r, s.proxies)
-	if wait := s.setups.Retry(ip); wait > 0 {
+	if wait := s.setups.Try(ip); wait > 0 {
 		s.log.Warn("throttled setup attempt", "remote", ip, "retryAfter", wait)
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
 		writeError(w, http.StatusTooManyRequests, "too many setup attempts, try again later")
@@ -170,7 +170,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Checked before the body is read and long before bcrypt runs: the point
 	// of the throttle is that a guess must not cost us a password hash.
 	ip := auth.ClientIP(r, s.proxies)
-	if wait := s.logins.Retry(ip); wait > 0 {
+	if wait := s.logins.Try(ip); wait > 0 {
 		s.log.Warn("throttled login", "remote", ip, "retryAfter", wait)
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
 		writeError(w, http.StatusTooManyRequests, "too many failed attempts, try again later")

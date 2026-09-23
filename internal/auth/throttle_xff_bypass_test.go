@@ -57,7 +57,7 @@ func TestRotatingTheForgedHopDoesNotMintFreshThrottleKeys(t *testing.T) {
 	if got := th.Failures(last); got != 12 {
 		t.Errorf("throttle counted %d failures across 12 forged requests, want 12", got)
 	}
-	if wait := th.Retry(last); wait <= 0 {
+	if wait := th.Try(last); wait <= 0 {
 		t.Error("throttle is not making the attacker wait after 12 failures")
 	}
 }
