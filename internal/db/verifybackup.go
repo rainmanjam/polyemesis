@@ -138,21 +138,32 @@ func VerifyBackup(dir string) error {
 	return checkKeyOpensSealedValues(sqldb, box)
 }
 
-// sealedColumn names one column this package writes with secrets.Box.Seal.
-type sealedColumn struct{ table, column string }
+// sealedColumn names one column this package writes with secrets.Box.Seal,
+// and what an operator does to re-seal a value in it that this server's own
+// key cannot open (see checkKeyOpensSealedValues for why that is needed).
+type sealedColumn struct{ table, column, remedy string }
 
 // sealedColumns is every column holding secretbox ciphertext.
 // TestVerifyBackupKnowsEverySealedColumn holds it to the schema, so a new
-// sealed column cannot be added without the key check covering it.
+// sealed column cannot be added without the key check covering it, and
+// TestEverySealedColumnSaysHowToReseal holds each to a remedy.
 var sealedColumns = []sealedColumn{
-	{"destinations", "stream_key_enc"},
-	{"destinations", "backup_stream_key_enc"},
-	{"mqtt_creds", "password_enc"},
-	{"automod_creds", "key_enc"},
-	{"platform_creds", "client_secret_enc"},
-	{"platform_accounts", "access_token_enc"},
-	{"platform_accounts", "refresh_token_enc"},
-	{"hooks", "secret"},
+	{"destinations", "stream_key_enc",
+		"re-enter the stream key on each affected destination (Dashboard, edit the destination), or remove it"},
+	{"destinations", "backup_stream_key_enc",
+		"re-enter the backup stream key on each affected destination (Dashboard, edit the destination), or remove it"},
+	{"mqtt_creds", "password_enc",
+		"re-enter or clear the MQTT broker password in Settings"},
+	{"automod_creds", "key_enc",
+		"re-enter or clear the automod model API key in Settings"},
+	{"platform_creds", "client_secret_enc",
+		"re-enter or remove the platform's client secret in Settings"},
+	{"platform_accounts", "access_token_enc",
+		"reconnect the platform account in Settings, or disconnect it"},
+	{"platform_accounts", "refresh_token_enc",
+		"reconnect the platform account in Settings, or disconnect it"},
+	{"hooks", "secret",
+		"set a new secret on the hook in Automation, or delete the hook"},
 }
 
 // checkKeyOpensSealedValues trial-decrypts the backup's sealed values with its
@@ -166,6 +177,18 @@ var sealedColumns = []sealedColumn{
 // so one success per column is proof enough and one failure is proof of
 // nothing. Per column rather than once overall, because a restore needs every
 // kind of credential back, not just the first one the check happens to try.
+//
+// That rationale only holds where a column has several values to try. For a
+// singleton -- mqtt_creds and automod_creds are CHECK (id = 1) -- or any column
+// that happens to hold one value, "opens none" and "fails one" are the same
+// test, and a value this server's own key cannot open is indistinguishable
+// from a foreign key. The backup is still refused (the restore would bring
+// that credential back unreadable either way), but the refusal cannot just say
+// "back up again with this server's key": that is the backup it is looking at,
+// and the next one would fail the same way, refusing every update.sh upgrade
+// with advice that leads round in a loop. So it names both causes, and for
+// the second gives the column's remedy -- re-seal or clear the value from the
+// console -- which is the only thing that changes what the next backup holds.
 //
 // A backup with no sealed values anywhere -- a fresh install, or one with no
 // credentials yet -- has nothing to try the key on, and passes on the parse
@@ -209,9 +232,12 @@ func checkKeyOpensSealedValues(sqldb *sql.DB, box *secrets.Box) error {
 		}
 		if tried > 0 && !opened {
 			return fmt.Errorf("backup's secret.key opens none of the %d sealed value(s) in %s.%s, "+
-				"so it is not the key this database was sealed with -- a restore would bring "+
-				"every one of those credentials back unreadable. Take the backup again with "+
-				"this server's own secret.key", tried, c.table, c.column)
+				"so a restore would bring every one of those credentials back unreadable. "+
+				"Either the key is from another install -- take the backup again with this "+
+				"server's own secret.key -- or this server cannot open these values either "+
+				"(sealed under a key it no longer has, say after an earlier restore), and a "+
+				"new backup will fail the same way: %s, then take the backup again",
+				tried, c.table, c.column, c.remedy)
 		}
 	}
 	return nil

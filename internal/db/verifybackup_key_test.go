@@ -149,3 +149,51 @@ func TestVerifyBackupKnowsEverySealedColumn(t *testing.T) {
 			"schema has: %v\nverify checks: %v", want, got)
 	}
 }
+
+func TestVerifyBackupSaysHowToEscapeAValueTheServerCannotOpenEither(t *testing.T) {
+	// The case "opens none, not fails one" does not cover. mqtt_creds is a
+	// singleton (CHECK id = 1): when the one password in it was sealed under a
+	// key this server no longer has -- an earlier bad restore -- the server's
+	// own key opens none of the column, exactly as a foreign key would, and
+	// nothing in the database can tell the two apart. It stays refused: a
+	// restore would bring that credential back unreadable either way.
+	//
+	// What must not happen is the old advice. "Take the backup again with this
+	// server's own secret.key" is what the operator just did, and the next
+	// backup fails the same way -- update.sh refuses every upgrade and the
+	// message sends them round the loop. The way out is to re-seal the value,
+	// so the error has to say so, and say where.
+	_, stranded := hexKey(t, 0xaa)
+	own, _ := hexKey(t, 0xbb)
+	dir := liveWALBackup(t, stranded, own)
+
+	err := VerifyBackup(dir)
+	if err == nil {
+		t.Fatal("accepted a key that opens none of mqtt_creds; the restore would bring " +
+			"the broker password back unreadable")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"mqtt_creds.password_enc",
+		"another install",            // cause 1: a foreign key
+		"cannot open",                // cause 2: this server cannot open it either
+		"MQTT broker password",       // the remedy names the credential...
+		"Settings",                   // ...and where to re-enter or clear it
+		"then take the backup again", // and only then back up again
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the refusal does not say %q:\n%s", want, msg)
+		}
+	}
+}
+
+// TestEverySealedColumnSaysHowToReseal keeps the refusal's way out from going
+// missing: a column added to sealedColumns without a remedy would print an
+// empty instruction to exactly the operator who has no other way to find one.
+func TestEverySealedColumnSaysHowToReseal(t *testing.T) {
+	for _, c := range sealedColumns {
+		if strings.TrimSpace(c.remedy) == "" {
+			t.Errorf("%s.%s has no remedy for a value this server cannot open", c.table, c.column)
+		}
+	}
+}

@@ -119,7 +119,14 @@ start with` (empty, not hex, the wrong length, or not a file), or `backup's
 secret.key opens none of the … sealed value(s) in <table>.<column>` — a
 well-formed key from another install. The key is read with the same parser the
 server uses at boot, then tried against the values the database sealed: for
-each sealed column that holds any, it must open at least one. Every failure it catches leaves a file of plausible
+each sealed column that holds any, it must open at least one. That last
+refusal has a second cause the check cannot tell apart from the first: a
+column holding a single value — the MQTT password and the automod API key are
+one row each — that this server's own key cannot open either, typically left by
+an earlier restore. Backing up again does not help there, since the next backup
+holds the same value; the message names what to re-enter or clear in the
+console (for `mqtt_creds`, the MQTT broker password in Settings), and the backup
+after that passes. Every failure it catches leaves a file of plausible
 size — a database copied while the server was writing to it, a truncated file,
 an archive unpacked into the wrong shape, a disk that filled halfway through —
 which is why existence checks do not find them. Run this when you take the

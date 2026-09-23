@@ -23,7 +23,10 @@ its first tagged release.
   key with the parser the server boots with, and tries it on the values the
   database sealed: for each sealed column holding any, the key must open at
   least one, or the backup is refused naming the table. The success line now
-  says so.
+  says so. Where a column holds one value this server's own key cannot open
+  either (the MQTT password or automod key after an earlier bad restore), the
+  refusal says so and names what to re-enter or clear in the console, instead of
+  sending you to take a backup that would fail the same way.
 
 ## [0.10.0] — 2026-09-23
 
