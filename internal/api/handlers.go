@@ -1449,6 +1449,11 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		if err := decodeJSONInto(body, settings); err != nil {
 			return err
 		}
+		// The one section decodeJSONInto's strictness cannot reach: automod
+		// has its own UnmarshalJSON. See db.CheckAutomodFields.
+		if err := checkSentAutomodFields(body); err != nil {
+			return err
+		}
 		// Validated HERE as well as inside UpdateSettings, and the order is the
 		// point: the filesystem check below must never run on a document the
 		// shape rules have already refused. Returning the typed error rather
@@ -3111,4 +3116,24 @@ func sameAutomodRules(a, b []db.AutomodRule) bool {
 		}
 	}
 	return true
+}
+
+// checkSentAutomodFields applies db.CheckAutomodFields to the automod object a
+// settings PUT carries, if it carries one. Called after decodeJSONInto, so the
+// body is already known to be one well-formed object; an absent or null
+// automod is the client not touching the section, and passes.
+func checkSentAutomodFields(body []byte) error {
+	var sent struct {
+		Automod json.RawMessage `json:"automod"`
+	}
+	if err := json.Unmarshal(body, &sent); err != nil {
+		return badRequestError{"invalid request body: " + err.Error()}
+	}
+	if len(sent.Automod) == 0 || string(sent.Automod) == "null" {
+		return nil
+	}
+	if err := db.CheckAutomodFields(sent.Automod); err != nil {
+		return badRequestError{"invalid request body: " + err.Error()}
+	}
+	return nil
 }

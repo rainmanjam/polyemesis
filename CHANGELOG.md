@@ -17,6 +17,13 @@ its first tagged release.
   live source. Publishes were refused while `/health` said ok. `settings.ingest`
   is now read from the default source on both GET and PUT, so an unchanged
   round-trip is a no-op by construction.
+- **An unknown field under `settings.automod` is now a 400, like every other
+  section.** Automod's own JSON decoder sat outside the request's
+  unknown-field check, so a typo was accepted and dropped. AUTOMOD.md named the
+  history bounds `window`, `retain`, `idleEviction` and `maxAuthors`, none of
+  which the server reads; it now names `windowSeconds`, `retainPerAuthor` and
+  `idleEvictionSeconds`, says the 20,000-author ceiling is fixed, and a test
+  holds the table to the struct.
 
 ## [0.10.0] — 2026-09-23
 
