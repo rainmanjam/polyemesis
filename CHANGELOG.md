@@ -552,6 +552,17 @@ its first tagged release.
   tag. RELEASE-RUNBOOK.md no longer says that re-pushing a tag fixes a wrong
   date. It cannot, because the gate reads the tagged commit.
 
+### Changed
+
+- **The published images are built from pinned base images.** Every `FROM`
+  in `Dockerfile`, `Dockerfile.cuda` and `Dockerfile.vaapi` used a floating
+  tag (`alpine:3.24`, `node:24-alpine`, `golang:1.27-alpine`, `ubuntu:26.04`,
+  `nvidia/cuda:…`). Two builds of the same commit could therefore start from
+  different bytes, and whatever the registry served on release day went in
+  unreviewed. Each is now `tag@sha256:…`. Base-image security fixes now arrive
+  as Dependabot digest-bump PRs instead of on every rebuild, and a test fails
+  any `FROM` without a digest.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

@@ -53,7 +53,7 @@
 # ---------- stage 1: build the web UI ----------
 # A copy of the default Dockerfile's stage, deliberately: see Dockerfile.cuda
 # for why these are not factored into a shared base image.
-FROM node:24-alpine AS ui
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS ui
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json* ./
 RUN npm ci --ignore-scripts
@@ -63,7 +63,7 @@ RUN mkdir -p /src/internal/web && npm run build
 # ---------- stage 2: build the Go binary ----------
 # Must stay >= the `go` directive in go.mod; the official golang images set
 # GOTOOLCHAIN=local, so a too-old tag fails the build outright.
-FROM golang:1.27-alpine AS build
+FROM golang:1.27-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -86,7 +86,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 #
 # Floating at 24.04, not pinned to a point release, so rebuilds collect
 # security updates. Verified to exist on 2026-07-26.
-FROM ubuntu:26.04
+FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
 ARG VERSION=dev
 
