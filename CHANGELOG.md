@@ -24,6 +24,11 @@ its first tagged release.
   written by an earlier release keeps whatever attribution it already had.
   The name also stops two sources that start recording in the same second
   from writing the same file.
+- One-port SRT refusals now reach the encoder with their typed reason
+  (`REJ_BADSECRET`, `REJ_CLOSE`, `REJ_RESOURCE`, `REJ_ROGUE`, `REJ_UNSECURE`), as
+  [TROUBLESHOOTING](docs/TROUBLESHOOTING.md) already described. Every refusal
+  used to arrive as the generic `REJ_PEER`, because gosrt's server loop
+  overwrote the reason; the listener now runs its own accept loop.
 
 ## [0.10.0] — 2026-09-23
 

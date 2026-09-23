@@ -130,7 +130,10 @@ type Server struct {
 	// to across calls. An entry surviving from a previous Start is one this
 	// server is already serving, and it makes the next Start's "did anything
 	// bind" question answer about the wrong attempt. See the comment on Start.
-	srvs []*srt.Server
+	//
+	// Bare listeners, not gosrt's srt.Server: this package runs its own accept
+	// loop (see serve) because srt.Server's discards every rejection reason.
+	srvs []srt.Listener
 
 	// report is what Start managed to bind, written once by Start and read by
 	// anything that wants to describe the listener. Guarded by reportMu rather
@@ -399,7 +402,7 @@ func (s *Server) Start() error {
 	// tested apart -- see restart_test.go. The interlock stops a caller starting
 	// twice; this stops the success check ever answering about the wrong
 	// attempt, which is how a call that bound nothing new could still return nil.
-	var bound []*srt.Server
+	var bound []srt.Listener
 	for _, addr := range report.Requested {
 		srv, err := s.listenOn(addr)
 		if err != nil {
@@ -443,12 +446,8 @@ func (s *Server) Start() error {
 	}
 
 	s.srvs = bound
-	for _, srv := range bound {
-		go func(srv *srt.Server) {
-			if err := srv.Serve(); err != nil && s.started.Load() {
-				s.log.Error("srt server stopped", "err", err)
-			}
-		}(srv)
+	for _, ln := range bound {
+		go s.serve(ln)
 	}
 	s.log.Info("one-port srt ingest listening",
 		"addr", s.addr, "bound", report.Bound, "degraded", report.Degraded())
@@ -485,21 +484,80 @@ func (s *Server) bindAddrs() []string {
 	return []string{net.JoinHostPort("0.0.0.0", port), net.JoinHostPort("::", port)}
 }
 
-func (s *Server) listenOn(addr string) (*srt.Server, error) {
-	cfg := srt.DefaultConfig()
-	// The listener never publishes outward, so a caller asking to subscribe is
-	// always refused; see handleConnect.
-	srv := &srt.Server{
-		Addr:            addr,
-		Config:          &cfg,
-		HandleConnect:   s.handleConnect,
-		HandlePublish:   s.handlePublish,
-		HandleSubscribe: s.handleSubscribe,
+func (s *Server) listenOn(addr string) (srt.Listener, error) {
+	return srt.Listen("srt", addr, srt.DefaultConfig())
+}
+
+// serve is one listener's accept loop, and it is OURS rather than gosrt's
+// srt.Server.Serve for one reason: that loop answers every REJECT with
+// req.Reject(REJ_PEER), unconditionally, so the specific code handleConnect
+// chose never reached the wire. Every refusal -- a wrong token, a disabled
+// source, a second publisher, a missing passphrase -- arrived at the encoder as
+// the same generic "rejected by peer", while the server's log named the real
+// reason. Reproduced live with a garbage token.
+//
+// It returns when the listener is closed. An error while this Server is still
+// started is a listener that died under it, which is worth an error line; one
+// after Stop is the shutdown itself.
+func (s *Server) serve(ln srt.Listener) {
+	for {
+		req, err := ln.Accept2()
+		if err != nil {
+			if s.started.Load() && !errors.Is(err, srt.ErrListenerClosed) {
+				s.log.Error("srt server stopped", "err", err)
+			}
+			return
+		}
+		// Off the accept loop, as srt.Server did: handleConnect does a
+		// constant-time lookup across every token, and one slow decision must
+		// not hold every other publisher's handshake behind it.
+		go s.admit(req)
 	}
-	if err := srv.Listen(); err != nil {
-		return nil, err
+}
+
+// admit carries out handleConnect's verdict on one connection request.
+func (s *Server) admit(req srt.ConnRequest) {
+	v := s.handleConnect(req)
+	if !v.publish {
+		req.Reject(v.rejection())
+		return
 	}
-	return srv, nil
+	conn, err := req.Accept()
+	if err != nil {
+		// The handshake failed after the decision (gosrt rejects it itself,
+		// e.g. a passphrase that does not decrypt). Nothing to clean up.
+		return
+	}
+	s.handlePublish(conn)
+}
+
+// verdict is handleConnect's answer: publish, or refuse for a stated reason.
+//
+// A TYPE RATHER THAN srt.ConnType PLUS A SIDE EFFECT, because the side effect is
+// what got lost. The reason used to be written onto the request with
+// SetRejectionReason and the mode returned separately, and the loop that acted
+// on the mode was free to ignore the reason -- gosrt's did. Here the reason is
+// the value that is returned, so a refusal cannot be carried out without it.
+//
+// The zero value REFUSES. A verdict built by mistake, or a path added without
+// deciding, fails closed with a generic code rather than admitting a publisher.
+type verdict struct {
+	publish bool
+	reason  srt.RejectionReason
+}
+
+// admitPublisher is the one verdict that lets a connection through.
+var admitPublisher = verdict{publish: true}
+
+// refuse is a refusal the publisher will be told the reason for.
+func refuse(reason srt.RejectionReason) verdict { return verdict{reason: reason} }
+
+// rejection is the code sent on the wire for a refusal.
+func (v verdict) rejection() srt.RejectionReason {
+	if v.reason == 0 {
+		return srt.REJ_PEER
+	}
+	return v.reason
 }
 
 // Stop closes the listener and every established publisher.
@@ -507,8 +565,8 @@ func (s *Server) Stop() {
 	if !s.started.Swap(false) {
 		return
 	}
-	for _, srv := range s.srvs {
-		srv.Shutdown()
+	for _, ln := range s.srvs {
+		ln.Close()
 	}
 	s.srvs = nil
 	s.mu.Lock()
@@ -530,7 +588,7 @@ func (s *Server) Stop() {
 // streamer sees a generic failure in OBS; a code that distinguishes "wrong
 // credentials" from "already publishing" from "disabled" is the difference
 // between fixing it and guessing.
-func (s *Server) handleConnect(req srt.ConnRequest) srt.ConnType {
+func (s *Server) handleConnect(req srt.ConnRequest) verdict {
 	peer := req.RemoteAddr().String()
 	streamID := req.StreamId()
 
@@ -539,16 +597,14 @@ func (s *Server) handleConnect(req srt.ConnRequest) srt.ConnType {
 	// See internal/authgate for why this is scoped per peer rather than global.
 	host := authgate.PeerHost(req.RemoteAddr())
 	if s.gate.Blocked(host) {
-		req.SetRejectionReason(srt.REJ_BADSECRET)
 		s.log.Debug("srt connect refused: peer is rate-limited after repeated wrong tokens",
 			"peer", peer)
-		return srt.REJECT
+		return refuse(srt.REJ_BADSECRET)
 	}
 
 	if l := len(streamID); l == 0 || l > MaxStreamIDLength {
-		req.SetRejectionReason(srt.REJ_ROGUE)
 		s.log.Warn("srt publish refused: unusable streamid", "peer", peer, "length", l)
-		return srt.REJECT
+		return refuse(srt.REJ_ROGUE)
 	}
 
 	target, ok := s.lookup(strings.TrimSpace(streamID))
@@ -556,26 +612,23 @@ func (s *Server) handleConnect(req srt.ConnRequest) srt.ConnType {
 		// Deliberately the same outcome as a well-formed token for a source
 		// that does not exist: an attacker must not be able to tell the two
 		// apart. The token is never logged.
-		req.SetRejectionReason(srt.REJ_BADSECRET)
 		s.log.Warn("srt publish refused: token not recognised", "peer", peer)
 		// Only an unrecognised token counts as a guess -- every refusal below
 		// this point already proved the caller holds a real one.
 		if s.gate.Fail(host) {
 			s.log.Warn("srt: peer rate-limited after repeated wrong tokens", "peer", peer)
 		}
-		return srt.REJECT
+		return refuse(srt.REJ_BADSECRET)
 	}
 	if !target.Enabled {
-		req.SetRejectionReason(srt.REJ_CLOSE)
 		s.log.Warn("srt publish refused: source disabled", "peer", peer, "source", target.Name)
-		return srt.REJECT
+		return refuse(srt.REJ_CLOSE)
 	}
 	if target.Sink == nil {
 		// The source exists but no engine is running for it. Accepting would
 		// swallow the stream silently, which is worse than refusing.
-		req.SetRejectionReason(srt.REJ_RESOURCE)
 		s.log.Warn("srt publish refused: no pipeline for source", "peer", peer, "source", target.Name)
-		return srt.REJECT
+		return refuse(srt.REJ_RESOURCE)
 	}
 
 	// Takeover, or refusal. Only a genuinely live incumbent in THIS publisher's
@@ -586,49 +639,34 @@ func (s *Server) handleConnect(req srt.ConnRequest) srt.ConnType {
 	stillLive := busy && incumbent.fresh(time.Now())
 	s.mu.Unlock()
 	if stillLive {
-		req.SetRejectionReason(srt.REJ_RESOURCE)
 		s.log.Warn("srt publish refused: source already publishing",
 			"peer", peer, "source", target.Name, "role", role(target.Backup),
 			"incumbent", incumbent.peer)
-		return srt.REJECT
+		return refuse(srt.REJ_RESOURCE)
 	}
 
 	if req.IsEncrypted() {
 		if target.Passphrase == "" {
-			req.SetRejectionReason(srt.REJ_UNSECURE)
 			s.log.Warn("srt publish refused: encrypted, but the source has no passphrase",
 				"peer", peer, "source", target.Name)
-			return srt.REJECT
+			return refuse(srt.REJ_UNSECURE)
 		}
 		if err := req.SetPassphrase(target.Passphrase); err != nil {
-			req.SetRejectionReason(srt.REJ_BADSECRET)
 			s.log.Warn("srt publish refused: passphrase rejected",
 				"peer", peer, "source", target.Name)
-			return srt.REJECT
+			return refuse(srt.REJ_BADSECRET)
 		}
 	} else if target.Passphrase != "" {
 		// The source requires encryption and this publisher offered none.
-		req.SetRejectionReason(srt.REJ_UNSECURE)
 		s.log.Warn("srt publish refused: source requires encryption",
 			"peer", peer, "source", target.Name)
-		return srt.REJECT
+		return refuse(srt.REJ_UNSECURE)
 	}
 
 	// A real token was just presented successfully; nothing this peer guessed
 	// wrong earlier should still count against it.
 	s.gate.Succeed(host)
-	return srt.PUBLISH
-}
-
-// handleSubscribe refuses every playback request.
-//
-// This port is an ingest. Playback is HLS through the playout origin, which is
-// authenticated and rate-limited; an unauthenticated SRT pull of any programme
-// on the box is not something to expose by accident.
-func (s *Server) handleSubscribe(conn srt.Conn) {
-	s.log.Warn("srt subscribe refused: this port is ingest only",
-		"peer", conn.RemoteAddr().String())
-	_ = conn.Close()
+	return admitPublisher
 }
 
 // handlePublish runs one publisher's read loop.
