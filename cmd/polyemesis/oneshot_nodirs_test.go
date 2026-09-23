@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 )
@@ -29,17 +31,33 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// oneShotDeadline bounds a runServer child. The one-shot paths answer in well
+// under a second; this is generous for a loaded CI runner and still far short
+// of the package timeout.
+const oneShotDeadline = 60 * time.Second
+
 // runServer runs this binary as polyemesis with args, in dir, and returns its
 // combined output and whether it exited 0.
+//
+// Every caller expects a one-shot: a command that answers and exits. A
+// regression that lets the server START instead would otherwise hang the
+// package until go test's own timeout, so the child is killed after
+// oneShotDeadline and that is reported as the failure it is.
 func runServer(t *testing.T, dir string, args ...string) (string, bool) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], args...)
+	ctx, cancel := context.WithTimeout(context.Background(), oneShotDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), runAsServerEnv+"=1")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	cmd.Stdin = strings.NewReader("")
 	err := cmd.Run()
+	if ctx.Err() != nil {
+		t.Fatalf("polyemesis %s did not exit within %s -- it started serving instead "+
+			"of answering and exiting:\n%s", strings.Join(args, " "), oneShotDeadline, out.String())
+	}
 	if err != nil {
 		if _, ok := err.(*exec.ExitError); !ok {
 			t.Fatalf("could not run the server process: %v", err)

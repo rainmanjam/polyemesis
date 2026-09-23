@@ -298,6 +298,11 @@ HTTP — while it looked like HTTPS was configured. Write the mode you meant, or
 `journalctl -u polyemesis` names the key to fix. Files written by
 `install.sh` use only known keys and always write a mode.
 
+The same applies to `--log`. A value other than `debug`, `info`, `warn` or
+`error` now stops the server instead of meaning `info`. If your unit or
+container command passes `--log warning` or similar, change it to `warn`
+before upgrading.
+
 ### Upgrading past 0.10.0 (unreleased, on `main`): the unit `install.sh` writes no longer passes `--addr`
 
 > Not yet in a tag — this note is here ahead of the release that carries it.

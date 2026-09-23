@@ -518,6 +518,11 @@ its first tagged release.
   All compose files now say `45s`, and a test holds every compose grace
   period and every `TimeoutStopSec` to the budget plus its margin. An existing
   compose file keeps `30s` until you edit it or re-run `install.sh`.
+- **An unknown `--log` value stops the server instead of meaning `info`.**
+  `--log warning` or `--log trace` used to start a server logging at `info`,
+  and nothing said the value had been ignored. The server now refuses to
+  start and lists the accepted values: `debug`, `info`, `warn`, `error`. Case
+  is still ignored.
 
 ### Security
 

@@ -132,6 +132,16 @@ func run(h *hooks) error {
 		return nil
 	}
 
+	// A LOG LEVEL THE SERVER DOES NOT KNOW STOPS IT. parseLevel mapped anything
+	// unrecognised to info, so `--log warning` or `--log=trace` in a unit file
+	// started a server logging at a level nobody chose, and nothing said so --
+	// the operator who asked for quieter logs got the default, and the one
+	// who asked for trace got less than debug. Refused here, before anything
+	// is opened, naming the four accepted values.
+	if _, err := levelFromFlag(*logLevel); err != nil {
+		return err
+	}
+
 	// DEBUG MODE, WIRED HERE BECAUSE THE LOGGER IS BUILT HERE. The switch shares
 	// its level with the handler, so changing it at runtime reaches every
 	// component that was handed this logger at startup -- the engine, the
@@ -1019,17 +1029,35 @@ func newLogger(level string) *slog.Logger {
 	}))
 }
 
+// parseLevel is levelFromFlag for callers that hold a value already known to be
+// valid -- run() refuses a bad --log before any of them is reached -- and
+// falls back to info for anything else.
 func parseLevel(level string) slog.Level {
-	switch strings.ToLower(level) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
+	l, err := levelFromFlag(level)
+	if err != nil {
 		return slog.LevelInfo
 	}
+	return l
+}
+
+// logLevels are the values --log accepts, in the order the flag help names them.
+var logLevels = []string{"debug", "info", "warn", "error"}
+
+// levelFromFlag maps a --log value to its slog level, case-insensitively, and
+// refuses anything else rather than guessing. See the check in run().
+func levelFromFlag(level string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info":
+		return slog.LevelInfo, nil
+	case "warn":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	}
+	return slog.LevelInfo, fmt.Errorf("--log %q is not a log level; use one of %s",
+		level, strings.Join(logLevels, ", "))
 }
 
 // verifyBackup answers whether a backup directory can be restored from.
