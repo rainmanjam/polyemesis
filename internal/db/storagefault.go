@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"io"
+	"reflect"
 	"sync"
 	"time"
 
@@ -162,6 +164,12 @@ func (c *observedConn) ExecContext(ctx context.Context, query string, args []dri
 		return nil, driver.ErrSkip
 	}
 	res, err := ex.ExecContext(ctx, query, args)
+	return c.execDone(res, err)
+}
+
+// execDone is the outcome of a statement that may have written, whether it ran
+// on the connection or through a prepared statement.
+func (c *observedConn) execDone(res driver.Result, err error) (driver.Result, error) {
 	if err != nil {
 		c.log.note(err)
 		return res, err
@@ -178,14 +186,23 @@ func (c *observedConn) ExecContext(ctx context.Context, query string, args []dri
 	return res, nil
 }
 
+// queryDone wraps a query's rows so an error met while iterating them is seen
+// too. Damage past the first page a query touches does not fail the query: it
+// fails the rows.Next that reaches it, after the rows before it came back.
+func (c *observedConn) queryDone(rows driver.Rows, err error) (driver.Rows, error) {
+	if err != nil {
+		c.log.note(err)
+		return rows, err
+	}
+	return &observedRows{rows: rows, log: c.log}, nil
+}
+
 func (c *observedConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	q, ok := c.Conn.(driver.QueryerContext)
 	if !ok {
 		return nil, driver.ErrSkip
 	}
-	rows, err := q.QueryContext(ctx, query, args)
-	c.log.note(err)
-	return rows, err
+	return c.queryDone(q.QueryContext(ctx, query, args))
 }
 
 func (c *observedConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
@@ -198,8 +215,14 @@ func (c *observedConn) PrepareContext(ctx context.Context, query string) (driver
 	} else {
 		st, err = c.Conn.Prepare(query)
 	}
-	c.log.note(err)
-	return st, err
+	if err != nil {
+		c.log.note(err)
+		return nil, err
+	}
+	// The statement is wrapped too: tx.Prepare is how the chat batch insert
+	// and the destination reorders write, and a full disk met there, or a
+	// commit of what they wrote, must count like any other statement's.
+	return &observedStmt{Stmt: st, conn: c}, nil
 }
 
 func (c *observedConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
@@ -268,4 +291,94 @@ func (t *observedTx) Rollback() error {
 	err := t.Tx.Rollback()
 	t.conn.log.note(err)
 	return err
+}
+
+// observedStmt forwards exactly what modernc's stmt implements: Close,
+// NumInput, Exec, Query and the two Context forms. The legacy Exec and Query
+// are what database/sql falls back to without the Context forms, so they are
+// observed as well rather than left as a way around the log.
+type observedStmt struct {
+	driver.Stmt
+	conn *observedConn
+}
+
+func (s *observedStmt) Exec(args []driver.Value) (driver.Result, error) {
+	return s.conn.execDone(s.Stmt.Exec(args)) //nolint:staticcheck // forwarding the legacy form the interface still carries
+}
+
+func (s *observedStmt) Query(args []driver.Value) (driver.Rows, error) {
+	return s.conn.queryDone(s.Stmt.Query(args)) //nolint:staticcheck // forwarding the legacy form the interface still carries
+}
+
+func (s *observedStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	ex, ok := s.Stmt.(driver.StmtExecContext)
+	if !ok {
+		return nil, driver.ErrSkip
+	}
+	return s.conn.execDone(ex.ExecContext(ctx, args))
+}
+
+func (s *observedStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	q, ok := s.Stmt.(driver.StmtQueryContext)
+	if !ok {
+		return nil, driver.ErrSkip
+	}
+	return s.conn.queryDone(q.QueryContext(ctx, args))
+}
+
+// observedRows passes each row through and notes the error that ends the
+// iteration early. io.EOF is the normal end of the rows, not a fault.
+//
+// It forwards Columns, Close and Next, plus the ColumnType* interfaces
+// modernc's rows implements, so sql.Rows.ColumnTypes reports the same types
+// through the wrapper as without it.
+type observedRows struct {
+	rows driver.Rows
+	log  *faultLog
+}
+
+func (r *observedRows) Columns() []string { return r.rows.Columns() }
+func (r *observedRows) Close() error      { return r.rows.Close() }
+
+func (r *observedRows) Next(dest []driver.Value) error {
+	err := r.rows.Next(dest)
+	if err != nil && !errors.Is(err, io.EOF) {
+		r.log.note(err)
+	}
+	return err
+}
+
+func (r *observedRows) ColumnTypeDatabaseTypeName(index int) string {
+	if t, ok := r.rows.(driver.RowsColumnTypeDatabaseTypeName); ok {
+		return t.ColumnTypeDatabaseTypeName(index)
+	}
+	return ""
+}
+
+func (r *observedRows) ColumnTypeLength(index int) (int64, bool) {
+	if t, ok := r.rows.(driver.RowsColumnTypeLength); ok {
+		return t.ColumnTypeLength(index)
+	}
+	return 0, false
+}
+
+func (r *observedRows) ColumnTypeNullable(index int) (bool, bool) {
+	if t, ok := r.rows.(driver.RowsColumnTypeNullable); ok {
+		return t.ColumnTypeNullable(index)
+	}
+	return false, false
+}
+
+func (r *observedRows) ColumnTypePrecisionScale(index int) (int64, int64, bool) {
+	if t, ok := r.rows.(driver.RowsColumnTypePrecisionScale); ok {
+		return t.ColumnTypePrecisionScale(index)
+	}
+	return 0, 0, false
+}
+
+func (r *observedRows) ColumnTypeScanType(index int) reflect.Type {
+	if t, ok := r.rows.(driver.RowsColumnTypeScanType); ok {
+		return t.ColumnTypeScanType(index)
+	}
+	return reflect.TypeOf(new(any)).Elem()
 }

@@ -46,9 +46,11 @@ its first tagged release.
   elsewhere both serve. So health said `ok` while every save failed with
   "database or disk is full", and on a database with a damaged hooks table it
   said `ok` while `/hooks` answered 500 and hooks had stopped. The store now
-  records the storage errors its real statements get, and health reports them
-  as `degraded`: a full or read-only volume until the next successful write, a
-  damaged file until restart.
+  records the storage errors its real statements get, including a corrupt page
+  met partway through reading a table and a write through a prepared
+  statement, and health reports them as `degraded`: a full or read-only volume
+  until the next successful write or committed transaction, a damaged file
+  until restart.
 
 ## [0.10.0] — 2026-09-23
 
