@@ -330,6 +330,13 @@ local_addresses_include() {
 
 cleanup_on_failure() {
   local code=$?
+  # A SIGNAL IS A FAILURE WHATEVER $? SAYS. Entered from the INT or TERM trap,
+  # $? is the status of the last command that finished -- 0 whenever the
+  # signal lands between two commands -- and the "code 0 means success" line
+  # below then exited 0 with nothing undone: a half-made install reported as a
+  # clean one. Seen in the installer workflow's interrupt step on main
+  # (1c0c77dd). The signal traps pass their own status instead.
+  [ -n "${1:-}" ] && code=$1
   # ONCE. The trap is armed for EXIT INT TERM, so a Ctrl-C ran this twice: SIGINT
   # fired the INT handler, which cleaned up and exited, and that exit fired the
   # EXIT handler, which cleaned up again. The operator saw the same failure
@@ -453,7 +460,9 @@ cleanup_on_failure() {
   err "nothing was left running. Fix the cause above and run this again."
   exit "$code"
 }
-trap cleanup_on_failure EXIT INT TERM
+trap cleanup_on_failure EXIT
+trap 'cleanup_on_failure 130' INT
+trap 'cleanup_on_failure 143' TERM
 
 # ---------------------------------------------------------------------- input
 #
