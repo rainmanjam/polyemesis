@@ -10,6 +10,16 @@ its first tagged release.
 
 ### Fixed
 
+- **A programme whose engine failed to start is no longer invisible.** When
+  one source's engine failed to build or start, the server logged it and kept
+  the others on air, which is right, but nothing reported it afterwards.
+  `GET /api/v1/health` said `ok` for "1 of 2 source(s) running", and
+  `/api/v1/metrics` emitted no ingest series for that programme, so
+  `polyemesis_ingest_up == 0` and the bitrate alert in MONITORING.md could not
+  fire for it. Health now answers `degraded` (still `200`) with the count, the
+  scrape reports the programme as a stopped ingest, and a new gauge,
+  `polyemesis_source_engine_up`, is 0 for it.
+
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer
   tracks was tested with a 5 s gap. In the field, with a 30 s outage, track 2

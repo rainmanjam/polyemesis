@@ -365,3 +365,26 @@ func TestAnUnknownSourceCountIsOmittedRatherThanRenderedAsZero(t *testing.T) {
 		t.Fatalf("dropping the source count took other families with it:\n%s", text)
 	}
 }
+
+// polyemesis_source_engine_up is 0 only for a programme the server has nothing
+// running for, and its family header stands on an empty install like every
+// other per-programme family, so the alert can be written before the first
+// engine fails to build.
+func TestSourceEngineUpSaysWhichProgrammeHasNoEngine(t *testing.T) {
+	out := Render(Snapshot{Ingests: []Ingest{
+		{Process: Process{State: "running"}, ID: 1, Name: "Main"},
+		{Process: Process{State: "stopped"}, ID: 2, Name: "Studio B", NoEngine: true},
+	}})
+	for _, want := range []string{
+		`polyemesis_source_engine_up{id="1",name="Main"} 1`,
+		`polyemesis_source_engine_up{id="2",name="Studio B"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if empty := Render(Snapshot{}); !strings.Contains(empty, "# TYPE polyemesis_source_engine_up gauge") {
+		t.Error("the family header is missing on an install with no programme, so the " +
+			"alert cannot be written before the first engine fails")
+	}
+}

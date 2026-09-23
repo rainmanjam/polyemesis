@@ -101,6 +101,17 @@ type Ingest struct {
 	// Destination is, so a scrape can be read without a second convention.
 	ID   int64
 	Name string
+	// NoEngine says the programme is in the sources table and nothing is
+	// running for it: its engine failed to build or to start, and Sync logged
+	// and carried on so the other programmes stayed on air. Its Process is
+	// then stopped and its relay zero, which _up already says -- this is what
+	// says WHY, so "the encoder is not sending" and "there is nothing here to
+	// receive it" do not read the same.
+	//
+	// Negative so the zero value is the ordinary case: every Ingest built from
+	// a running engine, which is all of them but one sweep, is right without
+	// setting it.
+	NoEngine bool
 }
 
 // Destination is one output, plus the labels identifying it.
@@ -236,6 +247,16 @@ func renderIngests(d *doc, ins []Ingest) {
 		"Restarts of the ingest process since the server started.")
 	for _, in := range sorted {
 		d.sample("polyemesis_ingest_restarts_total", float64(in.Restarts), ingestIdent(in)...)
+	}
+
+	// Per programme, beside _up rather than folded into it: _up is 0 for a
+	// listener waiting on a streamer too, which is normal between shows. This
+	// is 0 only when the server itself has nothing running for a configured
+	// programme, which is never normal.
+	d.family("polyemesis_source_engine_up", "gauge",
+		"1 when the programme has a running engine; 0 when its engine failed to build or start.")
+	for _, in := range sorted {
+		d.sample("polyemesis_source_engine_up", boolValue(!in.NoEngine), ingestIdent(in)...)
 	}
 }
 

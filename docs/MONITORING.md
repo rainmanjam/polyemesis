@@ -104,6 +104,10 @@ require restarting the server.
   can run several, and `polyemesis_ingest_up`, `polyemesis_ingest_state`,
   `polyemesis_ingest_bitrate_bits_per_second`, `polyemesis_ingest_restarts_total`
   and all five `polyemesis_relay_*` families carry one series per programme.
+  **Every programme in the sources table has these series, including one the
+  server has nothing running for**: a programme whose engine failed to build or
+  start is reported as a stopped ingest, and `polyemesis_source_engine_up` is 0
+  for it and 1 for every programme that has an engine.
 - `polyemesis_destination_info` carries `kind`, `platform` and `source_id` for
   joining. `source_id` is the `id` of the programme's ingest series, so it is how
   a destination query asks about its own programme's ingest (see the slow-output
@@ -138,7 +142,17 @@ rate(polyemesis_destination_output_seconds_total[1m]) < 0.9
       min_over_time(polyemesis_ingest_bitrate_bits_per_second[1m]) > 0,
       "source_id", "$1", "id", "(.*)"))                     # moving, but slowly
 polyemesis_recording_free_bytes < 20e9                      # disk filling up
+polyemesis_source_engine_up == 0                            # a programme the server is not running
 ```
+
+**The last is never normal.** `polyemesis_ingest_up` is 0 for a listener
+waiting on its streamer too, which is ordinary between shows.
+`polyemesis_source_engine_up` is 0 only when a configured programme has no
+engine at all: its ingest failed to build or to start, the server logged it and
+kept the other programmes on air. Nothing is receiving that programme's
+stream and no built-in alert can fire for it, because the alert watcher runs
+inside the engine. `GET /api/v1/health` reports the same state as `degraded`
+with a `200`, and its `engine` check says `N of M source(s) running`.
 
 The second is the one worth alerting on first: a destination that is enabled but
 not up is a platform you think you are streaming to and are not.

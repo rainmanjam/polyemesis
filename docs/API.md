@@ -409,10 +409,13 @@ restarts, because nothing the process does repairs it). Those two answer
 and opening the database on boot writes, so a restart over a full disk would
 take the programme off the air and not bring it back. `engine` fails when sources are
 configured and not one engine is running, which is "nothing is being
-published"; no sources at all is a fresh install and passes. `recordingDisk`
+published"; no sources at all is a fresh install and passes. It also fails,
+as `degraded` with a `200`, when some sources have an engine and some do not
+(`"1 of 2 source(s) running"`): the programme without one is publishing
+nothing, and a restart would take the others off the air to retry it. `recordingDisk`
 fails when the free-space floor has halted recording.
 
-**Only `database` (when it cannot be read at all) and `engine` are fatal, and
+**Only `database` (when it cannot be read at all) and `engine` (when no engine at all is running) are fatal, and
 only those make the status `503`.** A `recordingDisk` failure answers `200` with `"status": "degraded"`,
 deliberately: a box that has stopped writing recordings is still broadcasting,
 and taking it out of a load balancer over it would end the stream to fix the
