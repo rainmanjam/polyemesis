@@ -62,7 +62,12 @@ import {
   supportOf,
   tierInfo,
 } from "@/lib/capabilities";
-import { api, isAccountInUse, type AccountDestination } from "@/lib/api";
+import {
+  api,
+  isAccountInUse,
+  isSettingsConflict,
+  type AccountDestination,
+} from "@/lib/api";
 import {
   acmeStance,
   acmeYaml,
@@ -224,6 +229,19 @@ export function SettingsPage() {
   // an error with no single field behind it.
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  /* SOMEBODY ELSE SAVED FIRST, so this save was refused and nothing of it was
+   * stored. The server's sentence says so. Held open with a reload action,
+   * because the draft on screen is now based on a document that no longer
+   * exists, and saving it again would conflict again. Not reloaded
+   * automatically: that would throw away the draft the operator is looking at
+   * without asking. */
+  const conflictToast = (msg: string) =>
+    toast.error(msg, {
+      duration: Infinity,
+      closeButton: true,
+      action: { label: t("chatpage.reload"), onClick: () => window.location.reload() },
+    });
+
   const save = async (next: Settings) => {
     setSaving(true);
     setSaveError(null);
@@ -232,6 +250,12 @@ export function SettingsPage() {
       toast.success(t("set.settingsSavedAffectedProcessesHave"));
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("rec.saveFailed");
+      // A conflict is not given to setSaveError: it belongs to no field, and
+      // AutomodConfig would otherwise hunt for a rule to pin it on.
+      if (isSettingsConflict(err)) {
+        conflictToast(msg);
+        return;
+      }
       setSaveError(msg);
       toast.error(msg);
     } finally {
@@ -255,6 +279,10 @@ export function SettingsPage() {
       setSettings(saved);
       toast.success("MQTT settings saved.");
     } catch (err) {
+      if (isSettingsConflict(err) && err instanceof Error) {
+        conflictToast(err.message);
+        return;
+      }
       toast.error(err instanceof Error ? err.message : t("set.couldNotSaveTheMqtt"));
     } finally {
       setSaving(false);
@@ -1107,10 +1135,7 @@ function PipelineSettings({
           </div>
 
           <span className="text-micro text-muted-foreground">
-            Both apply and the more generous one wins: a message goes when it is older than the
-            hours <em>and</em> outside the newest N. So a busy channel keeps less time than you
-            asked and a quiet one keeps more &mdash; which is the right way round, because the
-            floor is what stops a slow channel&rsquo;s user cards being empty.
+            {t("set.chatBothApply")} {t("set.chatFloorWhy")}
           </span>
           <span className="text-micro text-muted-foreground">{t("set.chatNotOnlyDisk")}</span>
           <span className="text-micro text-muted-foreground">{t("set.chatSmall")}</span>
@@ -1855,6 +1880,7 @@ function MultitrackHardware({
   draft: Settings;
   setDraft: (s: Settings) => void;
 }) {
+  const t = useT();
   const gpus = draft.multitrack?.gpus ?? [];
   // Always sent as an explicit array, never omitted, so clearing the last entry
   // is a value this form can actually send. An absent key would leave the
@@ -1869,13 +1895,10 @@ function MultitrackHardware({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-1.5">
-          Enhanced Broadcasting hardware (Twitch)
+          {t("set.ebTitle")}
           <ExperimentalBadge />
         </CardTitle>
-        <CardDescription>
-          What this machine's GPU is, for the negotiation a destination with Enhanced Broadcasting
-          switched on makes at go-live.
-        </CardDescription>
+        <CardDescription>{t("set.ebDesc")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {/* The form is unchanged and still fully usable. This says only what
@@ -1883,17 +1906,7 @@ function MultitrackHardware({
             what Twitch documents. It is also the one place an operator can act
             on knowing that Twitch reads the DECLARATION, so the mechanism is
             stated here rather than left to be inferred from a refusal. */}
-        <Experimental>
-          An inventory declared here does reach Twitch's live endpoint, and polyemesis's own
-          tests watch it be accepted: a supported GPU is granted Enhanced Broadcasting, a VOD
-          audio track and a minted key. What Twitch checks is <em>this declaration</em> &mdash;
-          the vendor ID, device ID and driver version as sent, against a list it does not
-          publish. It has no way to inspect the machine, which is why these fields exist at all:
-          polyemesis sends what it is told. What has never been observed is a broadcast published
-          through a minted key. Filling this in is safe either way &mdash; nothing is sent until
-          a destination with the toggle on goes live, and a refusal falls back to the ordinary
-          Twitch ingest.
-        </Experimental>
+        <Experimental>{t("set.ebExperimental")}</Experimental>
         <span className="text-micro text-muted-foreground">
           Twitch grants Enhanced Broadcasting only to a client with a GPU it supports, and it checks
           what it is told: a zero vendor ID, a vendor it does not know and an out-of-date driver are

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -1668,6 +1669,39 @@ func (a *AutomodSettings) UnmarshalJSON(b []byte) error {
 		a.On = nil
 	}
 	return json.Unmarshal(b, (*plain)(a))
+}
+
+// CheckAutomodFields refuses a SENT automod object that names a field this
+// type does not have.
+//
+// It exists because of UnmarshalJSON above. PUT /settings decodes with
+// DisallowUnknownFields, and that is what makes {recording:{bogus:1}} a 400 --
+// but a custom unmarshaler is handed raw bytes, so the outer decoder's
+// strictness stops at its door. Every other section refused a typo and automod
+// alone answered 200 and stored nothing. AUTOMOD.md made that concrete: it
+// named the history bounds window / retain / idleEviction, the engine's own
+// names rather than the wire ones, and an operator who followed it was told
+// the save took.
+//
+// A separate check rather than a strict UnmarshalJSON, because the stored
+// document is decoded through the same method on every read. Strict THERE
+// would make a blob written by a newer version -- one extra automod key --
+// fail to load at all, which is the install that cannot boot. Strict on the
+// request, lenient on the store: the same split the rest of the document
+// already has.
+//
+// Decoded into the method-less shape, so it cannot recurse into UnmarshalJSON
+// and so the strictness reaches every nested type -- history, model, rules --
+// with no list here to keep in step with the struct.
+func CheckAutomodFields(raw []byte) error {
+	type plain AutomodSettings
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var p plain
+	if err := dec.Decode(&p); err != nil {
+		return fmt.Errorf("automod: %w", err)
+	}
+	return nil
 }
 
 // AutomodRule is one stored pattern. Mirrors automod.Rule, which is where it is

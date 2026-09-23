@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -109,6 +110,67 @@ type TLS struct {
 	HSTS bool `yaml:"hsts"`
 	// Enabled is the legacy on/off switch, kept for backwards compatibility.
 	Enabled bool `yaml:"enabled"`
+}
+
+// UnmarshalYAML decodes the tls block and REFUSES A KEY IT DOES NOT KNOW.
+//
+// The rest of config.yaml ignores unknown keys (see the enhancedRtmp note
+// above), and inside this block that leniency had the worst possible failure
+// mode. `mdoe: selfsigned` -- or `Mode:`, since yaml keys are case-sensitive --
+// leaves mode absent, normalizeTLS maps absent to off, and the server starts on
+// plain HTTP with session cookies missing their Secure flag. On a loopback bind
+// nothing was logged at all. A typo that silently turns TLS off is not one to
+// warn about; it is one to stop at, naming the key.
+//
+// Only this block, deliberately: every key it has ever had is still a field
+// below, so no existing file breaks. Tightening the top level would need an
+// allowlist of retired keys first.
+func (t *TLS) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.MappingNode {
+		known := tlsKeys()
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := n.Content[i].Value
+			if _, ok := known[k]; ok {
+				continue
+			}
+			hint := ""
+			for name := range known {
+				if strings.EqualFold(name, k) {
+					hint = fmt.Sprintf(" (did you mean %q? keys are case-sensitive)", name)
+				}
+			}
+			return fmt.Errorf("line %d: tls has no key %q%s. Refusing to start: an "+
+				"unrecognised tls key would otherwise be ignored, and a misspelled "+
+				"mode falls back to off -- plain HTTP, cookies without Secure. Valid "+
+				"keys: %s", n.Content[i].Line, k, hint, strings.Join(tlsKeyList(), ", "))
+		}
+	}
+	// The alias has TLS's fields and none of its methods, so this Decode does
+	// not recurse back into UnmarshalYAML.
+	type plain TLS
+	return n.Decode((*plain)(t))
+}
+
+// tlsKeyList is every yaml key TLS declares, read from its struct tags so a
+// field added later is accepted without anyone remembering to list it here.
+func tlsKeyList() []string {
+	rt := reflect.TypeOf(TLS{})
+	keys := make([]string, 0, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		name, _, _ := strings.Cut(rt.Field(i).Tag.Get("yaml"), ",")
+		if name != "" && name != "-" {
+			keys = append(keys, name)
+		}
+	}
+	return keys
+}
+
+func tlsKeys() map[string]struct{} {
+	m := map[string]struct{}{}
+	for _, k := range tlsKeyList() {
+		m[k] = struct{}{}
+	}
+	return m
 }
 
 // FFmpeg lets an operator pin specific binaries instead of relying on $PATH.
@@ -566,6 +628,24 @@ func (c Config) ModelsDir() string { return filepath.Join(c.DataDir, "models", "
 // package — importing playout would drag db, ffmpeg and routing in behind it.
 // TestPlayoutDirMatchesThePlayoutPackage pins the two against each other.
 func (c Config) PlayoutDir() string { return filepath.Join(c.DataDir, "playout") }
+
+// PlayoutDirFor is one source's playout root: its master playlist, one
+// directory per variant, and the live-caption sidecar.
+//
+// PER SOURCE FOR THE REASON HLSDirFor IS. Every engine runs its own playout
+// manager, and while each was handed PlayoutDir() itself, two programmes with
+// the default "main" variant both muxed into <root>/main/: the segments
+// overwrote each other, either engine's teardown cleared the other's live
+// window, and playout.sourceId -- which picks the engine whose handler serves
+// -- chose between two handlers serving the same files.
+//
+// Siblings under the shared root, never the root itself for one of them: the
+// sweeper walks its directory recursively, so a programme nested inside
+// another's root would have its window pruned under the other's limit. The
+// public URL does not change -- the handler serves relative to this directory.
+func (c Config) PlayoutDirFor(sourceID int64) string {
+	return filepath.Join(c.PlayoutDir(), strconv.FormatInt(sourceID, 10))
+}
 
 // FontsDir holds the fonts text overlays draw with: the two polyemesis embeds
 // and writes at startup, and any the operator drops in beside them.

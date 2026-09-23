@@ -705,17 +705,18 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		bus.Publish(events.TypeRecordings, nil)
 	},
 		recording.WithFFprobe(tools.FFprobe),
-		// The programme, so every row this manager indexes carries it. Nothing
-		// else ever knows: the filename does not encode it and a later reader
-		// cannot work it out, which is why source_id was NULL on every
-		// recording ever written and the clip editor labelled every clip with
-		// the default programme's track names.
-		recording.WithSourceID(sourceID),
+		// No programme is handed to the manager: a recording's programme is in
+		// the filename startRecorder gives it (recording.SegmentPattern). A
+		// per-manager one was stamped on every file in the SHARED directory by
+		// every engine's scan, so attributions flapped between programmes.
 		recording.WithStorageGuard(e.onStorage),
 	)
 	e.play = playout.New(playout.Deps{
-		Log:   log,
-		Dir:   cfg.PlayoutDir(),
+		Log: log,
+		// This programme's own root, never the shared one. See
+		// Config.PlayoutDirFor: two engines muxing into one directory overwrote
+		// each other's segments and made playout.sourceId meaningless.
+		Dir:   cfg.PlayoutDirFor(sourceID),
 		Ports: e.alloc,
 		// The manager never imports internal/supervisor; it asks for a child
 		// and the engine decides what a child is. That is what keeps a playout
@@ -864,6 +865,20 @@ const ingestLiveGrace = 3 * time.Second
 func (e *Engine) IngestLive() bool {
 	e.requireEngine("IngestLive")
 	return ingestLive(e.mon.Bitrate(), time.Now())
+}
+
+// RecorderRunning reports whether this engine has a recorder child right now.
+//
+// The slot, not recording.enabled: reconcileRecorder empties it when the
+// setting goes off AND when the free-space floor halts recording with the
+// setting still on, which is the case the setting cannot see. It is what the
+// shared recording manager's delete guard asks through Manager.RecorderRunning
+// -- see recording.WithRecorderProbe.
+func (e *Engine) RecorderRunning() bool {
+	e.requireEngine("RecorderRunning")
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.recorder != nil
 }
 
 // ingestLive is the decision on its own, so every boundary of it is a table
@@ -1843,7 +1858,9 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		return
 	}
 
-	pattern := filepath.Join(e.cfg.RecordingsDir(), "rec-%Y%m%d-%H%M%S.mkv")
+	// The programme rides in the name, because the directory is shared and
+	// the name is what every engine's scan attributes the file by.
+	pattern := recording.SegmentPattern(e.cfg.RecordingsDir(), e.sourceID)
 	rs := ffmpeg.RecorderSpec{
 		RelayURL:       url,
 		OutputPattern:  pattern,
@@ -1868,6 +1885,11 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: "recorder", Kind: "recorder", Bin: e.tools.FFmpeg, Args: args,
 		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+		// The recorder is the consumer this exists for: stopped after the
+		// publisher has gone -- the ingest ending, recording.enabled=false,
+		// `docker stop` on an idle server -- it used to be SIGKILLed with its
+		// last segment unfinalised. See relay.Hub.Wake.
+		WakeOnStop: relayWaker(e.hub, "recorder"),
 	})
 
 	e.mu.Lock()
@@ -1886,6 +1908,23 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	e.recorderSig = sig
 	e.mu.Unlock()
 	proc.Start()
+}
+
+// relayWaker is the Spec.WakeOnStop for a consumer subscribed to hub as name.
+//
+// Safe after the fact by construction: Wake does nothing for a name the hub no
+// longer holds, and every teardown here stops the process BEFORE it
+// unsubscribes, so the subscription is still there for as long as the wake can
+// be needed. The one overlap: a Stop whose context expires before its child is
+// reaped returns while the escalator is still running, and a successor that
+// subscribes under the same name in that window can be sent a wake too. That
+// costs it nothing it would notice -- a wake only ever reaches a feed that is
+// already silent, and the empty PES it opens carries no payload.
+func relayWaker(hub *relay.Hub, name string) func() {
+	if hub == nil {
+		return nil
+	}
+	return func() { hub.Wake(name) }
 }
 
 // reconcilePreview applies settings changes to the preview encoder, but never
@@ -5164,11 +5203,11 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 		}
 		// FFmpeg has been reporting all three of these once a second per
 		// destination since -progress was wired up, and nothing has ever read
-		// them. Left at their zero values the watcher treats the speed as
+		// them. Left at their zero values the watcher treats the rate as
 		// unknown and says nothing, which is what happens for a destination
 		// with no process.
 		if d.Process != nil {
-			ds.Speed = d.Process.Progress.Speed
+			ds.OutTimeMS = d.Process.Progress.OutTimeMS
 			ds.DropFrames = d.Process.Progress.DropFrames
 			ds.DupFrames = d.Process.Progress.DupFrames
 		}

@@ -91,6 +91,13 @@ var staticAssetExts = map[string]bool{
 	".mp4": true, ".webm": true, ".mp3": true, ".wav": true, ".m3u8": true, ".ts": true,
 }
 
+// probePaths are the health-probe paths monitoring tools guess. None is a UI
+// route (App.tsx has no /health*), so refusing them costs no deep link.
+var probePaths = map[string]bool{"healthz": true, "health": true, "livez": true, "readyz": true}
+
+// isProbePath reports whether the cleaned, slash-trimmed path p is one of them.
+func isProbePath(p string) bool { return probePaths[p] }
+
 // isStaticAssetPath reports whether p names a file rather than a UI route.
 func isStaticAssetPath(p string) bool {
 	return staticAssetExts[strings.ToLower(path.Ext(p))]
@@ -140,6 +147,24 @@ func HandlerFor(sub fs.FS) http.Handler {
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"no such endpoint"}` + "\n"))
+			return
+		}
+
+		// A CONVENTIONAL PROBE PATH IS NOT A DEEP LINK EITHER, and answering it
+		// with the SPA made an uptime monitor pass while checking nothing.
+		// /healthz, /health, /livez and /readyz are what an operator, a load
+		// balancer or a Kubernetes manifest reaches for first; each fell through
+		// to index.html and answered 200 -- green for a server whose database
+		// had gone. The real check is /api/v1/health, and it is not aliased here
+		// on purpose: this package serves files and cannot run it, and a second
+		// health route would be a second contract to keep byte-identical for
+		// the callers that compare its body. So these fail, loudly, on the first
+		// probe, and say where the check lives.
+		if isProbePath(p) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"no health check here; probe /api/v1/health"}` + "\n"))
 			return
 		}
 

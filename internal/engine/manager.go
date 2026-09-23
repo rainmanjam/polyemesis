@@ -301,16 +301,20 @@ func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg
 		alloc:   relay.NewPortAllocator(relayPortBase, relayPortSpan),
 		engines: map[int64]*Engine{},
 		host:    stats.NewHost(),
-		// NO ffprobe and NO storage guard, and both omissions are the point.
-		// This instance answers reads — usage, resolve, delete — for the API,
-		// which must be able to ask them on an install where no engine is
-		// running. Measuring a segment belongs to the engine that recorded it,
-		// and halting a recorder belongs to the engine that owns the child;
-		// see the pair of comments on Engine's own recman in engine.go.
-		recman: recording.New(log, store, cfg.RecordingsDir(), func() {
-			bus.Publish(events.TypeRecordings, nil)
-		}),
 	}
+	// NO ffprobe and NO storage guard, and both omissions are the point.
+	// This instance answers reads — usage, resolve, delete — for the API,
+	// which must be able to ask them on an install where no engine is
+	// running. Measuring a segment belongs to the engine that recorded it,
+	// and halting a recorder belongs to the engine that owns the child;
+	// see the pair of comments on Engine's own recman in engine.go.
+	//
+	// It DOES get the recorder probe, which is why it is built after m: its
+	// delete guard has to know whether any recorder is alive, and the halt that
+	// stops one with recording.enabled still on lives on the engines, not here.
+	m.recman = recording.New(log, store, cfg.RecordingsDir(), func() {
+		bus.Publish(events.TypeRecordings, nil)
+	}, recording.WithRecorderProbe(m.RecorderRunning))
 	// Built here rather than in Start so a Manager that is never started still
 	// answers Scheduler() with a real runner: the runs page reads Last() and
 	// renders an empty report rather than nothing at all.
@@ -709,7 +713,18 @@ func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
 		// lookup has to be spelled out rather than assigned straight through --
 		// otherwise a source with no engine would present a non-nil Sink and the
 		// listener would accept a stream into nothing.
-		if eng := m.Engine(s.ID); eng != nil {
+		//
+		// AND ONLY FOR A SOURCE SET TO SRT, the counterpart of the RTMP
+		// listener's Ready. This used to hand every running engine's hub to the
+		// shared SRT port whatever the source's ingest mode, so an SRT publish
+		// was admitted into an RTMP source (whose hub its RTMP ingest child is
+		// already writing -- two muxers interleaved into one stream), into a
+		// pull source, and into one whose ingest was never chosen, which is
+		// what the console's create form makes. The API meanwhile reported all
+		// three tokenEnforced:false with no publish URL. A nil Sink is refused
+		// with REJ_RESOURCE, the same as a source with no pipeline, which from
+		// an SRT encoder's side is exactly what it is.
+		if eng := m.Engine(s.ID); eng != nil && s.Ingest.Mode == db.IngestSRT {
 			sink = eng.Hub()
 		}
 		targets = append(targets, srtserver.Target{
@@ -726,7 +741,11 @@ func (m *Manager) lookupToken(token string) (srtserver.Target, bool) {
 		// listener. Derived rather than stored: one secret per source is one
 		// thing to rotate, one thing to leak, and one thing to explain -- and
 		// rotating the source's token moves the backup's address with it.
-		if eng := m.Engine(s.ID); eng != nil {
+		//
+		// Only when the standby is configured for SRT, for the reason the
+		// primary's Sink above is: an RTMP standby's hub is fed by its RTMP
+		// backup child, and lookupStreamKey already gates it the same way.
+		if eng := m.Engine(s.ID); eng != nil && eng.Settings().Failover.Backup.Mode == db.IngestSRT {
 			if bh := eng.BackupHub(); bh != nil {
 				suffixed := make([]string, 0, len(valid))
 				for _, t := range valid {
@@ -1336,6 +1355,22 @@ func (m *Manager) SetAlertRetry(attempts int) {
 func (m *Manager) IngestLive() bool {
 	for _, eng := range m.Engines() {
 		if eng.IngestLive() {
+			return true
+		}
+	}
+	return false
+}
+
+// RecorderRunning reports whether ANY programme has a recorder child alive.
+//
+// Any, because every programme's recorder writes rec-YYYYMMDD-HHMMSS.mkv into
+// the one recordings directory, and the name does not say whose it is: a
+// segment is only safe to unlink when no recorder on the box could hold it.
+// Engines() is read first and released, so no engine's lock is ever taken
+// under m.mu.
+func (m *Manager) RecorderRunning() bool {
+	for _, eng := range m.Engines() {
+		if eng.RecorderRunning() {
 			return true
 		}
 	}

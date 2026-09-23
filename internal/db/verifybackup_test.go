@@ -26,7 +26,7 @@ func goodBackup(t *testing.T) string {
 	if err := d.Close(); err != nil {
 		t.Fatalf("closing: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("00"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte(strings.Repeat("ab", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -112,7 +112,7 @@ func TestVerifyBackupRefusesAnEmptyDatabaseSQLiteJustCreated(t *testing.T) {
 	// destination: a valid, empty, useless SQLite file. It passes
 	// integrity_check, which is why existence and integrity are not enough.
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("00"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte(strings.Repeat("ab", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	empty := filepath.Join(dir, "polyemesis.db")
@@ -126,7 +126,7 @@ func TestVerifyBackupRefusesAnEmptyDatabaseSQLiteJustCreated(t *testing.T) {
 
 func TestVerifyBackupRefusesSomeoneElsesDatabase(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("00"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte(strings.Repeat("ab", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	other := filepath.Join(dir, "polyemesis.db")
@@ -152,7 +152,7 @@ func TestVerifyBackupRefusesABackupWhereTheCopyNeverRan(t *testing.T) {
 	// backup again before upgrading, and the message has to say so rather than
 	// implying the file needs repair.
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("00"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte(strings.Repeat("ab", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	err := VerifyBackup(dir)
@@ -209,3 +209,17 @@ func TestVerifyBackupRefusesADatabaseSQLiteCannotEvenWalk(t *testing.T) {
 // than five distinct problems, and how many rows it emits for a given byte
 // pattern is SQLite's business. A test pinning that would assert SQLite's
 // internals, break on a version bump, and tell us nothing about this function.
+
+// TestEverySealedColumnQueryReadsItsOwnColumn holds each sealedColumns entry's
+// literal query to the table and column it names. The query is written out by
+// hand so no SQL is built at run time; this is what stops a copied line from
+// checking one column while reporting on another.
+func TestEverySealedColumnQueryReadsItsOwnColumn(t *testing.T) {
+	for _, c := range sealedColumns {
+		want := `SELECT "` + c.column + `" FROM "` + c.table + `" WHERE "` + c.column +
+			`" IS NOT NULL AND length("` + c.column + `") > 0`
+		if c.query != want {
+			t.Errorf("%s.%s: query is\n  %s\nwant\n  %s", c.table, c.column, c.query, want)
+		}
+	}
+}

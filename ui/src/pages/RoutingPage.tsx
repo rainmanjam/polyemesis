@@ -607,10 +607,9 @@ export function RoutingPage() {
               allowAnnotating
               footer={(compiled) => (
                 <>
-                  Video is copied without re-encoding. Only this audio graph is applied, and only
-                  this destination restarts when you save.
+                  {t("route.copyFooter")}
                   {(compiled?.videoDelayMs ?? 0) > 0 &&
-                    ` Video is held back ${compiled?.videoDelayMs} ms at the input to let the audio run ahead.`}
+                    ` ${t("route.videoHeldBack", { ms: compiled?.videoDelayMs ?? 0 })}`}
                 </>
               )}
             />
@@ -1114,6 +1113,7 @@ function SecondMixCard({
    *  on every platform — see engine/destinations.go's provisional path. */
   probed: boolean;
 }) {
+  const t = useT();
   const enable = (on: boolean) => {
     if (!on) return onChange(null);
     // RESTORE FIRST. Switching off drops the whole profile, and re-seeding from
@@ -1135,7 +1135,7 @@ function SecondMixCard({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-1.5">
-          <Archive className="h-3.5 w-3.5" /> Second (VOD) audio mix
+          <Archive className="h-3.5 w-3.5" /> {t("route.vodTitle")}
           {twitchRtmp && <ExperimentalBadge />}
         </CardTitle>
       </CardHeader>
@@ -1150,19 +1150,13 @@ function SecondMixCard({
         <div className="flex h-9 items-center gap-2">
           <Switch id="vod-enabled" checked={profile !== null} onCheckedChange={enable} />
           <Label htmlFor="vod-enabled" className="text-[11px] text-muted-foreground">
-            {profile !== null
-              ? "A second mix is configured for this destination"
-              : "One audio mix (the normal case)"}
+            {profile !== null ? t("route.vodConfigured") : t("route.vodOneMix")}
           </Label>
         </div>
 
         <span className="text-[10px] text-muted-foreground">
-          A whole second mix of the same ingest, intended for a second audio track alongside the
-          live one. The usual reason is an archive that must not carry licensed music while the
-          live mix does. Off is the normal state.
-          {profile === null && restorable !== null && (
-            <> Switching this back on restores the mix you just turned off.</>
-          )}
+          {t("route.vodNote")}
+          {profile === null && restorable !== null && <> {t("route.vodRestores")}</>}
         </span>
 
         {/* State 0: not being sent, on every platform, and nothing on the
@@ -1555,7 +1549,7 @@ export function LoudnessCard({
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-1.5">
-          <Gauge className="h-3.5 w-3.5" /> Loudness target
+          <Gauge className="h-3.5 w-3.5" /> {t("route.loudnessTarget")}
         </CardTitle>
         {loudness && (
           <Badge variant={inert ? "warn" : "armed"} className="tnum">

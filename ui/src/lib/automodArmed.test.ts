@@ -121,6 +121,7 @@ describe("AutomodMatrix", () => {
     // Findings are recorded before the matrix is consulted and the flag job
     // returns immediately, so each of these switches had one possible outcome.
     expect(src()).toContain("isOperable(action)");
-    expect(src()).toContain("recorded for review, never acted on");
+    // The sentence itself lives in the catalogue as automod.flagRecordedOnly.
+    expect(src()).toContain('t("automod.flagRecordedOnly")');
   });
 });

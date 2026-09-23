@@ -98,7 +98,7 @@ the API accepts.
 
 | Field | Default | What it means |
 |---|---|---|
-| `window` | **30s** | how far back every detector below looks |
+| `windowSeconds` | **30** | how far back every detector below looks, in seconds |
 | `maxMessages` | **8** | messages in the window before it counts as flooding |
 | `maxRepeats` | **3** | repeats of the same *normalised* text in the window |
 | `maxLinks` | **3** | links in the window |
@@ -107,13 +107,18 @@ the API accepts.
 | `maxCapsRatio` | **0.8** | proportion of capitals before it counts as shouting, 0..1 |
 | `action` | **timeout** | flooding is usually somebody carried away, and a timeout expires on its own where a ban needs a human |
 | `timeoutSeconds` | **60** | duration for that action |
-| `retain` | **24** | messages kept per author |
-| `idleEviction` | **10m** | how long an author is kept after their last message |
-| `maxAuthors` | **20000** | ceiling on tracked authors |
+| `retainPerAuthor` | **24** | messages kept per author |
+| `idleEvictionSeconds` | **600** | how long an author is kept after their last message, in seconds |
 
-The last three are memory bounds rather than policy. A raid is thousands of new
+The last two are memory bounds rather than policy. A raid is thousands of new
 authors in a minute, so the ring has to forget — otherwise the defence becomes
-the denial of service.
+the denial of service. Idle eviction alone is not a bound while a raid is still
+going, because nobody is idle, so there is also a **fixed ceiling of 20,000
+tracked authors**. It is not a setting.
+
+The fields sit under `automod.history` in `PUT /settings`. A field the table
+does not name — a typo, or `window` for `windowSeconds` — is refused with a 400,
+the same as in every other section, rather than accepted and ignored.
 
 Because `maxRepeats` compares the **normalised** text, a spammer varying case,
 padding or doubled letters still trips it.
@@ -184,6 +189,14 @@ on their own:
 The key is write-only: `automod.model.hasApiKey` is all `GET /settings`
 carries. Sending an empty key clears it. See [the API reference](API.md) for
 the envelope.
+
+A `PUT /settings` that switches **on** a cell whose checker is not configured
+is refused with a 400 naming the cell: no enabled rule for a `rules` cell, the
+model switched off or with no endpoint for a `model` cell. Configure the
+checker in the same save and the cell arms. A cell that was already on when its
+checker was later switched off is kept, so switching the checker back on
+restores it, but it cannot fire in the meantime, and `/automod/matrix` does not
+count it in `summary`.
 
 ## See also
 

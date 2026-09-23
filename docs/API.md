@@ -41,7 +41,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the thirteen denied below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the thirteen `GET`s among the fifteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 
 The middleware also lets `HEAD` through, and no route in this API is registered
@@ -148,8 +148,10 @@ appears rather than what was said.
 `GET /encoders` stays available, but `?redetect=` needs `admin`: it runs a test
 encode per candidate encoder and rewrites the install's capability cache.
 
-`/hls/*`, the dashboard's preview playlist, is now **session-only** — no bearer
-of either scope. Requesting a playlist starts the on-demand preview encoder and
+`/hls/*`, the dashboard's preview playlist, is **mounted at the root, not under
+`/api/v1`**: `/hls/{source}/index.m3u8` for a given programme, and the bare
+`/hls/index.m3u8` as an alias for the default one. It is now **session-only** — no
+bearer of either scope. Requesting a playlist starts the on-demand preview encoder and
 polling keeps it running, and hls.js in the console authenticates with the
 session cookie anyway.
 
@@ -190,7 +192,12 @@ a `403` inside unattended automation. Revoke and re-mint to narrow one.
 
 `POST /auth/login` sets an `HttpOnly`, `SameSite=Lax` session cookie and a
 readable `polyemesis_csrf` cookie. **Every state-changing request must echo that
-value in the `X-CSRF-Token` header.**
+value in the `X-CSRF-Token` header.** The value is derived from the session
+(an HMAC of it under the server key), so it only works with the session cookie
+it was issued alongside; the server checks the header against the session, not
+against the `polyemesis_csrf` cookie, so a cookie planted by anything else that
+can write cookies for the host authorises nothing. A browser holding a stale
+value is sent the right one on its next authenticated request.
 
 ```sh
 curl -c jar -X POST https://host:8080/api/v1/auth/login \
@@ -393,13 +400,20 @@ Anything else answers with a `status` of `degraded` or `unhealthy` and a
 
 The three checks are always all three, in that order. `database` is a real
 query, not a nil check — the failures it catches are a file that has gone away
-and a volume unmounted under a running process. `engine` fails when sources are
+and a volume unmounted under a running process. It also reports what the
+server's own statements have been told about the storage: writes failing
+because the volume is full or read-only (cleared by the next write that
+succeeds), and a damaged database file (which stays reported until the server
+restarts, because nothing the process does repairs it). Those two answer
+`degraded` with a `200`, not `503`: a restart cannot add disk or mend a page,
+and opening the database on boot writes, so a restart over a full disk would
+take the programme off the air and not bring it back. `engine` fails when sources are
 configured and not one engine is running, which is "nothing is being
 published"; no sources at all is a fresh install and passes. `recordingDisk`
 fails when the free-space floor has halted recording.
 
-**Only `database` and `engine` are fatal, and only those two make the status
-`503`.** A `recordingDisk` failure answers `200` with `"status": "degraded"`,
+**Only `database` (when it cannot be read at all) and `engine` are fatal, and
+only those make the status `503`.** A `recordingDisk` failure answers `200` with `"status": "degraded"`,
 deliberately: a box that has stopped writing recordings is still broadcasting,
 and taking it out of a load balancer over it would end the stream to fix the
 files. The consequence for whoever wires up the monitoring is that **a full
@@ -485,6 +499,29 @@ used to have three samplers of the host disagreeing by a tick.
 `PUT /settings` takes the whole blob. Read it, change what you want, write it
 back — a partial object will clear what it omits.
 
+**A save from a stale read is refused, not merged.** `GET /settings` carries a
+`version`. Send it back unchanged in the `PUT` body, and if anyone has saved
+the document since — another operator, the scheduler flipping the playlist,
+`PUT /jobs/policy` — the save is refused with `409` and
+`{"code": "settings_conflict"}`, and **nothing in it is stored**. Read again,
+reapply your change, and save. The `PUT` response carries the new `version`, so
+you can save twice in a row without reading in between. So does an error that
+comes AFTER the document was stored -- the `503 no_source` for an ingest change
+on an install with no source (the rest of the document is saved), a failed
+ingest write-through, a failed reconcile: its body carries the `version` now
+stored, and your next save should send that one, or it will conflict with
+your own change. A body with no
+`version` is not checked, which keeps older scripts working and also means they
+still overwrite whatever was saved since they read. The console always sends
+it.
+
+**`ingest` is the default source's ingest, not a copy of it.** Once a source
+exists, `GET /settings` serves that source's `ingest` block and `PUT /settings`
+merges over it and writes it back to the source, so a document read and written
+back unchanged changes nothing — including after the Sources page has changed
+the mode. With no source, the blob's own block is served, and a change to it is
+refused because there is nothing for it to configure.
+
 `GET /tls/acme-preflight?hostname=…` reports what Let's Encrypt would need from
 this host — a name it can issue for, a DNS record, port 80, a contact address —
 and, in `acme` mode, what it said the last time it refused. Each check is
@@ -557,10 +594,24 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 List rows arrive wrapped as `{"destination": ..., "routing": ...}` so the UI
 gets the compiled routing without a second round trip.
 
-`start-all` and `stop-all` act on **every** destination — there is no id list
-and no selection. Each row is driven through the same code as
+`start-all` and `stop-all` take no id list. **With `?source=<id>` they act on
+that programme's destinations only; without it, on every destination on the
+install** — on a multi-source install too, so name the programme unless you
+mean all of them. A `source` that is not a number or not a source on this
+install is `400 source_required`, and an install with no source at all answers
+`503 no_source`. Each row is driven through the same code as
 `/destinations/{id}/start` and `/stop`, so the bulk control is exactly N presses
 of the per-destination button and can never be more destructive than it.
+
+**`stop-all` needs a body of `{"confirm": true}`**, and answers `400` without
+it — no body, an empty object, or `"confirm": false`. It ends live broadcasts
+(below), and a dialog in the console is a confirmation a script or a replayed
+request never sees. `start-all` takes no body.
+
+```sh
+curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"confirm": true}' "$POLYEMESIS_URL/api/v1/destinations/stop-all?source=2"
+```
 
 The answer is a list, never a boolean:
 
@@ -680,7 +731,20 @@ against `platforms.go` too. The console asks; it does not derive.
 
 `POST /routing/compile` returns the filter graph a profile would produce,
 without saving anything. Useful for understanding what a selection actually
-does.
+does. The body wraps the profile — the same object a destination's `routing`
+holds — under `"profile"`, and the answer echoes it back with defaults applied
+beside the compiled result:
+
+```json
+{"profile": {"mode": "simple", "tracks": [{"track": 0, "enabled": true, "gain": 1.0}]}}
+```
+
+```json
+{"routing": {...}, "profile": {...}}
+```
+
+A profile that does not compile is `400` with `error` and the `profile` as
+understood, so a caller can see which field it was read as.
 
 It and `POST /routing/presets/{preset}` are programme-scoped and need
 `?source=<id>` on a multi-source install — see [Conventions](#conventions).
@@ -800,6 +864,11 @@ to drift.
 
 `GET /automod/stats` reports model spend and health — calls this hour against
 the ceiling, failures, and the last error.
+
+A `PUT /settings` that arms a cell whose checker is not configured (no enabled
+rule, or the model off or without an endpoint) is a 400 that names the cell.
+`summary` counts only the cells that can fire. See
+[AUTOMOD.md](AUTOMOD.md#through-the-api).
 
 ### Recordings, library, clipper
 

@@ -536,31 +536,49 @@ case "${1:-}" in
       ls)      echo "DRIVER  VOLUME NAME"; echo "local   some-other-volume"; exit 0 ;;
     esac ;;
   run)
-    # TWO shapes now. The second one is the backup check added for #643:
-    #   docker run --rm -v DIR:/backup:ro IMAGE -verify-backup /backup
-    # It is matched first because both carry a /backup path and the tar branch
-    # below would otherwise swallow it and archive nothing.
+    # THE BACKUP CHECK (#643). The stub models the one property of the real
+    # image that decided whether it worked: a database handed in on a
+    # READ-ONLY bind mount does not open. SQLite has to create the -shm beside
+    # a WAL database, the mount forbids it, and the real server answers
+    # `unable to open database file (14)`. This stub used to accept that mount,
+    # and so the suite was green over a verify step that refused every real
+    # docker upgrade -- measured on a real install with the 0.10.0 image.
+    # Any host bind mount is refused here, not just :ro: its owner and mode
+    # are the host's, which the image's uid 10001 does not share.
     for a in "$@"; do
-      if [ "$a" = "-verify-backup" ]; then
-        # The unpacked copy is the host directory bound at /backup:ro.
-        mount=""
-        for m in "$@"; do case "$m" in *:/backup:ro) mount="${m%%:/backup:ro}" ;; esac; done
-        [ -n "$mount" ] || { echo "stub docker: no :/backup:ro mount in: $*" >&2; exit 1; }
-        [ -f "$mount/polyemesis.db" ] || { echo "stub: no polyemesis.db in the archive" >&2; exit 1; }
-        [ -f "$mount/secret.key" ]    || { echo "stub: no secret.key in the archive" >&2; exit 1; }
-        case "$(head -c 15 "$mount/polyemesis.db" 2>/dev/null)" in
+      if [ "$a" = "-verify-backup" ] || [ "$a" = "--entrypoint" ]; then
+        for m in "$@"; do
+          case "$m" in
+            *:/backup:ro|*:/backup)
+              echo "polyemesis: backup at /backup is not usable: backup's polyemesis.db could not be read: unable to open database file (14)" >&2
+              exit 1 ;;
+          esac
+        done
+        # The supported shape: the archive on stdin, unpacked by the container.
+        vdir="$(mktemp -d)"
+        tar xzf - -C "$vdir" || { echo "stub: the archive on stdin will not unpack" >&2; exit 1; }
+        [ -f "$vdir/polyemesis.db" ] || { echo "stub: no polyemesis.db in the archive" >&2; exit 1; }
+        [ -f "$vdir/secret.key" ]    || { echo "stub: no secret.key in the archive" >&2; exit 1; }
+        case "$(head -c 15 "$vdir/polyemesis.db" 2>/dev/null)" in
           "SQLite format 3") ;;
           *) echo "stub: the archived polyemesis.db is not a SQLite database" >&2; exit 1 ;;
         esac
+        rm -rf "$vdir"
         echo "backup opens, passes integrity_check and holds this server's schema"
         exit 0
       fi
     done
-    # ... -v polyemesis-data:/data -v DIR:/backup alpine tar czf /backup/NAME -C /data .
+    # The archive: `alpine tar czf - -C /data .` to stdout, which the script
+    # redirects into the file it created. The older shape wrote
+    # /backup/NAME through a bind mount; still understood, so a revert of the
+    # script is caught by the assertions below rather than by this stub.
     archive=""
     for a in "$@"; do case "$a" in /backup/*) archive="${a#/backup/}" ;; esac; done
-    [ -n "$archive" ] || { echo "stub docker: no /backup path in: $*" >&2; exit 1; }
-    tar czf "$STUB_BACKUP_DIR/$archive" -C "$STUB_VOLUME" . || exit 1
+    if [ -n "$archive" ]; then
+      tar czf "$STUB_BACKUP_DIR/$archive" -C "$STUB_VOLUME" . || exit 1
+    else
+      tar czf - -C "$STUB_VOLUME" . || exit 1
+    fi
     exit 0 ;;
 esac
 echo "stub docker: unexpected invocation: $*" >&2
@@ -580,8 +598,11 @@ gen_docker_update() { # gen_docker_update <install_dir> [compose_cmd]
 
 run_docker_update() { # run_docker_update <install_dir> <volume_dir> [args...]
   local dir="$1" vol="$2"; shift 2
-  STUB_VOLUME="$vol" STUB_BACKUP_DIR="$dir" PATH="$stub:$PATH" \
-    bash "$dir/update.sh" "$@" 2>&1
+  # umask 022, the common default, so an archive mode that only came out right
+  # because the suite's own umask was strict cannot pass.
+  ( umask 022
+    STUB_VOLUME="$vol" STUB_BACKUP_DIR="$dir" PATH="$stub:$PATH" \
+      bash "$dir/update.sh" "$@" 2>&1 )
 }
 
 # A compose stub that can answer `top` two ways, so the on-air guard has
@@ -631,6 +652,17 @@ case "$out" in
   *disabled*) ok "and it says what that costs: every destination back disabled" ;;
   *) bad "the docker secret.key refusal no longer explains the consequence" ;;
 esac
+# That refusal came AFTER `compose stop`. It used to exit there under set -e,
+# leaving a broadcast host off the air with one line of explanation at best.
+case "$out" in
+  *"[stub compose] start"*) ok "and it starts the container it stopped, rather than leaving the host off the air" ;;
+  *) bad "the refusal left the container stopped: update.sh never ran \`compose start\`" ;;
+esac
+if [ -z "$(find "$docker_dir" -maxdepth 1 -name 'backup-*.tar.gz')" ]; then
+  ok "and the unverified archive it wrote is removed, not left holding the disk"
+else
+  bad "a refused run left its unverified archive behind: $(ls "$docker_dir"/backup-*.tar.gz)"
+fi
 
 rm -f "$docker_dir"/backup-*.tar.gz
 
@@ -648,6 +680,15 @@ case "$out" in
   *"[stub compose] pull"*) ok "and only then does it reach the pull" ;;
   *) bad "the happy path never reached \`compose pull\`" ;;
 esac
+# The archive holds secret.key and tls/ca.key. Written by tar inside the
+# container it took the container's umask -- 0644, readable by every local
+# account. Run under a permissive umask on purpose: the mode must not depend on
+# the operator's.
+archive="$(find "$docker_dir" -maxdepth 1 -name 'backup-*.tar.gz' | head -1)"
+mode="$(ls -l "$archive" 2>/dev/null | cut -c1-10)"
+[ "$mode" = "-rw-------" ] \
+  && ok "the backup archive is 0600: it holds secret.key, so only its owner may read it" \
+  || bad "the backup archive is ${mode:-missing}, so any local account can read secret.key out of it"
 
 step "9. A second docker update in the same minute does not overwrite the backup"
 # Same stamp, same dest -- tar czf would otherwise TRUNCATE the archive from
@@ -1282,6 +1323,388 @@ for opt in 'max-size' 'max-file'; do
     && ok "and it bounds $opt" \
     || bad "the logging section does not set $opt, so it still has no ceiling"
 done
+
+step "20. A re-run does not read the install's own ports as taken"
+#
+# Re-running install.sh over a working install is the documented way to change
+# TLS or a port, and every port it asked about was already held -- by the very
+# service it was about to restart. warn_if_taken saw a listener, called it a
+# collision, and under --yes accepted its own offer: the web UI moved 8080 ->
+# 8081 and the summary advertised an SRT port nothing listened on. Measured on a
+# hand install adopted with `install.sh --mode binary --yes`.
+#
+# `ss` and `docker` are stubbed with the shapes the real tools print, so what is
+# under test is the installer's reading of them. The real `ss -p` output was
+# checked against a process named polyemesis in an ubuntu container.
+ports_stub="$work/ports-bin"; mkdir -p "$ports_stub"
+cat > "$ports_stub/ss" <<'SSSTUB'
+#!/usr/bin/env bash
+# Answers from fixture files. Without -p, ss prints no Process column, so the
+# users:(...) tail is stripped exactly as the real tool would omit it.
+flags="${1:-}"
+case "$flags" in *u*) f="${STUB_SS_UDP:-/dev/null}" ;; *) f="${STUB_SS_TCP:-/dev/null}" ;; esac
+case "$flags" in *p*) cat "$f" ;; *) sed 's/ *users:.*$//' "$f" ;; esac
+SSSTUB
+cat > "$ports_stub/docker" <<'DOCKERSTUB'
+#!/usr/bin/env bash
+# Only `docker port polyemesis`, which is how the installer asks whether a
+# published port is its own container's.
+if [ "${1:-}" = port ] && [ "${2:-}" = polyemesis ]; then
+  [ -n "${STUB_DOCKER_PORTS:-}" ] || { echo "Error: No such container: polyemesis" >&2; exit 1; }
+  printf '%s\n' "$STUB_DOCKER_PORTS"
+  exit 0
+fi
+exit 1
+DOCKERSTUB
+chmod +x "$ports_stub/ss" "$ports_stub/docker"
+
+ss_hdr='State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process'
+printf '%s\n%s\n%s\n' "$ss_hdr" \
+  'LISTEN 0      4096   *:8080            *:*    users:(("polyemesis",pid=4242,fd=9))' \
+  'LISTEN 0      4096   *:1935            *:*    users:(("polyemesis",pid=4242,fd=11))' > "$work/ss-tcp-ours"
+printf '%s\n%s\n' "$ss_hdr" \
+  'UNCONN 0      0      *:6000            *:*    users:(("polyemesis",pid=4242,fd=10))' > "$work/ss-udp-ours"
+printf '%s\n%s\n' "$ss_hdr" \
+  'LISTEN 0      511    0.0.0.0:8080      0.0.0.0:*    users:(("nginx",pid=77,fd=6))' > "$work/ss-tcp-nginx"
+printf '%s\n%s\n' "$ss_hdr" \
+  'LISTEN 0      4096   0.0.0.0:8080      0.0.0.0:*    users:(("docker-proxy",pid=90,fd=4))' > "$work/ss-tcp-proxy"
+# A listener on some OTHER port whose address happens to end in .8080-ish
+# digits must not count: 10.0.0.80 is an address, not port 80.
+printf '%s\n%s\n' "$ss_hdr" \
+  'LISTEN 0      4096   10.0.0.80:5000    0.0.0.0:*    users:(("sshd",pid=5,fd=3))' > "$work/ss-tcp-addr80"
+
+port_after() { # port_after <mode> <port> <proto> -> the port warn_if_taken leaves behind
+  # Read by install.sh's warn_if_taken, which arrives through the eval.
+  # shellcheck disable=SC2034
+  ( load_install_defs || exit 1
+    MODE="$1"
+    ASSUME_YES=true
+    p="$2"
+    warn_if_taken "$2" "$3" "probe" p >/dev/null 2>&1
+    printf '%s' "$p" )
+}
+
+got="$(STUB_SS_TCP="$work/ss-tcp-ours" PATH="$ports_stub:$PATH" port_after binary 8080 tcp)"
+[ "$got" = 8080 ] \
+  && ok "binary re-run: tcp/8080 held by the running polyemesis stays 8080" \
+  || bad "binary re-run: the web UI was moved to $got because polyemesis itself holds 8080"
+got="$(STUB_SS_UDP="$work/ss-udp-ours" PATH="$ports_stub:$PATH" port_after binary 6000 udp)"
+[ "$got" = 6000 ] \
+  && ok "binary re-run: udp/6000 held by the running polyemesis stays 6000" \
+  || bad "binary re-run: SRT was moved to $got because polyemesis itself holds 6000"
+got="$(STUB_SS_TCP="$work/ss-tcp-proxy" STUB_DOCKER_PORTS=$'8080/tcp -> 0.0.0.0:8080\n6000/udp -> 0.0.0.0:6000' \
+  PATH="$ports_stub:$PATH" port_after docker 8080 tcp)"
+[ "$got" = 8080 ] \
+  && ok "docker re-run: tcp/8080 published by the polyemesis container stays 8080" \
+  || bad "docker re-run: the web UI was moved to $got because the polyemesis container publishes 8080"
+
+# The guard still has to guard. Somebody else's listener is a real collision.
+got="$(STUB_SS_TCP="$work/ss-tcp-nginx" PATH="$ports_stub:$PATH" port_after binary 8080 tcp)"
+[ "$got" = 8081 ] \
+  && ok "a port held by another program (nginx) is still reported and moved" \
+  || bad "a port held by nginx was left at $got -- the collision check stopped working"
+got="$(STUB_SS_TCP="$work/ss-tcp-proxy" STUB_DOCKER_PORTS='' PATH="$ports_stub:$PATH" port_after docker 8080 tcp)"
+[ "$got" = 8081 ] \
+  && ok "a docker-proxy that is NOT the polyemesis container is still a collision" \
+  || bad "any docker-proxy on the port was taken for ours (left at $got)"
+got="$(STUB_SS_TCP="$work/ss-tcp-ours" PATH="$ports_stub:$PATH" port_after docker 8080 tcp)"
+[ "$got" = 8081 ] \
+  && ok "in docker mode a bare polyemesis PROCESS still collides -- the container cannot bind over it" \
+  || bad "docker mode treated a host polyemesis process as its own container (left at $got)"
+got="$(STUB_SS_TCP="$work/ss-tcp-addr80" PATH="$ports_stub:$PATH" port_after binary 80 tcp)"
+[ "$got" = 80 ] \
+  && ok "an address ending in .80 is not read as port 80" \
+  || bad "10.0.0.80:5000 was read as a listener on port 80 (moved to $got)"
+
+step "21. SRT and RTMP ports only go where the server will actually listen"
+#
+# The server's SRT and RTMP listeners are runtime settings (Settings ->
+# Listeners, stored in the database, 6000 and 1935 on a new install). Nothing
+# install.sh writes reaches them. In binary mode --srt-port/--rtmp-port changed
+# only the firewall rule and the printed address; in docker mode they published
+# host N to container N, where nothing listens either.
+out="$(bash "$INSTALL" --mode binary --srt-port 6001 --check 2>&1)"
+case "$out" in
+  *"--srt-port"*"Listeners"*) ok "binary mode refuses --srt-port 6001 and says where the port is really set" ;;
+  *) bad "binary mode accepted --srt-port 6001, which the server never reads"
+     printf '        got: %s\n' "$(printf '%s' "$out" | head -3 | tr '\n' ' ')" ;;
+esac
+out="$(bash "$INSTALL" --mode binary --rtmp-port 1936 --check 2>&1)"
+case "$out" in
+  *"--rtmp-port"*"Listeners"*) ok "binary mode refuses --rtmp-port 1936 the same way" ;;
+  *) bad "binary mode accepted --rtmp-port 1936, which the server never reads" ;;
+esac
+out="$(bash "$INSTALL" --mode binary --srt-port 6000 --rtmp-port 0 --check 2>&1)"
+case "$out" in
+  *"Listeners"*) bad "binary mode refused the defaults (or --rtmp-port 0), which ARE what the server binds" ;;
+  *) ok "binary mode still accepts the default ports and --rtmp-port 0" ;;
+esac
+out="$(bash "$INSTALL" --mode docker --srt-port 6001 --check 2>&1)"
+case "$out" in
+  *"Listeners"*) bad "docker mode refused --srt-port, which it can honour by mapping the host port" ;;
+  *) ok "docker mode accepts --srt-port 6001" ;;
+esac
+
+# And docker mode honours it by publishing the chosen HOST port onto the port
+# the server binds INSIDE the container. Generated for real, with compose and
+# docker stubbed so nothing is pulled or started.
+compose_dir="$work/compose-ports"
+# Read by install.sh's install_docker_mode, which arrives through the eval.
+# shellcheck disable=SC2034
+( load_install_defs || exit 1
+  INSTALL_DIR="$compose_dir"; MODE=docker; TLS_MODE=off
+  SRT_PORT=6001; RTMP_PORT=1936; ENABLE_RTMP=yes; COMPOSE_CMD=true
+  PATH="$ports_stub:$PATH" install_docker_mode >/dev/null 2>&1 )
+if grep -q '"6001:6000/udp"' "$compose_dir/docker-compose.yml" 2>/dev/null; then
+  ok "docker: --srt-port 6001 publishes host udp/6001 onto the server's udp/6000"
+else
+  bad "docker: --srt-port 6001 is not mapped onto the server's udp/6000: $(grep -h '/udp' "$compose_dir/docker-compose.yml" 2>/dev/null | tr -d ' ')"
+fi
+if grep -q '"1936:1935"' "$compose_dir/docker-compose.yml" 2>/dev/null; then
+  ok "docker: --rtmp-port 1936 publishes host tcp/1936 onto the server's tcp/1935"
+else
+  bad "docker: --rtmp-port 1936 is not mapped onto the server's tcp/1935"
+fi
+
+# The two numbers install.sh maps onto are the server's defaults. Pinned against
+# the Go source so the day the default moves, this fails instead of the ingest.
+srv_srt="$(sed -n 's/^SERVER_SRT_PORT=\([0-9]*\).*/\1/p' "$INSTALL")"
+srv_rtmp="$(sed -n 's/^SERVER_RTMP_PORT=\([0-9]*\).*/\1/p' "$INSTALL")"
+if grep -q "ListenerSettings{SRTPort: ${srv_srt:-x}, RTMPPort: ${srv_rtmp:-x}}" "$SCRIPTS/../internal/db/settings.go"; then
+  ok "install.sh's SERVER_SRT_PORT/SERVER_RTMP_PORT ($srv_srt/$srv_rtmp) match the server's listener defaults"
+else
+  bad "install.sh's server listener ports (${srv_srt:-unset}/${srv_rtmp:-unset}) do not match internal/db/settings.go's defaults"
+fi
+
+step "22. The binary update.sh restarts what it stopped, and its way back keeps the recordings"
+#
+# Every refusal after `systemctl stop` used to exit under set -e with the
+# service down. And the rollback it printed was
+#   sudo rm -rf $DATA_DIR && sudo cp -a $dest $DATA_DIR
+# which deleted every recording made since the upgrade and copied the root-owned
+# polyemesis.previous into the live directory.
+#
+# systemctl and sudo are stubbed: systemctl records what it was asked to do,
+# and sudo runs its command, so the suite drives the script's reaction and not
+# systemd.
+sysd_stub="$work/sysd-bin"; mkdir -p "$sysd_stub"
+cat > "$sysd_stub/systemctl" <<'SYSTEMCTLSTUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  is-active) [ "${STUB_ACTIVE:-false}" = true ]; exit $? ;;
+  start) echo start >> "$STUB_SYSTEMCTL_LOG"; [ "${STUB_START_FAILS:-false}" != true ]; exit $? ;;
+  *) echo "$1" >> "$STUB_SYSTEMCTL_LOG"; exit 0 ;;
+esac
+SYSTEMCTLSTUB
+printf '#!/usr/bin/env bash\nexec "$@"\n' > "$sysd_stub/sudo"
+chmod +x "$sysd_stub/systemctl" "$sysd_stub/sudo"
+
+run_sysd() { # run_sysd <log> <cmd...> -- with the service reported active
+  local log="$1"; shift
+  : > "$log"
+  STUB_ACTIVE=true STUB_SYSTEMCTL_LOG="$log" PATH="$sysd_stub:$PATH" "$@" 2>&1
+}
+
+# (a) A backup that will not open, refused after the stop.
+root="$work/sysd-refused"; mkdir -p "$root/data"
+printf 'key\n' > "$root/data/secret.key"
+printf 'this is not a database\n' > "$root/data/polyemesis.db"
+gen_binary_update "$root/opt" "$root/data"
+out="$(run_sysd "$root/log" bash "$root/opt/update.sh")"; st=$?
+log="$(tr '\n' ' ' < "$root/log")"
+if [ "$st" -ne 0 ] && [ "$log" = "stop start " ]; then
+  ok "a refusal after the stop starts the service again (systemctl: $log)"
+else
+  bad "a refusal after the stop left the service down (exit $st, systemctl: ${log:-nothing})"
+fi
+case "$out" in
+  *"running again"*) ok "and it says the service is running again and nothing was upgraded" ;;
+  *) bad "the refusal does not tell the operator what state the service is in" ;;
+esac
+[ "$(backups_under "$root")" = 0 ] \
+  && ok "and the unverified copy it took is removed" \
+  || bad "a refused run left its unverified copy holding the disk"
+
+# (b) The same, when the start fails too: the one thing it must do is say so.
+root="$work/sysd-nostart"; mkdir -p "$root/data"
+printf 'key\n' > "$root/data/secret.key"
+printf 'this is not a database\n' > "$root/data/polyemesis.db"
+gen_binary_update "$root/opt" "$root/data"
+out="$(STUB_START_FAILS=true run_sysd "$root/log" bash "$root/opt/update.sh")"
+case "$out" in
+  *"IS STOPPED"*"systemctl start"*) ok "if the start fails too, it says STOPPED and prints the command" ;;
+  *) bad "a failed restart is not announced: $(printf '%s' "$out" | tail -3 | tr '\n' ' ')" ;;
+esac
+
+# (c) The happy path. It leaves the service stopped ON PURPOSE -- the operator
+#     replaces the binary next -- and points at rollback.sh, not at rm -rf.
+root="$work/sysd-happy"; data="$root/data"; mkdir -p "$data/recordings" "$data/tls"
+printf 'SQLite format 3\000old' > "$data/polyemesis.db"
+printf 'key\n'    > "$data/secret.key"
+printf 'ca\n'     > "$data/tls/ca.key"
+printf 'before\n' > "$data/recordings/before.mp4"
+touch -t 202001010000 "$data/recordings/before.mp4"
+gen_binary_update "$root/opt" "$data"
+out="$(run_sysd "$root/log" bash "$root/opt/update.sh")"; st=$?
+log="$(tr '\n' ' ' < "$root/log")"
+[ "$st" -eq 0 ] && [ "$log" = "stop " ] \
+  && ok "a verified backup leaves the service stopped for the binary swap, as it says" \
+  || bad "the happy path ended with exit $st and systemctl: ${log:-nothing}"
+case "$out" in
+  *"rm -rf"*) bad "update.sh still prints an rm -rf of the data directory as the way back" ;;
+  *"$root/opt/rollback.sh "*) ok "the printed way back is rollback.sh, not an rm -rf of the data directory" ;;
+  *) bad "update.sh no longer prints a way back at all" ;;
+esac
+dest="$(printf '%s\n' "$out" | sed -n 's/^backing up .* to //p' | head -1)"
+
+# (d) The upgrade "happens": the database changes, a WAL appears, a recording is
+#     made, the binary is replaced. Then roll back.
+if [ -x "$root/opt/rollback.sh" ] && [ -n "$dest" ]; then
+  printf 'SQLite format 3\000new' > "$data/polyemesis.db"
+  printf 'newer log\n' > "$data/polyemesis.db-wal"
+  printf 'after\n' > "$data/recordings/after.mp4"
+  printf 'new binary\n' > "$root/opt/polyemesis"
+  out="$(run_sysd "$root/log" bash "$root/opt/rollback.sh" "$dest")"; st=$?
+  [ "$st" -eq 0 ] && ok "rollback.sh runs against the backup update.sh took" \
+    || bad "rollback.sh failed (exit $st): $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+  [ -f "$data/recordings/after.mp4" ] \
+    && ok "a recording made since the upgrade survives the rollback" \
+    || bad "the rollback deleted a recording made since the upgrade"
+  [ -f "$data/recordings/before.mp4" ] \
+    && ok "and the older recording is still there" \
+    || bad "the rollback lost a recording from before the upgrade"
+  cmp -s "$data/polyemesis.db" "$dest/polyemesis.db" \
+    && ok "the database is the backup's" \
+    || bad "the database was not restored from the backup"
+  [ ! -e "$data/polyemesis.db-wal" ] \
+    && ok "and the newer database's -wal is gone, so it cannot be replayed into the older file" \
+    || bad "the newer -wal was left beside the restored database"
+  [ ! -e "$data/polyemesis.previous" ] \
+    && ok "polyemesis.previous is not copied into the live data directory" \
+    || bad "polyemesis.previous landed in the live data directory, and every later backup carries it"
+  grep -q 'stub polyemesis' "$root/opt/polyemesis" 2>/dev/null \
+    && ok "the previous binary is back at BIN_PATH" \
+    || bad "BIN_PATH still holds the upgraded binary"
+  case "$(tr '\n' ' ' < "$root/log")" in
+    *start*) ok "and the service is started again" ;;
+    *) bad "rollback.sh did not start the service" ;;
+  esac
+  case "$out" in
+    *"1 file(s) written since the backup"*) ok "it says how many recordings it kept that the old database does not list" ;;
+    *) bad "rollback.sh does not report the media it kept: $(printf '%s' "$out" | tr '\n' ' ')" ;;
+  esac
+  out="$(run_sysd "$root/log" bash "$root/opt/rollback.sh" "$data")"; st=$?
+  case "$st:$out" in
+    0:*) bad "rollback.sh restored from the LIVE data directory" ;;
+    *"not a backup"*) ok "rollback.sh refuses a directory that is not one of update.sh's backups" ;;
+    *) bad "rollback.sh refused the live directory without saying why" ;;
+  esac
+else
+  bad "no rollback.sh was written beside update.sh (or no backup path was reported)"
+fi
+
+step "23. A docker re-run keeps the listener the operator moved, and says where it lives"
+#
+# Section 21 maps host N onto the server's DEFAULT 6000/1935. But an install
+# made before that fix published "7000:7000/udp", and the way an operator made
+# that work was to move the listener to 7000 under Settings -> Listeners.
+# Re-running install.sh with the same --srt-port then rewrote the mapping to
+# 7000:6000 -- onto a port the server had stopped listening on -- and the
+# ingest went dark. The container side of an existing file is the only record
+# this script can read of where the listener is now, so a re-run keeps it.
+rerun_compose() { # rerun_compose <dir> <srt> <rtmp> <existing compose body>
+  mkdir -p "$1"
+  printf '%s\n' "$4" > "$1/docker-compose.yml"
+  # Read by install.sh's install_docker_mode, which arrives through the eval.
+  # shellcheck disable=SC2034
+  ( load_install_defs || exit 1
+    INSTALL_DIR="$1"; MODE=docker; TLS_MODE=off
+    SRT_PORT="$2"; RTMP_PORT="$3"; ENABLE_RTMP=yes; COMPOSE_CMD=true
+    PATH="$ports_stub:$PATH" install_docker_mode >/dev/null 2>&1 )
+}
+old_compose='services:
+  polyemesis:
+    image: ghcr.io/rainmanjam/polyemesis:latest
+    ports:
+      - "8080:8080"
+      - "7000:7000/udp"
+      - "1936:1936"
+      - "80:80"'
+rerun_compose "$work/rerun-old" 7000 1936 "$old_compose"
+if grep -q '"7000:7000/udp"' "$work/rerun-old/docker-compose.yml" 2>/dev/null; then
+  ok "a re-run keeps an existing file's SRT container side (7000:7000/udp stays)"
+else
+  bad "a re-run rewrote the SRT mapping away from the listener the operator moved: $(grep -h '/udp' "$work/rerun-old/docker-compose.yml" 2>/dev/null | tr -d ' ')"
+fi
+if grep -q '"1936:1936"' "$work/rerun-old/docker-compose.yml" 2>/dev/null; then
+  ok "and its RTMP container side (1936:1936 stays)"
+else
+  bad "a re-run rewrote the RTMP mapping: $(grep -hE '"[0-9]+:[0-9]+"' "$work/rerun-old/docker-compose.yml" 2>/dev/null | tr -d ' ' | tr '\n' ' ')"
+fi
+# A changed HOST port still lands on the kept container side.
+new_compose='services:
+  polyemesis:
+    ports:
+      - "8080:8080"
+      - "6001:6000/udp"
+      - "1936:1935"'
+rerun_compose "$work/rerun-new" 6002 1937 "$new_compose"
+if grep -q '"6002:6000/udp"' "$work/rerun-new/docker-compose.yml" 2>/dev/null \
+   && grep -q '"1937:1935"' "$work/rerun-new/docker-compose.yml" 2>/dev/null; then
+  ok "a new host port on a re-run lands on the container side the file already had"
+else
+  bad "a re-run with new host ports did not keep the container side: $(grep -hE '"[0-9]+:[0-9]+(/udp)?"' "$work/rerun-new/docker-compose.yml" 2>/dev/null | tr -d ' ' | tr '\n' ' ')"
+fi
+# A file this script cannot read a mapping from falls back to the defaults.
+rerun_compose "$work/rerun-junk" 6001 1936 'services: {}'
+if grep -q '"6001:6000/udp"' "$work/rerun-junk/docker-compose.yml" 2>/dev/null; then
+  ok "an existing file with no SRT mapping falls back to the server's default 6000"
+else
+  bad "an unreadable existing file did not fall back to the default container side"
+fi
+
+# And the summary says where the listener lives in docker mode too, and that
+# moving it means editing the container side of the mapping. It used to print
+# that caveat only in binary mode.
+# Read by install.sh's print_summary, which arrives through the eval.
+# shellcheck disable=SC2034
+out="$( ( load_install_defs || exit 1
+  MODE=docker; TLS_MODE=off; INSTALL_DIR=/opt/polyemesis; COMPOSE_CMD="docker compose"
+  print_summary ) 2>&1 )"
+case "$out" in
+  *"Settings -> Listeners"*"docker-compose.yml"*) ok "the docker summary says a moved listener needs the compose mapping's container side changed" ;;
+  *) bad "the docker summary does not say that Settings -> Listeners and docker-compose.yml must agree" ;;
+esac
+
+step "24. A docker update that fails after the pull does not claim nothing was upgraded"
+#
+# on_exit's "running again on the image it had. Nothing was upgraded." is true
+# up to the pull. After it, `up -d` may already have recreated the container on
+# the new image before failing, and `compose start` then starts THAT -- which
+# migrates the database forward. Saying the opposite is the one message an
+# operator must not be handed at that moment.
+cat > "$stub/compose-upfails" <<'COMPOSESTUB'
+#!/usr/bin/env bash
+set -u
+[ "${1:-}" = top ] && exit 0
+echo "[stub compose] $*"
+[ "${1:-}" = up ] && { echo "stub compose: up failed" >&2; exit 1; }
+exit 0
+COMPOSESTUB
+chmod +x "$stub/compose-upfails"
+upfail_dir="$work/docker-upfails"; mkdir -p "$upfail_dir"
+gen_docker_update "$upfail_dir" "$stub/compose-upfails"
+out="$(run_docker_update "$upfail_dir" "$work/vol-ok")"; st=$?
+[ "$st" -ne 0 ] && ok "a failed \`up -d\` fails the update" || bad "a failed \`up -d\` exited 0"
+case "$out" in
+  *"Nothing was upgraded"*) bad "a failure AFTER the pull still says nothing was upgraded" ;;
+  *"after pulling"*) ok "it says the failure came after the pull, not that nothing changed" ;;
+  *) bad "a failure after the pull says nothing about where it stopped" ;;
+esac
+case "$out" in
+  *"backup-"*".tar.gz"*) ok "and it names the verified archive as the way back" ;;
+  *) bad "a failure after the pull does not name the verified archive" ;;
+esac
 
 # ------------------------------------------------------------- vacuity guard
 #

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,12 +43,18 @@ type Manager struct {
 	// freeSpace is diskFree in production; tests substitute a volume they can
 	// fill on demand, which no real temp directory lets them do.
 	freeSpace func(string) (uint64, uint64, error)
-	// sourceID is the programme these segments came from, stamped onto every
-	// row this manager indexes. Nil on a manager with no programme.
-	sourceID *int64
+	// recorderRunning answers whether any recorder process is alive right now.
+	// Nil means "not wired up", and Delete then falls back to recording.enabled.
+	// See WithRecorderProbe.
+	recorderRunning func() bool
 
 	storageMu sync.Mutex
 	storage   StorageState
+
+	// unprobeable remembers each segment ffprobe could not measure, by name,
+	// with the size it had when it failed. See Scan.
+	unprobeableMu sync.Mutex
+	unprobeable   map[string]int64
 }
 
 // StorageState is the free-space guard's verdict on whether the volume can
@@ -68,24 +75,31 @@ func WithFFprobe(bin string) Option {
 
 // WithStorageGuard registers the callback fired when the free-space floor
 // halts recording, and again when recovered space lets it resume.
-// WithSourceID names the programme whose segments this manager indexes.
-//
-// Without it every recording row was written with a NULL source_id, and the
-// clip editor then labelled every clip with the DEFAULT programme's track
-// names -- including clips cut from somebody else's show. Unset stays nil,
-// which is the honest answer for a manager that is not attached to a
-// programme at all (see engine.New's storeless construction in tests).
-func WithSourceID(id int64) Option {
-	return func(m *Manager) {
-		if id > 0 {
-			m.sourceID = &id
-		}
-	}
-}
-
 func WithStorageGuard(fn func(StorageState)) Option {
 	return func(m *Manager) { m.onStorage = fn }
 }
+
+// WithRecorderProbe supplies the question Delete's live-segment guard really
+// means to ask: is a recorder process alive, anywhere on the box, that could
+// still hold one of the recorder's segments open?
+//
+// recording.enabled is not that question, and the gap is the free-space floor.
+// When the volume drops below it the engine stops the recorder
+// (reconcileRecorder, on RecordingAllowed) while recording.enabled stays true --
+// so, read off the setting, the last segment stayed undeletable for up to one
+// segment length plus two minutes, with a 409 blaming a recorder that no longer
+// existed, at exactly the moment the operator was deleting to free the disk.
+// The halt lives on each ENGINE's own manager, not on the shared one that
+// answers the API's deletes, so this manager cannot read it off itself either.
+// The owner of the recorder processes can, and this is how it says so.
+func WithRecorderProbe(fn func() bool) Option {
+	return func(m *Manager) { m.recorderRunning = fn }
+}
+
+// RecorderProbed reports whether a recorder probe is wired. Exported for the
+// engine's wiring test, for the same reason as StorageGuarded: a missing probe
+// is silent, and the only symptom is the false 409 it exists to prevent.
+func (m *Manager) RecorderProbed() bool { return m.recorderRunning != nil }
 
 // New creates a Manager.
 func New(log *slog.Logger, store *db.DB, dir string, onChange func(), opts ...Option) *Manager {
@@ -292,16 +306,35 @@ func (m *Manager) Scan() (bool, error) {
 		// Probing costs an ffprobe per file, so it happens once per segment,
 		// and never on the one the recorder is still writing: its duration
 		// would be wrong the moment it was recorded.
-		if m.ffprobe != "" && rec.Filename != live && !measured[rec.Filename] {
-			if err := m.measure(rec); err != nil {
+		if m.ffprobe != "" && rec.Filename != live && !measured[rec.Filename] &&
+			!m.knownUnprobeable(rec) {
+			switch err := m.measure(rec); {
+			case err == nil:
+				m.forgetUnprobeable(rec.Filename)
+			case errors.Is(err, errNoDuration):
+				m.noteUnprobeable(rec, err)
+			default:
+				// ffprobe timed out, could not be run, or failed in a way that
+				// says nothing settled about the bytes. Not remembered: the
+				// next scan asks again, as it always did.
 				m.log.Warn("probe recording", "file", rec.Filename, "err", err)
 			}
 		}
-		// The programme this manager belongs to, stamped at index time. It is
-		// the only moment anything knows it: the filename does not carry it and
-		// a later reader cannot work it out.
-		if rec.SourceID == nil {
-			rec.SourceID = m.sourceID
+		// The programme that RECORDED the file, read from the name its
+		// recorder gave it -- never the programme of the manager doing the
+		// scan. Every engine's manager scans this one shared directory, and
+		// while each stamped its own programme on every file it saw, the
+		// upsert's "a non-null source_id wins" let each re-label the others'
+		// recordings in turn: source 1's segment read 3, 1, 1, 3 as the scans
+		// interleaved, and clipTracks named a clip's tracks after whichever
+		// programme had scanned last. The filename is the one input every
+		// scanner sees identically.
+		//
+		// A segment an earlier release wrote names no programme. It is left
+		// nil, which the upsert treats as "no opinion": whatever attribution
+		// the row already has stands, and none is invented.
+		if id, ok := SourceFromName(rec.Filename); ok {
+			rec.SourceID = &id
 		}
 		if err := m.store.UpsertRecording(rec); err != nil {
 			m.log.Warn("index recording", "file", rec.Filename, "err", err)
@@ -309,6 +342,14 @@ func (m *Manager) Scan() (bool, error) {
 		}
 		changed = true
 	}
+
+	m.unprobeableMu.Lock()
+	for name := range m.unprobeable {
+		if !onDisk[name] {
+			delete(m.unprobeable, name)
+		}
+	}
+	m.unprobeableMu.Unlock()
 
 	for _, r := range indexed {
 		if !onDisk[r.Filename] {
@@ -321,6 +362,56 @@ func (m *Manager) Scan() (bool, error) {
 		}
 	}
 	return changed, nil
+}
+
+// errNoDuration is the one probe failure that is a fact about the file rather
+// than about this attempt: ffprobe ran to completion, exited 0, and found no
+// duration in it. Only that outcome is remembered by noteUnprobeable. A
+// timeout on a loaded host, an exec failure or a crash could go the other way
+// on the next scan, and caching one would leave a good segment at 0 ms / 0
+// tracks, with a WARN calling it unfinalised, until the process restarts.
+var errNoDuration = errors.New("ffprobe reported no duration")
+
+// knownUnprobeable reports that rec has already failed a probe, with
+// errNoDuration, at its current size.
+//
+// Row 32. A segment the recorder never finalised -- a crash, a kill -9, a
+// SIGKILL at the end of a stop's grace -- has no duration for ffprobe to find,
+// and it never will, because nothing rewrites it. The only thing Scan used to
+// remember about a file was "has a duration", so it probed that one again every
+// 30s for the life of the process and logged the same WARN each time: noise
+// that trains an operator to stop reading the log. Probing unchanged bytes
+// cannot give a different answer, so the question is asked once per size. A
+// file that changes -- remuxed by hand, or still being flushed -- is asked
+// again.
+func (m *Manager) knownUnprobeable(rec *db.Recording) bool {
+	m.unprobeableMu.Lock()
+	defer m.unprobeableMu.Unlock()
+	size, ok := m.unprobeable[rec.Filename]
+	return ok && size == rec.Bytes
+}
+
+// noteUnprobeable records a probe that found no duration (errNoDuration; Scan
+// sends nothing else here) and says so ONCE, in words that name
+// what it means -- an unfinalised file -- rather than only what ffprobe said.
+func (m *Manager) noteUnprobeable(rec *db.Recording, err error) {
+	m.unprobeableMu.Lock()
+	if m.unprobeable == nil {
+		m.unprobeable = map[string]int64{}
+	}
+	m.unprobeable[rec.Filename] = rec.Bytes
+	m.unprobeableMu.Unlock()
+	m.log.Warn("a finished recording segment could not be measured, most likely because it "+
+		"was never finalised (the recorder was killed before writing its index). It is "+
+		"indexed with no duration and will not be probed again unless the file changes; "+
+		"remuxing it with ffmpeg -i <file> -c copy <new>.mkv usually recovers the footage",
+		"file", rec.Filename, "bytes", rec.Bytes, "err", err)
+}
+
+func (m *Manager) forgetUnprobeable(name string) {
+	m.unprobeableMu.Lock()
+	delete(m.unprobeable, name)
+	m.unprobeableMu.Unlock()
 }
 
 // newestSegment names the segment the recorder is presumably still appending
@@ -383,7 +474,7 @@ func (m *Manager) measure(rec *db.Recording) error {
 	}
 	secs, err := strconv.ParseFloat(p.Format.Duration, 64)
 	if err != nil || secs <= 0 {
-		return fmt.Errorf("ffprobe reported no duration for %s", rec.Filename)
+		return fmt.Errorf("%w for %s", errNoDuration, rec.Filename)
 	}
 	tracks := 0
 	for _, s := range p.Streams {
@@ -526,13 +617,45 @@ func liveWindow(segmentSeconds int) time.Duration {
 // liveWindow's default, which protects MORE rather than less -- the direction
 // where the cost is a delete the operator has to retry after a rollover
 // instead of footage that no longer exists.
-func (m *Manager) segmentSeconds() int {
+//
+// The second result is whether recording is switched on, and an unreadable row
+// answers true for the same reason: see Delete for what it lifts.
+func (m *Manager) segmentSeconds() (int, bool) {
 	s, err := m.store.GetSettings()
 	if err != nil {
 		m.log.Warn("recording settings unreadable; live-segment guard assumes the default segment length", "err", err)
-		return 0
+		return 0, true
 	}
-	return s.Recording.SegmentSeconds
+	return s.Recording.SegmentSeconds, s.Recording.Enabled
+}
+
+// recorderSegment matches the names the recorder writes and nothing else: the
+// strftime pattern rec-%Y%m%d-%H%M%S.mkv the engine hands ffmpeg.
+var recorderSegment = regexp.MustCompile(`^rec-[0-9]{8}-[0-9]{6}\.mkv$`)
+
+// destinationOutput names the file destination, if any, that can be writing
+// name: its own URL, or the stem-TIMESTAMP rollover ResolveForWrite picks when
+// that path is taken. Every destination is considered, enabled or not, running
+// or not -- this answers "could a live process hold this open", and a false
+// yes costs a retry where a false no costs footage.
+func (m *Manager) destinationOutput(name string) (string, error) {
+	dests, err := m.store.ListDestinations()
+	if err != nil {
+		return "", err
+	}
+	for _, d := range dests {
+		// A URL with a separator in it cannot resolve into this directory at
+		// all (Resolve refuses it), and a network URL always has one.
+		if d.URL == "" || strings.ContainsAny(d.URL, `/\`) {
+			continue
+		}
+		ext := filepath.Ext(d.URL)
+		stem := strings.TrimSuffix(d.URL, ext)
+		if name == d.URL || (strings.HasPrefix(name, stem+"-") && strings.HasSuffix(name, ext)) {
+			return d.Name, nil
+		}
+	}
+	return "", nil
 }
 
 // liveSegments names every recording no deletion path may touch: the ones a
@@ -548,13 +671,12 @@ func (m *Manager) segmentSeconds() int {
 // vanishing from Usage(), which is index-derived, so the operator loses the
 // tail of a live archive and the space it was costing does not come back.
 //
-// Keyed on the window rather than on Manager.sourceID even though a sourceID is
-// now to hand: the segments share one directory and Scan stamps its OWN
-// manager's programme on any row that has none yet, so a row's source_id says
-// which manager indexed the file first, not which recorder wrote it. Grouping
-// by it would protect one segment per programme -- the same undercount in a
-// costume. It also assumes one recorder per programme, which nothing enforces.
-// Start time is the property the recorder actually determines.
+// Keyed on the window rather than on a row's source_id even though the
+// filename now carries the programme: a segment written by an earlier release
+// has none, and grouping by programme would protect one segment per programme --
+// the same undercount in a costume. It also assumes one recorder per programme,
+// which nothing enforces. Start time is the property the recorder actually
+// determines.
 //
 // Measured against NOW rather than against the newest row in the index. The
 // index-relative version reads as the more conservative of the two and is
@@ -671,13 +793,28 @@ func (m *Manager) delete(r db.Recording, reason string) bool {
 // It unwraps to db.ErrStateConflict so the HTTP surface answers 409 without
 // having to learn about this package: writeStoreError already maps that
 // sentinel, and passes the sentence below through to the operator unchanged.
+//
+// dest names the file destination whose output it is, when it is one: the
+// advice differs, and the old single sentence told an operator to stop a
+// recording that had nothing to do with the file.
 var ErrSegmentLive error = liveSegmentError{}
 
-type liveSegmentError struct{}
+type liveSegmentError struct{ dest string }
 
-func (liveSegmentError) Error() string {
-	return "the recorder is still writing this segment; stop the recording, or wait for it to roll " +
-		"over into the next file, and then delete it"
+func (e liveSegmentError) Error() string {
+	if e.dest != "" {
+		return fmt.Sprintf("file destination %q may still be writing this file; stop that "+
+			"destination (or wait until the file is older than one recording segment length), "+
+			"and then delete it", e.dest)
+	}
+	return "the recorder is still writing this segment; turn recording off, or wait for it to " +
+		"roll over into the next file, and then delete it"
+}
+
+// Is makes every liveSegmentError match ErrSegmentLive, whichever writer it names.
+func (liveSegmentError) Is(target error) bool {
+	_, ok := target.(liveSegmentError)
+	return ok
 }
 
 func (liveSegmentError) Unwrap() error { return db.ErrStateConflict }
@@ -702,12 +839,42 @@ func (m *Manager) Delete(id int64) error {
 	//
 	// Refusing costs at most a segment: the recorder rolls over on its own and
 	// the file becomes deletable, which is what the message tells the operator.
+	//
+	// The window is a proxy for "a recorder holds it open", and a proxy that
+	// outlives the recorder: with recording switched off the engine has stopped
+	// it, yet its last segment stayed undeletable for up to segmentSeconds + 2
+	// min, refused with advice -- stop the recording -- the operator had already
+	// taken (exploratory run, row 35). So with no recorder running the
+	// recorder's own files are exempt. Only its own: a file destination writes
+	// into this same directory whether recording is on or not, and its outputs
+	// keep the guard. The engine clears its recorder slot before the child has
+	// finished exiting, so a delete in those few seconds unlinks a file the
+	// operator asked to be rid of, whose last bytes are the only thing lost,
+	// and the inode goes when ffmpeg exits.
 	recs, err := m.store.ListRecordings()
 	if err != nil {
 		return err
 	}
-	if liveSegments(recs, liveWindow(m.segmentSeconds()), time.Now())[r.Filename] {
-		return fmt.Errorf("cannot delete %s: %w", r.Filename, ErrSegmentLive)
+	segSeconds, recorderLive := m.segmentSeconds()
+	// The setting is only a stand-in for the fact. When the owner of the
+	// recorders can answer directly it does, both ways: the free-space floor
+	// stops the recorder with recording.enabled still on, and a recorder is
+	// still alive between the setting going off and the engine's reconcile
+	// acting on it. See WithRecorderProbe.
+	if m.recorderRunning != nil {
+		recorderLive = m.recorderRunning()
+	}
+	if liveSegments(recs, liveWindow(segSeconds), time.Now())[r.Filename] {
+		dest, err := m.destinationOutput(r.Filename)
+		if err != nil {
+			return err
+		}
+		if dest != "" {
+			return fmt.Errorf("cannot delete %s: %w", r.Filename, liveSegmentError{dest: dest})
+		}
+		if recorderLive || !recorderSegment.MatchString(r.Filename) {
+			return fmt.Errorf("cannot delete %s: %w", r.Filename, ErrSegmentLive)
+		}
 	}
 
 	path, err := m.Resolve(r.Filename)
@@ -887,6 +1054,51 @@ func (m *Manager) Usage() (DiskUsage, error) {
 		u.FreeBytes, u.TotalBytes = free, total
 	}
 	return u, nil
+}
+
+// segmentPrefix starts every master segment's name; sourceTag follows it for
+// segments written since the name began carrying the programme.
+const (
+	segmentPrefix = "rec-"
+	sourceTag     = "s"
+)
+
+// SegmentPattern is the strftime output pattern one programme's recorder
+// writes master segments to: rec-s<sourceID>-%Y%m%d-%H%M%S.mkv.
+//
+// THE PROGRAMME IS IN THE NAME because the directory is install-wide and every
+// engine's recording manager scans all of it; the name is the only thing every
+// scanner reads the same way. See Scan. It also keeps two programmes that start
+// recording in the same second from opening the same file.
+//
+// The timestamp stays the last two hyphen-separated fields, which is what
+// startTimeFromName, the stem pattern and ParseStemFilename already key on.
+func SegmentPattern(dir string, sourceID int64) string {
+	return filepath.Join(dir, segmentPrefix+sourceTag+strconv.FormatInt(sourceID, 10)+"-%Y%m%d-%H%M%S.mkv")
+}
+
+// SourceFromName reads the programme out of a master segment's filename, and
+// reports false for a name that does not carry one -- a segment written before
+// names did, or anything the recorder did not write. It never guesses.
+func SourceFromName(name string) (int64, bool) {
+	rest, ok := strings.CutPrefix(filepath.Base(name), segmentPrefix+sourceTag)
+	if !ok {
+		return 0, false
+	}
+	digits, _, ok := strings.Cut(rest, "-")
+	if !ok || digits == "" {
+		return 0, false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+	}
+	id, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
 }
 
 func isRecording(name string) bool {

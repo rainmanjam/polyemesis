@@ -29,10 +29,20 @@ script needed.
 |---|---|---|
 | `ingest.published` | data arrives on the ingest after silence | **none** |
 | `ingest.disconnected` | nothing has arrived for 5s | 5s |
-| `destination.up` | a destination starts delivering | none |
-| `destination.down` | a destination stops — failed, disabled or deleted | 10s |
+| `destination.up` | a destination's output starts moving — not when its process spawns | none |
+| `destination.down` | a destination stops — failed, disabled, deleted, or stalled with its process still running | 10s |
 | `broadcast.fault` | a platform refused to start or end a broadcast | none |
 | `destination.rolledover` | a file destination's recording continued into a different file | none |
+
+"Delivering" is read from FFmpeg's own progress report: the destination's
+output time has to advance between two sweeps, two seconds apart. A destination
+pointed at an endpoint that refuses the connection therefore never sends
+`destination.up`, however often its process is respawned. A sink that stops
+taking data leaves the process running with its output frozen, and after the
+10s dwell that is a `destination.down` with `reason: "stalled"`; when data moves
+again, a fresh `destination.up`. While the ingest itself is disconnected every
+destination's output stops, and that is reported once, as
+`ingest.disconnected`, not as a `stalled` per destination.
 
 `destination.rolledover` is also **not** a `destination.down`. Nothing stopped:
 the destination is delivering and the recording is continuing. What changed is

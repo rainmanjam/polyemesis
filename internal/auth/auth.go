@@ -7,7 +7,9 @@
 package auth
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -22,8 +24,9 @@ import (
 const (
 	// SessionCookie holds the JWT. HttpOnly, so XSS cannot read it.
 	SessionCookie = "polyemesis_session"
-	// CSRFCookie holds the double-submit token. Deliberately NOT HttpOnly:
-	// the SPA must read it to echo it back in a header.
+	// CSRFCookie is how the SPA learns the CSRF token. Deliberately NOT
+	// HttpOnly: the SPA must read it to echo it back in a header. Its CONTENT
+	// is never trusted -- the token is derived from the session; see csrfFor.
 	CSRFCookie = "polyemesis_csrf"
 	// CSRFHeader is where the SPA echoes the token.
 	CSRFHeader = "X-CSRF-Token"
@@ -91,9 +94,17 @@ func (m *Manager) Issue(userID int64, username string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// A random ID, so two logins in the same second are two sessions. Without
+	// it every claim is second-resolution and identical, the tokens are
+	// byte-for-byte equal, and so is the CSRF token bound to them.
+	jti, err := RandomToken()
+	if err != nil {
+		return "", err
+	}
 	now := time.Now()
 	claims := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			Subject:   fmt.Sprint(userID),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(sessionTTL)),
@@ -187,13 +198,14 @@ func (m *Manager) SetSession(w http.ResponseWriter, r *http.Request, token strin
 		MaxAge:   int(sessionTTL.Seconds()),
 	})
 
-	csrf, err := RandomToken()
-	if err != nil {
-		return err
-	}
+	m.setCSRFCookie(w, m.csrfFor(token), secure)
+	return nil
+}
+
+func (m *Manager) setCSRFCookie(w http.ResponseWriter, value string, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     CSRFCookie,
-		Value:    csrf,
+		Value:    value,
 		Path:     "/",
 		HttpOnly: false, // the SPA must read this to echo it back
 		Secure:   secure,
@@ -201,7 +213,42 @@ func (m *Manager) SetSession(w http.ResponseWriter, r *http.Request, token strin
 		Expires:  time.Now().Add(sessionTTL),
 		MaxAge:   int(sessionTTL.Seconds()),
 	})
-	return nil
+}
+
+// csrfFor is the CSRF token for one session: an HMAC of the session token
+// under the server key, domain-separated from the JWT signature that key also
+// makes.
+//
+// WHY DERIVED, NOT RANDOM. The token used to be a random value checked only
+// against the polyemesis_csrf cookie, and a cookie is the one thing an
+// attacker positioned to plant cookies for this host -- a sibling subdomain, a
+// plaintext hop on the same name -- can write. Plant `polyemesis_csrf=x` ahead
+// of the real one, send `x` in the header, and r.Cookie returns the planted
+// one first: the check passed (exploratory run, row 34). The session cookie
+// is HttpOnly and never readable by script, so a value derived from it is one
+// the attacker cannot compute, whatever cookies they can write.
+func (m *Manager) csrfFor(sessionToken string) string {
+	mac := hmac.New(sha256.New, m.key)
+	mac.Write([]byte("polyemesis/csrf/v1\x00"))
+	mac.Write([]byte(sessionToken))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// RefreshCSRFCookie re-sends the session's CSRF cookie when the request
+// carried a different one -- a cookie minted before tokens were bound to the
+// session, which every browser signed in across that upgrade holds, or one
+// somebody planted. Harmless to hand out: it is a Set-Cookie on a response to
+// an already-authenticated request, readable only by same-origin script.
+func (m *Manager) RefreshCSRFCookie(w http.ResponseWriter, r *http.Request) {
+	s, err := r.Cookie(SessionCookie)
+	if err != nil || s.Value == "" {
+		return
+	}
+	want := m.csrfFor(s.Value)
+	if c, err := r.Cookie(CSRFCookie); err == nil && c.Value == want {
+		return
+	}
+	m.setCSRFCookie(w, want, m.isSecure(r))
 }
 
 // ClearSession expires both cookies.
@@ -237,27 +284,36 @@ func BearerToken(r *http.Request) string {
 	return strings.TrimSpace(h[len(prefix):])
 }
 
-// CheckCSRF validates the double-submit token on state-changing requests.
+// CheckCSRF validates the CSRF header on state-changing requests against the
+// value bound to the request's session cookie (csrfFor).
 //
 // SameSite=Lax already blocks cross-site POSTs in every current browser; this
 // is the second layer, and the one that still holds if a future browser or a
 // misconfigured proxy weakens the first.
-func CheckCSRF(r *http.Request) error {
+//
+// A METHOD ON Manager, and there is no package-level version any more: the
+// check needs the server key, and the old free function could only compare
+// the header to a cookie -- which is the check that planting the cookie
+// satisfied. It cannot be called by mistake if it does not exist.
+//
+// The CSRF cookie is not consulted at all. It is how the SPA learns the value;
+// what the browser sends back in it proves nothing.
+func (m *Manager) CheckCSRF(r *http.Request) error {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return nil
 	}
-	cookie, err := r.Cookie(CSRFCookie)
-	if err != nil || cookie.Value == "" {
-		return errors.New("missing CSRF cookie")
+	session, err := r.Cookie(SessionCookie)
+	if err != nil || session.Value == "" {
+		return errors.New("missing session cookie")
 	}
 	header := r.Header.Get(CSRFHeader)
 	if header == "" {
 		return errors.New("missing " + CSRFHeader + " header")
 	}
-	// Constant-time compare: the token is a secret, and a timing oracle on it
-	// is cheap to avoid.
-	if subtleCompare(cookie.Value, header) != 1 {
+	// Constant-time: the token is a secret, and a timing oracle on it is
+	// cheap to avoid.
+	if !hmac.Equal([]byte(header), []byte(m.csrfFor(session.Value))) {
 		return errors.New("CSRF token mismatch")
 	}
 	return nil
@@ -270,18 +326,4 @@ func RandomToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-func subtleCompare(a, b string) int {
-	if len(a) != len(b) {
-		return 0
-	}
-	var v byte
-	for i := 0; i < len(a); i++ {
-		v |= a[i] ^ b[i]
-	}
-	if v == 0 {
-		return 1
-	}
-	return 0
 }

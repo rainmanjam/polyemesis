@@ -335,7 +335,10 @@ else
        "bool(${body_step}['with'].get('body'))"
   have "and generate_release_notes is still on, so the body adds rather than replaces" \
        "${body_step}['with'].get('generate_release_notes') is True"
-  for phrase in "one-way" "secret.key" "install.sh" "#440"; do
+  # "truncated", not "#440": #440 was fixed in 0.9.0, and requiring its number
+  # here is what kept the release body calling it unresolved afterwards. The
+  # Windows defect an operator still has to plan around is the truncation.
+  for phrase in "one-way" "secret.key" "install.sh" "truncated"; do
     have "the release body warns about ${phrase}" \
          "'${phrase}' in ${body_step}['with']['body']"
   done

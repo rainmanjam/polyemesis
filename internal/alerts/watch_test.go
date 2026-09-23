@@ -1,6 +1,7 @@
 package alerts
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -89,43 +90,106 @@ func TestWatcherDestinationTransitions(t *testing.T) {
 	})
 }
 
+// destPlan is one destination's condition at a given second: whether it is
+// enabled and running, and how fast its output time is advancing relative to
+// the wall clock.
+type destPlan struct {
+	enabled, running bool
+	speed            float64
+}
+
+type timedEvent struct {
+	sec int
+	typ Type
+	key string
+}
+
+// drive runs the watcher at the engine's 2s sweep. Each destination's output
+// time advances by speed*2s per sweep while it runs and resets to zero when it
+// does not, because a respawned child counts from zero. Only destination
+// events are returned.
+func drive(w *Watcher, until int, ids []int64, plan func(id int64, sec int) destPlan) []timedEvent {
+	out := map[int64]float64{}
+	var got []timedEvent
+	for sec := 0; sec <= until; sec += 2 {
+		snap := Snapshot{At: base.Add(time.Duration(sec) * time.Second)}
+		for _, id := range ids {
+			p := plan(id, sec)
+			if p.running {
+				if sec > 0 {
+					out[id] += p.speed * 2
+				}
+			} else {
+				out[id] = 0
+			}
+			snap.Destinations = append(snap.Destinations, DestState{
+				ID: id, Name: "d" + strconv.FormatInt(id, 10), Enabled: p.enabled, Running: p.running,
+				OutTimeMS: int64(out[id] * 1000),
+			})
+		}
+		for _, ev := range w.Observe(snap) {
+			got = append(got, timedEvent{sec, ev.Type, ev.Key})
+		}
+	}
+	return got
+}
+
+func typesOf(evs []timedEvent) []Type {
+	out := make([]Type, len(evs))
+	for i, e := range evs {
+		out[i] = e.typ
+	}
+	return out
+}
+
+func wantTypes(t *testing.T, got []timedEvent, want ...Type) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("events = %+v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i].typ != want[i] {
+			t.Fatalf("events = %+v, want %v", got, want)
+		}
+	}
+}
+
 // falling_behind is an EARLY warning, so its whole value is in not firing on
 // the dips that a live encoder makes constantly.
 func TestWatcherFallingBehindNeedsTheDwell(t *testing.T) {
 	w := NewWatcher(WatchConfig{SpeedFloor: 0.95, FallingBehindFor: 30 * time.Second})
-	at := func(speed float64) func(*Snapshot) {
-		return func(s *Snapshot) {
-			s.Destinations = []DestState{{ID: 7, Name: "Twitch", Enabled: true, Running: true, Speed: speed}}
-		}
-	}
-	runSteps(t, w, nil, []step{
-		{after: 0, snap: at(1.0)},
-		// A dip that returns inside the dwell is a keyframe boundary, not an
-		// incident. Firing here is what gets the whole feature muted.
-		{after: 5 * time.Second, snap: at(0.80)},
-		{after: 20 * time.Second, snap: at(1.0)},
+	got := drive(w, 200, []int64{7}, func(_ int64, sec int) destPlan {
+		speed := 1.0
+		switch {
+		// A two-second hiccup is a keyframe boundary, not an incident.
+		// Firing here is what gets the whole feature muted.
+		case sec >= 30 && sec < 32:
+			speed = 0.5
 		// Sustained is different.
-		{after: 30 * time.Second, snap: at(0.87)},
-		{after: 45 * time.Second, snap: at(0.87)},
-		{after: 61 * time.Second, snap: at(0.87), want: []Type{TypeDestinationFallingBehind}},
-		// And it says so exactly once while it stays bad.
-		{after: 75 * time.Second, snap: at(0.85)},
-		{after: 90 * time.Second, snap: at(1.01), want: []Type{TypeDestinationCaughtUp}},
+		case sec >= 60 && sec < 140:
+			speed = 0.85
+		}
+		return destPlan{enabled: true, running: true, speed: speed}
 	})
+	wantTypes(t, got, TypeDestinationFallingBehind, TypeDestinationCaughtUp)
+	// Said exactly once while it stayed bad, and not before the dwell.
+	if got[0].sec < 90 || got[0].sec >= 140 {
+		t.Errorf("falling_behind at %ds, want after 30s of sustained slowness", got[0].sec)
+	}
+	if got[1].sec < 140 {
+		t.Errorf("caught_up at %ds, before the destination recovered", got[1].sec)
+	}
 }
 
-// Speed 0 is "no progress block yet", not "stopped dead". Treating it as bad
-// fires on every destination for the first second of every broadcast.
-func TestWatcherTreatsUnknownSpeedAsUnknown(t *testing.T) {
+// Output time 0 is "no media moved yet", not "stopped dead". Treating it as
+// bad fires on every destination for the first seconds of every broadcast, and
+// on one that never connects at all -- which destination.down reports.
+func TestWatcherTreatsNoOutputYetAsUnknown(t *testing.T) {
 	w := NewWatcher(WatchConfig{SpeedFloor: 0.95, FallingBehindFor: 10 * time.Second})
-	zero := func(s *Snapshot) {
-		s.Destinations = []DestState{{ID: 1, Name: "YouTube", Enabled: true, Running: true, Speed: 0}}
-	}
-	runSteps(t, w, nil, []step{
-		{after: 0, snap: zero},
-		{after: 30 * time.Second, snap: zero},
-		{after: 120 * time.Second, snap: zero},
+	got := drive(w, 120, []int64{1}, func(int64, int) destPlan {
+		return destPlan{enabled: true, running: true, speed: 0}
 	})
+	wantTypes(t, got)
 }
 
 // A destination that dies while it is already flagged did not recover. Emitting
@@ -135,21 +199,21 @@ func TestWatcherDoesNotReportCaughtUpWhenTheDestinationDiedInstead(t *testing.T)
 	w := NewWatcher(WatchConfig{
 		DownFor: 20 * time.Second, SpeedFloor: 0.95, FallingBehindFor: 30 * time.Second,
 	})
-	state := func(running bool, speed float64) func(*Snapshot) {
-		return func(s *Snapshot) {
-			s.Destinations = []DestState{{ID: 3, Name: "Kick", Enabled: true, Running: running, Speed: speed}}
+	got := drive(w, 160, []int64{3}, func(_ int64, sec int) destPlan {
+		switch {
+		case sec < 10:
+			return destPlan{enabled: true, running: true, speed: 1}
+		case sec < 70:
+			return destPlan{enabled: true, running: true, speed: 0.6}
+		case sec < 120:
+			// It gives up: no process, no output time -- which must NOT read
+			// as a recovery.
+			return destPlan{enabled: true, running: false}
+		default:
+			return destPlan{enabled: true, running: true, speed: 1}
 		}
-	}
-	runSteps(t, w, nil, []step{
-		{after: 0, snap: state(true, 1.0)},
-		{after: 10 * time.Second, snap: state(true, 0.6)},
-		{after: 45 * time.Second, snap: state(true, 0.6), want: []Type{TypeDestinationFallingBehind}},
-		// It gives up. Speed goes to zero because there is no longer a process
-		// emitting progress, which must NOT read as a recovery.
-		{after: 50 * time.Second, snap: state(false, 0)},
-		{after: 75 * time.Second, snap: state(false, 0), want: []Type{TypeDestinationDown}},
-		{after: 100 * time.Second, snap: state(true, 1.0), want: []Type{TypeDestinationRecovered}},
 	})
+	wantTypes(t, got, TypeDestinationFallingBehind, TypeDestinationDown, TypeDestinationRecovered)
 }
 
 // A congested uplink degrades every destination at once, and each is its own
@@ -157,41 +221,55 @@ func TestWatcherDoesNotReportCaughtUpWhenTheDestinationDiedInstead(t *testing.T)
 // another fired would hide a destination that was independently sick.
 func TestWatcherFallingBehindIsPerDestination(t *testing.T) {
 	w := NewWatcher(WatchConfig{SpeedFloor: 0.95, FallingBehindFor: 20 * time.Second})
-	both := func(a, b float64) func(*Snapshot) {
-		return func(s *Snapshot) {
-			s.Destinations = []DestState{
-				{ID: 1, Name: "Twitch", Enabled: true, Running: true, Speed: a},
-				{ID: 2, Name: "YouTube", Enabled: true, Running: true, Speed: b},
-			}
+	got := drive(w, 140, []int64{1, 2}, func(id int64, sec int) destPlan {
+		speed := 1.0
+		// Both slow from 10s; destination 1 recovers at 80s, 2 does not.
+		if sec >= 10 && (id == 2 || sec < 80) {
+			speed = 0.7
 		}
-	}
-	runSteps(t, w, nil, []step{
-		{after: 0, snap: both(1.0, 1.0)},
-		{after: 5 * time.Second, snap: both(0.7, 0.7)},
-		{after: 30 * time.Second, snap: both(0.7, 0.7), want: []Type{
-			TypeDestinationFallingBehind, TypeDestinationFallingBehind,
-		}},
-		// One recovers, the other does not. The events must not be entangled.
-		{after: 40 * time.Second, snap: both(1.0, 0.7), want: []Type{TypeDestinationCaughtUp}},
+		return destPlan{enabled: true, running: true, speed: speed}
 	})
+	wantTypes(t, got, TypeDestinationFallingBehind, TypeDestinationFallingBehind, TypeDestinationCaughtUp)
+	if got[2].key != "destination:1:speed" {
+		t.Errorf("caught_up for %q, want destination 1 only", got[2].key)
+	}
 }
 
 // A disabled destination has no speed worth judging, and re-enabling it must
 // start the clock fresh rather than counting the time it spent switched off.
 func TestWatcherIgnoresSpeedOnADisabledDestination(t *testing.T) {
 	w := NewWatcher(WatchConfig{SpeedFloor: 0.95, FallingBehindFor: 20 * time.Second})
-	d := func(enabled bool, speed float64) func(*Snapshot) {
-		return func(s *Snapshot) {
-			s.Destinations = []DestState{{ID: 9, Name: "File", Enabled: enabled, Running: true, Speed: speed}}
+	got := drive(w, 400, []int64{9}, func(_ int64, sec int) destPlan {
+		return destPlan{enabled: sec >= 300, running: true, speed: 0.1}
+	})
+	wantTypes(t, got, TypeDestinationFallingBehind)
+	if got[0].sec < 320 {
+		t.Errorf("falling_behind at %ds, counting time it spent disabled", got[0].sec)
+	}
+}
+
+// With the source gone every destination's output time stops. That is
+// ingest.lost's news, once -- not a falling_behind per destination.
+func TestWatcherDoesNotCallAMissingSourceAStall(t *testing.T) {
+	w := NewWatcher(WatchConfig{DownFor: 20 * time.Second, SpeedFloor: 0.95, FallingBehindFor: 20 * time.Second})
+	out := 0.0
+	var types []Type
+	for sec := 0; sec <= 300; sec += 2 {
+		live := sec < 60 || sec >= 200
+		if live && sec > 0 {
+			out += 2
+		}
+		for _, ev := range w.Observe(Snapshot{
+			At: base.Add(time.Duration(sec) * time.Second), IngestConfigured: true, IngestLive: live,
+			Destinations: []DestState{{ID: 1, Name: "d1", Enabled: true, Running: true, OutTimeMS: int64(out * 1000)}},
+		}) {
+			types = append(types, ev.Type)
 		}
 	}
-	runSteps(t, w, nil, []step{
-		{after: 0, snap: d(false, 0.1)},
-		{after: 300 * time.Second, snap: d(false, 0.1)},
-		{after: 301 * time.Second, snap: d(true, 0.1)},
-		{after: 310 * time.Second, snap: d(true, 0.1)},
-		{after: 322 * time.Second, snap: d(true, 0.1), want: []Type{TypeDestinationFallingBehind}},
-	})
+	want := []Type{TypeIngestLost, TypeIngestRecovered}
+	if len(types) != len(want) || types[0] != want[0] || types[1] != want[1] {
+		t.Fatalf("events = %v, want %v", types, want)
+	}
 }
 
 func TestWatcherForgetsADestinationThatWasDeleted(t *testing.T) {

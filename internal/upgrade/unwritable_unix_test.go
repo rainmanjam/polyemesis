@@ -44,7 +44,7 @@ func TestSystemdRefusesADirectoryThatExistsAndDeniesCreates(t *testing.T) {
 		t.Fatal("precondition not built: a 0500 directory still accepts a create here")
 	}
 
-	p := PlanFor(MethodSystemd, binary, "v0.6.0")
+	p := PlanFor(MethodSystemd, binary, Versions{Running: "v0.5.0", Offered: "v0.6.0"})
 	if p.Automatic {
 		t.Error("offered an automatic upgrade into a directory it cannot write; it would fail half way")
 	}

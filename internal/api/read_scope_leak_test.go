@@ -35,9 +35,6 @@ const (
 	sentinelSourceSRT     = "SENTINEL-source-srt-passphrase-9f3a"
 	sentinelSourceRTMP    = "SENTINEL-source-rtmp-streamkey-9f3a"
 	sentinelSourcePullPwd = "SENTINEL-source-pull-password-9f3a"
-	sentinelSetSRT        = "SENTINEL-settings-srt-passphrase-9f3a"
-	sentinelSetRTMP       = "SENTINEL-settings-rtmp-streamkey-9f3a"
-	sentinelSetPullPwd    = "SENTINEL-settings-pull-password-9f3a"
 	sentinelBackupSRT     = "SENTINEL-backup-srt-passphrase-9f3a"
 	sentinelBackupRTMP    = "SENTINEL-backup-rtmp-streamkey-9f3a"
 	sentinelBackupPullPwd = "SENTINEL-backup-pull-password-9f3a"
@@ -66,7 +63,6 @@ const destFileName = "shows/monday-night-9f3a.mp4"
 func allSentinels() []string {
 	return []string{
 		sentinelSourceSRT, sentinelSourceRTMP, sentinelSourcePullPwd,
-		sentinelSetSRT, sentinelSetRTMP, sentinelSetPullPwd,
 		sentinelBackupSRT, sentinelBackupRTMP, sentinelBackupPullPwd,
 		sentinelMQTTPwd, sentinelDestKey, sentinelDestBackupKey,
 		sentinelIcecastPwd, sentinelPlayoutToken,
@@ -100,9 +96,13 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
-	st.Ingest.SRT.Passphrase = sentinelSetSRT
-	st.Ingest.RTMP.StreamKey = sentinelSetRTMP
-	st.Ingest.Pull.URL = "rtsp://camuser:" + sentinelSetPullPwd + "@10.0.0.9/stream1"
+	// No sentinel in st.Ingest, and that is not an omission. While a source
+	// exists, settings.ingest is a VIEW of the default source's ingest --
+	// GET /settings serves the source row's block and PUT /settings merges over
+	// it (see overlayDefaultSourceIngest) -- so the blob's own copy is a column
+	// nothing serves. A sentinel planted there is witnessed on no route, which
+	// is exactly the vacuous absence assertion the ledger preflight refuses.
+	// The source sentinels above are what GET /settings carries now.
 	st.Failover.Backup.SRT.Passphrase = sentinelBackupSRT
 	st.Failover.Backup.RTMP.StreamKey = sentinelBackupRTMP
 	st.Failover.Backup.Pull.URL = "rtsp://camuser:" + sentinelBackupPullPwd + "@10.0.0.9/stream1"
@@ -570,8 +570,8 @@ func TestSessionAndAdminStillReceiveEveryCredential(t *testing.T) {
 		{"/api/v1/sources", sentinelSourceSRT},
 		{"/api/v1/sources", sentinelSourceRTMP},
 		{"/api/v1/sources/1", sentinelSourcePullPwd},
-		{"/api/v1/settings", sentinelSetSRT},
-		{"/api/v1/settings", sentinelSetRTMP},
+		{"/api/v1/settings", sentinelSourceSRT},
+		{"/api/v1/settings", sentinelSourceRTMP},
 		{"/api/v1/settings", sentinelBackupSRT},
 		{"/api/v1/settings", sentinelBackupRTMP},
 		{"/api/v1/settings", sentinelMQTTPwd},

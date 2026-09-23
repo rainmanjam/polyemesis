@@ -283,13 +283,17 @@ And what polyemesis itself concluded, which is the same probe with the results
 already collected:
 
 ```bash
-curl -s -H "Authorization: Bearer $TOKEN" \
-  localhost:8080/api/v1/encoders                      # cached verdicts
-curl -s -H "Authorization: Bearer $TOKEN" \
-  'localhost:8080/api/v1/encoders?redetect=1'         # re-run everything
+curl -fsSk -H "Authorization: Bearer $TOKEN" \
+  "${POLYEMESIS_URL:?set it first}/api/v1/encoders"            # cached verdicts
+curl -fsSk -H "Authorization: Bearer $TOKEN" \
+  "${POLYEMESIS_URL:?set it first}/api/v1/encoders?redetect=1" # re-run everything
 ```
 
-`$TOKEN` is an API token from **Settings → API tokens**. This route sits behind
+`$POLYEMESIS_URL` is where this install answers — `https://localhost` for an
+`install.sh` install that took its defaults; the table in
+[INSTALL.md → Verifying the install](INSTALL.md#verifying-the-install) has the
+rest. The old `localhost:8080` here fails on those installs, and `-s` without
+`-f` hid that. `$TOKEN` is an API token from **Settings → API tokens**. This route sits behind
 authentication, so without the header both commands answer `401` and tell you
 nothing about your encoders. `?redetect=1` additionally needs a token with
 **admin** scope: re-running detection spawns a test encode per encoder, which is

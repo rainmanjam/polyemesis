@@ -457,7 +457,7 @@ func TestOnlySystemdUpgradesItself(t *testing.T) {
 		{MethodManual, false},
 		{MethodSystemd, true},
 	} {
-		p := PlanFor(tc.m, bin, "v0.6.0")
+		p := PlanFor(tc.m, bin, Versions{Running: "v0.5.0", Offered: "v0.6.0"})
 		if p.Automatic != tc.automatic {
 			t.Errorf("%s: Automatic = %v, want %v", tc.m, p.Automatic, tc.automatic)
 		}
@@ -473,7 +473,7 @@ func TestOnlySystemdUpgradesItself(t *testing.T) {
 // The docker command must recreate, not merely pull. An operator who runs only
 // `docker pull` has changed nothing and will reasonably believe otherwise.
 func TestDockerCommandRecreatesRatherThanOnlyPulling(t *testing.T) {
-	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", "v0.6.0")
+	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: "v0.5.0", Offered: "v0.6.0"})
 	if !strings.Contains(p.Command, "up -d") {
 		t.Errorf("the docker command does not recreate the container: %q", p.Command)
 	}
@@ -483,7 +483,7 @@ func TestSystemdRefusesAnUnwritableDirectory(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root, which can write anywhere")
 	}
-	p := PlanFor(MethodSystemd, "/proc/definitely-not-writable/polyemesis", "v0.6.0")
+	p := PlanFor(MethodSystemd, "/proc/definitely-not-writable/polyemesis", Versions{Running: "v0.5.0", Offered: "v0.6.0"})
 	if p.Automatic {
 		t.Error("offered an automatic upgrade into a directory it cannot write; it would fail half way")
 	}
@@ -838,5 +838,162 @@ func TestAnUnexecutableInstallStillYieldsARunnableBinary(t *testing.T) {
 	if st.Mode().Perm()&0o100 == 0 {
 		t.Errorf("binary is %o and not owner-executable; the service could not start it",
 			st.Mode().Perm())
+	}
+}
+
+// The release feed's tag is `v0.10.0`; the image tags release.yml publishes
+// (metadata-action, `type=semver,pattern={{version}}`) are `0.10.0`, `0.10`
+// and `latest`. A command naming `:v0.10.0` answers "not found".
+func TestDockerCommandNamesTheImageTagThatExists(t *testing.T) {
+	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: "v0.5.0", Offered: "v0.10.0"})
+	if want := "docker pull " + Image + ":0.10.0"; !strings.Contains(p.Command, want) {
+		t.Errorf("command = %q, want it to contain %q", p.Command, want)
+	}
+	if strings.Contains(p.Command, ":v0.10.0") {
+		t.Errorf("names an image tag that does not exist: %q", p.Command)
+	}
+}
+
+// Before any update check the offered tag is "". Every command must still be
+// one a person can paste, not `polyemesis:` or `polyemesis--linux-amd64`.
+func TestCommandsBeforeAnyCheckNameNoEmptyTag(t *testing.T) {
+	d := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: "v0.5.0", Offered: ""})
+	if strings.HasSuffix(strings.TrimSpace(d.Command), ":") || strings.Contains(d.Command, Image+":") {
+		t.Errorf("docker command names an empty tag: %q", d.Command)
+	}
+	if !strings.Contains(d.Command, "up -d") {
+		t.Errorf("docker command lost its recreate: %q", d.Command)
+	}
+	m := PlanFor(MethodManual, "/usr/local/bin/polyemesis", Versions{Running: "v0.5.0", Offered: ""})
+	if strings.Contains(m.Command, "polyemesis--") {
+		t.Errorf("manual command names an empty tag: %q", m.Command)
+	}
+}
+
+func TestImageTag(t *testing.T) {
+	for in, want := range map[string]string{
+		"v0.10.0":            "0.10.0",
+		"0.10.0":             "0.10.0",
+		" v1.2.3-rc1 ":       "1.2.3-rc1",
+		"":                   "",
+		"compose":            "",
+		"v0.9.0-12-gabcdef1": "",
+	} {
+		if got := ImageTag(in, VariantDefault); got != want {
+			t.Errorf("ImageTag(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// An image BUILT FROM SOURCE -- the shipped docker-compose.yml's `build:`
+// service, stamped "compose" -- is not moved by `docker compose pull`: the pull
+// skips a build service and `up -d` restarts the image on disk, both exiting 0.
+// Offering that as the upgrade is a command that silently does nothing.
+func TestASourceBuiltImageIsToldToRebuildNotPull(t *testing.T) {
+	for _, running := range []string{"compose", "docker", "v0.9.0-12-gabcdef1", "dev", ""} {
+		p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: running, Offered: "v0.10.0"})
+		if !strings.Contains(p.Command, "--build") {
+			t.Errorf("running %q: the command does not rebuild, so it changes nothing: %q", running, p.Command)
+		}
+		if strings.HasPrefix(p.Command, "docker compose pull") {
+			t.Errorf("running %q: still leads with the no-op pull: %q", running, p.Command)
+		}
+		// The published image is the way out of an incomparable version, so
+		// it is named -- by the tag that exists.
+		if !strings.Contains(p.Command, Image+":0.10.0") {
+			t.Errorf("running %q: does not name the published image: %q", running, p.Command)
+		}
+	}
+	// And a release image is still told to pull.
+	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: "v0.9.0", Offered: "v0.10.0"})
+	if strings.Contains(p.Command, "--build") || !strings.HasPrefix(p.Command, "docker compose pull") {
+		t.Errorf("a release image is told to rebuild: %q", p.Command)
+	}
+}
+
+// The GPU images are published as `:0.10.0-cuda` and `:0.10.0-vaapi`
+// (release.yml's TAGS_CUDA/TAGS_VAAPI), and they carry the same release version
+// as the default image. A GPU container told `docker pull ...:0.10.0` gets a
+// pull that SUCCEEDS -- onto an image with no hardware encoder. The variant has
+// to reach the tag, from the image's own declaration or, for a source build of
+// a GPU Dockerfile, from its version stamp.
+func TestDockerCommandKeepsTheImageVariant(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		v    Versions
+		want string
+	}{
+		{"release cuda image", Versions{Running: "v0.9.0", Offered: "v0.10.0", Variant: VariantCUDA}, "docker pull " + Image + ":0.10.0-cuda"},
+		{"release vaapi image", Versions{Running: "v0.9.0", Offered: "v0.10.0", Variant: VariantVAAPI}, "docker pull " + Image + ":0.10.0-vaapi"},
+		{"source-built cuda", Versions{Running: "docker-cuda", Offered: "v0.10.0"}, "image: " + Image + ":0.10.0-cuda"},
+		{"source-built vaapi", Versions{Running: "docker-vaapi", Offered: "v0.10.0"}, "image: " + Image + ":0.10.0-vaapi"},
+		{"compose-built cuda", Versions{Running: "compose-cuda", Offered: "v0.10.0"}, "image: " + Image + ":0.10.0-cuda"},
+		{"compose-built vaapi", Versions{Running: "compose-vaapi", Offered: "v0.10.0"}, "image: " + Image + ":0.10.0-vaapi"},
+		{"default image", Versions{Running: "v0.9.0", Offered: "v0.10.0"}, "docker pull " + Image + ":0.10.0"},
+	} {
+		p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", tc.v)
+		if !strings.Contains(p.Command, tc.want) {
+			t.Errorf("%s: command = %q, want it to contain %q", tc.name, p.Command, tc.want)
+		}
+		if tc.name == "default image" && (strings.Contains(p.Command, "-cuda") || strings.Contains(p.Command, "-vaapi")) {
+			t.Errorf("%s: default image named a GPU tag: %q", tc.name, p.Command)
+		}
+	}
+	// A variant this build does not know is not guessed at: the explicit tag is
+	// left out, and the compose file's own tag decides.
+	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: "v0.9.0", Offered: "v0.10.0", Variant: "rocm"})
+	if strings.Contains(p.Command, Image+":") {
+		t.Errorf("unknown variant: named a tag anyway: %q", p.Command)
+	}
+	if !strings.Contains(p.Command, "up -d") {
+		t.Errorf("unknown variant: lost the recreate: %q", p.Command)
+	}
+}
+
+func TestDetectVariant(t *testing.T) {
+	env := func(val string) func(string) string {
+		return func(k string) string {
+			if k == VariantEnv {
+				return val
+			}
+			return ""
+		}
+	}
+	for _, tc := range []struct {
+		env  string
+		want Variant
+	}{
+		{"", VariantDefault},
+		{"cuda", VariantCUDA},
+		{" VAAPI ", VariantVAAPI},
+		{"rocm", Variant("rocm")},
+	} {
+		if got := DetectVariant(env(tc.env)); got != tc.want {
+			t.Errorf("DetectVariant(%q) = %q, want %q", tc.env, got, tc.want)
+		}
+	}
+}
+
+// The Dockerfiles are where a variant is declared; a GPU Dockerfile that stops
+// declaring it silently turns its plan back into the CPU tag.
+func TestGPUDockerfilesDeclareTheirVariant(t *testing.T) {
+	for file, want := range map[string]string{
+		"../../Dockerfile.cuda":  "ENV " + VariantEnv + "=cuda",
+		"../../Dockerfile.vaapi": "ENV " + VariantEnv + "=vaapi",
+	} {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), want) {
+			t.Errorf("%s does not declare %q", file, want)
+		}
+	}
+	b, err := os.ReadFile("../../Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), VariantEnv) {
+		t.Errorf("the default Dockerfile declares a variant; its tag has no suffix")
 	}
 }

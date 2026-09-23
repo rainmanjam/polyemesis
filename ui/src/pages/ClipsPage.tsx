@@ -256,12 +256,11 @@ export function ClipsPage() {
 
               {!buffer?.enabled ? (
                 <p className="text-tiny text-muted-foreground">
-                  The buffer is off. Turn it on to the right; it costs memory, not disk, until you
-                  capture something.
+                  {t("clips.bufferOff")}
                 </p>
               ) : !buffer.running ? (
                 <p className="text-tiny text-muted-foreground">
-                  Nothing is arriving yet. The buffer starts filling as soon as a stream is live.
+                  {t("clips.bufferIdle")}
                 </p>
               ) : (
                 <p className="text-tiny text-muted-foreground">
@@ -458,8 +457,10 @@ export function ClipsPage() {
                   <span className="text-micro text-warn">{t("clips.windowAppliesOnEnable")}</span>
                 )}
                 <span className="text-micro text-muted-foreground">
-                  {view?.bounds.minWindowSeconds ?? 5}–{view?.bounds.maxWindowSeconds ?? 300}s. A
-                  longer window costs memory proportional to the stream's bitrate.
+                  {t("clips.windowNote", {
+                    min: view?.bounds.minWindowSeconds ?? 5,
+                    max: view?.bounds.maxWindowSeconds ?? 300,
+                  })}
                 </span>
               </div>
 
@@ -468,9 +469,10 @@ export function ClipsPage() {
                 <Stat labelKey="clips.onDisk" value={bytes(view?.usage.usedBytes ?? 0)} tone="muted" />
               </div>
               <p className="text-micro text-muted-foreground">
-                Retention keeps at most {view?.usage.maxClips ?? 0} clips and{" "}
-                {bytes(view?.usage.maxBytes ?? 0)}; the oldest go first. Clips are MPEG-TS, which
-                every editor and every player opens.
+                {t("clips.retention", {
+                  count: view?.usage.maxClips ?? 0,
+                  bytes: bytes(view?.usage.maxBytes ?? 0),
+                })}
               </p>
               <p className="text-micro text-subtle-foreground">
             {t("clips.bufferLiveNote")}

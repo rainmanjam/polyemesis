@@ -3,6 +3,7 @@ import Hls from "hls.js";
 import { MonitorPlay, VolumeX, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 /** Low-latency HLS preview of the relay.
  *
@@ -36,6 +37,7 @@ export function PreviewPlayer({
    *  letterboxed into a 16:9 box it never filled. */
   aspect?: { width: number; height: number };
 }) {
+  const t = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
@@ -180,15 +182,13 @@ export function PreviewPlayer({
           <MonitorPlay className="h-6 w-6 opacity-40" />
           <span className="text-[11px]">
             {!active
-              ? "Preview is disabled in Settings"
+              ? t("preview.disabled")
               : offAir
-                ? "Ingest offline"
-                : "Waiting for a stream…"}
+                ? t("preview.offline")
+                : t("preview.waiting")}
           </span>
           {offAir && (
-            <span className="text-[10px] opacity-70">
-              Start your encoder to see the preview
-            </span>
+            <span className="text-[10px] opacity-70">{t("preview.startEncoder")}</span>
           )}
         </div>
       )}

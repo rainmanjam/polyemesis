@@ -51,6 +51,27 @@ HTTP_PORT=8080
 SRT_PORT=6000
 RTMP_PORT=1935
 
+# WHERE THE SERVER ITSELF LISTENS FOR INGEST, which is not the same thing as the
+# two ports above. The SRT and RTMP listeners are runtime settings (Settings ->
+# Listeners, stored in the database), and a new install binds these defaults
+# -- ListenerSettings{SRTPort: 6000, RTMPPort: 1935} in internal/db/settings.go.
+# Nothing this script writes reaches them: config.yaml has no such key and the
+# binary has no such flag.
+#
+# So --srt-port/--rtmp-port used to be a promise nobody kept. In binary mode
+# they changed only the firewall rule and the printed address; in docker mode
+# they published host N onto container N, where nothing listens either. Docker
+# can honour them, by mapping the chosen HOST port onto these; binary mode
+# cannot, and refuses them (see refuse_unappliable_ports). Pinned against the
+# Go source by scripts/acceptance-install.sh.
+SERVER_SRT_PORT=6000
+SERVER_RTMP_PORT=1935
+# The container side docker mode actually publishes onto: the defaults above on
+# a first install, or what an existing docker-compose.yml already had on a
+# re-run (existing_container_ports).
+CONTAINER_SRT_PORT="$SERVER_SRT_PORT"
+CONTAINER_RTMP_PORT="$SERVER_RTMP_PORT"
+
 MODE=""            # docker | binary
 TLS_MODE="off"     # off | selfsigned | acme
 CHECK_PUBLIC_IP=false  # --check-public-ip: ask a third party what the world sees
@@ -549,7 +570,7 @@ require_systemd() {
   echo "     On a container, WSL without systemd, or an OpenRC/runit distribution,"
   echo "     run the image directly instead:"
   echo "       docker run -d --name polyemesis -p ${HTTP_PORT}:8080 \\"
-  echo "         -p ${SRT_PORT}:${SRT_PORT}/udp -v polyemesis-data:/data ${IMAGE}"
+  echo "         -p ${SRT_PORT}:${SERVER_SRT_PORT}/udp -v polyemesis-data:/data ${IMAGE}"
   return 1
 }
 
@@ -1007,15 +1028,50 @@ install_docker() {
   ok "using: $COMPOSE_CMD"
 }
 
+# listeners_on prints the ss lines for sockets bound to a port, with the
+# owning process when -p can see it (it can: this runs as root).
+#
+# COLUMN 4, NOT THE WHOLE LINE. This used to grep "[:.]PORT\b" anywhere, which
+# read `10.0.0.80:5000` as a listener on port 80 -- the dot in an address is as
+# good as the colon before a port to a regex that does not know which is which.
+listeners_on() { # listeners_on <port> <tcp|udp>
+  local port="$1" proto="${2:-tcp}" flags=-lntp
+  [ "$proto" = udp ] && flags=-lnup
+  command -v ss >/dev/null 2>&1 || return 0
+  ss "$flags" 2>/dev/null | awk -v p="$port" 'NR > 1 { n = split($4, a, ":"); if (a[n] == p) print }'
+}
+
 # port_in_use reports whether anything already holds a port, so a collision is
 # named here rather than discovered as an opaque bind error on first start.
 port_in_use() {
   local port="$1" proto="${2:-tcp}"
-  if command -v ss >/dev/null 2>&1; then
-    if [ "$proto" = udp ]; then ss -lnu 2>/dev/null | grep -qE "[:.]${port}\b"
-    else ss -lnt 2>/dev/null | grep -qE "[:.]${port}\b"; fi
+  [ -n "$(listeners_on "$port" "$proto")" ]
+}
+
+# port_held_by_this_install reports whether the thing holding a port is the
+# polyemesis this run is about to replace.
+#
+# A RE-RUN IS HOW THIS INSTALLER IS USED TO CHANGE ANYTHING, and on a re-run
+# every port it asks about is already held -- by the service it is about to
+# restart. warn_if_taken called that a collision and, under --yes, accepted its
+# own offer: a working install's web UI moved 8080 -> 8081 and the summary
+# advertised an SRT port nothing listened on. The service lets go of the port
+# when it is restarted onto the new config, so it is not a collision.
+#
+# Asked per mode, because the two holders look different and neither can stand
+# in for the other: in binary mode it is a process named polyemesis (ss -p), and
+# in docker mode it is a port the polyemesis container publishes (docker port).
+# A bare polyemesis PROCESS in docker mode still collides -- nothing this run
+# does restarts it, and the container cannot bind over it.
+port_held_by_this_install() { # port_held_by_this_install <port> <tcp|udp>
+  local port="$1" proto="${2:-tcp}"
+  if [ "$MODE" = docker ]; then
+    command -v docker >/dev/null 2>&1 || return 1
+    # `8080/tcp -> 0.0.0.0:8080` -- container port/proto, then the host side.
+    docker port polyemesis 2>/dev/null \
+      | awk -v p="$port" -v pr="$proto" '{ split($1, c, "/"); n = split($3, h, ":"); if (c[2] == pr && h[n] == p) f = 1 } END { exit !f }'
   else
-    return 1
+    listeners_on "$port" "$proto" | grep -q 'users:(("polyemesis"'
   fi
 }
 
@@ -1044,6 +1100,10 @@ next_free_port() {
 warn_if_taken() {
   local port="$1" proto="$2" what="$3" var="${4:-}" free answer
   port_in_use "$port" "$proto" || return 0
+  if port_held_by_this_install "$port" "$proto"; then
+    info "${proto}/${port} (${what}) is held by the polyemesis this run replaces — keeping it"
+    return 0
+  fi
 
   warn "${proto}/${port} (${what}) is already in use — polyemesis would fail to bind it"
   # Nothing to offer, or nowhere to put the answer: fall back to the old
@@ -1058,6 +1118,75 @@ warn_if_taken() {
     ok "${what} moved to ${proto}/${free}"
   else
     echo "     Keeping ${proto}/${port}. Stop whatever is holding it before starting polyemesis."
+  fi
+}
+
+# refuse_unappliable_ports stops a binary-mode install that was told to use an
+# ingest port it has no way to set.
+#
+# The server binds SERVER_SRT_PORT and SERVER_RTMP_PORT until somebody changes
+# them under Settings -> Listeners; see the note beside those constants. In
+# binary mode there is no port mapping in between, so `--srt-port 6001` used to
+# open udp/6001 in the firewall, print srt://host:6001 in the summary, and
+# leave the server on 6000 behind a closed port -- an install that looked
+# configured and could not be reached. A refusal before anything is written is
+# the only honest answer: the operator learns where the setting really lives.
+#
+# --rtmp-port 0 stays allowed. It does not stop the server binding RTMP; it
+# leaves the firewall closed to it, which is a choice this script CAN carry out.
+refuse_unappliable_ports() {
+  [ "$MODE" = binary ] || return 0
+  if [ "$SRT_PORT" != "$SERVER_SRT_PORT" ]; then
+    die "--srt-port ${SRT_PORT} cannot be applied in binary mode: the server's SRT port is a setting in its database (Settings -> Listeners, ${SERVER_SRT_PORT} on a new install), not something this installer writes. Install on ${SERVER_SRT_PORT}, then change it under Settings -> Listeners and open the new port in the firewall."
+  fi
+  if [ "$RTMP_PORT" != 0 ] && [ "$RTMP_PORT" != "$SERVER_RTMP_PORT" ]; then
+    die "--rtmp-port ${RTMP_PORT} cannot be applied in binary mode: the server's RTMP port is a setting in its database (Settings -> Listeners, ${SERVER_RTMP_PORT} on a new install), not something this installer writes. Install on ${SERVER_RTMP_PORT} (or pass --rtmp-port 0 to keep it closed in the firewall), then change it under Settings -> Listeners."
+  fi
+}
+
+# existing_container_ports reads the container side of the SRT and RTMP
+# mappings out of a docker-compose.yml this script wrote before, into
+# CONTAINER_SRT_PORT/CONTAINER_RTMP_PORT. With no file, or no mapping it can
+# read, they stay on the server's defaults.
+#
+# A RE-RUN MUST NOT MOVE THE CONTAINER SIDE. Installers before the host:server
+# fix published `--srt-port 7000` as "7000:7000/udp", onto a port nothing in the
+# container listened on, and the fix an operator found was to move the listener
+# to 7000 under Settings -> Listeners. Re-running with the same flag then wrote
+# "7000:6000/udp" -- onto the port the server had just been told to leave -- and
+# the ingest went dark with nothing said. The listener lives in the database,
+# which this script cannot read without stopping the container, so the mapping
+# already in the file is the best record there is of where it is now: the one
+# the operator made work.
+#
+# Read in the shape write-out below produces: the SRT entry is the one ending
+# /udp, and the RTMP entry is the tcp mapping written directly after it (80:80,
+# the acme challenge, is never it). A hand-edited file in some other shape
+# falls back to the defaults for whatever it cannot place.
+existing_container_ports() { # existing_container_ports <compose-file>
+  local f="$1" found
+  [ -f "$f" ] || return 0
+  found="$(awk '
+    /^[[:space:]]*-[[:space:]]*"?[0-9.:]+(\/(udp|tcp))?"?[[:space:]]*$/ {
+      s = $0; gsub(/[[:space:]"-]/, "", s)
+      proto = "tcp"; if (s ~ /\/udp$/) proto = "udp"
+      sub(/\/(udp|tcp)$/, "", s)
+      n = split(s, p, ":"); if (n < 2) next
+      if (proto == "udp") { if (srt == "") { srt = p[n]; after = 1 } ; next }
+      if (after && rtmp == "" && !(p[n-1] == 80 && p[n] == 80)) rtmp = p[n]
+      after = 0
+    }
+    END { print srt " " rtmp }' "$f")"
+  local srt="${found%% *}" rtmp="${found#* }"
+  if [[ "$srt" =~ ^[0-9]+$ ]] && [ "$srt" -ge 1 ] && [ "$srt" -le 65535 ]; then
+    CONTAINER_SRT_PORT="$srt"
+  fi
+  if [[ "$rtmp" =~ ^[0-9]+$ ]] && [ "$rtmp" -ge 1 ] && [ "$rtmp" -le 65535 ]; then
+    CONTAINER_RTMP_PORT="$rtmp"
+  fi
+  if [ "$CONTAINER_SRT_PORT" != "$SERVER_SRT_PORT" ] || [ "$CONTAINER_RTMP_PORT" != "$SERVER_RTMP_PORT" ]; then
+    info "keeping the existing mapping's container side: SRT udp/${CONTAINER_SRT_PORT}, RTMP tcp/${CONTAINER_RTMP_PORT}"
+    info "(it has to match Settings -> Listeners; a new install listens on ${SERVER_SRT_PORT}/${SERVER_RTMP_PORT})"
   fi
 }
 
@@ -1196,19 +1325,37 @@ gather_configuration() {
   fi
   ok "mode: $MODE"
 
+  # The mode may only have been decided just now, at the prompt above.
+  refuse_unappliable_ports
+
   header "=== Ports ==="
   [ "$HTTP_PORT_SET" = true ] || ask "Web UI port (tcp)" "$HTTP_PORT" HTTP_PORT
-  [ "$SRT_PORT_SET" = true ]  || ask "SRT ingest port (UDP — this is the one people forget)" "$SRT_PORT" SRT_PORT
-  [ "$RTMP_SET" = true ]      || ask "RTMP ingest port (tcp — 0 to decline it)" "$RTMP_PORT" RTMP_PORT
+  if [ "$MODE" = binary ]; then
+    # Not asked: see refuse_unappliable_ports. Asking for a number that is then
+    # only written into a firewall rule is how the SRT address in the summary
+    # came to name a port nothing listened on.
+    info "SRT udp/${SRT_PORT} and RTMP tcp/${SERVER_RTMP_PORT} are the server's own listeners;"
+    info "change them after sign-in under Settings -> Listeners."
+  else
+    [ "$SRT_PORT_SET" = true ]  || ask "SRT ingest port (UDP — this is the one people forget)" "$SRT_PORT" SRT_PORT
+    [ "$RTMP_SET" = true ]      || ask "RTMP ingest port (tcp — 0 to decline it)" "$RTMP_PORT" RTMP_PORT
+  fi
   # The port IS the switch, server-side too: internal/engine binds both
   # listeners and treats 0 as off. Asking a yes/no here and a port there meant
   # two different ways to say the same thing.
   case "$RTMP_PORT" in 0|"") ENABLE_RTMP="no" ;; *) ENABLE_RTMP="yes" ;; esac
 
   # The variable name goes in so an accepted alternative comes back out.
+  # Except in binary mode for the two ingest ports: there is no alternative to
+  # offer, because nothing here can move the server's listener. Warn only.
   warn_if_taken "$HTTP_PORT" tcp "web UI"      HTTP_PORT
-  warn_if_taken "$SRT_PORT"  udp "SRT ingest"  SRT_PORT
-  [ "$ENABLE_RTMP" = yes ] && warn_if_taken "$RTMP_PORT" tcp "RTMP ingest" RTMP_PORT
+  if [ "$MODE" = binary ]; then
+    warn_if_taken "$SRT_PORT"  udp "SRT ingest"
+    [ "$ENABLE_RTMP" = yes ] && warn_if_taken "$RTMP_PORT" tcp "RTMP ingest"
+  else
+    warn_if_taken "$SRT_PORT"  udp "SRT ingest"  SRT_PORT
+    [ "$ENABLE_RTMP" = yes ] && warn_if_taken "$RTMP_PORT" tcp "RTMP ingest" RTMP_PORT
+  fi
 
   header "=== TLS ==="
   echo "  Plain HTTP sends the login form and session cookie in clear text."
@@ -1510,6 +1657,9 @@ install_docker_mode() {
     tls_yaml
   } > "$INSTALL_DIR/config.yaml"
 
+  # Read BEFORE the file is rewritten below: it is the only record this script
+  # has of where the listeners are now. See existing_container_ports.
+  existing_container_ports "$INSTALL_DIR/docker-compose.yml"
   preserve_existing "$INSTALL_DIR/docker-compose.yml"
   {
     printf 'services:\n'
@@ -1523,8 +1673,17 @@ install_docker_mode() {
     # port of the same number instead: the container starts, the UI works, and
     # the ingest silently receives nothing. It is the single most common
     # first-run failure.
-    printf '      - "%s:%s/udp"\n' "$SRT_PORT" "$SRT_PORT"
-    [ "$ENABLE_RTMP" = yes ] && printf '      - "%s:%s"\n' "$RTMP_PORT" "$RTMP_PORT"
+    #
+    # HOST PORT ONTO THE SERVER'S PORT. The container side is where the server
+    # actually binds (SERVER_SRT_PORT/SERVER_RTMP_PORT, the database defaults);
+    # the host side is what the operator chose. This was "N:N", which for any
+    # N but the default published a port nothing inside the container listened
+    # on. If the listener is later moved under Settings -> Listeners, the
+    # container side here has to follow it -- nothing makes it follow, so a
+    # re-run keeps whatever container side the existing file already had
+    # (CONTAINER_SRT_PORT/CONTAINER_RTMP_PORT, from existing_container_ports).
+    printf '      - "%s:%s/udp"\n' "$SRT_PORT" "$CONTAINER_SRT_PORT"
+    [ "$ENABLE_RTMP" = yes ] && printf '      - "%s:%s"\n' "$RTMP_PORT" "$CONTAINER_RTMP_PORT"
     [ "$TLS_MODE" = acme ] && printf '      - "80:80"\n'
     printf '    volumes:\n'
     printf '      - polyemesis-data:/data\n'
@@ -1958,6 +2117,37 @@ fi
 # a first upgrade before enabling it, or a restore rehearsal -- has a
 # consistent data directory already, and an unconditional stop would abort
 # this script under set -e before a single check had run.
+#
+# AND A FAILURE AFTER THE STOP MUST NOT LEAVE IT DOWN IN SILENCE. Every exit
+# below the stop -- a full disk under cp, a backup without secret.key, one that
+# will not open -- used to leave the service stopped, and only the last of them
+# said so. Nothing has been replaced until the success message at the bottom,
+# so a failure starts what this script stopped and says so; if that start
+# fails too, it says STOPPED, loudly, with the command. The copy this run began
+# is removed: it is not a verified way back, and a partial one from a full
+# disk goes on holding the space that stopped it.
+STOPPED_BY_US=false
+DEST_CREATED=false
+on_exit() {
+  local rc=\$?
+  [ "\$rc" -eq 0 ] && return 0
+  if [ "\$DEST_CREATED" = true ] && [ -e "\$dest" ]; then
+    rm -rf "\$dest" && echo "removed the unverified backup \$dest" >&2
+  fi
+  if [ "\$STOPPED_BY_US" = true ]; then
+    echo "this script stopped \$SERVICE_NAME; starting it again" >&2
+    if sudo systemctl start "\$SERVICE_NAME"; then
+      echo "\$SERVICE_NAME is running again on the binary it had. Nothing was upgraded." >&2
+    else
+      echo >&2
+      echo "!!! \$SERVICE_NAME IS STOPPED and could not be started again. Start it with:" >&2
+      echo "!!!     sudo systemctl start \$SERVICE_NAME" >&2
+    fi
+  fi
+  return "\$rc"
+}
+trap on_exit EXIT
+
 if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "\$SERVICE_NAME" 2>/dev/null; then
   echo "stopping \$SERVICE_NAME so the copy is consistent"
   sudo systemctl stop "\$SERVICE_NAME"
@@ -1968,6 +2158,7 @@ else
 fi
 
 echo "backing up \$DATA_DIR to \$dest"
+DEST_CREATED=true
 cp -a "\$DATA_DIR" "\$dest"
 
 # KEEP THE BINARY THAT WORKS. This script has always told the operator to
@@ -1977,6 +2168,9 @@ if [ -x "\$BIN_PATH" ]; then
   cp -a "\$BIN_PATH" "\$dest/polyemesis.previous"
   echo "kept the running binary at \$dest/polyemesis.previous"
 fi
+# Stamp the backup with the moment it was taken. cp -a carried over the data
+# directory's own mtime; rollback.sh counts media newer than this.
+touch "\$dest"
 
 # THE CHECK THAT MATTERS. Not "is there a backup" but "does the backup hold the
 # file that makes the database usable". Without secret.key every destination
@@ -2011,8 +2205,6 @@ fi
 echo "checking the backup opens..."
 if ! "\$BIN_PATH" -verify-backup "\$dest"; then
   echo "ERROR: the backup at \$dest is not usable. Refusing to upgrade." >&2
-  echo "The service is still stopped; start it with:" >&2
-  echo "    sudo systemctl start \$SERVICE_NAME" >&2
   exit 1
 fi
 
@@ -2027,14 +2219,155 @@ echo
 echo "    sudo install -m 0755 ./polyemesis \$BIN_PATH"
 echo "    sudo systemctl start \$SERVICE_NAME"
 echo
+# THE WAY BACK IS A SCRIPT, NOT A PASTE. This printed
+#   sudo rm -rf \$DATA_DIR && sudo cp -a \$dest \$DATA_DIR
+# which deleted every recording, upload and font made since the upgrade -- the
+# data directory holds them all -- and copied polyemesis.previous, root-owned,
+# into the live directory, where every later backup carried it. rollback.sh
+# restores the state and leaves the media alone; see the note above it.
 echo "If the upgrade goes wrong, the way back is:"
 echo
-echo "    sudo systemctl stop \$SERVICE_NAME"
-echo "    sudo rm -rf \$DATA_DIR && sudo cp -a \$dest \$DATA_DIR"
-echo "    sudo install -m 0755 \$dest/polyemesis.previous \$BIN_PATH"
-echo "    sudo systemctl start \$SERVICE_NAME"
+echo "    sudo $INSTALL_DIR/rollback.sh \$dest"
+echo
+echo "It restores the database, secret.key and the rest of the state from the"
+echo "backup and puts the previous binary back. Recordings and uploads made since"
+echo "the upgrade are kept."
 EOF
   chmod +x "$INSTALL_DIR/update.sh"
+  write_binary_rollback_script
+}
+
+# write_binary_rollback_script writes the way back that update.sh points at.
+#
+# WHY A SCRIPT. The rollback update.sh used to print was a paste:
+#
+#	sudo rm -rf $DATA_DIR && sudo cp -a $dest $DATA_DIR
+#
+# The data directory is not just state. It holds recordings, uploads, fonts,
+# the HLS and playout output and the downloaded speech models, so that line
+# deleted everything recorded since the upgrade -- the hours an operator is
+# least able to lose, since a failed upgrade is noticed on air. It also copied
+# polyemesis.previous (root-owned, 25-30 MB) into the live directory, and from
+# there into every later backup.
+#
+# So this restores STATE and leaves MEDIA where it is. State is everything in
+# the backup except the directories named in MEDIA_DIRS and the kept binary;
+# enumerating the media rather than the state means a state file added in a
+# later release is restored without anyone remembering to list it here. The
+# live database's -wal and -shm go first: left beside the restored main file,
+# SQLite would replay the NEWER schema's log into the older database.
+#
+# Media made since the upgrade is counted and kept. The restored database does
+# not list it, but the files are the operator's, and deleting them is not a
+# decision a rollback gets to make.
+write_binary_rollback_script() {
+  cat > "$INSTALL_DIR/rollback.sh" <<EOF
+#!/usr/bin/env bash
+# Roll back an upgrade made with update.sh: restore the state from its backup,
+# keep the media, put the previous binary back. See install.sh for why.
+set -euo pipefail
+
+DATA_DIR="$DATA_DIR"
+BIN_PATH="$BIN_PATH"
+SERVICE_NAME="$SERVICE_NAME"
+# Kept as they are in the live directory; never deleted, never overwritten.
+# Mirrors the paths internal/config derives from DataDir.
+MEDIA_DIRS="recordings uploads hls playout models fonts logs"
+
+usage() {
+  echo "usage: rollback.sh <backup directory>" >&2
+  echo "  the directory update.sh named, e.g. \${DATA_DIR}.bak-YYYY-MM-DD-HHMM" >&2
+  echo "backups on this host:" >&2
+  ls -d "\${DATA_DIR}".bak-* 2>/dev/null | sed 's/^/  /' >&2 || echo "  (none)" >&2
+}
+
+backup="\${1:-}"
+if [ -z "\$backup" ] || [ "\$backup" = -h ] || [ "\$backup" = --help ]; then
+  usage; exit 2
+fi
+backup="\${backup%/}"
+
+# ONLY A BACKUP update.sh TOOK. Anything else -- the live directory itself, a
+# typo, some other copy -- is refused rather than restored over the live state.
+case "\$backup" in
+  "\${DATA_DIR}".bak-*) ;;
+  *) echo "ERROR: \$backup is not a backup update.sh took (\${DATA_DIR}.bak-*)." >&2
+     usage; exit 1 ;;
+esac
+for f in polyemesis.db secret.key; do
+  if [ ! -f "\$backup/\$f" ]; then
+    echo "ERROR: \$backup has no \$f. Refusing to roll back onto it." >&2
+    exit 1
+  fi
+done
+if [ ! -x "\$backup/polyemesis.previous" ]; then
+  echo "ERROR: \$backup has no polyemesis.previous. The restored database needs the" >&2
+  echo "binary it was written by; the current one would migrate it forward again." >&2
+  exit 1
+fi
+[ -d "\$DATA_DIR" ] || { echo "ERROR: \$DATA_DIR does not exist." >&2; exit 1; }
+
+is_media() {
+  local m
+  for m in \$MEDIA_DIRS; do [ "\$1" = "\$m" ] && return 0; done
+  return 1
+}
+
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "\$SERVICE_NAME" 2>/dev/null; then
+  echo "stopping \$SERVICE_NAME"
+  systemctl stop "\$SERVICE_NAME"
+fi
+
+# A rollback that dies halfway leaves a mix of old and new state. Say so, and
+# say the service is down: starting it on that mix is not something to do
+# without looking.
+incomplete() {
+  local rc=\$?
+  [ "\$rc" -eq 0 ] && return 0
+  echo >&2
+  echo "!!! ROLLBACK INCOMPLETE. \$SERVICE_NAME IS STOPPED. The backup at \$backup is" >&2
+  echo "!!! untouched; fix the error above and run this again." >&2
+  return "\$rc"
+}
+trap incomplete EXIT
+
+# The newer database's log must not be replayed into the older file.
+rm -f "\$DATA_DIR/polyemesis.db-wal" "\$DATA_DIR/polyemesis.db-shm"
+
+restored=""
+for src in "\$backup"/* "\$backup"/.[!.]*; do
+  [ -e "\$src" ] || continue
+  name="\${src##*/}"
+  [ "\$name" = polyemesis.previous ] && continue
+  is_media "\$name" && continue
+  rm -rf "\${DATA_DIR:?}/\$name"
+  cp -a "\$src" "\$DATA_DIR/\$name"
+  restored="\$restored \$name"
+done
+echo "restored from \$backup:\$restored"
+
+newer=0
+for m in \$MEDIA_DIRS; do
+  [ -d "\$DATA_DIR/\$m" ] || continue
+  # The backup directory's own mtime is when update.sh finished writing it.
+  n=\$(find "\$DATA_DIR/\$m" -type f -newer "\$backup" 2>/dev/null | wc -l | tr -d ' ')
+  newer=\$((newer + n))
+done
+echo "kept \$MEDIA_DIRS as they are (\$newer file(s) written since the backup;"
+echo "the restored database does not list those, but they are still on disk)"
+
+install -m 0755 "\$backup/polyemesis.previous" "\$BIN_PATH"
+echo "put the previous binary back at \$BIN_PATH"
+
+trap - EXIT
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl start "\$SERVICE_NAME"
+  echo "started \$SERVICE_NAME"
+else
+  echo "no systemctl here; start the server yourself"
+fi
+EOF
+  chmod +x "$INSTALL_DIR/rollback.sh"
 }
 
 # write_binary_uninstall_script gives systemd installs the same thing docker
@@ -2196,7 +2529,7 @@ fi
 echo
 EOF
 	chmod +x "$INSTALL_DIR/uninstall.sh"
-	ok "wrote update.sh and uninstall.sh"
+	ok "wrote update.sh, rollback.sh and uninstall.sh"
 }
 
 write_helper_scripts() {
@@ -2304,6 +2637,49 @@ docker volume inspect polyemesis-data >/dev/null 2>&1 || {
   exit 1
 }
 
+# A FAILURE AFTER THE STOP BELOW MUST NOT LEAVE THE SERVER DOWN IN SILENCE.
+# Every refusal from here on used to exit under set -e with the container
+# stopped, and only one of them said so -- so a broadcast host that failed its
+# upgrade check was simply off the air until somebody noticed. Nothing has been
+# pulled or replaced until the backup is verified, so the right answer to a
+# failure is to start what we stopped, and to say it either way.
+#
+# The archive this run started goes too: a failed run's archive is by
+# definition not a verified way back, and a half-written one from a full disk
+# goes on holding the space that stopped it.
+STOPPED_BY_US=false
+ARCHIVE_CREATED=false
+PULLED=false
+on_exit() {
+  local rc=\$?
+  [ "\$rc" -eq 0 ] && return 0
+  if [ "\$ARCHIVE_CREATED" = true ] && [ -e "\$dest" ]; then
+    rm -f "\$dest" && echo "removed the unverified archive \$dest" >&2
+  fi
+  if [ "\$STOPPED_BY_US" = true ]; then
+    echo "this script stopped the container; starting it again" >&2
+    if \$COMPOSE_CMD start >&2; then
+      if [ "\$PULLED" = true ]; then
+        # NOT "nothing was upgraded". The pull succeeded, so \`up -d\` may have
+        # recreated the container on the new image before it failed, and the
+        # start above then started THAT -- which migrates the database forward.
+        # Which image is running is not something this script can promise.
+        echo "The upgrade failed after pulling the new image. Check which image is" >&2
+        echo "running and why: \$COMPOSE_CMD ps; \$COMPOSE_CMD logs --tail 50" >&2
+        echo "The verified pre-upgrade archive is at \$dest (docs/UPGRADING.md, Rolling back)." >&2
+      else
+        echo "The container is running again on the image it had. Nothing was upgraded." >&2
+      fi
+    else
+      echo >&2
+      echo "!!! THE CONTAINER IS STOPPED and could not be started again. Start it with:" >&2
+      echo "!!!     cd $INSTALL_DIR && \$COMPOSE_CMD start" >&2
+    fi
+  fi
+  return "\$rc"
+}
+trap on_exit EXIT
+
 # STOP BEFORE ARCHIVING. tar of a live WAL database reads the main file, the
 # -wal and the -shm at three different instants, so the archive can hold a torn
 # transaction and is not guaranteed to open -- and it is the ONLY way back,
@@ -2314,10 +2690,25 @@ docker volume inspect polyemesis-data >/dev/null 2>&1 || {
 # \`stop\`, not \`down\`: down removes the container, and the operator may want it
 # back untouched if the checks below refuse the upgrade.
 echo "stopping the container so the archive is consistent"
+STOPPED_BY_US=true
 \$COMPOSE_CMD stop
 
-docker run --rm -v polyemesis-data:/data -v "$INSTALL_DIR:/backup" alpine \\
-  tar czf "/backup/backup-\${stamp}.tar.gz" -C /data .
+# THE ARCHIVE HOLDS secret.key AND tls/ca.key, SO ONLY ROOT MAY READ IT.
+# It used to be written by tar INSIDE the alpine container into a bind mount of
+# this directory, so its mode came from the container's umask, not the
+# operator's: 0644, in a 0755 directory, and any local account could
+# \`tar xzOf backup-*.tar.gz ./secret.key\`. Now the container writes the
+# archive to stdout and this shell creates the file -- 0600 under umask 077,
+# and with noclobber, so a file that appeared since the check above is refused
+# rather than truncated.
+if ! ( umask 077; set -C; : > "\$dest" ) 2>/dev/null; then
+  echo "ERROR: could not create \$dest (it exists, or the directory is not writable)." >&2
+  exit 1
+fi
+ARCHIVE_CREATED=true
+docker run --rm -v polyemesis-data:/data:ro alpine tar czf - -C /data . > "\$dest"
+# Archives written before this change are 0644. Close them too.
+chmod 0600 "$INSTALL_DIR"/backup-*.tar.gz 2>/dev/null || true
 
 # LIST ONCE, THEN TEST THE LISTING. Never pipe tar into a reader that can exit
 # early. \`tar tzf … | grep -q\` looks obviously correct and is not: grep -q
@@ -2359,22 +2750,32 @@ fi
 # carries the same SQLite driver the server runs on. It opens the file, walks
 # it and reads the schema; it runs no migration, because migrating the backup
 # would move the copy forward to the schema being kept a way back from. #643.
+#
+# THE ARCHIVE GOES IN ON STDIN AND IS UNPACKED INSIDE THE CONTAINER, into a
+# directory the image's own user made and can write. This used to unpack on
+# the host into a root-owned 0700 mktemp directory and bind it in at
+# /backup:ro, and every real upgrade was refused: the image runs as uid 10001,
+# and SQLite opening a WAL database needs to create its -shm beside it, which a
+# read-only mount forbids -- \`unable to open database file (14)\`, with the
+# container left stopped. The stub docker in acceptance-install.sh accepted the
+# mount, so nothing red ever said so. No host directory means no host
+# ownership, mode or mount flag for the check to trip over, and secret.key is
+# never unpacked onto the host at all.
 echo "checking the backup opens..."
-verify_dir="\$(mktemp -d)"
-trap 'rm -rf "\$verify_dir"' EXIT
-if ! tar xzf "\$dest" -C "\$verify_dir"; then
-  echo "ERROR: the backup archive will not unpack. Refusing to upgrade." >&2
-  exit 1
-fi
-if ! docker run --rm -v "\$verify_dir:/backup:ro" "$IMAGE" -verify-backup /backup; then
+if ! docker run -i --rm --entrypoint sh "$IMAGE" \\
+    -c 'd="\$(mktemp -d)" && tar xzf - -C "\$d" && exec polyemesis -verify-backup "\$d"' \\
+    < "\$dest"; then
   echo "ERROR: the backup at \$dest is not usable. Refusing to upgrade." >&2
-  echo "The container is still stopped; bring it back with:" >&2
-  echo "    \$COMPOSE_CMD start" >&2
   exit 1
 fi
 
 echo "backup verified: \${entries} entries, and the database opens"
+# From here the archive is the way back, and a failed pull or start must keep it.
+ARCHIVE_CREATED=false
 \$COMPOSE_CMD pull
+# Past this line the image on disk is the new one, and "nothing was upgraded"
+# stops being something on_exit can say. See the note there.
+PULLED=true
 \$COMPOSE_CMD up -d
 echo "updated. Watch the first minute: \$COMPOSE_CMD logs -f"
 EOF
@@ -2579,6 +2980,17 @@ print_summary() {
 
   echo "  ${BOLD}Point your encoder at${NC}"
   echo "    srt://${hostpart}:${SRT_PORT}?streamid=<token>"
+  if [ "$MODE" != docker ]; then
+    echo "  (the server's SRT port is set under Settings -> Listeners; if it was changed"
+    echo "  there, that number is the one to use, and the one to open in the firewall)"
+  else
+    # The docker half of the same caveat, which used to go unsaid: the host port
+    # above is published onto the container port the server listens on, and
+    # nothing moves that mapping when the listener moves.
+    echo "  (inside the container the server listens on udp/${CONTAINER_SRT_PORT}; if you move"
+    echo "  it under Settings -> Listeners, change the container side of the SRT mapping in"
+    echo "  ${INSTALL_DIR}/docker-compose.yml to match and run \`${COMPOSE_CMD} up -d\`)"
+  fi
   echo "  The Sources page shows the token. It is the address, so every source"
   echo "  shares this one port — adding another needs no new port and no restart."
   echo
@@ -2625,8 +3037,12 @@ it gets tested.
 Options:
   --mode docker|binary   install mode (default: ask, then docker)
   --http-port N          web UI port (default 8080)
-  --srt-port N           SRT ingest port, UDP (default 6000)
-  --rtmp-port N          RTMP ingest port, tcp (default 1935; 0 declines it)
+  --srt-port N           SRT ingest port, UDP (default 6000). Docker mode maps
+                         this host port onto the server's 6000; binary mode
+                         refuses anything else -- the server's own port is set
+                         under Settings -> Listeners after sign-in.
+  --rtmp-port N          RTMP ingest port, tcp (default 1935; 0 declines it).
+                         Same rule as --srt-port.
   --rtmp                 accepted for compatibility; RTMP is published by default
   --tls off|selfsigned|acme
                          TLS mode. Not passing it takes the interactive
@@ -2731,6 +3147,9 @@ parse_args() {
       die "$pv must be between 1 and 65535, not ${!pv}"
     fi
   done
+  # Here as well as in the interview, so `--mode binary --srt-port N --check`
+  # says so before anything else runs.
+  refuse_unappliable_ports
 }
 
 main() {

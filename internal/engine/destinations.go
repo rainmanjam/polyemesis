@@ -981,6 +981,13 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 			func() *supervisor.Process { return proc }, e.onLog),
 		OnState: e.onState,
 		LogSink: logSink{e},
+		// Every kind, not only files. A file destination is where it showed --
+		// stopped after its publisher left, it sat out the grace and was
+		// SIGKILLed with no trailer -- but an RTMP or SRT output stopped on the
+		// same silent feed took the same 8s and ended its session unflushed.
+		// The wake only ever reaches a feed that has gone quiet. See
+		// relay.Hub.Wake.
+		WakeOnStop: relayWaker(hub, subName),
 	})
 
 	e.mu.Lock()
@@ -1346,6 +1353,8 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 		OnLog:       e.onLog,
 		OnState:     e.onState,
 		LogSink:     logSink{e},
+		// The redundant output stops on the same quiet feed as its primary.
+		WakeOnStop: relayWaker(hub, sub),
 	})
 
 	d.backup = proc

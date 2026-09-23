@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -1595,6 +1596,14 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "not signed in")
 			return
 		}
+		// A cookie session gets its CSRF cookie re-sent whenever the one the
+		// browser holds is not the value bound to the session: one minted
+		// before the binding (every browser signed in across that upgrade), or
+		// one somebody planted. Before requireCSRF, so even a write refused for
+		// a stale cookie carries the fix and the SPA's next attempt succeeds.
+		if p.token == nil {
+			s.sessions.RefreshCSRFCookie(w, r)
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalKey, p)))
 	})
 }
@@ -1843,7 +1852,7 @@ func (s *Server) requireCSRF(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if err := auth.CheckCSRF(r); err != nil {
+		if err := s.sessions.CheckCSRF(r); err != nil {
 			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
@@ -1856,14 +1865,28 @@ func (s *Server) requireCSRF(next http.Handler) http.Handler {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.WriteHeader(status)
 	if v == nil {
+		w.WriteHeader(status)
 		return
 	}
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		// The status line is already written, so this can only be logged.
+	// ENCODE FIRST, THEN COMMIT THE STATUS. This used to write the status line
+	// and then encode straight onto the wire, discarding the error -- so a value
+	// encoding/json refuses (a NaN from a loudness meter reading digital
+	// silence was the one that happened) went out as "200" with an empty body,
+	// which a client can parse as neither the payload nor an error, and nobody
+	// was told. json.Encoder buffers the whole value before writing anyway, so
+	// encoding into a buffer here costs nothing extra and leaves the status
+	// still ours to choose when the encode fails.
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		slog.Error("a response body could not be encoded; answering 500 instead of an empty success",
+			"status", status, "type", fmt.Sprintf("%T", v), "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(apiError{Error: "the response could not be encoded; this is a server bug and has been logged"})
 		return
 	}
+	w.WriteHeader(status)
+	_, _ = w.Write(buf.Bytes())
 }
 
 // apiError is the single error shape the SPA handles.
@@ -1905,6 +1928,12 @@ const codeSourceRequired = "source_required"
 
 const codeNoSource = "no_source"
 
+// codeSettingsConflict: the settings document was saved by somebody else after
+// this client read it, so its save was refused rather than reverting theirs.
+// The console branches on it to offer a reload instead of a retry, since a
+// retry would conflict again. See handlePutSettings.
+const codeSettingsConflict = "settings_conflict"
+
 // noSourceMsg is the sentence, written once so that twenty routes cannot drift
 // into twenty wordings of it.
 //
@@ -1929,6 +1958,18 @@ var errNoSource = errors.New(noSourceMsg)
 // and the operator is the one who ends it.
 func writeNoSource(w http.ResponseWriter) {
 	writeErrorCode(w, http.StatusServiceUnavailable, codeNoSource, noSourceMsg)
+}
+
+// writeNoSourceStored is the same refusal from PUT /settings, which answers it
+// AFTER storing the rest of the document and so has to hand back the version
+// it stored -- see failStored in handlePutSettings. A named helper rather than
+// an inline body so TestEveryNoSourceRefusalIsAGuardOrIsRecorded still finds
+// the site by name.
+func writeNoSourceStored(w http.ResponseWriter, version string) {
+	writeJSON(w, http.StatusServiceUnavailable, storedSettingsError{
+		apiError: apiError{Error: noSourceMsg, Code: codeNoSource},
+		Version:  version,
+	})
 }
 
 // requireSource refuses a request that needs a running programme when there is

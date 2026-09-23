@@ -8,6 +8,468 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Docker upgrade command named an image tag that does not exist.**
+  `GET /upgrade/plan` printed `docker pull rainmanjam/polyemesis:v0.10.0`, the
+  release feed's spelling, but release.yml publishes images as `:0.10.0` (the
+  `v` is dropped), so the pull answered "not found". Before any update check it
+  printed `rainmanjam/polyemesis:` with an empty tag, and the manual install
+  plan named a `polyemesis--linux-amd64` file. The image tag now comes from one
+  function, `upgrade.ImageTag`, and a plan with no tag names none.
+- **A compose-built install was told to upgrade with a command that does
+  nothing.** The repo's `docker-compose.yml` builds the image from source and
+  stamps version `compose`, so the update check can never compare it — and
+  `/upgrade/plan` offered `docker compose pull && docker compose up -d`, which
+  skips a `build:` service and restarts the same image, exiting 0. An image
+  whose version is not a release tag (`compose`, `docker`, a `git describe`
+  string) is now told `git pull && docker compose up -d --build`, with the
+  published image named as the way to a comparable version. `upgrade.PlanFor`
+  takes the running and offered versions as named fields, so the two strings
+  cannot be passed the wrong way round. docs/UPGRADING.md said the same no-op
+  pull and is corrected.
+- **A GPU container was told to pull the CPU image.** The CUDA and VA-API
+  images are published as `:0.10.0-cuda` and `:0.10.0-vaapi` and carry the
+  same version as the default image, so the upgrade plan named `:0.10.0`, and
+  that pull succeeds onto an image with no hardware encoder. The GPU
+  Dockerfiles now declare `POLYEMESIS_IMAGE_VARIANT`, and `upgrade.ImageTag`
+  takes the variant as a required argument, so it adds the suffix. A variant
+  this build does not recognise gets no tag in the plan.
+- `-verify-backup` no longer writes to the backup it checks. It opened
+  `polyemesis.db` read-write, so SQLite folded the `-wal` into the main file and
+  deleted both sidecars, although INSTALL.md says it writes nothing; and on a
+  read-only directory or mount — how the Docker `update.sh` hands it the backup
+  — it could not create the `-shm` and refused a good backup. It now verifies a
+  private copy in the temporary directory and leaves the backup byte-identical.
+- `-verify-backup` no longer accepts any `secret.key`. It checked only that the
+  file existed, so a key from another install, an empty file, a non-hex or
+  wrong-length one, or a directory all passed — and the restore then either
+  refused to boot or brought every credential back unreadable. It now reads the
+  key with the parser the server boots with, and tries it on the values the
+  database sealed: for each sealed column holding any, the key must open at
+  least one, or the backup is refused naming the table. The success line now
+  says so. Where a column holds one value this server's own key cannot open
+  either (the MQTT password or automod key after an earlier bad restore), the
+  refusal says so and names what to re-enter or clear in the console, instead of
+  sending you to take a backup that would fail the same way.
+- **Re-running `install.sh` no longer moves a working install off its own
+  ports.** Every port it checked was already held by the service it was about
+  to restart, so under `--yes` it accepted its own offer: the web UI moved
+  8080 -> 8081. A port held by the polyemesis process (binary mode) or published
+  by the polyemesis container (docker mode) is now recognised as ours. The port
+  check also reads only the local-address column, so `10.0.0.80:5000` is no
+  longer taken for a listener on port 80.
+- **`--srt-port` / `--rtmp-port` now mean something, or are refused.** The
+  server's SRT and RTMP listeners are database settings (Settings -> Listeners),
+  and nothing the installer writes reaches them. In binary mode the flags only
+  opened a firewall port and printed an address nothing listened on; they are
+  now refused with a pointer to Settings -> Listeners. In docker mode the chosen
+  host port is published onto the server's 6000/1935 inside the container,
+  instead of `N:N`, which published a port nothing inside listened on. A
+  docker re-run keeps the container side an existing `docker-compose.yml`
+  already has, so an install that made `7000:7000/udp` work by moving the
+  listener to 7000 is not rewritten to `7000:6000/udp`; the docker summary now
+  says that moving the listener means changing that container side too.
+- **The docker-mode `update.sh` refused every real upgrade.** Its backup check
+  unpacked the archive into a root-owned 0700 directory and bound it into the
+  image read-only; the image runs as uid 10001 and SQLite cannot open a WAL
+  database without creating its `-shm`, so the check failed with
+  `unable to open database file (14)` and left the container stopped. The
+  archive now goes in on stdin and is unpacked inside the container. The
+  acceptance stub that had accepted the read-only mount now models it.
+- **Docker backups are 0600.** `backup-*.tar.gz` holds `secret.key` and
+  `tls/ca.key`, and was written 0644 by tar inside the container, so any local
+  account could read the key out of it. The script now creates the file itself
+  under `umask 077` (and with noclobber), and tightens archives left by earlier
+  runs.
+- **A failed docker `update.sh` no longer leaves the container stopped in
+  silence.** It stops the container before the backup, and every refusal after
+  that point used to exit with it down. It now starts what it stopped, says so,
+  and removes the unverified archive; if the start fails, it says the container
+  is STOPPED and prints the command. A failure after the new image was pulled
+  does not claim "nothing was upgraded" -- `up -d` may already have recreated
+  the container on it -- and names the verified archive instead.
+- **The binary-mode `update.sh` does the same**: a refusal after `systemctl
+  stop` starts the service again (or says STOPPED, with the command) and
+  removes the unverified copy.
+- **The binary-mode rollback no longer deletes the recordings.** `update.sh`
+  printed `rm -rf <dataDir> && cp -a <backup> <dataDir>` as the way back. That
+  deleted every recording and upload made since the upgrade, and copied the
+  root-owned `polyemesis.previous` into the live directory, where every later
+  backup carried it. `install.sh` now writes `rollback.sh`, which restores the
+  state (database, `secret.key`, `tls/`), removes the newer `-wal`/`-shm`,
+  leaves the media directories alone, puts the previous binary back and starts
+  the service. `docs/UPGRADING.md` describes it.
+- **Every destination start cost about 15 seconds of dead air.** The relay
+  consumers' 15s `-analyzeduration` was documented as a ceiling that probing
+  leaves early, but the ffmpeg CLI forces the MPEG-TS demuxer's `scan_all_pmts`
+  to 1. With it set, the demuxer never declares its header complete, so every
+  destination, recorder, preview and meter read the whole window before writing
+  anything: 15.5s to first output on a 2s GOP, on 8.1.2 and 9.0.1. Relay
+  consumers now pass `-scan_all_pmts 0` and start in about one GOP. A late
+  joiner still waits for the next keyframe (#460). All four consumers now take
+  their input options from the one function, so none can miss this again.
+  `docs/investigations/398-e-probe-window.sh`, which had "shown" the ceiling
+  behaviour, stopped its consumer with SIGTERM. The signal flushes the probe,
+  so the result was an artefact. The script now measures time to first output.
+- **A short-segment recording lost its first segment.** A recorder started
+  before the encoder connected held the whole 15s probe window of media. It
+  then passed all of it to the segment muxer at once. With `segmentSeconds`
+  below about 15, segment 1 opened in the same wall-clock second as segment 0.
+  Both got the same `rec-%Y%m%d-%H%M%S` name, and segment 1 overwrote segment 0,
+  so the first ten seconds were gone. The probe fix above removes the backlog
+  in the usual case, but not in every case. If a declared track sends nothing
+  for 15s, for example an audio track that stays silent (#674), the probe still
+  runs its full window. The backlog then comes back. With `segmentSeconds`
+  below about 16, the first segment can still be overwritten. Segment names
+  are still only unique to the second.
+- **A recording or file destination stopped after its publisher left is
+  finalised, not killed.** Relay consumers read with no timeout by design, so a
+  destination can ride through a quiet patch. On a silent feed, FFmpeg never
+  acts on a single SIGTERM, so these stops waited out the 8s grace and were
+  SIGKILLed. That left an MKV with no duration and no cues. Affected: the last
+  segment when an ingest ended, `recording.enabled=false`, `docker stop` on an
+  idle server, and the Stop button on a file destination. The supervisor now
+  wakes a stopping relay consumer that has not exited after 0.75s. The relay
+  sends that consumer alone one empty PES start per stream, which completes the
+  packet FFmpeg is holding, and only into a feed that has been silent for
+  0.25s. The 0.75s is FFmpeg's 0.5s stats period plus a margin: on Linux FFmpeg
+  registers a SIGTERM only at its next stats tick, and a wake that lands before
+  then is forwarded as ordinary media and cannot be repeated. A 0.3s wake passed
+  on macOS, where the signal is noticed at once, and failed about half the time
+  on Linux. Measured: 8.0s and `duration=N/A` before, 0.75s and a finalised file
+  after, on both. The no-timeout rule is untouched: a running destination still
+  rides through silence.
+- **A segment that was never finalised no longer logs a WARN every 30 seconds.**
+  The recordings scanner re-probed an unmeasurable segment on every pass for
+  the life of the process. It now asks once per file size and says once, in
+  plain words, that the file was most likely never finalised and how to remux
+  it. Only a probe that ran and found no duration is remembered; a timeout or
+  an ffprobe that could not start is retried on the next scan, so a good
+  segment is not stuck at 0 ms by one slow moment.
+- **A failover to a source with fewer tracks no longer leaves the routed tracks
+  out of step.** A slate or a one-track backup carries only track 0, so tracks 2
+  and up vanish from the relay for the length of the outage. `amix` and the
+  duck's sidechain pair their inputs by sample count, not timestamp, so when the
+  primary returned, the missing track picked up where it stopped and was summed
+  with track 0 from an outage earlier: audio from before and after the outage in
+  one mix, offset by the outage (18 s measured) until the destination restarted.
+  Every track's chain in a multi-track graph now ends with
+  `aresample=async=1:first_pts=0`, which fills the gap with silence and anchors
+  every track at the same origin. One-track graphs are unchanged.
+- **Failover away from a dead primary lands at the grace period, not eight
+  seconds after it.** The copy hop that carried the primary into the selector
+  sits blocked on its now-quiet input and ignores SIGTERM, and the switch
+  waited out its full 8 s shutdown grace before starting the slate or backup
+  (11.5 s measured against a 3 s `graceSeconds`). Because the incoming feed's
+  timestamp offset is stamped at the decision, those 8 s also put its timeline
+  behind wall clock, and the next switch repaid them as an 8 s forward jump.
+  A switch now sends the outgoing copy hop SIGTERM while its input is still
+  delivering (a healthy hop exits in about 0.1 s that way) and waits at most
+  0.5 s. Only a hop still running after that is cut off from its input, so it
+  has nothing left to publish, and the replacement starts while the old child
+  finishes dying in the background. The wait, and so any leftover jump at the
+  next switch, is now at most 0.5 s, and a quick switch back does not wait for
+  the feed before last. The seam ledger line gains `outDetached=true` when a
+  hop is left behind this way.
+
+- **Deleting the last recorded segment works as soon as recording is off.**
+  `DELETE /recordings/{id}` refused any segment that started within one
+  segment length plus two minutes, recorder or no recorder, so turning
+  recording off and deleting what it had just made answered `409` for up to an
+  hour and two minutes, telling the operator to stop the recording they had
+  already stopped. With recording off the recorder's own segments are now
+  deletable at once. A file destination's output keeps the guard either way,
+  and its refusal now names the destination instead of the recorder.
+- **The same delete works when the free-space floor has stopped the recorder.**
+  The guard read `recording.enabled`, which stays on when `minFreeGb` halts
+  recording, so the last segment was refused for up to an hour and two minutes
+  exactly when the operator was deleting to free the disk. It now asks the
+  engines whether any recorder process is running.
+- Multi-source playout: every source's playout muxer wrote the same
+  `<dataDir>/playout/<variant>/`, so two programmes overwrote each other's
+  segments, either one's teardown cleared the other's live window, and
+  `playout.sourceId` changed nothing. Each source now packages into
+  `playout/<sourceId>/`; the public URL is unchanged. A top-level
+  `playout/<variant>/` left by an earlier release can be deleted.
+- A recording's `sourceId` flapped between programmes: every source's recording
+  manager scans the shared recordings directory and stamped its own source on
+  every file it saw, so the last scanner won and the clip editor named a clip's
+  tracks after the wrong programme. Master segments are now named
+  `rec-s<sourceId>-<date>-<time>.mkv` and attributed from the name; a segment
+  written by an earlier release keeps whatever attribution it already had.
+  The name also stops two sources that start recording in the same second
+  from writing the same file.
+- One-port SRT refusals now reach the encoder with their typed reason
+  (`REJ_BADSECRET`, `REJ_CLOSE`, `REJ_RESOURCE`, `REJ_ROGUE`, `REJ_UNSECURE`), as
+  [TROUBLESHOOTING](docs/TROUBLESHOOTING.md) already described. Every refusal
+  used to arrive as the generic `REJ_PEER`, because gosrt's server loop
+  overwrote the reason; the listener now runs its own accept loop.
+- The one-port SRT listener admits a publisher only into a source whose ingest
+  is set to SRT. It used to accept any source's token, so an SRT publish was
+  admitted into an RTMP or pull source beside the ingest already writing its
+  stream, and into a source created from its name alone -- which the API
+  reported `tokenEnforced: false` with no publish URL. Such a publish is now
+  refused with `REJ_RESOURCE`; choose SRT on the source first. `POST /sources`
+  now fills unspecified ingest fields from the defaults, so
+  `{"name": "…", "ingest": {"mode": "srt"}}` is a complete request, and the
+  Sources page explains an unchosen or pull source's token instead of pointing
+  at a one-port setting that no longer exists.
+- **`/api/v1/status` and `/api/v1/loudness` no longer answer 200 with an empty
+  body after the audio falls silent.** ebur128 prints `nan`/`-inf` for a
+  loudness window with no signal; the parser now reads those as the -70 LUFS
+  "not measured" floor. Separately, any response body that cannot be encoded
+  now answers 500 with an error and is logged, rather than a silent empty 200,
+  and an unencodable WebSocket event is dropped and logged instead of closing
+  every open console.
+- **`/healthz`, `/health`, `/livez` and `/readyz` no longer answer 200.** They
+  fell through to the console's HTML page, so an uptime monitor pointed at them
+  stayed green while checking nothing. They now answer `404` with a body naming
+  the real check, `/api/v1/health`.
+- **`destination.falling_behind` now fires during a stall, and clears after it.**
+  It judged FFmpeg's `speed=`, an average over the whole run carried in the
+  progress report that stops arriving when a sink stops reading. A stalled
+  destination therefore read ~1.00x while stalled, alerted only after the heal,
+  stayed raised for most of an hour, never sent `caught_up`, and a second stall
+  could not alert. It now measures how fast the output time advances over the
+  last 20 seconds, and says nothing while the ingest itself is lost.
+- **`destination.up` means the destination is delivering, not that its process
+  exists.** It fired on every spawn, so a destination pointed at a closed port
+  announced "delivering" and flapped without sending a byte. It now waits for
+  FFmpeg's output time to move. A sink that stops reading, which leaves the
+  process running, now produces `destination.down` with `reason: "stalled"`
+  after the 10s dwell, and `destination.up` when data flows again. Broadcast
+  lifecycle automation does not end a broadcast on a stall.
+- **A stalled destination is visible on `/metrics`.** New counters
+  `polyemesis_destination_output_seconds_total` and
+  `polyemesis_destination_output_bytes_total` stop advancing when delivery does;
+  nothing else on the scrape moved, since the process stays running and the
+  bitrate gauge is FFmpeg's whole-run average. That gauge's help text now says
+  so.
+- **`/api/v1/health` no longer says the database is fine while it is failing.**
+  The check read page one, which a full volume and a file with a corrupt page
+  elsewhere both serve. So health said `ok` while every save failed with
+  "database or disk is full", and on a database with a damaged hooks table it
+  said `ok` while `/hooks` answered 500 and hooks had stopped. The store now
+  records the storage errors its real statements get, including a corrupt page
+  met partway through reading a table and a write through a prepared
+  statement, and health reports them as `degraded`: a full or read-only volume
+  until the next successful write or committed transaction, a damaged file
+  until restart.
+- **Saving the Settings page no longer unsets the ingest mode chosen on the
+  Sources page.** `GET /settings` served the settings blob's copy of `ingest`,
+  which the Sources page never updates, and the page PUTs the whole document
+  back on every save — so the write-through copied the stale block over the
+  live source. Publishes were refused while `/health` said ok. `settings.ingest`
+  is now read from the default source on both GET and PUT, so an unchanged
+  round-trip is a no-op by construction.
+- **An unknown field under `settings.automod` is now a 400, like every other
+  section.** Automod's own JSON decoder sat outside the request's
+  unknown-field check, so a typo was accepted and dropped. AUTOMOD.md named the
+  history bounds `window`, `retain`, `idleEviction` and `maxAuthors`, none of
+  which the server reads; it now names `windowSeconds`, `retainPerAuthor` and
+  `idleEvictionSeconds`, says the 20,000-author ceiling is fixed, and a test
+  holds the table to the struct.
+- **An automod cell can no longer be armed over a checker that is not
+  configured.** The API accepted `twitch/ban/model` with the model switched
+  off. The console drew that cell as inert, and its banner still said an
+  irreversible action was armed. Once someone configured the model, the ban
+  went live. `PUT /settings` now refuses to switch on such a cell and names
+  it. `/automod/matrix` and the console banner count only cells that can fire.
+- **A Settings save from a stale page no longer undoes other operators'
+  changes.** The page PUTs the whole document, so the last save won on every
+  field. A tab opened before someone disarmed an auto-ban re-armed it by saving
+  an unrelated retention change. `GET /settings` now carries a `version`, and a
+  `PUT` that sends back an out-of-date one is refused with `409
+  settings_conflict` and nothing is stored. The console sends it on every save
+  and, on a conflict, keeps your draft and offers a reload. Clients that send no
+  `version` are not checked. A save that is stored and then answers with an
+  error (`503 no_source` for an ingest change before any source exists, or a
+  failed reconcile) returns the stored `version` in the error body. The console
+  sends that version on its next save, so that save is not refused as a
+  conflict with your own change.
+- **Live chat works on an install with more than one source.** The chat socket
+  opened `/api/v1/ws` without `?source=`, which the server refuses with
+  `400 source_required` once there are two programmes, so the chat page sat on
+  "socket offline" and reconnected forever while its scrollback loaded fine.
+  It now names the programme the console is following, waits until that is
+  known, and moves when the operator switches. Every socket URL is built by
+  one helper, and a test refuses any `new WebSocket(` that bypasses it.
+- **Expert mode's Clear asks first.** It deleted a destination's extra FFmpeg
+  arguments on one click, which reconciles the destination and restarts a live
+  output. It now opens the same confirmation every other destructive action
+  uses, naming the destination and saying that a live output restarts.
+- **An expired session returns to the login screen.** Only the page load read
+  a 401; once signed in, an expired or revoked session made every button fail
+  with a "not signed in" toast for as long as the operator kept clicking. A 401
+  on any request now signs the console out and says why. A wrong password at
+  sign-in or on a password change is still reported in place, because those
+  401s are about what was typed, not the session.
+- **A go-live push no longer looks in flight for ever after a server
+  restart.** Push jobs live in the server's memory, so a restart mid-push lost
+  the job and the composer polled a 404 every 1.2 seconds, holding Push
+  disabled on "Pushing…" until the tab was reloaded. A 404, or ten failed polls
+  in a row, now ends the poll: the composer says the push's status was lost,
+  marks unfinished rows Unknown, and Push works again. The composer's requests
+  also go through the console's shared client now, so a reverse proxy's HTML
+  error page reads as "request failed (502)" rather than a JSON parse error,
+  and an expired session on this card signs the console out like everywhere
+  else.
+- **A tab left open across an upgrade no longer goes blank.** The lazy pages
+  (Jobs, Chat, Monitoring, Playout, the clip editor) are separate files named
+  by content hash, and an upgrade replaces them, so an old tab's first visit to
+  one failed to load it -- and with no error boundary the whole console
+  unmounted to an empty page that Back did not fix. The console now reloads
+  itself once when that happens, to pick up the new version. If a page still
+  fails, only that page is replaced by a notice with a Reload button; the
+  navigation and every other page keep working.
+- **The automatic-moderation card and about thirty other sentences follow the
+  language setting.** A pass over every page in every locale found the whole
+  automod matrix card, and sentences on the dashboard, chat pane, routing,
+  meters, renditions, clips, playout, monitoring, automation and settings pages,
+  still in English whatever language was chosen -- four of them with a
+  translation already in all fifteen catalogues that the page never asked for.
+  They are catalogue keys now, translated in all fifteen languages, and a test
+  keeps them from drifting back to literals. Three stay English on purpose: the
+  meter rows' status words (a family keyed together or not at all), the
+  engine's own status sentence, and the model's default instruction, which is
+  a setting sent to the model verbatim.
+- **The upgrade check for keys that did not survive a restore said "0" when it
+  had not run.** `docs/UPGRADING.md` counted `keyUnreadable` with
+  `curl -s localhost:8080/… | grep -o keyUnreadable | wc -l`. An `install.sh`
+  install serves HTTPS on 443, so the request failed, `-s` hid it, and `wc -l`
+  printed `0` — the all-clear, confirmed against a data directory restored
+  without `secret.key`. It also read a path the response does not have: rows are
+  `{"destination": {...}}`. The check is now `curl -f` against the operator's own
+  `$POLYEMESIS_URL`, and `jq` lists the affected destinations by name, so `[]` is
+  the all-clear and no output is a failed request. `INSTALL.md`'s health check
+  had the same hard-coded `http://localhost:8080`, which fails on every default
+  `install.sh` install; it now has a table of the three install shapes, and
+  `HARDWARE.md`'s encoder-verdict check had the same `curl -s localhost:8080`.
+  All three are held by `internal/testenv/operator_docs_test.go`.
+
+- **The Prometheus example sent its bearer token in cleartext.**
+  `docs/MONITORING.md` gave no `scheme`, and Prometheus defaults to `http` on
+  port 80 — which, on an install terminating TLS itself, is the HTTP→HTTPS
+  redirect. The token crossed the network once per scrape before the redirect
+  answered, and the scrape then failed against the self-signed certificate. The
+  example now says `scheme: https`, names `:443`, and verifies with
+  `tls_config.ca_file` pointing at the install's local CA.
+
+- **The docs told systemd operators to move to 443 by editing a line that
+  cannot move them.** `INSTALL.md`, `TLS.md` and `CONFIGURATION.md` all said to
+  set `addr: ":443"` in `config.yaml`, but both systemd units and the image's
+  `CMD` pass `--addr`, and `main.go` applies the flag after loading the file:
+  the server came back on the same port with the same warning. They now say
+  where the port actually comes from on each install shape, including that the
+  compose file `install.sh --mode docker` writes is the one where the file does
+  win. `TLS.md` also now warns that the image's `HEALTHCHECK` is plain HTTP, so
+  turning TLS on inside the container marks a healthy server unhealthy, and
+  gives the HTTPS replacement. `INSTALL.md`'s code citations by line number —
+  two of them ranges that ran backwards — are symbol names now, and a guard
+  refuses a `file:line` citation in the operator docs.
+
+- **The release notes and `INSTALL.md` still called the Windows runtime abort
+  (#440) unresolved.** It was fixed in 0.9.0 and the issue is closed; the
+  release-gate test had been requiring the release body to name it, which kept
+  the stale warning in place. The Windows warning now names the defect that is
+  still open — a service stop truncates the recording in progress.
+
+- **The macOS launchd job in `INSTALL.md` crash-looped as written.** It ran
+  `/usr/local/bin/polyemesis -config …/config.yaml`, and no step created either
+  file; a missing explicit `-config` refuses to start, and `KeepAlive` repeats
+  that forever. The section now installs the binary and copies
+  `config.example.yaml` first, and says the console is then on `https://`.
+  The Gatekeeper note uses the release asset's real name
+  (`polyemesis-<tag>-darwin-<arch>`) and says to clear the quarantine flag
+  before the first launch — a quarantined binary was seen to hang silently.
+
+- **`INSTALL.md`'s systemd steps left the data directory world-readable.** The
+  unit's own install notes had gained `chmod 0750 /var/lib/polyemesis` (the
+  directory holds `secret.key`); the page had not. It now has it, says the block
+  runs from a clone, gives the command for a downloaded release binary (whose
+  name carries the tag), and says the result answers on `https://<host>:8080`.
+
+- **`UPGRADING.md`'s manual upgrade now has `update.sh`'s guards, and its
+  Docker half upgrades.** The binary procedure is a paste-safe script that
+  stamps the backup to the minute, refuses an existing destination (a second
+  same-day upgrade used to nest its copy inside the first), keeps
+  `polyemesis.previous`, and runs `-verify-backup` before the binary is
+  replaced. The Docker half ran `docker compose pull` against the repository's
+  compose file, which *builds* its image — so it restarted the old version; a
+  clone now does `git pull` and `up -d --build`. Its backup tarball was written
+  into the clone, where the next build's `COPY . .` took it into the image, and
+  its `|| exit 1` closed the terminal it was pasted into. The page also no longer
+  says a binary-mode `update.sh` "pulls": it stops at a verified backup, with the
+  service stopped, and prints the two commands that finish the job.
+  It accepts the release asset as downloaded (mode 0644) rather than refusing it
+  as "no executable"; checks the copy with the new binary when the installed one
+  predates 0.9.0's `-verify-backup` (it would otherwise exit on an undefined
+  flag and call a good backup bad); and its way back restores the state —
+  database, `secret.key`, `tls/` — while keeping `recordings/`, `uploads/` and
+  the other media directories, instead of `rm -rf` of the whole data directory.
+
+- **`UPGRADING.md` had no note for 0.9.0 or 0.10.0.** 0.9.0 changed two
+  defaults an existing install can hit — the loopback default bind, and a
+  missing explicit `--config` refusing to start — and the page's banner still
+  named 0.8.0 as the newest release. Both versions now have a note (0.10.0: no
+  schema change, and a 0.9.0 binary opens its database), the 0.7.0 note no
+  longer says a missing `secret.key` produces "no error to notice" (0.9.0 logs
+  one), and every release from here on must have an `Upgrading to X.Y.Z`
+  section, held by a test and by `RELEASE-RUNBOOK.md`.
+
+- **Nothing said the console must be served from the root of its own
+  hostname.** It requests its API, assets, WebSocket and HLS preview by
+  absolute path, so behind `location /polyemesis/` on a shared host it loads
+  blank. `deploy/nginx.conf.example`, `INSTALL.md` and `TLS.md` now say to give
+  it a hostname of its own and proxy `/`.
+
+- **`API.md` described `stop-all` as unscoped and never mentioned its
+  confirmation body.** It is scoped by `?source=` when one is given, and it
+  refuses without `{"confirm": true}` — so a script written from the page got a
+  `400` on every call. Both are documented now, with an example. The page also
+  says the refused-route table has fifteen rows of which thirteen are `GET`s
+  (a test computes both from `readScopeDeniedPatterns`), that `/hls/*` is
+  mounted at the root, and what `POST /routing/compile` takes: the profile,
+  wrapped in `{"profile": …}`.
+
+- **The failover backup encoder's address was in no user-facing page.** It is
+  the source's publish token plus `.backup`, on the primary's port, for SRT and
+  RTMP alike; `docs/OBS.md` now says so, and that
+  `failover.backup.rtmp.streamKey` — which looks like the backup's address —
+  addresses nothing. `DESIGN-ONE-PORT-INGEST.md` no longer promises an
+  immediate reconnect after a blip: a new publisher is refused for three
+  seconds (`srtserver.StaleAfter`) after the old one's last packet.
+
+### Security
+
+- **Upgrading from 0.6.x no longer leaves plaintext stream keys in
+  `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
+  and every release before 0.7.0 ran without it: a real 0.6.0 install with five
+  destinations still had two keys legible in the destinations root page after
+  upgrading to 0.10.0, where a page split had left them. The upgrade now runs
+  `VACUUM` and truncates the log whenever it seals keys or opens a pre-0.7.0
+  file, and refuses to start if it cannot. Installs that already sealed under
+  0.7.0–0.10.0 still need the one-off `VACUUM` in `docs/UPGRADING.md`, which
+  now says so for every such install, not only 0.7.0 ones. The regression test
+  writes its pre-upgrade history with `secure_delete` off, as 0.6.0 did; the
+  earlier fixture wrote it through the fixed code and could not see this.
+- **A misspelled key in the `tls:` block now stops startup.** `mdoe:` or
+  `Mode:` (keys are case-sensitive) used to be ignored, so `mode` fell back to
+  `off`: plain HTTP and session cookies without `Secure`, logged nowhere on a
+  loopback bind. The error names the key, its line, the case-correct spelling
+  when there is one, and the valid keys. Every key the block has ever had is
+  still valid; the rest of `config.yaml` still ignores unknown keys.
+- **The CSRF token is bound to the session.** It was a random value checked
+  only against the `polyemesis_csrf` cookie, so anything able to write a cookie
+  for the host (a sibling subdomain, a plaintext hop) could plant
+  `polyemesis_csrf=x` ahead of the real one, send `x` in the header, and pass.
+  The token is now an HMAC of the session token under the server key and is
+  checked against the session; the cookie is only how the console learns it.
+  Browsers signed in across the upgrade are re-sent the bound value on their
+  next request instead of being locked out of writes. Sessions now also carry a
+  random ID, so two logins in the same second are distinct sessions.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

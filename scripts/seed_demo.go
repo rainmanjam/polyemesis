@@ -136,7 +136,7 @@ func main() {
 	// own. Named rather than defaulted, because the name is on screen in every
 	// shot this script exists to take.
 	if !hasSource() {
-		post("/sources", map[string]any{"name": "Studio A"})
+		post("/sources", srtSource("Studio A"))
 	}
 	if !hasSource() {
 		die("could not create the demo programme, so every scoped write below " +
@@ -343,9 +343,19 @@ var extraProgrammes = map[string]demoProgramme{
 
 // seedProgramme creates one programme and its destinations, and returns its id.
 // Idempotent on the name, because capturing is something you do repeatedly.
+// srtSource is the create body for a demo programme: named, and set to SRT.
+//
+// The mode is not optional. The shared SRT port admits a publisher only into a
+// source set to SRT, and every programme this seeds is fed through that port by
+// the capture scripts; a source created from its name alone has no ingest chosen
+// and its token is refused.
+func srtSource(name string) map[string]any {
+	return map[string]any{"name": name, "ingest": map[string]any{"mode": "srt"}}
+}
+
 func seedProgramme(p demoProgramme) int64 {
 	if !hasSourceNamed(p.name) {
-		post("/sources", map[string]any{"name": p.name})
+		post("/sources", srtSource(p.name))
 	}
 	id := sourceIDNamed(p.name)
 	if id == 0 {

@@ -177,6 +177,21 @@ type Spec struct {
 	OnLog      func(LogLine)
 	OnState    func(Status)
 
+	// WakeOnStop is called while a stopping child has not yet exited: first
+	// wakeAfter past the SIGTERM, then every wakeEvery until it exits or the
+	// grace runs out. Optional.
+	//
+	// It exists for the relay consumers. An FFmpeg reading a relay that has
+	// gone quiet is blocked in a read with no timeout, and a single SIGTERM
+	// does not reach it -- a second one does, but also aborts the trailer, so
+	// the only thing that lets it finish CLEANLY is a packet. relay.Hub.Wake
+	// supplies one, into silence only. Without it such a child is SIGKILLed at
+	// the end of the grace and a recording is left with no trailer.
+	//
+	// Called on the escalation goroutine; it must not block for long, and it
+	// must be safe to call after the child has already gone.
+	WakeOnStop func()
+
 	// LogSink persists captured lines beyond the in-memory ring. Optional,
 	// and typically one sink shared by every process so the persisted log
 	// reads as a single interleaved timeline.
@@ -1091,29 +1106,46 @@ func (p *Process) terminate() {
 	// runOnce when THIS cmd is reaped, so the ordinary case costs one timer and
 	// returns at once, and the escalating case cannot be about anybody else's
 	// child -- the channel was allocated with this cmd and is never reused.
+	wakeFn := p.spec.WakeOnStop
 	p.escalators.Add(1)
 	go func() {
 		defer p.escalators.Done()
 		t := time.NewTimer(p.grace)
 		defer t.Stop()
+		// The wake, when the Spec has one. A nil channel never fires, so a
+		// child without it is escalated exactly as before. See Spec.WakeOnStop.
+		var wake <-chan time.Time
+		var wt *time.Timer
+		if wakeFn != nil {
+			wt = time.NewTimer(wakeAfter)
+			defer wt.Stop()
+			wake = wt.C
+		}
 		// BOTH OUTCOMES ARE COUNTED HERE, in the one select that decides which
 		// happened. Counting them at separate call sites is how a denominator
 		// quietly stops matching its numerator -- and an absent denominator is
 		// why this escalation ran unnoticed for weeks. See teardown_stats.go.
-		select {
-		case <-exited:
-			// Reaped inside the grace period. There is nothing to escalate to,
-			// and killGroup on a reaped pid is a signal to whoever holds that
-			// number now.
-			noteTeardown(p.spec.Kind, false)
-		case <-t.C:
-			// KEEP THIS STRING. scripts/acceptance-recording-stop.sh greps for
-			// it verbatim as a required CI gate, and nothing links the two at
-			// compile time -- rewording it silently disarms that check.
-			// grace_string_test.go pins it.
-			p.log.Warn("process did not exit after grace period; killing group")
-			noteTeardown(p.spec.Kind, true)
-			killGroup(cmd)
+		for {
+			select {
+			case <-exited:
+				// Reaped inside the grace period. There is nothing to escalate to,
+				// and killGroup on a reaped pid is a signal to whoever holds that
+				// number now.
+				noteTeardown(p.spec.Kind, false)
+				return
+			case <-wake:
+				wakeFn()
+				wt.Reset(wakeEvery)
+			case <-t.C:
+				// KEEP THIS STRING. scripts/acceptance-recording-stop.sh greps for
+				// it verbatim as a required CI gate, and nothing links the two at
+				// compile time -- rewording it silently disarms that check.
+				// grace_string_test.go pins it.
+				p.log.Warn("process did not exit after grace period; killing group")
+				noteTeardown(p.spec.Kind, true)
+				killGroup(cmd)
+				return
+			}
 		}
 	}()
 }

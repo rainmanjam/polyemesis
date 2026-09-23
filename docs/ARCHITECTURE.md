@@ -185,6 +185,15 @@ The 5.1 coefficients are FFmpeg's own normalized ITU downmix:
 LFE is dropped (ffmpeg's default `lfe_mix_level = 0`). Normalizing by the
 coefficient sum is what prevents a hot 5.1 source from clipping on downmix.
 
+When more than one ingest track is read, each track's chain ends with
+`aresample=async=1:first_pts=0`. `amix` (and the ducking sidechain) pair their
+inputs by sample count, not timestamp, so a track that goes missing for a while
+-- which is what a failover to the slate or a one-track backup does to tracks 2
+and up -- would otherwise come back out of step with the others by the length
+of the outage, and stay that way until the destination restarts. The per-track
+resample fills the gap with silence and anchors every track at the same origin.
+A one-track graph has nothing to align and does not get it.
+
 Then sum and finish:
 
 ```
@@ -600,7 +609,7 @@ internal/
                URL, stream key included, when an endpoint refuses it
   stats/       ring buffers (30 min bitrate), host CPU/RAM
   metrics/     Prometheus text exposition, rendered from the engine's status
-  auth/        bcrypt, JWT cookie, CSRF double-submit, API tokens, login throttle
+  auth/        bcrypt, JWT cookie, session-bound CSRF token, API tokens, login throttle
   tlsx/        certificate layer: tls.Config, local CA + leaf, autocert, expiry
                introspection. Takes an already-resolved mode; knows no yaml.
   secrets/     NaCl secretbox token encryption at rest

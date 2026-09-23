@@ -831,6 +831,8 @@ const NOT_A_VALUE: Record<string, string> = {
     "a per-platform map; the matrix's platform switches edit it, keyed by platform name rather than by a field this can fingerprint",
   "automod.on":
     'a sparse set keyed "platform/action/checker"; every cell of the matrix writes into it, and there is no leaf to give a value to',
+  version:
+    "a branded SettingsVersion the server assigns and no page can mint: the version of the document the page read, sent back so a save from a stale read is refused (409) instead of reverting somebody else's change. Never a control",
   "playout.sourceId":
     "a branded SourceId, edited by PlayoutPage's ProgrammeCard Select whose options are the live source list plus 'default'. The walk cannot mint a SourceId that is in that domain, so it cannot fingerprint the control -- but the control exists and #774 is what added it. This is the Select-domain limit this file's header names, not a missing control",
 };

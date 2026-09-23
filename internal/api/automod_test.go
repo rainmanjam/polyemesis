@@ -135,6 +135,11 @@ func TestAutomodSettingsRoundTrip(t *testing.T) {
 		t.Fatal("settings carried no automod block")
 	}
 	am["enabled"] = true
+	// A rule to arm it over: a cell on an unconfigured checker is refused.
+	// See TestACellOnAnUnconfiguredCheckerCannotBeArmed.
+	am["rules"] = []map[string]any{
+		{"id": 1, "name": "spam", "enabled": true, "pattern": "spam", "action": "delete"},
+	}
 	am["on"] = map[string]any{"twitch/delete/rules": true}
 
 	send(t, h, sign, http.MethodPut, "/api/v1/settings", before, http.StatusOK)

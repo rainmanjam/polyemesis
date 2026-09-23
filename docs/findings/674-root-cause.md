@@ -108,6 +108,13 @@ constraint turned out to be audio sparsity in a feed's first seconds. It is a
 ceiling, not a wait — probing ends the moment parameters are known — so this is
 free on a healthy stream and only spends where the old value was failing.
 
+> **Correction (after 0.10.0):** it was a wait. The ffmpeg CLI forces the
+> MPEG-TS demuxer's `scan_all_pmts` to 1, which stops it ever declaring its
+> header complete, so every relay consumer read the whole window: 15.5s to
+> first output against a 2s GOP. `ffmpeg.RelayInputArgs` now passes
+> `-scan_all_pmts 0`, which is what makes the sentence above true. See
+> `docs/investigations/398-e-probe-window.sh`.
+
 `silentPublishBudget` is now DERIVED from `ffmpeg.RelayProbeWindow` rather than
 written beside it, with `TestTheSilentPublishBudgetOutlastsTheProbeWindow`
 pinning the relationship: a watchdog budget at or below the probe window would

@@ -33,7 +33,7 @@ func goodBackupDir(t *testing.T) string {
 	if err := d.Close(); err != nil {
 		t.Fatalf("closing: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("00"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte(strings.Repeat("ab", 32)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -50,7 +50,7 @@ func TestVerifyBackupFlagReportsAUsableBackup(t *testing.T) {
 	got := out.String()
 	// Each claim separately, because the operator acts on the specific claim
 	// and a message that dropped one would still look like a success line.
-	for _, want := range []string{dir, "opens", "integrity_check", "schema"} {
+	for _, want := range []string{dir, "opens", "integrity_check", "schema", "secret.key"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the success message does not mention %q, so it no longer says what "+
 				"was actually checked: %q", want, got)

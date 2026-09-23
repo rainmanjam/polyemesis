@@ -444,18 +444,22 @@ func (s *Server) handleCreateSource(w http.ResponseWriter, r *http.Request) {
 	// disabled" and the operator has no reason to suspect the thing they just
 	// created is off. That is exactly how it failed the first time this path
 	// was exercised end to end.
-	row := db.Source{Enabled: true}
+	//
+	// The ingest block is seeded the same way, and for the same reason: the
+	// body is decoded OVER the defaults, so whatever it names wins and whatever
+	// it omits keeps a valid default. A payload with no ingest block would
+	// otherwise validate against the zero value -- port 0, latency 0 -- and fail
+	// with errors that say nothing useful, so the smallest useful request is
+	// {"name":"Vertical"}, and {"name":"Vertical","ingest":{"mode":"srt"}} is
+	// as small. The defaults used to be applied only when no mode was sent,
+	// which made naming the transport -- the one thing the one-port SRT
+	// listener needs chosen before it admits a publisher -- the request that
+	// failed.
+	row := db.Source{Enabled: true, Ingest: db.DefaultSettings().Ingest}
 	if !decodeJSON(w, r, &row) {
 		return
 	}
 	row.ID = 0
-	// A payload that carries no ingest block would validate against the zero
-	// value -- port 0, unknown mode -- and fail with three errors that say
-	// nothing useful. Start from the defaults so the smallest useful request is
-	// {"name":"Vertical"} and the operator edits ports afterwards.
-	if row.Ingest.Mode == "" {
-		row.Ingest = db.DefaultSettings().Ingest
-	}
 	// The gate #255 found missing. A create introduces everything, so the
 	// stored-URL argument is empty: there is no inherited state on a row that
 	// does not exist yet.

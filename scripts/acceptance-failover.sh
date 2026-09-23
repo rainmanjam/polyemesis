@@ -948,6 +948,7 @@ else
         tear[n]=kv["teardownMs"]+0
         out_t[n]=kv["outTimeMs"]+0; out_o[n]=kv["outOffset"]+0
         dead[n]=kv["stopDeadline"]
+        det[n]=kv["outDetached"]
         next
       }
       # Second file: the packet DTS list, one value per line.
@@ -971,6 +972,7 @@ else
           printf "  seam %d %s->%s at tier %.3fs (%s): teardown %.3fms, outOffset %.3fs, outTime %.0fms",
                  j, from[j], to[j], at[j], wall[j], tear[j], out_o[j], out_t[j]
           if (dead[j]=="true") printf ", STOP DEADLINE -- the old feed may still have been writing"
+          if (det[j]=="true") printf ", old feed still exiting (input already cut)"
           printf "\n"
         }
         # The steps are listed on the FILE axis, next to the seams on the TIER

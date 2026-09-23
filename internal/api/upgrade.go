@@ -210,7 +210,7 @@ func (s *Server) handleUpgradePlan(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) upgradePlan(tag string) upgradePlanView {
 	v := upgradePlanView{
-		Plan:    upgrade.PlanFor(s.upgradeMethod, s.execPath, tag),
+		Plan:    upgrade.PlanFor(s.upgradeMethod, s.execPath, upgrade.Versions{Running: s.version, Offered: tag, Variant: upgrade.DetectVariant(nil)}),
 		Version: tag,
 		OnAir:   surveyOnAir(s),
 	}

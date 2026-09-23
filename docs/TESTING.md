@@ -121,8 +121,8 @@ The destination cards should show `Tracks 1, 2 → stereo` and
 editor should read:
 
 ```
-[0:a:0]pan=stereo|c0=1*c0|c1=1*c0[a_t0];
-[0:a:1]pan=stereo|c0=1*c0|c1=1*c0[a_t1];
+[0:a:0]pan=stereo|c0=1*c0|c1=1*c0,aresample=async=1:first_pts=0[a_t0];
+[0:a:1]pan=stereo|c0=1*c0|c1=1*c0,aresample=async=1:first_pts=0[a_t1];
 [a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];
 [a_mix]alimiter=limit=0.95:level=disabled[a_norm];
 [a_norm]aresample=48000:async=1:first_pts=0[aout]

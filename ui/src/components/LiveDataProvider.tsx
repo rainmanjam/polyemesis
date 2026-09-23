@@ -9,6 +9,7 @@ import {
 import { api } from "@/lib/api";
 import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/lib/currentProgramme";
 import { mergeStatusDestinations } from "@/lib/dashboardFacts";
+import { liveSocketUrl } from "@/lib/liveSocket";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
 import type {
   BitrateSample,
@@ -122,13 +123,12 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
     const connect = () => {
       if (cancelled) return;
 
-      const proto = location.protocol === "https:" ? "wss:" : "ws:";
       // The socket names a programme for the same reason every poll does: the
       // server refuses an unnamed one on a multi-source install, and this is
       // the connection every screen renders from -- an unnamed one takes the
-      // whole console down rather than one panel.
-      const q = programme == null ? "" : `?source=${encodeURIComponent(String(programme))}`;
-      const ws = new WebSocket(`${proto}//${location.host}/api/v1/ws${q}`);
+      // whole console down rather than one panel. lib/liveSocket.ts is the one
+      // builder of this URL; the chat socket's own copy is what forgot it.
+      const ws = new WebSocket(liveSocketUrl(programme));
       wsRef.current = ws;
 
       ws.onopen = () => {

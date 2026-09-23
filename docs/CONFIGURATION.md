@@ -107,14 +107,26 @@ forward to the schema you are keeping a way back *from*.
 
 ```
 polyemesis -verify-backup /var/backups/polyemesis-2026-09-16
-backup at /var/backups/polyemesis-2026-09-16 opens, passes integrity_check and holds this server's schema
+backup at /var/backups/polyemesis-2026-09-16 opens, passes integrity_check, holds this server's schema and has a secret.key that opens it
 ```
 
 Anything else is a non-zero exit and a line naming what is wrong: `backup has
 no polyemesis.db`, `backup's polyemesis.db is zero bytes`, `backup's
-polyemesis.db failed its integrity check: …`, or `backup has no secret.key, so
+polyemesis.db failed its integrity check: …`, `backup has no secret.key, so
 every destination would come back disabled and the restore would read as
-successful until go-live`. Every failure it catches leaves a file of plausible
+successful until go-live`, `backup's secret.key is not a key the server can
+start with` (empty, not hex, the wrong length, or not a file), or `backup's
+secret.key opens none of the … sealed value(s) in <table>.<column>` — a
+well-formed key from another install. The key is read with the same parser the
+server uses at boot, then tried against the values the database sealed: for
+each sealed column that holds any, it must open at least one. That last
+refusal has a second cause the check cannot tell apart from the first: a
+column holding a single value — the MQTT password and the automod API key are
+one row each — that this server's own key cannot open either, typically left by
+an earlier restore. Backing up again does not help there, since the next backup
+holds the same value; the message names what to re-enter or clear in the
+console (for `mqtt_creds`, the MQTT broker password in Settings), and the backup
+after that passes. Every failure it catches leaves a file of plausible
 size — a database copied while the server was writing to it, a truncated file,
 an archive unpacked into the wrong shape, a disk that filled halfway through —
 which is why existence checks do not find them. Run this when you take the
@@ -243,6 +255,14 @@ once, and the machinery is already here.
    http:// redirects will carry it too. Set addr: \":443\" in config.yaml…"*
    If you are debugging a certificate that never arrives, look for that line
    before you look at DNS.
+
+   **If the line is still there after you set `addr`, something is passing
+   `--addr`.** The flag wins over the file — `main.go` applies it after loading
+   `config.yaml` — and both systemd units (`deploy/polyemesis.service` and the
+   one `install.sh` writes) and the image's `CMD` pass it. On those, change the
+   port on the `ExecStart` line (`sudo systemctl edit --full polyemesis`) or in
+   compose's `command:`. See
+   [TLS.md → Binding, and the SSH tunnel](TLS.md#binding-and-the-ssh-tunnel).
 
    Binding 443 needs privilege. A systemd unit running as a non-root user also
    needs `AmbientCapabilities=CAP_NET_BIND_SERVICE` in its unit file, which
@@ -459,7 +479,7 @@ and can be ignored.
   secret.key        decrypts stored OAuth tokens and client secrets
   recordings/       segments, stems/, clips/, exports/
   hls/              PREVIEW segments, one numbered subdirectory per source
-  playout/          the public HLS/DASH origin, one directory per variant
+  playout/          the public HLS/DASH origin, one numbered subdirectory per source
   fonts/            fonts text overlays draw with (0755, deliberately not private)
   models/whisper/   downloaded speech models
   tls/              generated CA and certificates (dir 0700, keys 0600)
@@ -471,7 +491,11 @@ engine clears its own directory when a preview starts and again when it stops,
 so two engines sharing one directory deleted each other's live playlist. (The
 bare `hls/` still backs the legacy unscoped `/hls` route for the default
 source, so an existing player keeps working.) `playout/` is the public origin
-that viewers are actually served from.
+that viewers are actually served from. It is per source for the same reason —
+`playout/3/hd/` is source 3's `hd` variant — and `playout.sourceId` picks which
+of them `/playout/` serves; the URL itself carries no source number. A
+`playout/<variant>/` directory left at the top level by a release before this
+layout is no longer written or served and can be deleted.
 
 The server creates `recordings/`, `hls/`, `playout/` and `fonts/` at every
 startup; `models/whisper/` appears the first time a speech model is
