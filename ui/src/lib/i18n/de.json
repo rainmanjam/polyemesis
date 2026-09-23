@@ -4,6 +4,7 @@
   "auth.createAccount": "Konto erstellen",
   "auth.firstRun": "Ersteinrichtung",
   "auth.firstRunDesc": "Wählen Sie die Administrator-Zugangsdaten für diesen Server. Es gibt keine Kontowiederherstellung, bewahren Sie sie also sicher auf.",
+  "auth.sessionEnded": "Ihre Sitzung ist abgelaufen. Melden Sie sich erneut an, um fortzufahren.",
   "auth.password": "Kennwort",
   "auth.passwordMismatch": "Die Kennwörter stimmen nicht überein.",
   "auth.signIn": "Anmelden",

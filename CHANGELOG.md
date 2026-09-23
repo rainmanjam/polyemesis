@@ -21,6 +21,12 @@ its first tagged release.
   arguments on one click, which reconciles the destination and restarts a live
   output. It now opens the same confirmation every other destructive action
   uses, naming the destination and saying that a live output restarts.
+- **An expired session returns to the login screen.** Only the page load read
+  a 401; once signed in, an expired or revoked session made every button fail
+  with a "not signed in" toast for as long as the operator kept clicking. A 401
+  on any request now signs the console out and says why. A wrong password at
+  sign-in or on a password change is still reported in place, because those
+  401s are about what was typed, not the session.
 
 ## [0.10.0] — 2026-09-23
 

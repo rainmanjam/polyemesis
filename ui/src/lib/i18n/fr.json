@@ -4,6 +4,7 @@
   "auth.createAccount": "Créer le compte",
   "auth.firstRun": "Configuration initiale",
   "auth.firstRunDesc": "Choisissez les identifiants administrateur de ce serveur. Il n'existe aucune récupération de compte, conservez-les donc en lieu sûr.",
+  "auth.sessionEnded": "Votre session a pris fin. Reconnectez-vous pour continuer.",
   "auth.password": "Mot de passe",
   "auth.passwordMismatch": "Les mots de passe ne correspondent pas.",
   "auth.signIn": "Se connecter",

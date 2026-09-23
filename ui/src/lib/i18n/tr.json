@@ -4,6 +4,7 @@
   "auth.createAccount": "Hesap oluştur",
   "auth.firstRun": "İlk çalıştırma kurulumu",
   "auth.firstRunDesc": "Bu sunucu için yönetici kimlik bilgilerini seçin. Hesap kurtarma yoktur, bu yüzden onları güvenli bir yerde saklayın.",
+  "auth.sessionEnded": "Oturumunuz sona erdi. Devam etmek için yeniden giriş yapın.",
   "auth.password": "Parola",
   "auth.passwordMismatch": "Parolalar eşleşmiyor.",
   "auth.signIn": "Oturum aç",

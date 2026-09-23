@@ -1,4 +1,5 @@
 import { setDisplayTimeZone } from "@/lib/format";
+import { noteResponseStatus } from "@/lib/session";
 import type {
   RenditionConcern,
   AccountStats,
@@ -233,6 +234,9 @@ async function request<T>(
     headers,
     credentials: "same-origin",
   });
+  // A 401 mid-session returns the console to the login screen; see
+  // lib/session.ts for which 401s do not.
+  noteResponseStatus(path, resp.status);
 
   if (resp.status === 204) return undefined as T;
 
@@ -748,6 +752,7 @@ export const api = {
       headers: { "X-CSRF-Token": csrfToken() },
       credentials: "same-origin",
     });
+    noteResponseStatus("/debug/export", resp.status);
     const text = await resp.text();
     if (!resp.ok) {
       let msg = `export failed (${resp.status})`;

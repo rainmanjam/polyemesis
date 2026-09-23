@@ -4,6 +4,7 @@
   "auth.createAccount": "Utwórz konto",
   "auth.firstRun": "Konfiguracja początkowa",
   "auth.firstRunDesc": "Wybierz dane logowania administratora dla tego serwera. Nie ma odzyskiwania konta, więc przechowuj je w bezpiecznym miejscu.",
+  "auth.sessionEnded": "Sesja wygasła. Zaloguj się ponownie, aby kontynuować.",
   "auth.password": "Hasło",
   "auth.passwordMismatch": "Hasła nie są zgodne.",
   "auth.signIn": "Zaloguj się",

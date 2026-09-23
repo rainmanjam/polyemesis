@@ -4,6 +4,7 @@
   "auth.createAccount": "创建账号",
   "auth.firstRun": "首次运行设置",
   "auth.firstRunDesc": "为此服务器选择管理员凭据。没有账号找回机制，请把它们保存在安全的地方。",
+  "auth.sessionEnded": "会话已结束。请重新登录以继续。",
   "auth.password": "密码",
   "auth.passwordMismatch": "两次输入的密码不一致。",
   "auth.signIn": "登录",

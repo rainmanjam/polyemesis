@@ -4,6 +4,7 @@
   "auth.createAccount": "Create account",
   "auth.firstRun": "First-run setup",
   "auth.firstRunDesc": "Choose the administrator credentials for this server. There is no account recovery, so store them somewhere safe.",
+  "auth.sessionEnded": "Your session has ended. Sign in again to continue.",
   "auth.password": "Password",
   "auth.passwordMismatch": "The passwords do not match.",
   "auth.signIn": "Sign in",

@@ -4,6 +4,7 @@
   "auth.createAccount": "Buat akun",
   "auth.firstRun": "Penyiapan pertama",
   "auth.firstRunDesc": "Pilih kredensial administrator untuk server ini. Tidak ada pemulihan akun, jadi simpan di tempat yang aman.",
+  "auth.sessionEnded": "Sesi Anda telah berakhir. Masuk lagi untuk melanjutkan.",
   "auth.password": "Kata sandi",
   "auth.passwordMismatch": "Kata sandi tidak cocok.",
   "auth.signIn": "Masuk",

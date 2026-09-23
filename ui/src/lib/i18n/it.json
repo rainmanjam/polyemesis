@@ -4,6 +4,7 @@
   "auth.createAccount": "Crea account",
   "auth.firstRun": "Configurazione iniziale",
   "auth.firstRunDesc": "Scegli le credenziali dell'amministratore per questo server. Non esiste alcun recupero dell'account, quindi conservale in un posto sicuro.",
+  "auth.sessionEnded": "La sessione è terminata. Accedi di nuovo per continuare.",
   "auth.password": "Password",
   "auth.passwordMismatch": "Le password non coincidono.",
   "auth.signIn": "Accedi",
