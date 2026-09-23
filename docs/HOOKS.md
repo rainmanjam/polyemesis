@@ -42,7 +42,10 @@ taking data leaves the process running with its output frozen, and after the
 10s dwell that is a `destination.down` with `reason: "stalled"`; when data moves
 again, a fresh `destination.up`. While the ingest itself is disconnected every
 destination's output stops, and that is reported once, as
-`ingest.disconnected`, not as a `stalled` per destination.
+`ingest.disconnected`, not as a `stalled` per destination. The status API and
+`/metrics` show the same stall sooner, after 5 seconds with no dwell:
+`"stalled": true` on the destination's process, and
+`polyemesis_destination_up` 0. See [MONITORING.md](MONITORING.md).
 
 `destination.rolledover` is also **not** a `destination.down`. Nothing stopped:
 the destination is delivering and the recording is continuing. What changed is

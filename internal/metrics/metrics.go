@@ -81,6 +81,10 @@ type Process struct {
 	// converted to bits per second on the way out.
 	BitrateKbps float64
 	DropFrames  int64
+	// Stalled is the supervisor's verdict that the process is running but its
+	// output has not moved for supervisor.StallAfter. See renderDestinations
+	// for what it does to _up.
+	Stalled bool
 }
 
 // Ingest is one programme's inbound feed: the ingest child, plus the relay hub
@@ -257,10 +261,23 @@ func renderDestinations(d *doc, dests []Destination) {
 		d.sample("polyemesis_destination_enabled", boolValue(dest.Enabled), ident(dest)...)
 	}
 
+	// UP MEANS DELIVERING. It used to mean "the process is running", and a
+	// sink that stops reading leaves the process running -- so a stalled
+	// destination read up=1, flat restarts and a frozen non-zero bitrate for as
+	// long as the stall lasted, and the dashboard an operator reads said
+	// healthy (exploratory row 7). The state series still say running, which
+	// is true of the process; _up and _stalled say what happened to the
+	// stream. It is the meaning the destination.up hook already has.
 	d.family("polyemesis_destination_up", "gauge",
-		"1 when the destination's FFmpeg process is running.")
+		"1 when the destination's FFmpeg process is running and its output is moving.")
 	for _, dest := range sorted {
-		d.sample("polyemesis_destination_up", boolValue(dest.State == stateRunning), ident(dest)...)
+		d.sample("polyemesis_destination_up", boolValue(delivering(dest)), ident(dest)...)
+	}
+
+	d.family("polyemesis_destination_stalled", "gauge",
+		"1 when the destination's process is running but its output has not advanced for 5 seconds.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_stalled", boolValue(dest.State == stateRunning && dest.Stalled), ident(dest)...)
 	}
 
 	d.family("polyemesis_destination_state", "gauge",
@@ -273,10 +290,16 @@ func renderDestinations(d *doc, dests []Destination) {
 	}
 
 	d.family("polyemesis_destination_bitrate_bits_per_second", "gauge",
-		"Average bitrate FFmpeg reports for the destination's current run. It does not fall when delivery stalls; use rate() of polyemesis_destination_output_bytes_total for that.")
+		"Average bitrate FFmpeg reports for the destination's current run, and 0 while it is stalled. rate() of polyemesis_destination_output_bytes_total is the bitrate being sent now.")
 	for _, dest := range sorted {
-		d.sample("polyemesis_destination_bitrate_bits_per_second",
-			dest.BitrateKbps*1000, ident(dest)...)
+		// FFmpeg's figure is a run average and freezes non-zero in a stall.
+		// The supervisor already reports 0 then; saying it again here keeps a
+		// snapshot built any other way from rendering the frozen number.
+		bps := dest.BitrateKbps * 1000
+		if dest.Stalled {
+			bps = 0
+		}
+		d.sample("polyemesis_destination_bitrate_bits_per_second", bps, ident(dest)...)
 	}
 
 	d.family("polyemesis_destination_output_seconds_total", "counter",
@@ -422,6 +445,12 @@ func formatValue(v float64) string {
 		return "-Inf"
 	}
 	return strconv.FormatFloat(v, 'g', -1, 64)
+}
+
+// delivering is what polyemesis_destination_up reports: running, and not
+// stalled.
+func delivering(dest Destination) bool {
+	return dest.State == stateRunning && !dest.Stalled
 }
 
 func boolValue(b bool) float64 {

@@ -126,23 +126,36 @@ is what lets you write the alert before the first source exists.
 polyemesis_ingest_up == 0 and on() polyemesis_sources > 0   # nobody is streaming
 polyemesis_destination_up == 0 and polyemesis_destination_enabled == 1
 rate(polyemesis_destination_restarts_total[15m]) > 0        # a flapping output
-rate(polyemesis_destination_output_seconds_total[1m]) < 0.5
-  and polyemesis_destination_up == 1                        # a stalled output
+polyemesis_destination_stalled == 1                         # connected, not delivering
+rate(polyemesis_destination_output_seconds_total[1m]) < 0.9 # keeping up badly
 polyemesis_recording_free_bytes < 20e9                      # disk filling up
 ```
 
 The second is the one worth alerting on first: a destination that is enabled but
 not up is a platform you think you are streaming to and are not.
 
-It does not catch everything. A platform that stops taking data leaves the
-FFmpeg process running, so `_up` stays 1, restarts stay flat, and
-`polyemesis_destination_bitrate_bits_per_second` keeps the last figure FFmpeg
-printed — an average over the whole run, which never falls to zero. The fourth
-query is the one that sees a stall: `polyemesis_destination_output_seconds_total`
-is the media time delivered, so its `rate()` is about 1 while a destination
-keeps up and 0 while it is stuck. `polyemesis_destination_output_bytes_total`
-does the same in bytes, and `rate()` of it times 8 is the bitrate actually being
-sent now. Both reset with the process, which `rate()` handles.
+**`_up` means delivering, not just running.** A platform that stops taking data
+leaves the FFmpeg process running and connected, with its output frozen. That
+destination reads `polyemesis_destination_up` 0 and
+`polyemesis_destination_stalled` 1 once its output has not advanced for
+5 seconds. `polyemesis_destination_state{state="running"}` stays 1, because the
+process is still running, and restarts stay flat.
+`polyemesis_destination_bitrate_bits_per_second` reads 0 while the stall lasts.
+Otherwise it is FFmpeg's average over the whole run, so it only ever falls
+slowly. The same stall shows in `/api/v1/status`: the destination's `process`
+has `"stalled": true` and `stalledSec`, `progress.bitrateKbps` and
+`progress.speed` read 0, and `warnings` says it is stalled. A destination that
+has not moved any media yet, for example one still in its probe window, is not
+stalled. While the ingest itself is lost, every destination stalls because
+there is nothing to send. `_up` and `_stalled` say so, but the warning is left
+to the ingest.
+
+`polyemesis_destination_output_seconds_total` is the media time delivered, so
+its `rate()` is about 1 while a destination keeps up, below 1 while it is falling
+behind without stopping, and 0 while it is stuck. The fourth query uses it.
+`polyemesis_destination_output_bytes_total` does the same in bytes, and `rate()`
+of it times 8 is the bitrate actually being sent now. Both reset with the
+process, which `rate()` handles.
 
 **The first needs its guard.** Bare `polyemesis_ingest_up == 0` cannot tell a
 broadcast that ended from an install nobody has configured yet — every series

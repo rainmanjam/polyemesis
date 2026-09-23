@@ -12,6 +12,8 @@ package engine
 import (
 	"maps"
 	"slices"
+	"strconv"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -375,6 +377,10 @@ func (e *Engine) Status() Status {
 	st.Silence = e.Silence()
 	st.Failover = e.Failover()
 
+	// Whether the source is arriving decides what a stalled destination's
+	// warning says; see stallWarning. Read once, not per row.
+	sourceArriving := e.mon != nil && ingestLive(e.mon.Bitrate(), time.Now())
+
 	names := make(map[int64]string, len(st.Renditions))
 	for _, r := range st.Renditions {
 		names[r.ID] = r.Name
@@ -519,10 +525,35 @@ func (e *Engine) Status() Status {
 			if w := passthroughCodecWarning(row.Kind, row.Platform, row.RenditionID, source.Video); w != "" {
 				ds.Warnings = append(slices.Clip(ds.Warnings), w)
 			}
+			if w := stallWarning(ds.Process, sourceArriving); w != "" {
+				ds.Warnings = append(slices.Clip(ds.Warnings), w)
+			}
 			st.Destinations = append(st.Destinations, ds)
 		}
 	}
 	return st
+}
+
+// stallWarning is the card's warning for a destination whose process is
+// running but whose output has stopped moving (supervisor.Status.Stalled).
+//
+// A WARNING, because the process state cannot say it: the child is alive and
+// connected, so it reads "running", and before this the only other things on
+// the card were FFmpeg's bitrate and speed -- run averages, frozen non-zero --
+// so a destination the platform had stopped taking data from looked healthy
+// for as long as the stall lasted (exploratory row 7). Warnings is the field
+// the card already renders as "needs attention".
+//
+// Nothing while the source itself is not arriving. Every destination's output
+// stops then, the ingest's own status is what is wrong, and one warning per
+// destination would point the operator at the platforms instead of the
+// encoder. The stall flag and the zero bitrate still say what is true.
+func stallWarning(p *supervisor.Status, sourceArriving bool) string {
+	if p == nil || !p.Stalled || !sourceArriving {
+		return ""
+	}
+	return "Stalled: nothing has been delivered for " + strconv.Itoa(int(p.StalledSec)) +
+		"s although the connection is still open. The platform or the network is not taking data."
 }
 
 func (e *Engine) destByID(list []*destination, id int64) *destination {

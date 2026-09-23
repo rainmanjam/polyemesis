@@ -752,6 +752,11 @@ export interface ProcessStatus {
   lastError?: string;
   nextRetryIn?: number;
   progress: Progress;
+  // Set while the process is running but its output has not advanced for a
+  // few seconds (a sink that stopped reading). progress.bitrateKbps and
+  // progress.speed read 0 then; the destination also carries a warning.
+  stalled?: boolean;
+  stalledSec?: number;
 }
 
 export interface DestStatus {

@@ -1180,6 +1180,7 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 			Restarts:    d.Process.Restarts,
 			BitrateKbps: d.Process.Progress.BitrateKbps,
 			DropFrames:  d.Process.Progress.DropFrames,
+			Stalled:     d.Process.Stalled,
 		}
 		md.OutTimeMS = d.Process.Progress.OutTimeMS
 		md.OutputBytes = d.Process.Progress.TotalSize
