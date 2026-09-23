@@ -440,7 +440,15 @@ are ignored. See [INSTALL.md](INSTALL.md#the-first-run-setup-code).
 both answer `429` with a `Retry-After` header carrying whole seconds. The
 policy is the same for each: five free attempts, then a delay starting at two
 seconds and doubling with every further one to a five-minute ceiling, and the
-counter for an address is forgotten after an hour of quiet. The bodies are
+counter for an address is forgotten after an hour of quiet. An IPv6 client is
+counted by its **/64**, since one host owns the whole block, and an
+IPv4-mapped address (`::ffff:192.0.2.1`) counts as the IPv4 address.
+
+Each throttle also has one budget that every address shares: 100 counted
+attempts in a burst, then one more a second. It exists so that a pool of
+addresses, each inside its own free allowance, cannot guess without limit. When
+it is spent, the next attempt from any address gets a `429` with a
+`Retry-After` of about a second. The bodies are
 `{"error": "too many setup attempts, try again later"}` and `{"error": "too
 many failed attempts, try again later"}`.
 

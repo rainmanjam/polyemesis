@@ -470,6 +470,14 @@ its first tagged release.
 
 ### Security
 
+- **One IPv6 host can no longer dodge the login throttle by rotating
+  addresses.** The login and setup throttles keyed on the full client
+  address, and a VPS routinely gets a whole /64, so each of its addresses got
+  its own five free attempts. An IPv6 client is now counted by its /64, and
+  an IPv4-mapped address as its IPv4 address. Each throttle also has a
+  budget that all addresses share (100 attempts in a burst, then one a
+  second), so a large pool of addresses cannot guess without limit either.
+
 - **A client that reaches the port directly can no longer choose its own
   throttle key.** With `trustProxyHeaders: true`, `X-Forwarded-For` and
   `X-Real-IP` were believed from any peer. The docs say to bind 127.0.0.1
