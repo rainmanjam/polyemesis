@@ -17,6 +17,10 @@ its first tagged release.
   It now names the programme the console is following, waits until that is
   known, and moves when the operator switches. Every socket URL is built by
   one helper, and a test refuses any `new WebSocket(` that bypasses it.
+- **Expert mode's Clear asks first.** It deleted a destination's extra FFmpeg
+  arguments on one click, which reconciles the destination and restarts a live
+  output. It now opens the same confirmation every other destructive action
+  uses, naming the destination and saying that a live output restarts.
 
 ## [0.10.0] — 2026-09-23
 

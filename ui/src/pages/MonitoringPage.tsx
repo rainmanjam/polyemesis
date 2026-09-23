@@ -27,6 +27,8 @@ import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { useLiveData, useStaleTracker } from "@/hooks/useLiveData";
+import { useConfirm } from "@/hooks/useConfirm";
+import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
 import { bytes, clockTime, duration, kbps, pct } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
@@ -114,7 +116,7 @@ const DRY_RUN_LABEL: Record<DryRunResult["verdict"], TranslationKey> = {
  *  full command shown below the boxes was built from the text currently in
  *  them. Someone pasting flags from a forum thread into a live stream should
  *  have to look at the whole line first. */
-function ExpertPanel() {
+export function ExpertPanel() {
   const t = useT();
   const [dests, setDests] = useState<Destination[]>([]);
   const [selected, setSelected] = useState<string>("");
@@ -126,6 +128,12 @@ function ExpertPanel() {
   const [busy, setBusy] = useState<"" | "preview" | "dryrun" | "apply" | "clear">("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
+  // Clear is a WRITE THAT RESTARTS A LIVE OUTPUT: the server saves empty args
+  // and reconciles, the spec hash changes, and the destination's ffmpeg is
+  // replaced. It used to fire on one click of a ghost button beside Apply --
+  // which itself takes resolve-then-apply to reach. The only path to `clear`
+  // now runs through this confirmation, which names the destination.
+  const confirmClear = useConfirm<Destination>();
 
   useEffect(() => {
     api
@@ -216,9 +224,9 @@ function ExpertPanel() {
   );
 
   const clear = useCallback(
-    () =>
+    (dest: Destination) =>
       run("clear", async () => {
-        const r = await api.deleteExpert(asDestinationId(Number(selected)));
+        const r = await api.deleteExpert(asDestinationId(dest.id));
         setDraft({ inputArgs: "", outputArgs: "" });
         setAck(false);
         setDryRun(null);
@@ -226,8 +234,9 @@ function ExpertPanel() {
         setResolvedFor({ inputArgs: "", outputArgs: "" });
         setSaved(t("mon.clearedThisDestinationIsBack"));
       }),
-    [run, selected, t],
+    [run, t],
   );
+  const selectedDest = dests.find((d) => String(d.id) === selected);
 
   const guards = resolved?.guards ?? [];
   const shown = sameDraft(resolvedFor, draft);
@@ -308,8 +317,13 @@ function ExpertPanel() {
                 {busy === "apply" && <Loader2 className="h-3 w-3 animate-spin" />}
                 Apply
               </Button>
-              <Button size="sm" variant="ghost" onClick={clear} disabled={busy !== ""}>
-                Clear
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => selectedDest && confirmClear.ask(selectedDest)}
+                disabled={busy !== "" || !selectedDest}
+              >
+                {t("mon.clear")}
               </Button>
               {!shown && (
                 <span className="text-micro text-muted-foreground">
@@ -413,6 +427,22 @@ function ExpertPanel() {
           </>
         )}
       </CardContent>
+      {/* Recoverable -- the arguments can be typed back -- so a button, not a
+          typed challenge. The friction is naming the destination and saying
+          that a live output restarts, which is the part a click on "Clear"
+          did not tell anybody. */}
+      <ConfirmDestructive
+        open={confirmClear.open}
+        onOpenChange={confirmClear.onOpenChange}
+        subject={confirmClear.target?.name ?? ""}
+        title={t("mon.clearExpertTitle")}
+        description={t("mon.clearExpertBody")}
+        confirmLabel={t("mon.clearExpertConfirm")}
+        onConfirm={async () => {
+          if (confirmClear.target) await clear(confirmClear.target);
+          confirmClear.close();
+        }}
+      />
     </Card>
   );
 }
