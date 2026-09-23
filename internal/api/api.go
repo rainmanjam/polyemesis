@@ -1806,6 +1806,13 @@ var readScopeWritePatterns = map[string]bool{
 // transcript would have been a fix shaped by the URL rather than by the bytes,
 // which is the same mistake as gating on the HTTP verb.
 //
+// CHAT IS CONTENT FOR THE SAME REASON, and the four chat GETs joined the list
+// when staging-readiness row 32 found them missing: the scrollback, a search
+// over it, one viewer's history, and the overview that embeds the recent
+// messages. /chat/search is the /library/search argument again -- iterate
+// common words and the scrollback comes back. The same messages arrive live on
+// /ws, which a read token may open, so events.TypeChat is wsDrop there.
+//
 // GET /library still returns Speakers, the bare list of labels in the archive.
 // That is left reachable deliberately: it is who appears, not what was said,
 // and a dashboard that groups by speaker needs it. If that judgement is wrong
@@ -1831,6 +1838,13 @@ var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/clipper/recordings/{id}/transcript": true,
 	"/api/v1/library/recordings/{id}/transcript": true,
 	"/api/v1/library/search":                     true,
+	// Staging-readiness row 32: content, not metadata. What viewers wrote. The
+	// overview is here too because it carries the recent messages alongside
+	// the connection states; the live copy on /ws is withheld by wsEventPolicy.
+	"/api/v1/chat":          true,
+	"/api/v1/chat/messages": true,
+	"/api/v1/chat/search":   true,
+	"/api/v1/chat/users":    true,
 }
 
 // requireScope enforces what a token is ALLOWED to do, once requireAuth has

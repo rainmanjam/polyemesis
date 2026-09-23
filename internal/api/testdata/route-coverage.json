@@ -1,7 +1,7 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
   "excusedCeiling": 50,
-  "counterpartlessExcusedCeiling": 26,
+  "counterpartlessExcusedCeiling": 30,
   "differentialFloor": 8,
   "sentinelWitnessFloor": 24,
   "nonGetDifferentialFloor": 20,
@@ -13,16 +13,16 @@
   "shapesNotInspectedCeiling": 3,
   "totals": {
     "methodPatternPairs": 229,
-    "swept": 67,
+    "swept": 63,
     "excused": 50,
-    "denied": 112,
+    "denied": 116,
     "nonTrieProbes": 12,
     "shapesEmitted": 27,
     "shapesNotInspected": 3
   },
   "partition": {
     "differential": 8,
-    "invariant": 54,
+    "invariant": 50,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 1,
     "unstable": 4
@@ -127,7 +127,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/chat",
-      "coverage": "swept",
+      "coverage": "denied",
       "zeroSource": "unguarded"
     },
     {
@@ -211,7 +211,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/chat/messages",
-      "coverage": "swept",
+      "coverage": "denied",
       "zeroSource": "unguarded"
     },
     {
@@ -223,7 +223,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/chat/search",
-      "coverage": "swept",
+      "coverage": "denied",
       "zeroSource": "unguarded"
     },
     {
@@ -241,7 +241,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/chat/users",
-      "coverage": "swept",
+      "coverage": "denied",
       "zeroSource": "unguarded"
     },
     {
@@ -1439,26 +1439,6 @@
       "class": "invariant"
     },
     {
-      "path": "/api/v1/chat",
-      "pattern": "GET /api/v1/chat",
-      "class": "invariant"
-    },
-    {
-      "path": "/api/v1/chat/messages",
-      "pattern": "GET /api/v1/chat/messages",
-      "class": "invariant"
-    },
-    {
-      "path": "/api/v1/chat/search?q=hello",
-      "pattern": "GET /api/v1/chat/search",
-      "class": "invariant"
-    },
-    {
-      "path": "/api/v1/chat/users?platform=twitch\u0026authorId=1",
-      "pattern": "GET /api/v1/chat/users",
-      "class": "invariant"
-    },
-    {
       "path": "/api/v1/clipper/recordings/1",
       "pattern": "GET /api/v1/clipper/recordings/{id}",
       "class": "invariant"
@@ -1900,6 +1880,46 @@
       "route": "GET /api/v1/auth/tokens",
       "scope": "route",
       "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/chat",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/chat/messages",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/chat/search",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/chat/users",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
       "want": {
         "as": "read",
         "status": 403

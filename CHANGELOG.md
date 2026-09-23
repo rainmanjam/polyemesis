@@ -470,6 +470,14 @@ its first tagged release.
 
 ### Security
 
+- **A read-scoped API token no longer reads viewer chat.** `read` means
+  metadata, not content, and recordings and transcripts were already refused,
+  but `GET /chat`, `/chat/messages`, `/chat/search` and `/chat/users` answered
+  a read token with the scrollback, and `/ws` sent it every chat message.
+  Those four routes now answer `403`, and a read-scoped socket is not sent
+  `chat` events (connection state still arrives). A monitoring script that
+  read chat needs an `admin` token.
+
 - **A refused Kick webhook no longer writes its secret to the log.** The
   request log recorded the full path of every 4xx and 5xx, and
   `/api/v1/chat/kick/{secret}` answers a wrong method, a non-JSON body or a

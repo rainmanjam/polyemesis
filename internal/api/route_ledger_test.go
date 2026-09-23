@@ -694,6 +694,13 @@ var excusedRoutes = map[string]coverageExcus{
 		Issue: "#163",
 	},
 	"GET /api/v1/library/search": denied(),
+	// Staging-readiness row 32: what viewers wrote is content, and a read
+	// token is metadata. These four were swept -- a read token reached them
+	// and got the scrollback -- until readScopeDeniedPatterns listed them.
+	"GET /api/v1/chat":          denied(),
+	"GET /api/v1/chat/messages": denied(),
+	"GET /api/v1/chat/search":   denied(),
+	"GET /api/v1/chat/users":    denied(),
 }
 
 // The constructors below no longer take a test NAME or an ISSUE STRING. Both

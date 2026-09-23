@@ -41,7 +41,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the thirteen `GET`s among the fifteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the seventeen `GET`s among the nineteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 
 The middleware also lets `HEAD` through, and no route in this API is registered
@@ -111,10 +111,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Fifteen routes are refused outright**, for three different reasons. Masking
+**Nineteen routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next five, which
-are `403` because of what they *do*. The last eight are `403` because of what
+are `403` because of what they *do*. The last twelve are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -134,9 +134,17 @@ are `403` because of what they *do*. The last eight are `403` because of what
 | `GET /clipper/recordings/{id}/transcript` | the verbatim transcript |
 | `GET /library/recordings/{id}/transcript` | the same, by the library's route |
 | `GET /library/search` | hits carry the segment `text`, its `context` and the `speaker` |
+| `GET /chat` | the chat overview carries the recent messages, not only each platform's connection state |
+| `GET /chat/messages` | the chat scrollback: what each viewer wrote, under their name |
+| `GET /chat/search` | hits are chat messages; iterating common words rebuilds the scrollback |
+| `GET /chat/users` | everything one viewer has said |
 
-The last of those is the one worth reading twice. `GET /library/search` looks
-like a metadata query and is not: iterating common words would rebuild whole
+Chat is refused on the WebSocket as well: a `read` token may open `/ws`, and it
+is sent every event type except `chat` (connection state and retractions still
+arrive).
+
+`GET /library/search` is the one worth reading twice. It looks like a metadata
+query and is not: iterating common words would rebuild whole
 transcripts without ever requesting a route with `transcript` in its path. The
 list is drawn from what the bytes are, not from what the URL says.
 
