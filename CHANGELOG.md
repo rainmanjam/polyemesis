@@ -515,6 +515,16 @@ its first tagged release.
   has the commands. The installer and in-app upgrade still check
   `SHA256SUMS` only.
 
+### CI
+
+- **The release workflow rehearses itself every week.** The GPU images, the
+  arm64 image and the SBOM are built only by `release.yml`, which ran only
+  when someone pushed a tag, so drift in any of them first showed up as a
+  failed release (v0.7.0, v0.8.0 and v0.9.0 all failed on their first tag
+  run). `release.yml` now also runs as a dry run every Tuesday on `main` and
+  publishes nothing. `scripts/test-release-gates.sh` checks that `PUBLISH`
+  is false for a scheduled run.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

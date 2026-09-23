@@ -17,6 +17,12 @@ the images, cross-compiles every binary, produces the SBOM and the checksums, an
 pushes **nothing**. A rehearsal that fails is a release that would have failed
 halfway, which is the expensive way to find out.
 
+The same rehearsal also runs **every Tuesday on `main`** (a `schedule:` trigger
+that publishes nothing). The GPU images, the arm64 image and the SBOM are built
+nowhere else, so a red scheduled run is the early warning that the next tag would
+fail. It rehearses whatever `main` was on Tuesday, not your commit. Rehearse the
+commit you are tagging anyway.
+
 > `dry_run` was once declared and read by nothing: setting it to `false` and
 > expecting a publish got a silent no-op. `PUBLISH` is now derived explicitly
 > (`release.yml:77`), which is why the rehearsal is trustworthy.

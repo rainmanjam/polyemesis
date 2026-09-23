@@ -381,6 +381,64 @@ else
        "'id-token' not in (w.get('permissions') or {}) and {k for k, v in w['jobs'].items() if (v.get('permissions') or {}).get('id-token') == 'write'} == {'binaries', 'images'}"
   have "and so is attestations: write" \
        "{k for k, v in w['jobs'].items() if (v.get('permissions') or {}).get('attestations') == 'write'} == {'binaries', 'images'}"
+
+  step "11. The whole release is rehearsed every week, whether or not anyone asks"
+  # Staging-readiness row 23. RELEASE-RUNBOOK.md asks for a dry run on the
+  # commit being tagged; the last one before 0.10.0 was six weeks old, and the
+  # v0.7.0, v0.8.0 and v0.9.0 tag runs all failed first. The GPU images, the
+  # arm64 build and the SBOM are built ONLY here -- ci.yml and security.yml
+  # build none of them -- so a week of drift in any of them surfaced as a
+  # failed release. A schedule turns that into a failed Tuesday.
+  #
+  # PyYAML reads the bare key `on:` as the boolean True (YAML 1.1), hence the
+  # fallback.
+  trig='(w.get("on") or w.get(True) or {})'
+  have "release.yml runs on a schedule" \
+       "bool(${trig}.get('schedule')) and all(c.get('cron') for c in ${trig}['schedule'])"
+  have "and the version tag is still a trigger (positive control)" \
+       "'v*' in ${trig}['push']['tags']"
+fi
+
+# A scheduled run must PUBLISH NOTHING. That property lives in one expression,
+# env.PUBLISH, and a schedule has no dry_run input at all -- so the question is
+# what that expression makes of an event with no inputs. It is evaluated here
+# for each event rather than asserted as a string, so a rewrite that reads the
+# same and behaves differently is caught.
+publish_for() { # publish_for <event> <dry_run: true|false|none> -> true|false
+  python3 - "$WORKFLOW" "$1" "$2" <<'PY'
+import re, sys, yaml
+w = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+expr = w["env"]["PUBLISH"].strip()
+m = re.fullmatch(r"\$\{\{(.*)\}\}", expr, re.S)
+if not m:
+    sys.exit("PUBLISH is not a single ${{ }} expression: " + expr)
+body = m.group(1)
+# Only the operators and names this expression is written with; anything else
+# is an error, not a guess.
+allowed = re.sub(r"github\.event_name|inputs\.dry_run|'[a-z_]+'|==|\|\||&&|!|\(|\)|\s", "", body)
+if allowed:
+    sys.exit("PUBLISH uses something this evaluator does not model: " + allowed)
+py = (body.replace("||", " or ").replace("&&", " and ")
+          .replace("!inputs.dry_run", " (not dry_run) ")
+          .replace("github.event_name", "event"))
+dry = {"true": True, "false": False, "none": None}[sys.argv[3]]
+# eval over a string built above from release.yml's own PUBLISH expression,
+# after the allow-list check: names, quotes, comparisons and boolean operators
+# only.
+print("true" if eval(py, {"__builtins__": {}}, {"event": sys.argv[2], "dry_run": dry}) else "false")
+PY
+}
+if python3 -c 'import yaml' 2>/dev/null; then
+  got="$(publish_for schedule none 2>&1)"
+  [ "$got" = false ] && ok "a scheduled run publishes nothing (PUBLISH evaluates false)" \
+                     || bad "a scheduled run would PUBLISH: got $got"
+  # Controls, so the evaluator cannot pass by answering false to everything.
+  got="$(publish_for push none 2>&1)"
+  [ "$got" = true ] && ok "while a tag push still publishes" || bad "a tag push no longer publishes: got $got"
+  got="$(publish_for workflow_dispatch false 2>&1)"
+  [ "$got" = true ] && ok "and so does a dispatch with dry_run: false" || bad "dispatch dry_run=false: got $got"
+  got="$(publish_for workflow_dispatch true 2>&1)"
+  [ "$got" = false ] && ok "and a dispatch with dry_run: true does not" || bad "dispatch dry_run=true: got $got"
 fi
 
 printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"

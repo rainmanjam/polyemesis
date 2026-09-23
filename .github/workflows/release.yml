@@ -24,6 +24,21 @@ on:
         description: "Build everything but push nothing"
         type: boolean
         default: true
+  # A FORCED REHEARSAL EVERY WEEK, on main, publishing nothing. The GPU images,
+  # the arm64 image and the SBOM are built only in this workflow -- ci.yml and
+  # security.yml build none of them -- and this workflow otherwise runs only
+  # when someone tags. So drift in any of them (a base image that moved, an apt
+  # pin that vanished, syft) surfaced as a failed release: the v0.7.0, v0.8.0
+  # and v0.9.0 tag runs all failed first, and the last hand-run rehearsal
+  # before 0.10.0 was six weeks old.
+  #
+  # PUBLISH (below) is false for a schedule: it is true only for a tag push or
+  # a dispatch with dry_run: false, and a schedule is neither.
+  # scripts/test-release-gates.sh evaluates that expression for this event, so
+  # a rewrite that published on a schedule fails CI. Tuesday, clear of ci.yml's
+  # and security.yml's Monday runs.
+  schedule:
+    - cron: "37 7 * * 2"
 
 # ONE PUBLISH PER REF AT A TIME. Delete and re-push v0.7.0 to fix a wrong
 # CHANGELOG date, or press "Re-run all jobs" on a run whose images job failed,
