@@ -270,6 +270,64 @@ that creates the first admin should do one of these:
 
 See [INSTALL.md](INSTALL.md#the-first-run-setup-code).
 
+### Upgrading past 0.10.0 (unreleased, on `main`): read-scoped tokens no longer read chat
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`.
+
+**Only if something reads chat with a `read`-scoped API token.** `GET
+/api/v1/chat`, `/chat/messages`, `/chat/search` and `/chat/users` now answer a
+read token with `403`, and a read-scoped `/api/v1/ws` socket is no longer sent
+`chat` events. It still receives `chatState` (which platforms are connected)
+and `chatRetract`, so a monitor that only watches connection state keeps
+working.
+
+A dashboard, bot or archiver that reads the messages themselves needs an
+`admin` token instead: create one under **Settings → API tokens** and replace
+the read token in that integration. Nothing else a read token could do has
+changed.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): the login throttle counts IPv6 by /64 and has a shared budget
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`.
+
+**Usually nothing to do.** Two things changed in how failed sign-ins (and
+first-run setup attempts) are throttled:
+
+- **An IPv6 client is counted by its /64**, not its full address, and an
+  IPv4-mapped address (`::ffff:192.0.2.1`) as the IPv4 address. Several
+  people signing in from one IPv6 network now share one allowance of five free
+  failures before the doubling delay starts — the same as several people
+  behind one IPv4 NAT always have.
+- **All addresses share one budget**: 100 attempts back to back, then one a
+  second. An attempt is charged when it is let through, so requests in flight
+  at once cannot overdraw it, and a correct password gives its charge back.
+
+**What you see when the budget runs out.** Sign-in answers `429 too many failed
+attempts, try again later` with `Retry-After: 1`, and the server logs
+`throttled login` at WARN. The wait is never more than a second per attempt,
+but while an address pool keeps guessing at more than one attempt a second, the
+budget stays empty and your own sign-in gets intermittent `429`s: retry after a
+second and it goes through. If that persists, the guessing is the incident —
+block the source at the firewall or reverse proxy; restarting the server resets
+the budget but not the attacker.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): the request log records route patterns
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`.
+
+**Only if you parse the server's log.** The `path` field of the `http` request
+log line is now the route pattern the request matched, not the URL it arrived
+on: `/api/v1/destinations/{id}/start`, not `/api/v1/destinations/7/start`.
+That keeps secrets that live in a path, such as the Kick webhook's, out of the
+log. A request that matched no route is still logged with its real path, so
+404s read as before.
+
+A log query or alert that matched a specific ID in `path` no longer matches;
+match the pattern, and correlate with the request's other fields instead.
+
 ### Upgrading past 0.10.0 (unreleased, on `main`): sources with no ingest mode become SRT
 
 > Not yet in a tag — this note is here ahead of the release that carries it,

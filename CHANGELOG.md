@@ -492,7 +492,9 @@ its first tagged release.
   its own five free attempts. An IPv6 client is now counted by its /64, and
   an IPv4-mapped address as its IPv4 address. Each throttle also has a
   budget that all addresses share (100 attempts in a burst, then one a
-  second), so a large pool of addresses cannot guess without limit either.
+  second), charged when an attempt is let through rather than when it fails,
+  so a large pool of addresses cannot guess without limit either, however many
+  requests it has in flight. A correct password gives its charge back.
 
 - **A client that reaches the port directly can no longer choose its own
   throttle key.** With `trustProxyHeaders: true`, `X-Forwarded-For` and
