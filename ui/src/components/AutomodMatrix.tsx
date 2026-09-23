@@ -10,7 +10,12 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { armedCount, isOperable } from "@/lib/automodArmed";
+import {
+  anyIrreversibleArmed,
+  armedCount,
+  IRREVERSIBLE,
+  isOperable,
+} from "@/lib/automodArmed";
 import { ACTION_KEYS, CHECKER_KEYS, checkerReady } from "@/lib/automodConfig";
 import { useT } from "@/lib/i18n";
 import type {
@@ -51,10 +56,6 @@ import type {
    line and the cells came to disagree. The English text is untouched: these
    strings are accessible names the behaviour suite matches on. */
 
-/** Actions with no undo. They get a warning when armed, because the poka-yoke
- *  rule this project holds is that friction should be proportional to
- *  consequence — and these are where consequence stops being recoverable. */
-const IRREVERSIBLE: AutomodAction[] = ["delete", "ban"];
 
 export interface AutomodMatrixProps {
   settings: Settings;
@@ -175,13 +176,13 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
     onChange({ ...settings, automod: { ...automod!, on } });
   }
 
-  const anyIrreversibleArmed = view.actions.some(
-    (a) =>
-      IRREVERSIBLE.includes(a) &&
-      view.platforms.some((p) =>
-        view.checkers.some((c) => automod.on?.[`${p}/${a}/${c}`]),
-      ),
-  );
+  const irreversibleArmed = anyIrreversibleArmed({
+    platforms: view.platforms,
+    actions: view.actions,
+    checkers: view.checkers,
+    on: automod.on,
+    available: armable,
+  });
 
   return (
     <Card>
@@ -221,7 +222,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
           />
         </div>
 
-        {anyIrreversibleArmed && (
+        {irreversibleArmed && (
           <div className="flex items-start gap-2 rounded-md border border-warn/40 bg-warn/10 p-2 text-xs">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warn" aria-hidden />
             <span>

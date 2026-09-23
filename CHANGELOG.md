@@ -282,6 +282,38 @@ its first tagged release.
   statement, and health reports them as `degraded`: a full or read-only volume
   until the next successful write or committed transaction, a damaged file
   until restart.
+- **Saving the Settings page no longer unsets the ingest mode chosen on the
+  Sources page.** `GET /settings` served the settings blob's copy of `ingest`,
+  which the Sources page never updates, and the page PUTs the whole document
+  back on every save — so the write-through copied the stale block over the
+  live source. Publishes were refused while `/health` said ok. `settings.ingest`
+  is now read from the default source on both GET and PUT, so an unchanged
+  round-trip is a no-op by construction.
+- **An unknown field under `settings.automod` is now a 400, like every other
+  section.** Automod's own JSON decoder sat outside the request's
+  unknown-field check, so a typo was accepted and dropped. AUTOMOD.md named the
+  history bounds `window`, `retain`, `idleEviction` and `maxAuthors`, none of
+  which the server reads; it now names `windowSeconds`, `retainPerAuthor` and
+  `idleEvictionSeconds`, says the 20,000-author ceiling is fixed, and a test
+  holds the table to the struct.
+- **An automod cell can no longer be armed over a checker that is not
+  configured.** The API accepted `twitch/ban/model` with the model switched
+  off. The console drew that cell as inert, and its banner still said an
+  irreversible action was armed. Once someone configured the model, the ban
+  went live. `PUT /settings` now refuses to switch on such a cell and names
+  it. `/automod/matrix` and the console banner count only cells that can fire.
+- **A Settings save from a stale page no longer undoes other operators'
+  changes.** The page PUTs the whole document, so the last save won on every
+  field. A tab opened before someone disarmed an auto-ban re-armed it by saving
+  an unrelated retention change. `GET /settings` now carries a `version`, and a
+  `PUT` that sends back an out-of-date one is refused with `409
+  settings_conflict` and nothing is stored. The console sends it on every save
+  and, on a conflict, keeps your draft and offers a reload. Clients that send no
+  `version` are not checked. A save that is stored and then answers with an
+  error (`503 no_source` for an ingest change before any source exists, or a
+  failed reconcile) returns the stored `version` in the error body. The console
+  sends that version on its next save, so that save is not refused as a
+  conflict with your own change.
 
 ## [0.10.0] — 2026-09-23
 

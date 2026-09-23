@@ -19,6 +19,15 @@ export type SourceId = number & { readonly [SOURCE_ID]: never };
 declare const DESTINATION_ID: unique symbol;
 export type DestinationId = number & { readonly [DESTINATION_ID]: never };
 
+/** The version of a settings document, as GET /settings served it.
+ *
+ *  Branded, and with NO minting function, on purpose: the only way to hold one
+ *  is to have read it from the server. A page that made one up -- or copied it
+ *  across from a different read -- would be claiming its save was based on a
+ *  document it never saw, which is exactly the claim the server checks. */
+declare const SETTINGS_VERSION: unique symbol;
+export type SettingsVersion = string & { readonly [SETTINGS_VERSION]: never };
+
 /** Mint a branded id from a raw number at the one place it is freshly
  *  parsed -- a Select's string value, a route param -- rather than carried
  *  through from a server response that already has the brand. */
@@ -1265,6 +1274,14 @@ export interface Settings {
   /** Alert delivery policy. Optional so a client that predates it can still
    *  PUT settings. See AlertSettings below. */
   alerts?: AlertSettings;
+  /** The version of the document this was read at, as GET /settings served it.
+   *
+   *  Sent back on the next PUT, which the server refuses (409,
+   *  settings_conflict) if the stored document has changed since -- so a stale
+   *  tab cannot revert what another operator saved. Nothing sets it by hand:
+   *  every page holds the document it read and saves it back, so the version
+   *  travels without any page having to remember it. Absent means unchecked. */
+  version?: SettingsVersion;
 }
 
 /** The GPU inventory Twitch Enhanced Broadcasting is negotiated with.

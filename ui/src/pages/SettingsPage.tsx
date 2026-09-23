@@ -62,7 +62,12 @@ import {
   supportOf,
   tierInfo,
 } from "@/lib/capabilities";
-import { api, isAccountInUse, type AccountDestination } from "@/lib/api";
+import {
+  api,
+  isAccountInUse,
+  isSettingsConflict,
+  type AccountDestination,
+} from "@/lib/api";
 import {
   acmeStance,
   acmeYaml,
@@ -224,6 +229,19 @@ export function SettingsPage() {
   // an error with no single field behind it.
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  /* SOMEBODY ELSE SAVED FIRST, so this save was refused and nothing of it was
+   * stored. The server's sentence says so. Held open with a reload action,
+   * because the draft on screen is now based on a document that no longer
+   * exists, and saving it again would conflict again. Not reloaded
+   * automatically: that would throw away the draft the operator is looking at
+   * without asking. */
+  const conflictToast = (msg: string) =>
+    toast.error(msg, {
+      duration: Infinity,
+      closeButton: true,
+      action: { label: t("chatpage.reload"), onClick: () => window.location.reload() },
+    });
+
   const save = async (next: Settings) => {
     setSaving(true);
     setSaveError(null);
@@ -232,6 +250,12 @@ export function SettingsPage() {
       toast.success(t("set.settingsSavedAffectedProcessesHave"));
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("rec.saveFailed");
+      // A conflict is not given to setSaveError: it belongs to no field, and
+      // AutomodConfig would otherwise hunt for a rule to pin it on.
+      if (isSettingsConflict(err)) {
+        conflictToast(msg);
+        return;
+      }
       setSaveError(msg);
       toast.error(msg);
     } finally {
@@ -255,6 +279,10 @@ export function SettingsPage() {
       setSettings(saved);
       toast.success("MQTT settings saved.");
     } catch (err) {
+      if (isSettingsConflict(err) && err instanceof Error) {
+        conflictToast(err.message);
+        return;
+      }
       toast.error(err instanceof Error ? err.message : t("set.couldNotSaveTheMqtt"));
     } finally {
       setSaving(false);

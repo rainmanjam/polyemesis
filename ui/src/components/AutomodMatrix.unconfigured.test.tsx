@@ -149,6 +149,28 @@ describe("AutomodMatrix: a checker that was never configured", () => {
     expect(screen.getByText("1 automatic action")).toBeTruthy();
   });
 
+  it("does not warn of an irreversible action over a checker that cannot fire", async () => {
+    // A ban stored on over a switched-off model: armed through the API, or
+    // left behind when the model was turned off. The collapsed line said
+    // "nothing automatic" -- correctly, the engine is handed no model -- while
+    // the banner directly above it said an irreversible action was armed. The
+    // two read the same draft by different rules; they now share one.
+    await open(automod({ on: { "twitch/ban/model": true } }));
+
+    expect(screen.getByText("nothing automatic")).toBeTruthy();
+    expect(screen.queryByText(/An irreversible action is armed/)).toBeNull();
+  });
+
+  it("still warns once the checker behind the armed ban exists", async () => {
+    await open(
+      automod({
+        rules: [{ id: 1, name: "spam", enabled: true, pattern: "x", action: "ban" }],
+        on: { "twitch/ban/rules": true },
+      }),
+    );
+    expect(screen.getByText(/An irreversible action is armed/)).toBeTruthy();
+  });
+
   it("keeps the platform's own reason when the platform is the one that cannot", async () => {
     // Both gates are shut here. Configuring the model would change nothing,
     // so the reason shown has to be the platform's.

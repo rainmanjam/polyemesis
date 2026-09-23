@@ -1928,6 +1928,12 @@ const codeSourceRequired = "source_required"
 
 const codeNoSource = "no_source"
 
+// codeSettingsConflict: the settings document was saved by somebody else after
+// this client read it, so its save was refused rather than reverting theirs.
+// The console branches on it to offer a reload instead of a retry, since a
+// retry would conflict again. See handlePutSettings.
+const codeSettingsConflict = "settings_conflict"
+
 // noSourceMsg is the sentence, written once so that twenty routes cannot drift
 // into twenty wordings of it.
 //
@@ -1952,6 +1958,18 @@ var errNoSource = errors.New(noSourceMsg)
 // and the operator is the one who ends it.
 func writeNoSource(w http.ResponseWriter) {
 	writeErrorCode(w, http.StatusServiceUnavailable, codeNoSource, noSourceMsg)
+}
+
+// writeNoSourceStored is the same refusal from PUT /settings, which answers it
+// AFTER storing the rest of the document and so has to hand back the version
+// it stored -- see failStored in handlePutSettings. A named helper rather than
+// an inline body so TestEveryNoSourceRefusalIsAGuardOrIsRecorded still finds
+// the site by name.
+func writeNoSourceStored(w http.ResponseWriter, version string) {
+	writeJSON(w, http.StatusServiceUnavailable, storedSettingsError{
+		apiError: apiError{Error: noSourceMsg, Code: codeNoSource},
+		Version:  version,
+	})
 }
 
 // requireSource refuses a request that needs a running programme when there is

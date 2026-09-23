@@ -497,6 +497,29 @@ used to have three samplers of the host disagreeing by a tick.
 `PUT /settings` takes the whole blob. Read it, change what you want, write it
 back — a partial object will clear what it omits.
 
+**A save from a stale read is refused, not merged.** `GET /settings` carries a
+`version`. Send it back unchanged in the `PUT` body, and if anyone has saved
+the document since — another operator, the scheduler flipping the playlist,
+`PUT /jobs/policy` — the save is refused with `409` and
+`{"code": "settings_conflict"}`, and **nothing in it is stored**. Read again,
+reapply your change, and save. The `PUT` response carries the new `version`, so
+you can save twice in a row without reading in between. So does an error that
+comes AFTER the document was stored -- the `503 no_source` for an ingest change
+on an install with no source (the rest of the document is saved), a failed
+ingest write-through, a failed reconcile: its body carries the `version` now
+stored, and your next save should send that one, or it will conflict with
+your own change. A body with no
+`version` is not checked, which keeps older scripts working and also means they
+still overwrite whatever was saved since they read. The console always sends
+it.
+
+**`ingest` is the default source's ingest, not a copy of it.** Once a source
+exists, `GET /settings` serves that source's `ingest` block and `PUT /settings`
+merges over it and writes it back to the source, so a document read and written
+back unchanged changes nothing — including after the Sources page has changed
+the mode. With no source, the blob's own block is served, and a change to it is
+refused because there is nothing for it to configure.
+
 `GET /tls/acme-preflight?hostname=…` reports what Let's Encrypt would need from
 this host — a name it can issue for, a DNS record, port 80, a contact address —
 and, in `acme` mode, what it said the last time it refused. Each check is
@@ -812,6 +835,11 @@ to drift.
 
 `GET /automod/stats` reports model spend and health — calls this hour against
 the ceiling, failures, and the last error.
+
+A `PUT /settings` that arms a cell whose checker is not configured (no enabled
+rule, or the model off or without an endpoint) is a 400 that names the cell.
+`summary` counts only the cells that can fire. See
+[AUTOMOD.md](AUTOMOD.md#through-the-api).
 
 ### Recordings, library, clipper
 

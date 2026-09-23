@@ -69,3 +69,35 @@ export function armedCount(args: {
   }
   return n;
 }
+
+/** Actions with no undo. They get a warning when armed, because the poka-yoke
+ *  rule this project holds is that friction should be proportional to
+ *  consequence — and these are where consequence stops being recoverable. */
+export const IRREVERSIBLE: AutomodAction[] = ["delete", "ban"];
+
+/** Whether any irreversible action is armed on any platform — the banner.
+ *
+ *  Through the SAME `available` gate as `armedCount`, and that is the whole
+ *  point of it being here. The banner used to read `on` bare while the
+ *  collapsed line read it through the gate, so a ban stored over a switched-off
+ *  model drew "nothing automatic" directly beneath "An irreversible action is
+ *  armed". The line was right: the engine is handed no model, and the cell
+ *  cannot fire. */
+export function anyIrreversibleArmed(args: {
+  platforms: string[];
+  actions: AutomodAction[];
+  checkers: AutomodChecker[];
+  on: Record<string, boolean> | undefined;
+  available: (key: string) => boolean;
+}): boolean {
+  return args.platforms.some((platform) =>
+    args.actions.some(
+      (action) =>
+        IRREVERSIBLE.includes(action) &&
+        args.checkers.some((checker) => {
+          const key = `${platform}/${action}/${checker}`;
+          return !!args.on?.[key] && args.available(key);
+        }),
+    ),
+  );
+}
