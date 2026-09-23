@@ -493,7 +493,9 @@ bare `hls/` still backs the legacy unscoped `/hls` route for the default
 source, so an existing player keeps working.) `playout/` is the public origin
 that viewers are actually served from. It is per source for the same reason —
 `playout/3/hd/` is source 3's `hd` variant — and `playout.sourceId` picks which
-of them `/playout/` serves; the URL itself carries no source number. A
+of them `/playout/` serves; the URL itself carries no source number. Changing
+it takes effect on the next request to `/playout/`, with no restart; a player
+already watching keeps the old programme's playlist until it next reloads it. A
 `playout/<variant>/` directory left at the top level by a release before this
 layout is no longer written or served and can be deleted.
 

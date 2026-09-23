@@ -205,10 +205,15 @@ its first tagged release.
   engines whether any recorder process is running.
 - Multi-source playout: every source's playout muxer wrote the same
   `<dataDir>/playout/<variant>/`, so two programmes overwrote each other's
-  segments, either one's teardown cleared the other's live window, and
-  `playout.sourceId` changed nothing. Each source now packages into
-  `playout/<sourceId>/`; the public URL is unchanged. A top-level
-  `playout/<variant>/` left by an earlier release can be deleted.
+  segments and either one's teardown cleared the other's live window. Each
+  source now packages into `playout/<sourceId>/`; the public URL is unchanged. A
+  top-level `playout/<variant>/` left by an earlier release can be deleted.
+- **Changing `playout.sourceId` switches what the public page serves without a
+  restart.** The `/playout/` mount built its file handler once, from whichever
+  programme was named at the first public request after boot, so a saved switch
+  showed in the console while the audience kept the old programme until the
+  server restarted. A request that arrived before any engine was up likewise
+  pinned 503 until restart. The programme is now resolved on every request.
 - A recording's `sourceId` flapped between programmes: every source's recording
   manager scans the shared recordings directory and stamped its own source on
   every file it saw, so the last scanner won and the clip editor named a clip's
