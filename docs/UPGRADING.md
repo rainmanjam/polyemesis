@@ -314,9 +314,18 @@ live. See [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to
 
 ## Verifying an upgrade
 
+Set `POLYEMESIS_URL` to where this install answers. It is not `localhost:8080`
+for most installs: `install.sh` defaults to self-signed TLS on 443 in both
+modes. The table in
+[INSTALL.md → Verifying the install](INSTALL.md#verifying-the-install) lists
+each install shape; in short, `https://localhost` for an `install.sh` install
+that took the defaults, and `http://localhost:8080` for `docker compose` from a
+clone.
+
 ```sh
+export POLYEMESIS_URL=https://localhost      # see above
 polyemesis -version
-curl -s localhost:8080/api/v1/health
+curl -fsSk "${POLYEMESIS_URL:?set it first}/api/v1/health"
 ```
 
 **Check no destination came back disabled.** From 0.7.0 this is the first thing
@@ -324,18 +333,26 @@ to look at after an upgrade or a restore, because it is the one failure that
 looks like success:
 
 ```sh
-curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/v1/destinations \
-  | grep -o keyUnreadable | wc -l
+curl -fsSk -H "Authorization: Bearer $TOKEN" "${POLYEMESIS_URL:?set it first}/api/v1/destinations" \
+  | jq '[.[] | select(.destination.keyUnreadable) | .destination.name]'
 ```
 
 `$TOKEN` is an API token from **Settings → API tokens** (see
-[API.md](API.md)). Unauthenticated this endpoint answers `401`, and the count
-would be a meaningless zero — which reads as an all-clear for the very failure
-this check exists to find.
+[API.md](API.md)); a `read` token is enough.
 
-Anything above zero means those destinations could not decrypt their stream key
-— almost always a restore that omitted `secret.key`. Re-enter the key on each,
-or restore the file and restart.
+**`[]` is the all-clear, and it is the only one.** A list of names is the
+destinations that could not decrypt their stream key — almost always a restore
+that omitted `secret.key`. Re-enter the key on each, or restore the file and
+restart. **No output at all means the request failed**, and `curl` has said why
+on the line above: the wrong address, a certificate it would not accept, or a
+`401` for a missing token.
+
+This used to be `curl -s localhost:8080/… | grep -o keyUnreadable | wc -l`, and
+that form is worth recognising if you have it in a runbook. On an install
+serving HTTPS on 443 the request fails, `-s` hides the failure, and `wc -l`
+prints `0` — the all-clear, for the one failure this check exists to find. The
+exploratory test that caught it restored a data directory without `secret.key`
+and watched the old command report zero.
 
 Then, in the UI: the ingest goes live, each destination reports running, and the
 **Meters** page shows loudness after routing. That last one is the real check —

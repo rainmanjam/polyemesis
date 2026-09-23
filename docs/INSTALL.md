@@ -907,11 +907,25 @@ Four Windows-specific things worth knowing up front:
 
 ## Verifying the install
 
-Same on every platform.
+Same on every platform — but **not the same address on every install**, so set
+it first. Pick the row that matches how you installed:
+
+| You installed with | `POLYEMESIS_URL` |
+|---|---|
+| `install.sh`, either mode, taking its defaults (self-signed TLS, offered 443) | `https://localhost` |
+| `install.sh` where you kept port 8080, or the hand-installed unit in [Run it as a service](#run-it-as-a-service) with `config.example.yaml` (`tls.mode: auto` resolves to self-signed) | `https://localhost:8080` |
+| `./polyemesis` with no `config.yaml`, or `docker compose` from a clone of this repository | `http://localhost:8080` |
 
 ```bash
-curl -s http://localhost:8080/api/v1/health
+export POLYEMESIS_URL=https://localhost      # from the table above
+curl -fsSk "${POLYEMESIS_URL:?set it from the table above}/api/v1/health"
 ```
+
+`-f` is the part that matters: without it a refused connection or an error
+status prints nothing and exits 0, which is easy to read as "fine". `-k`
+accepts the self-signed certificate — reasonable for a check made on the box
+itself; from elsewhere, install `<dataDir>/tls/ca.crt` instead (see
+[TLS.md](TLS.md)). An `http://` address ignores it.
 
 The health endpoint is unauthenticated on purpose, so it works before you have
 signed in and from a container healthcheck.

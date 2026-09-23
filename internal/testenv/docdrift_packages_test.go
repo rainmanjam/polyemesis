@@ -37,6 +37,8 @@ var canonicalDriftTests = []string{
 	"TestTheAPIDocumentDescribesNoRouteThatIsGone",
 	"TestEveryCapabilityCellAgreesWithTheCodeThatImplementsIt",
 	"TestThePagesHeadersRestateEverySecurityHeaderTheNginxConfigDeclares",
+	"TestDocVerifyCommandsFailLoudlyAndNameTheirURL",
+	"TestDocKeyUnreadableCountReadsTheWireShape",
 }
 
 func TestTheDocsOnlyPathStillRunsTheDriftGuards(t *testing.T) {

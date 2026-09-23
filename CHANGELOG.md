@@ -8,6 +8,21 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The upgrade check for keys that did not survive a restore said "0" when it
+  had not run.** `docs/UPGRADING.md` counted `keyUnreadable` with
+  `curl -s localhost:8080/… | grep -o keyUnreadable | wc -l`. An `install.sh`
+  install serves HTTPS on 443, so the request failed, `-s` hid it, and `wc -l`
+  printed `0` — the all-clear, confirmed against a data directory restored
+  without `secret.key`. It also read a path the response does not have: rows are
+  `{"destination": {...}}`. The check is now `curl -f` against the operator's own
+  `$POLYEMESIS_URL`, and `jq` lists the affected destinations by name, so `[]` is
+  the all-clear and no output is a failed request. `INSTALL.md`'s health check
+  had the same hard-coded `http://localhost:8080`, which fails on every default
+  `install.sh` install; it now has a table of the three install shapes. Both are
+  held by `internal/testenv/operator_docs_test.go`.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added
