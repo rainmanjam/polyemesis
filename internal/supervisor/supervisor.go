@@ -334,6 +334,13 @@ type Process struct {
 	drain time.Duration
 	// stallAfter is StallAfter, a field for the same reason grace is.
 	stallAfter time.Duration
+	// stopWaited, when set, runs in stop() after the wait on the loop it ended
+	// and before the StateStopped write. Nil outside tests. It is the one seam
+	// that can hold stop() in the gap where a pending Start fires on the same
+	// `done`, which is the interleaving setStateFor exists for: without it a
+	// test can only hope the scheduler lands there, and a race that a test
+	// merely hopes for is a guard nothing defends.
+	stopWaited func()
 
 	runMu   sync.Mutex
 	cancel  context.CancelFunc
@@ -767,6 +774,9 @@ func (p *Process) stop(ctx context.Context, retire bool) error {
 	// behind, which fires on the same `done` this select just took -- may
 	// already have a new loop reporting Running, and a Stopped written over it
 	// would be the lie the one-loop rule in Start exists to prevent.
+	if p.stopWaited != nil {
+		p.stopWaited()
+	}
 	p.setStateFor(gen, StateStopped, "")
 	return err
 }

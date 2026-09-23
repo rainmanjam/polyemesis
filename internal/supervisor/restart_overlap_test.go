@@ -165,3 +165,91 @@ func TestAStopForAnOlderGenerationDoesNotOverwriteTheState(t *testing.T) {
 		t.Errorf("a stop for the current generation was dropped: got %q", st)
 	}
 }
+
+// THE SAME GUARD, DRIVEN THROUGH stop() ITSELF.
+//
+// The test above proves setStateFor drops a stale write; this one proves stop()
+// hands it the generation it ended rather than whatever is current when it
+// finally writes. The interleaving: a Stop is waiting on `done` with time to
+// spare, a Start arrives meanwhile and is left pending on that same `done`, and
+// when the loop ends both wake. If the pending Start's new loop reaches Running
+// before stop() writes, that write must be dropped. stopWaited holds stop() in
+// exactly that gap, so the order is forced rather than hoped for.
+//
+// Mutation: replace stop()'s `p.setStateFor(gen, StateStopped, "")` with
+// `_ = gen; p.setState(StateStopped, "")` (gen must stay used, or the mutant
+// does not build and proves nothing). This test fails with the process reading
+// Stopped over a live child; the three tests above all still pass.
+func TestAStopThatFinishesAfterAPendingStartFiredLeavesTheNewLoopRunning(t *testing.T) {
+	sink := newGatedSink(deafReadyLine)
+	rec := newRecorder()
+	p := testProcess(t, fakeDeaf(30*time.Second), Spec{OnState: rec.onState, LogSink: sink})
+	p.drain = 20 * time.Millisecond
+	// The deaf child ignores SIGTERM, so the escalator's SIGKILL is what ends
+	// it. Short, so the stop below is waiting on the held drain, not the grace.
+	p.grace = 50 * time.Millisecond
+
+	waited := make(chan struct{})
+	proceed := make(chan struct{})
+	var releaseStop sync.Once
+	letStopFinish := func() { releaseStop.Do(func() { close(proceed) }) }
+	var holdOnce sync.Once
+	p.stopWaited = func() {
+		// Only the stop under test is held; the cleanup Stop passes through.
+		holdOnce.Do(func() {
+			close(waited)
+			<-proceed
+		})
+	}
+	// Registered after testProcess, so these run before its cleanup Stop.
+	t.Cleanup(letStopFinish)
+	t.Cleanup(sink.release)
+
+	p.Start()
+	<-sink.held
+
+	// Long enough that this stop ends on `done`, never on its deadline: the
+	// point is the clean-completion path, which is the one that races a
+	// pending Start.
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer stopCancel()
+	stopErr := make(chan error, 1)
+	go func() { stopErr <- p.stop(stopCtx, false) }()
+
+	waitFor(t, "the stop to let go of the loop", func() bool {
+		p.runMu.Lock()
+		defer p.runMu.Unlock()
+		return !p.running
+	})
+	p.Start() // the old loop is still held, so this is left pending on its `done`
+	p.runMu.Lock()
+	pending := p.startPending
+	p.runMu.Unlock()
+	if !pending {
+		t.Fatal("the Start during the stop was not left pending: this test's precondition is gone")
+	}
+
+	sink.release() // the old loop ends; stop() and the pending Start both wake
+	select {
+	case <-waited:
+	case <-time.After(waitTimeout):
+		t.Fatal("stop() never finished waiting on the loop it ended")
+	}
+	waitFor(t, "the pending start's child to come up while stop() is held", func() bool {
+		return rec.distinctPIDs() == 2 && p.Status().State == StateRunning
+	})
+
+	letStopFinish()
+	select {
+	case err := <-stopErr:
+		if err != nil {
+			t.Fatalf("stop = %v, want nil: it ended on `done`, not its deadline", err)
+		}
+	case <-time.After(waitTimeout):
+		t.Fatal("stop() did not return once released")
+	}
+	if st := p.Status().State; st != StateRunning {
+		t.Errorf("state after the older stop finished = %q, want %q: it wrote Stopped over "+
+			"the generation the pending Start began", st, StateRunning)
+	}
+}
