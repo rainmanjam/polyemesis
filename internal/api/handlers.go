@@ -70,30 +70,29 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 // handleSetup creates the admin account on a fresh install.
 //
 // UNAUTHENTICATED BY NECESSITY -- there is no account to authenticate against
-// yet -- AND THROTTLED FOR THE SAME REASON. GET /setup advertises needsSetup to
-// anyone who asks, so the window between a process starting and its operator
-// reaching the browser is a race that is announced to the network it is running
-// on. CreateUser's WHERE NOT EXISTS is what makes the race narrow rather than
-// total: it cannot take over an install that already has a user, so the prize
-// is only the unconfigured install and only until the real operator gets there.
+// yet -- SO IT ASKS FOR THE NEXT BEST THING: proof the caller can read this
+// box. GET /setup advertises needsSetup to anyone who asks, and install.sh
+// starts the service and opens the firewall before the operator has a browser
+// open, so on a fresh install the first stranger to reach the port used to
+// become the admin. CreateUser's WHERE NOT EXISTS only decided WHO won that
+// race; it never stopped a stranger winning it.
 //
-// Narrow is not the same as bounded, though, and unthrottled this endpoint let
-// one address hold the door open indefinitely -- a bcrypt hash per request,
-// spun as fast as the network allows, on the one route that runs before any
-// credential exists. The throttle is what makes losing the race cost something:
-// five free attempts, then a doubling delay to a five-minute ceiling, per
-// address, forgotten after an hour of quiet.
+// The setup code closes it. It is minted at boot while no admin exists,
+// written 0600 to <dataDir>/setup-code and printed once in the startup banner,
+// so it reaches exactly the people who can read the box's files or its log --
+// the same bar -reset-admin sets. It is consumed the moment the admin exists.
 //
-// EVERY ATTEMPT IS COUNTED, not only the failures, which is the one place this
-// differs from the login throttle. There is exactly one attempt in the life of
-// an install that is supposed to succeed; a second POST arriving from the same
-// address is either a retry of a request that already worked or somebody
-// probing, and neither needs to be fast.
+// THROTTLED AS WELL, and EVERY ATTEMPT IS COUNTED, not only the failures, which
+// is the one place this differs from the login throttle. There is exactly one
+// attempt in the life of an install that is supposed to succeed; a second POST
+// arriving from the same address is either a retry of a request that already
+// worked or somebody guessing at the code, and neither needs to be fast. Five
+// free attempts, then a doubling delay to a five-minute ceiling, per address.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	// Before the body is read and long before CreateUser pays for a bcrypt
 	// hash, for the same reason the login throttle sits where it does.
-	ip := auth.ClientIP(r, s.cfg.TrustProxyHeaders)
-	if wait := s.setups.Retry(ip); wait > 0 {
+	ip := auth.ClientIP(r, s.proxies)
+	if wait := s.setups.Try(ip); wait > 0 {
 		s.log.Warn("throttled setup attempt", "remote", ip, "retryAfter", wait)
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
 		writeError(w, http.StatusTooManyRequests, "too many setup attempts, try again later")
@@ -102,8 +101,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	s.setups.Fail(ip)
 
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username  string `json:"username"`
+		Password  string `json:"password"`
+		SetupCode string `json:"setupCode"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -112,12 +112,42 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		req.Username = "admin"
 	}
 
-	// CreateUser refuses to run twice, so this endpoint cannot be used to take
-	// over an existing install even though it is unauthenticated.
+	// Already claimed is its own answer, ahead of the code: the code is gone by
+	// then, and "wrong code" would send a returning operator hunting for a file
+	// that no longer exists instead of to the sign-in form.
+	if has, err := s.store.HasUser(); err != nil {
+		writeStoreError(w, err)
+		return
+	} else if has {
+		writeError(w, http.StatusConflict, "setup is already complete; sign in instead")
+		return
+	}
+	if !s.setupCode.Pending() {
+		// Only a server built without a code gets here with no admin. Refusing
+		// is the safe reading of that: an install that cannot check the code
+		// must not stop asking for it.
+		writeError(w, http.StatusServiceUnavailable,
+			"this server has no setup code; restart it to generate one")
+		return
+	}
+	if !s.setupCode.Matches(req.SetupCode) {
+		s.log.Warn("setup attempt with a wrong or missing setup code", "remote", ip)
+		writeError(w, http.StatusForbidden, "the setup code is missing or wrong; it is printed in the "+
+			"server log at startup and saved in the file "+auth.SetupCodeFile+" in the data directory")
+		return
+	}
+
+	// CreateUser refuses to run twice, so two requests that both carried the
+	// right code still produce one admin.
 	user, err := s.store.CreateUser(req.Username, req.Password)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if err := s.setupCode.Consume(); err != nil {
+		// The code already stopped matching; only the file is left, and the
+		// next boot removes it because by then there is a user.
+		s.log.Warn("could not remove the used setup code file", "path", s.setupCode.Path(), "err", err)
 	}
 	// The operator who just configured this install is not a suspect. Their
 	// own address starts clean, so a browser that reloads onto the login form
@@ -139,8 +169,8 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Checked before the body is read and long before bcrypt runs: the point
 	// of the throttle is that a guess must not cost us a password hash.
-	ip := auth.ClientIP(r, s.cfg.TrustProxyHeaders)
-	if wait := s.logins.Retry(ip); wait > 0 {
+	ip := auth.ClientIP(r, s.proxies)
+	if wait := s.logins.Try(ip); wait > 0 {
 		s.log.Warn("throttled login", "remote", ip, "retryAfter", wait)
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
 		writeError(w, http.StatusTooManyRequests, "too many failed attempts, try again later")
@@ -1141,6 +1171,14 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("metrics: recordings usage unavailable", "err", err)
 	}
 
+	// The same install-wide sums GET /alerts/meta serves, so the scrape and
+	// the automation page cannot disagree. Only with a manager: without one
+	// there is no notifier, and zeros would read as "nothing has failed".
+	if s.mgr != nil {
+		st := s.alertStats()
+		snap.Alerts = &metrics.AlertDeliveries{Sent: st.Sent, Failed: st.Failed, LastSent: st.LastSent}
+	}
+
 	sys := s.hostSystem()
 	snap.Host = metrics.Host{
 		CPUPercent:     sys.CPUPercent,
@@ -1237,6 +1275,36 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 			in.BitrateKbps = b[len(b)-1].Kbps
 		}
 		out = append(out, in)
+	}
+
+	// AND EVERY PROGRAMME WITH NO ENGINE, as stopped. Sync logs and carries on
+	// when one source's engine fails to build or start, so the walk above
+	// could leave a configured programme with no series at all -- and a
+	// series that does not exist cannot fire `ingest_up == 0`, nor the
+	// `ingest_bitrate == 0 and on() sources > 0` alert MONITORING.md
+	// recommends. The same sweep DestinationStatuses does for that
+	// programme's destinations (#540), for its ingest.
+	rows, err := s.store.ListSources()
+	if err != nil {
+		// The engines' answer is still worth returning; see
+		// DestinationStatuses for the same choice.
+		s.log.Warn("metrics: cannot list sources to check for programmes with no engine", "err", err)
+		return out
+	}
+	seen := make(map[int64]bool, len(out))
+	for _, in := range out {
+		seen[in.ID] = true
+	}
+	for _, src := range rows {
+		if seen[src.ID] {
+			continue
+		}
+		out = append(out, metrics.Ingest{
+			Process:  metrics.Process{State: string(supervisor.StateStopped)},
+			ID:       src.ID,
+			Name:     src.Name,
+			NoEngine: true,
+		})
 	}
 	return out
 }
@@ -2658,6 +2726,19 @@ func (s *Server) handleReorderDestinations(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"ids": ids})
 }
 
+// deleteDestinationRequest is DELETE /destinations/{id}'s optional body.
+//
+// Confirm is required only when the row carries a broadcast this process
+// confirmed on air (testing or live). Deleting such a row is the "removed"
+// reason in lifecycle.go, and the coordinator then sends `complete` -- terminal
+// on YouTube. The UI's dialog was the only gate, and an admin API token never
+// sees it. A row with nothing on air deletes with no body, as it always has:
+// asking there would train every caller to send the confirmation by reflex,
+// which is the one thing that makes it worthless where it counts.
+type deleteDestinationRequest struct {
+	Confirm bool `json:"confirm"`
+}
+
 func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
@@ -2671,7 +2752,34 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	//
 	// It does NOT remove the platform's ingest stream, and the long comment at
 	// noteOrphanedIngestStream says why that is the answer rather than a gap.
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+	var req deleteDestinationRequest
+	// An absent body is the ordinary delete of a row with nothing on air, and
+	// must stay that: acceptance scripts and e2e cleanups delete their own rows
+	// this way. A body that IS present is decoded strictly, so a misspelt
+	// "confirmed" is refused rather than read as silence.
+	if len(body) > 0 {
+		if err := decodeJSONInto(body, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	if dest, err := s.store.GetDestination(id); err == nil {
+		// THE SAME PREDICATE endOrphan ACTS ON, so the question asked here is
+		// exactly "will this delete end a broadcast" -- not a local notion of
+		// "live" that could drift from what the coordinator then does.
+		if endableFromPhase(dest.Lifecycle.Phase) && !req.Confirm {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"%q is carrying a broadcast in the %q phase, and deleting it ends that "+
+					"broadcast on the platform -- a completed YouTube broadcast cannot return "+
+					"to live. Repeat this request with a JSON body of "+
+					`{"confirm": true} once that is intended.`,
+				dest.Name, dest.Lifecycle.Phase))
+			return
+		}
 		s.noteOrphanedIngestStream(dest)
 	}
 	if err := s.store.DeleteDestination(id); err != nil {

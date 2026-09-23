@@ -37,7 +37,7 @@
 # published before either of these Dockerfiles could build at all — and the one
 # property this project keeps is that any Dockerfile here builds from a clean
 # checkout with nothing else on the machine.
-FROM node:24-alpine AS ui
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS ui
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json* ./
 RUN npm ci --ignore-scripts
@@ -48,7 +48,7 @@ RUN mkdir -p /src/internal/web && npm run build
 # Must stay >= the `go` directive in go.mod; the official golang images set
 # GOTOOLCHAIN=local, so a too-old tag fails the build rather than quietly
 # fetching a newer toolchain.
-FROM golang:1.27-alpine AS build
+FROM golang:1.27-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -79,7 +79,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # behind, and a lower floor turns away fewer working machines. If you bump it,
 # bump for the Ubuntu release underneath (which decides the FFmpeg version),
 # not for CUDA features.
-FROM nvidia/cuda:12.6.3-base-ubuntu24.04
+FROM nvidia/cuda:12.6.3-base-ubuntu24.04@sha256:c87e78933f4c16e3272123bf2f75537306596d0fbaa395a29696a22786e5ee0e
 
 ARG VERSION=dev
 

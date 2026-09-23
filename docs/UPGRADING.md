@@ -21,11 +21,21 @@ missing `secret.key` or does not open, and then:
 
 - **docker mode:** pulls the new image and brings the container back up. That
   is the whole upgrade.
-- **binary mode:** stops there, **with the service still stopped**, and prints
-  the two commands that finish it — install the new binary, start the service.
-  It does not download anything; fetch the release asset first
-  (`polyemesis-<tag>-linux-<arch>`, checked against `SHA256SUMS`) and use its
-  name where the printed command says `./polyemesis`.
+- **binary mode:** fetch the release asset first
+  (`polyemesis-<tag>-linux-<arch>`) and pass it with its tag:
+
+  ```sh
+  sudo /opt/polyemesis/update.sh --binary ./polyemesis-v0.10.0-linux-amd64 --version v0.10.0
+  ```
+
+  Before stopping anything it refuses a file whose sha256 is not the one the
+  release's `SHA256SUMS` publishes for this host's architecture, one that will
+  not run here, and one whose `-version` is not the tag. It then takes the
+  backup, installs the file, starts the service and checks it stayed up; if it
+  did not, it names `rollback.sh`. `--sums FILE` checks against a local
+  `SHA256SUMS` on a host without GitHub access. Without `--binary`, it stops
+  after the backup **with the service still stopped** and prints the two
+  commands that finish it by hand.
 
 If you installed with `install.sh`, run `sudo <installDir>/update.sh` rather
 than the manual steps below — including for a binary you copied in by hand
@@ -189,9 +199,11 @@ there is much easier to deal with before you start streaming on it.
 ## Before you upgrade
 
 - **Read the [CHANGELOG](../CHANGELOG.md).**
-- **Stop cleanly.** Recordings are finalised during shutdown, which takes up to
-  about 30 seconds. Killing the process truncates whatever was being written.
-  `stop_grace_period: 30s` is already set in the compose file — do not lower it.
+- **Stop cleanly.** Recordings are finalised during shutdown, which can take
+  up to 35 seconds. Killing the process truncates whatever was being written.
+  The compose files set `stop_grace_period: 45s` and the systemd unit sets
+  `TimeoutStopSec=45`. Do not lower either. A compose file written before the
+  release after 0.10.0 says `30s`: raise it to `45s`.
 - **Check the FFmpeg floor.** It is 6.0 today. If a future release raises it,
   the server refuses to start rather than failing later in a confusing way.
 
@@ -220,6 +232,163 @@ instead.
 > released version has a note here, even when the note is "nothing to do". If
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): the self-signed CA is replaced once
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`. It becomes that release's note when it is cut.
+> Only installs whose TLS mode resolves to **selfsigned** are affected; acme,
+> manual and off are untouched.
+
+**What changed.** The local CA polyemesis generates now carries critical name
+constraints: it can sign only for `tls.hostname`, `localhost`, `127.0.0.1`
+and `::1`. The CA every earlier release generated has none, so its key —
+which sits in `<dataDir>/tls/ca.key` on the server — can sign a certificate
+for any website, and every laptop and phone you installed the CA on would
+accept it.
+
+**What the upgrade does, automatically, on its first start.** It replaces the
+unconstrained CA rather than keeping it. Keeping it and warning was the
+alternative, and it was rejected: the risk *is* the old key, and leaving it on
+disk for the rest of its ten-year life leaves the risk exactly where it was.
+The old `ca.key` is overwritten, a new `ca.crt` and leaf are issued, and the
+start logs, once:
+
+```
+level=WARN msg="tls: the local CA was replaced; ..." reason="the previous local CA had no name constraints and could vouch for any site" ca=/var/lib/polyemesis/tls/ca.crt caSHA256=...
+```
+
+**What you have to do.** Every browser, phone, keychain and Prometheus that
+trusted the old CA shows a certificate warning until you:
+
+1. **Remove the old CA** from each trust store. It is the one named
+   `polyemesis local CA` with nothing after it; the new one is named
+   `polyemesis local CA (<your hostname>)`. Removing it is the half that
+   matters for security — an old CA left installed keeps vouching for anything
+   its key signs, and that key may still be in a backup.
+2. **Install the new one** exactly as the first time, checking its fingerprint
+   against the `caSHA256` in that log line — see
+   [Trusting the self-signed CA](TLS.md#trusting-the-self-signed-ca).
+
+Also delete `tls/ca.key` from any backup taken before this upgrade, or treat
+those backups as holding a key that can impersonate any site to the machines
+that still trust the old CA.
+
+**From now on, changing `tls.hostname` also replaces the CA**, with the same
+warning, because a CA limited to the old name cannot sign for the new one.
+Before, only the leaf was reissued. Set `tls.hostname` explicitly — in a
+container especially, where the fallback system hostname is the container ID
+and changes on every recreate.
+
+**Rolling back** to a release before this one keeps working: it loads the new
+CA as it would any other.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): forwarded client addresses are believed only from trusted proxies
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`.
+
+**Only if you set `trustProxyHeaders: true`.** `X-Forwarded-For` and
+`X-Real-IP` are now read only when the connection comes from loopback or from
+an address in the new `trustedProxies` list. Before, they were read from any
+peer, so a client that reached the port directly could choose the address the
+login throttle and the audit log saw.
+
+**Proxy on the same host (the documented nginx setup): nothing to do.**
+
+**Proxy somewhere else** — nginx on the Docker host in front of the container,
+or a load balancer on another machine: add its address or range to
+`config.yaml`, or every client behind it shares one throttle key and the audit
+log names the proxy:
+
+```yaml
+trustedProxies: ["172.17.0.1"]
+```
+
+The server logs `ignored X-Forwarded-For from a peer that is not a trusted
+proxy` once, naming the peer, when this applies. It also warns at startup when
+`trustProxyHeaders` is on and the listener is public, and says whether
+`--addr` or `config.yaml` set it.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): first-run setup needs a setup code
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`.
+
+**An install that already has an admin account: nothing to do.** It never
+makes a setup code, and signing in is unchanged. On its first boot it deletes
+a leftover `<dataDir>/setup-code`, if there is one.
+
+**A fresh install, or a script that provisions one.** `POST /api/v1/setup` now
+needs a `setupCode` field. The server writes the code to `<dataDir>/setup-code`
+and prints it in its startup banner while no admin exists. Without it, setup
+answers `403`. Once an admin exists, it answers `409` (it was `400`). A script
+that creates the first admin should do one of these:
+
+- read the code from `<dataDir>/setup-code` (or `docker exec <container> cat
+  /data/setup-code`) and send it, or
+- set `POLYEMESIS_SETUP_CODE` (12 characters or more) in the server's
+  environment and send the same value.
+
+See [INSTALL.md](INSTALL.md#the-first-run-setup-code).
+
+### Upgrading past 0.10.0 (unreleased, on `main`): read-scoped tokens no longer read chat
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`.
+
+**Only if something reads chat with a `read`-scoped API token.** `GET
+/api/v1/chat`, `/chat/messages`, `/chat/search` and `/chat/users` now answer a
+read token with `403`, and a read-scoped `/api/v1/ws` socket is no longer sent
+`chat` events. It still receives `chatState` (which platforms are connected)
+and `chatRetract`, so a monitor that only watches connection state keeps
+working.
+
+A dashboard, bot or archiver that reads the messages themselves needs an
+`admin` token instead: create one under **Settings → API tokens** and replace
+the read token in that integration. Nothing else a read token could do has
+changed.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): the login throttle counts IPv6 by /64 and has a shared budget
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`.
+
+**Usually nothing to do.** Two things changed in how failed sign-ins (and
+first-run setup attempts) are throttled:
+
+- **An IPv6 client is counted by its /64**, not its full address, and an
+  IPv4-mapped address (`::ffff:192.0.2.1`) as the IPv4 address. Several
+  people signing in from one IPv6 network now share one allowance of five free
+  failures before the doubling delay starts — the same as several people
+  behind one IPv4 NAT always have.
+- **All addresses share one budget**: 100 attempts back to back, then one a
+  second. An attempt is charged when it is let through, so requests in flight
+  at once cannot overdraw it, and a correct password gives its charge back.
+
+**What you see when the budget runs out.** Sign-in answers `429 too many failed
+attempts, try again later` with `Retry-After: 1`, and the server logs
+`throttled login` at WARN. The wait is never more than a second per attempt,
+but while an address pool keeps guessing at more than one attempt a second, the
+budget stays empty and your own sign-in gets intermittent `429`s: retry after a
+second and it goes through. If that persists, the guessing is the incident —
+block the source at the firewall or reverse proxy; restarting the server resets
+the budget but not the attacker.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): the request log records route patterns
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`.
+
+**Only if you parse the server's log.** The `path` field of the `http` request
+log line is now the route pattern the request matched, not the URL it arrived
+on: `/api/v1/destinations/{id}/start`, not `/api/v1/destinations/7/start`.
+That keeps secrets that live in a path, such as the Kick webhook's, out of the
+log. A request that matched no route is still logged with its real path, so
+404s read as before.
+
+A log query or alert that matched a specific ID in `path` no longer matches;
+match the pattern, and correlate with the request's other fields instead.
 
 ### Upgrading past 0.10.0 (unreleased, on `main`): sources with no ingest mode become SRT
 
@@ -264,6 +433,110 @@ mode of a source that has one, with `choose an ingest mode: srt, rtmp or pull`.
 line was meant for RTMP or pull: change its **Ingest** on the Sources page.
 It could not have been receiving RTMP or pulling while it had no mode, so
 nothing that worked before stops working.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): API deletes of a source, or of an on-air destination, must be confirmed
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`. It becomes that release's note when it is cut.
+
+**What changed.** `DELETE /api/v1/sources/{id}` now refuses (`400`) unless the
+request carries `{"confirm": true, "destinations": N}`, with `N` the source's
+current `destinations` count from `GET /api/v1/sources`; a count that no longer
+matches is `409` and deletes nothing. `DELETE /api/v1/destinations/{id}` now
+refuses (`400`) without `{"confirm": true}` when the destination is carrying a
+broadcast in `testing` or `live`. The console sends both itself; nothing
+changes for someone deleting from the web UI.
+
+**Who it hits.** Scripts and integrations that delete sources over the API
+with an admin token — every one of them, because the body is required on every
+source delete. Destination deletes are affected only for rows on air; a script
+that deletes its own idle or test destinations keeps working unchanged.
+
+**What to do.** Read the source's `destinations` count and send it with the
+delete, as in [the API reference](API.md#sources). Add `{"confirm": true}` to a
+destination delete that is meant to end its broadcast.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): config.yaml refuses a key it does not know
+
+> Not yet in a tag — this note is here ahead of the release that carries it.
+
+**What changed.** A key `config.yaml` does not define — at the top level or
+inside `ffmpeg:` and `transcription:`, as `tls:` already did — now stops the
+server at startup with the key and its line. Keys are case-sensitive. Until now
+such a key was dropped silently and its setting stayed at the default: a
+misspelled `trustProxyHeaders` left session cookies without `Secure`, a
+misspelled `dataDir` put the database in `./data`. The retired `enhancedRtmp`
+key is still accepted and ignored.
+
+Also refused: a `tls.hostname` with no `tls.mode`. That meant `off` — plain
+HTTP — while it looked like HTTPS was configured. Write the mode you meant, or
+`mode: "off"` if something in front terminates TLS.
+
+**What you might need to do.** Before upgrading, check `config.yaml` against
+[CONFIGURATION.md](CONFIGURATION.md). If the new binary refuses to start,
+`journalctl -u polyemesis` names the key to fix. Files written by
+`install.sh` use only known keys and always write a mode.
+
+The same applies to `--log`. A value other than `debug`, `info`, `warn` or
+`error` now stops the server instead of meaning `info`. If your unit or
+container command passes `--log warning` or similar, change it to `warn`
+before upgrading.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): the unit `install.sh` writes no longer passes `--addr`
+
+> Not yet in a tag — this note is here ahead of the release that carries it.
+
+**What changed.** The unit `install.sh` generates used to set the web port
+twice. It passed `--addr :<port>` in `ExecStart` and also wrote
+`addr: ":<port>"` into `config.yaml`. The flag wins, so editing `addr:` did
+nothing. The generated unit now leaves the port to `config.yaml`. An existing
+unit keeps its `--addr` until `install.sh` is re-run. The startup warnings now
+say when the address came from `--addr`.
+
+**What you might need to do.** Nothing, unless you moved the port by editing
+`--addr` in the unit (for example to `:443`). Re-running `install.sh` rewrites
+the unit and `config.yaml` with the port you answer, so answer with the port you
+use. After that, change the port only in `config.yaml`.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): alert keys name their programme
+
+> Not yet in a tag, like the note above.
+
+**What changed.** An alert rule's `json` payload gives each alert a `key`.
+Three of them now end in the programme's id: `ingest` is now `ingest:<id>`,
+`failover` is now `failover:<id>`, and `clipping:track<N>` is now
+`clipping:track<N>:<id>`. Their titles now end in the programme's name, and
+every stream condition has `sourceId` and `sourceName` fields.
+`disk.low` and `disk.recovered` keep the key `disk` and are now sent once per
+install, not once per programme.
+
+**What you might need to do.** Only if a script that receives alerts matches
+on `key`: match on the prefix (`ingest:`), or on `type`, which has not
+changed. Discord and Slack rules need nothing.
+
+**A new event, `alerts.rule_changed`.** Creating, editing or deleting an alert
+rule now raises it. A rule with no event boxes ticked receives every type, so
+it starts receiving this one too; raise that rule's severity floor to
+`critical` if you want only deletions.
+
+### Upgrading past 0.10.0 (unreleased, on `main`): health reports a programme that is not running
+
+> Not yet in a tag, like the notes above.
+
+**What changed.** `GET /api/v1/health` used to answer `"status": "ok"` when
+some sources had an engine and some did not, because one running engine was
+enough. It now answers `"status": "degraded"` in that state, and the `engine`
+check's detail says how many are running, for example
+`"1 of 2 source(s) running"`. The HTTP code stays `200`: a restart would not
+bring a programme back whose engine could not be built, so this is not a
+reason for an orchestrator to kill the process.
+
+**What you might need to do.** Only if an external monitor alerts when
+`status` is not `ok`: it now alerts while a programme is down, which is the
+intent. Look at the `engine` check's detail to see which count is short, and at
+the server log for the `cannot build engine for source` or
+`cannot start engine for source` line that names it. A monitor that alerts on
+the HTTP code alone is unchanged.
 
 ### Upgrading to 0.10.0
 
@@ -528,6 +801,27 @@ migrated, and the older binary will not understand it.
 `polyemesis.db` is the mistake this section exists to prevent: from 0.7.0 the
 database alone is not enough to publish, and the failure is silent until you go
 live. See [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back).
+
+**The in-app rollback (`POST /api/v1/upgrade/rollback`) swaps the binary and
+nothing else.** It does not restore the database or `secret.key`, so it is
+safe only when the binary it puts back reads the data as it now stands. Two
+cases are not, and it **refuses** both:
+
+- The database is on a schema the previous binary would not open. That binary
+  would refuse to start on it. The staged binary is recorded with the schema
+  it opens (`<binary>.previous.schema`), and the rollback is refused once the
+  database is newer.
+- The rollback point has no such record, because the release that staged it
+  predates the record. It may be 0.6.x or older, which opens the same schema
+  but cannot read the stream keys 0.7.0 sealed: it would start, then fail every
+  publish. Nothing on disk tells it from a 0.7.x binary, so it is refused. This
+  happens once, on the first upgrade out of a release without the record.
+
+Either way `GET /api/v1/upgrade/plan` reports `rollbackAvailable: false` with
+the reason in `rollbackBlocked`, and the endpoint answers `409`. Roll back with
+the four steps above. Either way, take and verify a
+backup before the first start of a new release: it is the only rollback that
+covers the database.
 
 ## Verifying an upgrade
 

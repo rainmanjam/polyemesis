@@ -89,8 +89,8 @@ SRT remains the operated path.
 See `evidence/enhanced-rtmp-multitrack.md`.
 
 The `enhancedRtmp` config key is still gone, and still does not need to come
-back: this needs no flag. A config file that names it keeps loading; the key is
-ignored.
+back: this needs no flag. A config file that names it keeps loading; it is a
+retired key, accepted and ignored.
 
 ## Can I run horizontal and vertical at once?
 
@@ -193,7 +193,7 @@ Turn it on when you have a publicly trusted certificate and intend to keep one.
 With shell access to the box, set a new one and exit:
 
 ```bash
-sudo -u polyemesis polyemesis -reset-admin --config /etc/polyemesis/config.yaml
+sudo -u polyemesis polyemesis -reset-admin --config /etc/polyemesis/config.yaml --data /var/lib/polyemesis
 ```
 
 It asks for the new password twice, without echoing it, then signs out every
@@ -204,7 +204,7 @@ It is safe to run while the service is up: it touches only the database and
 never binds a port. To script it, pipe the password twice:
 
 ```bash
-printf '%s\n%s\n' "$NEW" "$NEW" | sudo -u polyemesis polyemesis -reset-admin --config /etc/polyemesis/config.yaml
+printf '%s\n%s\n' "$NEW" "$NEW" | sudo -u polyemesis polyemesis -reset-admin --config /etc/polyemesis/config.yaml --data /var/lib/polyemesis
 ```
 
 **Not as a command-line flag, deliberately.** A password in argv is visible in
@@ -212,11 +212,19 @@ printf '%s\n%s\n' "$NEW" "$NEW" | sudo -u polyemesis polyemesis -reset-admin --c
 any audit log that records command lines.
 
 **Do not delete the row from the database to force first-run setup.** It works —
-`needsSetup` is just "the users table is empty" — but `POST /api/v1/setup` is
-unauthenticated, and the only thing stopping it taking over a configured install
-is that an account already exists. Deleting the account removes that guard, so
-until you finish setup, anyone who can reach the port can claim your install.
-`-reset-admin` never opens that window: the account keeps existing throughout.
+`needsSetup` is just "the users table is empty" — but it takes a restart before
+first-run setup will accept anything, because the server only makes a
+[setup code](INSTALL.md#the-first-run-setup-code) at startup while no admin
+exists. `-reset-admin` needs neither: the account keeps existing throughout.
+
+## Where is the setup code?
+
+The first-run screen asks for a one-time setup code. The server writes it to
+`setup-code` in its data directory and prints it once in the startup log:
+`sudo journalctl -u polyemesis | grep -A2 'setup code'` on a systemd install,
+`docker logs polyemesis` in Docker. `install.sh` prints it at the end. It stops
+working once the admin account exists. See
+[INSTALL.md](INSTALL.md#the-first-run-setup-code).
 
 Sessions are ended on purpose. Someone resetting a forgotten password may be
 locking an intruder out, and leaving that intruder signed in would defeat it.

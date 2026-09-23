@@ -47,22 +47,22 @@ func TestAttemptIsRefusedUntilThePenaltyHasElapsed(t *testing.T) {
 			t.Fatalf("failure %d imposed %v, want no delay inside the free allowance", i+1, d)
 		}
 	}
-	if d := tr.Retry("1.2.3.4"); d != 0 {
+	if d := tr.Try("1.2.3.4"); d != 0 {
 		t.Fatalf("Retry inside the free allowance = %v, want 0", d)
 	}
 
 	tr.Fail("1.2.3.4")
-	if d := tr.Retry("1.2.3.4"); d != throttleBaseDelay {
+	if d := tr.Try("1.2.3.4"); d != throttleBaseDelay {
 		t.Fatalf("Retry = %v, want %v", d, throttleBaseDelay)
 	}
 
 	clock.advance(throttleBaseDelay - time.Millisecond)
-	if d := tr.Retry("1.2.3.4"); d != time.Millisecond {
+	if d := tr.Try("1.2.3.4"); d != time.Millisecond {
 		t.Errorf("Retry just before expiry = %v, want 1ms", d)
 	}
 
 	clock.advance(time.Millisecond)
-	if d := tr.Retry("1.2.3.4"); d != 0 {
+	if d := tr.Try("1.2.3.4"); d != 0 {
 		t.Errorf("Retry after the penalty elapsed = %v, want 0", d)
 	}
 }
@@ -73,10 +73,10 @@ func TestThrottleIsKeyedPerAddress(t *testing.T) {
 	for i := 0; i < throttleFreeAttempts+4; i++ {
 		tr.Fail("1.2.3.4")
 	}
-	if tr.Retry("1.2.3.4") == 0 {
+	if tr.Try("1.2.3.4") == 0 {
 		t.Fatal("the failing address should be waiting")
 	}
-	if d := tr.Retry("5.6.7.8"); d != 0 {
+	if d := tr.Try("5.6.7.8"); d != 0 {
 		t.Errorf("Retry for an untouched address = %v, want 0", d)
 	}
 }
@@ -107,7 +107,7 @@ func TestPenaltyIsCappedSoTheAdminIsNeverLockedOutForever(t *testing.T) {
 	}
 
 	clock.advance(throttleMaxDelay)
-	if d := tr.Retry("1.2.3.4"); d != 0 {
+	if d := tr.Try("1.2.3.4"); d != 0 {
 		t.Errorf("Retry after waiting the cap = %v, want the admin let back in", d)
 	}
 }
@@ -120,7 +120,7 @@ func TestAnIdleCounterIsForgotten(t *testing.T) {
 	}
 	clock.advance(throttleIdleTTL)
 
-	if d := tr.Retry("1.2.3.4"); d != 0 {
+	if d := tr.Try("1.2.3.4"); d != 0 {
 		t.Errorf("Retry after the idle TTL = %v, want 0", d)
 	}
 	if d := tr.Fail("1.2.3.4"); d != 0 {
@@ -157,7 +157,7 @@ func TestClientIPTrustsForwardedHeadersOnlyWhenConfiguredTo(t *testing.T) {
 		{
 			name:       "trusted X-Forwarded-For wins",
 			trustProxy: true,
-			remoteAddr: "10.0.0.1:51000",
+			remoteAddr: "127.0.0.1:51000",
 			headers:    map[string]string{"X-Forwarded-For": "198.51.100.7"},
 			want:       "198.51.100.7",
 		},
@@ -167,29 +167,29 @@ func TestClientIPTrustsForwardedHeadersOnlyWhenConfiguredTo(t *testing.T) {
 			// See the bypass described on ClientIP. #647.
 			name:       "rightmost entry is the hop the proxy appended",
 			trustProxy: true,
-			remoteAddr: "10.0.0.1:51000",
+			remoteAddr: "127.0.0.1:51000",
 			headers:    map[string]string{"X-Forwarded-For": " 198.51.100.7 , 10.0.0.5 "},
 			want:       "10.0.0.5",
 		},
 		{
 			name:       "a trailing comma falls back to the socket, never to the client half",
 			trustProxy: true,
-			remoteAddr: "10.0.0.1:51000",
+			remoteAddr: "127.0.0.1:51000",
 			headers:    map[string]string{"X-Forwarded-For": "198.51.100.7,"},
-			want:       "10.0.0.1",
+			want:       "127.0.0.1",
 		},
 		{
 			name:       "X-Real-IP is the fallback",
 			trustProxy: true,
-			remoteAddr: "10.0.0.1:51000",
+			remoteAddr: "127.0.0.1:51000",
 			headers:    map[string]string{"X-Real-IP": "198.51.100.7"},
 			want:       "198.51.100.7",
 		},
 		{
 			name:       "trusted but no headers falls back to the socket",
 			trustProxy: true,
-			remoteAddr: "10.0.0.1:51000",
-			want:       "10.0.0.1",
+			remoteAddr: "127.0.0.1:51000",
+			want:       "127.0.0.1",
 		},
 		{
 			name:       "IPv6 loses its port",
@@ -204,7 +204,7 @@ func TestClientIPTrustsForwardedHeadersOnlyWhenConfiguredTo(t *testing.T) {
 			for k, v := range tc.headers {
 				r.Header.Set(k, v)
 			}
-			if got := ClientIP(r, tc.trustProxy); got != tc.want {
+			if got := ClientIP(r, NewProxies(tc.trustProxy, nil, nil)); got != tc.want {
 				t.Errorf("ClientIP = %q, want %q", got, tc.want)
 			}
 		})

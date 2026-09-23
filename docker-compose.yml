@@ -31,8 +31,13 @@ services:
     # container mid-shutdown, which is exactly when a file destination has not
     # yet finalised its container and the recording is truncated.
     #
-    # 30s is the same shape as the systemd unit's TimeoutStopSec=45.
-    stop_grace_period: 30s
+    # 45s, the same as the systemd unit's TimeoutStopSec=45, and for the same
+    # reason: the process works to one shutdown deadline of 35s
+    # (engine.ShutdownBudget) and needs 10s on top for its exit to be seen.
+    # This was 30s, which killed a shutdown that used its budget with 5s of
+    # teardown left. internal/testenv's shutdown budget test reads this line
+    # and the two commented ones below.
+    stop_grace_period: 45s
     ports:
       - "8080:8080"        # web UI + API
       - "6000:6000/udp"    # SRT ingest — UDP, not TCP. ONE port for every
@@ -104,7 +109,7 @@ services:
   #   # Same reason as the default service above: an 8s supervisor grace period
   #   # does not fit inside Docker's 10s default, and losing the race truncates
   #   # whatever a file destination was still writing.
-  #   stop_grace_period: 30s
+  #   stop_grace_period: 45s
   #
   #   # `capabilities` here is not decoration: it becomes
   #   # NVIDIA_DRIVER_CAPABILITIES inside the container, and it OVERRIDES what
@@ -167,7 +172,7 @@ services:
   #   # Same reason as the default service above: an 8s supervisor grace period
   #   # does not fit inside Docker's 10s default, and losing the race truncates
   #   # whatever a file destination was still writing.
-  #   stop_grace_period: 30s
+  #   stop_grace_period: 45s
   #
   #   devices:
   #     # Passing the whole directory rather than one node: which renderD* is

@@ -132,6 +132,16 @@ func run(h *hooks) error {
 		return nil
 	}
 
+	// A LOG LEVEL THE SERVER DOES NOT KNOW STOPS IT. parseLevel mapped anything
+	// unrecognised to info, so `--log warning` or `--log=trace` in a unit file
+	// started a server logging at a level nobody chose, and nothing said so --
+	// the operator who asked for quieter logs got the default, and the one
+	// who asked for trace got less than debug. Refused here, before anything
+	// is opened, naming the four accepted values.
+	if _, err := levelFromFlag(*logLevel); err != nil {
+		return err
+	}
+
 	// DEBUG MODE, WIRED HERE BECAUSE THE LOGGER IS BUILT HERE. The switch shares
 	// its level with the handler, so changing it at runtime reaches every
 	// component that was handed this logger at startup -- the engine, the
@@ -158,6 +168,10 @@ func run(h *hooks) error {
 	// paths without rewriting config.yaml.
 	if *addr != "" {
 		cfg.Addr = *addr
+		// Recorded so the startup warnings name the flag, not the addr: line it
+		// just overrode. See config.Config.AddrFromFlag.
+		cfg.AddrFromFlag = true
+		cfg.AddrDefaulted = false
 	}
 	if *dataDir != "" {
 		cfg.DataDir = *dataDir
@@ -171,6 +185,32 @@ func run(h *hooks) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+
+	// BEFORE anything is started. A reset touches only the database and then
+	// exits, so it must not bind a port, spawn a child or write a log file --
+	// this is run on a box where the real server is usually already running, and
+	// a second instance racing it for the listener would fail for a reason that
+	// has nothing to do with the password.
+	// Before anything else that touches state. update.sh calls this on the copy
+	// it just took, and the whole point is that it answers about THAT
+	// directory: it opens the file, walks it, and reads the schema, without
+	// running a migration -- migrating the backup would move the copy forward
+	// to the schema the operator is keeping a way back from. #643.
+	//
+	// AND ABOVE EnsureDirs, WHICH IS NOT READ-ONLY. Both commands used to run
+	// after it, so `-config config.example.yaml -reset-admin` on a manual
+	// install -- whose unit supplies the real directory with --data, not the
+	// file -- created ./data/{fonts,hls,tls,...} and an empty polyemesis.db in
+	// whatever directory the operator stood in, then said "complete first-run
+	// setup". Neither command needs a directory made: -verify-backup reads the
+	// one it is given, and resetAdmin refuses a database that is not there.
+	if *verifyBak != "" {
+		return verifyBackup(*verifyBak, os.Stdout)
+	}
+	if *resetPass {
+		return resetAdmin(cfg, os.Stdin, os.Stdout, *resetRevoke)
+	}
+
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
 	}
@@ -191,23 +231,6 @@ func run(h *hooks) error {
 	// which reads this package's sources and names the file and line of any call
 	// that is not inside an init.
 
-	// BEFORE anything is started. A reset touches only the database and then
-	// exits, so it must not bind a port, spawn a child or write a log file --
-	// this is run on a box where the real server is usually already running, and
-	// a second instance racing it for the listener would fail for a reason that
-	// has nothing to do with the password.
-	// Before anything else that touches state. update.sh calls this on the copy
-	// it just took, and the whole point is that it answers about THAT
-	// directory: it opens the file, walks it, and reads the schema, without
-	// running a migration -- migrating the backup would move the copy forward
-	// to the schema the operator is keeping a way back from. #643.
-	if *verifyBak != "" {
-		return verifyBackup(*verifyBak, os.Stdout)
-	}
-
-	if *resetPass {
-		return resetAdmin(cfg, os.Stdin, os.Stdout, *resetRevoke)
-	}
 	// Text overlays need a font FILE, and the image polyemesis ships has no
 	// system fonts at all -- fontconfig is installed and finds nothing. The
 	// embedded copies are written out here so drawtext has a real path to open.
@@ -237,11 +260,10 @@ func run(h *hooks) error {
 	// mistake, and the operator should hear about it in the same breath as a
 	// missing ffmpeg rather than after the engine has started.
 	h.progress("preparing tls")
-	provider, err := newTLSProvider(cfg)
+	provider, err := newTLSProvider(log, cfg)
 	if err != nil {
 		return err
 	}
-	log.Info("tls", "mode", provider.Mode(), "hostname", cfg.TLS.Hostname)
 
 	// BEFORE the database, which is a move rather than an addition: this used
 	// to sit below, because the only things that needed it were the OAuth
@@ -273,6 +295,10 @@ func run(h *hooks) error {
 	// the product ever removes a staged file a killed process left behind. See
 	// sweepUploadLeftovers.
 	sweepUploadLeftovers(cfg.DataDir, log)
+	setupCode, err := prepareSetupCode(cfg, store)
+	if err != nil {
+		return err
+	}
 
 	bus := events.NewBroker()
 
@@ -370,6 +396,7 @@ func run(h *hooks) error {
 		Chat:          hub,
 		AutomodBudget: automodBudget,
 		Hooks:         hookd,
+		SetupCode:     setupCode,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
 		// disk out from under the running listener.
@@ -438,6 +465,7 @@ func run(h *hooks) error {
 	if err := reportStartup(log, cfg, provider, store, tools); err != nil {
 		return err
 	}
+	reportSetupCode(os.Stdout, log, setupCode)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -520,7 +548,23 @@ func run(h *hooks) error {
 // newTLSProvider turns the config into a certificate provider. Resolution is
 // delegated to the config package so the listener, the banner and the API all
 // describe the same decision instead of each re-deriving it.
-func newTLSProvider(cfg config.Config) (*tlsx.Provider, error) {
+//
+// It also says what it decided, and -- the part that matters -- whether it
+// replaced the local CA. That warning lives here rather than beside the call
+// in run() so that there is no way to get a provider without it: it used to
+// be a separate line in run(), and deleting that line left every test green
+// while the one message UPGRADING.md promises an operator went silent.
+func newTLSProvider(log *slog.Logger, cfg config.Config) (*tlsx.Provider, error) {
+	provider, err := buildTLSProvider(cfg)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("tls", "mode", provider.Mode(), "hostname", cfg.TLS.Hostname)
+	warnIfCAReplaced(log, provider, cfg.SelfSignedCACertPath())
+	return provider, nil
+}
+
+func buildTLSProvider(cfg config.Config) (*tlsx.Provider, error) {
 	mode := cfg.ResolvedTLSMode()
 	opts := tlsx.Options{
 		Mode:      tlsx.Mode(mode),
@@ -540,6 +584,25 @@ func newTLSProvider(cfg config.Config) (*tlsx.Provider, error) {
 		opts.Hostname = host
 	}
 	return tlsx.New(opts)
+}
+
+// warnIfCAReplaced tells the operator that the local CA their clients trust
+// was just replaced, and what to do about it.
+//
+// A WARN rather than an Info because what follows is every browser, phone and
+// Prometheus that trusted the old CA refusing this box until someone acts,
+// and the log is the one place the operator is certain to look when that
+// starts. It names both halves of the fix: trust the new CA, and REMOVE the
+// old one -- an unconstrained CA left in a trust store keeps vouching for
+// anything its key signs, and that key may be in a backup somewhere.
+func warnIfCAReplaced(log *slog.Logger, provider *tlsx.Provider, caPath string) {
+	reason := provider.CAReplaced()
+	if reason == "" {
+		return
+	}
+	log.Warn("tls: the local CA was replaced; every client that trusted the old one will now see a certificate warning. "+
+		"Remove the old \"polyemesis local CA\" from each trust store and install the new one (see TLS.md, Trusting the self-signed CA)",
+		"reason", reason, "ca", caPath, "caSHA256", provider.CAFingerprint())
 }
 
 // startHTTPHelper brings up the plain-HTTP companion on :80 — the ACME HTTP-01
@@ -847,11 +910,17 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 		fmt.Printf("\n  WARNING: %s\n", warn)
 		log.Warn("tls on a non-standard port", "detail", warn)
 	}
+	// trustProxyHeaders on a listener clients can reach without the proxy.
+	// See config.ProxyHeaderWarning for why it names --addr versus the file.
+	if warn := cfg.ProxyHeaderWarning(); warn != "" {
+		fmt.Printf("\n  WARNING: %s\n", warn)
+		log.Warn("proxy headers trusted on a directly reachable listener", "detail", warn)
+	}
 	if _, warn := cfg.HSTSPolicy(); warn != "" {
 		fmt.Printf("\n  WARNING: %s\n", warn)
 	}
 	if !hasUser {
-		fmt.Printf("\n  First run: open the web UI to set an admin password.\n")
+		fmt.Printf("\n  First run: open the web UI and create the admin account with the setup code below.\n")
 	}
 	if !api.UIBuilt() {
 		fmt.Printf("\n  WARNING: no web UI is embedded in this binary.\n")
@@ -1006,17 +1075,35 @@ func newLogger(level string) *slog.Logger {
 	}))
 }
 
+// parseLevel is levelFromFlag for callers that hold a value already known to be
+// valid -- run() refuses a bad --log before any of them is reached -- and
+// falls back to info for anything else.
 func parseLevel(level string) slog.Level {
-	switch strings.ToLower(level) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
+	l, err := levelFromFlag(level)
+	if err != nil {
 		return slog.LevelInfo
 	}
+	return l
+}
+
+// logLevels are the values --log accepts, in the order the flag help names them.
+var logLevels = []string{"debug", "info", "warn", "error"}
+
+// levelFromFlag maps a --log value to its slog level, case-insensitively, and
+// refuses anything else rather than guessing. See the check in run().
+func levelFromFlag(level string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info":
+		return slog.LevelInfo, nil
+	case "warn":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	}
+	return slog.LevelInfo, fmt.Errorf("--log %q is not a log level; use one of %s",
+		level, strings.Join(logLevels, ", "))
 }
 
 // verifyBackup answers whether a backup directory can be restored from.

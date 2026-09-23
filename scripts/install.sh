@@ -21,7 +21,10 @@
 #
 # This script never asks for, stores, or writes an admin password. polyemesis
 # has no admin account until you open the UI and create one on the first-run
-# screen, so there is no credential for an installer to mishandle.
+# screen, so there is no credential for an installer to mishandle. That screen
+# asks for the one-time setup code the server wrote to <data dir>/setup-code;
+# the summary at the end prints it, because whoever ran this script is exactly
+# the person it is for.
 
 set -euo pipefail
 
@@ -592,6 +595,10 @@ FFMPEG_UPGRADE=ask   # ask | skip | force
 # exception is a flag somebody typed.
 ALLOW_UNVERIFIED=false
 
+# --version: the release tag to install instead of releases/latest. Empty means
+# latest. See resolve_release_tag.
+VERSION_PIN=""
+
 # Set when this run installs the static FFmpeg, and consumed by the config
 # writer.
 #
@@ -607,11 +614,48 @@ ALLOW_UNVERIFIED=false
 FFMPEG_PINNED_BIN=""
 FFMPEG_PINNED_PROBE=""
 
+# THE STATIC FFMPEG IS ONE BUILD, NAMED BY A DATED TAG AND A HASH IN THIS FILE.
+#
+# This used to download BtbN's `latest` release, which BtbN moves to a new build
+# every day, and check it against the checksums.sha256 in that same release. So
+# two installs a day apart got two different FFmpeg builds under one asset name,
+# and the check could only catch a corrupt download: whoever could replace the
+# tarball could replace the checksum file next to it -- and the result is then
+# extracted and run as root. The hashes below come from this repository and are
+# reviewed in a pull request; the server that serves the tarball has no say in
+# what it is checked against.
+#
+# TO BUMP: pick a dated tag from https://github.com/BtbN/FFmpeg-Builds/releases,
+# then change the tag, both asset names and both hashes TOGETHER, in one PR:
+#   gh release download <tag> -R BtbN/FFmpeg-Builds -p checksums.sha256
+#   grep -E 'linux(arm)?64-gpl-8\.1\.tar\.xz' checksums.sha256
+# and cross-check against the digest GitHub computed itself:
+#   gh api repos/BtbN/FFmpeg-Builds/releases/tags/<tag> \
+#     --jq '.assets[] | select(.name|test("linux(arm)?64-gpl-8.1.tar")) | "\(.digest) \(.name)"'
+# BtbN keeps dated releases for roughly two years (the oldest listed on
+# 2026-09-23 was autobuild-2024-10-31-12-59), so a pin keeps working long after
+# it stops being current. internal/testenv/installer_ffmpeg_pin_test.go refuses
+# `latest`, an undated tag, or a missing hash.
+FFMPEG_BTBN_TAG=autobuild-2026-09-23-14-55
+
 ffmpeg_static_asset() {
-  # BtbN publishes per-architecture GPL tarballs. Only these two are built.
+  # BtbN publishes per-architecture GPL tarballs. Only these two are built. A
+  # dated release names the exact point release (n8.1.3); only the rolling
+  # release uses the n8.1-latest names.
   case "$ARCH" in
-    amd64) echo "ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz" ;;
-    arm64) echo "ffmpeg-n8.1-latest-linuxarm64-gpl-8.1.tar.xz" ;;
+    amd64) echo "ffmpeg-n8.1.3-linux64-gpl-8.1.tar.xz" ;;
+    arm64) echo "ffmpeg-n8.1.3-linuxarm64-gpl-8.1.tar.xz" ;;
+    *)     echo "" ;;
+  esac
+}
+
+# ffmpeg_static_sha256 is the sha256 of ffmpeg_static_asset in FFMPEG_BTBN_TAG.
+# Checked 2026-09-23 against both BtbN's checksums.sha256 and GitHub's own asset
+# digest for that release.
+ffmpeg_static_sha256() {
+  case "$ARCH" in
+    amd64) echo "8f8d9df68e0b12f401047c244f50ff411f533eb2d306173e73d6a16fb29b320d" ;;
+    arm64) echo "cf0ff6547cc76197fdd5f8377e0b53c9bdd8006d082113149d8909e3b5f36643" ;;
     *)     echo "" ;;
   esac
 }
@@ -635,7 +679,7 @@ ffmpeg_static_asset() {
 # DEFAULT path and not on every host, and an install that put a good binary
 # somewhere PATH does not reach is a failure that used to report success.
 offer_ffmpeg_upgrade() {
-  local have="$1" need="${2:-optional}" asset answer tmp label default_answer
+  local have="$1" need="${2:-optional}" asset want answer tmp label default_answer
   asset="$(ffmpeg_static_asset)"
   # "6.x" reads wrong when there is no FFmpeg at all.
   if [ -n "$have" ]; then label="$have.x"; else label="no FFmpeg"; fi
@@ -719,40 +763,30 @@ offer_ffmpeg_upgrade() {
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" RETURN
 
-  echo "     Fetching $asset ..."
-  if ! fetch_https "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$asset" \
+  echo "     Fetching $asset (BtbN ${FFMPEG_BTBN_TAG}) ..."
+  if ! fetch_https "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BTBN_TAG}/$asset" \
         "$tmp/ff.tar.xz"; then
     warn "download failed — staying on ${label}. Nothing was changed."
-    warn "(needs one of curl, wget or python3; this host appears to have none)"
+    warn "(needs one of curl, wget or python3 and a route to github.com; or BtbN no"
+    warn " longer serves ${FFMPEG_BTBN_TAG}, and a newer install.sh pins a newer build)"
     return 1
   fi
 
   # VERIFY BEFORE EXTRACTING, AND BEFORE RUNNING IT AS ROOT.
   #
   # This installer refuses its OWN binary without a matching SHA256SUMS, and
-  # fetched a third-party FFmpeg with no integrity check at all -- then
-  # extracted it and EXECUTED it as root to probe for libsrt. Whatever was
-  # published at that moment ran on the operator's box. The asymmetry was the
-  # finding: strict about us, silent about them.
-  #
-  # BtbN publishes one checksums.sha256 per release covering every asset, in
-  # the `<hash>  <name>` form sha256sum -c reads directly -- the same idiom
-  # install_binary_mode uses for our own download.
-  if ! fetch_https "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/checksums.sha256" \
-        "$tmp/checksums.sha256"; then
-    warn "could not fetch BtbN's checksums.sha256 — refusing to install an"
-    warn "unverified FFmpeg. Staying on ${label}. Nothing was changed."
-    warn "Install FFmpeg 6.0+ with libsrt by hand if you need it sooner."
-    return 1
-  fi
-  mv "$tmp/ff.tar.xz" "$tmp/$asset"
-  if ! (cd "$tmp" && grep " ${asset}\$" checksums.sha256 | sha256sum -c --status -); then
-    warn "CHECKSUM MISMATCH for $asset — refusing it. Staying on ${label}."
+  # once fetched a third-party FFmpeg with no integrity check at all -- then
+  # extracted it and EXECUTED it as root to probe for libsrt. The expected hash
+  # is the one pinned above, never one downloaded alongside the file: see
+  # FFMPEG_BTBN_TAG for why a same-origin checksum file is not a check.
+  want="$(ffmpeg_static_sha256)"
+  if [ -z "$want" ] || ! printf '%s  %s\n' "$want" "$tmp/ff.tar.xz" | sha256sum -c --status -; then
+    warn "CHECKSUM MISMATCH for $asset — it is not the build this installer pins"
+    warn "(${FFMPEG_BTBN_TAG}). Refusing it; staying on ${label}."
     warn "Nothing was changed, and nothing from that download was run."
     return 1
   fi
-  mv "$tmp/$asset" "$tmp/ff.tar.xz"
-  echo "     checksum verified"
+  echo "     checksum verified against the hash pinned in install.sh"
 
   mkdir -p "$tmp/x"
   if ! tar xf "$tmp/ff.tar.xz" --strip-components=1 -C "$tmp/x" 2>/dev/null; then
@@ -1566,6 +1600,7 @@ gather_configuration() {
 confirm_plan() {
   header "=== About to do this ==="
   echo "  mode          ${MODE}"
+  [ "$MODE" = binary ] && echo "  release       ${VERSION_PIN:-the latest release}"
   echo "  web UI        tcp/${HTTP_PORT}"
   echo "  SRT ingest    udp/${SRT_PORT}"
   [ "$ENABLE_RTMP" = yes ] && echo "  RTMP ingest   tcp/${RTMP_PORT}"
@@ -1690,8 +1725,10 @@ install_docker_mode() {
     printf '      - ./config.yaml:/config.yaml:ro\n'
     printf '    command: ["-config", "/config.yaml"]\n'
     # Recordings are finalised on the way down. A shorter grace period truncates
-    # whatever was being written, so this matches the project's own compose file.
-    printf '    stop_grace_period: 30s\n'
+    # whatever was being written, so this matches the project's own compose file
+    # and the unit's TimeoutStopSec: engine.ShutdownBudget (35s) plus 10s.
+    # internal/testenv's shutdown budget test reads this line.
+    printf '    stop_grace_period: 45s\n'
 
     # LOGS HAVE NO CEILING UNLESS ONE IS WRITTEN HERE. Docker's default
     # json-file driver keeps every line the container ever wrote, forever, in
@@ -1768,17 +1805,64 @@ install_docker_mode() {
 # --------------------------------------------------------------- binary mode
 
 latest_release_tag() {
-  curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+  release_tag_from "https://api.github.com/repos/${REPO}/releases/latest"
+}
+
+release_tag_from() { # release_tag_from <api url> -> the tag_name it reports
+  curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL "$1" 2>/dev/null \
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
+}
+
+# VERSION_RE is what --version accepts: a release tag, optionally a release
+# candidate. Anything else -- "latest", "0.10.0" without the v, a branch name --
+# is refused in parse_args, before a question is asked.
+VERSION_RE='^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
+
+# resolve_release_tag is the tag this run installs.
+#
+# releases/latest is the newest NON-prerelease, and release.yml marks every
+# -rc tag a prerelease, so a staging box could never install the candidate it
+# existed to test: it silently got the previous release instead. --version
+# asks for a tag by name, through releases/tags/<tag>, and the answer must
+# name that tag back -- a tag that does not exist is a refusal, never a
+# quiet fall-back to latest.
+resolve_release_tag() {
+  local tag
+  if [ -n "$VERSION_PIN" ]; then
+    # `|| true`: a 404 fails the pipeline, and under set -e that would end the
+    # run right here, silently, instead of at the refusal that names the tag.
+    tag="$(release_tag_from "https://api.github.com/repos/${REPO}/releases/tags/${VERSION_PIN}")" || true
+    [ "$tag" = "$VERSION_PIN" ] || die "no published release ${VERSION_PIN} for ${REPO} (--version). Check the tag on https://github.com/${REPO}/releases."
+    printf '%s\n' "$tag"
+    return 0
+  fi
+  tag="$(latest_release_tag)" || true
+  [ -n "$tag" ] || die "no published release found for ${REPO}. Build from source, or use the docker mode."
+  printf '%s\n' "$tag"
+}
+
+# --version picks a release BINARY. Docker mode installs ${IMAGE}:latest and its
+# update.sh pulls that tag again, so honouring the flag there would mean
+# rewriting how docker installs upgrade; accepting it and installing latest
+# anyway would be the silent substitution the flag exists to end. Refused, from
+# parse_args when --mode was given and again once the interview has chosen.
+refuse_version_in_docker_mode() {
+  [ -n "$VERSION_PIN" ] && [ "$MODE" = docker ] || return 0
+  die "--version pins a release binary and applies to --mode binary only. For docker, set the image tag in docker-compose.yml (e.g. ${IMAGE}:${VERSION_PIN#v})."
 }
 
 install_binary_mode() {
   check_ffmpeg || die "FFmpeg preflight failed — fix the above, or re-run and choose docker."
 
   local tag asset url tmp
-  tag="$(latest_release_tag)"
-  [ -n "$tag" ] || die "no published release found for ${REPO}. Build from source, or use the docker mode."
-  ok "latest release: $tag"
+  tag="$(resolve_release_tag)" || exit 1
+  # Said loudly, and with WHERE the tag came from: "latest" on a box meant to
+  # run a release candidate is the mistake this line exists to surface.
+  if [ -n "$VERSION_PIN" ]; then
+    ok "${BOLD}installing ${tag}${NC} (pinned by --version)"
+  else
+    ok "${BOLD}installing ${tag}${NC} (the latest release; pass --version to pin another)"
+  fi
 
   asset="polyemesis-${tag}-linux-${ARCH}"
   url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
@@ -1878,7 +1962,7 @@ install_binary_mode() {
   #   :443 -- the web UI itself, whenever the operator took the 443 offer. That
   #           is reachable with mode selfsigned, which is the DEFAULT choice, so
   #           gating on acme meant the service could not bind the port the
-  #           installer had just written into its own ExecStart.
+  #           installer had just written into its own config.
   case "$TLS_MODE:$HTTP_PORT" in
     acme:*|*:443|*:80)
       caps=$'AmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE'
@@ -1896,6 +1980,14 @@ install_binary_mode() {
   # it cannot be generated from that file. scripts/acceptance-install.sh instead
   # asserts that every [Service] directive in deploy/polyemesis.service appears
   # here -- add a directive there and this fails until it is added here too.
+  # NO --addr IN ExecStart. The listener is `addr:` in the config.yaml written
+  # above, and only there. This unit used to pass `--addr :${HTTP_PORT}` as
+  # well, and main.go applies the flag after the file -- so the two agreed
+  # until an operator did what the TLS docs and the server's own :443 warning
+  # said, edited addr: in config.yaml, restarted, and came back on the same
+  # port with the same warning. One place to set it cannot disagree with
+  # itself. --config and --data stay: they say where the file and the state
+  # are, which config.yaml cannot say about itself.
   if [ -e "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
     UNIT_PREEXISTING=true
     preserve_existing "/etc/systemd/system/${SERVICE_NAME}.service"
@@ -1911,7 +2003,7 @@ Wants=network-online.target
 Type=simple
 User=${RUN_USER}
 Group=${RUN_USER}
-ExecStart=${BIN_PATH} --config ${CONFIG_DIR}/config.yaml --data ${DATA_DIR} --addr :${HTTP_PORT}
+ExecStart=${BIN_PATH} --config ${CONFIG_DIR}/config.yaml --data ${DATA_DIR}
 ${caps}
 
 # 0077, so anything this service creates under ${DATA_DIR} is private to it.
@@ -2031,18 +2123,118 @@ set -euo pipefail
 DATA_DIR="$DATA_DIR"
 BIN_PATH="$BIN_PATH"
 SERVICE_NAME="$SERVICE_NAME"
+REPO="$REPO"
+# How long a newly installed binary gets to come up before it is judged. The
+# unit is Type=simple, so \`systemctl start\` returns before the server has read
+# its config; a binary that exits at once is only visible a moment later.
+SETTLE_SECONDS="\${SETTLE_SECONDS:-5}"
 
 FORCE=false
+NEW_BINARY=""
+WANT_VERSION=""
+SUMS_FILE=""
+usage() {
+	echo "usage: update.sh [--force] [--binary PATH --version vX.Y.Z[-rc.N] [--sums FILE]]"
+	echo "  --force           do not refuse while a broadcast is on air"
+	echo "  --binary PATH     after the verified backup, install PATH and start the service."
+	echo "                    Refused unless its sha256 matches the release's SHA256SUMS"
+	echo "                    for this host's architecture and PATH -version prints the tag."
+	echo "  --version TAG     the release PATH claims to be; required with --binary"
+	echo "  --sums FILE       check against this SHA256SUMS instead of downloading the"
+	echo "                    release's own (for a host without GitHub access)"
+}
 while [ \$# -gt 0 ]; do
 	case "\$1" in
 		--force) FORCE=true; shift ;;
-		-h|--help)
-			echo "usage: update.sh [--force]"
-			echo "  --force  do not refuse while a broadcast is on air"
-			exit 0 ;;
-		*) echo "unknown option: \$1" >&2; exit 2 ;;
+		--binary)  [ \$# -ge 2 ] || { echo "missing value for --binary" >&2; exit 2; }; NEW_BINARY="\$2"; shift 2 ;;
+		--version) [ \$# -ge 2 ] || { echo "missing value for --version" >&2; exit 2; }; WANT_VERSION="\$2"; shift 2 ;;
+		--sums)    [ \$# -ge 2 ] || { echo "missing value for --sums" >&2; exit 2; }; SUMS_FILE="\$2"; shift 2 ;;
+		-h|--help) usage; exit 0 ;;
+		*) echo "unknown option: \$1" >&2; usage >&2; exit 2 ;;
 	esac
 done
+
+# --binary: PROVE THE FILE IS THE RELEASE, ON THIS HOST, BEFORE ANYTHING STOPS.
+#
+# This script used to end by printing \`sudo install -m 0755 ./polyemesis
+# \$BIN_PATH\` and leave the operator to find the file. Nothing checked what
+# ./polyemesis was: an arm64 build on an amd64 box, a \`make build\` stamped
+# VERSION=dev, a download that stopped halfway. Each installs cleanly and then
+# crash-loops under Restart=on-failure, with the old binary already gone and
+# the service already down.
+#
+# So three questions are answered first, while the running service is still
+# untouched:
+#   - its sha256 is the one SHA256SUMS publishes for polyemesis-TAG-linux-ARCH,
+#     with ARCH read from THIS host -- which also refuses the right release
+#     built for the wrong machine, since that asset has a different hash;
+#   - it executes here at all;
+#   - \`-version\` prints the tag, so the file and the tag agree.
+# The deploy stays manual: an operator still decides when, and which file.
+if [ -n "\$NEW_BINARY\$WANT_VERSION\$SUMS_FILE" ]; then
+	if [ -z "\$NEW_BINARY" ] || [ -z "\$WANT_VERSION" ]; then
+		echo "ERROR: --binary and --version go together: the tag is what the file is checked against." >&2
+		exit 2
+	fi
+	if ! printf '%s\n' "\$WANT_VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?\$'; then
+		echo "ERROR: --version must look like v1.2.3 or v1.2.3-rc.1, not \$WANT_VERSION" >&2
+		exit 2
+	fi
+	if [ ! -f "\$NEW_BINARY" ]; then
+		echo "ERROR: --binary \$NEW_BINARY is not a file." >&2
+		exit 1
+	fi
+	case "\$(uname -m)" in
+		x86_64|amd64) host_arch=amd64 ;;
+		aarch64|arm64) host_arch=arm64 ;;
+		*) echo "ERROR: no polyemesis release is built for \$(uname -m)." >&2; exit 1 ;;
+	esac
+	asset="polyemesis-\${WANT_VERSION}-linux-\${host_arch}"
+	sums_tmp=""
+	if [ -z "\$SUMS_FILE" ]; then
+		sums_tmp="\$(mktemp)"
+		if ! curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "\$sums_tmp" \\
+			"https://github.com/\${REPO}/releases/download/\${WANT_VERSION}/SHA256SUMS"; then
+			rm -f "\$sums_tmp"
+			echo "ERROR: could not fetch SHA256SUMS for \$WANT_VERSION. Refusing to install a binary" >&2
+			echo "nothing can vouch for. Pass --sums FILE with the release's SHA256SUMS." >&2
+			exit 1
+		fi
+		SUMS_FILE="\$sums_tmp"
+	fi
+	want_sum="\$(awk -v a="\$asset" '\$2 == a || \$2 == "*" a { print \$1; exit }' "\$SUMS_FILE")"
+	[ -z "\$sums_tmp" ] || rm -f "\$sums_tmp"
+	if [ -z "\$want_sum" ]; then
+		echo "ERROR: SHA256SUMS for \$WANT_VERSION lists no \$asset, so there is no" >&2
+		echo "published hash for this host (\$host_arch). Refusing to install." >&2
+		exit 1
+	fi
+	# CHECK A PRIVATE COPY, AND INSTALL THAT COPY. The file named on the command
+	# line can change between this check and the install a minute later; the
+	# copy cannot. It is also made executable here, because a curl -fLO or
+	# browser download arrives 0644 and would otherwise read as "does not run".
+	VERIFIED_BIN="\$(mktemp)"
+	trap 'rm -f "\$VERIFIED_BIN"' EXIT
+	cp "\$NEW_BINARY" "\$VERIFIED_BIN"
+	chmod 0755 "\$VERIFIED_BIN"
+	got_sum="\$(sha256sum "\$VERIFIED_BIN" | awk '{print \$1}')"
+	if [ "\$got_sum" != "\$want_sum" ]; then
+		echo "ERROR: \$NEW_BINARY is not \$asset: its sha256 is \$got_sum," >&2
+		echo "the release publishes \$want_sum. A different version, another architecture" >&2
+		echo "or a partial download all look like this. Refusing to install." >&2
+		exit 1
+	fi
+	if ! got_version="\$("\$VERIFIED_BIN" -version 2>&1)"; then
+		echo "ERROR: \$NEW_BINARY does not run on this host: \$got_version" >&2
+		exit 1
+	fi
+	if [ "\$got_version" != "polyemesis \$WANT_VERSION" ]; then
+		echo "ERROR: \$NEW_BINARY -version says '\$got_version', not 'polyemesis \$WANT_VERSION'." >&2
+		echo "Refusing to install a binary that is not the release it was named as." >&2
+		exit 1
+	fi
+	echo "verified \$NEW_BINARY: \$asset, sha256 matches the release, and it runs here"
+fi
 
 # IS ANYTHING ON AIR? The compose updater has refused this since it was written;
 # the binary one did not, so the SAME operation was safe in one install mode and
@@ -2128,9 +2320,22 @@ fi
 # disk goes on holding the space that stopped it.
 STOPPED_BY_US=false
 DEST_CREATED=false
+BINARY_REPLACED=false
 on_exit() {
   local rc=\$?
+  [ -z "\${VERIFIED_BIN:-}" ] || rm -f "\$VERIFIED_BIN"
   [ "\$rc" -eq 0 ] && return 0
+  # PAST THE SWAP, THE STORY CHANGES. The backup is verified and is now the way
+  # back, so it is kept; and a start here would only start the new binary
+  # again, so this says what is true instead of "nothing was upgraded".
+  if [ "\$BINARY_REPLACED" = true ]; then
+    echo >&2
+    echo "!!! \$BIN_PATH is now \$WANT_VERSION and \$SERVICE_NAME did not come up on it." >&2
+    echo "!!! See: journalctl -u \$SERVICE_NAME -n 50" >&2
+    echo "!!! The way back, which restores the state and the previous binary:" >&2
+    echo "!!!     sudo $INSTALL_DIR/rollback.sh \$dest" >&2
+    return "\$rc"
+  fi
   if [ "\$DEST_CREATED" = true ] && [ -e "\$dest" ]; then
     rm -rf "\$dest" && echo "removed the unverified backup \$dest" >&2
   fi
@@ -2210,6 +2415,25 @@ fi
 
 echo "backup verified: it opens, passes integrity_check and holds the schema"
 echo
+
+if [ -n "\$NEW_BINARY" ]; then
+  sudo install -m 0755 "\$VERIFIED_BIN" "\$BIN_PATH"
+  BINARY_REPLACED=true
+  echo "installed \$WANT_VERSION at \$BIN_PATH; starting \$SERVICE_NAME"
+  sudo systemctl start "\$SERVICE_NAME"
+  sleep "\$SETTLE_SECONDS"
+  if ! systemctl is-active --quiet "\$SERVICE_NAME"; then
+    echo "ERROR: \$SERVICE_NAME is not running \$SETTLE_SECONDS s after the start." >&2
+    exit 1
+  fi
+  echo "\$SERVICE_NAME is running \$WANT_VERSION."
+  echo
+  echo "If it misbehaves, the way back is:"
+  echo
+  echo "    sudo $INSTALL_DIR/rollback.sh \$dest"
+  exit 0
+fi
+
 if [ "\$STOPPED_BY_US" = true ]; then
   echo "The service is STOPPED. Replace the binary and start it:"
 else
@@ -2218,6 +2442,9 @@ fi
 echo
 echo "    sudo install -m 0755 ./polyemesis \$BIN_PATH"
 echo "    sudo systemctl start \$SERVICE_NAME"
+echo
+echo "(Next time, \`update.sh --binary ./polyemesis --version vX.Y.Z\` checks the file"
+echo "against the release before it installs it, and starts the service for you.)"
 echo
 # THE WAY BACK IS A SCRIPT, NOT A PASTE. This printed
 #   sudo rm -rf \$DATA_DIR && sudo cp -a \$dest \$DATA_DIR
@@ -2948,15 +3175,51 @@ verify_acme_redirect() {
   return 1
 }
 
+# read_setup_code prints the one-time setup code the server wrote at boot, or
+# nothing when there is none -- an install that already has an admin, whose
+# server deleted the file when that admin was created.
+#
+# Read from the server's own file rather than scraped from its log: the file is
+# the one place the code is guaranteed to be, and it is written before the
+# listener opens, so by the time /health has answered it exists. The container
+# runs as its own user and the file is 0600, so the docker half reads it
+# through the container rather than from the volume.
+read_setup_code() {
+  if [ "$MODE" = docker ]; then
+    (cd "$INSTALL_DIR" && $COMPOSE_CMD exec -T polyemesis cat /data/setup-code) 2>/dev/null | tr -d '\r' || true
+  else
+    cat "$DATA_DIR/setup-code" 2>/dev/null || true
+  fi
+}
+
 print_summary() {
-  local scheme="http" hostpart="localhost"
+  local scheme="http" hostpart="localhost" setup_code
   [ "$TLS_MODE" = "off" ] || scheme="https"
   [ -n "$DOMAIN_NAME" ] && hostpart="$DOMAIN_NAME"
+  setup_code="$(read_setup_code)"
 
   header "polyemesis is running"
   echo
-  echo "  ${BOLD}Open ${scheme}://${hostpart}:${HTTP_PORT}${NC} and create your admin password."
-  echo "  There is no account until you do — that first screen is the only way to make one."
+  if [ -n "$setup_code" ]; then
+    # THE PORT IS ALREADY OPEN, and first-run setup is what makes someone the
+    # admin. The code is what stops that someone being whoever finds the port
+    # first: the first-run screen refuses to create the account without it.
+    echo "  ${BOLD}Open ${scheme}://${hostpart}:${HTTP_PORT}${NC} and create your admin account."
+    echo "  It asks for this one-time setup code:"
+    echo
+    echo "      ${BOLD}${setup_code}${NC}"
+    echo
+    if [ "$MODE" = docker ]; then
+      echo "  It is also in the server log (cd $INSTALL_DIR && $COMPOSE_CMD logs polyemesis)"
+      echo "  and in /data/setup-code inside the container. It stops working once the account exists."
+    else
+      echo "  It is also in the server log (journalctl -u $SERVICE_NAME) and in"
+      echo "  $DATA_DIR/setup-code. It stops working once the account exists."
+    fi
+  else
+    echo "  ${BOLD}Open ${scheme}://${hostpart}:${HTTP_PORT}${NC} and sign in."
+    echo "  This install already has an admin account, so there is no setup code."
+  fi
   echo
 
   if [ "$TLS_MODE" = "selfsigned" ]; then
@@ -3061,7 +3324,12 @@ Options:
                          Never installs under --check.
   --allow-unverified     install a release binary even when the release has no
                          published SHA256SUMS to check it against
-  --yes, -y              accept defaults; never prompt
+  --version vX.Y.Z[-rc.N]
+                         binary mode: install this release instead of the
+                         latest one. The only way to install a release
+                         candidate, which is never "latest". Refused in docker
+                         mode, where the image tag in docker-compose.yml pins it.
+  --yes, -y             accept defaults; never prompt
   --check                run the preflight checks and exit, changing nothing
   --help, -h             this text
 
@@ -3113,7 +3381,9 @@ parse_args() {
                     case "$2" in ask|skip|force) FFMPEG_UPGRADE="$2" ;;
                       *) die "--ffmpeg takes ask, skip or force" ;; esac; shift 2 ;;
       --allow-unverified) ALLOW_UNVERIFIED=true; shift ;;
-      -y|--yes)     ASSUME_YES=true; shift ;;
+      --version)    [ $# -ge 2 ] || die "missing value for --version"; VERSION_PIN="$2"; shift 2 ;;
+      --version=*)  VERSION_PIN="${1#*=}"; shift ;;
+      -y|--yes)    ASSUME_YES=true; shift ;;
       --check)      CHECK_ONLY=true; ASSUME_YES=true; shift ;;
       -h|--help)    usage; trap - EXIT INT TERM; exit 0 ;;
       *)            usage; echo; die "unknown option: $1" ;;
@@ -3128,6 +3398,11 @@ parse_args() {
     off|selfsigned|acme) ;;
     *) die "--tls must be off, selfsigned or acme, not $TLS_MODE" ;;
   esac
+  if [ -n "$VERSION_PIN" ]; then
+    printf '%s\n' "$VERSION_PIN" | grep -Eq "$VERSION_RE" \
+      || die "--version must be a release tag like v1.2.3 or v1.2.3-rc.1, not $VERSION_PIN"
+    refuse_version_in_docker_mode
+  fi
   # RTMP_PORT IS IN THE LIST. It was the one port that skipped this, so
   # `--rtmp-port 70000` reached docker-compose.yml as a port mapping and failed
   # at `compose up` -- which is loud, but it fails INSIDE the install, so the
@@ -3182,6 +3457,7 @@ main() {
   fi
 
   gather_configuration
+  refuse_version_in_docker_mode
   confirm_plan
 
   require_systemd || die "cannot install a service without systemd — see above"

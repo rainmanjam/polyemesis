@@ -1,9 +1,7 @@
 package auth
 
 import (
-	"net"
-	"net/http"
-	"strings"
+	"net/netip"
 	"sync"
 	"time"
 )
@@ -28,6 +26,27 @@ const (
 	// key, so an attacker with a large address pool would otherwise be handed
 	// an unbounded allocator.
 	throttleMaxEntries = 4096
+
+	// throttleGlobalBurst and throttleGlobalRefill are the budget every key
+	// shares: at most this many counted attempts back to back, then one more
+	// per refill interval, whoever makes them.
+	//
+	// WHY THERE IS ONE AT ALL. The per-key counter bounds one address. It does
+	// not bound an attacker with many: each fresh address gets five free
+	// attempts, and past throttleMaxEntries the LRU evicts the counters that
+	// were doing the throttling, so a big enough pool guesses without limit.
+	// IPv6 made that pool free -- a VPS routinely gets a /64 -- which the /64
+	// keying below closes for one allocation but not for many.
+	//
+	// WHY IT IS THIS LOOSE. A global limit is the denial of service the
+	// per-address design was chosen to avoid: while it is spent, the admin's
+	// own sign-in waits too. So it is set far above anything a person does --
+	// a hundred failures in a burst, then one a second, 3,600 an hour -- and
+	// it only ever makes an attempt wait for the next token, never for
+	// minutes. It turns "unbounded" into "bounded"; the per-address penalty
+	// is still what stops a single guesser.
+	throttleGlobalBurst  = 100
+	throttleGlobalRefill = time.Second
 )
 
 // Throttle rate-limits failed credential checks per client address.
@@ -40,6 +59,11 @@ type Throttle struct {
 	attempts map[string]*attempt
 	max      int
 	now      func() time.Time
+
+	// tokens is the shared budget (see throttleGlobalBurst), as of tokensAt.
+	// A fractional count, refilled lazily on each call.
+	tokens   float64
+	tokensAt time.Time
 }
 
 type attempt struct {
@@ -57,23 +81,89 @@ func NewThrottle() *Throttle {
 }
 
 func newThrottle(max int, now func() time.Time) *Throttle {
-	return &Throttle{attempts: make(map[string]*attempt), max: max, now: now}
+	return &Throttle{attempts: make(map[string]*attempt), max: max, now: now,
+		tokens: throttleGlobalBurst, tokensAt: now()}
 }
 
-// Retry reports how long key must wait before its next attempt. Zero means
-// the attempt may proceed now.
-func (t *Throttle) Retry(key string) time.Duration {
+// throttleKey is the bucket an address is counted in.
+//
+// AN IPv6 CLIENT IS ITS /64, NOT ITS ADDRESS. A /64 is the smallest
+// allocation a host is normally given -- one VPS, one home connection -- and
+// every address inside it belongs to the same party, who can use any of them
+// at will. Keyed on the full address, each of those 2^64 addresses got its
+// own five free attempts, so a single VPS could guess without limit.
+//
+// An IPv4-mapped IPv6 address (::ffff:192.0.2.1, which a dual-stack listener
+// reports for IPv4 clients) is the IPv4 address, or one client would hold two
+// counters. Anything that is not an address -- a header value from a trusted
+// proxy that was not one -- is its own key, unchanged, as before.
+func throttleKey(k string) string {
+	a, err := netip.ParseAddr(k)
+	if err != nil {
+		return k
+	}
+	a = a.WithZone("").Unmap()
+	if a.Is4() {
+		return a.String()
+	}
+	return netip.PrefixFrom(a, 64).Masked().String()
+}
+
+// refillLocked brings the shared budget up to now.
+func (t *Throttle) refillLocked(now time.Time) {
+	if el := now.Sub(t.tokensAt); el > 0 {
+		t.tokens += float64(el) / float64(throttleGlobalRefill)
+		if t.tokens > throttleGlobalBurst {
+			t.tokens = throttleGlobalBurst
+		}
+	}
+	t.tokensAt = now
+}
+
+// globalWaitLocked is how long until the shared budget has a whole attempt
+// in it again, or zero when it has one now.
+func (t *Throttle) globalWaitLocked(now time.Time) time.Duration {
+	t.refillLocked(now)
+	if t.tokens >= 1 {
+		return 0
+	}
+	return time.Duration((1 - t.tokens) * float64(throttleGlobalRefill))
+}
+
+// Try is the gate in front of a credential check. It reports how long key
+// must wait; zero means the attempt may proceed now, AND that the attempt has
+// already been charged to the shared budget.
+//
+// The wait is the longer of two: key's own penalty, and the shared budget's
+// (see throttleGlobalBurst), so a pool of addresses cannot out-guess the limit
+// that stops one.
+//
+// WHY THE CHECK ALSO TAKES THE TOKEN. This used to be Retry, a pure query, with
+// the token taken later by Fail. The handlers call Fail only after bcrypt has
+// answered, so every request that arrived while one token was left passed the
+// check -- two hundred parallel requests from two hundred addresses all saw
+// "tokens >= 1" -- and Fail's floor at zero then forgave the overdraw. Under
+// concurrency the budget bounded nothing: an address pool got (request rate x
+// bcrypt time) guesses per refill instead of one. Taking the token here, under
+// the same lock as the check, makes "at most one per refill" hold however many
+// requests are in flight. Succeed hands it back, so a correct password costs
+// the budget nothing.
+func (t *Throttle) Try(key string) time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	key = throttleKey(key)
 	now := t.now()
-	a := t.attempts[key]
-	if a == nil || now.Sub(a.seen) >= throttleIdleTTL {
-		return 0
+	wait := t.globalWaitLocked(now)
+	if a := t.attempts[key]; a != nil && now.Sub(a.seen) < throttleIdleTTL {
+		if d := a.until.Sub(now); d > wait {
+			wait = d
+		}
 	}
-	if d := a.until.Sub(now); d > 0 {
-		return d
+	if wait > 0 {
+		return wait
 	}
+	t.tokens--
 	return 0
 }
 
@@ -83,7 +173,11 @@ func (t *Throttle) Fail(key string) time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	key = throttleKey(key)
 	now := t.now()
+	// No token is taken here: Try took it when it let this attempt through.
+	// Taking it again would charge every failure twice, and taking it only
+	// here is the overdraw Try's comment describes.
 	a := t.attempts[key]
 	if a == nil || now.Sub(a.seen) >= throttleIdleTTL {
 		t.evictLocked(now)
@@ -109,7 +203,7 @@ func (t *Throttle) Fail(key string) time.Duration {
 // one that follows none, which is a distinction only this counter holds and
 // only until Succeed clears it.
 //
-// Idle expiry is honoured for the same reason Retry honours it: throttleIdleTTL
+// Idle expiry is honoured for the same reason Try honours it: throttleIdleTTL
 // is the promise that walking away and coming back is a clean slate, and a
 // count that outlived it would attribute yesterday's guessing to today's
 // sign-in.
@@ -117,7 +211,7 @@ func (t *Throttle) Failures(key string) int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	a := t.attempts[key]
+	a := t.attempts[throttleKey(key)]
 	if a == nil || t.now().Sub(a.seen) >= throttleIdleTTL {
 		return 0
 	}
@@ -125,11 +219,17 @@ func (t *Throttle) Failures(key string) int {
 }
 
 // Succeed clears the counter for key, so a correct password immediately
-// restores full speed.
+// restores full speed, and returns the shared-budget token Try took for the
+// attempt: a correct password is not a guess, and the admin signing in should
+// not spend what a guesser is rationed to.
 func (t *Throttle) Succeed(key string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	delete(t.attempts, key)
+	delete(t.attempts, throttleKey(key))
+	t.refillLocked(t.now())
+	if t.tokens++; t.tokens > throttleGlobalBurst {
+		t.tokens = throttleGlobalBurst
+	}
 }
 
 // penalty is the wait after n consecutive failures.
@@ -170,59 +270,4 @@ func (t *Throttle) evictLocked(now time.Time) {
 	if len(t.attempts) >= t.max && oldestKey != "" {
 		delete(t.attempts, oldestKey)
 	}
-}
-
-// ClientIP derives the address a request came from, for rate-limiting keys.
-//
-// X-Forwarded-For is honoured only when the operator has declared a proxy in
-// front of us; otherwise any client could mint a fresh key per request and
-// walk straight past the throttle.
-//
-// RIGHTMOST, NOT LEFTMOST, AND THAT WAS A REAL BYPASS. This used to take the
-// leftmost entry on the premise that trustProxyHeaders asserts the proxy
-// REWRITES the header. Our own deploy/nginx.conf.example did not: it shipped
-// $proxy_add_x_forwarded_for, which APPENDS to whatever the client sent, and
-// both SECURITY.md and docs/INSTALL.md tell the operator to turn
-// trustProxyHeaders on. So on the documented deployment the leftmost entry was
-// attacker-supplied: rotate it and every request gets a fresh throttle key,
-// which is unlimited online guessing at the one admin password, with
-// attacker-chosen addresses in the audit log to match.
-//
-// The rightmost entry is the hop the trusted proxy appended -- the address it
-// actually saw -- so this is correct whether the proxy appends or overwrites,
-// including proxy configurations we do not ship. The cost is a chain of
-// several trusted proxies, where the rightmost is the previous proxy rather
-// than the client: everyone behind it then shares one key, which throttles too
-// much rather than too little. That is the direction a mistake here should
-// point, and the fix for it is a trusted-hop count rather than trusting the
-// client's own bytes. #647.
-func ClientIP(r *http.Request, trustProxy bool) string {
-	if trustProxy {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			if i := strings.LastIndexByte(xff, ','); i >= 0 {
-				if last := strings.TrimSpace(xff[i+1:]); last != "" {
-					return last
-				}
-				// A trailing comma means the proxy appended nothing usable;
-				// fall through to the socket rather than to the client's half.
-				return socketHost(r)
-			}
-			if only := strings.TrimSpace(xff); only != "" {
-				return only
-			}
-		}
-		if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
-			return ip
-		}
-	}
-	return socketHost(r)
-}
-
-// socketHost is the peer address with its port removed.
-func socketHost(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }

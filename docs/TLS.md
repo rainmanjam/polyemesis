@@ -35,10 +35,17 @@ interface is the single biggest practical exposure this product has.
 
 **A key the `tls:` block does not know stops the server at startup**, naming
 the key and the line. Keys are case-sensitive, so `Mode:` is as wrong as
-`mdoe:`. The rest of `config.yaml` still ignores unknown keys, but here that
-leniency meant a misspelled `mode` fell back to `off` — plain HTTP, cookies
-without `Secure` — with nothing logged on a loopback bind. The valid keys are
-`mode`, `hostname`, `acmeEmail`, `certFile`, `keyFile`, `hsts` and `enabled`.
+`mdoe:`. The rest of `config.yaml` refuses unknown keys too (see
+[CONFIGURATION.md](CONFIGURATION.md)), but here the old leniency was worst: a
+misspelled `mode` fell back to `off` — plain HTTP, cookies without `Secure` —
+with nothing logged on a loopback bind. The valid keys are `mode`, `hostname`,
+`acmeEmail`, `certFile`, `keyFile`, `hsts` and `enabled`.
+
+**A `hostname` with no `mode` also stops the server.** A hostname is a name to
+put in a certificate, and an absent mode means `off`, so the two together used
+to start plain HTTP while the operator believed HTTPS was configured. Set a
+mode, or write `mode: "off"` explicitly when something in front terminates TLS
+— an explicit `off` beside a hostname is accepted.
 
 Whenever polyemesis is terminating TLS, the listener pins **TLS 1.2 as the
 floor** and prefers X25519, then P-256 and P-384. Go's server default already
@@ -144,12 +151,15 @@ tls:
   hsts: true                      # safe here: publicly trusted certificate
 ```
 
-> **Under systemd, or with the repository's `docker-compose.yml`, the `addr`
-> line in `config.yaml` is not the one that counts.** Both systemd units
-> (`deploy/polyemesis.service` and the one `install.sh` writes) and the image's
-> `CMD` pass `--addr` on the command line, and the flag wins over the file. Set
-> `:443` there — `sudo systemctl edit --full polyemesis`, or `command:` in
-> compose — or the server comes back on 8080 with the same warning. See
+> **Under the shipped systemd unit, or with the repository's
+> `docker-compose.yml`, the `addr` line in `config.yaml` is not the one that
+> counts.** `deploy/polyemesis.service` and the image's `CMD` pass `--addr` on
+> the command line, and the flag wins over the file. So do units written by
+> `install.sh` before the release after 0.10.0. Set `:443` there —
+> `sudo systemctl edit --full polyemesis`, or `command:` in compose — or the
+> server comes back on 8080. The startup warning says when the address came from
+> `--addr`. A unit `install.sh` writes now passes no `--addr`, so there
+> `addr:` in `config.yaml` is the setting. See
 > [Binding, and the SSH tunnel](#binding-and-the-ssh-tunnel).
 
 Point an A/AAAA record at the box and open **80 and 443**. The certificate is
@@ -216,10 +226,10 @@ That is a warning, not a refusal — a non-standard port is a legitimate choice,
 and polyemesis says it once at startup and serves anyway.
 
 The warning says `config.yaml` because that is the one place every install
-reads, but it is only the place that wins on a bare binary and on the compose
-file `install.sh --mode docker` writes. A systemd unit or the repository's
-compose file passes `--addr`, which overrides `addr:` — change the flag there,
-as the note under the first example says.
+reads. When the address came from `--addr` instead, the warning says that too
+and points at the unit's `ExecStart` or the container's command. The shipped
+unit and the repository's compose file pass `--addr`, which overrides `addr:`,
+so change the flag there, as the note under the first example says.
 
 Tradeoff: every browser warns until you
 [install the CA](#trusting-the-self-signed-ca), and mobile clients are genuinely
@@ -229,8 +239,13 @@ that matters on a shared LAN.
 If you reach the box by LAN address rather than by name, put the address in
 `hostname` — an IP literal is accepted and becomes a SAN. A certificate naming
 only `polyemesis.lan` will still warn when you browse to `https://192.168.1.10`,
-because the name you typed is not in it. Changing `hostname` reissues the leaf
-on the next start; the CA, and everything that already trusts it, is untouched.
+because the name you typed is not in it. Changing `hostname` **replaces the
+CA** on the next start, and every client has to trust the new one: the CA is
+limited to the names it serves (see
+[What trusting the CA grants](#what-trusting-the-ca-grants)), so one issued for
+the old name cannot sign for the new. Pick the name before you install the CA
+anywhere. In a container, set it explicitly: left empty, it falls back to the
+system hostname, which there is the container ID and changes on every recreate.
 
 ### 3. Behind nginx / Caddy / Traefik
 
@@ -289,10 +304,12 @@ The generated material lives in `<dataDir>/tls/` (directory `0700`, private keys
 ```
 
 The CA is valid for ten years; the leaf for one, and it is regenerated
-automatically within 30 days of expiry or if you change `tls.hostname`. That
-split is on purpose: installing a CA into a browser, a phone and a keychain is
-the most tedious step of a homelab setup, and making you redo it annually would
-be a reason to give up on HTTPS entirely.
+automatically within 30 days of expiry. That split is on purpose: installing a
+CA into a browser, a phone and a keychain is the most tedious step of a homelab
+setup, and making you redo it annually would be a reason to give up on HTTPS
+entirely. The CA itself is replaced only when it nears expiry or when
+`tls.hostname` changes; either way the start logs a `WARN` with the new CA's
+path and fingerprint, and you remove the old CA and install the new one.
 
 Copy the CA to the machine you browse from and **check the fingerprint** against
 the `ca sha-256` line polyemesis prints at startup before you trust it:
@@ -353,6 +370,32 @@ Import-Certificate -FilePath .\polyemesis-ca.crt `
 enable it as a trusted root (iOS: *Settings → General → About → Certificate
 Trust Settings*). If that is more than you want to do, use mode `acme`, or reach
 the UI over the [SSH tunnel](#binding-and-the-ssh-tunnel).
+
+### What trusting the CA grants
+
+Installing a CA as a trusted root tells that machine to believe any
+certificate the CA signs. The CA's private key is `ca.key` on the server, so
+anyone who can read it — a shell on the box (expert mode is one; see
+[SECURITY.md](../SECURITY.md)), a copy of the data directory, a backup — can
+sign certificates that machine will accept.
+
+So the CA polyemesis generates carries **critical name constraints**: it can
+sign only for `tls.hostname`, `localhost`, `127.0.0.1` and `::1` (and the
+address itself, when `hostname` is an IP). A certificate signed with a stolen
+`ca.key` for your bank, your mail or any other site is rejected by every
+client that enforces name constraints, which current Chrome, Firefox, Safari,
+Windows and Go all do. A DNS constraint also covers names *below* it, so a
+CA for `polyemesis.lan` can sign for `x.polyemesis.lan`; that is the standard's
+semantics, not a choice. The name appears in the CA's own name —
+`polyemesis local CA (polyemesis.lan)` — so you can tell it apart in a trust
+store.
+
+Releases before this constraint generated a CA with none. An upgraded install
+replaces that CA on its first start; see
+[UPGRADING.md](UPGRADING.md#upgrading-past-0100-unreleased-on-main-the-self-signed-ca-is-replaced-once)
+for what to remove and reinstall. If you would rather no CA of yours were
+trusted anywhere, use mode `acme` or reach the UI over the
+[SSH tunnel](#binding-and-the-ssh-tunnel).
 
 ## Switching to Let's Encrypt
 
@@ -532,11 +575,12 @@ no config.yaml, or a config.yaml with no `addr` key.
 **When both are set, the flag wins.** `cmd/polyemesis/main.go` applies `-addr`
 after it loads `config.yaml`, so on an install whose unit or container command
 passes `--addr`, editing `addr:` in the file and restarting changes nothing —
-the server comes back on the same port. That is every systemd install (the
-shipped unit and the one `install.sh` writes, which also puts the same value in
-`config.yaml`, so the two agree until you edit one) and the repository's
-`docker-compose.yml`, which runs the image's `CMD`. Change the port where it is
-passed, and change both if both are written.
+the server comes back on the same port. That is the shipped unit, a unit
+`install.sh` wrote before the release after 0.10.0 (which also put the same
+value in `config.yaml`, so the two agree until you edit one), and the
+repository's `docker-compose.yml`, which runs the image's `CMD`. Change the port
+where it is passed, and change both if both are written. A unit `install.sh`
+writes now passes no `--addr`, so `addr:` is the only setting there.
 
 Plain HTTP on every
 interface is the single biggest practical exposure this product has: the login
@@ -592,8 +636,18 @@ Five things matter:
    no proxy — otherwise a client can forge those headers.
 2. **Bind polyemesis to loopback** (`addr: "127.0.0.1:8080"`). With a proxy in
    front there is no reason for the plaintext port to be reachable from anywhere
-   else, and `trustProxyHeaders` suppresses the exposure warning that would
-   otherwise have told you about it.
+   else. **A `--addr` flag beats `addr` in `config.yaml`**, and
+   `deploy/polyemesis.service` passes `--addr :8080`: on a systemd install,
+   change it in the unit's `ExecStart` (`--addr 127.0.0.1:8080`), then
+   `systemctl daemon-reload` and restart. The server warns at startup when
+   `trustProxyHeaders` is on and the listener is public, and says whether the
+   flag or the file set it.
+   `X-Forwarded-For` and `X-Real-IP` are believed only from loopback and from
+   the addresses in `trustedProxies`, so if nginx is not on the same host (nginx
+   on the Docker host in front of this container, say), list it:
+   `trustedProxies: ["172.17.0.1"]`. Otherwise every client behind it is
+   throttled as one address, and the server logs once that it ignored a
+   forwarded header from that peer.
 3. **Proxy the WebSocket.** Live status, meters and logs all arrive over
    `/api/v1/ws`: `proxy_http_version 1.1`, `Upgrade`/`Connection "upgrade"`, and
    a long `proxy_read_timeout`.

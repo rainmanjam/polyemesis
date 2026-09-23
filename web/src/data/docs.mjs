@@ -286,7 +286,7 @@ const WITHHELD_ROWS = [
   ["DESTINATIONS-FRAMERATE.md", "A trace of which destination kinds encode video (none do -- every kind is -c:v copy) and where CFR is actually forced. ENCODING.md section 5 is the user-facing half and already carries the VFR measurement; publishing both would give the same behaviour two descriptions that can drift apart."],
   [
     "RELEASE-RUNBOOK.md",
-    "How a maintainer cuts a polyemesis release: rehearse with dry_run, what each release gate refuses, why deleting and re-pushing a tag is the supported fix. It is about publishing this project, not about running it, so it is for whoever holds the tag-push -- and UPGRADING.md is the half a reader of this site actually needs.",
+    "How a maintainer cuts a polyemesis release: rehearse with dry_run, what each release gate refuses, and why a wrong CHANGELOG date is fixed by re-dating on main and re-cutting the tag on that new commit with scripts/cut-release.sh -- re-pushing it to the same commit changes nothing. It is about publishing this project, not about running it, so it is for whoever holds the tag-push -- and UPGRADING.md is the half a reader of this site actually needs.",
   ],
   ["README.md", "A directory of the others; /docs is that page here."],
 ];

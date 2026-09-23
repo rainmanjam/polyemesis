@@ -182,7 +182,10 @@ export function SourcesPage() {
     // open to a second delete of a row already gone. busyId disables it too.
     setBusyId(deleting.id);
     try {
-      await api.deleteSource(deleting.id);
+      // The count the dialog showed, which the server checks is still the
+      // count: a destination added since the dialog opened refuses the delete
+      // (409) and the toast says so, rather than taking a row nobody saw.
+      await api.deleteSource(deleting.id, deleting.destinations);
       toast.success(t(wasOnly ? "sources.deletedLast" : "sources.deleted", { name: deleting.name }));
       setDeleting(null);
       await load();
@@ -192,6 +195,15 @@ export function SourcesPage() {
       await refreshSources();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("sources.deleteFailed"));
+      // Close the dialog and re-read the list. The commonest failure here is
+      // the 409 above, and the dialog is holding the stale count that caused
+      // it: left open, every retry sends that same number and is refused
+      // again, while the toast tells the operator to confirm a count the
+      // console never shows them. Reopening from the refreshed row shows the
+      // current count, and a source someone else already deleted (404) drops
+      // out of the list instead of staying clickable.
+      setDeleting(null);
+      await load();
     } finally {
       setBusyId(null);
     }

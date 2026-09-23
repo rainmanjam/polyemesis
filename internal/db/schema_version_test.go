@@ -99,6 +99,17 @@ func TestOpenRefusesADatabaseWrittenByANewerSchema(t *testing.T) {
 			"binary's (%s); an operator seeing this needs both numbers to know what happened",
 			err, got, want)
 	}
+
+	// The remedy has to name the backup that actually works. This used to say
+	// "restore a backup taken before the rollback" -- but a backup taken
+	// before the rollback is a copy of the NEWER database, which this binary
+	// refuses just the same. The one that opens here predates the upgrade
+	// (update.sh takes it). Staging-readiness row 30.
+	if !strings.Contains(err.Error(), "taken before the upgrade") ||
+		strings.Contains(err.Error(), "before the rollback") {
+		t.Fatalf("refusal error %q must point the operator at the backup taken before the "+
+			"upgrade; one taken before the rollback is the newer database again", err)
+	}
 }
 
 // TestSchemaVersionStampIsIdempotent covers the ordinary case: every Open of

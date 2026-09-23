@@ -210,7 +210,7 @@ UID_=$(docker run --rm --entrypoint id "$IMAGE" -u 2>/dev/null)
 step "2. Boot"
 docker network create "$NET" >/dev/null 2>&1
 docker volume create "$VOL" >/dev/null 2>&1
-docker run -d --name "$CTR" --network "$NET" \
+docker run -d --name "$CTR" -e POLYEMESIS_SETUP_CODE --network "$NET" \
   -p "$PORT:8080" -p "$SRTPORT:6000/udp" -p "$RTMPPORT:1935" \
   -e POLYEMESIS_FFMPEG_LOGLEVEL="${POLYEMESIS_FFMPEG_LOGLEVEL:-}" \
   -e POLYEMESIS_RELAY_CAPTURE=/data/relaycap \
@@ -1014,7 +1014,7 @@ drive mode srt >/dev/null
 step "6. Persistence across a container replacement"
 BEFORE=$(drive count)
 docker rm -f "$CTR" >/dev/null 2>&1
-docker run -d --name "$CTR" --network "$NET" \
+docker run -d --name "$CTR" -e POLYEMESIS_SETUP_CODE --network "$NET" \
   -p "$PORT:8080" -p "$SRTPORT:6000/udp" -p "$RTMPPORT:1935" \
   -e POLYEMESIS_FFMPEG_LOGLEVEL="${POLYEMESIS_FFMPEG_LOGLEVEL:-}" \
   -e POLYEMESIS_RELAY_CAPTURE=/data/relaycap \

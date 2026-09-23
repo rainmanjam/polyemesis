@@ -51,7 +51,7 @@ func main() {
 	client = &http.Client{Jar: jar, Timeout: 60 * time.Second}
 
 	waitUp()
-	call("POST", "/setup", map[string]any{"username": "admin", "password": "acceptance-pw"})
+	call("POST", "/setup", map[string]any{"username": "admin", "password": "acceptance-pw", "setupCode": os.Getenv("POLYEMESIS_SETUP_CODE")})
 	grabCSRF()
 
 	// The programme everything below hangs off. A fresh install has none since

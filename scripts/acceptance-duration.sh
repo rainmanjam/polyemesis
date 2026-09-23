@@ -62,7 +62,10 @@ poly_require_cmd ps "the memory trend is read out of the process table"
 poly_require_cmd du "the disk trend is read off the data directory"
 
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK" || exit 1
-poly_watchdog_arm
+# FROM THE RUN LENGTH, not the library's 900s. This suite is long on purpose,
+# and the plain default killed every DURATION_MINUTES=30 run at minute fifteen.
+# awk because MINUTES may be fractional; the driver takes a float.
+poly_watchdog_arm_for "$(awk -v m="$MINUTES" 'BEGIN{printf "%d", m*60}')"
 
 step "1. Start the binary"
 "$BIN" -addr ":$PORT" -data ./data -log warn > server.log 2>&1 &

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
@@ -135,8 +136,12 @@ type Manager struct {
 	rtmpAddr string
 	engines  map[int64]*Engine
 	order    []int64 // source ids in display order, so Default is deterministic
-	ctx      context.Context
-	started  bool
+	// retiredAlerts and retiring keep a deleted programme's alert delivery
+	// counts in the install's totals. See RetiredAlertStats. Under mu.
+	retiredAlerts alerts.Stats
+	retiring      map[*alerts.Notifier]struct{}
+	ctx           context.Context
+	started       bool
 
 	// settings is every Manager-level setting that has to reach an engine.
 	//
@@ -180,6 +185,11 @@ type engineSettings struct {
 	alertAttempts int
 	hooks         *hooks.Dispatcher
 	lifecycle     LifecycleObserver
+	// alertGate is not a setting anybody saves: NewManager builds it once.
+	// It rides here anyway because this is the one path every engine is
+	// configured through, and an engine that missed it would publish its own
+	// copy of every disk.low -- the duplicate the gate exists to remove.
+	alertGate *alerts.InstallGate
 }
 
 // engineSettingsSnapshot reads the settings block WHOLE, in one acquisition of
@@ -225,6 +235,7 @@ func (m *Manager) applyEngineSettings(eng *Engine, s engineSettings) {
 	eng.SetAlertRetry(s.alertAttempts)
 	eng.SetHooks(s.hooks)
 	eng.SetLifecycle(s.lifecycle)
+	eng.SetAlertGate(s.alertGate)
 }
 
 // applyEngineSettingsAll is the other half: every save ends here rather than
@@ -302,6 +313,7 @@ func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg
 		engines: map[int64]*Engine{},
 		host:    stats.NewHost(),
 	}
+	m.settings.alertGate = alerts.NewInstallGate()
 	// NO ffprobe and NO storage guard, and both omissions are the point.
 	// This instance answers reads — usage, resolve, delete — for the API,
 	// which must be able to ask them on an install where no engine is
@@ -499,6 +511,14 @@ func (m *Manager) Sync() error {
 		if !want[id] {
 			stopping = append(stopping, eng)
 			delete(m.engines, id)
+			// In the same critical section as the delete, so no reader of
+			// the totals ever sees this engine in neither place.
+			if n := eng.Alerts(); n != nil {
+				if m.retiring == nil {
+					m.retiring = map[*alerts.Notifier]struct{}{}
+				}
+				m.retiring[n] = struct{}{}
+			}
 		}
 	}
 	var missing []int64
@@ -511,6 +531,7 @@ func (m *Manager) Sync() error {
 
 	for _, eng := range stopping {
 		eng.Stop()
+		m.retireAlerts(eng.Alerts())
 	}
 	if !started {
 		return nil
@@ -1252,6 +1273,58 @@ func (m *Manager) DestinationStatuses() []DestStatus {
 		})
 	}
 	return out
+}
+
+// RetiredAlertStats is the alert delivery counts of programmes that have
+// been deleted since the process started.
+//
+// The install's totals -- the automation page, and
+// polyemesis_alert_deliveries_total on the scrape -- are a sum over the
+// engines that exist. Without this, deleting a programme took its share out
+// of the sum: the counter FELL without reaching zero, and Prometheus reads any
+// fall as a counter reset and counts everything that remains as new increase,
+// so `increase(...{result="failed"}[30m]) > 0` fired for failures that had
+// already been counted. Adding the deleted engines back in keeps the totals
+// monotonic for the life of the process, which is what a counter promises.
+//
+// Only the cumulative counters and LastSent. Pending is a gauge, and a
+// deleted programme has nothing pending.
+func (m *Manager) RetiredAlertStats() alerts.Stats {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := m.retiredAlerts
+	for n := range m.retiring {
+		addAlertCounters(&out, n.Stats())
+	}
+	return out
+}
+
+// retireAlerts folds a stopped engine's final counts into the retired total.
+func (m *Manager) retireAlerts(n *alerts.Notifier) {
+	if n == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.retiring[n]; !ok {
+		return
+	}
+	delete(m.retiring, n)
+	addAlertCounters(&m.retiredAlerts, n.Stats())
+}
+
+// addAlertCounters adds st's cumulative counters into dst.
+func addAlertCounters(dst *alerts.Stats, st alerts.Stats) {
+	dst.Queued += st.Queued
+	dst.Dropped += st.Dropped
+	dst.Coalesced += st.Coalesced
+	dst.Sent += st.Sent
+	dst.Failed += st.Failed
+	dst.Retries += st.Retries
+	dst.Deferred += st.Deferred
+	if st.LastSent.After(dst.LastSent) {
+		dst.LastSent = st.LastSent
+	}
 }
 
 // Engines returns every running engine in source display order.

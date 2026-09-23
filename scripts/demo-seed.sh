@@ -137,6 +137,10 @@ if [ -z "${E2E_PASSWORD:-}" ]; then
 fi
 export E2E_PASSWORD
 
+# First-run setup needs the server's one-time setup code; preset it so the
+# server started below and the seeder share it. See lib-preflight.sh.
+export POLYEMESIS_SETUP_CODE="${POLYEMESIS_SETUP_CODE:-acceptance-setup-code}"
+
 if [ -n "$BASE" ]; then
   # Seeding somebody else's server. The data-directory guarantee above does not
   # apply, so the ONLY protection is the driver's own refusal -- which is why it
@@ -207,7 +211,7 @@ DOCKERFILE
 # because nothing arrived.
 echo "==> starting polyemesis on :$PORT"
 docker network create "$NET" >/dev/null 2>&1 || true
-docker run -d --rm --name "$SRV" --network "$NET" \
+docker run -d --rm --name "$SRV" -e POLYEMESIS_SETUP_CODE --network "$NET" \
   -p "127.0.0.1:$PORT:$PORT" \
   -v "$DATA:/data" \
   "$IMAGE" -addr ":$PORT" -data /data -log warn >/dev/null

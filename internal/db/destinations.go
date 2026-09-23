@@ -817,6 +817,15 @@ func (d Destination) Validate() error {
 	for _, p := range d.Compliance.Problems() {
 		add("%s", p)
 	}
+	// Every field readSafeDestination blanks or masks. See redaction_guard.go.
+	probs = append(probs, redactionPlaceholderProblems(
+		credentialField{"streamKey", d.StreamKey},
+		credentialField{"backupStreamKey", d.BackupStreamKey},
+		credentialField{"url", d.URL},
+		credentialField{"backupUrl", d.BackupURL},
+		credentialField{"extraInputArgs", d.ExtraInputArgs},
+		credentialField{"extraOutputArgs", d.ExtraOutputArgs},
+	)...)
 
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid destination: %s", strings.Join(probs, "; "))

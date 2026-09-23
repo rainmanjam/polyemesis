@@ -8,11 +8,16 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -39,26 +44,35 @@ type Config struct {
 	// proxy" apart from "bound to loopback because nobody said otherwise", which
 	// are the same address and need opposite messages.
 	AddrDefaulted bool `yaml:"-"`
+	// AddrFromFlag records that Addr came from --addr on the command line, which
+	// main applies after config.yaml and which therefore beats it. Like
+	// AddrDefaulted it is not a setting. It exists so the startup warnings tell
+	// the operator to change the flag -- in the unit's ExecStart or the
+	// container's command -- rather than an addr: line the flag overrides.
+	// ProxyHeaderWarning uses it too: the answer to "I set addr: 127.0.0.1 and
+	// it still listens publicly" is almost always the unit's --addr.
+	AddrFromFlag bool `yaml:"-"`
 	// TrustProxyHeaders makes the server honour X-Forwarded-Proto when
 	// deciding whether to set the Secure flag on the session cookie. Only
 	// enable it when polyemesis really is behind a reverse proxy, otherwise a
 	// client can forge the header.
 	TrustProxyHeaders bool `yaml:"trustProxyHeaders"`
+	// TrustedProxies lists the proxies, besides loopback, whose
+	// X-Forwarded-For and X-Real-IP are believed when TrustProxyHeaders is on:
+	// CIDRs ("172.16.0.0/12") or single addresses ("172.17.0.1"). A request
+	// from any other peer is keyed on its own socket address, so a client
+	// that reaches the listener directly cannot choose the address the login
+	// throttle and the audit log see. Empty means loopback only, which is
+	// right for a proxy on the same host and wrong for one in another
+	// container or on another machine -- list that one here.
+	TrustedProxies []string `yaml:"trustedProxies"`
 }
 
 // An `enhancedRtmp` key used to live here as a declared-but-inert placeholder
-// for OBS 30.2+ multitrack FLV ingest, on the stated grounds that it had to
-// survive "so config files that already carry the key keep parsing".
-//
-// That reason was not true. Load uses yaml.Unmarshal, not a decoder with
-// KnownFields(true), so an unrecognised key is ignored rather than rejected --
-// pinned by TestOldConfigWithEnhancedRtmpStillParses. The field was therefore
-// buying nothing, while presenting a settable knob that did nothing, which is
-// the failure mode the settings drift guards exist to prevent.
-//
-// Enhanced RTMP is still not implemented and RTMP ingest is single-track either
-// way; SRT is the multitrack path. An old config carrying the key keeps
-// loading, and now it is ignored for the same reason any unknown key is.
+// for OBS 30.2+ multitrack FLV ingest. Enhanced RTMP is still not implemented
+// and RTMP ingest is single-track either way; SRT is the multitrack path. The
+// key is now a RETIRED key -- see onDisk -- so an old config that carries it
+// keeps loading while a key nobody ever defined stops the server.
 
 // Mode selects how the built-in HTTPS listener obtains its certificate.
 type Mode string
@@ -114,17 +128,17 @@ type TLS struct {
 
 // UnmarshalYAML decodes the tls block and REFUSES A KEY IT DOES NOT KNOW.
 //
-// The rest of config.yaml ignores unknown keys (see the enhancedRtmp note
-// above), and inside this block that leniency had the worst possible failure
-// mode. `mdoe: selfsigned` -- or `Mode:`, since yaml keys are case-sensitive --
-// leaves mode absent, normalizeTLS maps absent to off, and the server starts on
-// plain HTTP with session cookies missing their Secure flag. On a loopback bind
-// nothing was logged at all. A typo that silently turns TLS off is not one to
+// The whole file is decoded with KnownFields(true) now (see onDisk), but
+// this block keeps its own check for the sake of the message: inside it,
+// leniency had the worst possible failure mode. `mdoe: selfsigned` -- or
+// `Mode:`, since yaml keys are case-sensitive -- leaves mode absent,
+// normalizeTLS maps absent to off, and the server starts on plain HTTP with
+// session cookies missing their Secure flag. On a loopback bind nothing was
+// logged at all. A typo that silently turns TLS off is not one to
 // warn about; it is one to stop at, naming the key.
 //
-// Only this block, deliberately: every key it has ever had is still a field
-// below, so no existing file breaks. Tightening the top level would need an
-// allowlist of retired keys first.
+// Every key this block has ever had is still a field below, so it has no
+// retired keys of its own.
 func (t *TLS) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.MappingNode {
 		known := tlsKeys()
@@ -153,8 +167,10 @@ func (t *TLS) UnmarshalYAML(n *yaml.Node) error {
 
 // tlsKeyList is every yaml key TLS declares, read from its struct tags so a
 // field added later is accepted without anyone remembering to list it here.
-func tlsKeyList() []string {
-	rt := reflect.TypeOf(TLS{})
+func tlsKeyList() []string { return yamlKeyList(reflect.TypeOf(TLS{})) }
+
+// yamlKeyList is every yaml key a struct type declares, in field order.
+func yamlKeyList(rt reflect.Type) []string {
 	keys := make([]string, 0, rt.NumField())
 	for i := 0; i < rt.NumField(); i++ {
 		name, _, _ := strings.Cut(rt.Field(i).Tag.Get("yaml"), ",")
@@ -282,7 +298,10 @@ func load(path string, required bool) (Config, error) {
 	// applied AFTER the file is read, or "the file said nothing" and "the file
 	// said 127.0.0.1:8080" become the same state and AddrDefaulted lies.
 	cfg.Addr = ""
-	if err := yaml.Unmarshal(b, &cfg); err != nil {
+	if err := decodeStrict(b, &cfg); err != nil {
+		return cfg, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if err := cfg.TLS.checkHostnameWithoutMode(); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
 	cfg.AddrDefaulted = strings.TrimSpace(cfg.Addr) == ""
@@ -294,6 +313,159 @@ func load(path string, required bool) (Config, error) {
 	}
 	cfg.normalizeTLS()
 	return cfg, cfg.Validate()
+}
+
+// onDisk is what config.yaml may contain: every Config key, plus the RETIRED
+// ones -- keys the file once had and the server no longer reads -- each held as
+// a raw node so its value is accepted and then dropped.
+//
+// WHY AN ALLOWLIST AND NOT LENIENCY. Load used to be yaml.Unmarshal, which
+// ignores any key it does not recognise, and that turned every typo into a
+// silent default: `trustProxyhHeaders: true` drops the Secure cookie flag
+// behind a proxy, `tsl:` leaves TLS off, `dataDIr:` puts the database in
+// ./data. Nothing was logged, because nothing had noticed. Decoding with
+// KnownFields(true) makes the typo stop startup and name itself; the fields
+// below are what keep that strictness from breaking a file that was valid the
+// day it was written. A key removed from Config gets a field here, with the
+// release it went in, and the field is never deleted.
+type onDisk struct {
+	Config `yaml:",inline"`
+	// enhancedRtmp: removed in v0.2.0. Enhanced RTMP was never implemented and
+	// the key never did anything.
+	EnhancedRTMP yaml.Node `yaml:"enhancedRtmp"`
+}
+
+// unknownFieldRE matches the one line yaml.v3 writes per unknown key, e.g.
+// "line 2: field Binary not found in type config.FFmpeg".
+var unknownFieldRE = regexp.MustCompile(`^(line \d+): field (\S+) not found in type (\S+)$`)
+
+// decodeStrict decodes config.yaml into cfg and REFUSES A KEY IT DOES NOT KNOW,
+// at any depth. See onDisk for why, and for the retired keys it still accepts.
+func decodeStrict(b []byte, cfg *Config) error {
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec.KnownFields(true)
+	file := onDisk{Config: *cfg}
+	if err := dec.Decode(&file); err != nil {
+		// An empty file, or one that is only comments, is a file that set
+		// nothing -- which is what yaml.Unmarshal made of it too.
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return explainUnknownKey(err)
+	}
+	*cfg = file.Config
+	return nil
+}
+
+// explainUnknownKey turns yaml.v3's "field X not found in type config.FFmpeg"
+// lines into sentences an operator can act on: the key the server stopped on,
+// the block it sits in, a case-insensitive near miss if there is one, and the
+// keys that ARE valid at that spot. Any other decode error is returned as it
+// came.
+//
+// WHERE THE KEY SITS DECIDES THE LIST. yaml.v3 names the Go type it was
+// decoding into, and that is the only record of the depth: `Binary:` under
+// ffmpeg must be matched against ffmpeg's keys -- so the hint is "binary" --
+// and listing the top-level keys there would send the operator to the wrong
+// place. The Go type names are internal and are not repeated to the operator.
+func explainUnknownKey(err error) error {
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		return err
+	}
+	blocks := keyBlocks()
+	lines := make([]string, 0, len(te.Errors))
+	matched := false
+	for _, line := range te.Errors {
+		m := unknownFieldRE.FindStringSubmatch(line)
+		if m == nil {
+			lines = append(lines, line)
+			continue
+		}
+		matched = true
+		lines = append(lines, describeUnknownKey(m[1], m[2], blocks[m[3]]))
+	}
+	if !matched {
+		return err
+	}
+	return fmt.Errorf("%s. Refusing to start: an unrecognised key would otherwise be "+
+		"ignored and its setting silently left at the default",
+		strings.Join(lines, "; "))
+}
+
+// keyBlock is one place in config.yaml that holds keys: its name as the
+// operator writes it ("" for the top level) and the keys valid there.
+type keyBlock struct {
+	name string
+	keys []string
+}
+
+// keyBlocks maps each yaml.v3 type name ("config.FFmpeg") to the block it
+// decodes. It is derived from Config's own fields, so a new nested block is
+// covered the day it is added. tls is listed for completeness; its
+// UnmarshalYAML refuses its own unknown keys before this is reached.
+func keyBlocks() map[string]keyBlock {
+	ct := reflect.TypeOf(Config{})
+	top := keyBlock{keys: yamlKeyList(ct)}
+	blocks := map[string]keyBlock{
+		reflect.TypeOf(onDisk{}).String(): top,
+		ct.String():                       top,
+	}
+	for i := 0; i < ct.NumField(); i++ {
+		f := ct.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+		if f.Type.Kind() != reflect.Struct || name == "" || name == "-" {
+			continue
+		}
+		blocks[f.Type.String()] = keyBlock{name: name, keys: yamlKeyList(f.Type)}
+	}
+	return blocks
+}
+
+// describeUnknownKey writes one unknown key as a sentence. A block the map does
+// not know (a zero keyBlock) still names the key and line; it only loses the
+// list, rather than borrowing one from the wrong level.
+func describeUnknownKey(line, key string, b keyBlock) string {
+	where, valid := "at the top level", "Valid top-level keys"
+	if b.name != "" {
+		where, valid = "under "+b.name, "Valid keys under "+b.name
+	}
+	if b.keys == nil {
+		return fmt.Sprintf("%s: unknown key %q", line, key)
+	}
+	hint := ""
+	for _, name := range b.keys {
+		if strings.EqualFold(name, key) {
+			hint = fmt.Sprintf(" (did you mean %q? keys are case-sensitive)", name)
+		}
+	}
+	return fmt.Sprintf("%s: unknown key %q %s%s. %s: %s",
+		line, key, where, hint, valid, strings.Join(b.keys, ", "))
+}
+
+// checkHostnameWithoutMode refuses a tls block that names a host but never
+// says how to serve it.
+//
+// tls.hostname exists to go into a certificate -- ACME issues for it, the
+// self-signed leaf carries it -- so writing one down is a statement that this
+// server terminates TLS. An absent mode quietly contradicts that: normalizeTLS
+// maps it to off, and the server comes up on plain HTTP with cookies missing
+// their Secure flag while the operator believes they configured HTTPS. It is
+// the misspelled-mode failure with the key deleted rather than mistyped.
+//
+// ONLY THE ABSENT MODE. An explicit `mode: off` next to a hostname is
+// legitimate -- behind a proxy the hostname still names the public origin for
+// the OAuth redirect preflight -- and so is `mode: auto` resolving to off under
+// trustProxyHeaders; both said something on purpose. A legacy `enabled: true`
+// is a mode too (manual), so only the combination that said nothing is refused.
+func (t TLS) checkHostnameWithoutMode() error {
+	if strings.TrimSpace(string(t.Mode)) != "" || t.Enabled || strings.TrimSpace(t.Hostname) == "" {
+		return nil
+	}
+	return fmt.Errorf("tls.hostname is %q but tls.mode is not set, which means off: this "+
+		"server would serve plain HTTP, not a certificate for that name. Set tls.mode "+
+		"(auto, acme or selfsigned), or write mode: \"off\" if TLS is terminated in front "+
+		"of this server", t.Hostname)
 }
 
 // normalizeTLS maps the legacy tls.enabled boolean onto tls.mode and fills in
@@ -409,6 +581,9 @@ func (t TLS) EffectiveHostname() (string, error) {
 
 // Validate checks the invariants that would otherwise fail confusingly later.
 func (c Config) Validate() error {
+	if _, err := c.TrustedProxyPrefixes(); err != nil {
+		return err
+	}
 	if !c.TLS.Mode.Valid() {
 		return fmt.Errorf("tls.mode %q is not one of %v", c.TLS.Mode, Modes)
 	}
@@ -516,7 +691,77 @@ func (c Config) InsecureExposureWarning() string {
 	if !BindsPublicly(c.Addr) || c.TrustProxyHeaders || c.ServesTLS() {
 		return ""
 	}
-	return fmt.Sprintf("listening on %s without TLS: passwords and session cookies cross the network in plaintext. Set tls.mode: auto in config.yaml, or bind to 127.0.0.1 and put a reverse proxy in front (then set trustProxyHeaders: true).", c.Addr)
+	return fmt.Sprintf("listening on %s without TLS: passwords and session cookies cross the network in plaintext. Set tls.mode: auto in config.yaml, or bind to 127.0.0.1 and put a reverse proxy in front (then set trustProxyHeaders: true).%s", c.Addr, c.addrFlagNote())
+}
+
+// addrFlagNote is appended to any advice about the listen address when that
+// address came from --addr: the flag beats config.yaml, so an operator who
+// follows "set addr: in config.yaml" restarts onto the same port and the same
+// warning. Empty when the address came from the file or the default.
+func (c Config) addrFlagNote() string {
+	if !c.AddrFromFlag {
+		return ""
+	}
+	return fmt.Sprintf(" The listen address %s comes from --addr on the command line -- the "+
+		"systemd unit's ExecStart or the container's command -- and that flag overrides addr: "+
+		"in config.yaml, so change the address there (sudo systemctl edit --full polyemesis), "+
+		"or remove the flag and let config.yaml decide.", c.Addr)
+}
+
+// TrustedProxyPrefixes parses TrustedProxies. A bare address is that one
+// address; an entry that is neither an address nor a CIDR is an error naming
+// it, because a typo here would silently trust nobody -- or somebody else.
+func (c Config) TrustedProxyPrefixes() ([]netip.Prefix, error) {
+	out := make([]netip.Prefix, 0, len(c.TrustedProxies))
+	for _, raw := range c.TrustedProxies {
+		s := strings.TrimSpace(raw)
+		var (
+			p   netip.Prefix
+			err error
+		)
+		if strings.Contains(s, "/") {
+			p, err = netip.ParsePrefix(s)
+			p = p.Masked()
+		} else {
+			var a netip.Addr
+			if a, err = netip.ParseAddr(s); err == nil {
+				a = a.Unmap()
+				p = netip.PrefixFrom(a, a.BitLen())
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("trustedProxies: %q is not an address or a CIDR", raw)
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// ProxyHeaderWarning returns a message when trustProxyHeaders is on but the
+// listener can be reached without going through the proxy, or "" otherwise.
+//
+// Forwarding headers are believed only from loopback and trustedProxies, so a
+// direct client can no longer pick its own throttle key -- but a listener that
+// is public, or that terminates TLS itself, is still a sign the deployment is
+// not the one trustProxyHeaders describes. The usual cause is the systemd
+// unit's --addr :8080, which beats addr: 127.0.0.1 in config.yaml, so the
+// message says which of the two set the address.
+func (c Config) ProxyHeaderWarning() string {
+	if !c.TrustProxyHeaders || (!BindsPublicly(c.Addr) && !c.ServesTLS()) {
+		return ""
+	}
+	var why string
+	switch {
+	case BindsPublicly(c.Addr) && c.AddrFromFlag:
+		why = fmt.Sprintf("the listener %s, set by the --addr flag (which overrides addr in config.yaml; "+
+			"on a systemd install it is in the unit's ExecStart), is reachable without going through the proxy", c.Addr)
+	case BindsPublicly(c.Addr):
+		why = fmt.Sprintf("the listener %s, set by addr in config.yaml, is reachable without going through the proxy", c.Addr)
+	default:
+		why = fmt.Sprintf("this server terminates TLS itself on %s (tls.mode %s), so clients reach it directly", c.Addr, c.ResolvedTLSMode())
+	}
+	return fmt.Sprintf("trustProxyHeaders is on, but %s. Forwarding headers are believed only from loopback and trustedProxies, "+
+		"so direct clients are keyed on their own address; if the reverse proxy is meant to be the only way in, bind 127.0.0.1.", why)
 }
 
 // TLSPortWarning returns a message when TLS is on but the listener is not on
@@ -552,7 +797,7 @@ func (c Config) TLSPortWarning() string {
 	if port == "" || port == "443" {
 		return ""
 	}
-	return fmt.Sprintf("TLS is on but the listener is %s, not :443. Browsers reach this server only if every visitor types the port, and http:// redirects will carry it too. Set addr: \":443\" in config.yaml; a service running as a non-root user also needs AmbientCapabilities=CAP_NET_BIND_SERVICE in its unit, which install.sh grants for you. Keep %s if something in front of this box terminates TLS on 443 or the port is deliberate.", c.Addr, port)
+	return fmt.Sprintf("TLS is on but the listener is %s, not :443. Browsers reach this server only if every visitor types the port, and http:// redirects will carry it too. Set addr: \":443\" in config.yaml; a service running as a non-root user also needs AmbientCapabilities=CAP_NET_BIND_SERVICE in its unit, which install.sh grants for you. Keep %s if something in front of this box terminates TLS on 443 or the port is deliberate.%s", c.Addr, port, c.addrFlagNote())
 }
 
 // ListenPort is the port from an addr like ":8080" or "0.0.0.0:443", or "" when

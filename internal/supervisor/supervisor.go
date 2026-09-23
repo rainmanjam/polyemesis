@@ -8,6 +8,7 @@ package supervisor
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -263,8 +264,11 @@ type Process struct {
 	// goroutine and an HTTP handler at the same time.
 	secrets *alerts.SecretSet
 
-	mu        sync.RWMutex
-	state     State
+	mu    sync.RWMutex
+	state State
+	// gen counts supervise loops: Start bumps it (under mu) each time it
+	// launches one. setStateFor drops a write made for an older one.
+	gen       uint64
 	pid       int
 	restarts  int
 	startedAt time.Time
@@ -330,6 +334,13 @@ type Process struct {
 	drain time.Duration
 	// stallAfter is StallAfter, a field for the same reason grace is.
 	stallAfter time.Duration
+	// stopWaited, when set, runs in stop() after the wait on the loop it ended
+	// and before the StateStopped write. Nil outside tests. It is the one seam
+	// that can hold stop() in the gap where a pending Start fires on the same
+	// `done`, which is the interleaving setStateFor exists for: without it a
+	// test can only hope the scheduler lands there, and a race that a test
+	// merely hopes for is a guard nothing defends.
+	stopWaited func()
 
 	runMu   sync.Mutex
 	cancel  context.CancelFunc
@@ -353,6 +364,9 @@ type Process struct {
 	// A real Stop that lands between Restart's stop and its start does set it,
 	// and the restart correctly turns into a no-op.
 	retired bool
+	// startPending is set while a Start is waiting for the previous supervise
+	// loop to end before it launches the next one. See Start.
+	startPending bool
 
 	// policyMu guards pol. Deliberately NOT p.mu: setState takes p.mu and then
 	// calls OnState, which fans out to the WebSocket, and a reconcile applying
@@ -590,13 +604,47 @@ func (p *Process) Start() {
 	// The clause, NOT the line. Deleting the whole `if` leaves a dangling
 	// `return` and does not compile, and a mutation that does not build proves
 	// nothing at all.
-	if p.retired || p.running {
+	if p.retired || p.running || p.startPending {
 		return
+	}
+	// ONE SUPERVISE LOOP AT A TIME, and this is the only place a loop is born.
+	//
+	// A stop that hit its deadline returns without waiting for `done` -- it
+	// cannot, the deadline is spent -- so running is false while the previous
+	// loop is still inside runOnce, waiting on a SIGKILLed child the kernel has
+	// not yet reaped or on a drain. Restart's Start used to launch a second loop
+	// straight into that window. That was two children on one destination key,
+	// and, when the old loop finally unwound and found its ctx cancelled, a
+	// StateStopped written over the new loop's StateRunning: a process reading
+	// Stopped whose child was live and publishing.
+	//
+	// So a Start that finds the previous loop still alive becomes a promise to
+	// start the moment it ends. The retired latch is re-read then, so a Stop
+	// that lands in between still wins.
+	if prev := p.done; prev != nil {
+		select {
+		case <-prev:
+		default:
+			p.startPending = true
+			go func() {
+				<-prev
+				p.runMu.Lock()
+				p.startPending = false
+				p.runMu.Unlock()
+				p.Start()
+			}()
+			return
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 	p.done = make(chan struct{})
 	p.running = true
+	// A new generation, so a stop() still finishing the previous one cannot
+	// write its StateStopped over this loop's state. See setStateFor.
+	p.mu.Lock()
+	p.gen++
+	p.mu.Unlock()
 	go p.supervise(ctx, p.done)
 }
 
@@ -626,6 +674,11 @@ func (p *Process) Stop(ctx context.Context) error { return p.stop(ctx, true) }
 // Non-terminal, unlike Stop: this is a cycle, not a retirement. If a real Stop
 // lands in the gap, its latch makes the Start below a no-op, which is the
 // outcome the caller of Stop asked for.
+//
+// When the stop hits its deadline the new child does not come up at once: it
+// comes up when the old supervise loop has ended, which is to say when the
+// SIGKILLed child has been reaped. Until then the process reads Stopped. See
+// Start.
 func (p *Process) Restart(ctx context.Context) {
 	// Deliberately discarded: a restart that had to kill the old child still
 	// wants the new one, and the caller of Restart has no different action to
@@ -660,6 +713,9 @@ func (p *Process) stop(ctx context.Context, retire bool) error {
 	}
 	cancel, done := p.cancel, p.done
 	p.running = false
+	p.mu.RLock()
+	gen := p.gen
+	p.mu.RUnlock()
 	p.runMu.Unlock()
 
 	cancel()
@@ -713,7 +769,15 @@ func (p *Process) stop(ctx context.Context, retire bool) error {
 				ErrStopDeadline, p.Name())
 		}
 	}
-	p.setState(StateStopped, "")
+	// For the generation this stop ended, and no other. A Start that ran
+	// while this was waiting -- a reconcile's, or the pending one Start leaves
+	// behind, which fires on the same `done` this select just took -- may
+	// already have a new loop reporting Running, and a Stopped written over it
+	// would be the lie the one-loop rule in Start exists to prevent.
+	if p.stopWaited != nil {
+		p.stopWaited()
+	}
+	p.setStateFor(gen, StateStopped, "")
 	return err
 }
 
@@ -990,6 +1054,14 @@ func (p *Process) runOnce(ctx context.Context) error {
 		if err := handler(stdout); err != nil && ctx.Err() == nil {
 			p.log.Debug("stdout handler ended", "err", err)
 		}
+		// KEEP READING AFTER THE HANDLER HAS STOPPED. A handler that returns
+		// early -- the -progress parser refusing a line over its 1 MiB buffer,
+		// or any handler's own error -- would otherwise leave the pipe with no
+		// reader: it fills, the child blocks in write(), and cmd.Wait() below
+		// never returns. The child then reads Running while doing nothing, and
+		// no amount of waiting fixes it. Discarding costs nothing and ends at
+		// EOF, or at the close the bounded drain below makes.
+		_, _ = io.Copy(io.Discard, stdout)
 	}()
 
 	// FFmpeg's last words before dying are on stderr, so the tail of this
@@ -998,7 +1070,13 @@ func (p *Process) runOnce(ctx context.Context) error {
 	go func() {
 		defer wg.Done()
 		sc := bufio.NewScanner(stderr)
-		sc.Buffer(make([]byte, 0, 64*1024), 512*1024)
+		sc.Buffer(make([]byte, 0, 64*1024), stderrLineMax)
+		sc.Split(scanLogLines)
+		// The same reason as the io.Copy after the stdout handler: whatever
+		// ends this loop early, the pipe must go on being read or the child
+		// wedges. scanLogLines never refuses a token, so what is left is a
+		// read error, and discarding the rest is the only safe answer to it.
+		defer func() { _, _ = io.Copy(io.Discard, stderr) }()
 		for sc.Scan() {
 			line := strings.TrimRight(sc.Text(), "\r\n")
 			if line == "" {
@@ -1118,6 +1196,37 @@ func (p *Process) defaultStdout(r io.Reader) error {
 	})
 }
 
+// stderrLineMax is the longest stderr line kept as one log line. Anything
+// longer is cut into pieces of this size rather than refused.
+const stderrLineMax = 512 * 1024
+
+// scanLogLines is bufio.ScanLines for FFmpeg's stderr, with two differences
+// that both exist so the drain can never stop reading.
+//
+// It ends a line at \r as well as \n. FFmpeg's interactive stats update ends
+// in a bare \r so a terminal overwrites it in place; split on \n alone, a
+// child with stats on writes one "line" that grows for as long as it runs.
+// "\r\n" yields an empty token between its halves, which the caller skips.
+//
+// And it never returns ErrTooLong. A run of stderrLineMax bytes with no
+// terminator in it is handed back as a line of its own. bufio.Scanner calls
+// the split function before it decides the buffer is too small, so with the
+// buffer's ceiling set to stderrLineMax a full buffer reaches this cut first.
+// A scanner that refused the run would end the drain, and a drain that ends
+// early wedges the child on a full pipe.
+func scanLogLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if len(data) >= stderrLineMax {
+		return stderrLineMax, data[:stderrLineMax], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
 // terminate asks the child's whole process group to exit, then escalates.
 func (p *Process) terminate() {
 	p.cmdMu.Lock()
@@ -1226,6 +1335,27 @@ func (p *Process) kill() {
 
 func (p *Process) setState(s State, errMsg string) {
 	p.mu.Lock()
+	p.setStateLocked(s, errMsg)
+}
+
+// setStateFor is setState for a writer that speaks for one generation of the
+// supervise loop -- stop(), finishing a stop that has already let go of runMu.
+// If a Start has begun a newer generation since, the write is dropped: the
+// state belongs to the loop that is running now.
+//
+// Checked and written under one hold of p.mu, and Start bumps gen under p.mu,
+// so there is no gap between "still current" and the write.
+func (p *Process) setStateFor(gen uint64, s State, errMsg string) {
+	p.mu.Lock()
+	if p.gen != gen {
+		p.mu.Unlock()
+		return
+	}
+	p.setStateLocked(s, errMsg)
+}
+
+// setStateLocked is called with p.mu held, and releases it before OnState.
+func (p *Process) setStateLocked(s State, errMsg string) {
 	changed := p.state != s || p.lastErr != errMsg
 	p.state = s
 	if errMsg != "" {

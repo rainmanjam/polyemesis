@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
@@ -599,5 +600,70 @@ func TestRecorderRunningGoesFalseWhenTheFreeSpaceFloorHaltsARecorder(t *testing.
 
 	if e.RecorderRunning() {
 		t.Error("RecorderRunning() = true after the free-space floor stopped the recorder")
+	}
+}
+
+// Every cumulative counter is carried into a retired programme's share, and
+// nothing that is not one. Pending is a gauge: a deleted programme has nothing
+// waiting, and adding its last reading would leave the install permanently
+// "pending" deliveries nobody will make.
+func TestAddAlertCountersCarriesTheCountersAndNotTheGauge(t *testing.T) {
+	late := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	dst := alerts.Stats{Sent: 1, LastSent: late}
+	addAlertCounters(&dst, alerts.Stats{
+		Queued: 1, Dropped: 2, Coalesced: 3, Pending: 4, Sent: 5, Failed: 6,
+		Retries: 7, Deferred: 8, LastSent: late.Add(-time.Hour),
+	})
+	want := alerts.Stats{
+		Queued: 1, Dropped: 2, Coalesced: 3, Sent: 6, Failed: 6,
+		Retries: 7, Deferred: 8, LastSent: late,
+	}
+	if dst != want {
+		t.Errorf("folded %+v, want %+v", dst, want)
+	}
+	addAlertCounters(&dst, alerts.Stats{LastSent: late.Add(time.Hour)})
+	if !dst.LastSent.Equal(late.Add(time.Hour)) {
+		t.Errorf("LastSent = %v, want the newer one", dst.LastSent)
+	}
+}
+
+// The manager's side of the retired total: a deleted programme's notifier is
+// counted while its engine stops and after, and never twice.
+func TestADeletedProgrammesAlertCountsAreRetiredOnce(t *testing.T) {
+	m, store := managerFixture(t)
+	vert := addSource(t, store, "Vertical")
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	n := m.Engine(vert.ID).Alerts()
+	n.Publish(alerts.Event{Type: alerts.TypeIngestLost, Key: "retired"})
+	queued := n.Stats().Queued
+	if queued == 0 {
+		t.Fatal("the notifier queued nothing, so there is nothing to retire")
+	}
+	if err := store.DeleteSource(vert.ID); err != nil {
+		t.Fatalf("DeleteSource: %v", err)
+	}
+	if err := m.Sync(); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	// Its FINAL count: the engine may have published more of its own while
+	// it stopped.
+	queued = n.Stats().Queued
+	if got := m.RetiredAlertStats().Queued; got != queued {
+		t.Errorf("retired queued = %d, want %d", got, queued)
+	}
+	// Folded, not kept: a notifier held for ever per deleted programme is a
+	// leak that grows with every source an operator ever removed.
+	m.mu.RLock()
+	held := len(m.retiring)
+	m.mu.RUnlock()
+	if held != 0 {
+		t.Errorf("%d stopped notifier(s) still held after Sync; want their counts folded", held)
+	}
+	m.retireAlerts(n) // a second retirement of the same notifier is a no-op
+	m.retireAlerts(nil)
+	if got := m.RetiredAlertStats().Queued; got != queued {
+		t.Errorf("retiring twice counted it twice: %d, want %d", got, queued)
 	}
 }

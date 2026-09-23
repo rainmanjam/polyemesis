@@ -98,6 +98,24 @@ const (
 var stopTimeout = 12 * time.Second
 
 // Engine owns the whole streaming pipeline.
+//
+// LOCK ORDER. A goroutine holding one of these mutexes may take only a mutex
+// with a HIGHER number, never an equal or lower one. Locks on one row are
+// never held together. The reasons for each lock are on its field; this is
+// the one place the order between them is written down, and
+// TestEngineLocksAreTakenInTableOrder reads this table and fails on a method
+// that breaks it. -race cannot: an inversion is perfectly synchronised until
+// the moment it deadlocks.
+//
+//	1  reconcileMu              -- held for the whole of a Reconcile
+//	2  previewMu                -- preview lifecycle
+//	3  selMu                    -- the selector tier
+//	4  mu                       -- the engine's maps and children
+//	5  stopMu, heldMu, sinkMu   -- leaves: take nothing while holding one
+//
+// previewMu before selMu is what StopWithin does, and nothing takes previewMu
+// under selMu. Atomics and the locks inside other types (the hub, the
+// supervisor, meters.Store) are outside this table.
 type Engine struct {
 	// sourceID is the programme this engine owns. One engine per source: the
 	// hub, the ingest, the recorder, the meters and the whole destination and
@@ -364,6 +382,11 @@ type Engine struct {
 	// field by field, which is how the tests build one; every use is nil-safe.
 	lifecycle  LifecycleObserver
 	alertWatch *alerts.Watcher
+	// alertGate is SHARED across every engine, like hooks, and handed in by
+	// the manager: it is what lets one engine speak for the install on the
+	// recording volume, which every engine measures. Under e.mu; nil on an
+	// engine assembled field by field, which admits everything.
+	alertGate *alerts.InstallGate
 	// sched flips destinations' enabled flags on a timetable, through the same
 	// path a human uses.
 
@@ -1185,6 +1208,11 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	}
 
 	e.wg.Wait()
+	// After observeLoop has returned, so no sweep can claim the disk again
+	// behind this. A stopped engine's watcher will never report the recovery,
+	// and a claim it left on the shared gate would swallow the next disk.low
+	// from an engine that is alive. See alerts.InstallGate.
+	e.releaseAlertGate()
 	_ = e.hub.Close()
 	// After every child is gone, so the queued tail of their stderr is flushed
 	// rather than dropped.
@@ -5157,9 +5185,7 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			}
 			snap := e.alertSnapshot(now, live)
 			snap.Disk = disk
-			for _, ev := range e.alertWatch.Observe(snap) {
-				e.alerter.Publish(ev)
-			}
+			e.observeAlerts(snap)
 			if e.hookWatch != nil {
 				// Re-stamped every sweep: the source row is named after the
 				// engine is built, and an event carrying only an id tells a
@@ -5190,6 +5216,54 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// observeAlerts is one sweep of the alert watcher: stamp it with this
+// programme, judge the snapshot, publish what changed. It returns what it
+// published.
+//
+// Its own function so a test drives the path observeLoop drives. The stamp is
+// the line that makes a two-programme install's alerts say WHICH programme;
+// without it every engine's watcher is unscoped, writing key "ingest" and
+// title "Ingest lost" for every studio alike.
+func (e *Engine) observeAlerts(snap alerts.Snapshot) []alerts.Event {
+	// Re-stamped every sweep, for the reason hookWatch is in observeLoop: the
+	// source row is named after the engine is built.
+	e.alertWatch.SetSource(alerts.SourceRef{ID: e.sourceID, Name: e.SourceName()})
+	return e.publishAlerts(e.alertWatch.Observe(snap))
+}
+
+// publishAlerts hands one sweep's events to this engine's notifier, less any
+// install-wide edge another engine has already published, and returns what
+// it handed on. See alerts.InstallGate.
+func (e *Engine) publishAlerts(evs []alerts.Event) []alerts.Event {
+	e.mu.RLock()
+	gate := e.alertGate
+	e.mu.RUnlock()
+	var out []alerts.Event
+	for _, ev := range evs {
+		if gate.Admit(e, ev) {
+			e.alerter.Publish(ev)
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// releaseAlertGate withdraws this engine's claims on the shared gate.
+func (e *Engine) releaseAlertGate() {
+	e.mu.RLock()
+	gate := e.alertGate
+	e.mu.RUnlock()
+	gate.Release(e)
+}
+
+// SetAlertGate attaches the install's shared gate. A setter for the reason
+// SetHooks is one: engines are built whenever a source is added.
+func (e *Engine) SetAlertGate(g *alerts.InstallGate) {
+	e.mu.Lock()
+	e.alertGate = g
+	e.mu.Unlock()
 }
 
 // alertSnapshot flattens the status snapshot into the shape the watcher judges.

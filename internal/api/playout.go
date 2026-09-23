@@ -1061,7 +1061,7 @@ func (s *Server) handlePutPlayoutPublish(w http.ResponseWriter, r *http.Request)
 			// a stream in front of the whole internet, and the log is where an
 			// operator looks when they are asked to prove when that happened.
 			s.log.Warn("playout: stream is now PUBLIC and UNPROTECTED — anyone with the URL can watch",
-				"client", auth.ClientIP(r, s.cfg.TrustProxyHeaders))
+				"client", auth.ClientIP(r, s.proxies))
 		}
 	}
 	writeJSON(w, http.StatusOK, saved)

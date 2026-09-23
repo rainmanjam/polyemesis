@@ -81,6 +81,8 @@ const (
 	fieldProgramme = "Programme"
 	fieldVersion   = "Version"
 	fieldForced    = "Forced past a live broadcast"
+	fieldRuleName  = "Rule"
+	fieldChange    = "Change"
 )
 
 // clientIP is the address the request came from, resolved the same way the
@@ -100,10 +102,10 @@ const (
 // there costs an attacker a bucket of their own and nothing else. Here the same
 // string is rendered into a Slack or Discord message raised from
 // POST /api/v1/auth/login, which is UNAUTHENTICATED. With trustProxyHeaders on,
-// auth.ClientIP returns the leftmost X-Forwarded-For segment after nothing but
-// a TrimSpace -- so without this check anyone who can reach the login endpoint
-// can put arbitrary text of their choosing into the operator's channel, from
-// off the internet, without credentials.
+// auth.ClientIP returns an X-Forwarded-For segment after nothing but a
+// TrimSpace -- and although only a trusted proxy's header is read now, a proxy
+// that appends passes the client's own bytes along -- so without this check
+// text of an attacker's choosing could reach the operator's channel.
 //
 // alerts.Redact is not a backstop for this. It matches syntax -- URLs, k=v
 // pairs, Bearer headers -- and a plain sentence passes through it untouched.
@@ -113,7 +115,7 @@ const (
 // proxy is a small loss; relaying an attacker's prose to the operator as though
 // it were a client address is not.
 func (s *Server) clientIP(r *http.Request) string {
-	if addr := auth.ClientIP(r, s.cfg.TrustProxyHeaders); net.ParseIP(addr) != nil {
+	if addr := auth.ClientIP(r, s.proxies); net.ParseIP(addr) != nil {
 		return addr
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -382,6 +384,45 @@ func auditUpgradeRolledBack(forced bool, address string) alerts.Event {
 		ev = ev.WithField(fieldForced, "yes")
 	}
 	return ev
+}
+
+// ruleChange is what happened to an alert rule. A closed set, so the Change
+// field of the event can only ever read one of three words.
+type ruleChange string
+
+const (
+	ruleCreated ruleChange = "created"
+	ruleEdited  ruleChange = "edited"
+	ruleDeleted ruleChange = "deleted"
+)
+
+// auditAlertRuleChanged reports an alert rule being created, edited or
+// deleted.
+//
+// The NAME travels and the URL never does, not even redacted: the URL of a
+// Slack or Discord rule is the credential, and a masked one answers no
+// question the name does not. The log line beside each call carries the
+// redacted URL, because that stays on the box.
+//
+// Warning for a create or an edit, critical for a delete. A delete is the one
+// that takes a channel out of the loop, and a rule floored at critical is
+// the rule an operator keeps on their phone.
+func auditAlertRuleChanged(change ruleChange, name, address string) alerts.Event {
+	sev, text := alerts.SeverityWarning, "An alert rule was "+string(change)+"."
+	if change == ruleDeleted {
+		sev = alerts.SeverityCritical
+		text = "An alert rule was deleted. The channel it delivered to gets " +
+			"nothing more from this server, starting after this message."
+	}
+	return alerts.Event{
+		Type:     alerts.TypeAlertRuleChanged,
+		Severity: sev,
+		Title:    "Alert rule " + string(change),
+		Text:     text,
+	}.
+		WithField(fieldRuleName, name).
+		WithField(fieldChange, string(change)).
+		WithField(fieldAddress, address)
 }
 
 // auditSettingsChanged reports a settings save that altered something, naming

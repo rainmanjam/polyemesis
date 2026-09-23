@@ -398,6 +398,17 @@ type Server struct {
 	// allowance the admin needs the moment setup succeeds, and a mistyped
 	// password would slow down the one request that creates the account.
 	setups *auth.Throttle
+
+	// setupCode is the one-time code POST /setup requires on a fresh install.
+	// Nil once an admin exists, and nil in a server built without one, which
+	// refuses setup rather than accepting it. See auth.SetupCode.
+	setupCode *auth.SetupCode
+
+	// proxies is who may speak for a client's address through
+	// X-Forwarded-For. Nil when trustProxyHeaders is off. Every place that
+	// needs a client address goes through auth.ClientIP with this, so the
+	// throttles and the audit log cannot disagree about who is trusted.
+	proxies *auth.Proxies
 	// providers is the OAuth provider set every handler resolves through, and
 	// it replaced five function-pointer fields on this struct.
 	//
@@ -572,6 +583,11 @@ type Server struct {
 	// what, on which branch -- cannot be asserted at all. Removing all five
 	// call sites left the package green.
 	auditSink func(alerts.Event)
+	// farewellSink diverts the delivery a deleted alert rule is sent, AFTER
+	// the enabled and subscription checks, for the reason auditSink exists:
+	// without it the only way to see that a rule was NOT sent its farewell is
+	// to stand up an endpoint and wait for a goroutine that never comes.
+	farewellSink func(alerts.Rule, alerts.Event)
 
 	// probeBin supplies the ffprobe path directly, and is set only by tests.
 	//
@@ -660,6 +676,11 @@ type Options struct {
 	// Hooks is the lifecycle-webhook dispatcher. Optional.
 	Hooks *hooks.Dispatcher
 
+	// SetupCode is what POST /setup must be sent on an install with no admin.
+	// Leaving it nil is safe in the only direction that matters: setup is then
+	// refused, never opened. See auth.PrepareSetupCode.
+	SetupCode *auth.SetupCode
+
 	// Providers is the OAuth provider set every handler resolves through.
 	//
 	// Optional, and the zero value is what production passes: an unset Set
@@ -694,6 +715,7 @@ func New(o Options) *Server {
 		startedAt:     time.Now(),
 		logins:        auth.NewThrottle(),
 		setups:        auth.NewThrottle(),
+		setupCode:     o.SetupCode,
 		kickKeys:      &chat.KickKeyFetcher{},
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
@@ -709,6 +731,18 @@ func New(o Options) *Server {
 			o.DB.TokenEpoch,
 		),
 	}
+	// Config.Validate has already refused a malformed trustedProxies, so an
+	// error here means a caller skipped it; loopback-only is the safe reading.
+	extra, _ := o.Config.TrustedProxyPrefixes()
+	s.proxies = auth.NewProxies(o.Config.TrustProxyHeaders, extra, func(peer string) {
+		// Once per process. The deployment this catches -- nginx in another
+		// container, or on another box, never listed -- would otherwise log
+		// on every request, or worse, say nothing while every client behind
+		// that proxy shares one throttle key.
+		s.log.Warn("ignored X-Forwarded-For from a peer that is not a trusted proxy",
+			"peer", peer,
+			"action", "if this is your reverse proxy, add its address to trustedProxies in config.yaml")
+	})
 	// nil for both probes means "ask the real environment and the real
 	// filesystem", which is what a running server wants; the parameters exist
 	// for internal/upgrade's own tests.
@@ -1486,9 +1520,35 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 			level = slog.LevelWarn
 		}
 		s.log.Log(r.Context(), level, "http",
-			"method", r.Method, "path", r.URL.Path,
+			"method", r.Method, "path", loggedPath(r),
 			"status", ww.Status(), "dur", time.Since(start).Round(time.Millisecond))
 	})
+}
+
+// loggedPath is the path a request log line may carry: the ROUTE PATTERN it
+// matched, not the path it arrived on.
+//
+// A path can be a credential. /api/v1/chat/kick/{secret} is how Kick's webhook
+// proves it is Kick, and every 4xx or 5xx on it -- a GET instead of a POST, a
+// body that is not JSON, a signature that does not verify -- is logged at WARN
+// or ERROR, so the secret went into journald on exactly the requests that were
+// not Kick's, contradicting SECURITY.md's promise that it is never logged.
+// Logging the pattern redacts every path parameter by construction, so the
+// next route with a secret in its path cannot repeat it.
+//
+// A request that matched no route, or only a wildcard, has no pattern that
+// says anything, and there the raw path is logged: which unknown URL is being
+// asked for is the one thing a 404 line is for.
+func loggedPath(r *http.Request) string {
+	rc := chi.RouteContext(r.Context())
+	if rc == nil {
+		return r.URL.Path
+	}
+	p := rc.RoutePattern()
+	if p == "" || strings.HasSuffix(p, "*") {
+		return r.URL.Path
+	}
+	return p
 }
 
 // tokenRevoked reports whether an open socket's API token has been revoked.
@@ -1751,6 +1811,13 @@ var readScopeWritePatterns = map[string]bool{
 // transcript would have been a fix shaped by the URL rather than by the bytes,
 // which is the same mistake as gating on the HTTP verb.
 //
+// CHAT IS CONTENT FOR THE SAME REASON, and the four chat GETs joined the list
+// when staging-readiness row 32 found them missing: the scrollback, a search
+// over it, one viewer's history, and the overview that embeds the recent
+// messages. /chat/search is the /library/search argument again -- iterate
+// common words and the scrollback comes back. The same messages arrive live on
+// /ws, which a read token may open, so events.TypeChat is wsDrop there.
+//
 // GET /library still returns Speakers, the bare list of labels in the archive.
 // That is left reachable deliberately: it is who appears, not what was said,
 // and a dashboard that groups by speaker needs it. If that judgement is wrong
@@ -1776,6 +1843,13 @@ var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/clipper/recordings/{id}/transcript": true,
 	"/api/v1/library/recordings/{id}/transcript": true,
 	"/api/v1/library/search":                     true,
+	// Staging-readiness row 32: content, not metadata. What viewers wrote. The
+	// overview is here too because it carries the recent messages alongside
+	// the connection states; the live copy on /ws is withheld by wsEventPolicy.
+	"/api/v1/chat":          true,
+	"/api/v1/chat/messages": true,
+	"/api/v1/chat/search":   true,
+	"/api/v1/chat/users":    true,
 }
 
 // requireScope enforces what a token is ALLOWED to do, once requireAuth has

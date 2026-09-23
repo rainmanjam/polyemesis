@@ -79,6 +79,58 @@ func TestShutdownBudgetStaysUnderEveryTimeoutStopSec(t *testing.T) {
 	}
 }
 
+// THE SAME BUDGET UNDER DOCKER. docker stop sends SIGTERM and SIGKILLs at
+// stop_grace_period, which is the container's TimeoutStopSec -- and both
+// compose files said 30s against a 35s budget, so a shutdown that used its
+// budget (one wedged child is enough) was killed with five seconds of teardown
+// left: the #645 truncation, fixed for systemd and not for Docker. The
+// repository's compose file carries the setting three times (the default
+// service and two commented GPU variants an operator uncomments), and
+// install.sh writes a fourth. Staging-readiness row 27.
+var composeFilesWithStopGrace = []string{
+	"docker-compose.yml",
+	filepath.Join("scripts", "install.sh"),
+}
+
+func TestShutdownBudgetStaysUnderEveryDockerStopGracePeriod(t *testing.T) {
+	root := repoRootFromTest(t)
+	// Commented lines count: the GPU variants are shipped commented out, and
+	// uncommenting one must not bring back the short value. install.sh writes
+	// its compose file with printf, so the line there starts with one.
+	re := regexp.MustCompile(`(?m)^[\s#]*(?:printf\s+')?\s*stop_grace_period:\s*([0-9]+[a-z]+)`)
+
+	for _, rel := range composeFilesWithStopGrace {
+		b, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Errorf("reading %s: %v", rel, err)
+			continue
+		}
+		matches := re.FindAllStringSubmatch(string(b), -1)
+		if len(matches) == 0 {
+			t.Errorf("%s declares no stop_grace_period. Docker's default is 10s, "+
+				"far under the %s shutdown budget -- update composeFilesWithStopGrace "+
+				"in the same commit if the file stopped carrying one.", rel, engine.ShutdownBudget)
+			continue
+		}
+		for _, m := range matches {
+			grace, err := time.ParseDuration(m[1])
+			if err != nil {
+				t.Errorf("%s: stop_grace_period %q is not a duration", rel, m[1])
+				continue
+			}
+			if grace-engine.ShutdownBudget < engine.StopMargin {
+				t.Errorf("%s: stop_grace_period is %s, but engine.ShutdownBudget is %s and "+
+					"StopMargin asks for %s on top.\n"+
+					"Docker SIGKILLs the container at stop_grace_period, and a recorder "+
+					"killed mid-teardown leaves a truncated file with nothing in the log. "+
+					"Use %s, the systemd unit's TimeoutStopSec.",
+					rel, grace, engine.ShutdownBudget, engine.StopMargin,
+					engine.ShutdownBudget+engine.StopMargin)
+			}
+		}
+	}
+}
+
 func TestTheShutdownBudgetIsNotAbsurd(t *testing.T) {
 	// A budget of a few milliseconds would satisfy the comparison above and
 	// kill every child instantly. internal/engine/manager.go records the

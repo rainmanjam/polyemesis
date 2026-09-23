@@ -281,6 +281,45 @@ type Watcher struct {
 
 	switches     int
 	haveSwitches bool
+
+	// src is the programme this watcher speaks for; see SetSource.
+	src SourceRef
+}
+
+// SetSource names the programme whose snapshots this watcher judges.
+//
+// ONE NOTIFIER PER ENGINE, AND EVERY ONE OF THEM USED TO SAY "Ingest lost". On
+// a two-programme install that is two alerts with the same title, the same
+// key and no field saying which programme had gone, delivered through the
+// same rule to the same channel -- and the key being the same is worse than
+// unhelpful, because a receiver that deduplicates on it drops the second
+// programme's outage as a repeat of the first. The destination events escaped
+// this only because a destination id is unique across the install.
+//
+// Re-stamped every sweep, like hooks.Watcher.SetSource and for its reason: a
+// source is renamed long after its engine is built. The zero SourceRef is an
+// unscoped watcher -- the keys and titles it always produced -- which is what
+// a watcher built by hand in a test gets.
+func (w *Watcher) SetSource(src SourceRef) { w.src = src }
+
+// subject scopes a key that names something every programme has (its ingest,
+// its failover tier, its audio) to this programme. Keys that already name
+// something unique across the install -- a destination id -- do not come
+// through here.
+func (w *Watcher) subject(key string) string {
+	if w.src.ID == 0 {
+		return key
+	}
+	return key + ":" + strconv.FormatInt(w.src.ID, 10)
+}
+
+// titled appends the programme's name to a title that would otherwise read
+// the same for every programme.
+func (w *Watcher) titled(title string) string {
+	if w.src.Name == "" {
+		return title
+	}
+	return title + ": " + w.src.Name
 }
 
 // NewWatcher creates a watcher with cfg's thresholds.
@@ -308,6 +347,15 @@ func (w *Watcher) Observe(s Snapshot) []Event {
 	out = append(out, w.watchClipping(s, now)...)
 	out = append(out, w.watchDisk(s, now)...)
 	out = append(out, w.watchLoudness(s, now)...)
+	// Every event but the install's own carries the programme, so a script
+	// can route on it and a person can read it without opening the console.
+	for i := range out {
+		if w.src.ID != 0 && !out[i].Type.InstallScoped() {
+			out[i] = out[i].
+				WithField("sourceId", strconv.FormatInt(w.src.ID, 10)).
+				WithField("sourceName", w.src.Name)
+		}
+	}
 	return out
 }
 
@@ -322,16 +370,16 @@ func (w *Watcher) watchIngest(s Snapshot, now time.Time) []Event {
 	switch {
 	case fire:
 		ev := Event{
-			Type: TypeIngestLost, Severity: SeverityCritical, Key: "ingest",
-			Title: "Ingest lost",
+			Type: TypeIngestLost, Severity: SeverityCritical, Key: w.subject("ingest"),
+			Title: w.titled("Ingest lost"),
 			Text:  "No data has arrived on the ingest for " + short(now.Sub(w.ingest.since)) + ".",
 			At:    now,
 		}
 		return []Event{ev.WithField("error", s.IngestError)}
 	case recovered:
 		return []Event{{
-			Type: TypeIngestRecovered, Severity: SeverityInfo, Key: "ingest",
-			Title: "Ingest recovered", Text: "The source is delivering again.", At: now,
+			Type: TypeIngestRecovered, Severity: SeverityInfo, Key: w.subject("ingest"),
+			Title: w.titled("Ingest recovered"), Text: "The source is delivering again.", At: now,
 		}}
 	}
 	return nil
@@ -509,8 +557,8 @@ func (w *Watcher) watchFailover(s Snapshot, now time.Time) []Event {
 		sev = SeverityInfo
 	}
 	ev := Event{
-		Type: TypeFailoverSwitched, Severity: sev, Key: "failover",
-		Title: "Source switched to " + s.Failover.Active,
+		Type: TypeFailoverSwitched, Severity: sev, Key: w.subject("failover"),
+		Title: w.titled("Source switched to " + s.Failover.Active),
 		Text:  s.Failover.Reason, At: now,
 	}
 	return []Event{ev.WithField("source", s.Failover.Active).
@@ -544,8 +592,8 @@ func (w *Watcher) watchClipping(s Snapshot, now time.Time) []Event {
 		delete(w.clipHits, id)
 		ev := Event{
 			Type: TypeClipping, Severity: SeverityWarning,
-			Key:   "clipping:track" + strconv.Itoa(p.Track),
-			Title: fmt.Sprintf("Audio clipping on track %d", p.Track),
+			Key:   w.subject("clipping:track" + strconv.Itoa(p.Track)),
+			Title: w.titled(fmt.Sprintf("Audio clipping on track %d", p.Track)),
 			Text: fmt.Sprintf("Channel %d peaked at %.1f dBFS, at or above the %.1f dBFS ceiling.",
 				p.Channel, p.PeakDB, w.cfg.ClipDBFS),
 			At: now,

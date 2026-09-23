@@ -187,7 +187,7 @@ func TestAFailedInstallLeavesTheRollbackPointAlone(t *testing.T) {
 	prev := PreviousPath(bin)
 	os.WriteFile(prev, []byte("v0"), 0o700)
 
-	installed, err := install(bin, filepath.Join(dir, ".polyemesis-incoming-vanished"), dir)
+	installed, err := install(bin, filepath.Join(dir, ".polyemesis-incoming-vanished"), dir, 1)
 	if err == nil {
 		t.Fatal("install succeeded with no incoming file")
 	}
@@ -216,10 +216,10 @@ func TestStageClearsTempFilesAKilledRunLeftBehind(t *testing.T) {
 
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("v2"), 0o644)
-	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+	if err := Stage(bin, staged, hashOf(t, staged), Schema{}); err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
-	assertNoLitter(t, dir, "polyemesis", "polyemesis.previous", "staged")
+	assertNoLitter(t, dir, "polyemesis", "polyemesis.previous", "polyemesis.previous.schema", "staged")
 }
 
 // STALE, not merely present.
@@ -237,7 +237,7 @@ func TestTheSweepLeavesAnotherRunsFreshTempFilesAlone(t *testing.T) {
 
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("v2"), 0o644)
-	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+	if err := Stage(bin, staged, hashOf(t, staged), Schema{}); err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
 	if _, err := os.Stat(inFlight); err != nil {
@@ -260,7 +260,7 @@ func TestTheSweepDoesNotRemoveDirectories(t *testing.T) {
 
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("v2"), 0o644)
-	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+	if err := Stage(bin, staged, hashOf(t, staged), Schema{}); err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
 	if _, err := os.Stat(notOurs); err != nil {
@@ -306,7 +306,7 @@ func TestAnUpgradeFollowsASymlinkedBinaryToItsTarget(t *testing.T) {
 
 	staged := filepath.Join(root, "staged")
 	os.WriteFile(staged, []byte("v2"), 0o644)
-	if err := Stage(link, staged, hashOf(t, staged)); err != nil {
+	if err := Stage(link, staged, hashOf(t, staged), Schema{}); err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
 
@@ -347,7 +347,7 @@ func TestAHalfFailedInstallKeepsTheOutgoingBinarySomewhere(t *testing.T) {
 
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("v2"), 0o644)
-	err := Stage(bin, staged, hashOf(t, staged))
+	err := Stage(bin, staged, hashOf(t, staged), Schema{})
 	if err == nil {
 		t.Fatal("Stage reported success though the rollback point could not be written")
 	}
@@ -387,7 +387,7 @@ func TestASecondRescueReplacesTheFirstRatherThanAccumulating(t *testing.T) {
 	for _, v := range []string{"v2", "v3"} {
 		staged := filepath.Join(dir, "staged-"+v)
 		os.WriteFile(staged, []byte(v), 0o644)
-		if err := Stage(bin, staged, hashOf(t, staged)); err == nil {
+		if err := Stage(bin, staged, hashOf(t, staged), Schema{}); err == nil {
 			t.Fatalf("Stage(%s) reported success though the rollback point could not be written", v)
 		}
 	}
@@ -425,7 +425,7 @@ func TestARescuedBinarySurvivesALaterUpgrade(t *testing.T) {
 
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("v2"), 0o644)
-	if err := Stage(bin, staged, hashOf(t, staged)); err == nil {
+	if err := Stage(bin, staged, hashOf(t, staged), Schema{}); err == nil {
 		t.Fatal("Stage reported success though the rollback point could not be written")
 	}
 	if b, _ := os.ReadFile(RescuedPath(bin)); string(b) != "v1" {
@@ -434,7 +434,7 @@ func TestARescuedBinarySurvivesALaterUpgrade(t *testing.T) {
 	// Age everything, then run an upgrade that fails: it must change nothing.
 	old := time.Now().Add(-48 * time.Hour)
 	os.Chtimes(RescuedPath(bin), old, old)
-	if err := Stage(bin, staged, strings.Repeat("0", 64)); !errors.Is(err, ErrChecksumMismatch) {
+	if err := Stage(bin, staged, strings.Repeat("0", 64), Schema{}); !errors.Is(err, ErrChecksumMismatch) {
 		t.Fatalf("Stage = %v, want ErrChecksumMismatch", err)
 	}
 	if b, _ := os.ReadFile(RescuedPath(bin)); string(b) != "v1" {
@@ -530,7 +530,7 @@ func TestStageLeavesTheInstallAloneWhenVerificationFails(t *testing.T) {
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("a corrupted download"), 0o644)
 
-	if err := Stage(bin, staged, strings.Repeat("0", 64)); !errors.Is(err, ErrChecksumMismatch) {
+	if err := Stage(bin, staged, strings.Repeat("0", 64), Schema{}); !errors.Is(err, ErrChecksumMismatch) {
 		t.Fatalf("Stage = %v, want ErrChecksumMismatch", err)
 	}
 	got, _ := os.ReadFile(bin)
@@ -584,7 +584,7 @@ func TestStageInstallsItsOwnCopyRatherThanTheStagedPath(t *testing.T) {
 	staged := filepath.Join(stagingDir, "download")
 	os.WriteFile(staged, []byte("new"), 0o644)
 
-	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+	if err := Stage(bin, staged, hashOf(t, staged), Schema{}); err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
 	if b, err := os.ReadFile(staged); err != nil || string(b) != "new" {
@@ -595,7 +595,7 @@ func TestStageInstallsItsOwnCopyRatherThanTheStagedPath(t *testing.T) {
 	}
 	// A rename out of a temp directory crosses a filesystem on a normal install
 	// and fails with EXDEV. Copying is what makes a cross-device stage work.
-	assertNoLitter(t, dir, "polyemesis", "polyemesis.previous")
+	assertNoLitter(t, dir, "polyemesis", "polyemesis.previous", "polyemesis.previous.schema")
 }
 
 // A BACKUP THAT MIGHT BE PARTIAL IS WORSE THAN NO BACKUP.
@@ -626,7 +626,7 @@ func TestTheBackupIsReplacedAtomicallyNotTruncatedInPlace(t *testing.T) {
 
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("v2"), 0o644)
-	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+	if err := Stage(bin, staged, hashOf(t, staged), Schema{}); err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
 
@@ -637,7 +637,7 @@ func TestTheBackupIsReplacedAtomicallyNotTruncatedInPlace(t *testing.T) {
 	if b, _ := os.ReadFile(prev); string(b) != "v1" {
 		t.Errorf("previous is %q, want v1", b)
 	}
-	assertNoLitter(t, dir, "polyemesis", "polyemesis.previous", "staged")
+	assertNoLitter(t, dir, "polyemesis", "polyemesis.previous", "polyemesis.previous.schema", "staged")
 }
 
 func statOf(t *testing.T, path string) os.FileInfo {
@@ -656,7 +656,7 @@ func TestStageThenRollbackRoundTrips(t *testing.T) {
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("new"), 0o644)
 	h := hashOf(t, staged)
-	if err := Stage(bin, staged, h); err != nil {
+	if err := Stage(bin, staged, h, Schema{}); err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
 	if b, _ := os.ReadFile(bin); string(b) != "new" {
@@ -666,7 +666,7 @@ func TestStageThenRollbackRoundTrips(t *testing.T) {
 		t.Fatalf("previous is %q, want old", b)
 	}
 
-	if err := Rollback(bin); err != nil {
+	if err := Rollback(bin, Schema{}); err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}
 	if b, _ := os.ReadFile(bin); string(b) != "old" {
@@ -676,7 +676,7 @@ func TestStageThenRollbackRoundTrips(t *testing.T) {
 	if b, _ := os.ReadFile(PreviousPath(bin)); string(b) != "new" {
 		t.Errorf("after rollback the previous is %q, want new — a second rollback cannot undo the first", b)
 	}
-	if err := Rollback(bin); err != nil {
+	if err := Rollback(bin, Schema{}); err != nil {
 		t.Fatalf("second Rollback: %v", err)
 	}
 	if b, _ := os.ReadFile(bin); string(b) != "new" {
@@ -687,7 +687,7 @@ func TestStageThenRollbackRoundTrips(t *testing.T) {
 func TestRollbackWithNothingStaged(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "polyemesis")
 	os.WriteFile(bin, []byte("only ever this"), 0o755)
-	if err := Rollback(bin); err == nil {
+	if err := Rollback(bin, Schema{}); err == nil {
 		t.Error("Rollback succeeded with no previous binary")
 	}
 }
@@ -722,7 +722,7 @@ func TestTheBackupIsOwnerOnlyAndTheLiveBinaryIsNot(t *testing.T) {
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("new"), 0o644)
 
-	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+	if err := Stage(bin, staged, hashOf(t, staged), Schema{}); err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
 
@@ -761,10 +761,10 @@ func TestRollbackRestoresTheExecutableMode(t *testing.T) {
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("new"), 0o644)
 
-	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+	if err := Stage(bin, staged, hashOf(t, staged), Schema{}); err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
-	if err := Rollback(bin); err != nil {
+	if err := Rollback(bin, Schema{}); err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}
 	st, err := os.Stat(bin)
@@ -802,7 +802,7 @@ func TestAnUpgradePreservesTheInstalledMode(t *testing.T) {
 			staged := filepath.Join(dir, "staged")
 			os.WriteFile(staged, []byte("new"), 0o644)
 
-			if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+			if err := Stage(bin, staged, hashOf(t, staged), Schema{}); err != nil {
 				t.Fatalf("Stage: %v", err)
 			}
 			st, _ := os.Stat(bin)
@@ -831,7 +831,7 @@ func TestAnUnexecutableInstallStillYieldsARunnableBinary(t *testing.T) {
 	staged := filepath.Join(dir, "staged")
 	os.WriteFile(staged, []byte("new"), 0o644)
 
-	if err := Stage(bin, staged, hashOf(t, staged)); err != nil {
+	if err := Stage(bin, staged, hashOf(t, staged), Schema{}); err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
 	st, _ := os.Stat(bin)

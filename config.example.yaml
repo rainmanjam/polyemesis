@@ -115,6 +115,14 @@ tls:
 # front, a client could forge those headers.
 trustProxyHeaders: false
 
+# The proxies whose X-Forwarded-For / X-Real-IP are believed for login throttling
+# and the audit log, besides loopback, which is always trusted when
+# trustProxyHeaders is on. Addresses or CIDRs. A request from any other peer is
+# keyed on its own address, so a client that reaches the port directly cannot
+# pick its own. List your proxy here when it is not on this host, e.g. nginx on
+# the Docker host talking to this container: ["172.17.0.1"].
+trustedProxies: []
+
 # Pin specific binaries instead of searching $PATH. Leave empty to autodetect.
 ffmpeg:
   binary: ""
@@ -122,10 +130,11 @@ ffmpeg:
 
 # PLACEHOLDER — HAS NO EFFECT. Enhanced RTMP / multitrack FLV ingest (OBS
 # 30.2+) is not implemented, and RTMP ingest is single-track either way. There
-# is no key for it: an `enhancedRtmp` key was removed once it was established
-# that unknown keys are ignored, so it had been offering a switch that did
-# nothing. A config file that still carries it keeps loading. For multitrack
-# ingest today, use SRT.
+# is no key for it: an `enhancedRtmp` key was removed because it offered a
+# switch that did nothing. A config file that still carries it keeps loading --
+# it is a retired key, accepted and ignored -- but any OTHER key this file does
+# not define stops the server at startup, naming the key. For multitrack ingest
+# today, use SRT.
 
 # The optional whisper.cpp CLI, used by the transcription jobs. Every field is
 # optional: leave the whole block out and polyemesis searches $PATH for

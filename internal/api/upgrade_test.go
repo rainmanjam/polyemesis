@@ -304,12 +304,14 @@ func TestABadChecksumLeavesTheInstallAndItsRollbackPointAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read install dir: %v", err)
 	}
-	if len(entries) != 2 {
+	// The earlier, successful stage also recorded which schema .previous opens
+	// (upgrade.PreviousSchemaPath); that is part of the rollback point.
+	if len(entries) != 3 {
 		names := make([]string, 0, len(entries))
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		t.Errorf("install directory holds %v, want just the binary and its .previous", names)
+		t.Errorf("install directory holds %v, want just the binary, its .previous and that one's schema record", names)
 	}
 }
 

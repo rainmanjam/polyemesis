@@ -32,44 +32,16 @@ step(){ printf "\n\033[1m%s\033[0m\n" "$1"; }
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
-# Standard library only -- no PyYAML. The shape is pinned by extract_step
-# itself: if the step is renamed or stops being a `run: |` block it prints
-# nothing and every case below fails loudly, which is the correct outcome for a
-# test whose subject has moved.
-extract_step() { # extract_step <step name> -> the step's run: body, dedented
-  python3 - "$WORKFLOW" "$1" <<'PY'
-import sys
-path, want = sys.argv[1], sys.argv[2]
-lines = open(path, encoding="utf-8").read().splitlines()
-i = 0
-while i < len(lines):
-    s = lines[i].strip()
-    if s in ("- name: " + want, '- name: "' + want + '"'):
-        break
-    i += 1
-else:
-    sys.exit("step not found: " + want)
-while i < len(lines) and lines[i].strip() != "run: |":
-    i += 1
-    if i < len(lines) and lines[i].lstrip().startswith("- name:"):
-        sys.exit("no `run: |` before the next step in: " + want)
-i += 1
-indent = len(lines[i]) - len(lines[i].lstrip())
-out = []
-while i < len(lines):
-    ln = lines[i]
-    if ln.strip() and (len(ln) - len(ln.lstrip())) < indent:
-        break
-    out.append(ln[indent:] if len(ln) >= indent else ln)
-    i += 1
-print("\n".join(out).rstrip())
-PY
-}
+# The extractor lives in lib-release-steps.sh because scripts/cut-release.sh
+# runs these same step bodies against the real repository before a tag exists.
+# shellcheck source=scripts/lib-release-steps.sh
+. "$SCRIPTS/lib-release-steps.sh"
+extract_step() { extract_workflow_step "$WORKFLOW" "$1"; }
 
 # ------------------------------------------------------------ changelog-gate
 
 GATE="$work/changelog-gate.sh"
-extract_step "Require the pushed tag to match CHANGELOG.md's top dated heading" > "$GATE"
+extract_step "$STEP_CHANGELOG_GATE" > "$GATE"
 if [ ! -s "$GATE" ]; then
   bad "could not extract changelog-gate's script from release.yml"
   printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"
@@ -209,6 +181,62 @@ else
   fi
 fi
 
+step "7b. ci-gate requires security.yml as well as ci.yml, driven for real"
+# Staging-readiness row 37. ci-gate asked about ci.yml alone, and branch
+# protection is not strict, so a commit whose security.yml run on main was
+# red -- a new CVE in a dependency, a secret that gitleaks caught -- could be
+# tagged and published. The step is extracted and run against a stub `gh` that
+# answers per workflow file, so what is tested is the gate, not a copy of it.
+CIGATE="$work/ci-gate.sh"
+extract_step "$STEP_CI_GATE" > "$CIGATE"
+if [ ! -s "$CIGATE" ]; then
+  bad "could not extract ci-gate's step from release.yml"
+elif ! command -v jq >/dev/null 2>&1; then
+  bad "jq is not installed, so ci-gate cannot be driven"
+else
+  stub="$work/stub-bin"; mkdir -p "$stub" "$work/runs"
+  # A stand-in for `gh api <url>`: prints $work/runs/<workflow file>.json, or
+  # fails like the API does when that file is absent.
+  cat > "$stub/gh" <<STUB
+#!/usr/bin/env bash
+url="\$2"
+wf="\${url#*/actions/workflows/}"; wf="\${wf%%/*}"
+f="$work/runs/\$wf.json"
+[ -f "\$f" ] || { echo "HTTP 404" >&2; exit 1; }
+cat "\$f"
+STUB
+  chmod +x "$stub/gh"
+  green='{"workflow_runs":[{"status":"completed","conclusion":"success","event":"push","head_branch":"main"}]}'
+  red='{"workflow_runs":[{"status":"completed","conclusion":"failure","event":"push","head_branch":"main"}]}'
+  none='{"workflow_runs":[]}'
+  run_cigate() { # run_cigate <ci.yml json> <security.yml json>
+    printf '%s' "$1" > "$work/runs/ci.yml.json"
+    printf '%s' "$2" > "$work/runs/security.yml.json"
+    ( PATH="$stub:$PATH" PUBLISH=true REPO=o/r SHA=abc123 GH_TOKEN=x bash "$CIGATE" ) > "$work/cigate.out" 2>&1
+    GATE_RC=$?
+    GATE_OUT="$(cat "$work/cigate.out")"
+  }
+
+  run_cigate "$green" "$green"
+  [ "$GATE_RC" -eq 0 ] && ok "both green on main: the gate passes" \
+                       || bad "both workflows green and the gate still refused: $GATE_OUT"
+
+  run_cigate "$green" "$red"
+  expect_refusal "ci.yml green but security.yml red" "$GATE_OUT" "Not proven green on main: security.yml"
+
+  run_cigate "$green" "$none"
+  expect_refusal "ci.yml green and no security.yml run at all" "$GATE_OUT" "Not proven green on main: security.yml"
+
+  run_cigate "$red" "$green"
+  expect_refusal "security.yml green but ci.yml red" "$GATE_OUT" "Not proven green on main: ci.yml"
+
+  rm -f "$work/runs/security.yml.json"
+  printf '%s' "$green" > "$work/runs/ci.yml.json"
+  ( PATH="$stub:$PATH" PUBLISH=true REPO=o/r SHA=abc123 GH_TOKEN=x bash "$CIGATE" ) > "$work/cigate.out" 2>&1
+  GATE_RC=$?; GATE_OUT="$(cat "$work/cigate.out")"
+  expect_refusal "the API failing for security.yml (fails closed)" "$GATE_OUT" "Could not reach the Actions API to check security.yml"
+fi
+
 # -------------------------------------------------------------- GPU image tags
 
 step "8. The floating GPU tags are withheld from a prerelease, like :latest"
@@ -279,10 +307,10 @@ step "9. The workflow's own structure"
 have() { # have <label> <python expression over the parsed workflow>
   local label="$1" expr="$2" got
   got="$(python3 - "$WORKFLOW" "$expr" <<'PY'
-import sys, yaml
+import re, sys, yaml
 w = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 try:
-    print("yes" if eval(sys.argv[2], {"w": w}) else "no")
+    print("yes" if eval(sys.argv[2], {"w": w, "re": re}) else "no")
 except Exception as e:  # a missing key is a "no", not a crash
     print("no (%s)" % e)
 PY
@@ -342,6 +370,103 @@ else
     have "the release body warns about ${phrase}" \
          "'${phrase}' in ${body_step}['with']['body']"
   done
+
+  step "10. What the release publishes carries build provenance"
+  # Staging-readiness row 12. SHA256SUMS is published by the same release as
+  # the binaries, so a replaced binary can come with a replaced sums line --
+  # and install.sh and the in-app upgrade check against exactly that file. A
+  # provenance attestation is signed with the workflow's OIDC identity and kept
+  # by GitHub, outside the release. None of this can run without a real tag, so
+  # its shape is what can be asserted here.
+  attest='lambda job: [s for s in w["jobs"][job]["steps"] if s.get("uses", "").startswith("actions/attest-build-provenance@")]'
+  names='lambda job: [s.get("name") for s in w["jobs"][job]["steps"]]'
+  have "the binaries job attests what it publishes" \
+       "len((${attest})('binaries')) == 1"
+  have "every attest step is SHA-pinned, like every other action here" \
+       "all(re.fullmatch(r'actions/attest-build-provenance@[0-9a-f]{40}', s['uses']) for j in ('binaries', 'images') for s in (${attest})(j))"
+  have "and it attests every file SHA256SUMS lists" \
+       "(${attest})('binaries')[0]['with'].get('subject-checksums') == 'dist/SHA256SUMS'"
+  # After the checksums exist and before the release that ships them: an
+  # attestation step placed after Publish GitHub Release would leave a window,
+  # or a failed publish, with binaries out and nothing vouching for them.
+  have "after Checksums and before the release is published" \
+       "(${names})('binaries').index('Checksums') < (${names})('binaries').index((${attest})('binaries')[0]['name']) < (${names})('binaries').index('Publish GitHub Release')"
+  # One attestation per pushed image, each tied to that build step's digest.
+  # Counting attest steps alone would pass with three that all name the
+  # default image's digest.
+  builds='[s for s in w["jobs"]["images"]["steps"] if s.get("uses", "").startswith("docker/build-push-action@")]'
+  have "the images job still builds three images (positive control)" \
+       "len(${builds}) == 3"
+  have "and attests each one's own pushed digest" \
+       "sorted(s['with'].get('subject-digest', '') for s in (${attest})('images')) == sorted('\${{ steps.%s.outputs.digest }}' % b.get('id') for b in ${builds})"
+  # Only when publishing: a dry run's artefacts are discarded, and attesting
+  # them writes to the public transparency log about files nobody can fetch.
+  have "and attests only when it publishes" \
+       "all(s.get('if') == \"env.PUBLISH == 'true'\" for j in ('binaries', 'images') for s in (${attest})(j))"
+  # The OIDC token is a signing identity. It belongs to the two jobs that
+  # attest and to nothing else -- not the gates, not the workflow as a whole.
+  have "id-token: write is granted to the two publishing jobs and no others" \
+       "'id-token' not in (w.get('permissions') or {}) and {k for k, v in w['jobs'].items() if (v.get('permissions') or {}).get('id-token') == 'write'} == {'binaries', 'images'}"
+  have "and so is attestations: write" \
+       "{k for k, v in w['jobs'].items() if (v.get('permissions') or {}).get('attestations') == 'write'} == {'binaries', 'images'}"
+
+  step "11. The whole release is rehearsed every week, whether or not anyone asks"
+  # Staging-readiness row 23. RELEASE-RUNBOOK.md asks for a dry run on the
+  # commit being tagged; the last one before 0.10.0 was six weeks old, and the
+  # v0.7.0, v0.8.0 and v0.9.0 tag runs all failed first. The GPU images, the
+  # arm64 build and the SBOM are built ONLY here -- ci.yml and security.yml
+  # build none of them -- so a week of drift in any of them surfaced as a
+  # failed release. A schedule turns that into a failed Tuesday.
+  #
+  # PyYAML reads the bare key `on:` as the boolean True (YAML 1.1), hence the
+  # fallback.
+  trig='(w.get("on") or w.get(True) or {})'
+  have "release.yml runs on a schedule" \
+       "bool(${trig}.get('schedule')) and all(c.get('cron') for c in ${trig}['schedule'])"
+  have "and the version tag is still a trigger (positive control)" \
+       "'v*' in ${trig}['push']['tags']"
+fi
+
+# A scheduled run must PUBLISH NOTHING. That property lives in one expression,
+# env.PUBLISH, and a schedule has no dry_run input at all -- so the question is
+# what that expression makes of an event with no inputs. It is evaluated here
+# for each event rather than asserted as a string, so a rewrite that reads the
+# same and behaves differently is caught.
+publish_for() { # publish_for <event> <dry_run: true|false|none> -> true|false
+  python3 - "$WORKFLOW" "$1" "$2" <<'PY'
+import re, sys, yaml
+w = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+expr = w["env"]["PUBLISH"].strip()
+m = re.fullmatch(r"\$\{\{(.*)\}\}", expr, re.S)
+if not m:
+    sys.exit("PUBLISH is not a single ${{ }} expression: " + expr)
+body = m.group(1)
+# Only the operators and names this expression is written with; anything else
+# is an error, not a guess.
+allowed = re.sub(r"github\.event_name|inputs\.dry_run|'[a-z_]+'|==|\|\||&&|!|\(|\)|\s", "", body)
+if allowed:
+    sys.exit("PUBLISH uses something this evaluator does not model: " + allowed)
+py = (body.replace("||", " or ").replace("&&", " and ")
+          .replace("!inputs.dry_run", " (not dry_run) ")
+          .replace("github.event_name", "event"))
+dry = {"true": True, "false": False, "none": None}[sys.argv[3]]
+# eval over a string built above from release.yml's own PUBLISH expression,
+# after the allow-list check: names, quotes, comparisons and boolean operators
+# only.
+print("true" if eval(py, {"__builtins__": {}}, {"event": sys.argv[2], "dry_run": dry}) else "false")
+PY
+}
+if python3 -c 'import yaml' 2>/dev/null; then
+  got="$(publish_for schedule none 2>&1)"
+  [ "$got" = false ] && ok "a scheduled run publishes nothing (PUBLISH evaluates false)" \
+                     || bad "a scheduled run would PUBLISH: got $got"
+  # Controls, so the evaluator cannot pass by answering false to everything.
+  got="$(publish_for push none 2>&1)"
+  [ "$got" = true ] && ok "while a tag push still publishes" || bad "a tag push no longer publishes: got $got"
+  got="$(publish_for workflow_dispatch false 2>&1)"
+  [ "$got" = true ] && ok "and so does a dispatch with dry_run: false" || bad "dispatch dry_run=false: got $got"
+  got="$(publish_for workflow_dispatch true 2>&1)"
+  [ "$got" = false ] && ok "and a dispatch with dry_run: true does not" || bad "dispatch dry_run=true: got $got"
 fi
 
 printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"

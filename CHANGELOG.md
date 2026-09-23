@@ -8,7 +8,109 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- **`install.sh --version` and `update.sh --binary`: install a named release,
+  and only a binary that is that release.** Binary installs always took
+  `releases/latest`, and GitHub never marks a pre-release as latest, so a
+  staging box could not install a release candidate. It silently got the
+  previous release. `--version vX.Y.Z[-rc.N]` asks for the tag by name,
+  refuses one that does not exist, and the installer now says which tag it is
+  installing and why. The generated `update.sh` used to end by printing
+  `sudo install ./polyemesis`, and nothing checked the file. A wrong-arch or
+  `VERSION=dev` build would install and then crash-loop. `update.sh --binary
+  PATH --version TAG` now refuses before stopping anything unless the file's
+  sha256 matches `SHA256SUMS` for this host's architecture and its `-version`
+  prints the tag. It then backs up, installs, starts the service and checks it
+  stayed up. Deploys are still run by hand.
+
+- **`scripts/cut-release.sh` (and `make tag VERSION=vX.Y.Z`) runs the release
+  gates before the tag exists.** Every gate in `release.yml` ran only after the
+  tag was pushed, so a wrong date meant deleting the tag, re-dating through a PR,
+  waiting 20+ minutes for CI on `main` and tagging again. The date must be today
+  in UTC, which is tomorrow after 17:00 in California. The script reads
+  `changelog-gate`, the empty-`[Unreleased]` check and `ci-gate` out of
+  `release.yml` and runs them against `HEAD`. It also refuses a commit with no
+  green release rehearsal, a dirty tree, a `HEAD` that is not `origin/main`, and
+  the last 15 minutes before midnight UTC. With `--tag` it cuts the annotated
+  tag. RELEASE-RUNBOOK.md no longer says that re-pushing a tag fixes a wrong
+  date. It cannot, because the gate reads the tagged commit.
+
 ### Fixed
+
+- **A process no longer freezes while showing Running after a long run of
+  output with no newline in it.** The supervisor read a child's stderr one
+  line at a time and gave up on a line over 512 KiB, and it stopped reading
+  stdout once the progress parser gave up on a line over 1 MiB. After that
+  nothing read the pipe, it filled, FFmpeg blocked writing to it, and the
+  process stayed Running while doing nothing until someone restarted it. The
+  audio-meter sidecar triggered this when `POLYEMESIS_FFMPEG_LOGLEVEL` was
+  raised to `info` or above: it was the one long-running child without
+  `-nostats`, and FFmpeg's stats line ends each update in `\r`, never `\n`, so
+  it grew into one line that filled the buffer in about 40 minutes. The
+  meters sidecar now passes `-nostats`. Stderr is split at `\r` as well as
+  `\n`, and a longer run is cut into 512 KiB log lines. Both pipes are
+  drained to the end whatever their reader does.
+
+- **Restarting a destination whose child would not stop can no longer run two
+  copies or show a live stream as Stopped.** When a restart's stop reached
+  its deadline and killed the child, the new supervisor started at once,
+  while the old one was still waiting for the killed child to be reaped. For
+  that time two FFmpeg processes could push to the same stream key. When the
+  old supervisor finished it wrote Stopped over the new one's Running, and
+  the card showed Stopped while the destination was live. The new child now
+  starts only when the old supervisor has finished, so the destination shows
+  Stopped for that short gap. A Stop in the gap still cancels the restart.
+
+- **The in-app rollback refuses a binary that would not start on the
+  database.** It swaps binaries only, so after a release that raises the
+  schema version it would have put back a binary that refuses the migrated
+  database at boot: a bad upgrade turned into a service that does not start.
+  Staging now records, beside `<binary>.previous`, the schema the outgoing
+  binary opens; the upgrade plan reports `rollbackAvailable: false` with the
+  reason in `rollbackBlocked`, and `POST /api/v1/upgrade/rollback` answers
+  `409` and moves nothing. A rollback point staged by an earlier release has
+  no such record and is refused too: a 0.6.x binary opens the same schema but
+  cannot read the stream keys 0.7.0 sealed, and nothing tells it from a 0.7.x
+  one. Roll back through the backup instead, as `docs/UPGRADING.md` describes.
+- **A `[redacted]` placeholder written back is refused instead of stored over
+  the real credential.** A `read` token is shown `[redacted]` in place of a
+  destination's backup stream key, expert arguments and the secret part of its
+  URLs, and in place of ingest and failover credentials in settings and
+  sources. That document PUT back with an admin credential stored the
+  placeholder — sealing `[redacted]` as the backup key — and nothing failed
+  until a failover needed it. Every such field now refuses a value containing
+  the placeholder with a `400` that names the field.
+- **Alert delivery failures are on the metrics endpoint.** A webhook that
+  stopped accepting deliveries showed only on the Automation page.
+  `/api/v1/metrics` now has `polyemesis_alert_deliveries_total{result="sent"|"failed"}`
+  and `polyemesis_alert_last_success_timestamp_seconds`, and MONITORING.md
+  gives the Prometheus rule for "deliveries are failing and none is getting
+  through". Both counters, and the Automation page's, keep a deleted
+  programme's deliveries, so removing a programme never lowers them and
+  Prometheus does not mistake the drop for a counter reset.
+
+- **A programme whose engine failed to start is no longer invisible.** When
+  one source's engine failed to build or start, the server logged it and kept
+  the others on air, which is right, but nothing reported it afterwards.
+  `GET /api/v1/health` said `ok` for "1 of 2 source(s) running", and
+  `/api/v1/metrics` emitted no ingest series for that programme, so
+  `polyemesis_ingest_up == 0` and the bitrate alert in MONITORING.md could not
+  fire for it. Health now answers `degraded` (still `200`) with the count, the
+  scrape reports the programme as a stopped ingest, and a new gauge,
+  `polyemesis_source_engine_up`, is 0 for it.
+
+- **Alerts say which programme they are about, and a filling disk alerts
+  once.** On an install with more than one programme, `ingest.lost`,
+  `failover.switched` and `audio.clipping` read the same for every programme:
+  same title, same `key`, and nothing saying which one. A receiver that
+  deduplicated on `key` dropped the second programme's outage as a repeat.
+  They now carry the programme's id in `key` (`ingest:1`), its name in the
+  title, and `sourceId` and `sourceName` fields. `disk.low` and
+  `disk.recovered` were sent once per programme, because every programme
+  measures the same recordings volume; they are now sent once per install,
+  with a second `disk.low` only if a later programme sees the recorder halt
+  after the first reported a warning.
 
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer
@@ -468,7 +570,129 @@ its first tagged release.
   immediate reconnect after a blip: a new publisher is refused for three
   seconds (`srtserver.StaleAfter`) after the old one's last packet.
 
+- **The "newer schema" refusal names the right backup.** An older binary
+  refusing a database a newer release wrote told the operator to restore "a
+  backup taken before the rollback". That backup is the newer database again,
+  and it is refused the same way. The message now says to restore the backup
+  taken before the upgrade, which is the one `update.sh` makes.
+- **A misspelled `config.yaml` key stops the server instead of being ignored.**
+  Only the `tls:` block refused unknown keys. Anywhere else, a typo was
+  dropped and its setting stayed at the default, with nothing logged: for
+  example `trustProxyhHeaders: true` (cookies lose `Secure` behind a proxy) or
+  `DataDir:` (the database goes to `./data`). The whole file is now decoded
+  strictly, nested blocks included, and the error names the key, its line and
+  the keys valid in that block. The retired `enhancedRtmp` key is still accepted. A
+  `tls.hostname` with no `tls.mode` is also refused, because it meant plain
+  HTTP. See [docs/UPGRADING.md](docs/UPGRADING.md).
+- **`-reset-admin` and `-verify-backup` no longer create a data directory where
+  they are run.** Both ran after the server made its directories. So on a hand
+  install, whose unit passes `--data` while the copied config says `./data`,
+  `-reset-admin` created `./data/…` and an empty database in the current
+  directory. It then told the operator of a working install to "complete
+  first-run setup". Both now run before anything is created. `-reset-admin`
+  refuses when there is no database, and names the absolute path it looked
+  in. The reset commands in INSTALL.md and the FAQ now pass `-data`.
+- **Editing `addr:` in config.yaml now moves the port on an `install.sh`
+  install.** The unit the installer wrote passed `--addr` as well, and the
+  flag beats the file. So an operator who followed the docs or the server's
+  ":443" warning restarted onto the same port. The generated unit no longer
+  passes `--addr`. Where a flag does set the address (the shipped
+  `deploy/polyemesis.service`, the image's `CMD`, an older generated unit),
+  the startup warnings now say it came from `--addr` and where to change it.
+  See [docs/UPGRADING.md](docs/UPGRADING.md).
+- **Docker no longer kills a shutdown before its recordings are finalised.**
+  The server allows itself 35 s to shut down, and systemd waits 45 s. The
+  repository's `docker-compose.yml` (including its GPU variants) and the one
+  `install.sh --mode docker` writes set `stop_grace_period: 30s`. So a
+  shutdown that used its budget was SIGKILLed mid-teardown, which truncates
+  recordings. This is the #645 failure, fixed for systemd but not for Docker.
+  All compose files now say `45s`, and a test holds every compose grace
+  period and every `TimeoutStopSec` to the budget plus its margin. An existing
+  compose file keeps `30s` until you edit it or re-run `install.sh`.
+- **An unknown `--log` value stops the server instead of meaning `info`.**
+  `--log warning` or `--log trace` used to start a server logging at `info`,
+  and nothing said the value had been ignored. The server now refuses to
+  start and lists the accepted values: `debug`, `info`, `warn`, `error`. Case
+  is still ignored.
+
 ### Security
+
+- **The self-signed local CA can now vouch only for this server.** It carried
+  no name constraints, so anyone who read `<dataDir>/tls/ca.key` -- a shell
+  through expert mode, a backup, a stolen disk -- could mint a certificate for
+  any site that every client trusting the CA would accept. The CA is now
+  limited, by critical name constraints, to `tls.hostname`, `localhost` and
+  the loopback addresses. **An existing CA is replaced on the first start**,
+  and so is the CA whenever `tls.hostname` changes; the start logs a `WARN`
+  naming the new CA's file and fingerprint. Remove the old CA from every trust
+  store and install the new one: see `docs/UPGRADING.md`.
+- **Deleting a source, or a destination that is on air, has to be confirmed in
+  the request.** `DELETE /sources/{id}` cascades to every destination and
+  rendition on the programme, destroying their stream keys and ending any live
+  YouTube broadcast among them, and `DELETE /destinations/{id}` ends its
+  broadcast — both permanently, and both reachable with an admin API token
+  that never sees the console's dialog. A source delete now needs
+  `{"confirm": true, "destinations": N}` matching the current count (`409` on
+  a stale count), and a destination in `testing` or `live` needs
+  `{"confirm": true}`. The console sends both. API scripts that delete sources
+  must change; see `docs/UPGRADING.md`.
+- **Changing or deleting an alert rule is now recorded.** Creating, editing
+  or deleting a rule wrote no log line and raised nothing, so deleting the only
+  rule left no trace and the channel just went quiet. Each change now writes an
+  `INFO` line (name, redacted URL, client address) and raises a new event,
+  `alerts.rule_changed`. A deleted rule is sent that event itself before it
+  stops receiving anything.
+- **A read-scoped API token no longer reads viewer chat.** `read` means
+  metadata, not content, and recordings and transcripts were already refused,
+  but `GET /chat`, `/chat/messages`, `/chat/search` and `/chat/users` answered
+  a read token with the scrollback, and `/ws` sent it every chat message.
+  Those four routes now answer `403`, and a read-scoped socket is not sent
+  `chat` events (connection state still arrives). A monitoring script that
+  read chat needs an `admin` token.
+
+- **A refused Kick webhook no longer writes its secret to the log.** The
+  request log recorded the full path of every 4xx and 5xx, and
+  `/api/v1/chat/kick/{secret}` answers a wrong method, a non-JSON body or a
+  bad signature with one, so the webhook secret reached journald on exactly
+  the requests that were not Kick's. The request log now records the route
+  pattern a request matched, which redacts every path parameter; a request
+  that matched no route is still logged with its path.
+
+- **One IPv6 host can no longer dodge the login throttle by rotating
+  addresses.** The login and setup throttles keyed on the full client
+  address, and a VPS routinely gets a whole /64, so each of its addresses got
+  its own five free attempts. An IPv6 client is now counted by its /64, and
+  an IPv4-mapped address as its IPv4 address. Each throttle also has a
+  budget that all addresses share (100 attempts in a burst, then one a
+  second), charged when an attempt is let through rather than when it fails,
+  so a large pool of addresses cannot guess without limit either, however many
+  requests it has in flight. A correct password gives its charge back.
+
+- **A client that reaches the port directly can no longer choose its own
+  throttle key.** With `trustProxyHeaders: true`, `X-Forwarded-For` and
+  `X-Real-IP` were believed from any peer. The docs say to bind 127.0.0.1
+  behind the proxy, but the shipped unit's `--addr :8080` overrides
+  `config.yaml`, so the port was often public. A direct client could then pick
+  a fresh login and setup throttle key per request and write any address into
+  the audit log. The headers are now believed only from loopback and from the
+  new `trustedProxies` list (addresses or CIDRs). The server logs once when it
+  ignores a forwarded header from an unlisted peer, and warns at startup when
+  `trustProxyHeaders` is on and the listener is public, saying whether
+  `--addr` or `config.yaml` set it. A proxy that is not on the same host must
+  now be listed; see [docs/UPGRADING.md](docs/UPGRADING.md).
+
+- **A fresh install can no longer be claimed by whoever reaches its port
+  first.** `install.sh` starts the service and opens the firewall before the
+  operator has a browser open, and `POST /api/v1/setup` made the first caller
+  the admin. While no admin exists, the server now makes a one-time setup code
+  at startup, writes it to `<dataDir>/setup-code` (mode 0600), and prints it
+  once in the startup banner. Setup refuses without it (`403`). The code is
+  used up when the admin is created, and a restart before then keeps it. The
+  first-run screen has a field for it and says where to find it, and
+  `install.sh` prints it at the end. `POLYEMESIS_SETUP_CODE` presets it for
+  unattended installs. Installs that already have an admin are unaffected. See
+  [docs/UPGRADING.md](docs/UPGRADING.md) and
+  [docs/INSTALL.md](docs/INSTALL.md#the-first-run-setup-code).
 
 - **Upgrading from 0.6.x no longer leaves plaintext stream keys in
   `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
@@ -496,6 +720,60 @@ its first tagged release.
   Browsers signed in across the upgrade are re-sent the bound value on their
   next request instead of being locked out of writes. Sessions now also carry a
   random ID, so two logins in the same second are distinct sessions.
+- **`install.sh` installs one pinned FFmpeg build, checked against a hash in
+  the script.** The static FFmpeg it offers came from BtbN's rolling `latest`
+  release, which changes daily, and was checked against the
+  `checksums.sha256` in that same release. Two installs a day apart got
+  different builds, and anyone able to replace the tarball could replace its
+  checksum too; the result was then run as root. The installer now downloads
+  one dated release (`FFMPEG_BTBN_TAG`) and refuses any file whose sha256 is
+  not the one written in `install.sh`. A test rejects `latest`, an undated tag
+  or a missing hash.
+- **Release binaries and images now carry signed build provenance.** The only
+  integrity check a release offered was `SHA256SUMS`, which is published by the
+  same release as the binaries, so a replaced binary could come with a
+  replaced checksum. The release workflow now attests every file in
+  `SHA256SUMS` and each image digest through GitHub's Sigstore-backed
+  attestations. `gh attestation verify <file> --repo rainmanjam/polyemesis`
+  then fails for anything the release workflow did not build. docs/INSTALL.md
+  has the commands. The installer and in-app upgrade still check
+  `SHA256SUMS` only.
+
+### CI
+
+- **The release workflow rehearses itself every week.** The GPU images, the
+  arm64 image and the SBOM are built only by `release.yml`, which ran only
+  when someone pushed a tag, so drift in any of them first showed up as a
+  failed release (v0.7.0, v0.8.0 and v0.9.0 all failed on their first tag
+  run). `release.yml` now also runs as a dry run every Tuesday on `main` and
+  publishes nothing. `scripts/test-release-gates.sh` checks that `PUBLISH`
+  is false for a scheduled run.
+- **A release needs `security.yml` green on `main` as well as `ci.yml`.**
+  `ci-gate` asked only whether `ci.yml` passed for the tagged commit. Branch
+  protection is not strict, so a commit whose `security.yml` run (gitleaks,
+  govulncheck, npm-audit, semgrep) was red on `main` could still be tagged and
+  published. The gate now requires a successful push-to-`main` run of both
+  workflows and names each one that is missing.
+- **The workflow linter checks shell again.** The required `workflow lint`
+  job ran `actionlint -shellcheck=`, which turned shellcheck off for every
+  `run:` block. Nine real findings are now fixed, among them `sha256sum *`
+  with no `--` in the release checksums step, and a `sudo wc -l <` whose
+  redirect was never read as root. The seven PowerShell steps that shellcheck
+  was parsing as bash now declare `shell: pwsh`. With both done the flag is
+  removed, and a test keeps it off. shellcheck itself is pinned (0.11.0, by
+  checksum) rather than taken from the runner image, whose 0.9.0 reports
+  findings 0.11.0 does not, so the verdict no longer depends on the image.
+
+### Changed
+
+- **The published images are built from pinned base images.** Every `FROM`
+  in `Dockerfile`, `Dockerfile.cuda` and `Dockerfile.vaapi` used a floating
+  tag (`alpine:3.24`, `node:24-alpine`, `golang:1.27-alpine`, `ubuntu:26.04`,
+  `nvidia/cuda:…`). Two builds of the same commit could therefore start from
+  different bytes, and whatever the registry served on release day went in
+  unreviewed. Each is now `tag@sha256:…`. Base-image security fixes now arrive
+  as Dependabot digest-bump PRs instead of on every rebuild, and a test fails
+  any `FROM` without a digest.
 
 ## [0.10.0] — 2026-09-23
 

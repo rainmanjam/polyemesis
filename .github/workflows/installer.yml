@@ -403,7 +403,10 @@ jobs:
       - name: The unit file contains only the unit
         run: |
           unit=/etc/systemd/system/polyemesis.service
-          lines="$(sudo wc -l < "$unit")"
+          # sudo on the command that reads the file, not on wc: a redirect is
+          # opened by the runner's own shell before sudo runs, so `sudo wc -l <`
+          # never read anything as root.
+          lines="$(sudo cat "$unit" | wc -l)"
           echo "unit is $lines lines"
           # The template is ~40 lines. It once emitted 215, because a comment
           # quoting `ps` in an unquoted heredoc ran ps and wrote its output in.

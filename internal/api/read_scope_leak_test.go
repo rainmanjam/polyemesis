@@ -411,10 +411,9 @@ func leakRoutes() []string {
 		"/api/v1/alerts/meta",
 		"/api/v1/auth/me",
 		"/api/v1/automod/stats",
-		"/api/v1/chat",
-		"/api/v1/chat/messages",
-		"/api/v1/chat/search?q=hello",
-		"/api/v1/chat/users?platform=twitch&authorId=1",
+		// The four chat GETs left this sweep when a read token stopped being
+		// able to make them (staging-readiness row 32); they are asserted as
+		// refused in TestReadTokenIsDeniedTheRoutesThatAreNotReads instead.
 		"/api/v1/fonts",
 		"/api/v1/hooks/meta",
 		"/api/v1/loudness",

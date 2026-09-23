@@ -84,7 +84,7 @@ func main() {
 // listener addresses sources by key.
 func setup() {
 	if setupNeeded() {
-		post("/setup", map[string]any{"username": "admin", "password": password})
+		post("/setup", map[string]any{"username": "admin", "password": password, "setupCode": os.Getenv("POLYEMESIS_SETUP_CODE")})
 		grabCSRF()
 		// The programme sourceToken() below reads the publish key off. A fresh
 		// install has none since #387; see acceptance_driver.go for the full

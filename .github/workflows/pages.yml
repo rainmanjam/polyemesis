@@ -143,7 +143,7 @@ jobs:
             exit 0
           fi
           CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
-          echo "changed files:"; echo "$CHANGED" | sed 's/^/  /'
+          echo "changed files:"; printf '%s\n' "$CHANGED" | sed 's/^/  /'
           # The same three globs the `pull_request:` filter used to carry. Note
           # docs/** is load-bearing and not a courtesy -- astro.config.mjs maps
           # /docs/${slug} onto the repository's own docs/, so a docs-only change

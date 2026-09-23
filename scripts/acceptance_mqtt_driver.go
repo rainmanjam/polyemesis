@@ -119,7 +119,7 @@ func waitUp() {
 // a second call fails, and the caller ignores it.
 func setup() {
 	waitUp()
-	api(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass}, nil)
+	api(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass, "setupCode": os.Getenv("POLYEMESIS_SETUP_CODE")}, nil)
 	// The programme every step below acts on. A fresh install has none since
 	// #387; see acceptance_driver.go for the full reason.
 	api(http.MethodPost, "/sources", map[string]any{"name": sourceName, "enabled": true}, nil)

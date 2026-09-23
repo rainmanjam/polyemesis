@@ -137,6 +137,13 @@ Nothing is deleted either way. The static build lands in `/usr/local/bin` ahead
 of `/usr/bin` on a default `PATH`, your distribution's package is left where it
 is, and the way back is `rm /usr/local/bin/ffmpeg /usr/local/bin/ffprobe`.
 
+**It is always the same build.** The installer downloads one dated BtbN release,
+named by `FFMPEG_BTBN_TAG` in `install.sh`, and refuses the file unless its
+SHA-256 matches the hash written next to that tag. It does not use BtbN's
+rolling `latest` release or the checksum file published beside the download.
+So two hosts installed a week apart get the same bytes, and a replaced tarball
+is refused before it is extracted or run.
+
 **And `PATH` order does not decide the outcome.** When the installer installs
 FFmpeg itself, it writes the absolute path into the config it generates:
 
@@ -186,26 +193,101 @@ can check, as root, is not a reasonable default. If you are deliberately
 installing a release that has no published sums, `--allow-unverified` says so
 explicitly.
 
+**`SHA256SUMS` proves the download is intact, not that this project built it.**
+It is published by the same release as the binaries, so someone able to replace
+a binary could replace its line in `SHA256SUMS` too. Releases after 0.10.0 also
+carry a build provenance attestation for every file in `SHA256SUMS` and for
+each container image. The attestation is signed through Sigstore with the
+release workflow's identity and stored by GitHub, not inside the release. To
+check one, use the [GitHub CLI](https://cli.github.com/):
+
+```bash
+# A downloaded binary (or SBOM):
+gh attestation verify ./polyemesis-<version>-linux-amd64 \
+  --repo rainmanjam/polyemesis \
+  --signer-workflow rainmanjam/polyemesis/.github/workflows/release.yml
+
+# A container image. Docker Hub and GHCR serve the same digest, so either works:
+gh attestation verify oci://ghcr.io/rainmanjam/polyemesis:<version> \
+  --repo rainmanjam/polyemesis
+```
+
+A pass names the commit and tag the file was built from. A file this project's
+release workflow did not build fails, whatever `SHA256SUMS` says. The installer
+and the in-app upgrade do not run this check yet, because it needs `gh` and a
+GitHub login on the host. They still check `SHA256SUMS` only. 0.10.0 and older
+releases have no attestations.
+
+### Installing a specific release
+
+Binary mode installs the **latest release** unless told otherwise, and says
+which tag it picked. GitHub never calls a pre-release "latest", so a release
+candidate can only be installed by name:
+
+```sh
+sudo bash install.sh --mode binary --version v0.11.0-rc.1
+```
+
+The tag must look like `v1.2.3` or `v1.2.3-rc.1` and must exist. A tag with no
+release is refused rather than replaced by the latest one. Docker mode refuses
+`--version`: pin the image tag in `docker-compose.yml` instead.
+
 What it gets right that a hand-rolled `docker run` usually does not: `/udp` on
-the SRT port, `stop_grace_period: 30s` so a recording is finalised rather than
+the SRT port, `stop_grace_period: 45s` so a recording is finalised rather than
 truncated, a firewall rule for **udp**/6000, and `CAP_NET_BIND_SERVICE` on the
 unit when you choose ACME, without which the `:80` bind fails and issuance
 never completes.
 
 It never asks for an admin password. polyemesis has no account until you create
 one on the first-run screen, so there is no credential for an installer to
-handle. In binary mode it verifies the download against the release's published
+handle. The first-run screen asks for a one-time
+[setup code](#the-first-run-setup-code), and the installer's closing summary
+prints it. In binary mode it verifies the download against the release's published
 `SHA256SUMS` and refuses to install on a mismatch.
 
-**If you later lose that password, or think it leaked.** `-reset-admin` sets a
+### The first-run setup code
+
+A fresh install has no admin account, and the first-run screen is how one is
+made. That screen is on whatever port the server listens on, and `install.sh`
+opens that port before you have a browser open. Without something more, the
+first person to reach the port would become your admin.
+
+So while no admin exists, the server needs a **one-time setup code**, and the
+first-run screen asks for it. The server makes the code at startup and writes
+it, readable by the service user only, to `setup-code` in the data directory.
+It also prints it once in the startup banner:
+
+| Install | Where the code is |
+|---|---|
+| `install.sh`, binary | the installer's closing summary; `sudo journalctl -u polyemesis \| grep -A2 'setup code'`; `sudo cat /var/lib/polyemesis/setup-code` |
+| `install.sh`, docker | the installer's closing summary; `cd /opt/polyemesis && docker compose logs polyemesis`; `docker exec polyemesis cat /data/setup-code` |
+| `docker run` / compose | `docker logs polyemesis`; `docker exec polyemesis cat /data/setup-code` |
+| from source | the terminal you started it in; `./data/setup-code` |
+
+The code is used up when the admin account is created: the file is deleted and
+the code stops working. A restart before then **keeps the same code**, so a
+code you already copied still works. A missing or wrong code gets `403`, and
+each attempt counts against the per-address setup throttle.
+
+To provision a box unattended, set `POLYEMESIS_SETUP_CODE` in the server's
+environment (12 characters or more) and the server uses that code instead of
+making one. See [CONFIGURATION.md](CONFIGURATION.md#environment-variables).
+
+An install that already has an admin never has a setup code. Upgrading one
+changes nothing.
+
+**If you later lose the admin password, or think it leaked.** `-reset-admin` sets a
 new one and signs out every existing session; it touches only the database and
 exits before anything binds a port, so it is safe to run against a live server.
 On a systemd install, run it as the service user and point it at the same
-config, or it will look for the database somewhere else:
+config and data directory the unit uses. A hand-installed unit passes the data
+directory as `--data` while a copied `config.yaml` still says `./data`, so pass
+`-data` too. If no database is there, the command stops and prints the path it
+looked in. It does not create anything:
 
 ```bash
 sudo -u polyemesis /usr/local/bin/polyemesis \
-  -config /etc/polyemesis/config.yaml -reset-admin
+  -config /etc/polyemesis/config.yaml -data /var/lib/polyemesis -reset-admin
 ```
 
 What that does **not** do is end API tokens. Tokens carry no session epoch, so
@@ -217,7 +299,7 @@ change does not end them:`. To end them in the same run, add the second flag:
 
 ```bash
 sudo -u polyemesis /usr/local/bin/polyemesis \
-  -config /etc/polyemesis/config.yaml -reset-admin -revoke-api-tokens
+  -config /etc/polyemesis/config.yaml -data /var/lib/polyemesis -reset-admin -revoke-api-tokens
 ```
 
 which prints `N API token(s) revoked.` It is opt-in rather than implied because
@@ -459,7 +541,10 @@ docker compose up -d
 docker compose logs -f
 ```
 
-Open <http://localhost:8080> and set an admin password on the first-run screen.
+Open <http://localhost:8080> and create the admin account on the first-run
+screen, with the [setup code](#the-first-run-setup-code) from
+`docker compose logs polyemesis` (or `docker compose exec polyemesis cat
+/data/setup-code`).
 
 **What the compose file publishes**, and why each one:
 
@@ -594,7 +679,9 @@ make build                 # builds the UI, embeds it, produces ./polyemesis
 ./polyemesis -data ./data
 ```
 
-Open <http://localhost:8080> and set an admin password.
+Open <http://localhost:8080> and create the admin account. The first-run screen
+asks for the [setup code](#the-first-run-setup-code) the server printed in that
+terminal; it is also in `./data/setup-code`.
 
 **On the box itself.** That run binds **loopback only**. With no `config.yaml`
 and no `-addr`, the listen address is `127.0.0.1:8080` (`DefaultAddr` in
@@ -720,9 +807,16 @@ Three details in that unit are load-bearing:
 ### Behind a reverse proxy
 
 If nginx, Caddy or Traefik already terminates TLS, set `trustProxyHeaders: true`
-— only if the server cannot be reached except through that proxy, since it makes
-login throttling read client addresses out of a header — and leave `tls.mode: auto` — it deliberately resolves to `off`, so polyemesis
+and leave `tls.mode: auto` — it deliberately resolves to `off`, so polyemesis
 does not bind `:80` and does not compete with the proxy for ACME challenges.
+Forwarded client addresses are believed only from loopback and from
+`trustedProxies`; list the proxy there if it is not on the same host.
+
+**Bind the plaintext port to loopback, in the unit, not only in
+`config.yaml`.** The shipped `polyemesis.service` passes `--addr :8080`, and a
+flag beats the file, so `addr: "127.0.0.1:8080"` in `config.yaml` alone leaves
+the port public. Edit `ExecStart` to `--addr 127.0.0.1:8080`, then
+`sudo systemctl daemon-reload && sudo systemctl restart polyemesis`.
 There is a worked config in
 [`deploy/nginx.conf.example`](../deploy/nginx.conf.example).
 
@@ -1032,15 +1126,16 @@ tls mode=… hostname=…
 >
 > **On a systemd install, `addr:` in `config.yaml` changes nothing.** The
 > warning says to set `addr: ":443"` in `config.yaml`, and on the installs most
-> people have that is not where the port comes from. Both units pass the
-> address as a flag — `deploy/polyemesis.service` has `--addr :8080`, and the
-> unit `install.sh` writes has `--addr :<the port you chose>` — and a flag
-> beats the file (`main.go` applies `-addr` after loading `config.yaml`). Edit
-> the file, restart, and the server comes back on the same port with the same
-> warning. **Change the flag instead:** `sudo systemctl edit --full polyemesis`
-> and change `--addr` on the `ExecStart` line. (`install.sh` also writes the
-> same port into `config.yaml` as `addr:`, so the two agree until you edit one
-> of them; edit both.)
+> people have that is not where the port comes from. `deploy/polyemesis.service`
+> passes the address as a flag, `--addr :8080`. So does a unit `install.sh`
+> wrote before the release after 0.10.0 (`--addr :<the port you chose>`). A
+> flag beats the file, because `main.go` applies `-addr` after loading
+> `config.yaml`. Edit the file, restart, and the server comes back on the same
+> port. The warning then ends by saying the address came from `--addr`.
+> **Change the flag instead:** `sudo systemctl edit --full polyemesis` and
+> change `--addr` on the `ExecStart` line, or delete it and let `addr:` decide.
+> A unit `install.sh` writes now has no `--addr`: there `addr:` in
+> `config.yaml` is the one setting, and editing it is enough.
 >
 > The containers split. The repository's `docker-compose.yml` runs the image's
 > own `CMD`, which is `-addr :8080`, so there too the flag wins — override

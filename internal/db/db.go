@@ -430,8 +430,8 @@ func refuseNewerSchema(sqldb *sql.DB) error {
 		return fmt.Errorf(
 			"database schema version %d is newer than this binary's schema version %d: "+
 				"this database was written by a newer release of polyemesis than the one "+
-				"you are running now. Reinstall that newer release, or restore a backup "+
-				"taken before the rollback -- an older binary can open this file but does "+
+				"you are running now. Reinstall that newer release, or restore the backup "+
+				"taken before the upgrade -- an older binary can open this file but does "+
 				"not know what the columns a newer one added actually mean (see issue #498)",
 			got, currentSchemaVersion)
 	}
@@ -475,6 +475,23 @@ func (d *DB) MigrateSchemaVersion() error {
 		return fmt.Errorf("stamp schema version %d: %w", currentSchemaVersion, err)
 	}
 	return nil
+}
+
+// SchemaVersion is the newest schema this binary opens: the PRAGMA
+// user_version above which refuseNewerSchema refuses to start. The upgrade
+// path records it beside the rollback binary, so a later rollback can tell
+// whether that binary would still open the database. See
+// internal/upgrade.Schema.
+func SchemaVersion() int { return currentSchemaVersion }
+
+// UserVersion reads the schema version stamped in the open database -- the
+// number an older binary's refuseNewerSchema compares against its own.
+func (d *DB) UserVersion() (int, error) {
+	var v int
+	if err := d.sql.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return 0, fmt.Errorf("read schema version: %w", err)
+	}
+	return v, nil
 }
 
 // SQL exposes the underlying handle for the rare query that does not warrant

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/term"
@@ -38,7 +40,26 @@ import (
 // password may be locking an intruder out, and leaving that intruder's existing
 // session valid would defeat the whole exercise.
 func resetAdmin(cfg config.Config, in io.Reader, out io.Writer, revokeTokens bool) error {
-	store, err := db.Open(cfg.DBPath())
+	// THE DATABASE MUST ALREADY BE THERE. db.Open creates a file it cannot
+	// find, so pointed at the wrong directory -- a manual install's copied
+	// config says dataDir: "./data" while its unit passes --data -- this made an
+	// empty database, found no admin, and told the operator to "complete
+	// first-run setup" on an install that has had an owner for months. A reset
+	// is only ever meant for a database that exists, so a missing one is a
+	// wrong path, and the answer is the path.
+	dbPath := cfg.DBPath()
+	if abs, err := filepath.Abs(dbPath); err == nil {
+		dbPath = abs
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("no database at %s, so there is no admin password here to reset. "+
+				"Point this at the directory the server uses: pass the same --data the service "+
+				"runs with (e.g. -data /var/lib/polyemesis), or a --config whose dataDir is it", dbPath)
+		}
+		return fmt.Errorf("database %s: %w", dbPath, err)
+	}
+	store, err := db.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}

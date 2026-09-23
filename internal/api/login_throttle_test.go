@@ -90,15 +90,28 @@ func TestForwardedForCannotDefeatTheThrottleUnlessProxiesAreTrusted(t *testing.T
 	tests := []struct {
 		name       string
 		trustProxy bool
+		peer       string
 		want       int
 	}{
 		{
 			name: "spoofed X-Forwarded-For is ignored, so the socket stays throttled",
+			peer: "203.0.113.5:44444",
 			want: http.StatusTooManyRequests,
 		},
 		{
-			name:       "with a trusted proxy the header is the identity, so a new client starts fresh",
+			// The staging-readiness row 3 case. trustProxyHeaders is on, but
+			// this client reached the listener directly -- the unit's --addr
+			// :8080 overrides addr: 127.0.0.1 -- so its header is its own
+			// bytes, not a proxy's, and must not buy it a fresh key.
+			name:       "trust on, but a direct client's header is still ignored",
 			trustProxy: true,
+			peer:       "203.0.113.5:44444",
+			want:       http.StatusTooManyRequests,
+		},
+		{
+			name:       "through a proxy on loopback the header is the identity, so a new client starts fresh",
+			trustProxy: true,
+			peer:       "127.0.0.1:44444",
 			want:       http.StatusUnauthorized,
 		},
 	}
@@ -106,13 +119,26 @@ func TestForwardedForCannotDefeatTheThrottleUnlessProxiesAreTrusted(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			_, h, _ := testServer(t, config.Config{TrustProxyHeaders: tc.trustProxy})
 
-			const addr = "203.0.113.5:44444"
 			for i := 0; i < 6; i++ {
-				attemptLogin(t, h, addr, "10.0.0.1", "wrong")
+				attemptLogin(t, h, tc.peer, "10.0.0.1", "wrong")
 			}
-			if code := attemptLogin(t, h, addr, "10.0.0.2", "wrong"); code != tc.want {
+			if code := attemptLogin(t, h, tc.peer, "10.0.0.2", "wrong"); code != tc.want {
 				t.Errorf("status = %d, want %d", code, tc.want)
 			}
 		})
+	}
+}
+
+// A proxy in another container is not loopback; listing it is what makes its
+// header believed.
+func TestTrustedProxiesListsAProxyThatIsNotLoopback(t *testing.T) {
+	_, h, _ := testServer(t, config.Config{TrustProxyHeaders: true, TrustedProxies: []string{"172.16.0.0/12"}})
+
+	const bridge = "172.17.0.1:44444"
+	for i := 0; i < 6; i++ {
+		attemptLogin(t, h, bridge, "10.0.0.1", "wrong")
+	}
+	if code := attemptLogin(t, h, bridge, "10.0.0.2", "wrong"); code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401: a listed proxy's clients share one key", code)
 	}
 }

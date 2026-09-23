@@ -160,6 +160,13 @@ const (
 	// place credentials could be read from -- so this entry is the ONLY durable
 	// record that it happened.
 	TypeDebugExported Type = "debug.exported"
+	// TypeAlertRuleChanged fires when an alert rule is created, edited or
+	// deleted. Deleting the only rule used to leave no record at all -- not in
+	// a channel, not in the log -- which made it the first thing somebody who
+	// did not want to be noticed would do. The deleted rule is sent this event
+	// itself, on its way out (see the API's handleDeleteAlertRule), so the
+	// channel that goes quiet is told why.
+	TypeAlertRuleChanged Type = "alerts.rule_changed"
 	// TypeTest is what the "send a test message" button raises. It is never
 	// coalesced and never filtered, because a test that a rule quietly swallows
 	// teaches the operator nothing.
@@ -211,6 +218,9 @@ func AllTypes() []Type {
 		// of the server's own logs -- and filing it there would move every picker
 		// row below it.
 		TypeDebugExported,
+		// Appended for the fifth time. It is an audit event, like the block
+		// above, and it goes where every new row goes.
+		TypeAlertRuleChanged,
 	}
 }
 

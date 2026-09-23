@@ -344,10 +344,14 @@ func TestReadSocketAndAdminSocketDivergeOnTheSameEvent(t *testing.T) {
 	const secret = "SENTINEL-ws-fanout-shared-payload-7d10"
 	shared := map[string]any{"streamKey": secret, "note": "unchanged"}
 	time.Sleep(100 * time.Millisecond)
-	s.bus.Publish(events.TypeChat, shared)
+	// A caption, not a chat message: both are text authored elsewhere and
+	// both used to be redacted for a read socket, but chat is now withheld
+	// from one altogether (TestAReadSocketIsSentNoChat), so only a caption
+	// still exercises the copy-then-redact path this test is about.
+	s.bus.Publish(events.TypeCaption, shared)
 
-	adminFrame := waitForChatFrame(t, adminConn)
-	readFrame := waitForChatFrame(t, readConn)
+	adminFrame := waitForFrame(t, adminConn, events.TypeCaption)
+	readFrame := waitForFrame(t, readConn, events.TypeCaption)
 
 	if !strings.Contains(adminFrame, secret) {
 		t.Errorf("the ADMIN socket did not receive the credential; frame %q. This is the "+
@@ -370,11 +374,11 @@ func TestReadSocketAndAdminSocketDivergeOnTheSameEvent(t *testing.T) {
 	}
 }
 
-// waitForChatFrame returns the first chat frame, or "" if none arrives. The
+// waitForFrame returns the first frame of type typ, or "" if none arrives. The
 // initial status/source/stats burst is skipped by type rather than by count, so
 // a change to what the burst contains does not silently make this read the
 // wrong frame.
-func waitForChatFrame(t *testing.T, c *websocket.Conn) string {
+func waitForFrame(t *testing.T, c *websocket.Conn, typ events.Type) string {
 	t.Helper()
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
 	for {
@@ -385,7 +389,7 @@ func waitForChatFrame(t *testing.T, c *websocket.Conn) string {
 		var ev struct {
 			Type string `json:"type"`
 		}
-		if err := json.Unmarshal(msg, &ev); err != nil || ev.Type != string(events.TypeChat) {
+		if err := json.Unmarshal(msg, &ev); err != nil || ev.Type != string(typ) {
 			continue
 		}
 		return string(msg)

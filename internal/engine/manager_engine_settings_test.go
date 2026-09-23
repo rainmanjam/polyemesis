@@ -49,6 +49,10 @@ type managerSettingsProbe struct {
 	attempts  int
 	hooks     *hooks.Dispatcher
 	lifecycle LifecycleObserver
+	// gate is not pushed by any SetX -- NewManager builds it -- so it is read
+	// back off the manager rather than created here. What is asserted is
+	// that every engine holds the SAME one, which is the whole of its job.
+	gate *alerts.InstallGate
 }
 
 func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
@@ -68,6 +72,11 @@ func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
 	m.SetAlertRetry(p.attempts)
 	m.SetHooks(p.hooks)
 	m.SetLifecycle(p.lifecycle)
+	p.gate = m.engineSettingsSnapshot().alertGate
+	if p.gate == nil {
+		t.Fatal("NewManager built no install alert gate, so every engine would " +
+			"publish its own disk.low")
+	}
 	return p
 }
 
@@ -83,8 +92,13 @@ func checkEngineHasEverySetting(t *testing.T, eng *Engine, p managerSettingsProb
 	eng.mu.RLock()
 	whisper, dir, nice := eng.whisper, eng.whisperDir, eng.whisperNice
 	attempts, hookd, lifecycle := eng.alertAttempts, eng.hooks, eng.lifecycle
+	gate := eng.alertGate
 	eng.mu.RUnlock()
 
+	if gate != p.gate {
+		t.Errorf("%s: alert gate = %p, want the manager's %p: this programme "+
+			"would publish its own copy of every disk.low", what, gate, p.gate)
+	}
 	if whisper != p.tw {
 		t.Errorf("%s: transcriber = %v, want the one the manager was given: "+
 			"this programme's recordings would never transcribe", what, whisper)
@@ -263,7 +277,7 @@ func TestTheAlertBudgetReachesTheNotifierAndNotJustTheEngine(t *testing.T) {
 // that the field lands with a failing test naming exactly what else to do,
 // rather than silently.
 func TestEveryEngineSettingIsCoveredByTheSyncTests(t *testing.T) {
-	covered := []string{"alertAttempts", "hooks", "lifecycle", "modelsDir", "nice", "tw"}
+	covered := []string{"alertAttempts", "alertGate", "hooks", "lifecycle", "modelsDir", "nice", "tw"}
 
 	typ := reflect.TypeOf(engineSettings{})
 	got := make([]string, 0, typ.NumField())

@@ -194,9 +194,11 @@ jobs:
           fi
           # The same three apt options ci.yml settled on after three jobs hit
           # their ceiling stalled mid-fetch against azure.archive.ubuntu.com.
-          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=60 -o Acquire::http::ConnectionAttemptDelayMsec=1000"
-          sudo apt-get $APT_OPTS update -qq
-          sudo apt-get $APT_OPTS install -y --no-install-recommends lsof
+          # An array, so each option stays one argument without relying on
+          # unquoted word splitting.
+          APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=60 -o Acquire::http::ConnectionAttemptDelayMsec=1000)
+          sudo apt-get "${APT_OPTS[@]}" update -qq
+          sudo apt-get "${APT_OPTS[@]}" install -y --no-install-recommends lsof
 
       - name: obs acceptance
         # Above the suite's own internals, below the job ceiling, so a wedged

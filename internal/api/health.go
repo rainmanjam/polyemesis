@@ -98,6 +98,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		case sources > 0 && running == 0:
 			eng.OK, fatal = false, true
 			eng.Detail = fmt.Sprintf("%d source(s) configured and no engine running; nothing is being published", sources)
+		case running < sources:
+			// SOME PROGRAMMES DOWN, NOT ALL. Sync logs and carries on when one
+			// source's engine fails to build, so this is a real state and it
+			// used to read "ok": the programme that is off the air had no
+			// engine, so no ingest series and no alert watcher either, and
+			// nothing else in the process could say it was missing.
+			//
+			// Degraded, not fatal, by the two-tier rule above: a restart
+			// would take the programmes that ARE on air off it to retry the
+			// one that is not.
+			eng.OK = false
+			eng.Detail = fmt.Sprintf("%d of %d source(s) running; a programme with no engine is publishing nothing -- see the Sources page", running, sources)
 		default:
 			eng.Detail = fmt.Sprintf("%d of %d source(s) running", running, sources)
 		}

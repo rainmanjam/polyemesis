@@ -160,6 +160,14 @@ func (i IngestSettings) problems() []string {
 		add("unknown ingest mode %q", i.Mode)
 	}
 	probs = append(probs, i.Pull.problems()...)
+	// The three fields readSafeIngest blanks or masks, for settings and for a
+	// source alike -- both validate their ingest block here. See
+	// redaction_guard.go.
+	probs = append(probs, redactionPlaceholderProblems(
+		credentialField{"ingest.srt.passphrase", i.SRT.Passphrase},
+		credentialField{"ingest.rtmp.streamKey", i.RTMP.StreamKey},
+		credentialField{"ingest.pull.url", i.Pull.URL},
+	)...)
 	// Track roles are the operator's description of the feed. An invalid one
 	// would compile into a graph nobody asked for, so it is caught here rather
 	// than by a destination that will not start.
@@ -2236,6 +2244,17 @@ func (s Settings) Validate() error {
 	for _, p := range s.Alerts.problems() {
 		add("%s", p)
 	}
+	// The fields readSafeSettings blanks or masks beyond the primary ingest,
+	// which s.Ingest.problems() above already covered. Unconditional, unlike
+	// the MQTT checks: a placeholder saved while a feature is off is still the
+	// value it wakes up with. See redaction_guard.go.
+	probs = append(probs, redactionPlaceholderProblems(
+		credentialField{"failover.backup.srt.passphrase", s.Failover.Backup.SRT.Passphrase},
+		credentialField{"failover.backup.rtmp.streamKey", s.Failover.Backup.RTMP.StreamKey},
+		credentialField{"failover.backup.pull.url", s.Failover.Backup.Pull.URL},
+		credentialField{"mqtt.brokerUrl", s.MQTT.BrokerURL},
+		credentialField{"automod.model.endpoint", s.Automod.Model.Endpoint},
+	)...)
 
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid settings: %v", probs)

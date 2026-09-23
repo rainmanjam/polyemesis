@@ -1812,6 +1812,12 @@ func MetersArgs(s MetersSpec) []string {
 
 	args := commonArgs()
 	args = append(args,
+		// The other long-running children get -nostats from progressArgs. This
+		// one cannot take progressArgs -- its stdout carries levels -- so it
+		// asks for the silence on its own. Without it, at a raised -loglevel
+		// FFmpeg writes its interactive stats line to stderr for the child's
+		// whole life: \r-terminated updates and never a \n.
+		"-nostats",
 		"-fflags", "+genpts",
 		"-thread_queue_size", "512",
 	)

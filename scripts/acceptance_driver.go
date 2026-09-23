@@ -50,7 +50,7 @@ func main() {
 
 	waitUp()
 	fmt.Println("first-run setup")
-	call("POST", "/setup", map[string]any{"username": "admin", "password": "acceptance-pw"})
+	call("POST", "/setup", map[string]any{"username": "admin", "password": "acceptance-pw", "setupCode": os.Getenv("POLYEMESIS_SETUP_CODE")})
 	grabCSRF()
 
 	// The programme everything below hangs off.

@@ -33,11 +33,24 @@ if (!PASSWORD) {
   );
 }
 
+/* The one-time code first-run setup requires (internal/auth/setupcode.go).
+ * The calling script presets it with POLYEMESIS_SETUP_CODE on the server it
+ * starts, so the same variable reaches both sides. Checked only on the path
+ * that needs it: a returning run against a claimed volume has no code left. */
+const SETUP_CODE = process.env.POLYEMESIS_SETUP_CODE ?? "";
+
 setup("authenticate", async ({ page }) => {
   await page.goto("/");
 
   const create = page.getByRole("button", { name: "Create account" });
   if (await create.isVisible().catch(() => false)) {
+    if (!SETUP_CODE) {
+      throw new Error(
+        "This install needs first-run setup, and POLYEMESIS_SETUP_CODE is not set. " +
+          "Start the server with it exported, or read the code from its log.",
+      );
+    }
+    await page.locator("#setupCode").fill(SETUP_CODE);
     await page.locator("#password").fill(PASSWORD);
     await page.locator("#confirm").fill(PASSWORD);
     await create.click();

@@ -818,17 +818,13 @@ shorter timeout truncates the recording you were making, and a truncated
 Matroska file is exactly the right size on disk — nothing reports it, and you
 find out on playback.
 
-**The compose file's `stop_grace_period: 30s` is 5 seconds shorter than the
-process's own budget, not equal to it.** polyemesis works to a single shutdown
-deadline of **35 seconds**, sized as the systemd unit's `TimeoutStopSec=45` less
-a 10-second margin for systemd to observe a clean exit and for the last log
-lines to flush. A normal shutdown never approaches that, which is why 30s has
-been fine in practice — but a shutdown that actually used its full budget, one
-wedged child being the way to get there, is killed by Docker at 30s with five
-seconds of its own budget left.
-
-If you want Docker to cover the full budget, raise it to the same number the
-systemd unit uses:
+**The compose files set `stop_grace_period: 45s`, the same as the systemd
+unit's `TimeoutStopSec=45`.** polyemesis works to a single shutdown deadline
+of **35 seconds**, and the extra 10 seconds are for its clean exit to be seen
+and its last log lines to flush. Before the release after 0.10.0, both compose
+files said `30s`. A shutdown that used its full budget, for example with one
+wedged child, was then killed by Docker with five seconds left. If your compose
+file still says `30s`, raise it:
 
 ```yaml
 services:

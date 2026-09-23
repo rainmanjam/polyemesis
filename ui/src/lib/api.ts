@@ -374,12 +374,13 @@ const patch = <T,>(p: string, body: unknown) =>
   request<T>(p, { method: "PATCH", body: JSON.stringify(body) });
 const del = <T,>(p: string) => request<T>(p, { method: "DELETE" });
 // DELETE WITH A BODY, and a second verb rather than an optional argument on
-// `del`. Thirty-odd routes are deleted through `del` and exactly one of them
-// takes a body; an optional parameter would let every one of the others acquire
-// one by a typo, and — worse in the other direction — would let the one route
-// that MUST send `{"confirm": true}` be called without it and look identical at
-// the call site. Two names means the confirmed disconnect is greppable and the
-// unconfirmed one cannot be reached by forgetting an argument.
+// `del`. Thirty-odd routes are deleted through `del` and only the confirmed
+// ones -- a platform disconnect, a source, a destination -- take a body; an
+// optional parameter would let every one of the others acquire one by a typo,
+// and — worse in the other direction — would let a route that MUST send
+// `{"confirm": true}` be called without it and look identical at the call site.
+// Two names means the confirmed deletes are greppable and an unconfirmed one
+// cannot be reached by forgetting an argument.
 const delWithBody = <T,>(p: string, body: unknown) =>
   request<T>(p, { method: "DELETE", body: JSON.stringify(body) });
 
@@ -546,8 +547,11 @@ export const api = {
    *  answer as 0 and must not be rendered as one. */
   setupStatus: () =>
     get<{ needsSetup: boolean; minPasswordChars: number; sources?: number }>("/setup"),
-  setup: (username: string, password: string) =>
-    post<{ username: string }>("/setup", { username, password }),
+  /** setupCode is the one-time code the server printed at startup and wrote
+   *  to <data dir>/setup-code. Without it the server answers 403: an open port
+   *  on a fresh install is not an invitation to become its admin. */
+  setup: (username: string, password: string, setupCode: string) =>
+    post<{ username: string }>("/setup", { username, password, setupCode }),
   login: (username: string, password: string) =>
     post<{ username: string }>("/auth/login", { username, password }),
   logout: () => post<{ status: string }>("/auth/logout"),
@@ -724,7 +728,12 @@ export const api = {
     post<{ destination: Destination; warnings?: string[] }>("/destinations", d),
   updateDestination: (id: DestinationId, d: Partial<Destination>) =>
     put<DestinationWithRouting & { warnings?: string[] }>(`/destinations/${id}`, d),
-  deleteDestination: (id: DestinationId) => del<{ status: string }>(`/destinations/${id}`),
+  /** Always confirmed, because the only caller is behind the dashboard's own
+   *  confirm dialog. The server asks for it only when the row carries a
+   *  broadcast in testing or live -- deleting that ends the broadcast, which on
+   *  YouTube is terminal -- and ignores it otherwise. */
+  deleteDestination: (id: DestinationId) =>
+    delWithBody<{ status: string }>(`/destinations/${id}`, { confirm: true }),
   /** Display order only — the server does not restart anything for this. */
   reorderDestinations: (ids: DestinationId[]) =>
     put<{ ids: DestinationId[] }>("/destinations/order", { ids }),
@@ -860,7 +869,12 @@ export const api = {
   createSource: (s: Partial<Source>) => post<SourceView>("/sources", s),
   updateSource: (id: SourceId, s: Partial<Source>) =>
     put<SourceView>(`/sources/${id}`, s),
-  deleteSource: (id: SourceId) => del<void>(`/sources/${id}`),
+  /** `destinations` is the count the confirmation showed the operator
+   *  (SourceView.destinations), and it is required: the server refuses the
+   *  delete unless it still matches, so a destination added from another tab
+   *  after the dialog opened is not swept away by a click that never saw it. */
+  deleteSource: (id: SourceId, destinations: number) =>
+    delWithBody<void>(`/sources/${id}`, { confirm: true, destinations }),
   rotateSourceToken: (id: SourceId) =>
     post<SourceView>(`/sources/${id}/token`),
 

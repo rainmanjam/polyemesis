@@ -64,6 +64,10 @@ if [ -z "${E2E_PASSWORD:-}" ]; then
 fi
 export E2E_PASSWORD
 
+# First-run setup needs the server's one-time setup code; preset it so the
+# server started below and the seeder share it. See lib-preflight.sh.
+export POLYEMESIS_SETUP_CODE="${POLYEMESIS_SETUP_CODE:-acceptance-setup-code}"
+
 # Everything this script starts is a container, so cleanup is docker's job. The
 # host-process kills that used to be here were left over from the binary-launch
 # version and had been killing nothing for some time.
@@ -124,7 +128,7 @@ DOCKERFILE
 
 echo "==> starting polyemesis (container) on :$PORT"
 docker network create "$NET" >/dev/null 2>&1 || true
-docker run -d --rm --name "$SRV_NAME" --network "$NET" \
+docker run -d --rm --name "$SRV_NAME" -e POLYEMESIS_SETUP_CODE --network "$NET" \
   -p "127.0.0.1:$PORT:$PORT" \
   "$IMAGE" -addr ":$PORT" -data /data -log warn >/dev/null
 
