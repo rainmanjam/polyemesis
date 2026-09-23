@@ -430,8 +430,8 @@ func refuseNewerSchema(sqldb *sql.DB) error {
 		return fmt.Errorf(
 			"database schema version %d is newer than this binary's schema version %d: "+
 				"this database was written by a newer release of polyemesis than the one "+
-				"you are running now. Reinstall that newer release, or restore a backup "+
-				"taken before the rollback -- an older binary can open this file but does "+
+				"you are running now. Reinstall that newer release, or restore the backup "+
+				"taken before the upgrade -- an older binary can open this file but does "+
 				"not know what the columns a newer one added actually mean (see issue #498)",
 			got, currentSchemaVersion)
 	}
