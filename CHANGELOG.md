@@ -65,6 +65,19 @@ its first tagged release.
   runs from a clone, gives the command for a downloaded release binary (whose
   name carries the tag), and says the result answers on `https://<host>:8080`.
 
+- **`UPGRADING.md`'s manual upgrade now has `update.sh`'s guards, and its
+  Docker half upgrades.** The binary procedure is a paste-safe script that
+  stamps the backup to the minute, refuses an existing destination (a second
+  same-day upgrade used to nest its copy inside the first), keeps
+  `polyemesis.previous`, and runs `-verify-backup` before the binary is
+  replaced. The Docker half ran `docker compose pull` against the repository's
+  compose file, which *builds* its image — so it restarted the old version; a
+  clone now does `git pull` and `up -d --build`. Its backup tarball was written
+  into the clone, where the next build's `COPY . .` took it into the image, and
+  its `|| exit 1` closed the terminal it was pasted into. The page also no longer
+  says a binary-mode `update.sh` "pulls": it stops at a verified backup, with the
+  service stopped, and prints the two commands that finish the job.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

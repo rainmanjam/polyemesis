@@ -377,3 +377,86 @@ func TestDocServiceInstallStepsMatchTheUnitHeader(t *testing.T) {
 		}
 	}
 }
+
+// fencedBlocks returns each fenced code block in md as its raw lines.
+func fencedBlocks(md string) [][]string {
+	var out [][]string
+	var cur []string
+	inFence := false
+	for _, l := range strings.Split(md, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "```") {
+			if inFence {
+				out = append(out, cur)
+			}
+			inFence, cur = !inFence, nil
+			continue
+		}
+		if inFence {
+			cur = append(cur, l)
+		}
+	}
+	return out
+}
+
+// TestDocManualUpgradeCarriesUpdateShGuards: UPGRADING.md's manual upgrade is
+// the procedure staging actually uses, and it had none of the guards update.sh
+// applies (staging-readiness row 36): a date-only stamp, so a second upgrade the
+// same day cp -a'd the new copy INSIDE the first; no refusal of an existing
+// destination; no polyemesis.previous; no -verify-backup before the binary was
+// replaced. Its Docker half ran `docker compose pull` on a compose file that
+// BUILDS its image, so the "upgrade" restarted the old version (exploratory
+// IU-6), wrote the backup tarball into the clone where the next build's
+// `COPY . .` picks it up, and used `|| exit 1`, which closes the terminal it is
+// pasted into.
+func TestDocManualUpgradeCarriesUpdateShGuards(t *testing.T) {
+	const rel = "docs/UPGRADING.md"
+	sec := docSection(t, readDoc(t, rel), rel, "The short version")
+
+	var binary, docker string
+	for _, b := range fencedBlocks(sec) {
+		body := strings.Join(b, "\n")
+		// PASTE-SAFE: an `exit` at the top level of a pasted block exits the
+		// operator's own shell. Every block that can refuse must run in its own.
+		if strings.Contains(body, "exit") && !regexp.MustCompile(`^(sudo )?sh -eu\b.*<<'EOF'$`).MatchString(strings.TrimSpace(b[0])) {
+			t.Errorf("%s: a block in \"The short version\" can `exit` but does not run in its own "+
+				"`sh -eu <<'EOF'`; pasted, a refusal closes the operator's terminal:\n%s", rel, body)
+		}
+		// The first match of each: the rollback block after the binary
+		// upgrade also stops the service and installs a binary.
+		switch {
+		case binary == "" && strings.Contains(body, "systemctl stop") && strings.Contains(body, "install -m"):
+			binary = body
+		case docker == "" && strings.Contains(body, "docker compose") && strings.Contains(body, "tar czf"):
+			docker = body
+		}
+	}
+	if binary == "" || docker == "" {
+		t.Fatalf("%s: could not find both the binary and the Docker manual upgrade blocks; "+
+			"this guard would check nothing", rel)
+	}
+
+	for _, want := range []struct{ text, why string }{
+		{"date +%F-%H%M", "a date-only stamp makes a second same-day upgrade nest its copy inside the first"},
+		{`[ -e "$dest" ]`, "an existing backup destination must be refused, not copied into"},
+		{"polyemesis.previous", "the running binary is the way back and must be kept"},
+		{"secret.key", "a backup without secret.key restores every destination disabled"},
+		{"-verify-backup", "the copy must be opened and checked, not assumed"},
+	} {
+		if !strings.Contains(binary, want.text) {
+			t.Errorf("%s's manual binary upgrade has no %q: %s", rel, want.text, want.why)
+		}
+	}
+	if v, i := strings.Index(binary, "-verify-backup"), strings.Index(binary, "install -m"); v < 0 || i < v {
+		t.Errorf("%s's manual binary upgrade replaces the binary before -verify-backup has "+
+			"passed; a failed check must leave the old binary in place", rel)
+	}
+
+	if !strings.Contains(docker, "--build") || !strings.Contains(docker, "git pull") {
+		t.Errorf("%s's Docker upgrade for a clone must `git pull` and `up -d --build`: the "+
+			"repository's compose service has build:, so `pull` fetches nothing", rel)
+	}
+	if strings.Contains(docker, `$PWD:/backup`) {
+		t.Errorf("%s's Docker upgrade writes the backup into the working directory; in a clone "+
+			"the next build's `COPY . .` copies it, secret.key included, into the image", rel)
+	}
+}

@@ -46,6 +46,7 @@ var canonicalDriftTests = []string{
 	"TestDocWindowsAbortIsDescribedAsFixed",
 	"TestDocLaunchdJobHasEveryFileItNames",
 	"TestDocServiceInstallStepsMatchTheUnitHeader",
+	"TestDocManualUpgradeCarriesUpdateShGuards",
 }
 
 func TestTheDocsOnlyPathStillRunsTheDriftGuards(t *testing.T) {

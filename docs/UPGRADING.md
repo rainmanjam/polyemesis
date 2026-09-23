@@ -3,7 +3,7 @@
 ## The short version
 
 polyemesis migrates its own database on startup. In the normal case, upgrading
-is: stop, replace the binary or pull the image, start.
+is: stop, replace the binary or pull the image (rebuild it, from a clone), start.
 
 **Back up `<dataDir>` first, and check that the backup contains `secret.key`.**
 Migrations run forward only — there is no downgrade path, and a backup is the
@@ -15,12 +15,22 @@ so this applies to you now; see
 before you start, including its **mandatory** remediation if you have already
 upgraded.
 
-**`install.sh` writes a guarded `update.sh` that does all of this for you** — it
-takes the backup, refuses to proceed if the archive is empty or missing
-`secret.key`, and only then pulls. If you installed with `install.sh`, run
-`<installDir>/update.sh` rather than the manual steps below. Operators who
-installed before 0.7.0 do not have it: re-run `install.sh` to regenerate it, or
-follow the manual procedure and do the `secret.key` check by hand.
+**`install.sh` writes a guarded `update.sh` that does most of this for you** —
+it stops the service, takes the backup, refuses to proceed if the copy is
+missing `secret.key` or does not open, and then:
+
+- **docker mode:** pulls the new image and brings the container back up. That
+  is the whole upgrade.
+- **binary mode:** stops there, **with the service still stopped**, and prints
+  the two commands that finish it — install the new binary, start the service.
+  It does not download anything; fetch the release asset first
+  (`polyemesis-<tag>-linux-<arch>`, checked against `SHA256SUMS`) and use its
+  name where the printed command says `./polyemesis`.
+
+If you installed with `install.sh`, run `sudo <installDir>/update.sh` rather
+than the manual steps below — including for a binary you copied in by hand
+afterwards. Operators who installed before 0.7.0 do not have it: re-run
+`install.sh` to regenerate it, or follow the manual procedure.
 
 > This page had said 0.7.0 was *"not yet released"* here while saying seventy
 > lines further down that it was tagged and that its remediation was mandatory.
@@ -28,21 +38,92 @@ follow the manual procedure and do the `secret.key` check by hand.
 > requirement was not theirs yet. Corrected 2026-09-03; the version-specific
 > notes below have been the authority throughout.
 
-```sh
-# Binary
-systemctl stop polyemesis
-cp -a /var/lib/polyemesis /var/lib/polyemesis.bak-$(date +%F)
-# ... replace the binary ...
-systemctl start polyemesis
+**The manual procedure, binary install.** The same guards `update.sh` applies,
+in a form you can paste: it runs in its own shell, so a refusal stops the
+procedure without closing your terminal, and nothing after a failed check runs.
+Put the name of the binary you downloaded on the first line; the paths inside
+are the defaults `install.sh` and the shipped unit use.
 
-# Docker
-docker compose down
-docker volume inspect polyemesis-data >/dev/null || exit 1   # see the warning below
-docker run --rm -v polyemesis-data:/data -v "$PWD:/backup" alpine \
-  tar czf /backup/polyemesis-$(date +%F).tar.gz -C /data .
-tar tzf polyemesis-$(date +%F).tar.gz | wc -l                # more than 1 = real
-docker compose pull && docker compose up -d
+```sh
+sudo sh -eu -s -- "$PWD/polyemesis-v0.10.0-linux-amd64" <<'EOF'
+NEW="$1"                               # the binary you downloaded, as an absolute path
+DATA=/var/lib/polyemesis
+BIN=/usr/local/bin/polyemesis
+test -x "$NEW" || { echo "no executable at $NEW" >&2; exit 1; }
+dest="$DATA.bak-$(date +%F-%H%M)"      # minutes, so a second upgrade today gets its own copy
+if [ -e "$dest" ]; then                # cp -a would nest the copy INSIDE the old one
+  echo "refusing: $dest already exists" >&2; exit 1
+fi
+systemctl stop polyemesis              # a live WAL database does not copy consistently
+cp -a "$DATA" "$dest"
+cp -a "$BIN" "$dest/polyemesis.previous"   # the way back, kept beside the data
+if [ ! -f "$dest/secret.key" ]; then
+  echo "refusing: $dest has no secret.key. Service is stopped: systemctl start polyemesis" >&2
+  exit 1
+fi
+if ! "$BIN" -verify-backup "$dest"; then   # the RUNNING version checks its own schema
+  echo "refusing: $dest does not verify. Service is stopped: systemctl start polyemesis" >&2
+  exit 1
+fi
+install -m 0755 "$NEW" "$BIN"
+systemctl start polyemesis
+echo "upgraded; backup and previous binary in $dest"
+EOF
 ```
+
+`-verify-backup` runs before the binary is replaced, deliberately: the
+installed version is the one whose schema the copy should hold, and if the
+check fails you still have a working binary and an intact data directory. To go
+back afterwards:
+
+```sh
+sudo systemctl stop polyemesis
+sudo rm -rf /var/lib/polyemesis && sudo cp -a /var/lib/polyemesis.bak-<stamp> /var/lib/polyemesis
+sudo install -m 0755 /var/lib/polyemesis.bak-<stamp>/polyemesis.previous /usr/local/bin/polyemesis
+sudo systemctl start polyemesis
+```
+
+**The manual procedure, Docker.** Two shapes, and they upgrade differently:
+
+- **`install.sh --mode docker`** runs a published image, so the new version
+  arrives with `docker compose pull`. Use its `update.sh`.
+- **`docker compose` from a clone of this repository** *builds* its image — the
+  service has `build:`, not `image:` — so `docker compose pull` fetches nothing
+  and `up -d` restarts the version you already had, with no error. The new
+  version arrives with `git pull`, and reaches the container only with
+  `up -d --build`.
+
+For the clone, from its directory:
+
+```sh
+sh -eu <<'EOF'
+backups="$HOME/polyemesis-backups"     # OUTSIDE the clone -- see below
+vol=polyemesis-data                    # check with `docker volume ls` -- see the warning below
+docker volume inspect "$vol" >/dev/null
+mkdir -p "$backups"
+archive="$backups/polyemesis-$(date +%F-%H%M).tar.gz"
+[ ! -e "$archive" ] || { echo "refusing: $archive already exists" >&2; exit 1; }
+docker compose down                    # stopped, so the database is not copied mid-write
+docker run --rm -v "$vol:/data:ro" -v "$backups:/backup" alpine \
+  tar czf "/backup/${archive##*/}" -C /data .
+tar tzf "$archive" | grep -qx './secret.key' || {
+  echo "refusing: $archive has no secret.key. Bring it back with: docker compose up -d" >&2
+  exit 1; }
+git pull --ff-only
+docker compose up -d --build
+echo "upgraded; backup at $archive"
+EOF
+```
+
+**Keep the archive out of the clone.** The image build is `COPY . .` from the
+clone, and `.dockerignore` does not know about backup tarballs — an archive
+written into the working directory (as this page used to say, with
+`-v "$PWD:/backup"`) is copied into the build stage on the next `--build`,
+`secret.key` and all.
+
+The paste-safe `sh -eu <<'EOF'` form matters here too: the old snippet's
+`docker volume inspect … || exit 1` closed the terminal it was pasted into when
+the volume was missing — the moment you most need that terminal.
 
 > **Check the volume name before you trust the backup.** `docker run -v` creates
 > a missing volume instead of failing, so backing up a name that does not exist
