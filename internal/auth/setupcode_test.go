@@ -134,8 +134,18 @@ func TestPrepareSetupCodeReportsAnUnwritableDataDir(t *testing.T) {
 	if _, err := PrepareSetupCode(notDir, false, ""); err == nil {
 		t.Fatal("no error writing a setup code under a regular file")
 	}
-	if _, err := PrepareSetupCode(filepath.Join(notDir, "sub"), true, ""); err == nil {
-		t.Fatal("no error removing a leftover under a regular file")
+	// The leftover as a non-empty directory, which no platform will remove
+	// with os.Remove. Not "a path under a regular file": Unix answers that
+	// with ENOTDIR, but Windows answers ERROR_PATH_NOT_FOUND, which is
+	// fs.ErrNotExist -- correctly "nothing to remove" -- so the case proved
+	// nothing on Windows and failed there.
+	dir := t.TempDir()
+	stuck := filepath.Join(dir, SetupCodeFile)
+	if err := os.MkdirAll(filepath.Join(stuck, "keep"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PrepareSetupCode(dir, true, ""); err == nil {
+		t.Fatal("no error when the leftover setup code could not be removed")
 	}
 }
 
