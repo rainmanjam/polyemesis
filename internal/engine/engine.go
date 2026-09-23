@@ -98,6 +98,24 @@ const (
 var stopTimeout = 12 * time.Second
 
 // Engine owns the whole streaming pipeline.
+//
+// LOCK ORDER. A goroutine holding one of these mutexes may take only a mutex
+// with a HIGHER number, never an equal or lower one. Locks on one row are
+// never held together. The reasons for each lock are on its field; this is
+// the one place the order between them is written down, and
+// TestEngineLocksAreTakenInTableOrder reads this table and fails on a method
+// that breaks it. -race cannot: an inversion is perfectly synchronised until
+// the moment it deadlocks.
+//
+//	1  reconcileMu              -- held for the whole of a Reconcile
+//	2  previewMu                -- preview lifecycle
+//	3  selMu                    -- the selector tier
+//	4  mu                       -- the engine's maps and children
+//	5  stopMu, heldMu, sinkMu   -- leaves: take nothing while holding one
+//
+// previewMu before selMu is what StopWithin does, and nothing takes previewMu
+// under selMu. Atomics and the locks inside other types (the hub, the
+// supervisor, meters.Store) are outside this table.
 type Engine struct {
 	// sourceID is the programme this engine owns. One engine per source: the
 	// hub, the ingest, the recorder, the meters and the whole destination and
