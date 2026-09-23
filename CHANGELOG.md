@@ -52,6 +52,54 @@ its first tagged release.
   either (the MQTT password or automod key after an earlier bad restore), the
   refusal says so and names what to re-enter or clear in the console, instead of
   sending you to take a backup that would fail the same way.
+- **Re-running `install.sh` no longer moves a working install off its own
+  ports.** Every port it checked was already held by the service it was about
+  to restart, so under `--yes` it accepted its own offer: the web UI moved
+  8080 -> 8081. A port held by the polyemesis process (binary mode) or published
+  by the polyemesis container (docker mode) is now recognised as ours. The port
+  check also reads only the local-address column, so `10.0.0.80:5000` is no
+  longer taken for a listener on port 80.
+- **`--srt-port` / `--rtmp-port` now mean something, or are refused.** The
+  server's SRT and RTMP listeners are database settings (Settings -> Listeners),
+  and nothing the installer writes reaches them. In binary mode the flags only
+  opened a firewall port and printed an address nothing listened on; they are
+  now refused with a pointer to Settings -> Listeners. In docker mode the chosen
+  host port is published onto the server's 6000/1935 inside the container,
+  instead of `N:N`, which published a port nothing inside listened on. A
+  docker re-run keeps the container side an existing `docker-compose.yml`
+  already has, so an install that made `7000:7000/udp` work by moving the
+  listener to 7000 is not rewritten to `7000:6000/udp`; the docker summary now
+  says that moving the listener means changing that container side too.
+- **The docker-mode `update.sh` refused every real upgrade.** Its backup check
+  unpacked the archive into a root-owned 0700 directory and bound it into the
+  image read-only; the image runs as uid 10001 and SQLite cannot open a WAL
+  database without creating its `-shm`, so the check failed with
+  `unable to open database file (14)` and left the container stopped. The
+  archive now goes in on stdin and is unpacked inside the container. The
+  acceptance stub that had accepted the read-only mount now models it.
+- **Docker backups are 0600.** `backup-*.tar.gz` holds `secret.key` and
+  `tls/ca.key`, and was written 0644 by tar inside the container, so any local
+  account could read the key out of it. The script now creates the file itself
+  under `umask 077` (and with noclobber), and tightens archives left by earlier
+  runs.
+- **A failed docker `update.sh` no longer leaves the container stopped in
+  silence.** It stops the container before the backup, and every refusal after
+  that point used to exit with it down. It now starts what it stopped, says so,
+  and removes the unverified archive; if the start fails, it says the container
+  is STOPPED and prints the command. A failure after the new image was pulled
+  does not claim "nothing was upgraded" -- `up -d` may already have recreated
+  the container on it -- and names the verified archive instead.
+- **The binary-mode `update.sh` does the same**: a refusal after `systemctl
+  stop` starts the service again (or says STOPPED, with the command) and
+  removes the unverified copy.
+- **The binary-mode rollback no longer deletes the recordings.** `update.sh`
+  printed `rm -rf <dataDir> && cp -a <backup> <dataDir>` as the way back. That
+  deleted every recording and upload made since the upgrade, and copied the
+  root-owned `polyemesis.previous` into the live directory, where every later
+  backup carried it. `install.sh` now writes `rollback.sh`, which restores the
+  state (database, `secret.key`, `tls/`), removes the newer `-wal`/`-shm`,
+  leaves the media directories alone, puts the previous binary back and starts
+  the service. `docs/UPGRADING.md` describes it.
 
 ## [0.10.0] — 2026-09-23
 

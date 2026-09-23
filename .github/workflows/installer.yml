@@ -441,7 +441,7 @@ jobs:
         run: |
           # write_helper_scripts was called only in the docker branch, so its own
           # "if MODE != docker" arm was unreachable and #347 never shipped.
-          for f in /opt/polyemesis/update.sh /opt/polyemesis/uninstall.sh; do
+          for f in /opt/polyemesis/update.sh /opt/polyemesis/rollback.sh /opt/polyemesis/uninstall.sh; do
             [ -x "$f" ] || { echo "missing or not executable: $f"; ls -la /opt/polyemesis || true; exit 1; }
             echo "ok $f"
           done
