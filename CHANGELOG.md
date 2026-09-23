@@ -24,6 +24,18 @@ its first tagged release.
   prints the tag. It then backs up, installs, starts the service and checks it
   stayed up. Deploys are still run by hand.
 
+- **`scripts/cut-release.sh` (and `make tag VERSION=vX.Y.Z`) runs the release
+  gates before the tag exists.** Every gate in `release.yml` ran only after the
+  tag was pushed, so a wrong date meant deleting the tag, re-dating through a PR,
+  waiting 20+ minutes for CI on `main` and tagging again. The date must be today
+  in UTC, which is tomorrow after 17:00 in California. The script reads
+  `changelog-gate`, the empty-`[Unreleased]` check and `ci-gate` out of
+  `release.yml` and runs them against `HEAD`. It also refuses a commit with no
+  green release rehearsal, a dirty tree, a `HEAD` that is not `origin/main`, and
+  the last 15 minutes before midnight UTC. With `--tag` it cuts the annotated
+  tag. RELEASE-RUNBOOK.md no longer says that re-pushing a tag fixes a wrong
+  date. It cannot, because the gate reads the tagged commit.
+
 ### Fixed
 
 - **A process no longer freezes while showing Running after a long run of
@@ -77,8 +89,6 @@ its first tagged release.
   through". Both counters, and the Automation page's, keep a deleted
   programme's deliveries, so removing a programme never lowers them and
   Prometheus does not mistake the drop for a counter reset.
-
-### Fixed
 
 - **A programme whose engine failed to start is no longer invisible.** When
   one source's engine failed to build or start, the server logged it and kept
@@ -753,20 +763,6 @@ its first tagged release.
   removed, and a test keeps it off. shellcheck itself is pinned (0.11.0, by
   checksum) rather than taken from the runner image, whose 0.9.0 reports
   findings 0.11.0 does not, so the verdict no longer depends on the image.
-
-### Added
-
-- **`scripts/cut-release.sh` (and `make tag VERSION=vX.Y.Z`) runs the release
-  gates before the tag exists.** Every gate in `release.yml` ran only after the
-  tag was pushed, so a wrong date meant deleting the tag, re-dating through a PR,
-  waiting 20+ minutes for CI on `main` and tagging again. The date must be today
-  in UTC, which is tomorrow after 17:00 in California. The script reads
-  `changelog-gate`, the empty-`[Unreleased]` check and `ci-gate` out of
-  `release.yml` and runs them against `HEAD`. It also refuses a commit with no
-  green release rehearsal, a dirty tree, a `HEAD` that is not `origin/main`, and
-  the last 15 minutes before midnight UTC. With `--tag` it cuts the annotated
-  tag. RELEASE-RUNBOOK.md no longer says that re-pushing a tag fixes a wrong
-  date. It cannot, because the gate reads the tagged commit.
 
 ### Changed
 
