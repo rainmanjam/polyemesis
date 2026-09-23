@@ -279,10 +279,10 @@ step "9. The workflow's own structure"
 have() { # have <label> <python expression over the parsed workflow>
   local label="$1" expr="$2" got
   got="$(python3 - "$WORKFLOW" "$expr" <<'PY'
-import sys, yaml
+import re, sys, yaml
 w = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 try:
-    print("yes" if eval(sys.argv[2], {"w": w}) else "no")
+    print("yes" if eval(sys.argv[2], {"w": w, "re": re}) else "no")
 except Exception as e:  # a missing key is a "no", not a crash
     print("no (%s)" % e)
 PY
@@ -342,6 +342,45 @@ else
     have "the release body warns about ${phrase}" \
          "'${phrase}' in ${body_step}['with']['body']"
   done
+
+  step "10. What the release publishes carries build provenance"
+  # Staging-readiness row 12. SHA256SUMS is published by the same release as
+  # the binaries, so a replaced binary can come with a replaced sums line --
+  # and install.sh and the in-app upgrade check against exactly that file. A
+  # provenance attestation is signed with the workflow's OIDC identity and kept
+  # by GitHub, outside the release. None of this can run without a real tag, so
+  # its shape is what can be asserted here.
+  attest='lambda job: [s for s in w["jobs"][job]["steps"] if s.get("uses", "").startswith("actions/attest-build-provenance@")]'
+  names='lambda job: [s.get("name") for s in w["jobs"][job]["steps"]]'
+  have "the binaries job attests what it publishes" \
+       "len((${attest})('binaries')) == 1"
+  have "every attest step is SHA-pinned, like every other action here" \
+       "all(re.fullmatch(r'actions/attest-build-provenance@[0-9a-f]{40}', s['uses']) for j in ('binaries', 'images') for s in (${attest})(j))"
+  have "and it attests every file SHA256SUMS lists" \
+       "(${attest})('binaries')[0]['with'].get('subject-checksums') == 'dist/SHA256SUMS'"
+  # After the checksums exist and before the release that ships them: an
+  # attestation step placed after Publish GitHub Release would leave a window,
+  # or a failed publish, with binaries out and nothing vouching for them.
+  have "after Checksums and before the release is published" \
+       "(${names})('binaries').index('Checksums') < (${names})('binaries').index((${attest})('binaries')[0]['name']) < (${names})('binaries').index('Publish GitHub Release')"
+  # One attestation per pushed image, each tied to that build step's digest.
+  # Counting attest steps alone would pass with three that all name the
+  # default image's digest.
+  builds='[s for s in w["jobs"]["images"]["steps"] if s.get("uses", "").startswith("docker/build-push-action@")]'
+  have "the images job still builds three images (positive control)" \
+       "len(${builds}) == 3"
+  have "and attests each one's own pushed digest" \
+       "sorted(s['with'].get('subject-digest', '') for s in (${attest})('images')) == sorted('\${{ steps.%s.outputs.digest }}' % b.get('id') for b in ${builds})"
+  # Only when publishing: a dry run's artefacts are discarded, and attesting
+  # them writes to the public transparency log about files nobody can fetch.
+  have "and attests only when it publishes" \
+       "all(s.get('if') == \"env.PUBLISH == 'true'\" for j in ('binaries', 'images') for s in (${attest})(j))"
+  # The OIDC token is a signing identity. It belongs to the two jobs that
+  # attest and to nothing else -- not the gates, not the workflow as a whole.
+  have "id-token: write is granted to the two publishing jobs and no others" \
+       "'id-token' not in (w.get('permissions') or {}) and {k for k, v in w['jobs'].items() if (v.get('permissions') or {}).get('id-token') == 'write'} == {'binaries', 'images'}"
+  have "and so is attestations: write" \
+       "{k for k, v in w['jobs'].items() if (v.get('permissions') or {}).get('attestations') == 'write'} == {'binaries', 'images'}"
 fi
 
 printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"

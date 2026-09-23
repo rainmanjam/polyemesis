@@ -193,6 +193,31 @@ can check, as root, is not a reasonable default. If you are deliberately
 installing a release that has no published sums, `--allow-unverified` says so
 explicitly.
 
+**`SHA256SUMS` proves the download is intact, not that this project built it.**
+It is published by the same release as the binaries, so someone able to replace
+a binary could replace its line in `SHA256SUMS` too. Releases after 0.10.0 also
+carry a build provenance attestation for every file in `SHA256SUMS` and for
+each container image. The attestation is signed through Sigstore with the
+release workflow's identity and stored by GitHub, not inside the release. To
+check one, use the [GitHub CLI](https://cli.github.com/):
+
+```bash
+# A downloaded binary (or SBOM):
+gh attestation verify ./polyemesis-<version>-linux-amd64 \
+  --repo rainmanjam/polyemesis \
+  --signer-workflow rainmanjam/polyemesis/.github/workflows/release.yml
+
+# A container image. Docker Hub and GHCR serve the same digest, so either works:
+gh attestation verify oci://ghcr.io/rainmanjam/polyemesis:<version> \
+  --repo rainmanjam/polyemesis
+```
+
+A pass names the commit and tag the file was built from. A file this project's
+release workflow did not build fails, whatever `SHA256SUMS` says. The installer
+and the in-app upgrade do not run this check yet, because it needs `gh` and a
+GitHub login on the host. They still check `SHA256SUMS` only. 0.10.0 and older
+releases have no attestations.
+
 What it gets right that a hand-rolled `docker run` usually does not: `/udp` on
 the SRT port, `stop_grace_period: 30s` so a recording is finalised rather than
 truncated, a firewall rule for **udp**/6000, and `CAP_NET_BIND_SERVICE` on the

@@ -347,6 +347,12 @@ jobs:
     permissions:
       contents: read # checkout only; this job never writes to the repository
       packages: write # ghcr.io, via GITHUB_TOKEN
+      # Build provenance for the three image digests -- see "Attest build
+      # provenance" in the binaries job for why. id-token is the OIDC token
+      # Sigstore signs with; attestations is where GitHub stores the result.
+      # Granted to the two publishing jobs only, never workflow-wide.
+      id-token: write
+      attestations: write
     # A ceiling, because GitHub's default is SIX HOURS. Measured over eight
     # runs at 2.8 to 6.7 minutes, and the spread is the point: three image
     # variants, built multi-arch under QEMU and pushed to two registries, so
@@ -464,6 +470,7 @@ jobs:
       # Windows via WSL2; linux/arm64 covers Apple Silicon, Graviton/Ampere and
       # the Raspberry Pi 4/5.
       - name: Build and push (default, multi-arch)
+        id: build_default
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -481,6 +488,7 @@ jobs:
       # attached. They are published so people with the hardware can try them,
       # not because they are verified. See docs/HARDWARE.md.
       - name: Build and push (NVIDIA/NVENC)
+        id: build_cuda
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -498,6 +506,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push (Intel/AMD VA-API)
+        id: build_vaapi
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -509,6 +518,31 @@ jobs:
           push: ${{ env.PUBLISH == 'true' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # PROVENANCE FOR EACH PUSHED DIGEST. One attestation per image, keyed by
+      # the manifest digest buildx pushed. That digest is the same on Docker Hub
+      # and GHCR -- one build, pushed to both -- so a single attestation answers
+      # for a pull from either; subject-name is only the label it carries.
+      # Verify with `gh attestation verify oci://<image>:<tag> --repo
+      # rainmanjam/polyemesis` (docs/INSTALL.md, "Verifying the download").
+      - name: Attest build provenance (default image)
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.GHCR_IMAGE }}
+          subject-digest: ${{ steps.build_default.outputs.digest }}
+      - name: Attest build provenance (NVIDIA/NVENC image)
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.GHCR_IMAGE }}
+          subject-digest: ${{ steps.build_cuda.outputs.digest }}
+      - name: Attest build provenance (Intel/AMD VA-API image)
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.GHCR_IMAGE }}
+          subject-digest: ${{ steps.build_vaapi.outputs.digest }}
 
       # Docker Hub does not read the repository's README on its own: without
       # this the listing shows an empty overview, which is what a page nobody
@@ -549,6 +583,9 @@ jobs:
       # Creates the GitHub Release and uploads the assets. No packages: write —
       # this job pushes no images.
       contents: write
+      # Build provenance for dist/* -- see "Attest build provenance" below.
+      id-token: write
+      attestations: write
     # A ceiling, because GitHub's default is SIX HOURS. Measured over eight
     # runs at 2.8 to 3.4 minutes and tightly clustered, because the work is
     # deterministic: cross-compile every target, scan the source tree for the
@@ -749,6 +786,32 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
 
+      # SHA256SUMS PROVES A DOWNLOAD IS INTACT, NOT THAT WE BUILT IT. It is
+      # published next to the binaries, by the same release, so anyone able to
+      # replace a binary could replace its line in SHA256SUMS too -- and
+      # install.sh and the in-app upgrade both check against exactly that file.
+      #
+      # A build provenance attestation is signed with this workflow's OIDC
+      # identity through Sigstore and stored by GitHub, outside the release. It
+      # names the repository, the workflow file, the ref and the commit that
+      # produced each digest, so `gh attestation verify <file> --repo
+      # rainmanjam/polyemesis` fails for a binary this workflow did not build,
+      # whatever SHA256SUMS says.
+      #
+      # subject-checksums rather than subject-path: the file is already the list
+      # of what this release ships, with its digests, so the attestation and
+      # the checksums cannot disagree about which files exist. After the SBOM
+      # step for the same reason SHA256SUMS is -- the SBOMs are subjects too.
+      #
+      # PUBLISH only. A rehearsal's binaries are thrown away with the runner,
+      # and an attestation for them would sit in the public transparency log
+      # vouching for files nobody can download.
+      - name: Attest build provenance (binaries)
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+
       # A dry run builds the SBOM and then destroys it with the runner, so the
       # rehearsal could only ever prove the step exited 0. Uploading it makes a
       # dry run answer the question people actually have -- what is IN the bill
@@ -826,7 +889,10 @@ jobs:
             runtime abort, was fixed in 0.9.0.) See
             [docs/INSTALL.md](https://github.com/rainmanjam/polyemesis/blob/main/docs/INSTALL.md#windows).
 
-            Verify your download against `SHA256SUMS`, published below.
+            Verify your download against `SHA256SUMS`, published below, and
+            that this project's release workflow built it with
+            `gh attestation verify <file> --repo rainmanjam/polyemesis`. See
+            [docs/INSTALL.md](https://github.com/rainmanjam/polyemesis/blob/main/docs/INSTALL.md#verifying-the-download).
 
             ---
 

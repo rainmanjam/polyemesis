@@ -71,6 +71,15 @@ publishes of the same ref concurrently.
 
 - The GitHub Release, images on Docker Hub and GHCR (default, NVENC, VA-API),
   cross-compiled binaries, an SBOM and checksums are published by the run.
+- **Check the provenance attestations once, by hand.** The run attests every
+  file in `SHA256SUMS` and all three image digests. That step cannot run in a
+  rehearsal, so the first real tag after it was added is also its first test.
+  Download one binary from the Release and run
+  `gh attestation verify <file> --repo rainmanjam/polyemesis`, then
+  `gh attestation verify oci://ghcr.io/rainmanjam/polyemesis:X.Y.Z --repo rainmanjam/polyemesis`.
+  Both should name this tag's commit. If either finds nothing, the Release
+  still shipped, but the verification in `docs/INSTALL.md` does not work for
+  it. Say so in the release notes.
 - **No host is upgraded by any of this.** A published release is not a deployed
   one, and the readiness audit tracks the two separately for that reason. The
   upgrade an operator performs — including the production host this project runs

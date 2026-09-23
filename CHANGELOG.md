@@ -505,6 +505,15 @@ its first tagged release.
   one dated release (`FFMPEG_BTBN_TAG`) and refuses any file whose sha256 is
   not the one written in `install.sh`. A test rejects `latest`, an undated tag
   or a missing hash.
+- **Release binaries and images now carry signed build provenance.** The only
+  integrity check a release offered was `SHA256SUMS`, which is published by the
+  same release as the binaries, so a replaced binary could come with a
+  replaced checksum. The release workflow now attests every file in
+  `SHA256SUMS` and each image digest through GitHub's Sigstore-backed
+  attestations. `gh attestation verify <file> --repo rainmanjam/polyemesis`
+  then fails for anything the release workflow did not build. docs/INSTALL.md
+  has the commands. The installer and in-app upgrade still check
+  `SHA256SUMS` only.
 
 ## [0.10.0] — 2026-09-23
 
