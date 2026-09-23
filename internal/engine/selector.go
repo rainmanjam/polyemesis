@@ -27,7 +27,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -1668,12 +1667,23 @@ func (e *Engine) teardownFeed(f *sourceFeed) error {
 	return e.reportStop(f, e.stopFeed(f))
 }
 
-// stopFeed is teardownFeed without the report: it stops the process, gives
-// back the subscription and the port, and then waits for the feed this one
+// stopFeed is teardownFeed without the report: it stops this feed's own
+// process, subscription and port (stopOwn), and then waits for the feed this one
 // replaced (see sourceFeed.prev), so that returning means the whole chain is
-// gone. retireFeed runs it off the switch's time, where the report would be
-// about a different feed than the one the tier now shows.
+// gone.
 func (e *Engine) stopFeed(f *sourceFeed) error {
+	err := e.stopOwn(f)
+	if f.prev != nil {
+		<-f.prev
+	}
+	return err
+}
+
+// stopOwn stops what this feed itself holds, in the order teardown has always
+// used: the process first, while its input is still delivering, then the
+// subscription, then the port. It does NOT wait on prev -- a switch must not
+// pay for the feed before last; retireFeed carries that forward instead.
+func (e *Engine) stopOwn(f *sourceFeed) error {
 	var stopErr error
 	if f.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
@@ -1686,16 +1696,13 @@ func (e *Engine) stopFeed(f *sourceFeed) error {
 	if f.port != 0 {
 		e.releasePort(f.port)
 	}
-	if f.prev != nil {
-		<-f.prev
-	}
 	return stopErr
 }
 
 // retireFeed takes the outgoing feed off the air for a switch, and is what
 // keeps a switch away from a dead source to its grace period.
 //
-// THE OUTGOING FEED IS USUALLY WEDGED, AND THAT IS THE CASE THAT MATTERS. A
+// THE OUTGOING FEED IS SOMETIMES WEDGED, AND THAT IS THE CASE THIS BOUNDS. A
 // switch away from the primary happens because the primary's relay went quiet,
 // and the copy hop reading it is then an FFmpeg blocked in a read of a quiet UDP
 // input -- which does not answer SIGTERM. Stopping it synchronously cost the
@@ -1706,69 +1713,107 @@ func (e *Engine) stopFeed(f *sourceFeed) error {
 // moved), those eight seconds were also how far its timeline started behind
 // wall clock, which the next switch repaid as an 8 s forward jump.
 //
-// So the order is: CUT THE INPUT, WAIT BRIEFLY, THEN START THE REPLACEMENT
-// REGARDLESS. Unsubscribing first is what makes starting early safe rather
-// than a gamble -- a copy hop with no input has nothing left to publish into the
-// selector, so it cannot become the second publisher on one hub that
+// So the order is: SIGNAL, WAIT BRIEFLY, AND ONLY THEN CUT THE INPUT AND START
+// THE REPLACEMENT REGARDLESS.
+//
+// Signal first because the wedge is CAUSED by a silent input: manager.go's A/B
+// measured SIGTERM with packets still arriving exiting in 0.105 s, and with the
+// input already quiet still alive 15 s later. Cutting a healthy copy hop's
+// subscription before signalling it -- a recovery back to the primary, a pin, a
+// respawn -- would manufacture exactly the wedge this exists to survive, on
+// every switch. So a feed that is still being fed gets its SIGTERM while it is
+// still being fed, and exits inside seamStopWait; its subscription and port are
+// then given back in the usual order.
+//
+// Only a feed still there after seamStopWait is the wedged reader, and only then
+// is its input cut. That is what makes starting its replacement early safe
+// rather than a gamble: a copy hop with no input has nothing left to publish
+// into the selector, so it cannot become the second publisher on one hub that
 // teardownFeed warns about. It also frees selectorSubName on that hub before
 // startFeed takes the same name, which a respawn onto the same hub needs. The
-// brief wait (seamStopWait) lets a HEALTHY child, one still flushing packets
-// it had already read, exit before its successor begins; one that is still
-// there after it is the wedged reader, and it finishes dying in the background.
+// child finishes dying in the background.
 //
 // The slate has no input to cut and answers SIGTERM at once, so it is stopped
-// synchronously exactly as before: starting early would be two publishers.
+// synchronously: starting early would be two publishers.
+//
+// THE FEED BEFORE LAST IS CARRIED, NOT AWAITED. f.prev may be a predecessor
+// still dying from an earlier detached switch; a quick switch back inside its
+// kill window must cost f's own stop, not the rest of that one's. So f's own
+// parts are stopped here and f.prev is handed on as done, for the incoming feed
+// to hold as ITS prev -- every later teardown, shutdown above all, still
+// collects the whole chain.
 //
 // detached reports that the replacement will start before the old child has
-// gone, and done is then closed once it has, its port included. The caller
-// hands done to the incoming feed as prev, so any later teardown of the tier
-// collects it. stopErr is only known when detached is false.
+// gone; done then closes once it has, its port included, and once the chain
+// behind it has too. stopErr is only known when detached is false.
 func (e *Engine) retireFeed(f *sourceFeed) (stopErr error, detached bool, done <-chan struct{}) {
 	if f == nil {
 		return nil, false, nil
 	}
 	if f.proc == nil || f.in == nil || f.subName == "" {
-		return e.teardownFeed(f), false, nil
+		return e.reportStop(f, e.stopOwn(f)), false, f.prev
 	}
-	f.in.Unsubscribe(f.subName)
-	f.subName = ""
 
-	fin := make(chan struct{})
-	result := make(chan error, 1)
-	var abandoned atomic.Bool
+	// The SIGTERM goes out now, with the subscription still delivering.
+	// stopTimeout is read here, not in the goroutine, which can outlive this
+	// call by the whole grace period.
+	stopped, timeout := make(chan error, 1), stopTimeout
 	go func() {
-		defer close(fin)
-		err := e.stopFeed(f)
-		result <- err
-		// Nobody is waiting for the answer any more, and the tier's status
-		// belongs to the feed that replaced this one, so this is a log line
-		// and not sel.err. It was cut off from its input before the kill, so
-		// the "may still be writing" warning does not apply.
-		if err != nil && abandoned.Load() {
-			e.log.Warn("outgoing feed was killed after the switch; it had been cut off "+
-				"from its input, so it published nothing beside its replacement",
-				"source", string(f.kind), "err", err)
-		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		stopped <- f.proc.Stop(ctx)
 	}()
+
+	// finish gives back what the process was holding once it has exited.
+	finish := func() {
+		if f.subName != "" {
+			f.in.Unsubscribe(f.subName)
+		}
+		if f.port != 0 {
+			e.releasePort(f.port)
+		}
+	}
 
 	timer := time.NewTimer(seamStopWait)
 	defer timer.Stop()
 	select {
-	case err := <-result:
-		<-fin
-		return e.reportStop(f, err), false, nil
+	case err := <-stopped:
+		finish()
+		return e.reportStop(f, err), false, f.prev
 	case <-timer.C:
-		abandoned.Store(true)
 		// It may have finished on the boundary; completion wins the tie, as
 		// it does in supervisor.stop.
 		select {
-		case err := <-result:
-			<-fin
-			return e.reportStop(f, err), false, nil
+		case err := <-stopped:
+			finish()
+			return e.reportStop(f, err), false, f.prev
 		default:
 		}
-		return nil, true, fin
 	}
+
+	// Wedged. Cut it off from its input, so that it has nothing left to publish
+	// beside its replacement, and let it finish dying in the background.
+	f.in.Unsubscribe(f.subName)
+	f.subName = ""
+	fin := make(chan struct{})
+	go func() {
+		defer close(fin)
+		err := <-stopped
+		finish()
+		// Nobody is waiting for the answer any more, and the tier's status
+		// belongs to the feed that replaced this one, so this is a log line
+		// and not sel.err. It was cut off from its input before the kill, so
+		// the "may still be writing" warning does not apply.
+		if err != nil {
+			e.log.Warn("outgoing feed was killed after the switch; it had been cut off "+
+				"from its input, so it published nothing beside its replacement",
+				"source", string(f.kind), "err", err)
+		}
+		if f.prev != nil {
+			<-f.prev
+		}
+	}()
+	return nil, true, fin
 }
 
 // reportStop reports a stop that ran out its deadline, for teardownFeed and for

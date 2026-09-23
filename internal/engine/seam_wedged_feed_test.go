@@ -148,3 +148,208 @@ func TestASwitchAwayFromAWedgedFeedDoesNotWaitOutItsGracePeriod(t *testing.T) {
 		return !held
 	}, "the outgoing feed's port to be released after it was killed")
 }
+
+// healthyFeedBinary writes a stand-in for FFmpeg whose copy hop DOES answer
+// SIGTERM, the way a real one does while its input is still delivering: it
+// leaves a marker the moment the signal lands, takes a beat to "flush", and
+// exits. The slate exits on TERM at once.
+//
+// The marker is what lets the test ask the ORDER question. manager.go measured
+// that an FFmpeg given SIGTERM on an input that has already gone silent is still
+// alive fifteen seconds later, while one signalled with packets arriving exits in
+// 0.105 s -- so cutting a healthy copy hop's input before signalling it is what
+// turns a clean switch into a wedged one. At the instant the signal lands, the
+// copy hop must still be subscribed.
+func healthyFeedBinary(t *testing.T) (bin, armed, termed string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin = filepath.Join(dir, "ffmpeg")
+	armed, termed = filepath.Join(dir, "armed"), filepath.Join(dir, "termed")
+	// Not exec: the trap has to stay with this shell, so the sleep runs in the
+	// background and the shell waits on it, which a TERM interrupts.
+	script := "#!/bin/sh\n" +
+		"case \" $* \" in\n" +
+		"*\" copy \"*) trap ': > \"" + termed + "\"; sleep 0.2; kill $! 2>/dev/null; exit 0' TERM; : > '" + armed + "';;\n" +
+		"*) trap 'kill $! 2>/dev/null; exit 0' TERM;;\n" +
+		"esac\n" +
+		"sleep 60 &\nwait\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, armed, termed
+}
+
+// A switch away from a copy hop that is still healthy -- recovery, a pin, a
+// respawn, or the moment a quiet source crosses its grace while its hop is still
+// draining -- must signal it while its input is still delivering, and must not
+// come out of it detached. Cutting the input first is what wedges it.
+func TestASwitchAwayFromAHealthyFeedSignalsItBeforeCuttingItsInput(t *testing.T) {
+	e := failoverEngine(t)
+	bin, armed, termed := healthyFeedBinary(t)
+	e.tools.FFmpeg = bin
+	var buf syncBuffer
+	e.log = slog.New(slog.NewTextHandler(&buf, nil))
+
+	s := failoverOnSettings()
+	setSettings(e, s)
+
+	t0 := time.Now()
+	e.reconcileSelector(s, wantSelector(s), "")
+	hub := e.selectorHub()
+	if hub == nil {
+		t.Fatal("the selector tier did not start")
+	}
+	t.Cleanup(func() {
+		e.selMu.Lock()
+		defer e.selMu.Unlock()
+		_ = e.teardownFeed(e.sel.feed)
+		_ = hub.Close()
+	})
+
+	e.deliver(sourcePrimary, t0)
+	e.step(s, t0)
+	e.mu.RLock()
+	primary := e.sel.feed
+	e.mu.RUnlock()
+	if primary == nil || primary.kind != sourcePrimary || primary.in == nil {
+		t.Fatalf("the primary's copy hop did not go on air (feed %+v)", primary)
+	}
+	waitUntil(t, func() bool { _, err := os.Stat(armed); return err == nil },
+		"the primary's copy hop to be running with its TERM trap in place")
+	in := primary.in
+
+	// Watch for the signal landing, and look at the subscription at that moment.
+	subscribedAtTerm := make(chan bool, 1)
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := os.Stat(termed); err == nil {
+				subscribedAtTerm <- slices.Contains(in.Subscribers(), selectorSubName)
+				return
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+	defer close(stop)
+
+	buf.Reset()
+	e.step(s, t0.Add(20*time.Second))
+
+	select {
+	case sub := <-subscribedAtTerm:
+		if !sub {
+			t.Error("the outgoing copy hop was cut off from its input before it was sent " +
+				"SIGTERM; an FFmpeg signalled on a silent input does not exit, so every switch " +
+				"away from a healthy feed becomes a wedged one")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the outgoing copy hop was never signalled")
+	}
+
+	lines := seamLines(buf.String())
+	if len(lines) != 1 {
+		t.Fatalf("one switch wrote %d seam lines:\n%s", len(lines), buf.String())
+	}
+	if lines[0]["outDetached"] != "false" {
+		t.Errorf("outDetached = %q for a feed that exits on SIGTERM; the ledger reports a "+
+			"wedge that did not happen", lines[0]["outDetached"])
+	}
+	if ms := seamFloat(t, lines[0], "teardownMs"); ms >= float64(seamStopWait.Milliseconds()) {
+		t.Errorf("teardownMs = %.0f for a feed that exits 0.2 s after SIGTERM; the switch "+
+			"paid the whole seam wait", ms)
+	}
+	// And after the stop, the subscription is gone -- signalling first must not
+	// mean never cutting.
+	if slices.Contains(in.Subscribers(), selectorSubName) {
+		t.Error("the outgoing copy hop is still subscribed after the switch")
+	}
+}
+
+// A flap inside the old child's kill window. The first switch leaves the wedged
+// primary hop dying in the background and hands its done channel to the slate
+// as prev. Switching straight back must cost the SLATE's stop -- which is
+// immediate -- and not the predecessor's remaining seconds: the predecessor is
+// carried forward to the next feed, not waited on at the seam.
+func TestAQuickSwitchBackDoesNotWaitForTheFeedBeforeLast(t *testing.T) {
+	e := failoverEngine(t)
+	bin, armed := wedgedFeedBinary(t)
+	e.tools.FFmpeg = bin
+	var buf syncBuffer
+	e.log = slog.New(slog.NewTextHandler(&buf, nil))
+
+	s := failoverOnSettings()
+	setSettings(e, s)
+
+	t0 := time.Now()
+	e.reconcileSelector(s, wantSelector(s), "")
+	hub := e.selectorHub()
+	if hub == nil {
+		t.Fatal("the selector tier did not start")
+	}
+	t.Cleanup(func() {
+		prev := stopTimeout
+		stopTimeout = 100 * time.Millisecond
+		defer func() { stopTimeout = prev }()
+		e.selMu.Lock()
+		defer e.selMu.Unlock()
+		_ = e.teardownFeed(e.sel.feed)
+		_ = hub.Close()
+	})
+
+	e.deliver(sourcePrimary, t0)
+	e.step(s, t0)
+	e.mu.RLock()
+	first := e.sel.feed
+	e.mu.RUnlock()
+	if first == nil || first.kind != sourcePrimary {
+		t.Fatalf("the primary did not go on air (feed %+v)", first)
+	}
+	waitUntil(t, func() bool { _, err := os.Stat(armed); return err == nil },
+		"the primary's copy hop to be running with SIGTERM ignored")
+
+	// Primary goes quiet: away to the slate, leaving the wedged hop behind.
+	e.step(s, t0.Add(20*time.Second))
+	e.mu.RLock()
+	slate := e.sel.feed
+	e.mu.RUnlock()
+	if slate == nil || slate.kind != sourceSlate || slate.prev == nil {
+		t.Fatalf("the first switch did not detach onto the slate (feed %+v)", slate)
+	}
+
+	// The primary is back at once, while the first hop is still dying.
+	if !feedRunning(first) {
+		t.Fatal("the first hop was already gone, so this would measure nothing")
+	}
+	buf.Reset()
+	back := t0.Add(21 * time.Second)
+	e.deliver(sourcePrimary, back)
+	e.step(s, back)
+	e.mu.RLock()
+	active, cur := e.sel.active, e.sel.feed
+	e.mu.RUnlock()
+	if active != sourcePrimary || cur == nil {
+		t.Fatalf("active = %q; the switch back under test did not happen", active)
+	}
+	lines := seamLines(buf.String())
+	if len(lines) != 1 {
+		t.Fatalf("one switch wrote %d seam lines:\n%s", len(lines), buf.String())
+	}
+	if ms := seamFloat(t, lines[0], "teardownMs"); ms >= float64(seamStopWait.Milliseconds()) {
+		t.Errorf("teardownMs = %.0f: stopping a slate that exits at once waited on the "+
+			"feed before it, still dying from the previous switch", ms)
+	}
+	if lines[0]["outDetached"] != "false" {
+		t.Errorf("outDetached = %q for a slate that exited on SIGTERM", lines[0]["outDetached"])
+	}
+	// The predecessor is not dropped: the new feed carries it, so the next
+	// teardown still collects its process and port.
+	if cur.prev == nil {
+		t.Error("the feed before last is no longer tracked by anything; shutdown would " +
+			"not wait for it and would report its port as leaked")
+	}
+}

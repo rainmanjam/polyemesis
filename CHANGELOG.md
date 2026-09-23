@@ -27,11 +27,14 @@ its first tagged release.
   (11.5 s measured against a 3 s `graceSeconds`). Because the incoming feed's
   timestamp offset is stamped at the decision, those 8 s also put its timeline
   behind wall clock, and the next switch repaid them as an 8 s forward jump.
-  A switch now unsubscribes the outgoing copy hop from its input first, so it
-  has nothing left to publish, waits at most 0.5 s for it to exit, and then
-  starts the replacement while the old child finishes dying in the background.
-  The wait, and so any leftover jump at the next switch, is now at most 0.5 s.
-  The seam ledger line gains `outDetached=true` when this happens.
+  A switch now sends the outgoing copy hop SIGTERM while its input is still
+  delivering (a healthy hop exits in about 0.1 s that way) and waits at most
+  0.5 s. Only a hop still running after that is cut off from its input, so it
+  has nothing left to publish, and the replacement starts while the old child
+  finishes dying in the background. The wait, and so any leftover jump at the
+  next switch, is now at most 0.5 s, and a quick switch back does not wait for
+  the feed before last. The seam ledger line gains `outDetached=true` when a
+  hop is left behind this way.
 
 ## [0.10.0] — 2026-09-23
 
