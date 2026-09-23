@@ -11,7 +11,12 @@
 #                                 # (this is also the default now, when no addr
 #                                 #  is set; written out here because a proxy
 #                                 #  deployment should say what it binds)
+#                                 # A --addr flag BEATS this: deploy/polyemesis.service
+#                                 # passes --addr :8080, so on a systemd install edit
+#                                 # ExecStart to --addr 127.0.0.1:8080 instead.
 #     trustProxyHeaders: true     # honour X-Forwarded-Proto / X-Forwarded-Host
+#     trustedProxies: []          # nginx on this host is loopback, trusted already;
+#                                 # list nginx's address if it runs elsewhere
 #     tls:
 #       mode: "auto"              # resolves to OFF, because trustProxyHeaders is true
 #

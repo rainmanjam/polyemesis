@@ -158,6 +158,7 @@ func run(h *hooks) error {
 	// paths without rewriting config.yaml.
 	if *addr != "" {
 		cfg.Addr = *addr
+		cfg.AddrFromFlag = true
 	}
 	if *dataDir != "" {
 		cfg.DataDir = *dataDir
@@ -852,6 +853,12 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	if warn := cfg.TLSPortWarning(); warn != "" {
 		fmt.Printf("\n  WARNING: %s\n", warn)
 		log.Warn("tls on a non-standard port", "detail", warn)
+	}
+	// trustProxyHeaders on a listener clients can reach without the proxy.
+	// See config.ProxyHeaderWarning for why it names --addr versus the file.
+	if warn := cfg.ProxyHeaderWarning(); warn != "" {
+		fmt.Printf("\n  WARNING: %s\n", warn)
+		log.Warn("proxy headers trusted on a directly reachable listener", "detail", warn)
 	}
 	if _, warn := cfg.HSTSPolicy(); warn != "" {
 		fmt.Printf("\n  WARNING: %s\n", warn)

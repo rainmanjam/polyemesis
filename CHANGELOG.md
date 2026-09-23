@@ -470,6 +470,19 @@ its first tagged release.
 
 ### Security
 
+- **A client that reaches the port directly can no longer choose its own
+  throttle key.** With `trustProxyHeaders: true`, `X-Forwarded-For` and
+  `X-Real-IP` were believed from any peer. The docs say to bind 127.0.0.1
+  behind the proxy, but the shipped unit's `--addr :8080` overrides
+  `config.yaml`, so the port was often public. A direct client could then pick
+  a fresh login and setup throttle key per request and write any address into
+  the audit log. The headers are now believed only from loopback and from the
+  new `trustedProxies` list (addresses or CIDRs). The server logs once when it
+  ignores a forwarded header from an unlisted peer, and warns at startup when
+  `trustProxyHeaders` is on and the listener is public, saying whether
+  `--addr` or `config.yaml` set it. A proxy that is not on the same host must
+  now be listed; see [docs/UPGRADING.md](docs/UPGRADING.md).
+
 - **A fresh install can no longer be claimed by whoever reaches its port
   first.** `install.sh` starts the service and opens the firewall before the
   operator has a browser open, and `POST /api/v1/setup` made the first caller

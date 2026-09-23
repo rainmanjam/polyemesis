@@ -157,7 +157,7 @@ func TestClientIPTrustsForwardedHeadersOnlyWhenConfiguredTo(t *testing.T) {
 		{
 			name:       "trusted X-Forwarded-For wins",
 			trustProxy: true,
-			remoteAddr: "10.0.0.1:51000",
+			remoteAddr: "127.0.0.1:51000",
 			headers:    map[string]string{"X-Forwarded-For": "198.51.100.7"},
 			want:       "198.51.100.7",
 		},
@@ -167,29 +167,29 @@ func TestClientIPTrustsForwardedHeadersOnlyWhenConfiguredTo(t *testing.T) {
 			// See the bypass described on ClientIP. #647.
 			name:       "rightmost entry is the hop the proxy appended",
 			trustProxy: true,
-			remoteAddr: "10.0.0.1:51000",
+			remoteAddr: "127.0.0.1:51000",
 			headers:    map[string]string{"X-Forwarded-For": " 198.51.100.7 , 10.0.0.5 "},
 			want:       "10.0.0.5",
 		},
 		{
 			name:       "a trailing comma falls back to the socket, never to the client half",
 			trustProxy: true,
-			remoteAddr: "10.0.0.1:51000",
+			remoteAddr: "127.0.0.1:51000",
 			headers:    map[string]string{"X-Forwarded-For": "198.51.100.7,"},
-			want:       "10.0.0.1",
+			want:       "127.0.0.1",
 		},
 		{
 			name:       "X-Real-IP is the fallback",
 			trustProxy: true,
-			remoteAddr: "10.0.0.1:51000",
+			remoteAddr: "127.0.0.1:51000",
 			headers:    map[string]string{"X-Real-IP": "198.51.100.7"},
 			want:       "198.51.100.7",
 		},
 		{
 			name:       "trusted but no headers falls back to the socket",
 			trustProxy: true,
-			remoteAddr: "10.0.0.1:51000",
-			want:       "10.0.0.1",
+			remoteAddr: "127.0.0.1:51000",
+			want:       "127.0.0.1",
 		},
 		{
 			name:       "IPv6 loses its port",
@@ -204,7 +204,7 @@ func TestClientIPTrustsForwardedHeadersOnlyWhenConfiguredTo(t *testing.T) {
 			for k, v := range tc.headers {
 				r.Header.Set(k, v)
 			}
-			if got := ClientIP(r, tc.trustProxy); got != tc.want {
+			if got := ClientIP(r, NewProxies(tc.trustProxy, nil, nil)); got != tc.want {
 				t.Errorf("ClientIP = %q, want %q", got, tc.want)
 			}
 		})

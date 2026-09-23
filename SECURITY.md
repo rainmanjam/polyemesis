@@ -257,8 +257,10 @@ admin UI, this field is not your biggest problem.
 - Put it behind a reverse proxy if you want anything resembling access control,
   and set `trustProxyHeaders: true` so throttling sees real client addresses.
   `trustProxyHeaders` means "a proxy I control sets these headers": only turn it
-  on when the server is genuinely unreachable except through that proxy, because
-  it makes the server read addresses out of a header. polyemesis takes the
+  on when the server is genuinely unreachable except through that proxy. The
+  headers are believed only when the connection comes from loopback or from an
+  address in `trustedProxies`, so a client that reaches the port directly is
+  keyed on its own address whatever it sends. polyemesis takes the
   **rightmost** `X-Forwarded-For` hop — the one the proxy appended — so both the
   appending and the overwriting nginx forms are safe; `deploy/nginx.conf.example`
   overwrites.

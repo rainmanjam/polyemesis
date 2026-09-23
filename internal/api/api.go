@@ -403,6 +403,12 @@ type Server struct {
 	// Nil once an admin exists, and nil in a server built without one, which
 	// refuses setup rather than accepting it. See auth.SetupCode.
 	setupCode *auth.SetupCode
+
+	// proxies is who may speak for a client's address through
+	// X-Forwarded-For. Nil when trustProxyHeaders is off. Every place that
+	// needs a client address goes through auth.ClientIP with this, so the
+	// throttles and the audit log cannot disagree about who is trusted.
+	proxies *auth.Proxies
 	// providers is the OAuth provider set every handler resolves through, and
 	// it replaced five function-pointer fields on this struct.
 	//
@@ -720,6 +726,18 @@ func New(o Options) *Server {
 			o.DB.TokenEpoch,
 		),
 	}
+	// Config.Validate has already refused a malformed trustedProxies, so an
+	// error here means a caller skipped it; loopback-only is the safe reading.
+	extra, _ := o.Config.TrustedProxyPrefixes()
+	s.proxies = auth.NewProxies(o.Config.TrustProxyHeaders, extra, func(peer string) {
+		// Once per process. The deployment this catches -- nginx in another
+		// container, or on another box, never listed -- would otherwise log
+		// on every request, or worse, say nothing while every client behind
+		// that proxy shares one throttle key.
+		s.log.Warn("ignored X-Forwarded-For from a peer that is not a trusted proxy",
+			"peer", peer,
+			"action", "if this is your reverse proxy, add its address to trustedProxies in config.yaml")
+	})
 	// nil for both probes means "ask the real environment and the real
 	// filesystem", which is what a running server wants; the parameters exist
 	// for internal/upgrade's own tests.

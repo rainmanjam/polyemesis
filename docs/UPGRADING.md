@@ -221,6 +221,33 @@ instead.
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading past 0.10.0 (unreleased, on `main`): forwarded client addresses are believed only from trusted proxies
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`.
+
+**Only if you set `trustProxyHeaders: true`.** `X-Forwarded-For` and
+`X-Real-IP` are now read only when the connection comes from loopback or from
+an address in the new `trustedProxies` list. Before, they were read from any
+peer, so a client that reached the port directly could choose the address the
+login throttle and the audit log saw.
+
+**Proxy on the same host (the documented nginx setup): nothing to do.**
+
+**Proxy somewhere else** — nginx on the Docker host in front of the container,
+or a load balancer on another machine: add its address or range to
+`config.yaml`, or every client behind it shares one throttle key and the audit
+log names the proxy:
+
+```yaml
+trustedProxies: ["172.17.0.1"]
+```
+
+The server logs `ignored X-Forwarded-For from a peer that is not a trusted
+proxy` once, naming the peer, when this applies. It also warns at startup when
+`trustProxyHeaders` is on and the listener is public, and says whether
+`--addr` or `config.yaml` set it.
+
 ### Upgrading past 0.10.0 (unreleased, on `main`): first-run setup needs a setup code
 
 > Not yet in a tag — this note is here ahead of the release that carries it,

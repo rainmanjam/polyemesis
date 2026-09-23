@@ -758,9 +758,16 @@ Three details in that unit are load-bearing:
 ### Behind a reverse proxy
 
 If nginx, Caddy or Traefik already terminates TLS, set `trustProxyHeaders: true`
-— only if the server cannot be reached except through that proxy, since it makes
-login throttling read client addresses out of a header — and leave `tls.mode: auto` — it deliberately resolves to `off`, so polyemesis
+and leave `tls.mode: auto` — it deliberately resolves to `off`, so polyemesis
 does not bind `:80` and does not compete with the proxy for ACME challenges.
+Forwarded client addresses are believed only from loopback and from
+`trustedProxies`; list the proxy there if it is not on the same host.
+
+**Bind the plaintext port to loopback, in the unit, not only in
+`config.yaml`.** The shipped `polyemesis.service` passes `--addr :8080`, and a
+flag beats the file, so `addr: "127.0.0.1:8080"` in `config.yaml` alone leaves
+the port public. Edit `ExecStart` to `--addr 127.0.0.1:8080`, then
+`sudo systemctl daemon-reload && sudo systemctl restart polyemesis`.
 There is a worked config in
 [`deploy/nginx.conf.example`](../deploy/nginx.conf.example).
 
