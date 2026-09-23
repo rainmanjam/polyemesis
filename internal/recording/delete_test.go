@@ -2,8 +2,10 @@ package recording
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -209,6 +211,11 @@ func TestDeleteRefusesASegmentARecorderIsStillWriting(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			m, dir, store := newManager(t)
+			// A recorder is running, so recording is on: with it off the
+			// recorder's segments are exempt (see
+			// TestDeleteLiftsTheLiveGuardOnRecorderSegmentsOnceRecordingIsOff),
+			// and the default install has it off.
+			setRecording(t, store, true)
 			now := time.Now()
 			names := writeSegments(t, dir, now, ages, nil)
 			if _, err := m.Scan(); err != nil {
@@ -297,5 +304,101 @@ func TestDeleteAllowsTheLoneSegmentOfAFinishedSession(t *testing.T) {
 	}
 	if got := filesOnDisk(t, dir); len(got) != 0 {
 		t.Errorf("files on disk %v, want none", got)
+	}
+}
+
+// setRecording turns recording on or off in the store, which is what the
+// settings page writes and what the engine's reconcile acts on.
+func setRecording(t *testing.T, store *db.DB, enabled bool) {
+	t.Helper()
+	if _, err := store.UpdateSettings(func(s *db.Settings) error {
+		s.Recording.Enabled = enabled
+		return nil
+	}); err != nil {
+		t.Fatalf("set recording.enabled=%v: %v", enabled, err)
+	}
+}
+
+// ONCE RECORDING IS OFF, THE RECORDER'S LAST SEGMENT IS THE OPERATOR'S.
+//
+// The live guard is a window -- anything that started within one segment
+// length plus two minutes of now -- and it used to apply whether or not a
+// recorder existed. So an operator who turned recording off and then deleted
+// the segment they had just made got 409 "the recorder is still writing this
+// segment; stop the recording, or wait for it to roll over" for up to
+// segmentSeconds + 2 min (an hour and two minutes on the default), with advice
+// they had already followed and a recorder that no longer existed to roll over
+// (exploratory run, row 35: DELETE after disable -> 409, twice).
+//
+// With recording off the engine has stopped the recorder, so none of the
+// rec-YYYYMMDD-HHMMSS files it names are open. What stays guarded, recording
+// on or off, is everything else a live process can be writing into the same
+// directory: a file destination's output, whose name derives from its URL.
+//
+// Mutation: drop the recording-off exemption in Delete. Observed to fail the
+// "off" row with ErrSegmentLive.
+func TestDeleteLiftsTheLiveGuardOnRecorderSegmentsOnceRecordingIsOff(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		recording  bool
+		destURL    string
+		file       string
+		wantRefuse bool
+	}{
+		{"recording on: the recorder's newest segment is still open", true, "booth.mkv", "", true},
+		{"recording off: the recorder's last segment is closed and deletable", false, "booth.mkv", "", false},
+		{"recording off: a file destination's rolled-over output is still guarded", false, "booth.mkv", "booth-%s.mkv", true},
+		{"recording off: a file destination's own path is still guarded", false, "booth.mkv", "booth.mkv", true},
+		// ResolveForWrite rolls rec.mkv over to rec-YYYYMMDD-HHMMSS.mkv -- the
+		// recorder's own pattern -- so the name alone cannot say which wrote it.
+		{"recording off: a destination output that looks like a recorder segment is still guarded", false, "rec.mkv", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, dir, store := newManager(t)
+			setRecording(t, store, tc.recording)
+			if _, err := store.CreateDestination(&db.Destination{
+				Name: "booth", Kind: db.DestFile, URL: tc.destURL,
+			}); err != nil {
+				t.Fatalf("create file destination: %v", err)
+			}
+
+			started := time.Now().Add(-5 * time.Minute)
+			name := segmentName(started)
+			if tc.file != "" {
+				name = tc.file
+				if strings.Contains(name, "%s") {
+					name = fmt.Sprintf(name, started.Format("20060102-150405"))
+				}
+			}
+			writeFile(t, dir, name, 16)
+			if err := store.UpsertRecording(&db.Recording{Filename: name, StartedAt: started}); err != nil {
+				t.Fatalf("index %s: %v", name, err)
+			}
+			recs, err := store.ListRecordings()
+			if err != nil || len(recs) != 1 {
+				t.Fatalf("ListRecordings = %d rows, %v; want 1", len(recs), err)
+			}
+
+			err = m.Delete(recs[0].ID)
+			if tc.wantRefuse {
+				if !errors.Is(err, ErrSegmentLive) {
+					t.Fatalf("Delete(%s) = %v, want ErrSegmentLive: a file a live process may "+
+						"be writing into was not guarded", name, err)
+				}
+				if !tc.recording && !strings.Contains(err.Error(), `"booth"`) {
+					t.Errorf("Delete(%s) = %v: the refusal does not name the file destination "+
+						"holding it, so the operator is told to stop a recording instead", name, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Delete(%s) = %v with recording turned off: the recorder that "+
+					"segment belonged to is gone, and the operator was told to wait for it "+
+					"to roll over", name, err)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(statErr) {
+				t.Errorf("Delete(%s) succeeded and left the file on disk (%v)", name, statErr)
+			}
+		})
 	}
 }

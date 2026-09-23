@@ -37,6 +37,17 @@ its first tagged release.
   next request instead of being locked out of writes. Sessions now also carry a
   random ID, so two logins in the same second are distinct sessions.
 
+### Fixed
+
+- **Deleting the last recorded segment works as soon as recording is off.**
+  `DELETE /recordings/{id}` refused any segment that started within one
+  segment length plus two minutes, recorder or no recorder, so turning
+  recording off and deleting what it had just made answered `409` for up to an
+  hour and two minutes, telling the operator to stop the recording they had
+  already stopped. With recording off the recorder's own segments are now
+  deletable at once. A file destination's output keeps the guard either way,
+  and its refusal now names the destination instead of the recorder.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added
