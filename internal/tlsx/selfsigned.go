@@ -54,6 +54,12 @@ type material struct {
 	leaf   *x509.Certificate
 	caCert *x509.Certificate
 	caPEM  []byte
+	// caReplaced says why an existing CA was just thrown away and a new one
+	// minted, or is empty when the CA on disk was kept or there was none. A
+	// replaced CA is one every client has to be told to trust again, so this
+	// is surfaced rather than left for the operator to discover as a browser
+	// warning.
+	caReplaced string
 }
 
 // ensureSelfSigned loads the persisted CA and leaf, minting whatever is
@@ -76,14 +82,17 @@ func ensureSelfSigned(dir, hostname string, now func() time.Time) (*material, er
 	if err != nil {
 		return nil, err
 	}
-	if caCert == nil || expiringBy(caCert, now(), renewWindow) {
-		caCert, caKey, caPEM, err = generateCA(dir, now())
+
+	dnsNames, ips := sansFor(hostname)
+	permittedDNS, permittedIPs := caConstraints(dnsNames, ips)
+
+	replaced := caReplacementReason(caCert, permittedDNS, permittedIPs, now())
+	if caCert == nil || replaced != "" {
+		caCert, caKey, caPEM, err = generateCA(dir, dnsNames[0], permittedDNS, permittedIPs, now())
 		if err != nil {
 			return nil, err
 		}
 	}
-
-	dnsNames, ips := sansFor(hostname)
 
 	leafPair, leaf, err := loadLeaf(dir)
 	if err != nil {
@@ -96,7 +105,104 @@ func ensureSelfSigned(dir, hostname string, now func() time.Time) (*material, er
 		}
 	}
 
-	return &material{pair: leafPair, leaf: leaf, caCert: caCert, caPEM: caPEM}, nil
+	return &material{pair: leafPair, leaf: leaf, caCert: caCert, caPEM: caPEM, caReplaced: replaced}, nil
+}
+
+// caReplacementReason says why the CA on disk must be replaced, or "" when it
+// can stay. A missing CA is not a replacement: minting the first one asks
+// nobody to re-trust anything.
+//
+// THE CA IS LIMITED TO THE NAMES THIS BOX IS REACHED BY. It goes into the
+// system trust store of the operator's own laptop, and its key sits in
+// dataDir on an internet-facing server -- readable by anyone with a shell
+// there (expert mode is shell-equivalent), in every backup, on a stolen disk.
+// An unconstrained CA turns any of those into a certificate for the
+// operator's bank that their browser accepts. Name constraints, marked
+// critical, cap what that key can ever vouch for at this box.
+//
+// The price is that the CA follows tls.hostname: a CA constrained to the old
+// name cannot sign for the new one, so changing the hostname mints a new CA
+// that clients must trust again. That trade is deliberate. The alternative --
+// one CA wide enough for any future name -- is the unconstrained CA again.
+func caReplacementReason(ca *x509.Certificate, permittedDNS []string, permittedIPs []*net.IPNet, now time.Time) string {
+	switch {
+	case ca == nil:
+		return ""
+	case expiringBy(ca, now, renewWindow):
+		return "the previous local CA was about to expire"
+	case len(ca.PermittedDNSDomains) == 0 && len(ca.PermittedIPRanges) == 0:
+		// Every CA a release before name constraints minted. Kept, it would
+		// go on being able to sign for any site for the rest of its ten years.
+		return "the previous local CA had no name constraints and could vouch for any site"
+	case !constraintsMatch(ca, permittedDNS, permittedIPs):
+		return "tls.hostname changed and the previous local CA was limited to the old name"
+	}
+	return ""
+}
+
+// caConstraints turns the leaf's SAN set into the CA's permitted subtrees.
+//
+// Lower-cased, because DNS names are case-insensitive and a CA replaced over
+// a retyped capital letter would be a re-trust for nothing. Each address is
+// a single-host range: the CA may vouch for exactly the addresses the leaf
+// carries, not their neighbours.
+func caConstraints(dnsNames []string, ips []net.IP) ([]string, []*net.IPNet) {
+	dns := make([]string, 0, len(dnsNames))
+	for _, n := range dnsNames {
+		dns = append(dns, strings.ToLower(n))
+	}
+	nets := make([]*net.IPNet, 0, len(ips))
+	for _, ip := range ips {
+		if v4 := ip.To4(); v4 != nil {
+			nets = append(nets, &net.IPNet{IP: v4, Mask: net.CIDRMask(32, 32)})
+			continue
+		}
+		nets = append(nets, &net.IPNet{IP: ip.To16(), Mask: net.CIDRMask(128, 128)})
+	}
+	return dns, nets
+}
+
+// constraintsMatch reports whether ca carries exactly these constraints,
+// critically. Exactly, not "at least": a CA still permitted to sign for a
+// hostname the operator has since abandoned is wider than this box needs.
+func constraintsMatch(ca *x509.Certificate, permittedDNS []string, permittedIPs []*net.IPNet) bool {
+	if !ca.PermittedDNSDomainsCritical {
+		return false
+	}
+	return sameSet(lowered(ca.PermittedDNSDomains), permittedDNS) &&
+		sameSet(cidrs(ca.PermittedIPRanges), cidrs(permittedIPs))
+}
+
+func lowered(in []string) []string {
+	out := make([]string, len(in))
+	for i, s := range in {
+		out[i] = strings.ToLower(s)
+	}
+	return out
+}
+
+func cidrs(in []*net.IPNet) []string {
+	out := make([]string, len(in))
+	for i, n := range in {
+		out[i] = n.String()
+	}
+	return out
+}
+
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	have := make(map[string]bool, len(a))
+	for _, s := range a {
+		have[s] = true
+	}
+	for _, s := range b {
+		if !have[s] {
+			return false
+		}
+	}
+	return true
 }
 
 // needsNewLeaf covers the three ways a persisted leaf stops being usable:
@@ -234,7 +340,7 @@ func loadLeaf(dir string) (tls.Certificate, *x509.Certificate, error) {
 	return pair, leaf, nil
 }
 
-func generateCA(dir string, now time.Time) (*x509.Certificate, *ecdsa.PrivateKey, []byte, error) {
+func generateCA(dir, primaryName string, permittedDNS []string, permittedIPs []*net.IPNet, now time.Time) (*x509.Certificate, *ecdsa.PrivateKey, []byte, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("tlsx: cannot generate a CA key: %w", err)
@@ -246,7 +352,10 @@ func generateCA(dir string, now time.Time) (*x509.Certificate, *ecdsa.PrivateKey
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			CommonName:   "polyemesis local CA",
+			// The name it serves is in the subject so that, in a keychain
+			// holding this CA and the one it replaced, the operator can tell
+			// which is which and remove the right one.
+			CommonName:   "polyemesis local CA (" + primaryName + ")",
 			Organization: []string{"polyemesis"},
 		},
 		// Backdate slightly so a client whose clock runs behind ours does not
@@ -258,6 +367,12 @@ func generateCA(dir string, now time.Time) (*x509.Certificate, *ecdsa.PrivateKey
 		IsCA:                  true,
 		MaxPathLen:            0,
 		MaxPathLenZero:        true,
+		// See caReplacementReason. Critical: a client that does not
+		// understand name constraints must refuse this CA rather than
+		// silently trust it for everything.
+		PermittedDNSDomainsCritical: true,
+		PermittedDNSDomains:         permittedDNS,
+		PermittedIPRanges:           permittedIPs,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {

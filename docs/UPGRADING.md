@@ -221,6 +221,56 @@ instead.
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading past 0.10.0 (unreleased, on `main`): the self-signed CA is replaced once
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`. It becomes that release's note when it is cut.
+> Only installs whose TLS mode resolves to **selfsigned** are affected; acme,
+> manual and off are untouched.
+
+**What changed.** The local CA polyemesis generates now carries critical name
+constraints: it can sign only for `tls.hostname`, `localhost`, `127.0.0.1`
+and `::1`. The CA every earlier release generated has none, so its key —
+which sits in `<dataDir>/tls/ca.key` on the server — can sign a certificate
+for any website, and every laptop and phone you installed the CA on would
+accept it.
+
+**What the upgrade does, automatically, on its first start.** It replaces the
+unconstrained CA rather than keeping it. Keeping it and warning was the
+alternative, and it was rejected: the risk *is* the old key, and leaving it on
+disk for the rest of its ten-year life leaves the risk exactly where it was.
+The old `ca.key` is overwritten, a new `ca.crt` and leaf are issued, and the
+start logs, once:
+
+```
+level=WARN msg="tls: the local CA was replaced; ..." reason="the previous local CA had no name constraints and could vouch for any site" ca=/var/lib/polyemesis/tls/ca.crt caSHA256=...
+```
+
+**What you have to do.** Every browser, phone, keychain and Prometheus that
+trusted the old CA shows a certificate warning until you:
+
+1. **Remove the old CA** from each trust store. It is the one named
+   `polyemesis local CA` with nothing after it; the new one is named
+   `polyemesis local CA (<your hostname>)`. Removing it is the half that
+   matters for security — an old CA left installed keeps vouching for anything
+   its key signs, and that key may still be in a backup.
+2. **Install the new one** exactly as the first time, checking its fingerprint
+   against the `caSHA256` in that log line — see
+   [Trusting the self-signed CA](TLS.md#trusting-the-self-signed-ca).
+
+Also delete `tls/ca.key` from any backup taken before this upgrade, or treat
+those backups as holding a key that can impersonate any site to the machines
+that still trust the old CA.
+
+**From now on, changing `tls.hostname` also replaces the CA**, with the same
+warning, because a CA limited to the old name cannot sign for the new one.
+Before, only the leaf was reissued. Set `tls.hostname` explicitly — in a
+container especially, where the fallback system hostname is the container ID
+and changes on every recreate.
+
+**Rolling back** to a release before this one keeps working: it loads the new
+CA as it would any other.
+
 ### Upgrading past 0.10.0 (unreleased, on `main`): sources with no ingest mode become SRT
 
 > Not yet in a tag — this note is here ahead of the release that carries it,
@@ -528,6 +578,27 @@ migrated, and the older binary will not understand it.
 `polyemesis.db` is the mistake this section exists to prevent: from 0.7.0 the
 database alone is not enough to publish, and the failure is silent until you go
 live. See [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back).
+
+**The in-app rollback (`POST /api/v1/upgrade/rollback`) swaps the binary and
+nothing else.** It does not restore the database or `secret.key`, so it is
+safe only when the binary it puts back reads the data as it now stands. Two
+cases are not, and it **refuses** both:
+
+- The database is on a schema the previous binary would not open. That binary
+  would refuse to start on it. The staged binary is recorded with the schema
+  it opens (`<binary>.previous.schema`), and the rollback is refused once the
+  database is newer.
+- The rollback point has no such record, because the release that staged it
+  predates the record. It may be 0.6.x or older, which opens the same schema
+  but cannot read the stream keys 0.7.0 sealed: it would start, then fail every
+  publish. Nothing on disk tells it from a 0.7.x binary, so it is refused. This
+  happens once, on the first upgrade out of a release without the record.
+
+Either way `GET /api/v1/upgrade/plan` reports `rollbackAvailable: false` with
+the reason in `rollbackBlocked`, and the endpoint answers `409`. Roll back with
+the four steps above. Either way, take and verify a
+backup before the first start of a new release: it is the only rollback that
+covers the database.
 
 ## Verifying an upgrade
 

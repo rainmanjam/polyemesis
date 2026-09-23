@@ -237,11 +237,10 @@ func run(h *hooks) error {
 	// mistake, and the operator should hear about it in the same breath as a
 	// missing ffmpeg rather than after the engine has started.
 	h.progress("preparing tls")
-	provider, err := newTLSProvider(cfg)
+	provider, err := newTLSProvider(log, cfg)
 	if err != nil {
 		return err
 	}
-	log.Info("tls", "mode", provider.Mode(), "hostname", cfg.TLS.Hostname)
 
 	// BEFORE the database, which is a move rather than an addition: this used
 	// to sit below, because the only things that needed it were the OAuth
@@ -520,7 +519,23 @@ func run(h *hooks) error {
 // newTLSProvider turns the config into a certificate provider. Resolution is
 // delegated to the config package so the listener, the banner and the API all
 // describe the same decision instead of each re-deriving it.
-func newTLSProvider(cfg config.Config) (*tlsx.Provider, error) {
+//
+// It also says what it decided, and -- the part that matters -- whether it
+// replaced the local CA. That warning lives here rather than beside the call
+// in run() so that there is no way to get a provider without it: it used to
+// be a separate line in run(), and deleting that line left every test green
+// while the one message UPGRADING.md promises an operator went silent.
+func newTLSProvider(log *slog.Logger, cfg config.Config) (*tlsx.Provider, error) {
+	provider, err := buildTLSProvider(cfg)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("tls", "mode", provider.Mode(), "hostname", cfg.TLS.Hostname)
+	warnIfCAReplaced(log, provider, cfg.SelfSignedCACertPath())
+	return provider, nil
+}
+
+func buildTLSProvider(cfg config.Config) (*tlsx.Provider, error) {
 	mode := cfg.ResolvedTLSMode()
 	opts := tlsx.Options{
 		Mode:      tlsx.Mode(mode),
@@ -540,6 +555,25 @@ func newTLSProvider(cfg config.Config) (*tlsx.Provider, error) {
 		opts.Hostname = host
 	}
 	return tlsx.New(opts)
+}
+
+// warnIfCAReplaced tells the operator that the local CA their clients trust
+// was just replaced, and what to do about it.
+//
+// A WARN rather than an Info because what follows is every browser, phone and
+// Prometheus that trusted the old CA refusing this box until someone acts,
+// and the log is the one place the operator is certain to look when that
+// starts. It names both halves of the fix: trust the new CA, and REMOVE the
+// old one -- an unconstrained CA left in a trust store keeps vouching for
+// anything its key signs, and that key may be in a backup somewhere.
+func warnIfCAReplaced(log *slog.Logger, provider *tlsx.Provider, caPath string) {
+	reason := provider.CAReplaced()
+	if reason == "" {
+		return
+	}
+	log.Warn("tls: the local CA was replaced; every client that trusted the old one will now see a certificate warning. "+
+		"Remove the old \"polyemesis local CA\" from each trust store and install the new one (see TLS.md, Trusting the self-signed CA)",
+		"reason", reason, "ca", caPath, "caSHA256", provider.CAFingerprint())
 }
 
 // startHTTPHelper brings up the plain-HTTP companion on :80 — the ACME HTTP-01

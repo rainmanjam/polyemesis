@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -59,8 +60,13 @@ type Plan struct {
 	// BinaryPath is what would be replaced. Empty when Automatic is false.
 	BinaryPath string `json:"binaryPath,omitempty"`
 	// RollbackAvailable reports that a previous binary is staged and could be
-	// restored. See PreviousPath.
+	// restored. See PreviousPath. False, with RollbackBlocked saying why, when
+	// one is staged but would refuse the database as it now stands, or has
+	// no record of which database it opens (see errNoSchemaRecord).
 	RollbackAvailable bool `json:"rollbackAvailable"`
+	// RollbackBlocked explains why a staged previous binary cannot be rolled
+	// back to. Empty when there is none, or when it can. See RollbackRefusal.
+	RollbackBlocked string `json:"rollbackBlocked,omitempty"`
 	// Reason explains a refusal that is not about being on air -- an unwritable
 	// binary directory, an unidentifiable install. Empty when the plan is
 	// actionable.
@@ -184,6 +190,83 @@ func supervisedByAUnit(env func(string) string, exists func(string) bool) bool {
 // after a restart that went badly.
 func PreviousPath(binary string) string { return binary + ".previous" }
 
+// PreviousSchemaPath records the newest database schema the binary at
+// PreviousPath opens. See Schema.
+func PreviousSchemaPath(binary string) string { return PreviousPath(binary) + ".schema" }
+
+// Schema is what a binary swap has to know about the database, because a
+// rollback swaps binaries and nothing else.
+//
+// THE FAILURE IT EXISTS FOR. A release that bumps the schema migrates the
+// database on its first start. The binary before it then refuses that
+// database at boot (internal/db refuseNewerSchema), so rolling back to it --
+// the button pressed when something has already gone wrong -- would leave a
+// service that does not start at all. The rollback point is therefore
+// recorded with the schema it understands, and a rollback to a binary that
+// would refuse the live database is refused before anything moves.
+//
+// NAMED FIELDS, because both are ints and swapping them compiles.
+type Schema struct {
+	// Live is the database's schema version now (PRAGMA user_version).
+	Live int
+	// Understood is the newest schema the RUNNING binary opens
+	// (db.SchemaVersion). The running binary is always the one that becomes
+	// .previous -- on a stage and on a rollback alike -- so this is what is
+	// recorded beside it.
+	Understood int
+}
+
+// errNoSchemaRecord is a rollback point with no record of the schema its
+// binary opens: one staged by a release before the record existed.
+//
+// REFUSED, NOT GUESSED. Every such release opened schema 1, so "1" looks like
+// a safe assumption, and for the schema check alone it is. It is not safe for
+// the rollback: 0.6.x had the in-app rollback and no record, and a 0.6.x
+// binary opens a 0.7+ database -- same schema version -- but cannot read the
+// stream keys 0.7.0 sealed with secret.key, so it starts and then fails every
+// publish. Nothing on disk tells a 0.6.x rollback point from a 0.7.x one, so
+// the only answer that is never wrong is to send the operator to the backup.
+// The cost is one refused rollback, on the first upgrade out of a release
+// without the record; every point staged after that carries one.
+var errNoSchemaRecord = errors.New("no schema record")
+
+// RollbackRefusal says why the binary at PreviousPath(binary) must not be
+// rolled back to with the database at live, or "" when it can. binary is the
+// resolved path.
+func RollbackRefusal(binary string, live int) string {
+	understood, err := previousSchema(binary)
+	if errors.Is(err, errNoSchemaRecord) {
+		return "the previous binary was set aside by a release that did not record which database it opens; " +
+			"if it is 0.6.x or older it cannot read the stream keys 0.7.0 sealed and would fail every publish. " +
+			"Restore the backup taken before the upgrade instead (docs/UPGRADING.md, Rolling back)"
+	}
+	if err != nil {
+		return fmt.Sprintf("cannot tell which database schema the previous binary opens (%v); "+
+			"restore the backup taken before the upgrade instead", err)
+	}
+	if understood < live {
+		return fmt.Sprintf("the previous binary opens database schema %d at most, and the database is now at %d: "+
+			"it would refuse to start. Restore the backup taken before the upgrade instead "+
+			"(docs/UPGRADING.md, Rolling back)", understood, live)
+	}
+	return ""
+}
+
+func previousSchema(binary string) (int, error) {
+	b, err := os.ReadFile(PreviousSchemaPath(binary))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, errNoSchemaRecord
+	}
+	if err != nil {
+		return 0, err
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		return 0, fmt.Errorf("%s is not a schema version: %w", PreviousSchemaPath(binary), err)
+	}
+	return v, nil
+}
+
 // RescuedPath is where a binary ends up when it could not be filed as the
 // rollback point but must not be thrown away. See install.
 //
@@ -298,6 +381,9 @@ type Versions struct {
 	// Variant is the image this container runs (see DetectVariant). Only a
 	// container plan reads it; the tag it names carries its suffix.
 	Variant Variant
+	// LiveSchema is the database's schema version now. The rollback point is
+	// offered only when its binary opens it; see RollbackRefusal.
+	LiveSchema int
 }
 
 // PlanFor builds the plan for this box.
@@ -310,7 +396,8 @@ func PlanFor(m Method, binary string, v Versions) Plan {
 	p := Plan{Method: m}
 	// Beside the RESOLVED binary, because that is where Stage put it.
 	if _, err := os.Stat(PreviousPath(resolve(binary))); err == nil {
-		p.RollbackAvailable = true
+		p.RollbackBlocked = RollbackRefusal(resolve(binary), v.LiveSchema)
+		p.RollbackAvailable = p.RollbackBlocked == ""
 	}
 	version := v.Offered
 
@@ -431,6 +518,11 @@ func writable(dir string) error {
 // is a network blip and the other is not.
 var ErrChecksumMismatch = errors.New("checksum does not match the published SHA256SUMS")
 
+// ErrRollbackRefused is returned when the previous binary would refuse the
+// live database. Its own error so a caller can answer 409 -- a refusal the
+// operator can act on -- rather than 500.
+var ErrRollbackRefused = errors.New("rollback refused")
+
 // Verify checks a staged file against an expected hex sha256.
 //
 // MANDATORY, not optional, and it is why this package takes a checksum rather
@@ -488,7 +580,7 @@ func ChecksumFor(sums, artefact string) (string, error) {
 //
 // Does not restart anything. The caller decides when, having asked whether
 // anything is on air.
-func Stage(binary, staged, wantHex string) error {
+func Stage(binary, staged, wantHex string, schema Schema) error {
 	if strings.TrimSpace(wantHex) == "" {
 		return errors.New("no expected checksum was supplied; refusing to install an unverified binary")
 	}
@@ -547,7 +639,7 @@ func Stage(binary, staged, wantHex string) error {
 	if err := setModeDurably(incoming, mode); err != nil {
 		return err
 	}
-	installed, err = install(binary, incoming, dir)
+	installed, err = install(binary, incoming, dir, schema.Understood)
 	return err
 }
 
@@ -574,7 +666,12 @@ func Stage(binary, staged, wantHex string) error {
 // .previous still pointing at the version before the last one. The rollback
 // target is one release stale; nothing on disk is broken. That is the worst
 // state this function can be interrupted into, and it is an acceptable one.
-func install(binary, incoming, dir string) (bool, error) {
+//
+// The schema record beside .previous (see Schema) is removed BEFORE .previous
+// changes and rewritten AFTER, so no interruption can leave a record that
+// describes a different binary. A missing record refuses the rollback (see
+// errNoSchemaRecord), so every interruption errs towards the backup.
+func install(binary, incoming, dir string, understood int) (bool, error) {
 	// 0o700: only the LIVE binary needs to be executable by whoever runs the
 	// service. A backup beside it is read by exactly one thing -- a rollback,
 	// running as the same user -- so group and world access on it buys nothing
@@ -597,6 +694,11 @@ func install(binary, incoming, dir string) (bool, error) {
 	// Past this point the upgrade has happened and must be reported as such,
 	// even if keeping the rollback point fails: the caller has to know the live
 	// binary changed.
+	//
+	// The old record goes first; failing to remove it is not fatal, because
+	// the binary it describes is older than the one about to replace it and
+	// so understands no more -- a stale record can only understate.
+	os.Remove(PreviousSchemaPath(binary))
 	if err := os.Rename(backup, PreviousPath(binary)); err != nil {
 		// THE BACKUP IS NOT DELETED HERE, and that is deliberate. It is now the
 		// only copy of the version that was running a moment ago -- deleting it
@@ -618,7 +720,38 @@ func install(binary, incoming, dir string) (bool, error) {
 			"written: the previous version is at %s, move it to %s to restore it: %w",
 			kept, PreviousPath(binary), err)
 	}
+	if err := writeSchemaRecord(binary, dir, understood); err != nil {
+		return true, fmt.Errorf("the new binary is installed and the previous one kept at %s, but which "+
+			"database schema it opens could not be recorded, so the in-app rollback will refuse it: %w",
+			PreviousPath(binary), err)
+	}
 	return true, syncDir(dir)
+}
+
+// writeSchemaRecord writes PreviousSchemaPath atomically: a temp file in the
+// same directory, synced, renamed over. A half-written record would parse as
+// garbage, and RollbackRefusal refuses on garbage -- safe, but a refusal of a
+// rollback that should have worked.
+func writeSchemaRecord(binary, dir string, understood int) error {
+	f, err := os.CreateTemp(dir, backupPrefix+"*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	_, werr := fmt.Fprintf(f, "%d\n", understood)
+	if werr == nil {
+		werr = f.Sync()
+	}
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Rename(name, PreviousSchemaPath(binary))
+	}
+	if werr != nil {
+		os.Remove(name)
+	}
+	return werr
 }
 
 const (
@@ -759,7 +892,11 @@ func syncDir(dir string) error {
 //
 // The CURRENT binary becomes the new .previous, so a rollback taken by mistake
 // can be undone by a second rollback. Nobody should need the release page at 3am.
-func Rollback(binary string) error {
+//
+// Refused, before anything moves, when the previous binary would not open the
+// database as it now stands: see Schema. Checked here and not only in the
+// plan, because the plan is advice and this is the operation.
+func Rollback(binary string, schema Schema) error {
 	binary = resolve(binary)
 	// Read before anything moves: afterwards the live path holds the file that
 	// was being kept owner-only, and its mode is not the one to restore.
@@ -770,6 +907,9 @@ func Rollback(binary string) error {
 	prev := PreviousPath(binary)
 	if _, err := os.Stat(prev); err != nil {
 		return errors.New("there is no previous binary to roll back to")
+	}
+	if why := RollbackRefusal(binary, schema.Live); why != "" {
+		return fmt.Errorf("%w: %s", ErrRollbackRefused, why)
 	}
 	dir := filepath.Dir(binary)
 	sweepStaleTemps(dir)
@@ -794,7 +934,7 @@ func Rollback(binary string) error {
 	if err := setModeDurably(incoming, mode); err != nil {
 		return err
 	}
-	installed, err = install(binary, incoming, dir)
+	installed, err = install(binary, incoming, dir, schema.Understood)
 	return err
 }
 

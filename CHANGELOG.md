@@ -34,6 +34,17 @@ its first tagged release.
   starts only when the old supervisor has finished, so the destination shows
   Stopped for that short gap. A Stop in the gap still cancels the restart.
 
+- **The in-app rollback refuses a binary that would not start on the
+  database.** It swaps binaries only, so after a release that raises the
+  schema version it would have put back a binary that refuses the migrated
+  database at boot: a bad upgrade turned into a service that does not start.
+  Staging now records, beside `<binary>.previous`, the schema the outgoing
+  binary opens; the upgrade plan reports `rollbackAvailable: false` with the
+  reason in `rollbackBlocked`, and `POST /api/v1/upgrade/rollback` answers
+  `409` and moves nothing. A rollback point staged by an earlier release has
+  no such record and is refused too: a 0.6.x binary opens the same schema but
+  cannot read the stream keys 0.7.0 sealed, and nothing tells it from a 0.7.x
+  one. Roll back through the backup instead, as `docs/UPGRADING.md` describes.
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer
   tracks was tested with a 5 s gap. In the field, with a 30 s outage, track 2
@@ -494,6 +505,15 @@ its first tagged release.
 
 ### Security
 
+- **The self-signed local CA can now vouch only for this server.** It carried
+  no name constraints, so anyone who read `<dataDir>/tls/ca.key` -- a shell
+  through expert mode, a backup, a stolen disk -- could mint a certificate for
+  any site that every client trusting the CA would accept. The CA is now
+  limited, by critical name constraints, to `tls.hostname`, `localhost` and
+  the loopback addresses. **An existing CA is replaced on the first start**,
+  and so is the CA whenever `tls.hostname` changes; the start logs a `WARN`
+  naming the new CA's file and fingerprint. Remove the old CA from every trust
+  store and install the new one: see `docs/UPGRADING.md`.
 - **Upgrading from 0.6.x no longer leaves plaintext stream keys in
   `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
   and every release before 0.7.0 ran without it: a real 0.6.0 install with five

@@ -105,6 +105,9 @@ type Provider struct {
 	// it for download and show the fingerprint the user is trusting.
 	caPEM  []byte
 	caCert *x509.Certificate
+	// caReplaced is why this start threw away a CA clients may already trust.
+	// See CAReplaced.
+	caReplaced string
 
 	acme *autocert.Manager
 
@@ -191,6 +194,7 @@ func (p *Provider) initSelfSigned(opts Options) error {
 	p.leaf = mat.leaf
 	p.caCert = mat.caCert
 	p.caPEM = mat.caPEM
+	p.caReplaced = mat.caReplaced
 	return nil
 }
 
@@ -299,6 +303,14 @@ func (p *Provider) CAFingerprint() string {
 	}
 	return fingerprint(p.caCert.Raw)
 }
+
+// CAReplaced says why this start replaced a local CA that already existed --
+// it was expiring, it predates name constraints, or tls.hostname moved off the
+// names it was limited to -- and is empty otherwise, including on the first
+// start and in every mode but selfsigned. Non-empty means every client that
+// trusted the old CA now sees a certificate warning until it trusts the new
+// one, so the caller must tell the operator.
+func (p *Provider) CAReplaced() string { return p.caReplaced }
 
 // CertInfo describes the certificate currently being served.
 func (p *Provider) CertInfo() (CertInfo, error) {
