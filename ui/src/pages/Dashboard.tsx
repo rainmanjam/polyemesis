@@ -731,10 +731,7 @@ function BulkDestinationControl({
       {/* Starts are paced on the server, so the button stays busy for a while
           on a long list. Saying why turns a stuck-looking dashboard into one
           that is visibly working. */}
-      <p className="text-micro text-muted-foreground">
-        Starts are spread out rather than fired together, so a long list takes a
-        while and the outcomes below arrive all at once at the end.
-      </p>
+      <p className="text-micro text-muted-foreground">{t("dash.bulkPacingNote")}</p>
 
       {/* ---------- what each destination did ---------- */}
       <div aria-live="polite" className="flex flex-col gap-1.5">
@@ -1573,9 +1570,7 @@ export function Dashboard() {
 
               {system && !system.ffmpeg.hasLibsrt && (
                 <div className="rounded border border-warn/30 bg-warn-dim px-2 py-1 text-micro text-warn">
-                  This FFmpeg build has no SRT support, so multi-track SRT ingest will not work.
-                  Install a build with <code className="font-mono">--enable-libsrt</code>, or switch
-                  the ingest to RTMP in Settings.
+                  {t("dash.noLibsrt", { flag: "--enable-libsrt" })}
                 </div>
               )}
             </CardContent>

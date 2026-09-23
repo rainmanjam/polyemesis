@@ -206,12 +206,8 @@ export function MediaUploads() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Media</CardTitle>
-        <CardDescription>
-          Upload a file to broadcast from it on a schedule, with no encoder
-          attached. Copy its pull URL into the source's ingest — <em>Settings → Ingest →
-          Pull</em> for the default source.
-        </CardDescription>
+        <CardTitle>{t("media.title")}</CardTitle>
+        <CardDescription>{t("media.desc")}</CardDescription>
       </CardHeader>
 
       <CardContent className="grid gap-3">

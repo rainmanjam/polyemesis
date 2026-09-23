@@ -48,8 +48,9 @@ import type {
    AutomodConfig — the card that finally lets an operator write the rule and
    configure the model these cells hand permission to — names the same six
    actions, and a second copy of the vocabulary is precisely how the collapsed
-   line and the cells came to disagree. The English text is untouched: these
-   strings are accessible names the behaviour suite matches on. */
+   line and the cells came to disagree. Every visible string on this card is a
+   catalogue key; the English values are unchanged, because they are the
+   accessible names the behaviour suite matches on. */
 
 /** Actions with no undo. They get a warning when armed, because the poka-yoke
  *  rule this project holds is that friction should be proportional to
@@ -130,8 +131,8 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Automatic moderation</CardTitle>
-          <CardDescription>{error || "Loading…"}</CardDescription>
+          <CardTitle>{t("automod.matrixTitle")}</CardTitle>
+          <CardDescription>{error || t("common.loading")}</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -186,11 +187,8 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Automatic moderation</CardTitle>
-        <CardDescription>
-          What each checker may do, on each platform, without asking. Everything
-          starts off except flagging — nothing here acts until you switch it on.
-        </CardDescription>
+        <CardTitle>{t("automod.matrixTitle")}</CardTitle>
+        <CardDescription>{t("automod.matrixDesc")}</CardDescription>
       </CardHeader>
 
       <CardContent className="grid gap-4">
@@ -205,11 +203,10 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
           <div>
             <Label htmlFor="automod-enabled" className="flex items-center gap-2">
               <Power className="size-4" aria-hidden />
-              Automatic moderation
+              {t("automod.matrixTitle")}
             </Label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Off stops every automatic action everywhere, whatever the cells
-              below say. Messages are still flagged for review.
+              {t("automod.killSwitchNote")}
             </p>
           </div>
           <Switch
@@ -224,11 +221,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
         {anyIrreversibleArmed && (
           <div className="flex items-start gap-2 rounded-md border border-warn/40 bg-warn/10 p-2 text-xs">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warn" aria-hidden />
-            <span>
-              An irreversible action is armed. Deleting a message and banning a
-              viewer cannot be undone by polyemesis — a ban needs a human to
-              lift it, and a deleted message is gone from the platform.
-            </span>
+            <span>{t("automod.irreversibleArmed")}</span>
           </div>
         )}
 
@@ -274,8 +267,10 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                   <span className="font-medium capitalize">{platform}</span>
                   <span className="text-xs text-muted-foreground">
                     {armed === 0
-                      ? "nothing automatic"
-                      : `${armed} automatic action${armed === 1 ? "" : "s"}`}
+                      ? t("automod.nothingAutomatic")
+                      : armed === 1
+                        ? t("automod.armedOne")
+                        : t("automod.armedMany", { count: armed })}
                   </span>
                 </button>
 
@@ -287,7 +282,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                     htmlFor={`automod-${platform}`}
                     className="text-xs text-muted-foreground"
                   >
-                    {platformOn ? "Active" : "Paused"}
+                    {platformOn ? t("automod.platformActive") : t("automod.platformPaused")}
                   </Label>
                   <Switch
                     id={`automod-${platform}`}
@@ -302,7 +297,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                   <table className="w-full text-xs">
                     <thead>
                       <tr>
-                        <th className="pb-2 text-left font-medium">Action</th>
+                        <th className="pb-2 text-left font-medium">{t("automod.colAction")}</th>
                         {view.checkers.map((c) => {
                           const ready = readiness.get(c);
                           return (
@@ -323,7 +318,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                 className="mt-0.5 text-[10px] font-normal text-muted-foreground underline"
                                 onClick={() => setColumn(platform, c, false)}
                               >
-                                clear
+                                {t("automod.clearColumn")}
                               </button>
                             </th>
                           );
@@ -339,9 +334,9 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                               {IRREVERSIBLE.includes(action) && (
                                 <span
                                   className="rounded bg-warn/15 px-1 text-[10px] text-warn"
-                                  title="This cannot be undone by polyemesis"
+                                  title={t("automod.noUndoTitle")}
                                 >
-                                  no undo
+                                  {t("automod.noUndo")}
                                 </span>
                               )}
                             </div>
@@ -353,11 +348,11 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                 className="text-[10px] text-muted-foreground underline"
                                 onClick={() => setRow(platform, action, false)}
                               >
-                                clear row
+                                {t("automod.clearRow")}
                               </button>
                             ) : (
                               <div className="text-[10px] text-muted-foreground">
-                                recorded for review, never acted on
+                                {t("automod.flagRecordedOnly")}
                               </div>
                             )}
                           </td>
@@ -393,9 +388,9 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                      disagreeing about what "armed" means. */
                                   <span
                                     className="cursor-help text-[10px] text-muted-foreground"
-                                    title="Every checker's findings are recorded before this matrix is consulted, and recording is all flagging does. There is nothing here to switch."
+                                    title={t("automod.alwaysOnTitle")}
                                   >
-                                    always on
+                                    {t("automod.alwaysOn")}
                                   </span>
                                 ) : available && ready && !ready.ready ? (
                                   /* INERT WITH THE REASON, exactly as an
@@ -433,7 +428,11 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                   <Switch
                                     checked={Boolean(automod.on?.[key])}
                                     onCheckedChange={(v) => setCell(key, v)}
-                                    aria-label={`${t(CHECKER_KEYS[checker])} may ${t(ACTION_KEYS[action])} on ${platform}`}
+                                    aria-label={t("automod.cellLabel", {
+                                      checker: t(CHECKER_KEYS[checker]),
+                                      action: t(ACTION_KEYS[action]),
+                                      platform,
+                                    })}
                                   />
                                 ) : (
                                   /* Inert WITH a reason, never an unticked box.
@@ -442,9 +441,9 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                      protected. */
                                   <span
                                     className="cursor-help text-[10px] text-muted-foreground"
-                                    title={cell?.reason ?? "not supported here"}
+                                    title={cell?.reason ?? t("automod.notSupportedHere")}
                                   >
-                                    n/a
+                                    {t("automod.notApplicable")}
                                   </span>
                                 )}
                               </td>

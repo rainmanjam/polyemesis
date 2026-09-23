@@ -235,8 +235,7 @@ export function MetersPage() {
           <CardContent className="flex items-start gap-2 py-3">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
             <div className="text-[11px] text-muted-foreground">
-              No stream is arriving. Point your encoder at the publish URL on the Sources page;
-              the track layout and meters appear automatically.
+              {t("meters.noStream")}
             </div>
           </CardContent>
         </Card>
@@ -293,9 +292,9 @@ export function MetersPage() {
             ))
           )}
           <p className="text-[10px] text-subtle-foreground">
-            Integrated loudness is the figure a platform normalizes against, and it needs about{" "}
-            {loudness?.bounds.minIntegrationSeconds ?? 20}s of programme before it means anything.
-            Until then the verdict is unknown rather than a pass.
+            {t("meters.integratedNote", {
+              seconds: loudness?.bounds.minIntegrationSeconds ?? 20,
+            })}
           </p>
         </CardContent>
       </Card>

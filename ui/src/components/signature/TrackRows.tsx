@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { AudioMeter } from "./AudioMeter";
 import { channelLabels } from "@/lib/channels";
 import { trackSignal, TRACK_SIGNAL_TEXT, type TrackSignal } from "@/lib/trackSignal";
+import { useT } from "@/lib/i18n";
 import { gainPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { trackChipTitle } from "@/lib/trackLabels";
@@ -101,6 +102,7 @@ export function TrackRows({
   duckTrigger = [],
   duckTarget = [],
 }: TrackRowsProps) {
+  const t = useT();
   const selFor = (index: number): TrackSel =>
     selection.find((s) => s.track === index) ?? { track: index, enabled: false, gain: 1 };
 
@@ -321,10 +323,7 @@ export function TrackRows({
       {!probed && (
         <div className="mt-1 flex items-start gap-1.5 text-[11px] text-muted-foreground">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-warn" />
-          <span>
-            No stream is arriving yet, so this shows the default six stereo tracks. The real
-            layout is detected automatically once the encoder connects.
-          </span>
+          <span>{t("meters.defaultTracksNote")}</span>
         </div>
       )}
     </div>

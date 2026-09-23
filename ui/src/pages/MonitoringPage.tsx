@@ -275,7 +275,7 @@ export function ExpertPanel() {
 
         {selected === "" ? (
           <div className="rounded border border-dashed border-border py-6 text-center text-tiny text-muted-foreground">
-            Choose a destination to edit its command line.
+            {t("mon.chooseDestinationToEdit")}
           </div>
         ) : (
           <>
@@ -625,7 +625,7 @@ export function MonitoringPage() {
               tone={(status?.relay.dropped ?? 0) > 0 ? "warn" : "muted"}
             />
             <div className="mt-1 text-micro text-muted-foreground">
-              sends to a consumer that had not bound its port yet
+              {t("mon.relayDropsNote")}
             </div>
           </CardContent>
         </Card>
@@ -810,7 +810,7 @@ export function MonitoringPage() {
             >
               {filtered.length === 0 ? (
                 <div className="py-6 text-center text-muted-foreground">
-                  No log lines yet. FFmpeg only writes when something is worth saying.
+                  {t("mon.noLogLines")}
                 </div>
               ) : (
                 filtered.map((l, i) => (

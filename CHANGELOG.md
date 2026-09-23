@@ -45,6 +45,17 @@ its first tagged release.
   itself once when that happens, to pick up the new version. If a page still
   fails, only that page is replaced by a notice with a Reload button; the
   navigation and every other page keep working.
+- **The automatic-moderation card and about thirty other sentences follow the
+  language setting.** A pass over every page in every locale found the whole
+  automod matrix card, and sentences on the dashboard, chat pane, routing,
+  meters, renditions, clips, playout, monitoring, automation and settings pages,
+  still in English whatever language was chosen -- four of them with a
+  translation already in all fifteen catalogues that the page never asked for.
+  They are catalogue keys now, translated in all fifteen languages, and a test
+  keeps them from drifting back to literals. Three stay English on purpose: the
+  meter rows' status words (a family keyed together or not at all), the
+  engine's own status sentence, and the model's default instruction, which is
+  a setting sent to the model verbatim.
 
 ## [0.10.0] — 2026-09-23
 

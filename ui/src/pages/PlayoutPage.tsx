@@ -232,11 +232,9 @@ export function PlayoutPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Eye className="h-3.5 w-3.5" />
-              Audience
+              {t("play.audienceTitle")}
             </CardTitle>
-            <CardDescription>
-              A viewer is counted while they keep pulling segments.
-            </CardDescription>
+            <CardDescription>{t("play.audienceDesc")}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -351,7 +349,7 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
     return (
       <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
         <Lock className="h-3.5 w-3.5 shrink-0" />
-        Playout is off. Nothing is being served to viewers.
+        {t("play.offBanner")}
       </div>
     );
   }
@@ -678,10 +676,7 @@ function ProtectionCard({
         <div className="flex items-start justify-between gap-3 rounded-md border border-border p-2.5">
           <div>
             <p className="text-sm font-medium">{t("play.public")}</p>
-            <p className="text-tiny text-muted-foreground">
-              Serve viewers who are not signed in. Off means administrators only,
-              whatever the protection setting says.
-            </p>
+            <p className="text-tiny text-muted-foreground">{t("play.publicNote")}</p>
           </div>
           <Switch
             checked={play.public}
@@ -694,11 +689,7 @@ function ProtectionCard({
         <div className="flex items-start justify-between gap-3 rounded-md border border-border p-2.5">
           <div>
             <p className="text-sm font-medium">{t("play.allowCrossOrigin")}</p>
-            <p className="text-tiny text-muted-foreground">
-              Lets a player embedded on another website fetch the media, and lets
-              this server's player page be framed. Not needed for same-site
-              embedding.
-            </p>
+            <p className="text-tiny text-muted-foreground">{t("play.crossOriginNote")}</p>
           </div>
           <Switch
             checked={play.allowCrossOrigin}

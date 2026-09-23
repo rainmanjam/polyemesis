@@ -514,9 +514,7 @@ function AlertRules({
             </div>
           ) : rules.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-              No alert rules. Add one with a Discord, Slack or plain JSON webhook URL and
-              polyemesis will tell you when a destination drops, the ingest goes away, or the disk
-              fills.
+              {t("auto.noRules")}
             </div>
           ) : (
             <Table>
