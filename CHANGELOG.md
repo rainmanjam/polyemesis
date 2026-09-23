@@ -468,6 +468,16 @@ its first tagged release.
   immediate reconnect after a blip: a new publisher is refused for three
   seconds (`srtserver.StaleAfter`) after the old one's last packet.
 
+- **A misspelled `config.yaml` key stops the server instead of being ignored.**
+  Only the `tls:` block refused unknown keys. Anywhere else, a typo was
+  dropped and its setting stayed at the default, with nothing logged: for
+  example `trustProxyhHeaders: true` (cookies lose `Secure` behind a proxy) or
+  `DataDir:` (the database goes to `./data`). The whole file is now decoded
+  strictly, nested blocks included, and the error names the key, its line and
+  the valid keys. The retired `enhancedRtmp` key is still accepted. A
+  `tls.hostname` with no `tls.mode` is also refused, because it meant plain
+  HTTP. See [docs/UPGRADING.md](docs/UPGRADING.md).
+
 ### Security
 
 - **Upgrading from 0.6.x no longer leaves plaintext stream keys in

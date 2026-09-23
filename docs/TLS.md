@@ -35,10 +35,17 @@ interface is the single biggest practical exposure this product has.
 
 **A key the `tls:` block does not know stops the server at startup**, naming
 the key and the line. Keys are case-sensitive, so `Mode:` is as wrong as
-`mdoe:`. The rest of `config.yaml` still ignores unknown keys, but here that
-leniency meant a misspelled `mode` fell back to `off` — plain HTTP, cookies
-without `Secure` — with nothing logged on a loopback bind. The valid keys are
-`mode`, `hostname`, `acmeEmail`, `certFile`, `keyFile`, `hsts` and `enabled`.
+`mdoe:`. The rest of `config.yaml` refuses unknown keys too (see
+[CONFIGURATION.md](CONFIGURATION.md)), but here the old leniency was worst: a
+misspelled `mode` fell back to `off` — plain HTTP, cookies without `Secure` —
+with nothing logged on a loopback bind. The valid keys are `mode`, `hostname`,
+`acmeEmail`, `certFile`, `keyFile`, `hsts` and `enabled`.
+
+**A `hostname` with no `mode` also stops the server.** A hostname is a name to
+put in a certificate, and an absent mode means `off`, so the two together used
+to start plain HTTP while the operator believed HTTPS was configured. Set a
+mode, or write `mode: "off"` explicitly when something in front terminates TLS
+— an explicit `off` beside a hostname is accepted.
 
 Whenever polyemesis is terminating TLS, the listener pins **TLS 1.2 as the
 floor** and prefers X25519, then P-256 and P-384. Go's server default already

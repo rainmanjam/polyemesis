@@ -172,11 +172,9 @@ func TestLoadKeepsLegacyCertPathsSoUpgradesServeTheSameCertificate(t *testing.T)
 // that made removing it safe rather than a breaking change for anyone holding a
 // config file that still names it.
 //
-// The field's own comment claimed it existed so such files would keep parsing.
-// They keep parsing regardless, because Load uses yaml.Unmarshal rather than a
-// decoder with KnownFields(true), and an unrecognised key is ignored. If that
-// ever changes -- someone tightens Load to reject unknown keys, which is a
-// defensible thing to want -- this test fails and names the upgrade that would
+// Load now decodes with KnownFields(true) and refuses an unknown key, so this
+// file keeps loading only because enhancedRtmp is listed as a RETIRED key on
+// onDisk. Drop that field and this test fails, naming the upgrade that would
 // otherwise break in the field rather than in CI.
 func TestOldConfigWithEnhancedRtmpStillParses(t *testing.T) {
 	cfg, err := Load(writeConfig(t, "addr: \":9001\"\nenhancedRtmp: true\ntrustProxyHeaders: true\n"))
@@ -647,7 +645,7 @@ func TestEachSourcePreviewsIntoItsOwnDirectory(t *testing.T) {
 
 // A MISSPELLED tls KEY USED TO MEAN PLAINTEXT, SILENTLY.
 //
-// Load ignores unknown keys, and inside the tls block that turns a typo into
+// Load used to ignore unknown keys, and inside the tls block that turned a typo into
 // the most dangerous outcome available: `mdoe: selfsigned` leaves mode absent,
 // normalizeTLS maps absent to off, and the server comes up on plain HTTP with
 // session cookies missing their Secure flag -- on a loopback bind without a
@@ -686,9 +684,8 @@ func TestAnUnknownTLSKeyRefusesToLoadRatherThanFallingBackToPlaintext(t *testing
 	}
 }
 
-// The strictness is the tls block's alone: every correctly spelled key still
-// loads, and an unknown TOP-LEVEL key (the retired enhancedRtmp, say) is still
-// ignored -- TestOldConfigWithEnhancedRtmpStillParses pins that separately.
+// Every correctly spelled tls key still loads. (The retired top-level
+// enhancedRtmp is pinned separately by TestOldConfigWithEnhancedRtmpStillParses.)
 func TestEveryKnownTLSKeyStillLoads(t *testing.T) {
 	cfg, err := Load(writeConfig(t, "tls:\n  mode: \"off\"\n  hostname: box.lan\n"+
 		"  acmeEmail: a@b.c\n  certFile: /c.pem\n  keyFile: /k.pem\n  hsts: true\n  enabled: true\n"))

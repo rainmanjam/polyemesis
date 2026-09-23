@@ -8,11 +8,15 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -47,18 +51,10 @@ type Config struct {
 }
 
 // An `enhancedRtmp` key used to live here as a declared-but-inert placeholder
-// for OBS 30.2+ multitrack FLV ingest, on the stated grounds that it had to
-// survive "so config files that already carry the key keep parsing".
-//
-// That reason was not true. Load uses yaml.Unmarshal, not a decoder with
-// KnownFields(true), so an unrecognised key is ignored rather than rejected --
-// pinned by TestOldConfigWithEnhancedRtmpStillParses. The field was therefore
-// buying nothing, while presenting a settable knob that did nothing, which is
-// the failure mode the settings drift guards exist to prevent.
-//
-// Enhanced RTMP is still not implemented and RTMP ingest is single-track either
-// way; SRT is the multitrack path. An old config carrying the key keeps
-// loading, and now it is ignored for the same reason any unknown key is.
+// for OBS 30.2+ multitrack FLV ingest. Enhanced RTMP is still not implemented
+// and RTMP ingest is single-track either way; SRT is the multitrack path. The
+// key is now a RETIRED key -- see onDisk -- so an old config that carries it
+// keeps loading while a key nobody ever defined stops the server.
 
 // Mode selects how the built-in HTTPS listener obtains its certificate.
 type Mode string
@@ -114,17 +110,17 @@ type TLS struct {
 
 // UnmarshalYAML decodes the tls block and REFUSES A KEY IT DOES NOT KNOW.
 //
-// The rest of config.yaml ignores unknown keys (see the enhancedRtmp note
-// above), and inside this block that leniency had the worst possible failure
-// mode. `mdoe: selfsigned` -- or `Mode:`, since yaml keys are case-sensitive --
-// leaves mode absent, normalizeTLS maps absent to off, and the server starts on
-// plain HTTP with session cookies missing their Secure flag. On a loopback bind
-// nothing was logged at all. A typo that silently turns TLS off is not one to
+// The whole file is decoded with KnownFields(true) now (see onDisk), but
+// this block keeps its own check for the sake of the message: inside it,
+// leniency had the worst possible failure mode. `mdoe: selfsigned` -- or
+// `Mode:`, since yaml keys are case-sensitive -- leaves mode absent,
+// normalizeTLS maps absent to off, and the server starts on plain HTTP with
+// session cookies missing their Secure flag. On a loopback bind nothing was
+// logged at all. A typo that silently turns TLS off is not one to
 // warn about; it is one to stop at, naming the key.
 //
-// Only this block, deliberately: every key it has ever had is still a field
-// below, so no existing file breaks. Tightening the top level would need an
-// allowlist of retired keys first.
+// Every key this block has ever had is still a field below, so it has no
+// retired keys of its own.
 func (t *TLS) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.MappingNode {
 		known := tlsKeys()
@@ -153,8 +149,10 @@ func (t *TLS) UnmarshalYAML(n *yaml.Node) error {
 
 // tlsKeyList is every yaml key TLS declares, read from its struct tags so a
 // field added later is accepted without anyone remembering to list it here.
-func tlsKeyList() []string {
-	rt := reflect.TypeOf(TLS{})
+func tlsKeyList() []string { return yamlKeyList(reflect.TypeOf(TLS{})) }
+
+// yamlKeyList is every yaml key a struct type declares, in field order.
+func yamlKeyList(rt reflect.Type) []string {
 	keys := make([]string, 0, rt.NumField())
 	for i := 0; i < rt.NumField(); i++ {
 		name, _, _ := strings.Cut(rt.Field(i).Tag.Get("yaml"), ",")
@@ -282,7 +280,10 @@ func load(path string, required bool) (Config, error) {
 	// applied AFTER the file is read, or "the file said nothing" and "the file
 	// said 127.0.0.1:8080" become the same state and AddrDefaulted lies.
 	cfg.Addr = ""
-	if err := yaml.Unmarshal(b, &cfg); err != nil {
+	if err := decodeStrict(b, &cfg); err != nil {
+		return cfg, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if err := cfg.TLS.checkHostnameWithoutMode(); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
 	cfg.AddrDefaulted = strings.TrimSpace(cfg.Addr) == ""
@@ -294,6 +295,93 @@ func load(path string, required bool) (Config, error) {
 	}
 	cfg.normalizeTLS()
 	return cfg, cfg.Validate()
+}
+
+// onDisk is what config.yaml may contain: every Config key, plus the RETIRED
+// ones -- keys the file once had and the server no longer reads -- each held as
+// a raw node so its value is accepted and then dropped.
+//
+// WHY AN ALLOWLIST AND NOT LENIENCY. Load used to be yaml.Unmarshal, which
+// ignores any key it does not recognise, and that turned every typo into a
+// silent default: `trustProxyhHeaders: true` drops the Secure cookie flag
+// behind a proxy, `tsl:` leaves TLS off, `dataDIr:` puts the database in
+// ./data. Nothing was logged, because nothing had noticed. Decoding with
+// KnownFields(true) makes the typo stop startup and name itself; the fields
+// below are what keep that strictness from breaking a file that was valid the
+// day it was written. A key removed from Config gets a field here, with the
+// release it went in, and the field is never deleted.
+type onDisk struct {
+	Config `yaml:",inline"`
+	// enhancedRtmp: removed in v0.2.0. Enhanced RTMP was never implemented and
+	// the key never did anything.
+	EnhancedRTMP yaml.Node `yaml:"enhancedRtmp"`
+}
+
+// unknownFieldRE matches the one line yaml.v3 writes per unknown key.
+var unknownFieldRE = regexp.MustCompile(`field (\S+) not found in type`)
+
+// decodeStrict decodes config.yaml into cfg and REFUSES A KEY IT DOES NOT KNOW,
+// at any depth. See onDisk for why, and for the retired keys it still accepts.
+func decodeStrict(b []byte, cfg *Config) error {
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec.KnownFields(true)
+	file := onDisk{Config: *cfg}
+	if err := dec.Decode(&file); err != nil {
+		// An empty file, or one that is only comments, is a file that set
+		// nothing -- which is what yaml.Unmarshal made of it too.
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return explainUnknownKey(err)
+	}
+	*cfg = file.Config
+	return nil
+}
+
+// explainUnknownKey turns yaml.v3's "field X not found in type config.onDisk"
+// into a sentence an operator can act on: why the server stopped, the key it
+// stopped on, a case-insensitive near miss if there is one, and the keys that
+// do exist. Any other decode error is returned as it came.
+func explainUnknownKey(err error) error {
+	m := unknownFieldRE.FindStringSubmatch(err.Error())
+	if m == nil {
+		return err
+	}
+	known := yamlKeyList(reflect.TypeOf(Config{}))
+	hint := ""
+	for _, name := range known {
+		if strings.EqualFold(name, m[1]) {
+			hint = fmt.Sprintf(" (did you mean %q? keys are case-sensitive)", name)
+		}
+	}
+	return fmt.Errorf("%w%s. Refusing to start: an unrecognised key would otherwise be "+
+		"ignored and its setting silently left at the default. Top-level keys are: %s",
+		err, hint, strings.Join(known, ", "))
+}
+
+// checkHostnameWithoutMode refuses a tls block that names a host but never
+// says how to serve it.
+//
+// tls.hostname exists to go into a certificate -- ACME issues for it, the
+// self-signed leaf carries it -- so writing one down is a statement that this
+// server terminates TLS. An absent mode quietly contradicts that: normalizeTLS
+// maps it to off, and the server comes up on plain HTTP with cookies missing
+// their Secure flag while the operator believes they configured HTTPS. It is
+// the misspelled-mode failure with the key deleted rather than mistyped.
+//
+// ONLY THE ABSENT MODE. An explicit `mode: off` next to a hostname is
+// legitimate -- behind a proxy the hostname still names the public origin for
+// the OAuth redirect preflight -- and so is `mode: auto` resolving to off under
+// trustProxyHeaders; both said something on purpose. A legacy `enabled: true`
+// is a mode too (manual), so only the combination that said nothing is refused.
+func (t TLS) checkHostnameWithoutMode() error {
+	if strings.TrimSpace(string(t.Mode)) != "" || t.Enabled || strings.TrimSpace(t.Hostname) == "" {
+		return nil
+	}
+	return fmt.Errorf("tls.hostname is %q but tls.mode is not set, which means off: this "+
+		"server would serve plain HTTP, not a certificate for that name. Set tls.mode "+
+		"(auto, acme or selfsigned), or write mode: \"off\" if TLS is terminated in front "+
+		"of this server", t.Hostname)
 }
 
 // normalizeTLS maps the legacy tls.enabled boolean onto tls.mode and fills in

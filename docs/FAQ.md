@@ -89,8 +89,8 @@ SRT remains the operated path.
 See `evidence/enhanced-rtmp-multitrack.md`.
 
 The `enhancedRtmp` config key is still gone, and still does not need to come
-back: this needs no flag. A config file that names it keeps loading; the key is
-ignored.
+back: this needs no flag. A config file that names it keeps loading; it is a
+retired key, accepted and ignored.
 
 ## Can I run horizontal and vertical at once?
 

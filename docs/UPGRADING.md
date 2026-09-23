@@ -265,6 +265,27 @@ line was meant for RTMP or pull: change its **Ingest** on the Sources page.
 It could not have been receiving RTMP or pulling while it had no mode, so
 nothing that worked before stops working.
 
+### Upgrading past 0.10.0 (unreleased, on `main`): config.yaml refuses a key it does not know
+
+> Not yet in a tag — this note is here ahead of the release that carries it.
+
+**What changed.** A key `config.yaml` does not define — at the top level or
+inside `ffmpeg:` and `transcription:`, as `tls:` already did — now stops the
+server at startup with the key and its line. Keys are case-sensitive. Until now
+such a key was dropped silently and its setting stayed at the default: a
+misspelled `trustProxyHeaders` left session cookies without `Secure`, a
+misspelled `dataDir` put the database in `./data`. The retired `enhancedRtmp`
+key is still accepted and ignored.
+
+Also refused: a `tls.hostname` with no `tls.mode`. That meant `off` — plain
+HTTP — while it looked like HTTPS was configured. Write the mode you meant, or
+`mode: "off"` if something in front terminates TLS.
+
+**What you might need to do.** Before upgrading, check `config.yaml` against
+[CONFIGURATION.md](CONFIGURATION.md). If the new binary refuses to start,
+`journalctl -u polyemesis` names the key to fix. Files written by
+`install.sh` use only known keys and always write a mode.
+
 ### Upgrading to 0.10.0
 
 **No schema change.** `internal/db` is identical between `v0.9.0` and
