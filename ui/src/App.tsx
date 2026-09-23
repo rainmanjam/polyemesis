@@ -1,9 +1,12 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { lazy, useCallback, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LiveDataProvider } from "@/components/LiveDataProvider";
+import { LazyBoundary } from "@/components/ErrorBoundary";
 import { api, ApiError } from "@/lib/api";
+import { onSessionEnded } from "@/lib/session";
+import { useT } from "@/lib/i18n";
 import { AppLayout } from "@/components/AppLayout";
 import { AuthScreen } from "@/pages/AuthScreen";
 import { AutomationPage } from "@/pages/AutomationPage";
@@ -119,6 +122,21 @@ export default function App() {
     void resolveGate();
   }, [resolveGate]);
 
+  // A 401 on any request once signed in means the session is gone -- expired,
+  // revoked by a password change elsewhere, or the server's key rotated. Back
+  // to the login screen rather than a console whose every button now fails
+  // with the same toast. lib/session.ts decides which 401s count.
+  const t = useT();
+  const signedIn = gate.phase === "ready";
+  useEffect(() => {
+    if (!signedIn) return;
+    return onSessionEnded(() => {
+      setGate({ phase: "login" });
+      // One id, so a page firing six polls at once raises one toast, not six.
+      toast.error(t("auth.sessionEnded"), { id: "session-ended" });
+    });
+  }, [signedIn, t]);
+
   const signOut = useCallback(async () => {
     try {
       await api.logout();
@@ -131,9 +149,9 @@ export default function App() {
   // socket. A viewer following a shared link gets the player and nothing else.
   if (watching) {
     return (
-      <Suspense fallback={<RouteFallback />}>
+      <LazyBoundary fallback={<RouteFallback />}>
         <PublicPlayer />
-      </Suspense>
+      </LazyBoundary>
     );
   }
 
@@ -171,9 +189,9 @@ export default function App() {
               <Route
                 path="/playout"
                 element={
-                  <Suspense fallback={<RouteFallback />}>
+                  <LazyBoundary fallback={<RouteFallback />}>
                     <PlayoutPage />
-                  </Suspense>
+                  </LazyBoundary>
                 }
               />
               <Route path="/library" element={<LibraryPage />} />
@@ -184,34 +202,34 @@ export default function App() {
               <Route
                 path="/clips/:id"
                 element={
-                  <Suspense fallback={<RouteFallback />}>
+                  <LazyBoundary fallback={<RouteFallback />}>
                     <ClipEditor />
-                  </Suspense>
+                  </LazyBoundary>
                 }
               />
               <Route
                 path="/jobs"
                 element={
-                  <Suspense fallback={<RouteFallback />}>
+                  <LazyBoundary fallback={<RouteFallback />}>
                     <JobsPage />
-                  </Suspense>
+                  </LazyBoundary>
                 }
               />
               <Route
                 path="/chat"
                 element={
-                  <Suspense fallback={<RouteFallback />}>
+                  <LazyBoundary fallback={<RouteFallback />}>
                     <ChatPage />
-                  </Suspense>
+                  </LazyBoundary>
                 }
               />
               <Route path="/automation" element={<AutomationPage />} />
               <Route
                 path="/monitoring"
                 element={
-                  <Suspense fallback={<RouteFallback />}>
+                  <LazyBoundary fallback={<RouteFallback />}>
                     <MonitoringPage />
-                  </Suspense>
+                  </LazyBoundary>
                 }
               />
               <Route path="/settings" element={<SettingsPage />} />

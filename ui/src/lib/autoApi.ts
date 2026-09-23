@@ -15,6 +15,7 @@
    =========================================================================== */
 
 import { ApiError } from "./api";
+import { noteResponseStatus } from "./session";
 
 const BASE = "/api/v1";
 
@@ -44,6 +45,8 @@ async function autoRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
   if (method !== "GET" && method !== "HEAD") headers.set("X-CSRF-Token", csrfToken());
 
   const resp = await fetch(BASE + path, { ...init, headers, credentials: "same-origin" });
+  // The same session-ended contract as lib/api.ts's request; see lib/session.ts.
+  noteResponseStatus(path, resp.status);
   if (resp.status === 204) return undefined as T;
 
   const text = await resp.text();

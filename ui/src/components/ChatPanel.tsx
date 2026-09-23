@@ -900,21 +900,20 @@ export function ChatEmpty({
    *  to think about one. */
   hiddenMessages?: number;
 }) {
+  const t = useT();
   let body: string;
-  if (loading) body = "Loading chat…";
+  if (loading) body = t("chatpage.emptyLoading");
   else if (error) body = error;
-  else if (!configured)
-    body =
-      "Chat is not running on this server. Connect a platform account under Settings → Platform credentials, then restart to attach it.";
-  else if (statuses.length === 0)
-    body = "Chat is running but no platform account is attached yet.";
+  else if (!configured) body = t("chatpage.emptyNotRunning");
+  else if (statuses.length === 0) body = t("chatpage.emptyNoAccount");
   // Ranked ABOVE "nothing has been said": when the filter is the reason the
   // pane is empty, it is the only reason worth printing.
   else if (hiddenMessages > 0)
-    body = `The platform filter is hiding ${hiddenMessages} message${
-      hiddenMessages === 1 ? "" : "s"
-    }. Nothing else has been said. Turn a platform back on above to see them.`;
-  else body = "Connected and waiting. Nothing has been said yet.";
+    body =
+      hiddenMessages === 1
+        ? t("chatpage.emptyFilteredOne")
+        : t("chatpage.emptyFilteredMany", { count: hiddenMessages });
+  else body = t("chatpage.emptyWaiting");
 
   return (
     <div className="flex h-full items-center justify-center px-6 text-center">

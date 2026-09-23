@@ -314,6 +314,52 @@ its first tagged release.
   failed reconcile) returns the stored `version` in the error body. The console
   sends that version on its next save, so that save is not refused as a
   conflict with your own change.
+- **Live chat works on an install with more than one source.** The chat socket
+  opened `/api/v1/ws` without `?source=`, which the server refuses with
+  `400 source_required` once there are two programmes, so the chat page sat on
+  "socket offline" and reconnected forever while its scrollback loaded fine.
+  It now names the programme the console is following, waits until that is
+  known, and moves when the operator switches. Every socket URL is built by
+  one helper, and a test refuses any `new WebSocket(` that bypasses it.
+- **Expert mode's Clear asks first.** It deleted a destination's extra FFmpeg
+  arguments on one click, which reconciles the destination and restarts a live
+  output. It now opens the same confirmation every other destructive action
+  uses, naming the destination and saying that a live output restarts.
+- **An expired session returns to the login screen.** Only the page load read
+  a 401; once signed in, an expired or revoked session made every button fail
+  with a "not signed in" toast for as long as the operator kept clicking. A 401
+  on any request now signs the console out and says why. A wrong password at
+  sign-in or on a password change is still reported in place, because those
+  401s are about what was typed, not the session.
+- **A go-live push no longer looks in flight for ever after a server
+  restart.** Push jobs live in the server's memory, so a restart mid-push lost
+  the job and the composer polled a 404 every 1.2 seconds, holding Push
+  disabled on "Pushing…" until the tab was reloaded. A 404, or ten failed polls
+  in a row, now ends the poll: the composer says the push's status was lost,
+  marks unfinished rows Unknown, and Push works again. The composer's requests
+  also go through the console's shared client now, so a reverse proxy's HTML
+  error page reads as "request failed (502)" rather than a JSON parse error,
+  and an expired session on this card signs the console out like everywhere
+  else.
+- **A tab left open across an upgrade no longer goes blank.** The lazy pages
+  (Jobs, Chat, Monitoring, Playout, the clip editor) are separate files named
+  by content hash, and an upgrade replaces them, so an old tab's first visit to
+  one failed to load it -- and with no error boundary the whole console
+  unmounted to an empty page that Back did not fix. The console now reloads
+  itself once when that happens, to pick up the new version. If a page still
+  fails, only that page is replaced by a notice with a Reload button; the
+  navigation and every other page keep working.
+- **The automatic-moderation card and about thirty other sentences follow the
+  language setting.** A pass over every page in every locale found the whole
+  automod matrix card, and sentences on the dashboard, chat pane, routing,
+  meters, renditions, clips, playout, monitoring, automation and settings pages,
+  still in English whatever language was chosen -- four of them with a
+  translation already in all fifteen catalogues that the page never asked for.
+  They are catalogue keys now, translated in all fifteen languages, and a test
+  keeps them from drifting back to literals. Three stay English on purpose: the
+  meter rows' status words (a family keyed together or not at all), the
+  engine's own status sentence, and the model's default instruction, which is
+  a setting sent to the model verbatim.
 
 ## [0.10.0] — 2026-09-23
 

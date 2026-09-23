@@ -535,7 +535,7 @@ export function RenditionsPage() {
               </Badge>
             )}
             <Button size="sm" onClick={openCreate}>
-              <Plus /> New rendition
+              <Plus /> {t("rend.newRendition")}
             </Button>
           </>
         }
@@ -544,15 +544,9 @@ export function RenditionsPage() {
       <Card className="mb-3">
         <CardHeader>
           <CardTitle className="flex items-center gap-1.5">
-            <Layers className="h-3.5 w-3.5" /> How this works
+            <Layers className="h-3.5 w-3.5" /> {t("rend.howTitle")}
           </CardTitle>
-          <CardDescription>
-            A rendition re-encodes <strong className="font-semibold">video only</strong> and copies
-            every audio track through it untouched. Destinations still do{" "}
-            <code className="font-mono">-c:v copy</code> plus their own routing graph, so
-            per-destination audio keeps working on top of a shared picture and no audio is ever
-            encoded twice. Three destinations that all need 1080p60 cost one encode, not three.
-          </CardDescription>
+          <CardDescription>{t("rend.howBody")}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
@@ -584,7 +578,7 @@ export function RenditionsPage() {
             {t("rend.empty")}
             </p>
             <Button size="sm" onClick={openCreate}>
-              <Plus /> New rendition
+              <Plus /> {t("rend.newRendition")}
             </Button>
           </CardContent>
         </Card>

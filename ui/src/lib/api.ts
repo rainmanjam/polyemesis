@@ -1,4 +1,11 @@
 import { setDisplayTimeZone } from "@/lib/format";
+import { noteResponseStatus } from "@/lib/session";
+import type {
+  BroadcastWindowRow,
+  MetaJob,
+  MetaPushRequest,
+  MetaTarget,
+} from "@/lib/metadataPush";
 import type {
   RenditionConcern,
   AccountStats,
@@ -260,6 +267,9 @@ async function request<T>(
     headers,
     credentials: "same-origin",
   });
+  // A 401 mid-session returns the console to the login screen; see
+  // lib/session.ts for which 401s do not.
+  noteResponseStatus(path, resp.status);
 
   if (resp.status === 204) return undefined as T;
 
@@ -277,7 +287,7 @@ async function request<T>(
     const msg =
       body && typeof body === "object" && "error" in body
         ? String((body as { error: unknown }).error)
-        : typeof body === "string" && body
+        : typeof body === "string" && body && !looksLikeHtml(body)
           ? body
           : `request failed (${resp.status})`;
     // Omitted by the server on every error that has nothing to branch on, so
@@ -294,6 +304,16 @@ async function request<T>(
   }
   reportReconcileFailure(body);
   return body as T;
+}
+
+/** Whether an error body is an HTML page rather than a sentence.
+ *
+ *  The server answers errors in JSON, and a few routes in plain text through
+ *  http.Error. An HTML body came from something in between -- a reverse proxy's
+ *  502 page while the server restarts, a captive portal -- and quoting it
+ *  whole would put a page of markup in a toast. The status says more. */
+function looksLikeHtml(text: string): boolean {
+  return /^\s*</.test(text);
 }
 
 /** The `destinations` array off an error body, `[]` when there is none.
@@ -811,6 +831,7 @@ export const api = {
       headers: { "X-CSRF-Token": csrfToken() },
       credentials: "same-origin",
     });
+    noteResponseStatus("/debug/export", resp.status);
     const text = await resp.text();
     if (!resp.ok) {
       let msg = `export failed (${resp.status})`;
@@ -952,6 +973,17 @@ export const api = {
   recordingUsage: () => get<DiskUsage>("/recordings/usage"),
   deleteRecording: (id: number) => del<{ status: string }>(`/recordings/${id}`),
   downloadUrl: (id: number) => `${BASE}/recordings/${id}/download`,
+
+  // --- go-live metadata ---
+  // The composer's own fetch used to live in Dashboard.tsx, and it parsed a
+  // proxy's HTML error page with a bare JSON.parse and never reported a 401 to
+  // lib/session.ts. Here the routes get request()'s handling of both.
+  metadata: () => get<{ targets: MetaTarget[]; last?: MetaJob }>("/metadata"),
+  metadataBroadcastWindow: () =>
+    get<{ accounts: BroadcastWindowRow[] }>("/metadata/broadcast-window"),
+  pushMetadata: (body: MetaPushRequest) => post<MetaJob>("/metadata/push", body),
+  metadataPushJob: (id: string) =>
+    get<MetaJob>(`/metadata/push/${encodeURIComponent(id)}`),
 
   // --- playout (the public origin) ---
   // Distinct from the dashboard preview: that is an admin-only 360p re-encode,
