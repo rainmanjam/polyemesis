@@ -5164,11 +5164,11 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 		}
 		// FFmpeg has been reporting all three of these once a second per
 		// destination since -progress was wired up, and nothing has ever read
-		// them. Left at their zero values the watcher treats the speed as
+		// them. Left at their zero values the watcher treats the rate as
 		// unknown and says nothing, which is what happens for a destination
 		// with no process.
 		if d.Process != nil {
-			ds.Speed = d.Process.Progress.Speed
+			ds.OutTimeMS = d.Process.Progress.OutTimeMS
 			ds.DropFrames = d.Process.Progress.DropFrames
 			ds.DupFrames = d.Process.Progress.DupFrames
 		}

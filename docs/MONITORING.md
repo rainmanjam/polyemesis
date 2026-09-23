@@ -300,11 +300,20 @@ swallows teaches the operator nothing — and is not subscribable.
 `destination.down`: a destination is usually degraded for a while before its
 FFmpeg child gives up.
 
-The measurement is FFmpeg's own speed ratio for that destination — output time
-over wall-clock time. What makes it useful here is that video is passed through
-untouched, so there is barely any encoding work to be slow at. **A passthrough
-destination sitting under 1.0 means FFmpeg is blocking on the write to the
-platform.**
+The measurement is how fast that destination's output time advances against
+the wall clock, over the last **20 seconds**. What makes it useful here is that
+video is passed through untouched, so there is barely any encoding work to be
+slow at. **A passthrough destination sitting under 1.0 means FFmpeg is blocking
+on the write to the platform** — and one whose sink has stopped reading
+entirely reads 0, so a stalled destination is caught while its process is still
+`running`.
+
+It is deliberately *not* the `speed=` FFmpeg prints. That figure is averaged
+over the whole run, so it barely moves during a stall — and it arrives in the
+same progress report that stops arriving when a sink stalls. Judged on it, the
+alert fired only after a stall had healed, then stayed raised for most of an
+hour while the average recovered, so `caught_up` never came and the next stall
+could not alert.
 
 That is close to the question a platform's own health API would answer, and it
 is answered for *every* destination — including one configured from a pasted
@@ -320,11 +329,15 @@ the diagnosis to you. The two frame counters are what tell the two apart:
 | dropped frames | FFmpeg is discarding to keep up — the **output** is congested |
 | duplicated frames | FFmpeg is padding — the **source** is starving |
 
-Thresholds are `speed < 0.95` sustained for 30 seconds. Both are deliberately
-conservative: a dip at a keyframe boundary is normal and an alert that fires on
-one is an alert you mute. A destination with no process reports a speed of zero,
-which is treated as *unknown* rather than slow, so nothing fires while a
-destination is starting up or after it has stopped.
+Thresholds are a rate under `0.95` sustained for 30 seconds. Both are
+deliberately conservative: a dip at a keyframe boundary is normal and an alert
+that fires on one is an alert you mute. Nothing is measured until a
+destination's process has moved some media, or while it is not running — so
+nothing fires while a destination is starting up or after it has stopped
+(`destination.down` covers that) — and nothing is measured while the ingest is
+lost, because every destination stops then and `ingest.lost` already says so.
+Each stall raises its own `falling_behind`, and each recovery its own
+`caught_up`.
 
 The same numbers are on each destination's card, live.
 

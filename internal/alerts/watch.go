@@ -31,6 +31,12 @@ const (
 	// broadcast's speed distribution.
 	DefaultSpeedFloor       = 0.95
 	DefaultFallingBehindFor = 30 * time.Second
+	// DefaultSpeedWindow is how much history the delivery rate is measured
+	// over. FFmpeg reports progress every half second, so the output time a
+	// snapshot carries is up to 0.5s stale; over 20 seconds that is at most
+	// 2.5% of error, comfortably inside the 5% between realtime and the floor.
+	// A shorter window would put ordinary sampling jitter at the floor.
+	DefaultSpeedWindow = 20 * time.Second
 	// DefaultLoudnessFor is how long a destination must be out of tolerance.
 	// EBU R128 integrates over the whole programme, so a minute of drift is a
 	// mix that is wrong rather than a quiet passage.
@@ -54,6 +60,9 @@ type WatchConfig struct {
 	// keyframe-alignment stall while still mattering inside a short stream.
 	SpeedFloor       float64
 	FallingBehindFor time.Duration
+	// SpeedWindow is how far back the delivery rate looks. See
+	// DefaultSpeedWindow.
+	SpeedWindow time.Duration
 }
 
 func (c WatchConfig) normalized() WatchConfig {
@@ -81,6 +90,9 @@ func (c WatchConfig) normalized() WatchConfig {
 	if c.FallingBehindFor <= 0 {
 		c.FallingBehindFor = DefaultFallingBehindFor
 	}
+	if c.SpeedWindow <= 0 {
+		c.SpeedWindow = DefaultSpeedWindow
+	}
 	return c
 }
 
@@ -94,16 +106,22 @@ type DestState struct {
 	Running  bool
 	Platform string
 	Error    string
-	// Speed is FFmpeg's output-time-over-wall-clock ratio for this
-	// destination's child, and 0 when there is no process to have one.
+	// OutTimeMS is the output timestamp from this destination's latest FFmpeg
+	// progress block, in milliseconds, and 0 when there is no process or it
+	// has not moved any media yet. The watcher derives the delivery rate from
+	// how far it advances between snapshots.
 	//
-	// Zero means UNKNOWN, not stopped. A child that has not yet emitted its
-	// first progress block reports 0, and so does one that has just died, so
-	// the condition below requires Speed > 0 before it judges anything. Reading
-	// zero as slow would fire on every destination for the first second of
-	// every broadcast, which is how an alert gets muted before it is ever
-	// useful.
-	Speed float64
+	// THERE IS NO SPEED FIELD, ON PURPOSE. FFmpeg's speed= is output time over
+	// wall time SINCE THE PROCESS STARTED -- a cumulative average, not a rate --
+	// and it is carried in the same progress block that stops arriving when a
+	// sink stops reading, because a blocked write blocks FFmpeg's whole loop.
+	// Judged on that number, a stalled destination read a frozen ~1.00x for as
+	// long as it was stalled; the alert fired only after the heal, when the
+	// average had been dragged under the floor, and then held for the best part
+	// of an hour while the average crawled back, so caught_up never came and
+	// the next stall had nothing left to fire. The field is gone so nothing can
+	// judge on it again.
+	OutTimeMS int64
 	// DropFrames and DupFrames are cumulative counts, carried for context in
 	// the event rather than thresholded. They are the pair that tells an
 	// operator WHICH way a destination is unwell: drops mean FFmpeg is
@@ -190,6 +208,55 @@ func (d *downState) observe(bad bool, now time.Time, after time.Duration) (fire,
 	return false, false
 }
 
+// rateWindow measures how fast a destination's output time is advancing
+// against the wall clock, over recent history only.
+//
+// This is the number FFmpeg's speed= looks like it is and is not: that one is
+// averaged over the whole run. Measured here, a stall reads as zero while it
+// is happening, and the rate returns to 1.0 one window after the stall ends --
+// not an hour later.
+type rateWindow struct {
+	samples []rateSample
+}
+
+type rateSample struct {
+	at    time.Time
+	outMS int64
+}
+
+// observe records one output time and returns the rate over the window, with
+// ok false while there is not yet enough history to say.
+//
+// Nothing is measured until the output time is non-zero: a child that has not
+// moved any media yet has no rate, and judging one would flag every
+// destination for the first seconds of every broadcast. Output time going
+// BACKWARDS is a respawn -- a new process counts from zero -- and starts the
+// measurement over.
+func (r *rateWindow) observe(now time.Time, outMS int64, window time.Duration) (rate float64, ok bool) {
+	if n := len(r.samples); outMS <= 0 || (n > 0 && outMS < r.samples[n-1].outMS) {
+		r.reset()
+		if outMS <= 0 {
+			return 0, false
+		}
+	}
+	r.samples = append(r.samples, rateSample{at: now, outMS: outMS})
+	// Keep the newest sample at or before the window's start as the baseline,
+	// and drop everything older. The span is then at least the window when the
+	// history allows it.
+	cutoff := now.Add(-window)
+	for len(r.samples) >= 2 && !r.samples[1].at.After(cutoff) {
+		r.samples = r.samples[1:]
+	}
+	first := r.samples[0]
+	span := now.Sub(first.at)
+	if span < window/2 {
+		return 0, false
+	}
+	return float64(outMS-first.outMS) / float64(span.Milliseconds()), true
+}
+
+func (r *rateWindow) reset() { r.samples = r.samples[:0] }
+
 // Watcher turns a stream of snapshots into events.
 //
 // It holds the "how long has this been true" state that a single snapshot
@@ -204,6 +271,8 @@ type Watcher struct {
 	// entire point of the condition -- and one downState cannot hold two
 	// independent "how long has this been true" clocks.
 	slow map[int64]*downState
+	// rate is the delivery-rate history slow is judged on, keyed the same way.
+	rate map[int64]*rateWindow
 	loud map[int64]*downState
 	// clipHits counts consecutive observations on the ceiling, per channel.
 	clipHits map[string]int
@@ -220,6 +289,7 @@ func NewWatcher(cfg WatchConfig) *Watcher {
 		cfg:      cfg.normalized(),
 		dest:     map[int64]*downState{},
 		slow:     map[int64]*downState{},
+		rate:     map[int64]*rateWindow{},
 		loud:     map[int64]*downState{},
 		clipHits: map[string]int{},
 	}
@@ -282,24 +352,29 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 			slow = &downState{}
 			w.slow[d.ID] = slow
 		}
+		rate := w.rate[d.ID]
+		if rate == nil {
+			rate = &rateWindow{}
+			w.rate[d.ID] = rate
+		}
 		if !d.Enabled {
 			// A destination the operator turned off is not down. Clearing the
 			// state means turning it back on starts the clock fresh instead of
 			// firing on the time it spent disabled.
 			*st = downState{}
 			*slow = downState{}
+			rate.reset()
 			continue
 		}
 		fire, recovered := st.observe(!d.Running, now, w.cfg.DownFor)
 		key := "destination:" + strconv.FormatInt(d.ID, 10)
 
-		// Speed is only judged while the destination is up and has actually
-		// reported one. See DestState.Speed for why zero is not slow.
+		// The rate is only judged while the destination is up, the source is
+		// arriving, and there is a measurement to judge.
 		var slowFire, slowRecovered bool
-		if d.Running {
-			behind := d.Speed > 0 && d.Speed < w.cfg.SpeedFloor
-			slowFire, slowRecovered = slow.observe(behind, now, w.cfg.FallingBehindFor)
-		} else {
+		var speed float64
+		switch {
+		case !d.Running:
 			// A destination that is not running has no speed, so the condition
 			// is UNOBSERVABLE rather than recovered. Feeding "not slow" into
 			// observe() here would announce that it caught up, at the exact
@@ -308,6 +383,29 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 			// latch is dropped silently and destination.down does the
 			// reporting.
 			*slow = downState{}
+			rate.reset()
+		case s.IngestConfigured && !s.IngestLive:
+			// NOTHING TO DELIVER IS NOT FALLING BEHIND. With the source gone
+			// every destination's output time stops, and reading that as a
+			// stall would page once per destination for what ingest.lost
+			// already says once. The history is dropped so the gap is not
+			// averaged into the first rate after the source returns; a latch
+			// that already fired is held rather than cleared, because nothing
+			// has been seen to recover.
+			rate.reset()
+			if !slow.fired {
+				*slow = downState{}
+			}
+		default:
+			var known bool
+			speed, known = rate.observe(now, d.OutTimeMS, w.cfg.SpeedWindow)
+			if known {
+				slowFire, slowRecovered = slow.observe(speed < w.cfg.SpeedFloor, now, w.cfg.FallingBehindFor)
+			} else if !slow.fired {
+				// Not enough history yet: unknown, not slow, and not a
+				// recovery either.
+				*slow = downState{}
+			}
 		}
 		switch {
 		case slowFire:
@@ -315,14 +413,14 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 				Type: TypeDestinationFallingBehind, Severity: SeverityWarning,
 				Key:   key + ":speed",
 				Title: d.Name + " is falling behind",
-				Text: d.Name + " has been encoding at " + speedText(d.Speed) +
+				Text: d.Name + " has been delivering at " + speedText(speed) +
 					" realtime for " + short(now.Sub(slow.since)) +
 					". That usually means the platform or the network is not " +
 					"taking data fast enough.",
 				At: now,
 			}.WithField("destination", d.Name).
 				WithField("platform", d.Platform).
-				WithField("speed", speedText(d.Speed)).
+				WithField("speed", speedText(speed)).
 				WithField("dropped frames", strconv.FormatInt(d.DropFrames, 10)).
 				WithField("duplicated frames", strconv.FormatInt(d.DupFrames, 10)))
 		case slowRecovered:
@@ -356,6 +454,7 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 		if !live[id] {
 			delete(w.dest, id)
 			delete(w.slow, id)
+			delete(w.rate, id)
 		}
 	}
 	return out

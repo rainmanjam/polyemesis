@@ -21,6 +21,13 @@ its first tagged release.
   fell through to the console's HTML page, so an uptime monitor pointed at them
   stayed green while checking nothing. They now answer `404` with a body naming
   the real check, `/api/v1/health`.
+- **`destination.falling_behind` now fires during a stall, and clears after it.**
+  It judged FFmpeg's `speed=`, an average over the whole run carried in the
+  progress report that stops arriving when a sink stops reading. A stalled
+  destination therefore read ~1.00x while stalled, alerted only after the heal,
+  stayed raised for most of an hour, never sent `caught_up`, and a second stall
+  could not alert. It now measures how fast the output time advances over the
+  last 20 seconds, and says nothing while the ingest itself is lost.
 
 ## [0.10.0] — 2026-09-23
 
