@@ -1374,6 +1374,8 @@ printf '%s\n%s\n' "$ss_hdr" \
   'LISTEN 0      4096   10.0.0.80:5000    0.0.0.0:*    users:(("sshd",pid=5,fd=3))' > "$work/ss-tcp-addr80"
 
 port_after() { # port_after <mode> <port> <proto> -> the port warn_if_taken leaves behind
+  # Read by install.sh's warn_if_taken, which arrives through the eval.
+  # shellcheck disable=SC2034
   ( load_install_defs || exit 1
     MODE="$1"
     ASSUME_YES=true
@@ -1447,6 +1449,8 @@ esac
 # the server binds INSIDE the container. Generated for real, with compose and
 # docker stubbed so nothing is pulled or started.
 compose_dir="$work/compose-ports"
+# Read by install.sh's install_docker_mode, which arrives through the eval.
+# shellcheck disable=SC2034
 ( load_install_defs || exit 1
   INSTALL_DIR="$compose_dir"; MODE=docker; TLS_MODE=off
   SRT_PORT=6001; RTMP_PORT=1936; ENABLE_RTMP=yes; COMPOSE_CMD=true
@@ -1470,6 +1474,133 @@ if grep -q "ListenerSettings{SRTPort: ${srv_srt:-x}, RTMPPort: ${srv_rtmp:-x}}" 
   ok "install.sh's SERVER_SRT_PORT/SERVER_RTMP_PORT ($srv_srt/$srv_rtmp) match the server's listener defaults"
 else
   bad "install.sh's server listener ports (${srv_srt:-unset}/${srv_rtmp:-unset}) do not match internal/db/settings.go's defaults"
+fi
+
+step "22. The binary update.sh restarts what it stopped, and its way back keeps the recordings"
+#
+# Every refusal after `systemctl stop` used to exit under set -e with the
+# service down. And the rollback it printed was
+#   sudo rm -rf $DATA_DIR && sudo cp -a $dest $DATA_DIR
+# which deleted every recording made since the upgrade and copied the root-owned
+# polyemesis.previous into the live directory.
+#
+# systemctl and sudo are stubbed: systemctl records what it was asked to do,
+# and sudo runs its command, so the suite drives the script's reaction and not
+# systemd.
+sysd_stub="$work/sysd-bin"; mkdir -p "$sysd_stub"
+cat > "$sysd_stub/systemctl" <<'SYSTEMCTLSTUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  is-active) [ "${STUB_ACTIVE:-false}" = true ]; exit $? ;;
+  start) echo start >> "$STUB_SYSTEMCTL_LOG"; [ "${STUB_START_FAILS:-false}" != true ]; exit $? ;;
+  *) echo "$1" >> "$STUB_SYSTEMCTL_LOG"; exit 0 ;;
+esac
+SYSTEMCTLSTUB
+printf '#!/usr/bin/env bash\nexec "$@"\n' > "$sysd_stub/sudo"
+chmod +x "$sysd_stub/systemctl" "$sysd_stub/sudo"
+
+run_sysd() { # run_sysd <log> <cmd...> -- with the service reported active
+  local log="$1"; shift
+  : > "$log"
+  STUB_ACTIVE=true STUB_SYSTEMCTL_LOG="$log" PATH="$sysd_stub:$PATH" "$@" 2>&1
+}
+
+# (a) A backup that will not open, refused after the stop.
+root="$work/sysd-refused"; mkdir -p "$root/data"
+printf 'key\n' > "$root/data/secret.key"
+printf 'this is not a database\n' > "$root/data/polyemesis.db"
+gen_binary_update "$root/opt" "$root/data"
+out="$(run_sysd "$root/log" bash "$root/opt/update.sh")"; st=$?
+log="$(tr '\n' ' ' < "$root/log")"
+if [ "$st" -ne 0 ] && [ "$log" = "stop start " ]; then
+  ok "a refusal after the stop starts the service again (systemctl: $log)"
+else
+  bad "a refusal after the stop left the service down (exit $st, systemctl: ${log:-nothing})"
+fi
+case "$out" in
+  *"running again"*) ok "and it says the service is running again and nothing was upgraded" ;;
+  *) bad "the refusal does not tell the operator what state the service is in" ;;
+esac
+[ "$(backups_under "$root")" = 0 ] \
+  && ok "and the unverified copy it took is removed" \
+  || bad "a refused run left its unverified copy holding the disk"
+
+# (b) The same, when the start fails too: the one thing it must do is say so.
+root="$work/sysd-nostart"; mkdir -p "$root/data"
+printf 'key\n' > "$root/data/secret.key"
+printf 'this is not a database\n' > "$root/data/polyemesis.db"
+gen_binary_update "$root/opt" "$root/data"
+out="$(STUB_START_FAILS=true run_sysd "$root/log" bash "$root/opt/update.sh")"
+case "$out" in
+  *"IS STOPPED"*"systemctl start"*) ok "if the start fails too, it says STOPPED and prints the command" ;;
+  *) bad "a failed restart is not announced: $(printf '%s' "$out" | tail -3 | tr '\n' ' ')" ;;
+esac
+
+# (c) The happy path. It leaves the service stopped ON PURPOSE -- the operator
+#     replaces the binary next -- and points at rollback.sh, not at rm -rf.
+root="$work/sysd-happy"; data="$root/data"; mkdir -p "$data/recordings" "$data/tls"
+printf 'SQLite format 3\000old' > "$data/polyemesis.db"
+printf 'key\n'    > "$data/secret.key"
+printf 'ca\n'     > "$data/tls/ca.key"
+printf 'before\n' > "$data/recordings/before.mp4"
+touch -t 202001010000 "$data/recordings/before.mp4"
+gen_binary_update "$root/opt" "$data"
+out="$(run_sysd "$root/log" bash "$root/opt/update.sh")"; st=$?
+log="$(tr '\n' ' ' < "$root/log")"
+[ "$st" -eq 0 ] && [ "$log" = "stop " ] \
+  && ok "a verified backup leaves the service stopped for the binary swap, as it says" \
+  || bad "the happy path ended with exit $st and systemctl: ${log:-nothing}"
+case "$out" in
+  *"rm -rf"*) bad "update.sh still prints an rm -rf of the data directory as the way back" ;;
+  *"$root/opt/rollback.sh "*) ok "the printed way back is rollback.sh, not an rm -rf of the data directory" ;;
+  *) bad "update.sh no longer prints a way back at all" ;;
+esac
+dest="$(printf '%s\n' "$out" | sed -n 's/^backing up .* to //p' | head -1)"
+
+# (d) The upgrade "happens": the database changes, a WAL appears, a recording is
+#     made, the binary is replaced. Then roll back.
+if [ -x "$root/opt/rollback.sh" ] && [ -n "$dest" ]; then
+  printf 'SQLite format 3\000new' > "$data/polyemesis.db"
+  printf 'newer log\n' > "$data/polyemesis.db-wal"
+  printf 'after\n' > "$data/recordings/after.mp4"
+  printf 'new binary\n' > "$root/opt/polyemesis"
+  out="$(run_sysd "$root/log" bash "$root/opt/rollback.sh" "$dest")"; st=$?
+  [ "$st" -eq 0 ] && ok "rollback.sh runs against the backup update.sh took" \
+    || bad "rollback.sh failed (exit $st): $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+  [ -f "$data/recordings/after.mp4" ] \
+    && ok "a recording made since the upgrade survives the rollback" \
+    || bad "the rollback deleted a recording made since the upgrade"
+  [ -f "$data/recordings/before.mp4" ] \
+    && ok "and the older recording is still there" \
+    || bad "the rollback lost a recording from before the upgrade"
+  cmp -s "$data/polyemesis.db" "$dest/polyemesis.db" \
+    && ok "the database is the backup's" \
+    || bad "the database was not restored from the backup"
+  [ ! -e "$data/polyemesis.db-wal" ] \
+    && ok "and the newer database's -wal is gone, so it cannot be replayed into the older file" \
+    || bad "the newer -wal was left beside the restored database"
+  [ ! -e "$data/polyemesis.previous" ] \
+    && ok "polyemesis.previous is not copied into the live data directory" \
+    || bad "polyemesis.previous landed in the live data directory, and every later backup carries it"
+  grep -q 'stub polyemesis' "$root/opt/polyemesis" 2>/dev/null \
+    && ok "the previous binary is back at BIN_PATH" \
+    || bad "BIN_PATH still holds the upgraded binary"
+  case "$(tr '\n' ' ' < "$root/log")" in
+    *start*) ok "and the service is started again" ;;
+    *) bad "rollback.sh did not start the service" ;;
+  esac
+  case "$out" in
+    *"1 file(s) written since the backup"*) ok "it says how many recordings it kept that the old database does not list" ;;
+    *) bad "rollback.sh does not report the media it kept: $(printf '%s' "$out" | tr '\n' ' ')" ;;
+  esac
+  out="$(run_sysd "$root/log" bash "$root/opt/rollback.sh" "$data")"; st=$?
+  case "$st:$out" in
+    0:*) bad "rollback.sh restored from the LIVE data directory" ;;
+    *"not a backup"*) ok "rollback.sh refuses a directory that is not one of update.sh's backups" ;;
+    *) bad "rollback.sh refused the live directory without saying why" ;;
+  esac
+else
+  bad "no rollback.sh was written beside update.sh (or no backup path was reported)"
 fi
 
 # ------------------------------------------------------------- vacuity guard

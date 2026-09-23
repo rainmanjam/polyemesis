@@ -307,7 +307,29 @@ you can stop.
 Restoring the data directory is not optional. The database will have been
 migrated, and the older binary will not understand it.
 
-**Restore the whole directory, including `secret.key`.** Restoring only
+**Binary installs made with `install.sh`: run the `rollback.sh` beside
+`update.sh`,** with the backup directory `update.sh` named:
+
+```sh
+sudo <installDir>/rollback.sh /var/lib/polyemesis.bak-<stamp>
+```
+
+It stops the service, restores the state from the backup (the database,
+`secret.key`, `tls/` and anything else that is not media), deletes the newer
+database's `-wal`/`-shm` so they cannot be replayed into the older file, puts
+the kept `polyemesis.previous` back as the binary, and starts the service. It
+refuses a directory that is not one of `update.sh`'s backups.
+
+**Restore the state, not the media.** `update.sh` used to print
+`rm -rf <dataDir> && cp -a <backup> <dataDir>`, which deleted every recording
+and upload made since the upgrade, since the data directory holds them all.
+`rollback.sh` leaves `recordings/`, `uploads/`, `hls/`, `playout/`, `models/`,
+`fonts/` and `logs/` alone and tells you how many files were written there since
+the backup. The restored database does not list those files, but they stay on
+disk. Doing it by hand, copy everything in the backup except those directories
+and `polyemesis.previous`.
+
+**Always restore `secret.key` with the database.** Restoring only
 `polyemesis.db` is the mistake this section exists to prevent: from 0.7.0 the
 database alone is not enough to publish, and the failure is silent until you go
 live. See [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back).

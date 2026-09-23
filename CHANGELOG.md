@@ -41,6 +41,17 @@ its first tagged release.
   that point used to exit with it down. It now starts what it stopped, says so,
   and removes the unverified archive; if the start fails, it says the container
   is STOPPED and prints the command.
+- **The binary-mode `update.sh` does the same**: a refusal after `systemctl
+  stop` starts the service again (or says STOPPED, with the command) and
+  removes the unverified copy.
+- **The binary-mode rollback no longer deletes the recordings.** `update.sh`
+  printed `rm -rf <dataDir> && cp -a <backup> <dataDir>` as the way back. That
+  deleted every recording and upload made since the upgrade, and copied the
+  root-owned `polyemesis.previous` into the live directory, where every later
+  backup carried it. `install.sh` now writes `rollback.sh`, which restores the
+  state (database, `secret.key`, `tls/`), removes the newer `-wal`/`-shm`,
+  leaves the media directories alone, puts the previous binary back and starts
+  the service. `docs/UPGRADING.md` describes it.
 
 ## [0.10.0] — 2026-09-23
 

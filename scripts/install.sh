@@ -2061,6 +2061,37 @@ fi
 # a first upgrade before enabling it, or a restore rehearsal -- has a
 # consistent data directory already, and an unconditional stop would abort
 # this script under set -e before a single check had run.
+#
+# AND A FAILURE AFTER THE STOP MUST NOT LEAVE IT DOWN IN SILENCE. Every exit
+# below the stop -- a full disk under cp, a backup without secret.key, one that
+# will not open -- used to leave the service stopped, and only the last of them
+# said so. Nothing has been replaced until the success message at the bottom,
+# so a failure starts what this script stopped and says so; if that start
+# fails too, it says STOPPED, loudly, with the command. The copy this run began
+# is removed: it is not a verified way back, and a partial one from a full
+# disk goes on holding the space that stopped it.
+STOPPED_BY_US=false
+DEST_CREATED=false
+on_exit() {
+  local rc=\$?
+  [ "\$rc" -eq 0 ] && return 0
+  if [ "\$DEST_CREATED" = true ] && [ -e "\$dest" ]; then
+    rm -rf "\$dest" && echo "removed the unverified backup \$dest" >&2
+  fi
+  if [ "\$STOPPED_BY_US" = true ]; then
+    echo "this script stopped \$SERVICE_NAME; starting it again" >&2
+    if sudo systemctl start "\$SERVICE_NAME"; then
+      echo "\$SERVICE_NAME is running again on the binary it had. Nothing was upgraded." >&2
+    else
+      echo >&2
+      echo "!!! \$SERVICE_NAME IS STOPPED and could not be started again. Start it with:" >&2
+      echo "!!!     sudo systemctl start \$SERVICE_NAME" >&2
+    fi
+  fi
+  return "\$rc"
+}
+trap on_exit EXIT
+
 if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "\$SERVICE_NAME" 2>/dev/null; then
   echo "stopping \$SERVICE_NAME so the copy is consistent"
   sudo systemctl stop "\$SERVICE_NAME"
@@ -2071,6 +2102,7 @@ else
 fi
 
 echo "backing up \$DATA_DIR to \$dest"
+DEST_CREATED=true
 cp -a "\$DATA_DIR" "\$dest"
 
 # KEEP THE BINARY THAT WORKS. This script has always told the operator to
@@ -2080,6 +2112,9 @@ if [ -x "\$BIN_PATH" ]; then
   cp -a "\$BIN_PATH" "\$dest/polyemesis.previous"
   echo "kept the running binary at \$dest/polyemesis.previous"
 fi
+# Stamp the backup with the moment it was taken. cp -a carried over the data
+# directory's own mtime; rollback.sh counts media newer than this.
+touch "\$dest"
 
 # THE CHECK THAT MATTERS. Not "is there a backup" but "does the backup hold the
 # file that makes the database usable". Without secret.key every destination
@@ -2114,8 +2149,6 @@ fi
 echo "checking the backup opens..."
 if ! "\$BIN_PATH" -verify-backup "\$dest"; then
   echo "ERROR: the backup at \$dest is not usable. Refusing to upgrade." >&2
-  echo "The service is still stopped; start it with:" >&2
-  echo "    sudo systemctl start \$SERVICE_NAME" >&2
   exit 1
 fi
 
@@ -2130,14 +2163,155 @@ echo
 echo "    sudo install -m 0755 ./polyemesis \$BIN_PATH"
 echo "    sudo systemctl start \$SERVICE_NAME"
 echo
+# THE WAY BACK IS A SCRIPT, NOT A PASTE. This printed
+#   sudo rm -rf \$DATA_DIR && sudo cp -a \$dest \$DATA_DIR
+# which deleted every recording, upload and font made since the upgrade -- the
+# data directory holds them all -- and copied polyemesis.previous, root-owned,
+# into the live directory, where every later backup carried it. rollback.sh
+# restores the state and leaves the media alone; see the note above it.
 echo "If the upgrade goes wrong, the way back is:"
 echo
-echo "    sudo systemctl stop \$SERVICE_NAME"
-echo "    sudo rm -rf \$DATA_DIR && sudo cp -a \$dest \$DATA_DIR"
-echo "    sudo install -m 0755 \$dest/polyemesis.previous \$BIN_PATH"
-echo "    sudo systemctl start \$SERVICE_NAME"
+echo "    sudo $INSTALL_DIR/rollback.sh \$dest"
+echo
+echo "It restores the database, secret.key and the rest of the state from the"
+echo "backup and puts the previous binary back. Recordings and uploads made since"
+echo "the upgrade are kept."
 EOF
   chmod +x "$INSTALL_DIR/update.sh"
+  write_binary_rollback_script
+}
+
+# write_binary_rollback_script writes the way back that update.sh points at.
+#
+# WHY A SCRIPT. The rollback update.sh used to print was a paste:
+#
+#	sudo rm -rf $DATA_DIR && sudo cp -a $dest $DATA_DIR
+#
+# The data directory is not just state. It holds recordings, uploads, fonts,
+# the HLS and playout output and the downloaded speech models, so that line
+# deleted everything recorded since the upgrade -- the hours an operator is
+# least able to lose, since a failed upgrade is noticed on air. It also copied
+# polyemesis.previous (root-owned, 25-30 MB) into the live directory, and from
+# there into every later backup.
+#
+# So this restores STATE and leaves MEDIA where it is. State is everything in
+# the backup except the directories named in MEDIA_DIRS and the kept binary;
+# enumerating the media rather than the state means a state file added in a
+# later release is restored without anyone remembering to list it here. The
+# live database's -wal and -shm go first: left beside the restored main file,
+# SQLite would replay the NEWER schema's log into the older database.
+#
+# Media made since the upgrade is counted and kept. The restored database does
+# not list it, but the files are the operator's, and deleting them is not a
+# decision a rollback gets to make.
+write_binary_rollback_script() {
+  cat > "$INSTALL_DIR/rollback.sh" <<EOF
+#!/usr/bin/env bash
+# Roll back an upgrade made with update.sh: restore the state from its backup,
+# keep the media, put the previous binary back. See install.sh for why.
+set -euo pipefail
+
+DATA_DIR="$DATA_DIR"
+BIN_PATH="$BIN_PATH"
+SERVICE_NAME="$SERVICE_NAME"
+# Kept as they are in the live directory; never deleted, never overwritten.
+# Mirrors the paths internal/config derives from DataDir.
+MEDIA_DIRS="recordings uploads hls playout models fonts logs"
+
+usage() {
+  echo "usage: rollback.sh <backup directory>" >&2
+  echo "  the directory update.sh named, e.g. \${DATA_DIR}.bak-YYYY-MM-DD-HHMM" >&2
+  echo "backups on this host:" >&2
+  ls -d "\${DATA_DIR}".bak-* 2>/dev/null | sed 's/^/  /' >&2 || echo "  (none)" >&2
+}
+
+backup="\${1:-}"
+if [ -z "\$backup" ] || [ "\$backup" = -h ] || [ "\$backup" = --help ]; then
+  usage; exit 2
+fi
+backup="\${backup%/}"
+
+# ONLY A BACKUP update.sh TOOK. Anything else -- the live directory itself, a
+# typo, some other copy -- is refused rather than restored over the live state.
+case "\$backup" in
+  "\${DATA_DIR}".bak-*) ;;
+  *) echo "ERROR: \$backup is not a backup update.sh took (\${DATA_DIR}.bak-*)." >&2
+     usage; exit 1 ;;
+esac
+for f in polyemesis.db secret.key; do
+  if [ ! -f "\$backup/\$f" ]; then
+    echo "ERROR: \$backup has no \$f. Refusing to roll back onto it." >&2
+    exit 1
+  fi
+done
+if [ ! -x "\$backup/polyemesis.previous" ]; then
+  echo "ERROR: \$backup has no polyemesis.previous. The restored database needs the" >&2
+  echo "binary it was written by; the current one would migrate it forward again." >&2
+  exit 1
+fi
+[ -d "\$DATA_DIR" ] || { echo "ERROR: \$DATA_DIR does not exist." >&2; exit 1; }
+
+is_media() {
+  local m
+  for m in \$MEDIA_DIRS; do [ "\$1" = "\$m" ] && return 0; done
+  return 1
+}
+
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "\$SERVICE_NAME" 2>/dev/null; then
+  echo "stopping \$SERVICE_NAME"
+  systemctl stop "\$SERVICE_NAME"
+fi
+
+# A rollback that dies halfway leaves a mix of old and new state. Say so, and
+# say the service is down: starting it on that mix is not something to do
+# without looking.
+incomplete() {
+  local rc=\$?
+  [ "\$rc" -eq 0 ] && return 0
+  echo >&2
+  echo "!!! ROLLBACK INCOMPLETE. \$SERVICE_NAME IS STOPPED. The backup at \$backup is" >&2
+  echo "!!! untouched; fix the error above and run this again." >&2
+  return "\$rc"
+}
+trap incomplete EXIT
+
+# The newer database's log must not be replayed into the older file.
+rm -f "\$DATA_DIR/polyemesis.db-wal" "\$DATA_DIR/polyemesis.db-shm"
+
+restored=""
+for src in "\$backup"/* "\$backup"/.[!.]*; do
+  [ -e "\$src" ] || continue
+  name="\${src##*/}"
+  [ "\$name" = polyemesis.previous ] && continue
+  is_media "\$name" && continue
+  rm -rf "\${DATA_DIR:?}/\$name"
+  cp -a "\$src" "\$DATA_DIR/\$name"
+  restored="\$restored \$name"
+done
+echo "restored from \$backup:\$restored"
+
+newer=0
+for m in \$MEDIA_DIRS; do
+  [ -d "\$DATA_DIR/\$m" ] || continue
+  # The backup directory's own mtime is when update.sh finished writing it.
+  n=\$(find "\$DATA_DIR/\$m" -type f -newer "\$backup" 2>/dev/null | wc -l | tr -d ' ')
+  newer=\$((newer + n))
+done
+echo "kept \$MEDIA_DIRS as they are (\$newer file(s) written since the backup;"
+echo "the restored database does not list those, but they are still on disk)"
+
+install -m 0755 "\$backup/polyemesis.previous" "\$BIN_PATH"
+echo "put the previous binary back at \$BIN_PATH"
+
+trap - EXIT
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl start "\$SERVICE_NAME"
+  echo "started \$SERVICE_NAME"
+else
+  echo "no systemctl here; start the server yourself"
+fi
+EOF
+  chmod +x "$INSTALL_DIR/rollback.sh"
 }
 
 # write_binary_uninstall_script gives systemd installs the same thing docker
@@ -2299,7 +2473,7 @@ fi
 echo
 EOF
 	chmod +x "$INSTALL_DIR/uninstall.sh"
-	ok "wrote update.sh and uninstall.sh"
+	ok "wrote update.sh, rollback.sh and uninstall.sh"
 }
 
 write_helper_scripts() {
