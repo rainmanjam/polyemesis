@@ -24,6 +24,16 @@ its first tagged release.
   `\n`, and a longer run is cut into 512 KiB log lines. Both pipes are
   drained to the end whatever their reader does.
 
+- **Restarting a destination whose child would not stop can no longer run two
+  copies or show a live stream as Stopped.** When a restart's stop reached
+  its deadline and killed the child, the new supervisor started at once,
+  while the old one was still waiting for the killed child to be reaped. For
+  that time two FFmpeg processes could push to the same stream key. When the
+  old supervisor finished it wrote Stopped over the new one's Running, and
+  the card showed Stopped while the destination was live. The new child now
+  starts only when the old supervisor has finished, so the destination shows
+  Stopped for that short gap. A Stop in the gap still cancels the restart.
+
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer
   tracks was tested with a 5 s gap. In the field, with a 30 s outage, track 2

@@ -264,8 +264,11 @@ type Process struct {
 	// goroutine and an HTTP handler at the same time.
 	secrets *alerts.SecretSet
 
-	mu        sync.RWMutex
-	state     State
+	mu    sync.RWMutex
+	state State
+	// gen counts supervise loops: Start bumps it (under mu) each time it
+	// launches one. setStateFor drops a write made for an older one.
+	gen       uint64
 	pid       int
 	restarts  int
 	startedAt time.Time
@@ -354,6 +357,9 @@ type Process struct {
 	// A real Stop that lands between Restart's stop and its start does set it,
 	// and the restart correctly turns into a no-op.
 	retired bool
+	// startPending is set while a Start is waiting for the previous supervise
+	// loop to end before it launches the next one. See Start.
+	startPending bool
 
 	// policyMu guards pol. Deliberately NOT p.mu: setState takes p.mu and then
 	// calls OnState, which fans out to the WebSocket, and a reconcile applying
@@ -591,13 +597,47 @@ func (p *Process) Start() {
 	// The clause, NOT the line. Deleting the whole `if` leaves a dangling
 	// `return` and does not compile, and a mutation that does not build proves
 	// nothing at all.
-	if p.retired || p.running {
+	if p.retired || p.running || p.startPending {
 		return
+	}
+	// ONE SUPERVISE LOOP AT A TIME, and this is the only place a loop is born.
+	//
+	// A stop that hit its deadline returns without waiting for `done` -- it
+	// cannot, the deadline is spent -- so running is false while the previous
+	// loop is still inside runOnce, waiting on a SIGKILLed child the kernel has
+	// not yet reaped or on a drain. Restart's Start used to launch a second loop
+	// straight into that window. That was two children on one destination key,
+	// and, when the old loop finally unwound and found its ctx cancelled, a
+	// StateStopped written over the new loop's StateRunning: a process reading
+	// Stopped whose child was live and publishing.
+	//
+	// So a Start that finds the previous loop still alive becomes a promise to
+	// start the moment it ends. The retired latch is re-read then, so a Stop
+	// that lands in between still wins.
+	if prev := p.done; prev != nil {
+		select {
+		case <-prev:
+		default:
+			p.startPending = true
+			go func() {
+				<-prev
+				p.runMu.Lock()
+				p.startPending = false
+				p.runMu.Unlock()
+				p.Start()
+			}()
+			return
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 	p.done = make(chan struct{})
 	p.running = true
+	// A new generation, so a stop() still finishing the previous one cannot
+	// write its StateStopped over this loop's state. See setStateFor.
+	p.mu.Lock()
+	p.gen++
+	p.mu.Unlock()
 	go p.supervise(ctx, p.done)
 }
 
@@ -627,6 +667,11 @@ func (p *Process) Stop(ctx context.Context) error { return p.stop(ctx, true) }
 // Non-terminal, unlike Stop: this is a cycle, not a retirement. If a real Stop
 // lands in the gap, its latch makes the Start below a no-op, which is the
 // outcome the caller of Stop asked for.
+//
+// When the stop hits its deadline the new child does not come up at once: it
+// comes up when the old supervise loop has ended, which is to say when the
+// SIGKILLed child has been reaped. Until then the process reads Stopped. See
+// Start.
 func (p *Process) Restart(ctx context.Context) {
 	// Deliberately discarded: a restart that had to kill the old child still
 	// wants the new one, and the caller of Restart has no different action to
@@ -661,6 +706,9 @@ func (p *Process) stop(ctx context.Context, retire bool) error {
 	}
 	cancel, done := p.cancel, p.done
 	p.running = false
+	p.mu.RLock()
+	gen := p.gen
+	p.mu.RUnlock()
 	p.runMu.Unlock()
 
 	cancel()
@@ -714,7 +762,12 @@ func (p *Process) stop(ctx context.Context, retire bool) error {
 				ErrStopDeadline, p.Name())
 		}
 	}
-	p.setState(StateStopped, "")
+	// For the generation this stop ended, and no other. A Start that ran
+	// while this was waiting -- a reconcile's, or the pending one Start leaves
+	// behind, which fires on the same `done` this select just took -- may
+	// already have a new loop reporting Running, and a Stopped written over it
+	// would be the lie the one-loop rule in Start exists to prevent.
+	p.setStateFor(gen, StateStopped, "")
 	return err
 }
 
@@ -1272,6 +1325,27 @@ func (p *Process) kill() {
 
 func (p *Process) setState(s State, errMsg string) {
 	p.mu.Lock()
+	p.setStateLocked(s, errMsg)
+}
+
+// setStateFor is setState for a writer that speaks for one generation of the
+// supervise loop -- stop(), finishing a stop that has already let go of runMu.
+// If a Start has begun a newer generation since, the write is dropped: the
+// state belongs to the loop that is running now.
+//
+// Checked and written under one hold of p.mu, and Start bumps gen under p.mu,
+// so there is no gap between "still current" and the write.
+func (p *Process) setStateFor(gen uint64, s State, errMsg string) {
+	p.mu.Lock()
+	if p.gen != gen {
+		p.mu.Unlock()
+		return
+	}
+	p.setStateLocked(s, errMsg)
+}
+
+// setStateLocked is called with p.mu held, and releases it before OnState.
+func (p *Process) setStateLocked(s State, errMsg string) {
 	changed := p.state != s || p.lastErr != errMsg
 	p.state = s
 	if errMsg != "" {
