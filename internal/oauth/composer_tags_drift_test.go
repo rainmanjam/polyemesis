@@ -33,7 +33,10 @@ func dashboardSource(t *testing.T) string {
 // composer that still cannot send them.
 func TestTheComposerCanSendFacebookTags(t *testing.T) {
 	src := dashboardSource(t)
-	body := strings.Index(src, `metaFetch<MetaJob>("/metadata/push"`)
+	// The push moved from a local metaFetch into lib/api.ts (#47: a restart used
+	// to leave the composer polling a job the server no longer had). The body is
+	// still built here, in the call's object literal, so that is the window.
+	body := strings.Index(src, `api.pushMetadata({`)
 	if body < 0 {
 		t.Fatal("cannot find the metadata push call in Dashboard.tsx; this guard " +
 			"is no longer looking where the push body lives, so it asserts nothing")

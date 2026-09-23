@@ -88,15 +88,15 @@
       "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
     }
   ],
-  "total": 101,
+  "total": 104,
   "byPackage": {
     "cmd/polyemesis": 1,
     "internal/api": 7,
     "internal/clipper": 4,
     "internal/clips": 4,
     "internal/config": 1,
-    "internal/db": 3,
-    "internal/engine": 6,
+    "internal/db": 4,
+    "internal/engine": 7,
     "internal/ffmpeg": 25,
     "internal/media": 5,
     "internal/meters": 3,
@@ -107,6 +107,7 @@
     "internal/scheduler": 1,
     "internal/secrets": 1,
     "internal/srtserver": 3,
+    "internal/supervisor": 1,
     "internal/transcribe": 2,
     "internal/upgrade": 8
   },
@@ -170,6 +171,19 @@
       },
       "why": "ONE new site, and one stale one removed, so the total does not move -- which is exactly the coincidence that would have hidden the new one if this file only tracked a total. internal/transcribe gains symlinkOrSkip, a single helper shared by both confinement tests rather than a skip per test, following the sampleMedia/needFFmpeg shape the entries above settled on. A Windows account without the create-symlink privilege cannot run either test, and that is a property of the machine; anything other than a permission refusal is reported as a failure, not a skip. internal/supervisor is committed at 1 and has had 0 for some time -- there is no t.Skip left in the package -- so the count is corrected here rather than left to absorb somebody else's future addition.",
       "notAdded": "The cancellation test for the surviving-grandchild hang wanted a #!/bin/sh fixture, which is the same trade PR 118 made and PR 270 paid back. It uses internal/media's existing TestHelperProcess re-exec instead, with a new grandchild mode, so it runs on Windows and adds no site at all."
+    }
+  ],
+  "raisedBy6": [
+    {
+      "pr": "the v0.10.0 exploratory-testing fixes (integ/all-fixes)",
+      "from": 101,
+      "to": 104,
+      "packages": {
+        "internal/db": "3 -> 4",
+        "internal/engine": "6 -> 7",
+        "internal/supervisor": "0 -> 1 (committed at 1 already; the new site is real)"
+      },
+      "why": "THREE new sites, each environmental and each saying so in its message. internal/supervisor: the quiet-relay stop test needs SIGTERM, which Windows does not deliver -- the Unix run is the one that proves an unfinalised file is now finalised. internal/engine: the recording free-space floor test needs a volume that reports free-space figures; a platform that reports none cannot halt on the floor, and the test says so rather than passing over nothing. internal/db: the corrupt-page boot test skips only when this SQLite build refuses to open the damaged file at all, in which case the fault already surfaces at boot, which is the property being tested. None of the three fires because the thing under test changed."
     }
   ]
 }
