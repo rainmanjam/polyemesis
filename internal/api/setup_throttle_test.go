@@ -24,7 +24,8 @@ func attemptSetup(t *testing.T, h http.Handler, remoteAddr string) *httptest.Res
 // CreateUser's WHERE NOT EXISTS keeps that race narrow -- the loser cannot take
 // over an install that already has a user -- but narrow is not bounded, and
 // unthrottled one address could hold the door open at whatever rate the network
-// allows, paying a bcrypt hash of our CPU for each try.
+// allows. The setup code (setup_code_test.go) is what now keeps a stranger out;
+// the throttle is what keeps them from guessing at it.
 func TestRepeatedSetupAttemptsEventuallyGet429WithRetryAfter(t *testing.T) {
 	// This fixture already has an admin, so every attempt below is a losing
 	// one -- which is the case that matters. An attacker's attempts are losing
@@ -35,8 +36,10 @@ func TestRepeatedSetupAttemptsEventuallyGet429WithRetryAfter(t *testing.T) {
 	// Six, not five: the penalty is imposed BY the attempt that spends the
 	// last free one, so it is the attempt after that which is turned away.
 	for i := 0; i < 6; i++ {
-		if code := attemptSetup(t, h, addr).Code; code != http.StatusBadRequest {
-			t.Fatalf("attempt %d status = %d, want 400 while inside the free allowance", i+1, code)
+		// 409: the fixture's admin exists, so each attempt is told setup is
+		// already complete -- and is still counted.
+		if code := attemptSetup(t, h, addr).Code; code != http.StatusConflict {
+			t.Fatalf("attempt %d status = %d, want 409 while inside the free allowance", i+1, code)
 		}
 	}
 	w := attemptSetup(t, h, addr)

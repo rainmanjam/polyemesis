@@ -9,6 +9,8 @@
   "auth.createAccount": "Hesap oluştur",
   "auth.firstRun": "İlk çalıştırma kurulumu",
   "auth.firstRunDesc": "Bu sunucu için yönetici kimlik bilgilerini seçin. Hesap kurtarma yoktur, bu yüzden onları güvenli bir yerde saklayın.",
+  "auth.setupCode": "Kurulum kodu",
+  "auth.setupCodeHint": "Sunucu başlarken bunu yazdırdı ve veri dizinindeki setup-code dosyasına kaydetti. Linux'ta: sudo journalctl -u polyemesis | grep -A2 'setup code' veya sudo cat /var/lib/polyemesis/setup-code. Docker'da: docker logs polyemesis veya docker exec polyemesis cat /data/setup-code.",
   "auth.sessionEnded": "Oturumunuz sona erdi. Devam etmek için yeniden giriş yapın.",
   "auth.password": "Parola",
   "auth.passwordMismatch": "Parolalar eşleşmiyor.",

@@ -192,13 +192,13 @@ func login() {
 // ---------------------------------------------------------------- steps
 
 func setup() {
-	code, out := do(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass})
+	code, out := do(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass, "setupCode": os.Getenv("POLYEMESIS_SETUP_CODE")})
 	if code != http.StatusOK && code != http.StatusCreated {
 		die(fmt.Sprintf("setup failed: %d %s", code, out))
 	}
 	// CreateUser refuses to run twice; that is what stops a stranger who finds
 	// an exposed port from taking over an install that is already configured.
-	code2, _ := do(http.MethodPost, "/setup", map[string]string{"username": "intruder", "password": "Intruder!9xzq"})
+	code2, _ := do(http.MethodPost, "/setup", map[string]string{"username": "intruder", "password": "Intruder!9xzq", "setupCode": os.Getenv("POLYEMESIS_SETUP_CODE")})
 	if code2 == http.StatusOK || code2 == http.StatusCreated {
 		fmt.Println("SETUP_REPEATABLE")
 		return

@@ -358,7 +358,7 @@ tokens are for.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/setup` | Whether first-run setup is still needed |
-| `POST` | `/setup` | Create the admin. Refused once one exists. Throttled per client address |
+| `POST` | `/setup` | Create the admin. Needs the one-time `setupCode`; `409` once an admin exists. Throttled per client address |
 | `POST` | `/auth/login` | Throttled per client address |
 | `GET` | `/health` | Three named checks. Not every failure is a `503` — see below |
 | `GET` | `/tls/ca` | The generated CA, for trusting a self-signed instance |
@@ -419,6 +419,20 @@ and taking it out of a load balancer over it would end the stream to fix the
 files. The consequence for whoever wires up the monitoring is that **a full
 recording volume is invisible to a check keyed on the HTTP status** — key on
 the `status` field instead, and alert on `degraded` as well as on `unhealthy`.
+
+#### First-run setup
+
+`POST /setup` takes `{"username", "password", "setupCode"}`. `setupCode` is the
+one-time code the server writes to `<dataDir>/setup-code` at startup while no
+admin exists, and prints once in its startup banner; case, spaces and dashes
+are ignored. See [INSTALL.md](INSTALL.md#the-first-run-setup-code).
+
+| Status | When |
+|---|---|
+| `201` | The admin was created and signed in. The code is used up |
+| `403` | The code is missing or wrong |
+| `409` | An admin already exists |
+| `503` | The server has no code to check against; restart it |
 
 #### The two throttles
 

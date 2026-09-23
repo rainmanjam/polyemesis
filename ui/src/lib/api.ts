@@ -546,8 +546,11 @@ export const api = {
    *  answer as 0 and must not be rendered as one. */
   setupStatus: () =>
     get<{ needsSetup: boolean; minPasswordChars: number; sources?: number }>("/setup"),
-  setup: (username: string, password: string) =>
-    post<{ username: string }>("/setup", { username, password }),
+  /** setupCode is the one-time code the server printed at startup and wrote
+   *  to <data dir>/setup-code. Without it the server answers 403: an open port
+   *  on a fresh install is not an invitation to become its admin. */
+  setup: (username: string, password: string, setupCode: string) =>
+    post<{ username: string }>("/setup", { username, password, setupCode }),
   login: (username: string, password: string) =>
     post<{ username: string }>("/auth/login", { username, password }),
   logout: () => post<{ status: string }>("/auth/logout"),

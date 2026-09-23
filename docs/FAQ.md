@@ -212,11 +212,19 @@ printf '%s\n%s\n' "$NEW" "$NEW" | sudo -u polyemesis polyemesis -reset-admin --c
 any audit log that records command lines.
 
 **Do not delete the row from the database to force first-run setup.** It works —
-`needsSetup` is just "the users table is empty" — but `POST /api/v1/setup` is
-unauthenticated, and the only thing stopping it taking over a configured install
-is that an account already exists. Deleting the account removes that guard, so
-until you finish setup, anyone who can reach the port can claim your install.
-`-reset-admin` never opens that window: the account keeps existing throughout.
+`needsSetup` is just "the users table is empty" — but it takes a restart before
+first-run setup will accept anything, because the server only makes a
+[setup code](INSTALL.md#the-first-run-setup-code) at startup while no admin
+exists. `-reset-admin` needs neither: the account keeps existing throughout.
+
+## Where is the setup code?
+
+The first-run screen asks for a one-time setup code. The server writes it to
+`setup-code` in its data directory and prints it once in the startup log:
+`sudo journalctl -u polyemesis | grep -A2 'setup code'` on a systemd install,
+`docker logs polyemesis` in Docker. `install.sh` prints it at the end. It stops
+working once the admin account exists. See
+[INSTALL.md](INSTALL.md#the-first-run-setup-code).
 
 Sessions are ended on purpose. Someone resetting a forgotten password may be
 locking an intruder out, and leaving that intruder signed in would defeat it.

@@ -190,7 +190,7 @@ func Login(user, pass string) {
 // and the distinction is not something a suite should have an opinion about --
 // what matters is that an account now exists.
 func Setup(user, pass string) {
-	code, out := Do(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass})
+	code, out := Do(http.MethodPost, "/setup", map[string]string{"username": user, "password": pass, "setupCode": os.Getenv("POLYEMESIS_SETUP_CODE")})
 	if code != http.StatusOK && code != http.StatusCreated {
 		Die(fmt.Sprintf("setup failed: %d %s", code, out))
 	}

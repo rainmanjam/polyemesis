@@ -527,6 +527,12 @@ to earn its place. The ones that have earned it are a credential with nowhere
 else to live, and a set of escape hatches an operator reaches for while
 standing at a terminal reading an error.
 
+### First-run setup
+
+| Variable | What it does |
+|---|---|
+| `POLYEMESIS_SETUP_CODE` | The one-time code first-run setup needs, instead of one the server makes. For unattended provisioning, where whoever set up the box already knows it. 12 characters or more, or the server refuses to start. Read only while no admin account exists. See [INSTALL.md](INSTALL.md#the-first-run-setup-code) |
+
 ### Rumble chat
 
 | Variable | What it does |

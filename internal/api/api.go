@@ -398,6 +398,11 @@ type Server struct {
 	// allowance the admin needs the moment setup succeeds, and a mistyped
 	// password would slow down the one request that creates the account.
 	setups *auth.Throttle
+
+	// setupCode is the one-time code POST /setup requires on a fresh install.
+	// Nil once an admin exists, and nil in a server built without one, which
+	// refuses setup rather than accepting it. See auth.SetupCode.
+	setupCode *auth.SetupCode
 	// providers is the OAuth provider set every handler resolves through, and
 	// it replaced five function-pointer fields on this struct.
 	//
@@ -660,6 +665,11 @@ type Options struct {
 	// Hooks is the lifecycle-webhook dispatcher. Optional.
 	Hooks *hooks.Dispatcher
 
+	// SetupCode is what POST /setup must be sent on an install with no admin.
+	// Leaving it nil is safe in the only direction that matters: setup is then
+	// refused, never opened. See auth.PrepareSetupCode.
+	SetupCode *auth.SetupCode
+
 	// Providers is the OAuth provider set every handler resolves through.
 	//
 	// Optional, and the zero value is what production passes: an unset Set
@@ -694,6 +704,7 @@ func New(o Options) *Server {
 		startedAt:     time.Now(),
 		logins:        auth.NewThrottle(),
 		setups:        auth.NewThrottle(),
+		setupCode:     o.SetupCode,
 		kickKeys:      &chat.KickKeyFetcher{},
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),

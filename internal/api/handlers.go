@@ -70,25 +70,24 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 // handleSetup creates the admin account on a fresh install.
 //
 // UNAUTHENTICATED BY NECESSITY -- there is no account to authenticate against
-// yet -- AND THROTTLED FOR THE SAME REASON. GET /setup advertises needsSetup to
-// anyone who asks, so the window between a process starting and its operator
-// reaching the browser is a race that is announced to the network it is running
-// on. CreateUser's WHERE NOT EXISTS is what makes the race narrow rather than
-// total: it cannot take over an install that already has a user, so the prize
-// is only the unconfigured install and only until the real operator gets there.
+// yet -- SO IT ASKS FOR THE NEXT BEST THING: proof the caller can read this
+// box. GET /setup advertises needsSetup to anyone who asks, and install.sh
+// starts the service and opens the firewall before the operator has a browser
+// open, so on a fresh install the first stranger to reach the port used to
+// become the admin. CreateUser's WHERE NOT EXISTS only decided WHO won that
+// race; it never stopped a stranger winning it.
 //
-// Narrow is not the same as bounded, though, and unthrottled this endpoint let
-// one address hold the door open indefinitely -- a bcrypt hash per request,
-// spun as fast as the network allows, on the one route that runs before any
-// credential exists. The throttle is what makes losing the race cost something:
-// five free attempts, then a doubling delay to a five-minute ceiling, per
-// address, forgotten after an hour of quiet.
+// The setup code closes it. It is minted at boot while no admin exists,
+// written 0600 to <dataDir>/setup-code and printed once in the startup banner,
+// so it reaches exactly the people who can read the box's files or its log --
+// the same bar -reset-admin sets. It is consumed the moment the admin exists.
 //
-// EVERY ATTEMPT IS COUNTED, not only the failures, which is the one place this
-// differs from the login throttle. There is exactly one attempt in the life of
-// an install that is supposed to succeed; a second POST arriving from the same
-// address is either a retry of a request that already worked or somebody
-// probing, and neither needs to be fast.
+// THROTTLED AS WELL, and EVERY ATTEMPT IS COUNTED, not only the failures, which
+// is the one place this differs from the login throttle. There is exactly one
+// attempt in the life of an install that is supposed to succeed; a second POST
+// arriving from the same address is either a retry of a request that already
+// worked or somebody guessing at the code, and neither needs to be fast. Five
+// free attempts, then a doubling delay to a five-minute ceiling, per address.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	// Before the body is read and long before CreateUser pays for a bcrypt
 	// hash, for the same reason the login throttle sits where it does.
@@ -102,8 +101,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	s.setups.Fail(ip)
 
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username  string `json:"username"`
+		Password  string `json:"password"`
+		SetupCode string `json:"setupCode"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -112,12 +112,42 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		req.Username = "admin"
 	}
 
-	// CreateUser refuses to run twice, so this endpoint cannot be used to take
-	// over an existing install even though it is unauthenticated.
+	// Already claimed is its own answer, ahead of the code: the code is gone by
+	// then, and "wrong code" would send a returning operator hunting for a file
+	// that no longer exists instead of to the sign-in form.
+	if has, err := s.store.HasUser(); err != nil {
+		writeStoreError(w, err)
+		return
+	} else if has {
+		writeError(w, http.StatusConflict, "setup is already complete; sign in instead")
+		return
+	}
+	if !s.setupCode.Pending() {
+		// Only a server built without a code gets here with no admin. Refusing
+		// is the safe reading of that: an install that cannot check the code
+		// must not stop asking for it.
+		writeError(w, http.StatusServiceUnavailable,
+			"this server has no setup code; restart it to generate one")
+		return
+	}
+	if !s.setupCode.Matches(req.SetupCode) {
+		s.log.Warn("setup attempt with a wrong or missing setup code", "remote", ip)
+		writeError(w, http.StatusForbidden, "the setup code is missing or wrong; it is printed in the "+
+			"server log at startup and saved in the file "+auth.SetupCodeFile+" in the data directory")
+		return
+	}
+
+	// CreateUser refuses to run twice, so two requests that both carried the
+	// right code still produce one admin.
 	user, err := s.store.CreateUser(req.Username, req.Password)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if err := s.setupCode.Consume(); err != nil {
+		// The code already stopped matching; only the file is left, and the
+		// next boot removes it because by then there is a user.
+		s.log.Warn("could not remove the used setup code file", "path", s.setupCode.Path(), "err", err)
 	}
 	// The operator who just configured this install is not a suspect. Their
 	// own address starts clean, so a browser that reloads onto the login form

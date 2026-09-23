@@ -9,6 +9,8 @@
   "auth.createAccount": "계정 만들기",
   "auth.firstRun": "최초 실행 설정",
   "auth.firstRunDesc": "이 서버의 관리자 자격 증명을 정하세요. 계정 복구 수단이 없으므로 안전한 곳에 보관하세요.",
+  "auth.setupCode": "설정 코드",
+  "auth.setupCodeHint": "서버가 시작할 때 출력했고, 데이터 디렉터리의 setup-code 파일에 저장했습니다. Linux: sudo journalctl -u polyemesis | grep -A2 'setup code' 또는 sudo cat /var/lib/polyemesis/setup-code. Docker: docker logs polyemesis 또는 docker exec polyemesis cat /data/setup-code.",
   "auth.sessionEnded": "세션이 종료되었습니다. 계속하려면 다시 로그인하세요.",
   "auth.password": "비밀번호",
   "auth.passwordMismatch": "비밀번호가 일치하지 않습니다.",

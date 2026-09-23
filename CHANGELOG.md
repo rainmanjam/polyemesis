@@ -470,6 +470,19 @@ its first tagged release.
 
 ### Security
 
+- **A fresh install can no longer be claimed by whoever reaches its port
+  first.** `install.sh` starts the service and opens the firewall before the
+  operator has a browser open, and `POST /api/v1/setup` made the first caller
+  the admin. While no admin exists, the server now makes a one-time setup code
+  at startup, writes it to `<dataDir>/setup-code` (mode 0600), and prints it
+  once in the startup banner. Setup refuses without it (`403`). The code is
+  used up when the admin is created, and a restart before then keeps it. The
+  first-run screen has a field for it and says where to find it, and
+  `install.sh` prints it at the end. `POLYEMESIS_SETUP_CODE` presets it for
+  unattended installs. Installs that already have an admin are unaffected. See
+  [docs/UPGRADING.md](docs/UPGRADING.md) and
+  [docs/INSTALL.md](docs/INSTALL.md#the-first-run-setup-code).
+
 - **Upgrading from 0.6.x no longer leaves plaintext stream keys in
   `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
   and every release before 0.7.0 ran without it: a real 0.6.0 install with five

@@ -194,10 +194,43 @@ never completes.
 
 It never asks for an admin password. polyemesis has no account until you create
 one on the first-run screen, so there is no credential for an installer to
-handle. In binary mode it verifies the download against the release's published
+handle. The first-run screen asks for a one-time
+[setup code](#the-first-run-setup-code), and the installer's closing summary
+prints it. In binary mode it verifies the download against the release's published
 `SHA256SUMS` and refuses to install on a mismatch.
 
-**If you later lose that password, or think it leaked.** `-reset-admin` sets a
+### The first-run setup code
+
+A fresh install has no admin account, and the first-run screen is how one is
+made. That screen is on whatever port the server listens on, and `install.sh`
+opens that port before you have a browser open. Without something more, the
+first person to reach the port would become your admin.
+
+So while no admin exists, the server needs a **one-time setup code**, and the
+first-run screen asks for it. The server makes the code at startup and writes
+it, readable by the service user only, to `setup-code` in the data directory.
+It also prints it once in the startup banner:
+
+| Install | Where the code is |
+|---|---|
+| `install.sh`, binary | the installer's closing summary; `sudo journalctl -u polyemesis \| grep -A2 'setup code'`; `sudo cat /var/lib/polyemesis/setup-code` |
+| `install.sh`, docker | the installer's closing summary; `cd /opt/polyemesis && docker compose logs polyemesis`; `docker exec polyemesis cat /data/setup-code` |
+| `docker run` / compose | `docker logs polyemesis`; `docker exec polyemesis cat /data/setup-code` |
+| from source | the terminal you started it in; `./data/setup-code` |
+
+The code is used up when the admin account is created: the file is deleted and
+the code stops working. A restart before then **keeps the same code**, so a
+code you already copied still works. A missing or wrong code gets `403`, and
+each attempt counts against the per-address setup throttle.
+
+To provision a box unattended, set `POLYEMESIS_SETUP_CODE` in the server's
+environment (12 characters or more) and the server uses that code instead of
+making one. See [CONFIGURATION.md](CONFIGURATION.md#environment-variables).
+
+An install that already has an admin never has a setup code. Upgrading one
+changes nothing.
+
+**If you later lose the admin password, or think it leaked.** `-reset-admin` sets a
 new one and signs out every existing session; it touches only the database and
 exits before anything binds a port, so it is safe to run against a live server.
 On a systemd install, run it as the service user and point it at the same
@@ -459,7 +492,10 @@ docker compose up -d
 docker compose logs -f
 ```
 
-Open <http://localhost:8080> and set an admin password on the first-run screen.
+Open <http://localhost:8080> and create the admin account on the first-run
+screen, with the [setup code](#the-first-run-setup-code) from
+`docker compose logs polyemesis` (or `docker compose exec polyemesis cat
+/data/setup-code`).
 
 **What the compose file publishes**, and why each one:
 
@@ -594,7 +630,9 @@ make build                 # builds the UI, embeds it, produces ./polyemesis
 ./polyemesis -data ./data
 ```
 
-Open <http://localhost:8080> and set an admin password.
+Open <http://localhost:8080> and create the admin account. The first-run screen
+asks for the [setup code](#the-first-run-setup-code) the server printed in that
+terminal; it is also in `./data/setup-code`.
 
 **On the box itself.** That run binds **loopback only**. With no `config.yaml`
 and no `-addr`, the listen address is `127.0.0.1:8080` (`DefaultAddr` in

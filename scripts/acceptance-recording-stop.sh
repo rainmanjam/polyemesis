@@ -78,7 +78,7 @@ curl -fsS -m5 "$API/health" >/dev/null 2>&1 \
   && ok "server started" || { bad "server did not start"; tail -20 server.log; exit 1; }
 
 curl -fsS -m5 -X POST -H 'Content-Type: application/json' \
-  -d "{\"username\":\"admin\",\"password\":\"$PW\"}" "$API/setup" >/dev/null 2>&1 \
+  -d "{\"username\":\"admin\",\"password\":\"$PW\",\"setupCode\":\"$POLYEMESIS_SETUP_CODE\"}" "$API/setup" >/dev/null 2>&1 \
   && ok "first-run setup" || { bad "setup failed"; exit 1; }
 curl -fsS -m5 -c "$CJ" -X POST -H 'Content-Type: application/json' \
   -d "{\"username\":\"admin\",\"password\":\"$PW\"}" "$API/auth/login" >/dev/null 2>&1 \

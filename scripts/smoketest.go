@@ -41,7 +41,7 @@ func main() {
 	waitUp()
 
 	step("first-run setup")
-	do("POST", "/setup", map[string]any{"username": "admin", "password": "hunter2hunter2"})
+	do("POST", "/setup", map[string]any{"username": "admin", "password": "hunter2hunter2", "setupCode": os.Getenv("POLYEMESIS_SETUP_CODE")})
 	grabCSRF()
 
 	// The programme everything below hangs off.

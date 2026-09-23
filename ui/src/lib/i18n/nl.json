@@ -9,6 +9,8 @@
   "auth.createAccount": "Account aanmaken",
   "auth.firstRun": "Eerste installatie",
   "auth.firstRunDesc": "Kies de beheerdersgegevens voor deze server. Er is geen accountherstel, bewaar ze dus ergens veilig.",
+  "auth.setupCode": "Installatiecode",
+  "auth.setupCodeHint": "De server heeft hem bij het starten getoond en opgeslagen in het bestand setup-code in zijn datamap. Op Linux: sudo journalctl -u polyemesis | grep -A2 'setup code' of sudo cat /var/lib/polyemesis/setup-code. In Docker: docker logs polyemesis of docker exec polyemesis cat /data/setup-code.",
   "auth.sessionEnded": "Je sessie is beëindigd. Meld je opnieuw aan om verder te gaan.",
   "auth.password": "Wachtwoord",
   "auth.passwordMismatch": "De wachtwoorden komen niet overeen.",

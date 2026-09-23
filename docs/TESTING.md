@@ -51,7 +51,7 @@ make build
 ./polyemesis -data ./data
 ```
 
-Open <http://localhost:8080>, complete first-run setup, and note the SRT port
+Open <http://localhost:8080>, complete first-run setup (with the setup code the server printed), and note the SRT port
 from **Settings → Listeners** (default 6000).
 
 Then **create a source**: Sources → Add source, name it `Main`, ingest mode

@@ -47,7 +47,7 @@ the thing it protects.
 | Process control | Process groups + `KillMode=mixed` in the shipped unit | `deploy/polyemesis.service`, `scripts/install.sh:1523` |
 | API authz | Enforced at the router, not per handler; route population derived from registrations; read-scope denial and credential redaction pinned by reflective classification tests | 9 guards + `TestLedgerPreflight` (23 subtests) run, pass |
 | API | Webhook/alert SSRF closed at dial time against one shared range list (`internal/netguard`) | read; imported by `hooks`, `alerts` |
-| Auth | JWT alg-pinned; epoch revocation fails closed; bcrypt default cost; first-run bootstrap race-safe (`INSERT … WHERE NOT EXISTS`); `-reset-admin` never reopens setup | read; `users.go:192 ErrUserExists` |
+| Auth | JWT alg-pinned; epoch revocation fails closed; bcrypt default cost; first-run bootstrap race-safe (`INSERT … WHERE NOT EXISTS`) and gated by a one-time setup code in `<dataDir>/setup-code`; `-reset-admin` never reopens setup | read; `users.go:192 ErrUserExists` |
 | Secrets at rest | `secure_delete` in DSN (`db.go:168`); WAL checkpoint on the no-work boot with regression test; `wal_checkpoint(TRUNCATE)` read back; sidecars chmod'd on every open; read path fails closed | read |
 | Migrations | Forward-only with three devices above rung 0: `refuseNewerSchema` before any write, an AST check on `Open`, and `previous_release_schema_test.go` opening the real shipped previous schema | tests run |
 | Scans | `govulncheck` 0 · `npm audit` 0 · gitleaks 0 tracked hits | run 2026-09-01 |
@@ -142,8 +142,9 @@ one. Device: `enforce_admins: true`. Control rung.
 
 - API: password change bumps `users.token_epoch` but `api_tokens` are looked up
   by hash only (`tokens.go:182`) — a leaked admin token survives incident
-  response. `POST /setup` is unauthenticated and unthrottled: first boot is a
-  race for the install (bootstrap is race-*safe*; the window is still public).
+  response. (`POST /setup` is no longer a first-boot race: it needs the
+  one-time setup code the server writes to `<dataDir>/setup-code`, and it is
+  throttled per address.)
 - DB: `secret.key` is minted silently over a restored data directory
   (`secrets.go:88–96`); `-reset-admin` runs migrations against a possibly-live DB.
 - Security: no `config.yaml` → plaintext HTTP on `0.0.0.0:8080`; pull URLs

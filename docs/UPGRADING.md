@@ -221,6 +221,28 @@ instead.
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading past 0.10.0 (unreleased, on `main`): first-run setup needs a setup code
+
+> Not yet in a tag — this note is here ahead of the release that carries it,
+> for anyone running `main`.
+
+**An install that already has an admin account: nothing to do.** It never
+makes a setup code, and signing in is unchanged. On its first boot it deletes
+a leftover `<dataDir>/setup-code`, if there is one.
+
+**A fresh install, or a script that provisions one.** `POST /api/v1/setup` now
+needs a `setupCode` field. The server writes the code to `<dataDir>/setup-code`
+and prints it in its startup banner while no admin exists. Without it, setup
+answers `403`. Once an admin exists, it answers `409` (it was `400`). A script
+that creates the first admin should do one of these:
+
+- read the code from `<dataDir>/setup-code` (or `docker exec <container> cat
+  /data/setup-code`) and send it, or
+- set `POLYEMESIS_SETUP_CODE` (12 characters or more) in the server's
+  environment and send the same value.
+
+See [INSTALL.md](INSTALL.md#the-first-run-setup-code).
+
 ### Upgrading past 0.10.0 (unreleased, on `main`): sources with no ingest mode become SRT
 
 > Not yet in a tag — this note is here ahead of the release that carries it,
