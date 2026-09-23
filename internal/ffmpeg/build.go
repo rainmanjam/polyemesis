@@ -746,10 +746,25 @@ const relayFIFOPackets = 32768
 // than logging and carrying on. It must therefore be able to reach the NEXT
 // keyframe, which costs one whole GOP of bytes.
 //
-// THESE ARE CEILINGS, NOT WAITS, which is what makes generous values free.
-// Probing ends the moment the parameters are known, so a stream joined at a
-// keyframe pays nothing for a budget it never spends. The cost is bounded
-// memory during a start that would otherwise have failed.
+// THESE ARE CEILINGS, NOT WAITS -- BUT ONLY WITH -scan_all_pmts 0, and until
+// that was added they were waits. This comment said so without the condition,
+// and every destination start paid the whole window as dead air: 15.4s to the
+// first byte against a 2s GOP, tracking the window 1:1 (5s gave 5.3s) on both
+// 8.1.2 and 9.0.1. The ffmpeg CLI sets the MPEG-TS demuxer's scan_all_pmts to 1
+// unless told otherwise, and with it set the demuxer never clears
+// AVFMTCTX_NOHEADER -- avformat_find_stream_info's "more streams may still
+// appear" -- so "All info found" is unreachable and probing runs until a budget
+// is spent. RelayInputArgs turns it off; see there. With it off, a consumer
+// joined at a keyframe is on air in well under a second and one joined mid-GOP
+// in about the distance to the next keyframe, and a generous ceiling costs
+// nothing a start does not actually need.
+//
+// The evidence that once "showed" the ceiling behaviour,
+// docs/investigations/398-e-probe-window.sh, stopped its consumer with SIGTERM
+// inside the window. A signal interrupts the probe and FFmpeg then writes out
+// what it had buffered, so the file had media in it whether or not the probe
+// would have ended on its own. The script now measures time to first output
+// instead.
 //
 // 32 MB covers one 2-second GOP -- what OBS ships by default -- up to about
 // 128 Mbit/s, and a 10-second GOP at a comfortable broadcast rate.
@@ -785,12 +800,54 @@ const RelayProbeWindow = relayProbeWindow * time.Microsecond
 // come BEFORE the -i they belong to.
 //
 // A function rather than a slice so no caller can append to a shared array and
-// change what the next one gets.
+// change what the next one gets. And every relay consumer in this file takes
+// its input options from here rather than restating them, because the recorder,
+// preview and meters each carried their own copy of the two budgets -- which is
+// how a third option could be added to the destination and silently missed by
+// the other three.
 func RelayInputArgs() []string {
 	return []string{
 		"-analyzeduration", strconv.Itoa(relayProbeWindow),
 		"-probesize", strconv.Itoa(relayProbeSize),
+		// What makes the two budgets above ceilings rather than waits. The ffmpeg
+		// CLI forces scan_all_pmts=1 on every input that does not set it, and the
+		// MPEG-TS demuxer only declares its header complete -- clearing
+		// AVFMTCTX_NOHEADER, which is what lets avformat_find_stream_info stop at
+		// "All info found" -- when scan_all_pmts is <= 0 and every program in the
+		// PAT has its PMT.
+		//
+		// Nothing is given up by turning it off here. scan_all_pmts exists for
+		// broadcast captures carrying several programs; the relay carries one,
+		// written by our own remux, so the first PMT is all the PMTs. The stream
+		// list still comes from that PMT, so every track the encoder declared is
+		// still found, and a stream whose parameters are not yet known -- the
+		// mid-GOP joiner waiting for a keyframe (#460), audio that has not
+		// arrived -- still holds the probe open, up to the same window.
+		"-scan_all_pmts", "0",
 	}
+}
+
+// relayInputArgsFor is RelayInputArgs for the input actually being read, and it
+// is what every builder in this file calls.
+//
+// scan_all_pmts is the MPEG-TS demuxer's own option, and the ffmpeg CLI treats
+// an input option no demuxer consumed as fatal -- "Option scan_all_pmts not
+// found", exit 8, before a byte is read. The relay is always MPEG-TS over UDP
+// (RelayOutputURL sizes its datagrams in TS packets), so a udp:// input gets
+// the whole set. Anything else -- a file handed to the same builder, as the
+// package tests do -- gets the two budgets alone, which every
+// demuxer accepts, rather than a command that cannot start.
+func relayInputArgsFor(input string) []string {
+	args := RelayInputArgs()
+	if strings.HasPrefix(input, "udp://") {
+		return args
+	}
+	for i, a := range args {
+		if a == "-scan_all_pmts" {
+			return append(args[:i:i], args[i+2:]...)
+		}
+	}
+	return args
 }
 
 func RelayInputURL(base string) string {
@@ -1247,7 +1304,7 @@ func DestinationArgs(s DestSpec) []string {
 		// jitter that would otherwise show up as dropped frames.
 		"-thread_queue_size", "1024",
 	)
-	args = append(args, RelayInputArgs()...)
+	args = append(args, relayInputArgsFor(s.RelayURL)...)
 	args = append(args, "-i", RelayInputURL(s.RelayURL))
 
 	// The copy path branches BEFORE -filter_complex, and it has to. A graph
@@ -1483,8 +1540,9 @@ func RecorderArgs(s RecorderSpec) []string {
 	args = append(args,
 		"-fflags", "+genpts",
 		"-thread_queue_size", "1024",
-		"-analyzeduration", strconv.Itoa(relayProbeWindow),
-		"-probesize", strconv.Itoa(relayProbeSize),
+	)
+	args = append(args, relayInputArgsFor(s.RelayURL)...)
+	args = append(args,
 		"-i", RelayInputURL(s.RelayURL),
 		"-map", "0",
 		"-c", "copy",
@@ -1543,8 +1601,9 @@ func PreviewArgs(s PreviewSpec) []string {
 	args = append(args,
 		"-fflags", "+genpts",
 		"-thread_queue_size", "1024",
-		"-analyzeduration", strconv.Itoa(relayProbeWindow),
-		"-probesize", strconv.Itoa(relayProbeSize),
+	)
+	args = append(args, relayInputArgsFor(s.RelayURL)...)
+	args = append(args,
 		"-i", RelayInputURL(s.RelayURL),
 		"-map", "0:v:0",
 		"-map", fmt.Sprintf("0:a:%d?", s.AudioTrack), // '?' => tolerate a video-only ingest
@@ -1720,8 +1779,9 @@ func MetersArgs(s MetersSpec) []string {
 	args = append(args,
 		"-fflags", "+genpts",
 		"-thread_queue_size", "512",
-		"-analyzeduration", strconv.Itoa(relayProbeWindow),
-		"-probesize", strconv.Itoa(relayProbeSize),
+	)
+	args = append(args, relayInputArgsFor(s.RelayURL)...)
+	args = append(args,
 		"-i", RelayInputURL(s.RelayURL),
 		"-filter_complex", strings.Join(chains, ";"),
 		"-map", "[mout]",

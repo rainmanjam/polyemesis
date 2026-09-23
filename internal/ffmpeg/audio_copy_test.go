@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -305,12 +306,20 @@ func streamField(t *testing.T, probe, path, kind, field string) []string {
 
 // replaceRelayInput points the built command at a file instead of the relay,
 // leaving every argument under test exactly where the builder put it.
+//
+// Except -scan_all_pmts, which is the MPEG-TS demuxer's option: the relay is
+// MPEG-TS, the stand-in file is not, and FFmpeg refuses an input option its
+// demuxer does not have. The builder makes the same trade for a non-udp input
+// (relayInputArgsFor); this is the test's copy of it.
 func replaceRelayInput(t *testing.T, args []string, src string) []string {
 	t.Helper()
 	for i, a := range args {
 		if a == "-i" && i+1 < len(args) {
 			out := append([]string{}, args...)
 			out[i+1] = src
+			if j := slices.Index(out[:i], "-scan_all_pmts"); j >= 0 {
+				out = slices.Delete(out, j, j+2)
+			}
 			return out
 		}
 	}
