@@ -24,6 +24,12 @@ its first tagged release.
   which the server reads; it now names `windowSeconds`, `retainPerAuthor` and
   `idleEvictionSeconds`, says the 20,000-author ceiling is fixed, and a test
   holds the table to the struct.
+- **An automod cell can no longer be armed over a checker that is not
+  configured.** The API accepted `twitch/ban/model` with the model switched
+  off. The console drew that cell as inert, and its banner still said an
+  irreversible action was armed. Once someone configured the model, the ban
+  went live. `PUT /settings` now refuses to switch on such a cell and names
+  it. `/automod/matrix` and the console banner count only cells that can fire.
 
 ## [0.10.0] — 2026-09-23
 

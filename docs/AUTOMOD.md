@@ -190,6 +190,14 @@ The key is write-only: `automod.model.hasApiKey` is all `GET /settings`
 carries. Sending an empty key clears it. See [the API reference](API.md) for
 the envelope.
 
+A `PUT /settings` that switches **on** a cell whose checker is not configured
+is refused with a 400 naming the cell: no enabled rule for a `rules` cell, the
+model switched off or with no endpoint for a `model` cell. Configure the
+checker in the same save and the cell arms. A cell that was already on when its
+checker was later switched off is kept, so switching the checker back on
+restores it, but it cannot fire in the meantime, and `/automod/matrix` does not
+count it in `summary`.
+
 ## See also
 
 - [Platforms](PLATFORMS.md) — what each platform's chat supports

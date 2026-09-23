@@ -3,6 +3,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,7 +40,14 @@ func (s *Server) handleAutomodMatrix(w http.ResponseWriter, r *http.Request) {
 		"enabled":         m.Enabled,
 		"platformEnabled": m.PlatformEnabled,
 		"cells":           m.Cells(caps),
-		"summary":         m.Summary(caps),
+		// Counted over the cells that can FIRE, not the cells that are stored
+		// on. A cell whose checker is not configured is kept -- turning the
+		// model off for an evening must not forget which cells it was allowed
+		// -- but it decides nothing, because automod.New is handed a nil
+		// checker for it. Counting it anyway is what put "irreversible action
+		// armed" in the banner over a matrix the console drew as "nothing
+		// automatic". See checkerConfigured.
+		"summary": liveMatrix(m, settings.Automod).Summary(caps),
 		// The vocabularies, so the UI renders rows and columns from the server's
 		// list rather than a second copy that can drift out of step.
 		"actions":   automod.Actions,
@@ -149,6 +157,102 @@ func matrixFromSettings(a db.AutomodSettings) automod.Matrix {
 		m.On[k] = true
 	}
 	return m
+}
+
+// checkerConfigured reports whether a checker exists at all in the engine
+// ApplyAutomod would build from these settings, and in the operator's terms why
+// not when it does not.
+//
+// automod.New takes each checker as a pointer and a nil one contributes
+// nothing. Two of the three are nil by default: rules until a usable rule is
+// written, the model unless it is enabled. A cell in either column can be
+// stored on and still never fire -- until somebody configures the checker,
+// when it goes live as an action nobody knowingly chose that day.
+//
+// THE CONSOLE HAS THE SAME RULE, in ui/src/lib/automodConfig.ts checkerReady,
+// which renders these columns inert. The two must agree: where they did not,
+// the console said "nothing automatic" and the banner said a ban was armed.
+func checkerConfigured(a db.AutomodSettings, c automod.Checker) (bool, string) {
+	switch c {
+	case automod.CheckerRules:
+		// A DISABLED rule is no rule: Rule.Match returns false for one, so the
+		// checker would be built and find nothing.
+		for _, r := range a.Rules {
+			if r.Enabled && strings.TrimSpace(r.Pattern) != "" {
+				return true, ""
+			}
+		}
+		return false, "no enabled rule is written"
+	case automod.CheckerModel:
+		if !a.Model.Enabled {
+			return false, "the model checker is switched off"
+		}
+		// modelConfigFrom copies an empty endpoint over the default, so the
+		// checker is built and every call is a POST to "" that fails open.
+		if strings.TrimSpace(a.Model.Endpoint) == "" {
+			return false, "the model checker has no endpoint"
+		}
+		return true, ""
+	}
+	// History is built from DefaultHistoryLimits on every save and is never
+	// nil. A checker this build does not know is dropped by matrixFromSettings
+	// before it could matter.
+	return true, ""
+}
+
+// liveMatrix is m without the cells whose checker is not configured -- the
+// cells that can actually decide something.
+func liveMatrix(m automod.Matrix, a db.AutomodSettings) automod.Matrix {
+	live := m
+	live.On = map[string]bool{}
+	for k, on := range m.On {
+		key, err := automod.ParseKey(k)
+		if err != nil || !on {
+			continue
+		}
+		if ok, _ := checkerConfigured(a, key.Checker); ok {
+			live.On[k] = true
+		}
+	}
+	return live
+}
+
+// newlyArmedOnUnconfigured refuses a save that switches ON a cell whose checker
+// is not configured by that same save.
+//
+// Refusal rather than a warning, because the console never offers the switch
+// (the column is inert), so the only way to reach this is the API -- and a 200
+// there stored an armed ban the console would then hide.
+//
+// Scoped to cells this save TURNS ON, for the reason the rule-compile check is
+// scoped to a change. A cell already stored on over a checker that has since
+// been switched off is kept, and does nothing while it stays off (liveMatrix);
+// refusing it would make every unrelated save fail until the operator found a
+// column the console draws inert. Configuring the checker and arming the cell
+// in one save is allowed, because readiness is judged on the document being
+// saved.
+func newlyArmedOnUnconfigured(stored map[string]bool, sent db.AutomodSettings) error {
+	var bad []string
+	for k, on := range sent.On {
+		if !on || stored[k] {
+			continue
+		}
+		key, err := automod.ParseKey(k)
+		if err != nil || !automod.KnownPlatform(key.Platform) ||
+			!automod.KnownActions(key.Action) || !automod.KnownChecker(key.Checker) {
+			// matrixFromSettings drops it; there is nothing to arm.
+			continue
+		}
+		if ok, why := checkerConfigured(sent, key.Checker); !ok {
+			bad = append(bad, k+" ("+why+")")
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	sort.Strings(bad)
+	return badRequestError{"automod: cannot arm a cell whose checker is not configured: " +
+		strings.Join(bad, ", ") + "; configure the checker in the same save, or leave the cell off"}
 }
 
 // rulesFromSettings compiles the stored rules.

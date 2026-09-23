@@ -808,6 +808,11 @@ to drift.
 `GET /automod/stats` reports model spend and health — calls this hour against
 the ceiling, failures, and the last error.
 
+A `PUT /settings` that arms a cell whose checker is not configured (no enabled
+rule, or the model off or without an endpoint) is a 400 that names the cell.
+`summary` counts only the cells that can fire. See
+[AUTOMOD.md](AUTOMOD.md#through-the-api).
+
 ### Recordings, library, clipper
 
 | Method | Path |

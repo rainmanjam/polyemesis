@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
@@ -1446,6 +1447,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// block above: the decode rewrites the slice in place, so a comparison
 		// made afterwards would be a slice against itself.
 		storedRules := append([]db.AutomodRule(nil), settings.Automod.Rules...)
+		// And the stored armed cells, which newlyArmedOnUnconfigured compares
+		// against. A map is shared memory too, so a clone.
+		storedOn := maps.Clone(settings.Automod.On)
 		if err := decodeJSONInto(body, settings); err != nil {
 			return err
 		}
@@ -1516,6 +1520,11 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			if _, err := rulesFromSettings(settings.Automod); err != nil {
 				return db.InvalidSettingsError{Err: err}
 			}
+		}
+		// AND NO CELL MAY BE ARMED OVER A CHECKER THAT IS NOT THERE. See
+		// newlyArmedOnUnconfigured.
+		if err := newlyArmedOnUnconfigured(storedOn, settings.Automod); err != nil {
+			return err
 		}
 		// A save that touches the ingest section may not leave the mode unset.
 		//
