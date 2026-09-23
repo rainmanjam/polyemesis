@@ -224,8 +224,8 @@ func TestCompileSimpleTwoTracksAutoLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
-		"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];" +
+	want := "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];" +
+		"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 		"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 		"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
 		"[a_norm]aresample=48000:async=1:first_pts=0[aout]"
@@ -274,7 +274,7 @@ func TestCompileGainIsAppliedPerTrack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.FilterComplex, "[0:a:1]pan=stereo|c0=0.25*c0|c1=0.25*c1[a_t1]") {
+	if !strings.Contains(res.FilterComplex, "[0:a:1]pan=stereo|c0=0.25*c0|c1=0.25*c1,") {
 		t.Errorf("track 2 gain not applied: %s", res.FilterComplex)
 	}
 }
@@ -288,8 +288,8 @@ func TestCompile51SourceDownmixesBeforeSumming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "[0:a:0]pan=stereo|c0=0.4143*c0+0.2929*c2+0.2929*c4|c1=0.4143*c1+0.2929*c2+0.2929*c5[a_t0];" +
-		"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];" +
+	want := "[0:a:0]pan=stereo|c0=0.4143*c0+0.2929*c2+0.2929*c4|c1=0.4143*c1+0.2929*c2+0.2929*c5,aresample=async=1:first_pts=0[a_t0];" +
+		"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 		"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 		"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
 		"[a_norm]aresample=48000:async=1:first_pts=0[aout]"
@@ -318,8 +318,8 @@ func TestCompileMatrixMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "[0:a:0]pan=stereo|c0=1*c4|c1=1*c5[a_t0];" +
-		"[0:a:2]pan=stereo|c0=0.8*c0|c1=0*c0[a_t2];" +
+	want := "[0:a:0]pan=stereo|c0=1*c4|c1=1*c5,aresample=async=1:first_pts=0[a_t0];" +
+		"[0:a:2]pan=stereo|c0=0.8*c0|c1=0*c0,aresample=async=1:first_pts=0[a_t2];" +
 		"[a_t0][a_t2]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 		"[a_mix]loudnorm=I=-16:TP=-1.5:LRA=11[a_norm];" +
 		"[a_norm]aresample=48000:async=1:first_pts=0[aout]"

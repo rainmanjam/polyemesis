@@ -72,8 +72,8 @@ type Result struct {
 //
 // Shape of the generated graph, for N contributing tracks:
 //
-//	[0:a:0]pan=stereo|c0=...|c1=...[a_t0];
-//	[0:a:1]pan=stereo|c0=...|c1=...[a_t1];
+//	[0:a:0]pan=stereo|c0=...|c1=...,aresample=async=1:first_pts=0[a_t0];
+//	[0:a:1]pan=stereo|c0=...|c1=...,aresample=async=1:first_pts=0[a_t1];
 //	[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];
 //	[a_mix]alimiter=limit=0.95:level=disabled[a_norm];
 //	[a_norm]aresample=48000:async=1:first_pts=0[aout]
@@ -153,28 +153,46 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 	sort.Ints(tracks)
 	res.Tracks = tracks
 
-	var chains []string
 	label := make(map[int]string, len(tracks))
-	for _, t := range tracks {
+	bodies := make([]string, len(tracks))
+	for i, t := range tracks {
 		label[t] = n.track(t)
-		chain := trackChain(src, t, byTrack[t])
+		bodies[i] = trackChain(src, t, byTrack[t])
 		if provisional {
-			chain = provisionalChain(src, t, trackGain(p, t))
+			bodies[i] = provisionalChain(src, t, trackGain(p, t))
 		}
-		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, chain, label[t]))
 	}
 
 	// Duck before summing: a duck applied to the finished mix would pull the
 	// trigger down along with everything else.
 	legs := make([]string, 0, len(tracks))
+	var duckChains []string
+	tapped := false
 	if d, ok := p.EffectiveDucking(); ok {
-		duckChains, duckLegs, duckWarns := duckGraph(d, src, tracks, label, provisional, n)
-		chains = append(chains, duckChains...)
+		var duckLegs, duckWarns []string
+		duckChains, duckLegs, duckWarns, tapped = duckGraph(d, src, tracks, label, provisional, n)
 		legs = duckLegs
 		if len(duckWarns) > 0 {
 			res.Warnings = dedupe(append(res.Warnings, duckWarns...))
 		}
 	}
+
+	// The per-track chains are written only now, because whether they need
+	// trackAlign depends on how many ingest tracks the WHOLE graph reads, and a
+	// duck can tap a trigger track that is not in the mix. Written first all
+	// the same: a label must be declared before the chain that consumes it.
+	align := len(tracks) > 1 || tapped
+	chains := make([]string, 0, len(tracks)+len(duckChains)+4)
+	for i, t := range tracks {
+		body := bodies[i]
+		if align {
+			body += "," + trackAlign
+		}
+		// n.track(t), not label[t]: duckGraph has already renamed a trigger
+		// it split, and this chain is the one that feeds the split.
+		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, body, n.track(t)))
+	}
+	chains = append(chains, duckChains...)
 	if len(legs) == 0 {
 		for _, t := range tracks {
 			legs = append(legs, label[t])
@@ -241,6 +259,36 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 	}
 	return res, nil
 }
+
+// trackAlign ends every track's chain whenever more than one track is mixed,
+// and it is what keeps the tracks on one timeline when one of them goes away.
+//
+// amix, and the duck's sidechaincompress, combine their inputs BY SAMPLE COUNT
+// and never look at a timestamp. That is fine for as long as every track
+// delivers continuously, and a failover is precisely when one does not: a slate
+// or a one-track backup carries only track 0, so for the length of the outage
+// the other tracks are simply absent from the relay while track 0 keeps going.
+// When the primary returns, the absent track resumes from the sample where it
+// stopped and every sample it delivers is summed with track 0 from an outage
+// earlier -- audio from before and after the outage in one mix, and the tracks
+// held that far apart until the destination restarts. Measured at 18 s after an
+// 18 s outage.
+//
+// async=1 fills a timestamp gap with silence, so each leg's sample count
+// becomes its position on the shared timeline again. first_pts=0 anchors every
+// leg at the same origin, which covers the case a gap filler alone does not: a
+// destination started while the slate was on air, whose track 2 appears for
+// the first time at the return and would otherwise be counted from its first
+// sample rather than from where it sits. See track_gap_test.go, which runs both
+// shapes through real FFmpeg.
+//
+// A single track has nothing to be aligned against, and the final resample
+// already fills its gaps, so a one-track graph stays exactly the shape it was.
+//
+// What this does NOT change: while a track is absent, a mix that needs it has
+// no input to sum and produces nothing, as selector.go's slate note says. This
+// makes the return correct; it does not make the outage audible.
+const trackAlign = "aresample=async=1:first_pts=0"
 
 // trackGain is the per-track gain a provisional chain applies by hand, because
 // it is not folding one into a matrix.
@@ -350,7 +398,13 @@ const DenoiseFilter = "afftdn=nr=12:nf=-25:tn=1"
 // legs. Returning no legs means nothing was ducked and the caller should mix as
 // usual; that is the deliberate response to a duck that cannot be built, since
 // an un-ducked mix is still the operator's audio and a broken graph is silence.
-func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provisional bool, n ns) (chains, legs, warns []string) {
+//
+// tapped reports that the key reads an ingest track the mix does not, which
+// makes this a multi-track graph even when the mix itself has one track: the
+// sidechain pairs its two inputs by sample count exactly as amix does, so the
+// caller aligns the mix legs as well (see trackAlign). The taps themselves are
+// always aligned here, because a tap only exists beside at least one target.
+func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provisional bool, n ns) (chains, legs, warns []string, tapped bool) {
 	inMix := map[int]bool{}
 	for _, t := range tracks {
 		inMix[t] = true
@@ -375,10 +429,10 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 	}
 
 	if len(targets) == 0 {
-		return nil, nil, []string{"ducking is configured but none of its target tracks are in this destination's mix; no ducking is applied"}
+		return nil, nil, []string{"ducking is configured but none of its target tracks are in this destination's mix; no ducking is applied"}, false
 	}
 	if len(triggers) == 0 {
-		return nil, nil, []string{"ducking is configured but none of its trigger tracks are present on the ingest; no ducking is applied"}
+		return nil, nil, []string{"ducking is configured but none of its trigger tracks are present on the ingest; no ducking is applied"}, false
 	}
 
 	var keys []string
@@ -406,8 +460,9 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 		if provisional {
 			tap = provisionalChain(src, t, 1)
 		}
-		chains = append(chains, fmt.Sprintf("[0:a:%d]%s[%s]", t, tap, keyLbl))
+		chains = append(chains, fmt.Sprintf("[0:a:%d]%s,%s[%s]", t, tap, trackAlign, keyLbl))
 		keys = append(keys, keyLbl)
+		tapped = true
 	}
 
 	key := keys[0]
@@ -444,7 +499,7 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 		}
 		legs = append(legs, label[t])
 	}
-	return chains, legs, nil
+	return chains, legs, nil, tapped
 }
 
 // duckParams renders sidechaincompress' parameters.

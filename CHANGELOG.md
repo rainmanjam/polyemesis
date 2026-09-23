@@ -143,6 +143,31 @@ its first tagged release.
   it. Only a probe that ran and found no duration is remembered; a timeout or
   an ffprobe that could not start is retried on the next scan, so a good
   segment is not stuck at 0 ms by one slow moment.
+- **A failover to a source with fewer tracks no longer leaves the routed tracks
+  out of step.** A slate or a one-track backup carries only track 0, so tracks 2
+  and up vanish from the relay for the length of the outage. `amix` and the
+  duck's sidechain pair their inputs by sample count, not timestamp, so when the
+  primary returned, the missing track picked up where it stopped and was summed
+  with track 0 from an outage earlier: audio from before and after the outage in
+  one mix, offset by the outage (18 s measured) until the destination restarted.
+  Every track's chain in a multi-track graph now ends with
+  `aresample=async=1:first_pts=0`, which fills the gap with silence and anchors
+  every track at the same origin. One-track graphs are unchanged.
+- **Failover away from a dead primary lands at the grace period, not eight
+  seconds after it.** The copy hop that carried the primary into the selector
+  sits blocked on its now-quiet input and ignores SIGTERM, and the switch
+  waited out its full 8 s shutdown grace before starting the slate or backup
+  (11.5 s measured against a 3 s `graceSeconds`). Because the incoming feed's
+  timestamp offset is stamped at the decision, those 8 s also put its timeline
+  behind wall clock, and the next switch repaid them as an 8 s forward jump.
+  A switch now sends the outgoing copy hop SIGTERM while its input is still
+  delivering (a healthy hop exits in about 0.1 s that way) and waits at most
+  0.5 s. Only a hop still running after that is cut off from its input, so it
+  has nothing left to publish, and the replacement starts while the old child
+  finishes dying in the background. The wait, and so any leftover jump at the
+  next switch, is now at most 0.5 s, and a quick switch back does not wait for
+  the feed before last. The seam ledger line gains `outDetached=true` when a
+  hop is left behind this way.
 
 ## [0.10.0] — 2026-09-23
 
