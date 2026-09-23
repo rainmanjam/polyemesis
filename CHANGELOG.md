@@ -501,6 +501,14 @@ its first tagged release.
   first-run setup". Both now run before anything is created. `-reset-admin`
   refuses when there is no database, and names the absolute path it looked
   in. The reset commands in INSTALL.md and the FAQ now pass `-data`.
+- **Editing `addr:` in config.yaml now moves the port on an `install.sh`
+  install.** The unit the installer wrote passed `--addr` as well, and the
+  flag beats the file. So an operator who followed the docs or the server's
+  ":443" warning restarted onto the same port. The generated unit no longer
+  passes `--addr`. Where a flag does set the address (the shipped
+  `deploy/polyemesis.service`, the image's `CMD`, an older generated unit),
+  the startup warnings now say it came from `--addr` and where to change it.
+  See [docs/UPGRADING.md](docs/UPGRADING.md).
 
 ### Security
 

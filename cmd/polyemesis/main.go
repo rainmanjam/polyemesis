@@ -158,6 +158,10 @@ func run(h *hooks) error {
 	// paths without rewriting config.yaml.
 	if *addr != "" {
 		cfg.Addr = *addr
+		// Recorded so the startup warnings name the flag, not the addr: line it
+		// just overrode. See config.Config.AddrFromFlag.
+		cfg.AddrFromFlag = true
+		cfg.AddrDefaulted = false
 	}
 	if *dataDir != "" {
 		cfg.DataDir = *dataDir

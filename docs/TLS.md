@@ -151,12 +151,15 @@ tls:
   hsts: true                      # safe here: publicly trusted certificate
 ```
 
-> **Under systemd, or with the repository's `docker-compose.yml`, the `addr`
-> line in `config.yaml` is not the one that counts.** Both systemd units
-> (`deploy/polyemesis.service` and the one `install.sh` writes) and the image's
-> `CMD` pass `--addr` on the command line, and the flag wins over the file. Set
-> `:443` there — `sudo systemctl edit --full polyemesis`, or `command:` in
-> compose — or the server comes back on 8080 with the same warning. See
+> **Under the shipped systemd unit, or with the repository's
+> `docker-compose.yml`, the `addr` line in `config.yaml` is not the one that
+> counts.** `deploy/polyemesis.service` and the image's `CMD` pass `--addr` on
+> the command line, and the flag wins over the file. So do units written by
+> `install.sh` before the release after 0.10.0. Set `:443` there —
+> `sudo systemctl edit --full polyemesis`, or `command:` in compose — or the
+> server comes back on 8080. The startup warning says when the address came from
+> `--addr`. A unit `install.sh` writes now passes no `--addr`, so there
+> `addr:` in `config.yaml` is the setting. See
 > [Binding, and the SSH tunnel](#binding-and-the-ssh-tunnel).
 
 Point an A/AAAA record at the box and open **80 and 443**. The certificate is
@@ -223,10 +226,10 @@ That is a warning, not a refusal — a non-standard port is a legitimate choice,
 and polyemesis says it once at startup and serves anyway.
 
 The warning says `config.yaml` because that is the one place every install
-reads, but it is only the place that wins on a bare binary and on the compose
-file `install.sh --mode docker` writes. A systemd unit or the repository's
-compose file passes `--addr`, which overrides `addr:` — change the flag there,
-as the note under the first example says.
+reads. When the address came from `--addr` instead, the warning says that too
+and points at the unit's `ExecStart` or the container's command. The shipped
+unit and the repository's compose file pass `--addr`, which overrides `addr:`,
+so change the flag there, as the note under the first example says.
 
 Tradeoff: every browser warns until you
 [install the CA](#trusting-the-self-signed-ca), and mobile clients are genuinely
@@ -539,11 +542,12 @@ no config.yaml, or a config.yaml with no `addr` key.
 **When both are set, the flag wins.** `cmd/polyemesis/main.go` applies `-addr`
 after it loads `config.yaml`, so on an install whose unit or container command
 passes `--addr`, editing `addr:` in the file and restarting changes nothing —
-the server comes back on the same port. That is every systemd install (the
-shipped unit and the one `install.sh` writes, which also puts the same value in
-`config.yaml`, so the two agree until you edit one) and the repository's
-`docker-compose.yml`, which runs the image's `CMD`. Change the port where it is
-passed, and change both if both are written.
+the server comes back on the same port. That is the shipped unit, a unit
+`install.sh` wrote before the release after 0.10.0 (which also put the same
+value in `config.yaml`, so the two agree until you edit one), and the
+repository's `docker-compose.yml`, which runs the image's `CMD`. Change the port
+where it is passed, and change both if both are written. A unit `install.sh`
+writes now passes no `--addr`, so `addr:` is the only setting there.
 
 Plain HTTP on every
 interface is the single biggest practical exposure this product has: the login

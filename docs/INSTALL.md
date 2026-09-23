@@ -1049,15 +1049,16 @@ tls mode=… hostname=…
 >
 > **On a systemd install, `addr:` in `config.yaml` changes nothing.** The
 > warning says to set `addr: ":443"` in `config.yaml`, and on the installs most
-> people have that is not where the port comes from. Both units pass the
-> address as a flag — `deploy/polyemesis.service` has `--addr :8080`, and the
-> unit `install.sh` writes has `--addr :<the port you chose>` — and a flag
-> beats the file (`main.go` applies `-addr` after loading `config.yaml`). Edit
-> the file, restart, and the server comes back on the same port with the same
-> warning. **Change the flag instead:** `sudo systemctl edit --full polyemesis`
-> and change `--addr` on the `ExecStart` line. (`install.sh` also writes the
-> same port into `config.yaml` as `addr:`, so the two agree until you edit one
-> of them; edit both.)
+> people have that is not where the port comes from. `deploy/polyemesis.service`
+> passes the address as a flag, `--addr :8080`. So does a unit `install.sh`
+> wrote before the release after 0.10.0 (`--addr :<the port you chose>`). A
+> flag beats the file, because `main.go` applies `-addr` after loading
+> `config.yaml`. Edit the file, restart, and the server comes back on the same
+> port. The warning then ends by saying the address came from `--addr`.
+> **Change the flag instead:** `sudo systemctl edit --full polyemesis` and
+> change `--addr` on the `ExecStart` line, or delete it and let `addr:` decide.
+> A unit `install.sh` writes now has no `--addr`: there `addr:` in
+> `config.yaml` is the one setting, and editing it is enough.
 >
 > The containers split. The repository's `docker-compose.yml` runs the image's
 > own `CMD`, which is `-addr :8080`, so there too the flag wins — override

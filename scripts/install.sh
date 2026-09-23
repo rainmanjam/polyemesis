@@ -1930,7 +1930,7 @@ install_binary_mode() {
   #   :443 -- the web UI itself, whenever the operator took the 443 offer. That
   #           is reachable with mode selfsigned, which is the DEFAULT choice, so
   #           gating on acme meant the service could not bind the port the
-  #           installer had just written into its own ExecStart.
+  #           installer had just written into its own config.
   case "$TLS_MODE:$HTTP_PORT" in
     acme:*|*:443|*:80)
       caps=$'AmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE'
@@ -1948,6 +1948,14 @@ install_binary_mode() {
   # it cannot be generated from that file. scripts/acceptance-install.sh instead
   # asserts that every [Service] directive in deploy/polyemesis.service appears
   # here -- add a directive there and this fails until it is added here too.
+  # NO --addr IN ExecStart. The listener is `addr:` in the config.yaml written
+  # above, and only there. This unit used to pass `--addr :${HTTP_PORT}` as
+  # well, and main.go applies the flag after the file -- so the two agreed
+  # until an operator did what the TLS docs and the server's own :443 warning
+  # said, edited addr: in config.yaml, restarted, and came back on the same
+  # port with the same warning. One place to set it cannot disagree with
+  # itself. --config and --data stay: they say where the file and the state
+  # are, which config.yaml cannot say about itself.
   if [ -e "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
     UNIT_PREEXISTING=true
     preserve_existing "/etc/systemd/system/${SERVICE_NAME}.service"
@@ -1963,7 +1971,7 @@ Wants=network-online.target
 Type=simple
 User=${RUN_USER}
 Group=${RUN_USER}
-ExecStart=${BIN_PATH} --config ${CONFIG_DIR}/config.yaml --data ${DATA_DIR} --addr :${HTTP_PORT}
+ExecStart=${BIN_PATH} --config ${CONFIG_DIR}/config.yaml --data ${DATA_DIR}
 ${caps}
 
 # 0077, so anything this service creates under ${DATA_DIR} is private to it.

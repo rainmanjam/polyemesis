@@ -43,6 +43,12 @@ type Config struct {
 	// proxy" apart from "bound to loopback because nobody said otherwise", which
 	// are the same address and need opposite messages.
 	AddrDefaulted bool `yaml:"-"`
+	// AddrFromFlag records that Addr came from --addr on the command line, which
+	// main applies after config.yaml and which therefore beats it. Like
+	// AddrDefaulted it is not a setting. It exists so the startup warnings tell
+	// the operator to change the flag -- in the unit's ExecStart or the
+	// container's command -- rather than an addr: line the flag overrides.
+	AddrFromFlag bool `yaml:"-"`
 	// TrustProxyHeaders makes the server honour X-Forwarded-Proto when
 	// deciding whether to set the Secure flag on the session cookie. Only
 	// enable it when polyemesis really is behind a reverse proxy, otherwise a
@@ -604,7 +610,21 @@ func (c Config) InsecureExposureWarning() string {
 	if !BindsPublicly(c.Addr) || c.TrustProxyHeaders || c.ServesTLS() {
 		return ""
 	}
-	return fmt.Sprintf("listening on %s without TLS: passwords and session cookies cross the network in plaintext. Set tls.mode: auto in config.yaml, or bind to 127.0.0.1 and put a reverse proxy in front (then set trustProxyHeaders: true).", c.Addr)
+	return fmt.Sprintf("listening on %s without TLS: passwords and session cookies cross the network in plaintext. Set tls.mode: auto in config.yaml, or bind to 127.0.0.1 and put a reverse proxy in front (then set trustProxyHeaders: true).%s", c.Addr, c.addrFlagNote())
+}
+
+// addrFlagNote is appended to any advice about the listen address when that
+// address came from --addr: the flag beats config.yaml, so an operator who
+// follows "set addr: in config.yaml" restarts onto the same port and the same
+// warning. Empty when the address came from the file or the default.
+func (c Config) addrFlagNote() string {
+	if !c.AddrFromFlag {
+		return ""
+	}
+	return fmt.Sprintf(" The listen address %s comes from --addr on the command line -- the "+
+		"systemd unit's ExecStart or the container's command -- and that flag overrides addr: "+
+		"in config.yaml, so change the address there (sudo systemctl edit --full polyemesis), "+
+		"or remove the flag and let config.yaml decide.", c.Addr)
 }
 
 // TLSPortWarning returns a message when TLS is on but the listener is not on
@@ -640,7 +660,7 @@ func (c Config) TLSPortWarning() string {
 	if port == "" || port == "443" {
 		return ""
 	}
-	return fmt.Sprintf("TLS is on but the listener is %s, not :443. Browsers reach this server only if every visitor types the port, and http:// redirects will carry it too. Set addr: \":443\" in config.yaml; a service running as a non-root user also needs AmbientCapabilities=CAP_NET_BIND_SERVICE in its unit, which install.sh grants for you. Keep %s if something in front of this box terminates TLS on 443 or the port is deliberate.", c.Addr, port)
+	return fmt.Sprintf("TLS is on but the listener is %s, not :443. Browsers reach this server only if every visitor types the port, and http:// redirects will carry it too. Set addr: \":443\" in config.yaml; a service running as a non-root user also needs AmbientCapabilities=CAP_NET_BIND_SERVICE in its unit, which install.sh grants for you. Keep %s if something in front of this box terminates TLS on 443 or the port is deliberate.%s", c.Addr, port, c.addrFlagNote())
 }
 
 // ListenPort is the port from an addr like ":8080" or "0.0.0.0:443", or "" when

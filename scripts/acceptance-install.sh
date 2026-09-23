@@ -1225,6 +1225,20 @@ EOF
     || bad "the data directory is left at mkdir's 0755 — it holds secret.key and the recordings (#297)"
 fi
 
+# ONE PLACE FOR THE LISTENER. The generated unit passed --addr as well as
+# writing addr: into config.yaml, and the flag wins -- so an operator who
+# followed the docs and the :443 warning, edited config.yaml and restarted,
+# came back on the old port. Staging-readiness row 25.
+execstart="$(grep -m1 '^ExecStart=' "$INSTALL")"
+case "$execstart" in
+  *--addr*) bad "the generated unit's ExecStart passes --addr, which overrides addr: in the config.yaml it writes: $execstart" ;;
+  "") bad "no ExecStart line found in install.sh's unit heredoc" ;;
+  *) ok "the generated unit leaves the listener to config.yaml (no --addr in ExecStart)" ;;
+esac
+grep -q "printf 'addr: \":%s\"\\\\n' \"\$HTTP_PORT\"" "$INSTALL" \
+  && ok "and the binary-mode config.yaml carries the chosen port as addr:" \
+  || bad "the config writer no longer writes addr: -- with no --addr either, the server would fall back to 127.0.0.1:8080"
+
 step "17. The docker update.sh refuses to upgrade a broadcast that is on air"
 #
 # uninstall.sh has asked this question since it was written; update.sh did not,

@@ -296,6 +296,22 @@ HTTP — while it looked like HTTPS was configured. Write the mode you meant, or
 `journalctl -u polyemesis` names the key to fix. Files written by
 `install.sh` use only known keys and always write a mode.
 
+### Upgrading past 0.10.0 (unreleased, on `main`): the unit `install.sh` writes no longer passes `--addr`
+
+> Not yet in a tag — this note is here ahead of the release that carries it.
+
+**What changed.** The unit `install.sh` generates used to set the web port
+twice. It passed `--addr :<port>` in `ExecStart` and also wrote
+`addr: ":<port>"` into `config.yaml`. The flag wins, so editing `addr:` did
+nothing. The generated unit now leaves the port to `config.yaml`. An existing
+unit keeps its `--addr` until `install.sh` is re-run. The startup warnings now
+say when the address came from `--addr`.
+
+**What you might need to do.** Nothing, unless you moved the port by editing
+`--addr` in the unit (for example to `:443`). Re-running `install.sh` rewrites
+the unit and `config.yaml` with the port you answer, so answer with the port you
+use. After that, change the port only in `config.yaml`.
+
 ### Upgrading to 0.10.0
 
 **No schema change.** `internal/db` is identical between `v0.9.0` and

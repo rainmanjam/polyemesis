@@ -260,10 +260,12 @@ once, and the machinery is already here.
 
    **If the line is still there after you set `addr`, something is passing
    `--addr`.** The flag wins over the file — `main.go` applies it after loading
-   `config.yaml` — and both systemd units (`deploy/polyemesis.service` and the
-   one `install.sh` writes) and the image's `CMD` pass it. On those, change the
+   `config.yaml` — and `deploy/polyemesis.service`, the image's `CMD`, and units
+   written by `install.sh` before the release after 0.10.0 pass it. The line
+   then ends by saying the address came from `--addr`. On those, change the
    port on the `ExecStart` line (`sudo systemctl edit --full polyemesis`) or in
-   compose's `command:`. See
+   compose's `command:`. A unit `install.sh` writes now has no `--addr`, so
+   `addr:` in `config.yaml` is the only listener setting there. See
    [TLS.md → Binding, and the SSH tunnel](TLS.md#binding-and-the-ssh-tunnel).
 
    Binding 443 needs privilege. A systemd unit running as a non-root user also
