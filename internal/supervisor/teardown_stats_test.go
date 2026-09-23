@@ -109,12 +109,20 @@ func TestKindsAreSeparate(t *testing.T) {
 func TestAnUnnamedKindStillCounts(t *testing.T) {
 	// A Spec with no Kind is a bug, but dropping its teardowns would corrupt
 	// the denominator to hide it -- the one thing this file must not do.
+	//
+	// THE ONE ROW THE HEADER'S FIX CANNOT MAKE PRIVATE. "unknown" is where an
+	// empty Kind lands, and this package's own tests start children from Specs
+	// with no Kind, whose teardown goroutines can land here after the reset --
+	// observed on ubuntu-latest as {Total:2 Kills:1}. So the assertion is the
+	// increase this call made, which is the claim under test ("not dropped"),
+	// and a stray teardown can only add to it.
 	resetTeardownsForTest()
+	before := statsFor(t, "unknown")
 	noteTeardown("", true)
 
 	got := statsFor(t, "unknown")
-	if got.Total != 1 {
-		t.Fatalf("an unnamed kind was dropped from the tally: %+v", got)
+	if got.Total-before.Total < 1 || got.Kills-before.Kills < 1 {
+		t.Fatalf("an unnamed kind was dropped from the tally: before %+v, after %+v", before, got)
 	}
 }
 
