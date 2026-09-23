@@ -137,6 +137,13 @@ Nothing is deleted either way. The static build lands in `/usr/local/bin` ahead
 of `/usr/bin` on a default `PATH`, your distribution's package is left where it
 is, and the way back is `rm /usr/local/bin/ffmpeg /usr/local/bin/ffprobe`.
 
+**It is always the same build.** The installer downloads one dated BtbN release,
+named by `FFMPEG_BTBN_TAG` in `install.sh`, and refuses the file unless its
+SHA-256 matches the hash written next to that tag. It does not use BtbN's
+rolling `latest` release or the checksum file published beside the download.
+So two hosts installed a week apart get the same bytes, and a replaced tarball
+is refused before it is extracted or run.
+
 **And `PATH` order does not decide the outcome.** When the installer installs
 FFmpeg itself, it writes the absolute path into the config it generates:
 
@@ -185,6 +192,31 @@ those are the same risk with different evidence, and installing a binary nobody
 can check, as root, is not a reasonable default. If you are deliberately
 installing a release that has no published sums, `--allow-unverified` says so
 explicitly.
+
+**`SHA256SUMS` proves the download is intact, not that this project built it.**
+It is published by the same release as the binaries, so someone able to replace
+a binary could replace its line in `SHA256SUMS` too. Releases after 0.10.0 also
+carry a build provenance attestation for every file in `SHA256SUMS` and for
+each container image. The attestation is signed through Sigstore with the
+release workflow's identity and stored by GitHub, not inside the release. To
+check one, use the [GitHub CLI](https://cli.github.com/):
+
+```bash
+# A downloaded binary (or SBOM):
+gh attestation verify ./polyemesis-<version>-linux-amd64 \
+  --repo rainmanjam/polyemesis \
+  --signer-workflow rainmanjam/polyemesis/.github/workflows/release.yml
+
+# A container image. Docker Hub and GHCR serve the same digest, so either works:
+gh attestation verify oci://ghcr.io/rainmanjam/polyemesis:<version> \
+  --repo rainmanjam/polyemesis
+```
+
+A pass names the commit and tag the file was built from. A file this project's
+release workflow did not build fails, whatever `SHA256SUMS` says. The installer
+and the in-app upgrade do not run this check yet, because it needs `gh` and a
+GitHub login on the host. They still check `SHA256SUMS` only. 0.10.0 and older
+releases have no attestations.
 
 ### Installing a specific release
 

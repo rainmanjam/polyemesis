@@ -29,7 +29,7 @@
 # never the target architecture. The output is JavaScript and CSS, which are
 # architecture-independent, so emulating this stage under QEMU for an arm64
 # target would burn minutes to produce identical bytes.
-FROM --platform=$BUILDPLATFORM node:24-alpine AS ui
+FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS ui
 WORKDIR /src/ui
 # Copy manifests first so a dependency-only change reuses the install layer.
 COPY ui/package.json ui/package-lock.json* ./
@@ -52,7 +52,7 @@ RUN mkdir -p /src/internal/web && npm run build
 # Cross-compiling is safe because CGO_ENABLED=0 already: there is no C
 # toolchain in the picture, so a native Go compiler targeting another GOARCH
 # produces the same static binary emulation would have.
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -81,11 +81,18 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
 # configuration, not the more tested one, and pinning to it meant shipping
 # something no suite had ever exercised end to end.
 #
-# The tag is deliberately left floating at the patch level (3.24, not 3.24.1) so
-# rebuilds pick up musl/openssl security fixes. If you need a bit-exact rebuild
-# instead, pin the digest as well — verified 2026-07-27, amd64 and arm64:
-#   FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
-FROM alpine:3.24
+# EVERY FROM IN THIS FILE IS tag@digest (checked 2026-09-23, the multi-arch
+# index digest, so amd64 and arm64 both resolve through it). The tag used to
+# float, so rebuilds picked up musl/openssl fixes on their own -- and two builds
+# of one commit could start from different bytes, with whatever the registry
+# served that day going into a release unreviewed. The fixes now arrive as a
+# dependabot PR (.github/dependabot.yml, docker ecosystem): it reads the tag to
+# know what to track and proposes the new digest, weekly. Keep the tag when you
+# bump by hand; a bare @sha256 gives dependabot nothing to track.
+# internal/testenv/dockerfile_digest_pin_test.go fails a FROM without a digest.
+# To find the current digest:
+#   docker buildx imagetools inspect alpine:3.24 --format '{{json .Manifest}}' | jq -r .digest
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 ARG VERSION=dev
 

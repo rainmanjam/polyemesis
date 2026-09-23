@@ -619,6 +619,74 @@ its first tagged release.
   Browsers signed in across the upgrade are re-sent the bound value on their
   next request instead of being locked out of writes. Sessions now also carry a
   random ID, so two logins in the same second are distinct sessions.
+- **`install.sh` installs one pinned FFmpeg build, checked against a hash in
+  the script.** The static FFmpeg it offers came from BtbN's rolling `latest`
+  release, which changes daily, and was checked against the
+  `checksums.sha256` in that same release. Two installs a day apart got
+  different builds, and anyone able to replace the tarball could replace its
+  checksum too; the result was then run as root. The installer now downloads
+  one dated release (`FFMPEG_BTBN_TAG`) and refuses any file whose sha256 is
+  not the one written in `install.sh`. A test rejects `latest`, an undated tag
+  or a missing hash.
+- **Release binaries and images now carry signed build provenance.** The only
+  integrity check a release offered was `SHA256SUMS`, which is published by the
+  same release as the binaries, so a replaced binary could come with a
+  replaced checksum. The release workflow now attests every file in
+  `SHA256SUMS` and each image digest through GitHub's Sigstore-backed
+  attestations. `gh attestation verify <file> --repo rainmanjam/polyemesis`
+  then fails for anything the release workflow did not build. docs/INSTALL.md
+  has the commands. The installer and in-app upgrade still check
+  `SHA256SUMS` only.
+
+### CI
+
+- **The release workflow rehearses itself every week.** The GPU images, the
+  arm64 image and the SBOM are built only by `release.yml`, which ran only
+  when someone pushed a tag, so drift in any of them first showed up as a
+  failed release (v0.7.0, v0.8.0 and v0.9.0 all failed on their first tag
+  run). `release.yml` now also runs as a dry run every Tuesday on `main` and
+  publishes nothing. `scripts/test-release-gates.sh` checks that `PUBLISH`
+  is false for a scheduled run.
+- **A release needs `security.yml` green on `main` as well as `ci.yml`.**
+  `ci-gate` asked only whether `ci.yml` passed for the tagged commit. Branch
+  protection is not strict, so a commit whose `security.yml` run (gitleaks,
+  govulncheck, npm-audit, semgrep) was red on `main` could still be tagged and
+  published. The gate now requires a successful push-to-`main` run of both
+  workflows and names each one that is missing.
+- **The workflow linter checks shell again.** The required `workflow lint`
+  job ran `actionlint -shellcheck=`, which turned shellcheck off for every
+  `run:` block. Nine real findings are now fixed, among them `sha256sum *`
+  with no `--` in the release checksums step, and a `sudo wc -l <` whose
+  redirect was never read as root. The seven PowerShell steps that shellcheck
+  was parsing as bash now declare `shell: pwsh`. With both done the flag is
+  removed, and a test keeps it off. shellcheck itself is pinned (0.11.0, by
+  checksum) rather than taken from the runner image, whose 0.9.0 reports
+  findings 0.11.0 does not, so the verdict no longer depends on the image.
+
+### Added
+
+- **`scripts/cut-release.sh` (and `make tag VERSION=vX.Y.Z`) runs the release
+  gates before the tag exists.** Every gate in `release.yml` ran only after the
+  tag was pushed, so a wrong date meant deleting the tag, re-dating through a PR,
+  waiting 20+ minutes for CI on `main` and tagging again. The date must be today
+  in UTC, which is tomorrow after 17:00 in California. The script reads
+  `changelog-gate`, the empty-`[Unreleased]` check and `ci-gate` out of
+  `release.yml` and runs them against `HEAD`. It also refuses a commit with no
+  green release rehearsal, a dirty tree, a `HEAD` that is not `origin/main`, and
+  the last 15 minutes before midnight UTC. With `--tag` it cuts the annotated
+  tag. RELEASE-RUNBOOK.md no longer says that re-pushing a tag fixes a wrong
+  date. It cannot, because the gate reads the tagged commit.
+
+### Changed
+
+- **The published images are built from pinned base images.** Every `FROM`
+  in `Dockerfile`, `Dockerfile.cuda` and `Dockerfile.vaapi` used a floating
+  tag (`alpine:3.24`, `node:24-alpine`, `golang:1.27-alpine`, `ubuntu:26.04`,
+  `nvidia/cuda:…`). Two builds of the same commit could therefore start from
+  different bytes, and whatever the registry served on release day went in
+  unreviewed. Each is now `tag@sha256:…`. Base-image security fixes now arrive
+  as Dependabot digest-bump PRs instead of on every rebuild, and a test fails
+  any `FROM` without a digest.
 
 ## [0.10.0] — 2026-09-23
 

@@ -493,6 +493,9 @@ jobs:
             # inside an argument array. This refuses it anyway. The reasoning
             # that makes it safe is four steps long, and a reader should not
             # have to reconstruct it to review a workflow.
+            # The single quotes are the point: these are the literal
+            # characters being refused, not expansions.
+            # shellcheck disable=SC2016
             case "$PATTERN" in
               *'$('*|*'`'*) echo "-run pattern may not contain \$( or a backtick: '$PATTERN'" >&2; exit 1 ;;
             esac

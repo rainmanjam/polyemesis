@@ -82,6 +82,11 @@ updates:
   # Base images. The FFmpeg pin inside them is deliberate and NOT managed here
   # -- see the comment in the Dockerfile about a rebuild silently becoming a
   # different product.
+  #
+  # Every FROM in the three root Dockerfiles is tag@sha256 (staging-readiness
+  # row 41), so upstream security fixes to a base image reach a release ONLY
+  # through the digest bumps this entry proposes. Merge them; they are the
+  # replacement for the floating tag that used to pick fixes up on its own.
   - package-ecosystem: docker
     directory: "/"
     schedule: { interval: weekly, day: monday }

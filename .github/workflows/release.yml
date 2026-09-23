@@ -24,10 +24,27 @@ on:
         description: "Build everything but push nothing"
         type: boolean
         default: true
+  # A FORCED REHEARSAL EVERY WEEK, on main, publishing nothing. The GPU images,
+  # the arm64 image and the SBOM are built only in this workflow -- ci.yml and
+  # security.yml build none of them -- and this workflow otherwise runs only
+  # when someone tags. So drift in any of them (a base image that moved, an apt
+  # pin that vanished, syft) surfaced as a failed release: the v0.7.0, v0.8.0
+  # and v0.9.0 tag runs all failed first, and the last hand-run rehearsal
+  # before 0.10.0 was six weeks old.
+  #
+  # PUBLISH (below) is false for a schedule: it is true only for a tag push or
+  # a dispatch with dry_run: false, and a schedule is neither.
+  # scripts/test-release-gates.sh evaluates that expression for this event, so
+  # a rewrite that published on a schedule fails CI. Tuesday, clear of ci.yml's
+  # and security.yml's Monday runs.
+  schedule:
+    - cron: "37 7 * * 2"
 
-# ONE PUBLISH PER REF AT A TIME. Delete and re-push v0.7.0 to fix a wrong
-# CHANGELOG date, or press "Re-run all jobs" on a run whose images job failed,
-# and two runs executed the same publish steps concurrently:
+# ONE PUBLISH PER REF AT A TIME. Move v0.7.0 to a new commit (delete it and
+# push it again on the commit that re-dated the CHANGELOG -- re-pushing it to
+# the same commit fixes nothing, since changelog-gate reads the tagged commit),
+# or press "Re-run all jobs" on a run whose images job failed, and two runs
+# executed the same publish steps concurrently:
 # softprops/action-gh-release UPDATES an existing release rather than refusing
 # one, so both runs uploaded dist/* to the same release and the asset set could
 # end up half from each. Every other workflow here already has a group --
@@ -88,7 +105,7 @@ jobs:
   # This asks the platform directly, by commit SHA, rather than trusting
   # branch protection: even if the required-checks list drifts, or the tag
   # targets a commit that was never main's HEAD, a commit with no successful
-  # ci.yml run cannot publish. FAILS CLOSED -- an API error, a rate limit, an
+  # ci.yml AND security.yml run cannot publish. FAILS CLOSED -- an API error, a rate limit, an
   # empty result all read as "not proven green" and block everything below.
   ci-gate:
     name: CI gate (fail closed)
@@ -99,7 +116,7 @@ jobs:
       actions: read
     timeout-minutes: 5
     steps:
-      - name: Require a successful ci.yml run for this commit before publishing
+      - name: Require successful ci.yml and security.yml runs for this commit before publishing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -117,35 +134,57 @@ jobs:
             exit 0
           fi
 
-          echo "Looking for a successful ci.yml run against ${SHA}..."
-          runs_json=$(gh api \
-            "repos/${REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=20") || {
-            echo "::error::Could not reach the Actions API to check CI status for ${SHA}. Refusing to publish an unverified release."
-            exit 1
-          }
+          # BOTH WORKFLOWS THAT RUN ON A PUSH TO MAIN, not ci.yml alone.
+          # security.yml is where gitleaks, govulncheck, npm-audit and semgrep
+          # run, and it is kept out of ci.yml so a new CVE does not block
+          # unrelated merges -- which is right for a merge and wrong for a
+          # release. Branch protection is not strict, so a commit whose
+          # security.yml run on main was red could be tagged, and this gate,
+          # asking only about ci.yml, published it. Staging-readiness row 37.
+          #
+          # Every workflow is checked and every missing one named before
+          # refusing, so one run of the gate says everything that is wrong.
+          missing=""
+          for wf in ci.yml security.yml; do
+            echo "Looking for a successful ${wf} run against ${SHA}..."
+            if ! runs_json=$(gh api \
+              "repos/${REPO}/actions/workflows/${wf}/runs?head_sha=${SHA}&per_page=20"); then
+              echo "::error::Could not reach the Actions API to check ${wf} for ${SHA}. Refusing to publish an unverified release."
+              missing="${missing} ${wf}"
+              continue
+            fi
 
-          # AS MAIN, ON A PUSH. A bare "some green ci.yml run exists" was
-          # narrower than its name: ci.yml's suite picker keeps the full
-          # acceptance set only for `schedule` or REF = refs/heads/main, and
-          # every other ref falls through to `suites=[]`. The container matrix
-          # is then empty, those jobs are skipped, and the run's conclusion is
-          # still `success`. So a commit whose only ci.yml run was a manual
-          # workflow_dispatch on a hotfix branch satisfied this gate having
-          # never run the acceptance suites at all.
-          successes=$(echo "${runs_json}" | jq '[.workflow_runs[]? | select(.status == "completed" and .conclusion == "success" and .event == "push" and .head_branch == "main")] | length')
+            # AS MAIN, ON A PUSH. A bare "some green ci.yml run exists" was
+            # narrower than its name: ci.yml's suite picker keeps the full
+            # acceptance set only for `schedule` or REF = refs/heads/main, and
+            # every other ref falls through to `suites=[]`. The container matrix
+            # is then empty, those jobs are skipped, and the run's conclusion is
+            # still `success`. So a commit whose only ci.yml run was a manual
+            # workflow_dispatch on a hotfix branch satisfied this gate having
+            # never run the acceptance suites at all. security.yml also runs on
+            # a push to main, so the same selector holds it to the same bar.
+            successes=$(echo "${runs_json}" | jq '[.workflow_runs[]? | select(.status == "completed" and .conclusion == "success" and .event == "push" and .head_branch == "main")] | length')
 
-          if [ "${successes:-0}" -lt 1 ]; then
-            echo "::error::No successful ci.yml run found for commit ${SHA} from a push to main. A version tag must point at a commit that passed CI *as main* -- a workflow_dispatch or branch run skips the acceptance matrix and still reports success. Merge to main and let CI run there, then tag. Refusing to publish."
+            if [ "${successes:-0}" -lt 1 ]; then
+              echo "::error::No successful ${wf} run found for commit ${SHA} from a push to main. A version tag must point at a commit that passed ${wf} *as main* -- a workflow_dispatch or branch run is not the same run, and may skip what main runs. Merge to main, let it go green there, then tag."
+              missing="${missing} ${wf}"
+              continue
+            fi
+            echo "Found ${successes} successful ${wf} run(s) for ${SHA}."
+          done
+
+          if [ -n "${missing}" ]; then
+            echo "::error::Not proven green on main:${missing}. Refusing to publish."
             exit 1
           fi
-
-          echo "Found ${successes} successful ci.yml run(s) for ${SHA}. Proceeding."
+          echo "ci.yml and security.yml are both green on main for ${SHA}. Proceeding."
 
   # THE INSTALLER WAS NOT ON THE RELEASE'S CRITICAL PATH (#559). installer.yml
   # runs on push/pull_request filtered to scripts/install.sh,
   # scripts/acceptance-install.sh and its own file -- and a tag push matches no
   # `paths` filter at all -- so the release published without the installer
-  # suite having run against the released commit. ci-gate requires ci.yml only.
+  # suite having run against the released commit. ci-gate requires ci.yml and
+  # security.yml, and neither runs the installer suite.
   # install.sh is what every operator uses.
   #
   # RUN HERE RATHER THAN LOOKED FOR ELSEWHERE. Asking the API for a green
@@ -299,7 +338,7 @@ jobs:
           # edit, because the previous message named the wrong entry entirely.
           heading_date="$(echo "${heading}" | sed -nE 's/^.*— ([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]*$/\1/p')"
           if [ -z "${heading_date}" ]; then
-            echo "::error::CHANGELOG.md's ${heading_version} heading is not dated: '${heading}'. A tag says this release shipped, so date it before tagging -- change it to '## [${heading_version}] — $(date -u +%Y-%m-%d)' and push the tag again. Refusing to publish."
+            echo "::error::CHANGELOG.md's ${heading_version} heading is not dated: '${heading}'. A tag says this release shipped, so date it before tagging -- change it to '## [${heading_version}] — $(date -u +%Y-%m-%d)' on main, then delete ${REF_NAME} and re-cut it on that new commit (scripts/cut-release.sh). Re-pushing the tag to this commit changes nothing: the gate reads CHANGELOG.md from the tagged commit. Refusing to publish."
             exit 1
           fi
 
@@ -313,12 +352,14 @@ jobs:
           # contradict. GHSA advisories point at this document.
           #
           # UTC, and exactly today. A midnight-boundary push fails here and the
-          # recovery is the same one the undated branch prints: re-date, re-tag.
+          # recovery is the same one the undated branch prints: re-date on main,
+          # re-tag THAT commit. scripts/cut-release.sh runs this step before the
+          # tag exists and refuses within 15 minutes of midnight UTC.
           # That is a rare annoyance; a silently wrong ship date is a permanent
           # false claim.
           today="$(date -u +%Y-%m-%d)"
           if [ "${heading_date}" != "${today}" ]; then
-            echo "::error::CHANGELOG.md's ${heading_version} heading is dated ${heading_date}, but this release is being published on ${today} (UTC). Change it to '## [${heading_version}] — ${today}', then delete and re-push ${REF_NAME}. Refusing to publish a release whose notes claim a ship date the artefacts contradict."
+            echo "::error::CHANGELOG.md's ${heading_version} heading is dated ${heading_date}, but this release is being published on ${today} (UTC). Change it to '## [${heading_version}] — ${today}' on main, let CI go green on that commit, then delete ${REF_NAME} and re-cut it on the new commit (scripts/cut-release.sh). Re-pushing the tag to this commit changes nothing: the gate reads CHANGELOG.md from the tagged commit. Refusing to publish a release whose notes claim a ship date the artefacts contradict."
             exit 1
           fi
 
@@ -347,6 +388,12 @@ jobs:
     permissions:
       contents: read # checkout only; this job never writes to the repository
       packages: write # ghcr.io, via GITHUB_TOKEN
+      # Build provenance for the three image digests -- see "Attest build
+      # provenance" in the binaries job for why. id-token is the OIDC token
+      # Sigstore signs with; attestations is where GitHub stores the result.
+      # Granted to the two publishing jobs only, never workflow-wide.
+      id-token: write
+      attestations: write
     # A ceiling, because GitHub's default is SIX HOURS. Measured over eight
     # runs at 2.8 to 6.7 minutes, and the spread is the point: three image
     # variants, built multi-arch under QEMU and pushed to two registries, so
@@ -464,6 +511,7 @@ jobs:
       # Windows via WSL2; linux/arm64 covers Apple Silicon, Graviton/Ampere and
       # the Raspberry Pi 4/5.
       - name: Build and push (default, multi-arch)
+        id: build_default
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -481,6 +529,7 @@ jobs:
       # attached. They are published so people with the hardware can try them,
       # not because they are verified. See docs/HARDWARE.md.
       - name: Build and push (NVIDIA/NVENC)
+        id: build_cuda
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -498,6 +547,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push (Intel/AMD VA-API)
+        id: build_vaapi
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -509,6 +559,31 @@ jobs:
           push: ${{ env.PUBLISH == 'true' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # PROVENANCE FOR EACH PUSHED DIGEST. One attestation per image, keyed by
+      # the manifest digest buildx pushed. That digest is the same on Docker Hub
+      # and GHCR -- one build, pushed to both -- so a single attestation answers
+      # for a pull from either; subject-name is only the label it carries.
+      # Verify with `gh attestation verify oci://<image>:<tag> --repo
+      # rainmanjam/polyemesis` (docs/INSTALL.md, "Verifying the download").
+      - name: Attest build provenance (default image)
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.GHCR_IMAGE }}
+          subject-digest: ${{ steps.build_default.outputs.digest }}
+      - name: Attest build provenance (NVIDIA/NVENC image)
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.GHCR_IMAGE }}
+          subject-digest: ${{ steps.build_cuda.outputs.digest }}
+      - name: Attest build provenance (Intel/AMD VA-API image)
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.GHCR_IMAGE }}
+          subject-digest: ${{ steps.build_vaapi.outputs.digest }}
 
       # Docker Hub does not read the repository's README on its own: without
       # this the listing shows an empty overview, which is what a page nobody
@@ -549,6 +624,9 @@ jobs:
       # Creates the GitHub Release and uploads the assets. No packages: write —
       # this job pushes no images.
       contents: write
+      # Build provenance for dist/* -- see "Attest build provenance" below.
+      id-token: write
+      attestations: write
     # A ceiling, because GitHub's default is SIX HOURS. Measured over eight
     # runs at 2.8 to 3.4 minutes and tightly clustered, because the work is
     # deterministic: cross-compile every target, scan the source tree for the
@@ -746,8 +824,37 @@ jobs:
       - name: Checksums
         run: |
           cd dist
-          sha256sum * > SHA256SUMS
+          # `--` so a file whose name starts with a dash is hashed, not parsed
+          # as an option. Names are written as given, which is the form
+          # install.sh and internal/upgrade look up.
+          sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
+
+      # SHA256SUMS PROVES A DOWNLOAD IS INTACT, NOT THAT WE BUILT IT. It is
+      # published next to the binaries, by the same release, so anyone able to
+      # replace a binary could replace its line in SHA256SUMS too -- and
+      # install.sh and the in-app upgrade both check against exactly that file.
+      #
+      # A build provenance attestation is signed with this workflow's OIDC
+      # identity through Sigstore and stored by GitHub, outside the release. It
+      # names the repository, the workflow file, the ref and the commit that
+      # produced each digest, so `gh attestation verify <file> --repo
+      # rainmanjam/polyemesis` fails for a binary this workflow did not build,
+      # whatever SHA256SUMS says.
+      #
+      # subject-checksums rather than subject-path: the file is already the list
+      # of what this release ships, with its digests, so the attestation and
+      # the checksums cannot disagree about which files exist. After the SBOM
+      # step for the same reason SHA256SUMS is -- the SBOMs are subjects too.
+      #
+      # PUBLISH only. A rehearsal's binaries are thrown away with the runner,
+      # and an attestation for them would sit in the public transparency log
+      # vouching for files nobody can download.
+      - name: Attest build provenance (binaries)
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
 
       # A dry run builds the SBOM and then destroys it with the runner, so the
       # rehearsal could only ever prove the step exited 0. Uploading it makes a
@@ -826,7 +933,10 @@ jobs:
             runtime abort, was fixed in 0.9.0.) See
             [docs/INSTALL.md](https://github.com/rainmanjam/polyemesis/blob/main/docs/INSTALL.md#windows).
 
-            Verify your download against `SHA256SUMS`, published below.
+            Verify your download against `SHA256SUMS`, published below, and
+            that this project's release workflow built it with
+            `gh attestation verify <file> --repo rainmanjam/polyemesis`. See
+            [docs/INSTALL.md](https://github.com/rainmanjam/polyemesis/blob/main/docs/INSTALL.md#verifying-the-download).
 
             ---
 

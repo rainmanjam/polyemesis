@@ -265,11 +265,13 @@ var invocationGoJobExclusions = []struct {
 			"compile error should not be reported as a test failure.",
 	},
 	{
-		re: regexp.MustCompile(`\./scripts/(test-lib-observe|test-lib-watchdog|test-sbom-guard|test-release-gates|termination-guard|test-termination-guard|test-obs-stop|test-lib-cleanup)\.sh`),
+		re: regexp.MustCompile(`\./scripts/(test-lib-observe|test-lib-watchdog|test-sbom-guard|test-release-gates|test-cut-release|termination-guard|test-termination-guard|test-obs-stop|test-lib-cleanup)\.sh`),
 		reason: "the shell harnesses. Each starts and kills processes -- test-lib-cleanup.sh " +
 			"needs lsof installed and kills by port -- and running them from a pre-commit " +
 			"gate on a shared developer machine kills whatever else that machine is doing. " +
-			"They are also the steps in this job with real step timeouts, for that reason.",
+			"They are also the steps in this job with real step timeouts, for that reason. " +
+			"test-release-gates.sh and test-cut-release.sh kill nothing, but they need jq and " +
+			"PyYAML and exercise only release machinery no ordinary commit touches.",
 	},
 	{
 		re: regexp.MustCompile(`\./scripts/acceptance-hooks\.sh`),

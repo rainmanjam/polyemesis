@@ -17,6 +17,12 @@ the images, cross-compiles every binary, produces the SBOM and the checksums, an
 pushes **nothing**. A rehearsal that fails is a release that would have failed
 halfway, which is the expensive way to find out.
 
+The same rehearsal also runs **every Tuesday on `main`** (a `schedule:` trigger
+that publishes nothing). The GPU images, the arm64 image and the SBOM are built
+nowhere else, so a red scheduled run is the early warning that the next tag would
+fail. It rehearses whatever `main` was on Tuesday, not your commit. Rehearse the
+commit you are tagging anyway.
+
 > `dry_run` was once declared and read by nothing: setting it to `false` and
 > expecting a publish got a silent no-op. `PUBLISH` is now derived explicitly
 > (`release.yml:77`), which is why the rehearsal is trustworthy.
@@ -29,7 +35,8 @@ version had shipped when it had not (#499), so this is not ceremony.
 
 **Checklist, in order:**
 
-1. `main` is green — `ci-gate` requires a *successful* `ci.yml` run for the exact
+1. `main` is green — `ci-gate` requires a *successful* `ci.yml` run **and** a
+   successful `security.yml` run, both from a push to `main`, for the exact
    commit you are tagging, not merely a recent one.
 2. `CHANGELOG.md`'s top heading is `## [X.Y.Z] — YYYY-MM-DD` with today's date
    and no `[Unreleased]` content beneath it.
@@ -55,34 +62,59 @@ version had shipped when it had not (#499), so this is not ceremony.
    `TestDocEveryReleaseHasAnUpgradeFixture` fails the release commit without it.
 5. The rehearsal above is green.
 
+`scripts/cut-release.sh` checks items 1, 2 and 4 for you, before the tag exists.
+It runs `changelog-gate`, the `[Unreleased]` check and `ci-gate` exactly as
+`release.yml` will, reading them out of `release.yml`. It also refuses a commit
+with no green rehearsal, a dirty tree, a `HEAD` that is not `origin/main`, and
+the last 15 minutes before midnight UTC. Item 3 is enforced by `go test` on the
+release commit.
+
 ## Cutting it
 
 ```sh
 git checkout main && git pull --ff-only
-git tag -a vX.Y.Z -m "vX.Y.Z"
-git push origin vX.Y.Z
+scripts/cut-release.sh vX.Y.Z          # checks only; tags nothing
+scripts/cut-release.sh vX.Y.Z --tag    # checks, then tags HEAD and pushes the tag
 ```
 
-The tag push is what publishes. There is no button.
+`make tag VERSION=vX.Y.Z` runs the check, and `make tag VERSION=vX.Y.Z TAG=1`
+tags. The tag push is what publishes. There is no button.
+
+The date gate compares against **today in UTC** on the runner, a few minutes
+after the push. After 17:00 in California that is already tomorrow. Date the
+heading, merge it, and tag on the same UTC day.
 
 ## What will stop you, and what each means
 
 | Gate | Refuses when | What to do |
 |---|---|---|
-| `ci-gate` | no successful `ci.yml` run exists for this commit | do not re-run the release; fix the commit and tag again |
+| `ci-gate` | no successful push-to-`main` run of `ci.yml`, or of `security.yml`, exists for this commit | do not re-run the release; fix the commit and tag again. A red `security.yml` with no code change is usually a new advisory: fix it on `main` first |
 | `installer-gate` | `install.sh` does not parse, or its argument validator accepts bad input | a real defect in the installer — fix it, it is what operators run |
-| `changelog-gate` | the tag and `CHANGELOG.md`'s top dated heading disagree | correct the CHANGELOG, delete the tag, re-tag |
+| `changelog-gate` | the tag and `CHANGELOG.md`'s top dated heading disagree, or the heading is not dated today (UTC) | correct the CHANGELOG on `main`, delete the tag, re-tag the **new** commit (see below) |
 | `[Unreleased] must be empty` | unreleased notes remain | move them under the dated heading |
 
-**Deleting and re-pushing a tag is supported and is the normal fix** for a wrong
-CHANGELOG date. The workflow's concurrency group is per-ref for exactly this
-reason: a delete-and-re-push, or pressing "Re-run all jobs", once ran two
-publishes of the same ref concurrently.
+**Re-pushing a tag to the same commit does not fix a wrong CHANGELOG date.**
+`changelog-gate` reads `CHANGELOG.md` from the commit the tag points at, so the
+same commit gives the same refusal. The fix is a new commit: re-date the heading
+on `main` through a PR, wait for `ci.yml` and `security.yml` to go green on that
+commit, delete the tag (`git tag -d vX.Y.Z && git push origin :vX.Y.Z`), and cut
+it again on the new commit with `scripts/cut-release.sh`. The workflow's
+concurrency group is per-ref because a delete-and-re-push, or pressing "Re-run
+all jobs", once ran two publishes of the same ref concurrently.
 
 ## Afterwards
 
 - The GitHub Release, images on Docker Hub and GHCR (default, NVENC, VA-API),
   cross-compiled binaries, an SBOM and checksums are published by the run.
+- **Check the provenance attestations once, by hand.** The run attests every
+  file in `SHA256SUMS` and all three image digests. That step cannot run in a
+  rehearsal, so the first real tag after it was added is also its first test.
+  Download one binary from the Release and run
+  `gh attestation verify <file> --repo rainmanjam/polyemesis`, then
+  `gh attestation verify oci://ghcr.io/rainmanjam/polyemesis:X.Y.Z --repo rainmanjam/polyemesis`.
+  Both should name this tag's commit. If either finds nothing, the Release
+  still shipped, but the verification in `docs/INSTALL.md` does not work for
+  it. Say so in the release notes.
 - **No host is upgraded by any of this.** A published release is not a deployed
   one, and the readiness audit tracks the two separately for that reason. The
   upgrade an operator performs — including the production host this project runs
