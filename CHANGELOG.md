@@ -27,6 +27,15 @@ its first tagged release.
   loopback bind. The error names the key, its line, the case-correct spelling
   when there is one, and the valid keys. Every key the block has ever had is
   still valid; the rest of `config.yaml` still ignores unknown keys.
+- **The CSRF token is bound to the session.** It was a random value checked
+  only against the `polyemesis_csrf` cookie, so anything able to write a cookie
+  for the host (a sibling subdomain, a plaintext hop) could plant
+  `polyemesis_csrf=x` ahead of the real one, send `x` in the header, and pass.
+  The token is now an HMAC of the session token under the server key and is
+  checked against the session; the cookie is only how the console learns it.
+  Browsers signed in across the upgrade are re-sent the bound value on their
+  next request instead of being locked out of writes. Sessions now also carry a
+  random ID, so two logins in the same second are distinct sessions.
 
 ## [0.10.0] — 2026-09-23
 
