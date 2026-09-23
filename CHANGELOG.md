@@ -44,7 +44,9 @@ its first tagged release.
   silence.** It stops the container before the backup, and every refusal after
   that point used to exit with it down. It now starts what it stopped, says so,
   and removes the unverified archive; if the start fails, it says the container
-  is STOPPED and prints the command.
+  is STOPPED and prints the command. A failure after the new image was pulled
+  does not claim "nothing was upgraded" -- `up -d` may already have recreated
+  the container on it -- and names the verified archive instead.
 - **The binary-mode `update.sh` does the same**: a refusal after `systemctl
   stop` starts the service again (or says STOPPED, with the command) and
   removes the unverified copy.

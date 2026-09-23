@@ -1676,6 +1676,36 @@ case "$out" in
   *) bad "the docker summary does not say that Settings -> Listeners and docker-compose.yml must agree" ;;
 esac
 
+step "24. A docker update that fails after the pull does not claim nothing was upgraded"
+#
+# on_exit's "running again on the image it had. Nothing was upgraded." is true
+# up to the pull. After it, `up -d` may already have recreated the container on
+# the new image before failing, and `compose start` then starts THAT -- which
+# migrates the database forward. Saying the opposite is the one message an
+# operator must not be handed at that moment.
+cat > "$stub/compose-upfails" <<'COMPOSESTUB'
+#!/usr/bin/env bash
+set -u
+[ "${1:-}" = top ] && exit 0
+echo "[stub compose] $*"
+[ "${1:-}" = up ] && { echo "stub compose: up failed" >&2; exit 1; }
+exit 0
+COMPOSESTUB
+chmod +x "$stub/compose-upfails"
+upfail_dir="$work/docker-upfails"; mkdir -p "$upfail_dir"
+gen_docker_update "$upfail_dir" "$stub/compose-upfails"
+out="$(run_docker_update "$upfail_dir" "$work/vol-ok")"; st=$?
+[ "$st" -ne 0 ] && ok "a failed \`up -d\` fails the update" || bad "a failed \`up -d\` exited 0"
+case "$out" in
+  *"Nothing was upgraded"*) bad "a failure AFTER the pull still says nothing was upgraded" ;;
+  *"after pulling"*) ok "it says the failure came after the pull, not that nothing changed" ;;
+  *) bad "a failure after the pull says nothing about where it stopped" ;;
+esac
+case "$out" in
+  *"backup-"*".tar.gz"*) ok "and it names the verified archive as the way back" ;;
+  *) bad "a failure after the pull does not name the verified archive" ;;
+esac
+
 # ------------------------------------------------------------- vacuity guard
 #
 # THE VERDICT ABOVE IS DERIVED FROM COUNTERS, AND COUNTERS CANNOT SEE A STEP

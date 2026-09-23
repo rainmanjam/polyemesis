@@ -2649,6 +2649,7 @@ docker volume inspect polyemesis-data >/dev/null 2>&1 || {
 # goes on holding the space that stopped it.
 STOPPED_BY_US=false
 ARCHIVE_CREATED=false
+PULLED=false
 on_exit() {
   local rc=\$?
   [ "\$rc" -eq 0 ] && return 0
@@ -2658,7 +2659,17 @@ on_exit() {
   if [ "\$STOPPED_BY_US" = true ]; then
     echo "this script stopped the container; starting it again" >&2
     if \$COMPOSE_CMD start >&2; then
-      echo "The container is running again on the image it had. Nothing was upgraded." >&2
+      if [ "\$PULLED" = true ]; then
+        # NOT "nothing was upgraded". The pull succeeded, so \`up -d\` may have
+        # recreated the container on the new image before it failed, and the
+        # start above then started THAT -- which migrates the database forward.
+        # Which image is running is not something this script can promise.
+        echo "The upgrade failed after pulling the new image. Check which image is" >&2
+        echo "running and why: \$COMPOSE_CMD ps; \$COMPOSE_CMD logs --tail 50" >&2
+        echo "The verified pre-upgrade archive is at \$dest (docs/UPGRADING.md, Rolling back)." >&2
+      else
+        echo "The container is running again on the image it had. Nothing was upgraded." >&2
+      fi
     else
       echo >&2
       echo "!!! THE CONTAINER IS STOPPED and could not be started again. Start it with:" >&2
@@ -2762,6 +2773,9 @@ echo "backup verified: \${entries} entries, and the database opens"
 # From here the archive is the way back, and a failed pull or start must keep it.
 ARCHIVE_CREATED=false
 \$COMPOSE_CMD pull
+# Past this line the image on disk is the new one, and "nothing was upgraded"
+# stops being something on_exit can say. See the note there.
+PULLED=true
 \$COMPOSE_CMD up -d
 echo "updated. Watch the first minute: \$COMPOSE_CMD logs -f"
 EOF
