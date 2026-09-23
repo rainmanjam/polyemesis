@@ -370,3 +370,57 @@ func TestLoadOrCreateRefusesAMalformedKeyFile(t *testing.T) {
 		})
 	}
 }
+
+// Load is the read-only half of LoadOrCreate, for -verify-backup: the same
+// parser boot uses, so a key it accepts is a key the restored server will
+// accept, and none of the side effects -- it must not mint a key where there is
+// none, and must not chmod a file inside a backup it only means to read.
+func TestLoadAcceptsExactlyWhatLoadOrCreateAcceptsAndChangesNothing(t *testing.T) {
+	key := bytes.Repeat([]byte{0xcd}, keySize)
+	path := filepath.Join(t.TempDir(), "secret.key")
+	if err := os.WriteFile(path, []byte(hex.EncodeToString(key)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load refused a key LoadOrCreate would boot with: %v", err)
+	}
+	if !bytes.Equal(b.key[:], key) {
+		t.Error("Load returned a different key from the one in the file")
+	}
+	if runtime.GOOS != "windows" {
+		st, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm() != 0o644 {
+			t.Errorf("Load changed the file's mode to %o; it must only read", st.Mode().Perm())
+		}
+	}
+}
+
+func TestLoadRefusesWhatBootWouldRefuseAndNeverMintsAKey(t *testing.T) {
+	cases := map[string]func(path string) error{
+		"missing":      func(string) error { return nil },
+		"empty":        func(p string) error { return os.WriteFile(p, nil, 0o600) },
+		"not hex":      func(p string) error { return os.WriteFile(p, []byte("zzzz-not-hex-at-all"), 0o600) },
+		"wrong length": func(p string) error { return os.WriteFile(p, []byte("deadbeef"), 0o600) },
+		"a directory":  func(p string) error { return os.Mkdir(p, 0o700) },
+	}
+	for name, seed := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "secret.key")
+			if err := seed(path); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(path); err == nil {
+				t.Fatalf("Load accepted a secret.key that is %s", name)
+			}
+			if name == "missing" {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Error("Load created a key file where there was none; only boot may mint one")
+				}
+			}
+		})
+	}
+}

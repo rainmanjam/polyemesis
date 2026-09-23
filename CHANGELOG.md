@@ -35,6 +35,23 @@ its first tagged release.
   Dockerfiles now declare `POLYEMESIS_IMAGE_VARIANT`, and `upgrade.ImageTag`
   takes the variant as a required argument, so it adds the suffix. A variant
   this build does not recognise gets no tag in the plan.
+- `-verify-backup` no longer writes to the backup it checks. It opened
+  `polyemesis.db` read-write, so SQLite folded the `-wal` into the main file and
+  deleted both sidecars, although INSTALL.md says it writes nothing; and on a
+  read-only directory or mount — how the Docker `update.sh` hands it the backup
+  — it could not create the `-shm` and refused a good backup. It now verifies a
+  private copy in the temporary directory and leaves the backup byte-identical.
+- `-verify-backup` no longer accepts any `secret.key`. It checked only that the
+  file existed, so a key from another install, an empty file, a non-hex or
+  wrong-length one, or a directory all passed — and the restore then either
+  refused to boot or brought every credential back unreadable. It now reads the
+  key with the parser the server boots with, and tries it on the values the
+  database sealed: for each sealed column holding any, the key must open at
+  least one, or the backup is refused naming the table. The success line now
+  says so. Where a column holds one value this server's own key cannot open
+  either (the MQTT password or automod key after an earlier bad restore), the
+  refusal says so and names what to re-enter or clear in the console, instead of
+  sending you to take a backup that would fail the same way.
 
 ## [0.10.0] — 2026-09-23
 

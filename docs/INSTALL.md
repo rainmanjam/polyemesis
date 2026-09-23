@@ -1051,9 +1051,12 @@ the path.
 **Check that backup before you rely on it.** The binary will answer for it:
 `-verify-backup <dir>` opens the copy with the same SQLite driver the server
 runs on, runs `PRAGMA integrity_check`, reads the schema, and exits. It writes
-nothing and runs no migration — migrating the backup would move the copy
-forward to the schema you are keeping a way back *from* — so it is safe against
-a backup you intend to keep.
+nothing to the backup and runs no migration — migrating the backup would move
+the copy forward to the schema you are keeping a way back *from* — so it is safe
+against a backup you intend to keep, and it works on a read-only directory or
+mount. It checks a private copy of `polyemesis.db` and its `-wal`, made in the
+system temporary directory (`$TMPDIR`, else `/tmp`) and deleted on exit, so that
+directory needs free space for one copy of the database.
 
 ```bash
 /usr/local/bin/polyemesis -verify-backup /var/backups/polyemesis-2026-07-26
@@ -1062,14 +1065,19 @@ a backup you intend to keep.
 On success it prints one line:
 
 ```text
-backup at /var/backups/polyemesis-2026-07-26 opens, passes integrity_check and holds this server's schema
+backup at /var/backups/polyemesis-2026-07-26 opens, passes integrity_check, holds this server's schema and has a secret.key that opens it
 ```
 
 Anything else is a refusal naming what is wrong: no `polyemesis.db`, a
 zero-byte one, one that will not open or fails its integrity check, or — the
 quiet one — no `secret.key`, which it calls out separately because that restore
 reads as successful right up until go-live, when every destination comes back
-disabled. It opens the `-wal` sidecar alongside the main file, so a copy taken
+disabled. A `secret.key` that is present but wrong is the same restore by a
+different door, so it is checked too: read with the parser the server uses at
+boot (an empty file, one that is not 64 hex characters, or a directory is
+refused), then tried against the credentials the database sealed. For each kind
+of sealed value the backup holds, the key must open at least one; a key copied
+from another install opens none and is refused, naming the table. It opens the `-wal` sidecar alongside the main file, so a copy taken
 from a live database is judged on what it actually holds rather than on a main
 file missing the last few minutes.
 
