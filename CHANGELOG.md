@@ -168,36 +168,6 @@ its first tagged release.
   next switch, is now at most 0.5 s, and a quick switch back does not wait for
   the feed before last. The seam ledger line gains `outDetached=true` when a
   hop is left behind this way.
-### Security
-
-- **Upgrading from 0.6.x no longer leaves plaintext stream keys in
-  `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
-  and every release before 0.7.0 ran without it: a real 0.6.0 install with five
-  destinations still had two keys legible in the destinations root page after
-  upgrading to 0.10.0, where a page split had left them. The upgrade now runs
-  `VACUUM` and truncates the log whenever it seals keys or opens a pre-0.7.0
-  file, and refuses to start if it cannot. Installs that already sealed under
-  0.7.0–0.10.0 still need the one-off `VACUUM` in `docs/UPGRADING.md`, which
-  now says so for every such install, not only 0.7.0 ones. The regression test
-  writes its pre-upgrade history with `secure_delete` off, as 0.6.0 did; the
-  earlier fixture wrote it through the fixed code and could not see this.
-- **A misspelled key in the `tls:` block now stops startup.** `mdoe:` or
-  `Mode:` (keys are case-sensitive) used to be ignored, so `mode` fell back to
-  `off`: plain HTTP and session cookies without `Secure`, logged nowhere on a
-  loopback bind. The error names the key, its line, the case-correct spelling
-  when there is one, and the valid keys. Every key the block has ever had is
-  still valid; the rest of `config.yaml` still ignores unknown keys.
-- **The CSRF token is bound to the session.** It was a random value checked
-  only against the `polyemesis_csrf` cookie, so anything able to write a cookie
-  for the host (a sibling subdomain, a plaintext hop) could plant
-  `polyemesis_csrf=x` ahead of the real one, send `x` in the header, and pass.
-  The token is now an HMAC of the session token under the server key and is
-  checked against the session; the cookie is only how the console learns it.
-  Browsers signed in across the upgrade are re-sent the bound value on their
-  next request instead of being locked out of writes. Sessions now also carry a
-  random ID, so two logins in the same second are distinct sessions.
-
-### Fixed
 
 - **Deleting the last recorded segment works as soon as recording is off.**
   `DELETE /recordings/{id}` refused any segment that started within one
@@ -466,6 +436,35 @@ its first tagged release.
   addresses nothing. `DESIGN-ONE-PORT-INGEST.md` no longer promises an
   immediate reconnect after a blip: a new publisher is refused for three
   seconds (`srtserver.StaleAfter`) after the old one's last packet.
+
+### Security
+
+- **Upgrading from 0.6.x no longer leaves plaintext stream keys in
+  `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
+  and every release before 0.7.0 ran without it: a real 0.6.0 install with five
+  destinations still had two keys legible in the destinations root page after
+  upgrading to 0.10.0, where a page split had left them. The upgrade now runs
+  `VACUUM` and truncates the log whenever it seals keys or opens a pre-0.7.0
+  file, and refuses to start if it cannot. Installs that already sealed under
+  0.7.0–0.10.0 still need the one-off `VACUUM` in `docs/UPGRADING.md`, which
+  now says so for every such install, not only 0.7.0 ones. The regression test
+  writes its pre-upgrade history with `secure_delete` off, as 0.6.0 did; the
+  earlier fixture wrote it through the fixed code and could not see this.
+- **A misspelled key in the `tls:` block now stops startup.** `mdoe:` or
+  `Mode:` (keys are case-sensitive) used to be ignored, so `mode` fell back to
+  `off`: plain HTTP and session cookies without `Secure`, logged nowhere on a
+  loopback bind. The error names the key, its line, the case-correct spelling
+  when there is one, and the valid keys. Every key the block has ever had is
+  still valid; the rest of `config.yaml` still ignores unknown keys.
+- **The CSRF token is bound to the session.** It was a random value checked
+  only against the `polyemesis_csrf` cookie, so anything able to write a cookie
+  for the host (a sibling subdomain, a plaintext hop) could plant
+  `polyemesis_csrf=x` ahead of the real one, send `x` in the header, and pass.
+  The token is now an HMAC of the session token under the server key and is
+  checked against the session; the cookie is only how the console learns it.
+  Browsers signed in across the upgrade are re-sent the bound value on their
+  next request instead of being locked out of writes. Sessions now also carry a
+  random ID, so two logins in the same second are distinct sessions.
 
 ## [0.10.0] — 2026-09-23
 
