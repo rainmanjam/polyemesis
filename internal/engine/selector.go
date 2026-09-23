@@ -27,6 +27,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -97,6 +98,13 @@ import (
 // work does not own.
 
 const (
+	// seamStopWait is how long a switch waits for the outgoing copy hop to exit
+	// before starting its replacement anyway. See retireFeed. Five times the
+	// 0.105s a healthy FFmpeg takes to answer SIGTERM with its input flowing
+	// (the measurement in manager.go), so a feed that is merely busy still exits
+	// inside it; the only feed that does not is one wedged in a read, and the
+	// grace period that wedge used to cost is what this bounds.
+	seamStopWait = 500 * time.Millisecond
 	// selectorSweep is how often liveness is re-evaluated. Well under any
 	// sensible grace period, so a switch lands near its deadline rather than up
 	// to a whole period late.
@@ -178,6 +186,13 @@ type sourceFeed struct {
 	upstream  string
 	offset    float64
 	startedAt time.Time
+	// prev is closed once the feed this one replaced has finished stopping.
+	// A switch can start this feed while its predecessor is still being killed
+	// in the background (see retireFeed), so tearing THIS feed down waits on
+	// it too: whoever tears the tier down -- shutdown above all, which counts
+	// ports afterwards -- gets every process and port the chain held, not just
+	// the newest one's. Nil when nothing was left behind.
+	prev <-chan struct{}
 }
 
 // backupIngest is the second listener, with a hub of its own so it can be
@@ -1142,7 +1157,7 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	respawn := active == want
 
 	teardownFrom := time.Now()
-	stopErr := e.teardownFeed(cur)
+	stopErr, detached, retired := e.retireFeed(cur)
 	teardownMs := float64(time.Since(teardownFrom).Microseconds()) / 1000
 
 	// THE OFFSET TAKES THE DECISION TIME, AND A MEASUREMENT SAYS SO.
@@ -1171,7 +1186,16 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	// 0 of 12 with it kept and the offset reverted.
 	startedAt := time.Now()
 	feed := e.startFeed(s, want, upstream, silenceSig, now)
-	e.logSeam(cur, feed, reason, teardownMs, stopErr)
+	e.logSeam(cur, feed, reason, teardownMs, stopErr, detached)
+	if feed != nil {
+		feed.prev = retired
+	} else if retired != nil {
+		// Nothing started, so nothing will carry the predecessor forward to a
+		// later teardown. Collect it here: the tier has nothing on air either
+		// way, and a background stop nobody waits on is a port that shutdown
+		// would report as leaked.
+		<-retired
+	}
 
 	e.mu.Lock()
 	if e.sel != nil {
@@ -1267,7 +1291,12 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 // Called ONLY from ensureFeed, immediately after the replacement is started.
 // Anywhere earlier and the incoming feed has no offset yet; anywhere later and
 // the outgoing process has been collected.
-func (e *Engine) logSeam(out, in *sourceFeed, reason string, teardownMs float64, stopErr error) {
+//
+// outDetached says the replacement was started while the outgoing child was
+// still exiting (see retireFeed). outProgressDone is then false because the
+// child has not finished, not because it never reported, and stopDeadline is
+// false because the stop had not yet reached its deadline.
+func (e *Engine) logSeam(out, in *sourceFeed, reason string, teardownMs float64, stopErr error, detached bool) {
 	// No outgoing feed is not a seam -- there is no timeline to join to -- and a
 	// line for it would put rows in the ledger the script would have to filter
 	// back out.
@@ -1298,7 +1327,7 @@ func (e *Engine) logSeam(out, in *sourceFeed, reason string, teardownMs float64,
 			"outGen", out.gen, "outKind", string(out.kind), "outOffset", out.offset,
 			"outTimeMs", outTimeMs, "outProgressDone", progressDone,
 			"teardownMs", teardownMs, "stopDeadline", errors.Is(stopErr, supervisor.ErrStopDeadline),
-			"reason", reason)
+			"outDetached", detached, "reason", reason)
 		return
 	}
 
@@ -1306,6 +1335,7 @@ func (e *Engine) logSeam(out, in *sourceFeed, reason string, teardownMs float64,
 		"outGen", out.gen, "outKind", string(out.kind), "outOffset", out.offset,
 		"outTimeMs", outTimeMs, "outProgressDone", progressDone,
 		"teardownMs", teardownMs, "stopDeadline", errors.Is(stopErr, supervisor.ErrStopDeadline),
+		"outDetached", detached,
 		"inGen", in.gen, "inKind", string(in.kind), "inOffset", in.offset,
 		"reason", reason)
 }
@@ -1635,36 +1665,20 @@ func (e *Engine) teardownFeed(f *sourceFeed) error {
 	if f == nil {
 		return nil
 	}
+	return e.reportStop(f, e.stopFeed(f))
+}
+
+// stopFeed is teardownFeed without the report: it stops the process, gives
+// back the subscription and the port, and then waits for the feed this one
+// replaced (see sourceFeed.prev), so that returning means the whole chain is
+// gone. retireFeed runs it off the switch's time, where the report would be
+// about a different feed than the one the tier now shows.
+func (e *Engine) stopFeed(f *sourceFeed) error {
 	var stopErr error
 	if f.proc != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		err := f.proc.Stop(ctx)
+		stopErr = f.proc.Stop(ctx)
 		cancel()
-		stopErr = err
-		// A KILLED CHILD IS NOT A STOPPED ONE, and this is the caller that has
-		// to care. ensureFeed starts the replacement into the same hub the
-		// moment this returns, so a feed that ignored SIGTERM for twelve
-		// seconds and was killed may still be writing when the new one begins:
-		// two publishers on one input, which is a corrupted timeline rather
-		// than a missing one.
-		//
-		// Reported rather than obeyed. Refusing to start the replacement would
-		// leave the tier with no feed at all, which is worse than a seam, and
-		// waiting longer would hold the switch open past the deadline that was
-		// already chosen. So the switch proceeds and the operator is told --
-		// this is the "degrade visibly rather than corrupt quietly" rule the
-		// slate fallback follows, applied to the case where the corruption is
-		// possible rather than certain.
-		if err != nil {
-			e.log.Error("outgoing feed did not exit before the deadline; the "+
-				"replacement starts while it may still be writing",
-				"source", string(f.kind), "err", err)
-			e.mu.Lock()
-			if e.sel != nil {
-				e.sel.err = err.Error()
-			}
-			e.mu.Unlock()
-		}
 	}
 	if f.subName != "" && f.in != nil {
 		f.in.Unsubscribe(f.subName)
@@ -1672,7 +1686,119 @@ func (e *Engine) teardownFeed(f *sourceFeed) error {
 	if f.port != 0 {
 		e.releasePort(f.port)
 	}
+	if f.prev != nil {
+		<-f.prev
+	}
 	return stopErr
+}
+
+// retireFeed takes the outgoing feed off the air for a switch, and is what
+// keeps a switch away from a dead source to its grace period.
+//
+// THE OUTGOING FEED IS USUALLY WEDGED, AND THAT IS THE CASE THAT MATTERS. A
+// switch away from the primary happens because the primary's relay went quiet,
+// and the copy hop reading it is then an FFmpeg blocked in a read of a quiet UDP
+// input -- which does not answer SIGTERM. Stopping it synchronously cost the
+// supervisor's whole grace period, eight seconds, before the replacement could
+// start: the field measured 11.5 s to fail over against a 3 s graceSeconds, the
+// ledger reading teardownMs=8003. And because the incoming feed's timestamp
+// offset is stamped at the DECISION (see ensureFeed -- measured, and not to be
+// moved), those eight seconds were also how far its timeline started behind
+// wall clock, which the next switch repaid as an 8 s forward jump.
+//
+// So the order is: CUT THE INPUT, WAIT BRIEFLY, THEN START THE REPLACEMENT
+// REGARDLESS. Unsubscribing first is what makes starting early safe rather
+// than a gamble -- a copy hop with no input has nothing left to publish into the
+// selector, so it cannot become the second publisher on one hub that
+// teardownFeed warns about. It also frees selectorSubName on that hub before
+// startFeed takes the same name, which a respawn onto the same hub needs. The
+// brief wait (seamStopWait) lets a HEALTHY child, one still flushing packets
+// it had already read, exit before its successor begins; one that is still
+// there after it is the wedged reader, and it finishes dying in the background.
+//
+// The slate has no input to cut and answers SIGTERM at once, so it is stopped
+// synchronously exactly as before: starting early would be two publishers.
+//
+// detached reports that the replacement will start before the old child has
+// gone, and done is then closed once it has, its port included. The caller
+// hands done to the incoming feed as prev, so any later teardown of the tier
+// collects it. stopErr is only known when detached is false.
+func (e *Engine) retireFeed(f *sourceFeed) (stopErr error, detached bool, done <-chan struct{}) {
+	if f == nil {
+		return nil, false, nil
+	}
+	if f.proc == nil || f.in == nil || f.subName == "" {
+		return e.teardownFeed(f), false, nil
+	}
+	f.in.Unsubscribe(f.subName)
+	f.subName = ""
+
+	fin := make(chan struct{})
+	result := make(chan error, 1)
+	var abandoned atomic.Bool
+	go func() {
+		defer close(fin)
+		err := e.stopFeed(f)
+		result <- err
+		// Nobody is waiting for the answer any more, and the tier's status
+		// belongs to the feed that replaced this one, so this is a log line
+		// and not sel.err. It was cut off from its input before the kill, so
+		// the "may still be writing" warning does not apply.
+		if err != nil && abandoned.Load() {
+			e.log.Warn("outgoing feed was killed after the switch; it had been cut off "+
+				"from its input, so it published nothing beside its replacement",
+				"source", string(f.kind), "err", err)
+		}
+	}()
+
+	timer := time.NewTimer(seamStopWait)
+	defer timer.Stop()
+	select {
+	case err := <-result:
+		<-fin
+		return e.reportStop(f, err), false, nil
+	case <-timer.C:
+		abandoned.Store(true)
+		// It may have finished on the boundary; completion wins the tie, as
+		// it does in supervisor.stop.
+		select {
+		case err := <-result:
+			<-fin
+			return e.reportStop(f, err), false, nil
+		default:
+		}
+		return nil, true, fin
+	}
+}
+
+// reportStop reports a stop that ran out its deadline, for teardownFeed and for
+// a retireFeed that waited the stop out.
+func (e *Engine) reportStop(f *sourceFeed, err error) error {
+	// A KILLED CHILD IS NOT A STOPPED ONE, and this is the caller that has
+	// to care. ensureFeed starts the replacement into the same hub the
+	// moment this returns, so a feed that ignored SIGTERM for twelve
+	// seconds and was killed may still be writing when the new one begins:
+	// two publishers on one input, which is a corrupted timeline rather
+	// than a missing one.
+	//
+	// Reported rather than obeyed. Refusing to start the replacement would
+	// leave the tier with no feed at all, which is worse than a seam, and
+	// waiting longer would hold the switch open past the deadline that was
+	// already chosen. So the switch proceeds and the operator is told --
+	// this is the "degrade visibly rather than corrupt quietly" rule the
+	// slate fallback follows, applied to the case where the corruption is
+	// possible rather than certain.
+	if err != nil {
+		e.log.Error("outgoing feed did not exit before the deadline; the "+
+			"replacement starts while it may still be writing",
+			"source", string(f.kind), "err", err)
+		e.mu.Lock()
+		if e.sel != nil {
+			e.sel.err = err.Error()
+		}
+		e.mu.Unlock()
+	}
+	return err
 }
 
 // relayFeedArgs builds the copy hop that carries one ingest into the selector.

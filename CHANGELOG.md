@@ -20,6 +20,18 @@ its first tagged release.
   Every track's chain in a multi-track graph now ends with
   `aresample=async=1:first_pts=0`, which fills the gap with silence and anchors
   every track at the same origin. One-track graphs are unchanged.
+- **Failover away from a dead primary lands at the grace period, not eight
+  seconds after it.** The copy hop that carried the primary into the selector
+  sits blocked on its now-quiet input and ignores SIGTERM, and the switch
+  waited out its full 8 s shutdown grace before starting the slate or backup
+  (11.5 s measured against a 3 s `graceSeconds`). Because the incoming feed's
+  timestamp offset is stamped at the decision, those 8 s also put its timeline
+  behind wall clock, and the next switch repaid them as an 8 s forward jump.
+  A switch now unsubscribes the outgoing copy hop from its input first, so it
+  has nothing left to publish, waits at most 0.5 s for it to exit, and then
+  starts the replacement while the old child finishes dying in the background.
+  The wait, and so any leftover jump at the next switch, is now at most 0.5 s.
+  The seam ledger line gains `outDetached=true` when this happens.
 
 ## [0.10.0] — 2026-09-23
 
