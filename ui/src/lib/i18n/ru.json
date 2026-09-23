@@ -61,6 +61,7 @@
   "auto.evAudioClipping": "Клиппинг звука",
   "auto.evClipCaptured": "Клип записан",
   "auto.evDebugExported": "Отладочный архив выгружен",
+  "auto.evAlertRuleChanged": "Правило оповещения изменено",
   "auto.evDiskLow": "Мало места на диске",
   "auto.evDiskRecovered": "Место на диске восстановлено",
   "auto.evIngestLost": "Вход потерян",

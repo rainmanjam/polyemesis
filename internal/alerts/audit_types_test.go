@@ -75,12 +75,17 @@ func TestAllTypesKeepsTheOperationalPickerOrderItAlreadyHad(t *testing.T) {
 	// ADDED, not by what it means, and that is a deliberate trade of tidiness for
 	// not moving a control under somebody who has learned where it is.
 	diagnostics := []Type{TypeDebugExported}
+	// The fifth: alerts.rule_changed is an audit event, appended after the rest.
+	ruleAudit := []Type{TypeAlertRuleChanged}
 	all := AllTypes()
-	if len(all) != len(operational)+len(auditTypes)+len(health)+len(lifecycle)+len(diagnostics) {
+	if len(all) != len(operational)+len(auditTypes)+len(health)+len(lifecycle)+len(diagnostics)+len(ruleAudit) {
 		t.Fatalf("AllTypes has %d entries, want %d operational + %d audit + %d health + "+
-			"%d lifecycle + %d diagnostics",
+			"%d lifecycle + %d diagnostics + %d rule audit",
 			len(all), len(operational), len(auditTypes), len(health), len(lifecycle),
-			len(diagnostics))
+			len(diagnostics), len(ruleAudit))
+	}
+	if last := all[len(all)-1]; last != TypeAlertRuleChanged {
+		t.Errorf("AllTypes ends with %q, want %q appended last", last, TypeAlertRuleChanged)
 	}
 	for i, want := range operational {
 		if all[i] != want {

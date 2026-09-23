@@ -61,6 +61,7 @@
   "auto.evAudioClipping": "Przesterowanie dźwięku",
   "auto.evClipCaptured": "Przechwycono klip",
   "auto.evDebugExported": "Wyeksportowano pakiet diagnostyczny",
+  "auto.evAlertRuleChanged": "Zmieniono regułę alertu",
   "auto.evDiskLow": "Kończy się miejsce na dysku",
   "auto.evDiskRecovered": "Dysk przywrócony",
   "auto.evIngestLost": "Utracono wejście",

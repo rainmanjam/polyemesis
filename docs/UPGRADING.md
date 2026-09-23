@@ -281,6 +281,11 @@ install, not once per programme.
 on `key`: match on the prefix (`ingest:`), or on `type`, which has not
 changed. Discord and Slack rules need nothing.
 
+**A new event, `alerts.rule_changed`.** Creating, editing or deleting an alert
+rule now raises it. A rule with no event boxes ticked receives every type, so
+it starts receiving this one too; raise that rule's severity floor to
+`critical` if you want only deletions.
+
 ### Upgrading to 0.10.0
 
 **No schema change.** `internal/db` is identical between `v0.9.0` and

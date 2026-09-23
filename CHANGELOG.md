@@ -490,6 +490,13 @@ its first tagged release.
 
 ### Security
 
+- **Changing or deleting an alert rule is now recorded.** Creating, editing
+  or deleting a rule wrote no log line and raised nothing, so deleting the only
+  rule left no trace and the channel just went quiet. Each change now writes an
+  `INFO` line (name, redacted URL, client address) and raises a new event,
+  `alerts.rule_changed`. A deleted rule is sent that event itself before it
+  stops receiving anything.
+
 - **Upgrading from 0.6.x no longer leaves plaintext stream keys in
   `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
   and every release before 0.7.0 ran without it: a real 0.6.0 install with five

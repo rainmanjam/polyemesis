@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -131,6 +132,7 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.auditRuleChange(r, ruleCreated, *out)
 	writeJSON(w, http.StatusCreated, out)
 }
 
@@ -159,6 +161,7 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.auditRuleChange(r, ruleEdited, *out)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -168,11 +171,85 @@ func (s *Server) handleDeleteAlertRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	// Read first: the rule is about to stop existing, and both the log line
+	// and the farewell below need what it was.
+	rule, err := s.store.GetAlertRule(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	if err := s.store.DeleteAlertRule(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
+	ev := s.auditRuleChange(r, ruleDeleted, *rule)
+	s.farewell(*rule, ev)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// auditRuleChange logs an alert-rule change and raises alerts.rule_changed
+// to the rules that are stored now, and returns the event.
+//
+// BOTH, because they fail differently. The event is lossy by design and goes
+// to channels an attacker may have just deleted; the log line goes to the
+// journal, which a request to this API cannot reach. Deleting the only rule
+// used to leave neither.
+func (s *Server) auditRuleChange(r *http.Request, change ruleChange, rule alerts.Rule) alerts.Event {
+	addr := s.clientIP(r)
+	s.log.Info("alert rule "+string(change),
+		"rule", rule.Name, "url", rule.RedactedURL(), "remote", addr)
+	ev := auditAlertRuleChanged(change, rule.Name, addr)
+	s.publishAudit(ev)
+	return ev
+}
+
+// farewellTimeout bounds the one delivery made to a rule that no longer
+// exists. Long enough for the notifier's retries against a slow endpoint;
+// short enough that a dead one does not keep a goroutine for the life of the
+// process.
+const farewellTimeout = 30 * time.Second
+
+// farewell sends a deleted rule its own deletion.
+//
+// publishAudit cannot: it queues, and the queue delivers to the rules stored
+// when it flushes, which no longer include this one. So an attacker who
+// deleted the only rule left a channel that simply went quiet -- the silence
+// reading exactly like a quiet night. The rule is sent the event directly, by
+// value, from the copy read before the delete.
+//
+// Only if the rule would have wanted it: a disabled rule was switched off by
+// somebody, and a rule filtered away from this type or severity asked not to
+// hear about it. Neither is overridden here.
+//
+// In the background, because a dead endpoint retries with backoff and the
+// DELETE has already happened; the operator is owed their answer now. The
+// outcome is logged either way.
+func (s *Server) farewell(rule alerts.Rule, ev alerts.Event) {
+	if !rule.Enabled || !rule.Normalized().Wants(ev) {
+		return
+	}
+	if s.farewellSink != nil {
+		s.farewellSink(rule, ev)
+		return
+	}
+	n := s.engOrNil().Alerts()
+	if n == nil {
+		// No programme, so no engine and no notifier. Rules are install-wide
+		// and are deleted perfectly well before the first source exists, and
+		// the farewell must not depend on one: a notifier with no rules of
+		// its own is enough to make one delivery.
+		n = alerts.New(s.log, alerts.RuleFunc(func() ([]alerts.Rule, error) { return nil, nil }))
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), farewellTimeout)
+		defer cancel()
+		if err := n.Send(ctx, rule, ev); err != nil {
+			s.log.Warn("could not tell a deleted alert rule it was deleted",
+				"rule", rule.Name, "url", rule.RedactedURL(), "err", err)
+			return
+		}
+		s.log.Info("told a deleted alert rule it was deleted", "rule", rule.Name)
+	}()
 }
 
 // handleTestAlertRule posts a test message to one rule's endpoint, right now.

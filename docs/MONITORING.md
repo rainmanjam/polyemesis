@@ -498,7 +498,7 @@ the API, under `lifecycle`.
 
 ### Security and configuration events
 
-Ten of the subscribable types are not about the stream. They are about the
+Eleven of the subscribable types are not about the stream. They are about the
 server itself, and they answer one question: *was that me?*
 
 | Event | Severity | Fires when |
@@ -513,9 +513,11 @@ server itself, and they answer one question: *was that me?*
 | `upgrade.rolled_back` | `critical` | the previous binary was restored. Names no version — a rollback restores whatever this box ran before, and inventing a tag would be a guess printed as a fact |
 | `debug.exported` | `critical` | a debug bundle was downloaded, with how many log records and whether the capture was truncated |
 | `clip.captured` | `info` | a clip was cut from the replay buffer |
+| `alerts.rule_changed` | `warning`, or `critical` for a delete | an alert rule was created, edited or deleted; names the rule, never its URL. **A deleted rule is sent this event itself**, on its way out, if it was enabled and would have wanted it |
 
 **The five `critical` ones are what belong on a phone**, and they are one story
-rather than five. Changing the password evicts every existing session; minting a
+rather than five. (Deleting an alert rule is `critical` too; it is covered
+below.) Changing the password evicts every existing session; minting a
 token creates a credential that survives the password change; replacing the
 binary creates something that survives the password change, the token revocation
 **and** the restart — and the restart is what arms it. A rollback is a binary
@@ -526,7 +528,7 @@ of this server's own logs leaves the operator's control, and since polyemesis
 keeps no copy of the bundle — a second place credentials could be read from — the
 event is the **only** durable record that it happened.
 
-All ten are in `AllTypes()`, so they appear in the rule picker and are delivered
+All eleven are in `AllTypes()`, so they appear in the rule picker and are delivered
 to any rule with an empty event list. A rule that subscribes to everything
 receives these whether or not it was written with them in mind.
 
@@ -577,13 +579,15 @@ events rather than slowing the streaming path down — so under sustained delive
 failure a security event can vanish with only the notifier's `dropped` counter to
 show for it.
 
-**Five of the ten do leave a line in the server log**, and it is worth knowing
+**Six of the eleven do leave a line in the server log**, and it is worth knowing
 which before you conclude an incident left no trace at all. Minting a token
 (`api token created`, carrying the name, the prefix — which the alert
 deliberately withholds — and the scope), revoking one (`api token revoked`),
 staging a binary (`upgrade staged`, carrying the version, whether it was forced,
 who did it and from which address) and rolling one back (`upgrade rolled back`)
-each write an `INFO` line as well as raising the alert.
+each write an `INFO` line as well as raising the alert. So does every alert-rule
+change (`alert rule created`, `alert rule edited`, `alert rule deleted`, with
+the rule's name, its redacted URL and the client address).
 
 The fifth is the failed sign-in, and it does not line up with the alert.
 `failed login` is written at `WARN` on **every** rejected attempt — the first
@@ -598,9 +602,12 @@ the debug bundle exports. It is a consequence of those handlers being chatty
 rather than a trail anybody designed: it rotates away with everything else, and
 the other five events on this page leave nothing behind.
 
-So an attacker who deletes your only alert rule leaves no record of the deletion
-and none of anything else on this list. If you need a record that survives the
-incident, the receiving end of the webhook is where to keep it.
+Deleting an alert rule is the one change built to be seen by the channel it
+silences. The deleted rule is sent `alerts.rule_changed` directly, from the copy
+read before the delete, so a channel that goes quiet has been told why, and the
+deletion is in the log. What an attacker who deletes your only rule still
+leaves unrecorded is everything they do *after* it. If you need a record that
+survives the incident, the receiving end of the webhook is where to keep it.
 
 ---
 

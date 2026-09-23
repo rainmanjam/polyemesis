@@ -302,15 +302,25 @@ func (n *Notifier) Flush(now time.Time) { n.flush(n.currentRules(), now) }
 // Test delivers one synthetic event to a single rule immediately, skipping the
 // queue, the subscription filter and the debounce.
 func (n *Notifier) Test(ctx context.Context, r Rule) error {
-	now := n.now()
-	ev := Event{
+	return n.Send(ctx, r, Event{
 		Type: TypeTest, Severity: SeverityInfo, Key: "test",
 		Title: "polyemesis test alert",
 		Text:  "If you can read this, " + r.Name + " is wired up correctly.",
-		At:    now,
-	}.Redacted()
+	})
+}
+
+// Send delivers one event to one rule immediately, the way Test does, whether
+// or not the rule is still stored. It is how a rule being deleted is told so:
+// by the time the queue would flush, the rule is no longer in the list the
+// queue delivers to. The caller decides whether the rule wants the event.
+func (n *Notifier) Send(ctx context.Context, r Rule, ev Event) error {
+	now := n.now()
+	if ev.At.IsZero() {
+		ev.At = now
+	}
+	ev = ev.Redacted()
 	rule := r.Normalized()
-	d := Delivery{Rule: rule, Items: []Item{{Event: ev, Count: 1, First: now, Last: now}}}
+	d := Delivery{Rule: rule, Items: []Item{{Event: ev, Count: 1, First: ev.At, Last: ev.At}}}
 	err := n.post(ctx, d)
 	if err == nil {
 		return nil

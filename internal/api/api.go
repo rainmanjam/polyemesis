@@ -572,6 +572,11 @@ type Server struct {
 	// what, on which branch -- cannot be asserted at all. Removing all five
 	// call sites left the package green.
 	auditSink func(alerts.Event)
+	// farewellSink diverts the delivery a deleted alert rule is sent, AFTER
+	// the enabled and subscription checks, for the reason auditSink exists:
+	// without it the only way to see that a rule was NOT sent its farewell is
+	// to stand up an endpoint and wait for a goroutine that never comes.
+	farewellSink func(alerts.Rule, alerts.Event)
 
 	// probeBin supplies the ffprobe path directly, and is set only by tests.
 	//
