@@ -2,6 +2,7 @@ package db
 
 import (
 	"bytes"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1046,5 +1047,120 @@ func TestTheDatabaseIsOpenedWithSecureDeleteOn(t *testing.T) {
 			"zeroing it and the plaintext stream key stays legible in the freed " +
 			"page. The driver's default IS 0 -- CPython's bundled SQLite compiles " +
 			"it to 1, so the same check written in Python reports a false pass.")
+	}
+}
+
+// THE FIXTURES ABOVE WERE WRITTEN BY THE FIXED BINARY, and that hid a leak.
+//
+// keyDB opens through Open, and Open turns secure_delete on. So every
+// "pre-upgrade" row in the tests above was written with SQLite already zeroing
+// whatever it freed. No release before 0.7.0 did that, and the difference is
+// not academic: measured by upgrading a real 0.6.0 install with five
+// destinations, two plaintext keys were still greppable out of polyemesis.db
+// after the upgraded server had started and stopped cleanly (exploratory run,
+// row 6). Both sat in the UNALLOCATED GAP of the destinations root page.
+//
+// THE MECHANISM. A destination row is ~1.4 KB (the profile JSON), so two fit on
+// a 4 KB page. The third INSERT overflows the root, and SQLite's
+// balance-deeper copies the root's cells into a new child leaf and turns the
+// root into an interior page -- without zeroing the leaf content it left
+// behind, because secure_delete was off. Those bytes are not in any cell and
+// not on the freelist, so nothing the backfill does touches them, and
+// secure_delete at upgrade time cannot reach them either: it governs writes
+// made while it is on.
+//
+// So the history here is written through a handle with secure_delete OFF --
+// the modernc default, and what every pre-0.7.0 binary ran with -- one INSERT
+// at a time, exactly as 0.6.0's CreateDestination issued them. Only the
+// upgrade goes through Open.
+//
+// Mutation: remove the VACUUM from backfillDestinationStreamKeys. Observed to
+// fail with "2 copies ... (db=2 wal=0)", the same two the real upgrade left.
+func TestTheBackfillScrubsPlaintextABeforeSecureDeleteReleaseLeftBehind(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "polyemesis.db")
+	box := testBox(t)
+	const rows = 5
+
+	// The rows themselves are built by the current code on a SEPARATE file, so
+	// they are valid for today's schema; only their bytes are copied across.
+	seedPath := filepath.Join(dir, "seed.db")
+	seed := keyDB(t, seedPath)
+	for i := 0; i < rows; i++ {
+		d := validDest()
+		d.Name = fmt.Sprintf("dest-%03d", i)
+		d.StreamKey = residueNeedle(i)
+		if _, err := seed.CreateDestination(d); err != nil {
+			t.Fatalf("CreateDestination: %v", err)
+		}
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("close seed: %v", err)
+	}
+	// The target: schema and source, no destinations.
+	if err := keyDB(t, path).Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// A 0.6.0 connection: WAL, no secure_delete.
+	old, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("open the pre-upgrade handle: %v", err)
+	}
+	old.SetMaxOpenConns(1)
+	var sd int
+	if err := old.QueryRow(`PRAGMA secure_delete`).Scan(&sd); err != nil || sd != 0 {
+		t.Fatalf("the pre-upgrade handle has secure_delete=%d (err %v), want 0: the "+
+			"fixture is not what a pre-0.7.0 binary wrote", sd, err)
+	}
+	if _, err := old.Exec(`ATTACH DATABASE ? AS seed`, seedPath); err != nil {
+		t.Fatalf("attach seed: %v", err)
+	}
+	for i := 1; i <= rows; i++ {
+		if _, err := old.Exec(`INSERT INTO main.destinations
+			SELECT * FROM seed.destinations WHERE id = ?`, i); err != nil {
+			t.Fatalf("write a pre-upgrade row: %v", err)
+		}
+	}
+	if _, err := old.Exec(`DETACH DATABASE seed`); err != nil {
+		t.Fatalf("detach seed: %v", err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("close the pre-upgrade handle: %v", err)
+	}
+
+	total := func() (db, wal int) {
+		for i := 0; i < rows; i++ {
+			d, w := rawResidue(t, path, residueNeedle(i))
+			db += d
+			wal += w
+		}
+		return db, wal
+	}
+	if db, wal := total(); db+wal <= rows {
+		t.Fatalf("%d plaintext copies before the upgrade, want more than %d (one live "+
+			"copy per row plus the ones a split left in the root's gap): the fixture "+
+			"did not reproduce a 0.6.0 file and the assertion below is vacuous",
+			db+wal, rows)
+	}
+
+	second := keyDB(t, path, WithSecretBox(box))
+
+	if db, wal := total(); db+wal != 0 {
+		t.Errorf("%d copies of the plaintext stream key are still greppable out of the "+
+			"raw file bytes after upgrading a database written without secure_delete "+
+			"(db=%d wal=%d): space a pre-0.7.0 binary freed is never rewritten by the "+
+			"backfill, so a leaked file is still a leaked set of stream keys",
+			db+wal, db, wal)
+	}
+	for i := 1; i <= rows; i++ {
+		got, err := second.GetDestination(int64(i))
+		if err != nil {
+			t.Fatalf("GetDestination(%d): %v", i, err)
+		}
+		if got.StreamKey != residueNeedle(i-1) {
+			t.Fatalf("destination %d reads back %q, want %q: the residue was removed "+
+				"by losing the key", i, got.StreamKey, residueNeedle(i-1))
+		}
 	}
 }

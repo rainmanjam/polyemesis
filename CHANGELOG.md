@@ -8,6 +8,20 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Security
+
+- **Upgrading from 0.6.x no longer leaves plaintext stream keys in
+  `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
+  and every release before 0.7.0 ran without it: a real 0.6.0 install with five
+  destinations still had two keys legible in the destinations root page after
+  upgrading to 0.10.0, where a page split had left them. The upgrade now runs
+  `VACUUM` and truncates the log whenever it seals keys or opens a pre-0.7.0
+  file, and refuses to start if it cannot. Installs that already sealed under
+  0.7.0–0.10.0 still need the one-off `VACUUM` in `docs/UPGRADING.md`, which
+  now says so for every such install, not only 0.7.0 ones. The regression test
+  writes its pre-upgrade history with `secure_delete` off, as 0.6.0 did; the
+  earlier fixture wrote it through the fixed code and could not see this.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

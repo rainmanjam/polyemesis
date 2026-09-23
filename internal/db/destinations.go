@@ -2129,6 +2129,13 @@ func (d *DB) backfillDestinationStreamKeys() error {
 	if d.box == nil {
 		return nil
 	}
+	// Read BEFORE MigrateSchemaVersion stamps it, which Open does after this
+	// returns: 0 here means the file was last written by a release that
+	// predates seal-at-rest, and so predates secure_delete. See scrubFreedSpace.
+	var priorVersion int
+	if err := d.sql.QueryRow(`PRAGMA user_version`).Scan(&priorVersion); err != nil {
+		return fmt.Errorf("read schema version before stream key backfill: %w", err)
+	}
 	type pending struct {
 		id                   int64
 		key, backup          string
@@ -2171,6 +2178,14 @@ func (d *DB) backfillDestinationStreamKeys() error {
 		//
 		// So the checkpoint runs anyway. It is cheap on an already-clean log, and
 		// it is the difference between a transient exposure and a permanent one.
+		//
+		// And a file still at user_version 0 gets the full scrub even with
+		// nothing to seal: MigrateStrandedStreamKeys may have just blanked the
+		// only plaintext keys it held, and the bytes a pre-0.7.0 binary freed
+		// are there whether or not any live column still needs sealing.
+		if priorVersion < 1 {
+			return scrubFreedSpace(d)
+		}
 		return checkpointTruncate(d)
 	}
 
@@ -2247,6 +2262,45 @@ func (d *DB) backfillDestinationStreamKeys() error {
 	// is still on disk -- exactly the silent half-fix this change is about. An
 	// operator who sees the startup error can run the remediation in
 	// docs/UPGRADING.md; one who sees nothing cannot.
+	//
+	// scrubFreedSpace rather than the checkpoint alone: see its comment for the
+	// copies neither secure_delete nor the checkpoint can reach.
+	return scrubFreedSpace(d)
+}
+
+// scrubFreedSpace rebuilds the whole database file with VACUUM and then
+// truncates the write-ahead log, so that no byte a pre-0.7.0 release left
+// behind survives the upgrade.
+//
+// WHY THE CHECKPOINT AND secure_delete ARE NOT ENOUGH. secure_delete governs
+// writes made while it is on. Every release before 0.7.0 ran with it off, and
+// its churn left plaintext stream keys in places that are neither a cell nor a
+// freelist page -- measured on a real 0.6.0 -> 0.10.0 upgrade with five
+// destinations: two keys in the UNALLOCATED GAP of the destinations root page,
+// left there when the third INSERT split the root and SQLite moved its cells
+// to a child leaf without zeroing the copy it left behind. The backfill never
+// writes to those bytes, so nothing in it can clear them, and docs/UPGRADING.md
+// told only 0.7.0 installs to VACUUM. VACUUM rewrites every page from the live
+// rows, which is the one operation that reaches all of it; the checkpoint then
+// moves the rebuilt pages over the old file and empties the log.
+//
+// It runs only when there is something from before secure_delete to scrub --
+// rows were just sealed, or the file is still at user_version 0 -- because it
+// rewrites the whole file, and on a database carrying months of chat history
+// that is not a cost to pay on every boot.
+//
+// A FAILURE IS FATAL, for the same reason checkpointTruncate's is: a startup
+// that carries on reads every key back correctly while the plaintext is still
+// on disk. user_version is not stamped until after this returns, so the next
+// start retries it. The likeliest cause is disk space -- VACUUM needs room for
+// a second copy of the file -- and the error says so.
+func scrubFreedSpace(d *DB) error {
+	if _, err := d.sql.Exec(`VACUUM`); err != nil {
+		return fmt.Errorf("VACUUM after stream key backfill (it needs free space for a "+
+			"second copy of polyemesis.db; plaintext stream keys from before the "+
+			"seal-at-rest upgrade may remain readable in its freed space until it "+
+			"succeeds -- see docs/UPGRADING.md): %w", err)
+	}
 	return checkpointTruncate(d)
 }
 

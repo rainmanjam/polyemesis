@@ -156,10 +156,27 @@ kill, a restart landing in the wrong second — used to come back, find no work 
 do, return before the checkpoint, and never truncate the log again.
 
 So an install that upgrades now gets its `-wal` cleared on the next start,
-whether or not the migration itself was interrupted. What upgrading cannot do is
-undo the freed pages: `secure_delete` only governs writes made after it is set,
-so **an install that already ran the 0.7.0 migration still needs `VACUUM` once by
-hand.** Run the pair, which remains the safe order:
+whether or not the migration itself was interrupted.
+
+**`secure_delete` was not enough on its own either, and this section used to say
+it was.** It only governs writes made after it is set, and every release before
+0.7.0 ran without it. Measured by upgrading a real 0.6.0 install with five
+destinations to 0.10.0: two plaintext keys were still in `polyemesis.db` after a
+clean start and stop, in the unallocated space of the destinations table's first
+page, where SQLite left them when the third destination split that page. The
+migration never writes to those bytes. **From the release after 0.10.0 the
+upgrade runs `VACUUM` itself** whenever it seals keys, or opens a file last
+written by a release before 0.7.0, and then truncates the log — so upgrading
+straight from 0.6.x or earlier needs nothing by hand. `VACUUM` needs free disk
+space for a second copy of the database; if it fails the server refuses to
+start and says so, and the next start tries again.
+
+What upgrading cannot do is reach a database whose keys were already sealed by
+an earlier release: by then nothing is left to seal and the file is no longer a
+pre-0.7.0 one, so there is no signal to scrub on. **Any install that already ran
+the sealing migration under 0.7.0 through 0.10.0 — whether it started on 0.6.x
+or earlier — still needs `VACUUM` once by hand.** Run the pair, which remains the
+safe order:
 
 ```sh
 systemctl stop polyemesis                      # or: docker compose down
