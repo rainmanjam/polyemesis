@@ -42,12 +42,36 @@ Prometheus at it:
 ```yaml
 scrape_configs:
   - job_name: polyemesis
+    scheme: https                       # NOT optional -- see below
     metrics_path: /api/v1/metrics
     static_configs:
-      - targets: ['stream.example.com']
+      - targets: ['stream.example.com:443']
     authorization:
       credentials_file: /etc/prometheus/polyemesis.token
+    tls_config:
+      # The install's local CA, for tls.mode selfsigned (install.sh's default).
+      # Copy <dataDir>/tls/ca.crt to the Prometheus host -- TLS.md says how.
+      # Delete this line for an ACME or manual certificate a browser trusts.
+      ca_file: /etc/prometheus/polyemesis-ca.crt
 ```
+
+**Say `scheme: https`, and name the port.** Prometheus defaults to `http` on
+port 80, and on an install that terminates TLS itself port 80 is the
+HTTP→HTTPS redirect. So a scrape configured without a scheme sends its
+`Authorization` header — the token — **in cleartext, once per scrape**, and
+only then is redirected. Nothing on the server can prevent that, because the
+header is already on the wire by the time the redirect answers; the fix has to
+be in the scrape config. `:443` is `install.sh`'s default. Use `:8080` if you
+kept that port, and `scheme: http` with `:8080` only for a plain-HTTP install
+reached over loopback or a private network — and then the token is in the clear
+by design.
+
+`tls_config.ca_file` is what lets a self-signed install verify at all:
+without it the scrape fails certificate verification, and the tempting fix,
+`insecure_skip_verify: true`, sends the token to whoever answers. The
+self-signed leaf names `tls.hostname`, `localhost` and the loopback addresses,
+so scrape by that hostname — or set `tls_config.server_name` to it when the
+target is an IP.
 
 A session cookie works too, so you can just open the URL in a signed-in browser
 tab while you are working out what to graph.

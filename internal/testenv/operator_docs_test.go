@@ -99,7 +99,7 @@ func fencedLines(md string) []string {
 	return out
 }
 
-// curlFailsLoudly reports whether a curl command line turns an HTTP error or a
+// curlFailFlag matches whether a curl command line turns an HTTP error or a
 // refused connection into a non-zero exit with a message (-f / --fail, and -S
 // so -s does not also silence the error).
 var curlFailFlag = regexp.MustCompile(`(^|\s)(-[a-zA-Z]*f[a-zA-Z]*|--fail)(\s|$)`)
@@ -185,5 +185,48 @@ func TestDocKeyUnreadableCountReadsTheWireShape(t *testing.T) {
 	if found == 0 {
 		t.Error("no operator doc carries a keyUnreadable check any more. docs/UPGRADING.md's " +
 			"\"Verifying an upgrade\" is where an operator is told to run it.")
+	}
+}
+
+// TestDocPrometheusExampleScrapesOverTLS: Prometheus defaults to http on the
+// target's port 80. On an install that terminates TLS itself, :80 is the
+// HTTP->HTTPS redirect helper, so the documented scrape sent its bearer token
+// in cleartext on every scrape before being redirected -- and then failed
+// verification against the self-signed certificate anyway. Staging-readiness
+// row 14. The token is on the wire before anything on the server can refuse
+// it, so the only place to stop this is the example people copy.
+func TestDocPrometheusExampleScrapesOverTLS(t *testing.T) {
+	const rel = "docs/MONITORING.md"
+	doc := readDoc(t, rel)
+	var block []string
+	inFence, cur := false, []string{}
+	for _, l := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "```") {
+			if inFence && strings.Contains(strings.Join(cur, "\n"), "scrape_configs:") &&
+				strings.Contains(strings.Join(cur, "\n"), "polyemesis") {
+				block = cur
+				break
+			}
+			inFence, cur = !inFence, nil
+			continue
+		}
+		if inFence {
+			cur = append(cur, l)
+		}
+	}
+	if block == nil {
+		t.Fatalf("%s has no scrape_configs example for polyemesis; this guard would check nothing", rel)
+	}
+	body := strings.Join(block, "\n")
+	for _, want := range []string{"scheme: https", "tls_config:", "ca_file:"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%s's Prometheus example has no %q. Without an explicit https scheme "+
+				"Prometheus scrapes http://<target>:80, and the bearer token crosses the "+
+				"network in cleartext before the redirect:\n%s", rel, want, body)
+		}
+	}
+	if !regexp.MustCompile(`targets:\s*\[\s*'[^']+:\d+'`).MatchString(body) {
+		t.Errorf("%s's Prometheus target names no port. With scheme https Prometheus "+
+			"would pick 443, which is right only for some installs -- say it:\n%s", rel, body)
 	}
 }

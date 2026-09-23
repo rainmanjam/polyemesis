@@ -39,6 +39,7 @@ var canonicalDriftTests = []string{
 	"TestThePagesHeadersRestateEverySecurityHeaderTheNginxConfigDeclares",
 	"TestDocVerifyCommandsFailLoudlyAndNameTheirURL",
 	"TestDocKeyUnreadableCountReadsTheWireShape",
+	"TestDocPrometheusExampleScrapesOverTLS",
 }
 
 func TestTheDocsOnlyPathStillRunsTheDriftGuards(t *testing.T) {

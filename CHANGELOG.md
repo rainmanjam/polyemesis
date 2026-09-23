@@ -23,6 +23,14 @@ its first tagged release.
   `install.sh` install; it now has a table of the three install shapes. Both are
   held by `internal/testenv/operator_docs_test.go`.
 
+- **The Prometheus example sent its bearer token in cleartext.**
+  `docs/MONITORING.md` gave no `scheme`, and Prometheus defaults to `http` on
+  port 80 — which, on an install terminating TLS itself, is the HTTP→HTTPS
+  redirect. The token crossed the network once per scrape before the redirect
+  answered, and the scrape then failed against the self-signed certificate. The
+  example now says `scheme: https`, names `:443`, and verifies with
+  `tls_config.ca_file` pointing at the install's local CA.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added
