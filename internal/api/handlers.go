@@ -1173,6 +1173,7 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 		Kind:     string(d.Kind),
 		Platform: string(d.Platform),
 		Enabled:  d.Enabled,
+		SourceID: d.SourceID,
 	}
 	if d.Process != nil {
 		md.Process = metrics.Process{

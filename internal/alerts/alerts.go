@@ -54,8 +54,12 @@ const (
 	//
 	// The one overlap is an outage: a falling_behind still open when the
 	// destination went down is closed by that outage's destination.recovered
-	// and gets no caught_up of its own. Either way every falling_behind is
-	// closed by exactly one message (Watcher.watchDestinations).
+	// and gets no caught_up of its own. Either way a falling_behind is closed
+	// by exactly one message (Watcher.watchDestinations) -- EXCEPT when the
+	// operator disables or deletes the destination while it is open: the
+	// watcher drops its state then and sends nothing, because the operator
+	// ended it themselves and a "caught up" would claim a recovery that did
+	// not happen.
 	TypeDestinationCaughtUp Type = "destination.caught_up"
 	// TypeIngestLost fires when the source stops arriving.
 	TypeIngestLost Type = "ingest.lost"

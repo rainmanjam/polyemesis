@@ -103,7 +103,9 @@ func TestAStalledDestinationIsNotUpOnTheScrape(t *testing.T) {
 // before this the scrape turned that into up=0 on every running destination --
 // so `polyemesis_destination_up == 0 and polyemesis_destination_enabled == 1`,
 // the alert MONITORING.md says to write first, paged once per destination for
-// what polyemesis_ingest_up already says once. The hooks and alerts watchers
+// what the programme's ingest series already say once -- its bitrate at 0, NOT
+// polyemesis_ingest_up, which stays 1 while an SRT or RTMP listener waits for a
+// publisher that went away (Engine.IngestLive). The hooks and alerts watchers
 // have both refused that reading since they were written; the engine now
 // decides it once (DestStatus.Stalled), and the scrape follows the engine.
 func TestAStallCausedByALostIngestDoesNotTakeADestinationDown(t *testing.T) {
@@ -135,5 +137,23 @@ func TestAStallCausedByALostIngestDoesNotTakeADestinationDown(t *testing.T) {
 		if !found {
 			t.Errorf("series %s is missing from the scrape:\n%s", series, out)
 		}
+	}
+}
+
+// A DESTINATION NAMES ITS PROGRAMME ON THE SCRAPE. The slow-output query in
+// MONITORING.md has to leave out a destination whose output stopped because
+// its SOURCE did -- up stays 1 then, by design -- and that takes a join from
+// the destination to its programme's ingest series. Destination and ingest
+// series are both labelled id and name, but the ids are of different things,
+// so without source_id there was nothing to join on, and the query paged once
+// per destination for one lost ingest.
+func TestTheScrapeNamesEachDestinationsProgramme(t *testing.T) {
+	src := int64(4)
+	out := metrics.Render(metrics.Snapshot{Destinations: []metrics.Destination{
+		metricsDestination(engine.DestStatus{ID: 9, Name: "Twitch", Kind: "rtmp", Platform: "twitch", SourceID: &src}),
+	}})
+	want := `polyemesis_destination_info{id="9",name="Twitch",kind="rtmp",platform="twitch",source_id="4"} 1`
+	if !strings.Contains(out, want+"\n") {
+		t.Errorf("scrape is missing %s:\n%s", want, out)
 	}
 }

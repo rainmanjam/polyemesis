@@ -1095,7 +1095,12 @@ func (p *Process) noteProgress(pr ffmpeg.Progress) {
 	defer p.mu.Unlock()
 	// Advancing, not merely reported: a stalled FFmpeg keeps printing blocks
 	// with the same out_time, so the arrival of a block proves nothing.
-	if pr.OutTimeMS > p.progress.OutTimeMS {
+	//
+	// `!=`, not `>`: a stall is one out_time repeated, and any other value is
+	// media moving. Output time can step backwards on a timestamp discontinuity
+	// FFmpeg passes through; counted only on a rise, a child delivering below
+	// its old high read stalled until it climbed past it.
+	if pr.OutTimeMS != p.progress.OutTimeMS {
 		p.movedAt = time.Now()
 	}
 	p.progress = pr

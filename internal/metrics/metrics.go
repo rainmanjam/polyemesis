@@ -111,6 +111,11 @@ type Destination struct {
 	Kind     string
 	Platform string
 	Enabled  bool
+	// SourceID is the programme this destination carries, nil when the row
+	// names none. Rendered on _info alone, as source_id, for the one join the
+	// destination series cannot otherwise make: to that programme's ingest
+	// series, whose id label is the SOURCE's id. See renderDestinations.
+	SourceID *int64
 	// OutTimeMS and OutputBytes are how far this run's output has got, in
 	// media time and in bytes, from FFmpeg's progress report. Both restart
 	// from zero with the process, which is a counter reset to Prometheus.
@@ -253,8 +258,18 @@ func renderDestinations(d *doc, dests []Destination) {
 	d.family("polyemesis_destination_info", "gauge",
 		"Destination labels; the value is always 1.")
 	for _, dest := range sorted {
+		// source_id is what lets a destination query ask about ITS programme's
+		// ingest: destination and ingest series both carry id, but they are
+		// ids of different things, so nothing joined them and a "moving slowly"
+		// alert could not leave out a destination whose source had gone. On
+		// _info, not on every series, with kind and platform: a descriptive
+		// label joined in when wanted, and empty for a row with no programme.
+		src := ""
+		if dest.SourceID != nil {
+			src = strconv.FormatInt(*dest.SourceID, 10)
+		}
 		d.sample("polyemesis_destination_info", 1, append(ident(dest),
-			label{"kind", dest.Kind}, label{"platform", dest.Platform})...)
+			label{"kind", dest.Kind}, label{"platform", dest.Platform}, label{"source_id", src})...)
 	}
 
 	d.family("polyemesis_destination_enabled", "gauge",

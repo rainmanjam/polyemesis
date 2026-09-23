@@ -21,6 +21,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -41,8 +42,9 @@ type DestStatus struct {
 	Error         string             `json:"error,omitempty"`
 	Process       *supervisor.Status `json:"process,omitempty"`
 	// Stalled is the destination's own stall: its process is running and its
-	// output has not moved (Process.Stalled), AND the source is arriving, so
-	// the thing not taking data is this destination's platform or network.
+	// output has not moved (Process.Stalled), AND the source it reads has been
+	// arriving for supervisor.StallAfter (sourceLiveFor), so the thing not
+	// taking data is this destination's platform or network.
 	//
 	// A SEPARATE VERDICT FROM Process.Stalled because the two differ exactly
 	// when the ingest is lost. Every destination's output freezes then and the
@@ -391,9 +393,14 @@ func (e *Engine) Status() Status {
 	st.Silence = e.Silence()
 	st.Failover = e.Failover()
 
-	// Whether the source is arriving decides whether a stalled process is the
-	// destination's stall; see destinationStalled. Read once, not per row.
-	sourceArriving := e.mon != nil && ingestLive(e.mon.Bitrate(), time.Now())
+	// How long the source the destinations read has been arriving decides
+	// whether a stalled process is the destination's stall; see
+	// destinationStalled. Read once, not per row.
+	var primary []stats.Sample
+	if e.mon != nil {
+		primary = e.mon.Bitrate()
+	}
+	sourceLive := sourceLiveFor(primary, st.Failover, time.Now())
 	ingestConfigured := st.Ingest != nil
 
 	names := make(map[int64]string, len(st.Renditions))
@@ -540,7 +547,7 @@ func (e *Engine) Status() Status {
 			if w := passthroughCodecWarning(row.Kind, row.Platform, row.RenditionID, source.Video); w != "" {
 				ds.Warnings = append(slices.Clip(ds.Warnings), w)
 			}
-			ds.Stalled = destinationStalled(ds.Process, ingestConfigured, sourceArriving)
+			ds.Stalled = destinationStalled(ds.Process, ingestConfigured, sourceLive)
 			if w := stallWarning(ds); w != "" {
 				ds.Warnings = append(slices.Clip(ds.Warnings), w)
 			}
@@ -557,11 +564,52 @@ func (e *Engine) Status() Status {
 // rule as the hooks watcher (IngestConfigured && !IngestLive), so a lost source
 // is one ingest event and not a destination fault per platform. With no ingest
 // configured there is no source to blame, so the process's flag stands.
-func destinationStalled(p *supervisor.Status, ingestConfigured, sourceArriving bool) bool {
+//
+// AND NOT UNTIL THE SOURCE HAS BEEN ARRIVING FOR supervisor.StallAfter. The
+// process's stall runs from its output's last movement, which for a
+// destination frozen by an outage is the start of the outage -- so on the
+// ingest's return every destination read stalled, up=0 and warned, until its
+// next progress block. Requiring the source to have been back as long as the
+// stall threshold measures the destination's stall from the later of the two:
+// its last movement, or the source's return.
+func destinationStalled(p *supervisor.Status, ingestConfigured bool, sourceLive time.Duration) bool {
 	if p == nil || p.State != supervisor.StateRunning || !p.Stalled {
 		return false
 	}
-	return sourceArriving || !ingestConfigured
+	return !ingestConfigured || sourceLive >= supervisor.StallAfter
+}
+
+// sourceLiveFor is how long the stream the destinations read has been arriving
+// without a break, 0 while it is not arriving.
+//
+// NORMALLY THE PRIMARY HUB, read off its 1 Hz bitrate samples: the start of
+// the trailing run of non-zero samples, if the last one is live (ingestLive).
+//
+// THE FAILOVER FEED while failover has switched away from the primary. The
+// destinations then read the selector's hub, which a backup, playlist or slate
+// feed is publishing into, and the primary hub is silent by definition -- read
+// alone, it called every destination's stall a lost ingest and hid a platform
+// that had stopped taking data for as long as failover was on air. A feed that
+// is running and not itself stalled is arriving, for as long as it has moved
+// media. Not while the primary is active: the feed then only copies the
+// primary hub and freezes with it, a StallAfter later than the destinations
+// do, so it would briefly vouch for a source that is gone.
+func sourceLiveFor(primary []stats.Sample, fo *FailoverStatus, now time.Time) time.Duration {
+	if fo != nil && fo.Active != "" && fo.Active != sourcePrimary {
+		f := fo.Feed
+		if f == nil || f.State != supervisor.StateRunning || f.Stalled {
+			return 0
+		}
+		return time.Duration(f.UptimeSec * float64(time.Second))
+	}
+	if !ingestLive(primary, now) {
+		return 0
+	}
+	i := len(primary) - 1
+	for i > 0 && primary[i-1].Kbps > 0 {
+		i--
+	}
+	return now.Sub(primary[i].Time)
 }
 
 // stallWarning is the card's warning for a destination that is stalled

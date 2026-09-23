@@ -3,6 +3,8 @@ package supervisor
 import (
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
 // A sink that stops reading leaves the child running and still reporting: the
@@ -68,5 +70,25 @@ func TestAChildThatHasMovedNoMediaIsNotStalled(t *testing.T) {
 	p.stallAfter = time.Millisecond
 	if p.Status().Stalled {
 		t.Fatal("a child with no media yet reported stalled")
+	}
+}
+
+// MOVEMENT IS A CHANGE IN OUTPUT TIME, NOT A RISE. A stall repeats one out_time
+// block after block, so any other value means media moved. Output time that
+// steps backwards -- a timestamp discontinuity FFmpeg passes through -- and
+// then keeps advancing below its old high is a delivering child. Counted only
+// on a rise, it read stalled until it climbed past the old figure: a stall
+// warning and up=0 on a destination that was sending the whole time.
+func TestOutputTimeThatStepsBackIsStillMovement(t *testing.T) {
+	p := running(time.Hour)
+	p.stallAfter = time.Minute
+	p.noteProgress(ffmpeg.Progress{OutTimeMS: 3_600_000})
+	// As if the last advance was long ago, so only the next block can clear it.
+	p.movedAt = time.Now().Add(-time.Hour)
+
+	p.noteProgress(ffmpeg.Progress{OutTimeMS: 2_000})
+	if st := p.Status(); st.Stalled {
+		t.Fatalf("output time moved (3600000 ms -> 2000 ms) and the child still reads stalled "+
+			"for %.0fs; it is delivering", st.StalledSec)
 	}
 }
