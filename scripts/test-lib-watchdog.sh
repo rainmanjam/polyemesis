@@ -200,8 +200,89 @@ printf '%s' "$matched" | grep -q "sshd" \
   && bad "an unrelated process was reported" \
   || ok "unrelated processes are left out"
 
+step "9. A suite whose run length is a parameter gets a deadline that outlives it"
+# acceptance-duration.sh broadcasts for DURATION_MINUTES and armed the default
+# deadline, 900s. So DURATION_MINUTES=30 -- the run the staging-readiness
+# review asked for, and the one its own header says the slow faults need --
+# was killed at minute fifteen with a WATCHDOG report, every time, having
+# measured nothing. The deadline is a hang detector; a run that is long on
+# purpose is not a hang. make_suite arms one second first, so this also proves
+# the longer deadline REPLACES the default rather than running beside it.
+make_suite "$WORK/long.sh" '
+POLY_WATCHDOG_SECS=1 POLY_WATCHDOG_RUN_HEADROOM=1
+poly_watchdog_arm_for 2
+step "1. a run that is long on purpose"
+sleep 2
+printf "SUITE_COMPLETED\n"
+'
+run_suite "$WORK/long.sh" "$WORK/long.out"
+rc=$?
+if [ "$rc" -eq 0 ] && grep -q SUITE_COMPLETED "$WORK/long.out" && ! grep -q "WATCHDOG" "$WORK/long.out"; then
+  ok "a run inside its own length plus headroom is not killed by the shorter default"
+else
+  bad "a run shorter than its declared length was killed (rc=$rc):"
+  sed 's/^/        /' "$WORK/long.out"
+fi
+
+# Still a deadline: past its length plus headroom, it fires as before.
+make_suite "$WORK/longhang.sh" '
+POLY_WATCHDOG_SECS=1 POLY_WATCHDOG_RUN_HEADROOM=0
+poly_watchdog_arm_for 1
+step "1. a long run that then wedges"
+sleep 10
+printf "SUITE_COMPLETED\n"
+'
+run_suite "$WORK/longhang.sh" "$WORK/longhang.out"
+if grep -q "=== WATCHDOG" "$WORK/longhang.out" && ! grep -q SUITE_COMPLETED "$WORK/longhang.out"; then
+  ok "a run past its length plus headroom is still killed and reported"
+else
+  bad "poly_watchdog_arm_for never fired on a run past its length"
+fi
+
+# And the suite that needs it uses it. Read rather than run: running it is a
+# thirty-minute broadcast.
+if grep -qE '^poly_watchdog_arm_for .*MINUTES' "$SCRIPTS/acceptance-duration.sh" \
+   && ! grep -qE '^poly_watchdog_arm *$' "$SCRIPTS/acceptance-duration.sh"; then
+  ok "acceptance-duration.sh arms its deadline from DURATION_MINUTES"
+else
+  bad "acceptance-duration.sh does not arm with poly_watchdog_arm_for and its MINUTES; any DURATION_MINUTES over ~14 is killed by the 900s default"
+fi
+
+step "10. A suite the watchdog killed never prints POLY-VERDICT: PASS"
+# Found by the same thirty-minute run. The watchdog fired at 901s, the suite's
+# teardown trap ran -- and its last line was "POLY-VERDICT: PASS". The trap is
+# handed `$?`, and after a TERM that is the status of whatever last finished,
+# usually 0. lib-preflight.sh's whole contract is that a KILL takes the pass
+# token with it; here the kill manufactured one. This case uses the real
+# teardown trap the suites use, not make_suite's stand-in.
+cat > "$WORK/verdict.sh" <<EOF
+#!/usr/bin/env bash
+set -uo pipefail
+. "$SCRIPTS/lib-cleanup.sh"
+. "$SCRIPTS/lib-watchdog.sh"
+POLY_STEP_FILE="$WORK/verdict.sh.step"
+POLY_WATCHDOG_TICK=0.2
+cleanup() { return "\${1:-0}"; }   # as poly_cleanup_exit does: the status it is handed
+trap 'poly_teardown_trap \$? cleanup' EXIT
+cd "$WORK"
+poly_watchdog_arm 1
+true
+sleep 10
+EOF
+chmod +x "$WORK/verdict.sh"
+run_suite "$WORK/verdict.sh" "$WORK/verdict.out"
+rc=$?
+if grep -q "POLY-VERDICT: FAIL" "$WORK/verdict.out" && ! grep -q "POLY-VERDICT: PASS" "$WORK/verdict.out"; then
+  ok "a watchdog kill ends in POLY-VERDICT: FAIL (rc=$rc)"
+else
+  bad "a watchdog-killed suite printed $(grep -o 'POLY-VERDICT: [A-Z]*' "$WORK/verdict.out" || echo 'no verdict') (rc=$rc)"
+fi
+[ -e "$WORK/verdict.sh.step.fired" ] \
+  && bad "the watchdog's fired marker survived the teardown" \
+  || ok "the fired marker is cleaned up with the breadcrumb"
+
 total=$((pass + fail))
-EXPECTED_CHECKS=17
+EXPECTED_CHECKS=22
 printf "\n"
 if [ "$total" -lt "$EXPECTED_CHECKS" ]; then
   printf "  \033[31mINCOMPLETE\033[0m  %d of %d checks ran\n\n" "$total" "$EXPECTED_CHECKS"
