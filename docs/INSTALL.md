@@ -637,18 +637,36 @@ the default.
 ### Run it as a service
 
 A hardened systemd unit ships in
-[`deploy/polyemesis.service`](../deploy/polyemesis.service):
+[`deploy/polyemesis.service`](../deploy/polyemesis.service). Run this from the
+clone you built in — it copies three files out of it:
 
 ```bash
 sudo cp polyemesis /usr/local/bin/
 sudo useradd --system --home /var/lib/polyemesis --shell /usr/sbin/nologin polyemesis
 sudo mkdir -p /var/lib/polyemesis /etc/polyemesis
+sudo chmod 0750 /var/lib/polyemesis    # holds stream keys -- see #297
 sudo chown polyemesis:polyemesis /var/lib/polyemesis
 sudo cp config.example.yaml /etc/polyemesis/config.yaml
 sudo cp deploy/polyemesis.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now polyemesis
 journalctl -u polyemesis -f
 ```
+
+**With a downloaded release binary instead of a clone,** the file is named
+`polyemesis-<tag>-linux-<arch>`, not `polyemesis`, so the first line becomes
+`sudo install -m 0755 polyemesis-v0.10.0-linux-amd64 /usr/local/bin/polyemesis`
+(with your tag and architecture). Take `config.example.yaml` and
+`deploy/polyemesis.service` from the same tag.
+
+**The `chmod 0750` is not decoration.** `mkdir` makes the directory `0755`
+under the usual umask, and it holds `secret.key` and a database of sealed stream
+keys. The unit's `UMask=0077` covers what the service creates *inside* it, not
+the directory you made by hand.
+
+The unit passes `--addr :8080` and `config.example.yaml` sets `tls.mode: auto`,
+which resolves to self-signed — so this install answers on
+`https://<host>:8080`, with a certificate warning until you
+[install the CA](TLS.md#trusting-the-self-signed-ca).
 
 Three details in that unit are load-bearing:
 

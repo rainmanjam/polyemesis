@@ -45,6 +45,7 @@ var canonicalDriftTests = []string{
 	"TestDocTLSWarnsTheImageHealthcheckIsPlainHTTP",
 	"TestDocWindowsAbortIsDescribedAsFixed",
 	"TestDocLaunchdJobHasEveryFileItNames",
+	"TestDocServiceInstallStepsMatchTheUnitHeader",
 }
 
 func TestTheDocsOnlyPathStillRunsTheDriftGuards(t *testing.T) {

@@ -59,6 +59,12 @@ its first tagged release.
   (`polyemesis-<tag>-darwin-<arch>`) and says to clear the quarantine flag
   before the first launch — a quarantined binary was seen to hang silently.
 
+- **`INSTALL.md`'s systemd steps left the data directory world-readable.** The
+  unit's own install notes had gained `chmod 0750 /var/lib/polyemesis` (the
+  directory holds `secret.key`); the page had not. It now has it, says the block
+  runs from a clone, gives the command for a downloaded release binary (whose
+  name carries the tag), and says the result answers on `https://<host>:8080`.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

@@ -326,3 +326,54 @@ func TestDocLaunchdJobHasEveryFileItNames(t *testing.T) {
 		}
 	}
 }
+
+// TestDocServiceInstallStepsMatchTheUnitHeader: deploy/polyemesis.service opens
+// with the commands that install it, and INSTALL.md's "Run it as a service"
+// repeats them. They drifted: the unit gained `chmod 0750 /var/lib/polyemesis`
+// (#297 -- the directory holds secret.key and the sealed stream keys) and the
+// page did not, so an operator following the page got a 0755 data directory.
+// Staging-readiness row 30, exploratory IU-3. Two copies of a procedure are
+// held to be one copy here: every command in either must be in the other.
+func TestDocServiceInstallStepsMatchTheUnitHeader(t *testing.T) {
+	norm := func(l string) string {
+		if i := strings.Index(l, " #"); i >= 0 {
+			l = l[:i]
+		}
+		return strings.Join(strings.Fields(l), " ")
+	}
+	unit := map[string]bool{}
+	for _, l := range strings.Split(readDoc(t, "deploy/polyemesis.service"), "\n") {
+		if !strings.HasPrefix(l, "#") {
+			break // the header ends at the first non-comment line
+		}
+		c := strings.TrimSpace(strings.TrimPrefix(l, "#"))
+		if strings.HasPrefix(c, "sudo ") || strings.HasPrefix(c, "journalctl ") {
+			unit[norm(c)] = true
+		}
+	}
+	const rel = "docs/INSTALL.md"
+	sec := docSection(t, readDoc(t, rel), rel, "Run it as a service")
+	page := map[string]bool{}
+	for _, l := range fencedLines(sec) {
+		c := strings.TrimSpace(l)
+		if strings.HasPrefix(c, "sudo ") || strings.HasPrefix(c, "journalctl ") {
+			page[norm(c)] = true
+		}
+	}
+	if len(unit) < 5 || len(page) < 5 {
+		t.Fatalf("found %d commands in the unit header and %d in %s; this guard would check "+
+			"almost nothing", len(unit), len(page), rel)
+	}
+	for c := range unit {
+		if !page[c] {
+			t.Errorf("deploy/polyemesis.service's install notes run %q and %s's \"Run it as a "+
+				"service\" does not", c, rel)
+		}
+	}
+	for c := range page {
+		if !unit[c] {
+			t.Errorf("%s's \"Run it as a service\" runs %q and deploy/polyemesis.service's "+
+				"install notes do not", rel, c)
+		}
+	}
+}
