@@ -27,7 +27,12 @@ its first tagged release.
   then passed all of it to the segment muxer at once. With `segmentSeconds`
   below about 15, segment 1 opened in the same wall-clock second as segment 0.
   Both got the same `rec-%Y%m%d-%H%M%S` name, and segment 1 overwrote segment 0,
-  so the first ten seconds were gone. The probe fix above removes the backlog.
+  so the first ten seconds were gone. The probe fix above removes the backlog
+  in the usual case, but not in every case. If a declared track sends nothing
+  for 15s, for example an audio track that stays silent (#674), the probe still
+  runs its full window. The backlog then comes back. With `segmentSeconds`
+  below about 16, the first segment can still be overwritten. Segment names
+  are still only unique to the second.
 
 ## [0.10.0] — 2026-09-23
 
