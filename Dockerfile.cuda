@@ -113,6 +113,13 @@ LABEL org.opencontainers.image.title="polyemesis" \
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
 ENV NVIDIA_VISIBLE_DEVICES=all
 
+# Which published image this is, read by the upgrade plan (upgrade.DetectVariant).
+# The binary inside is the same source with the same version stamp as the
+# default image, so only the image can say it is the cuda one -- and without it
+# the plan tells a CUDA container to `docker pull ...:0.10.0`, a pull that
+# succeeds onto an image with no hardware encoder. The tag is `:0.10.0-cuda`.
+ENV POLYEMESIS_IMAGE_VARIANT=cuda
+
 # Ubuntu 24.04's FFmpeg is 6.1.1, which keeps this image on the same 6.1.x
 # series as the Alpine one — the series this project is actually exercised
 # against — and it is built with NVENC (verified: `ffmpeg -encoders` in

@@ -879,7 +879,7 @@ func TestImageTag(t *testing.T) {
 		"compose":            "",
 		"v0.9.0-12-gabcdef1": "",
 	} {
-		if got := ImageTag(in); got != want {
+		if got := ImageTag(in, VariantDefault); got != want {
 			t.Errorf("ImageTag(%q) = %q, want %q", in, got, want)
 		}
 	}
@@ -908,5 +908,92 @@ func TestASourceBuiltImageIsToldToRebuildNotPull(t *testing.T) {
 	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: "v0.9.0", Offered: "v0.10.0"})
 	if strings.Contains(p.Command, "--build") || !strings.HasPrefix(p.Command, "docker compose pull") {
 		t.Errorf("a release image is told to rebuild: %q", p.Command)
+	}
+}
+
+// The GPU images are published as `:0.10.0-cuda` and `:0.10.0-vaapi`
+// (release.yml's TAGS_CUDA/TAGS_VAAPI), and they carry the same release version
+// as the default image. A GPU container told `docker pull ...:0.10.0` gets a
+// pull that SUCCEEDS -- onto an image with no hardware encoder. The variant has
+// to reach the tag, from the image's own declaration or, for a source build of
+// a GPU Dockerfile, from its version stamp.
+func TestDockerCommandKeepsTheImageVariant(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		v    Versions
+		want string
+	}{
+		{"release cuda image", Versions{Running: "v0.9.0", Offered: "v0.10.0", Variant: VariantCUDA}, "docker pull " + Image + ":0.10.0-cuda"},
+		{"release vaapi image", Versions{Running: "v0.9.0", Offered: "v0.10.0", Variant: VariantVAAPI}, "docker pull " + Image + ":0.10.0-vaapi"},
+		{"source-built cuda", Versions{Running: "docker-cuda", Offered: "v0.10.0"}, "image: " + Image + ":0.10.0-cuda"},
+		{"source-built vaapi", Versions{Running: "docker-vaapi", Offered: "v0.10.0"}, "image: " + Image + ":0.10.0-vaapi"},
+		{"compose-built cuda", Versions{Running: "compose-cuda", Offered: "v0.10.0"}, "image: " + Image + ":0.10.0-cuda"},
+		{"compose-built vaapi", Versions{Running: "compose-vaapi", Offered: "v0.10.0"}, "image: " + Image + ":0.10.0-vaapi"},
+		{"default image", Versions{Running: "v0.9.0", Offered: "v0.10.0"}, "docker pull " + Image + ":0.10.0"},
+	} {
+		p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", tc.v)
+		if !strings.Contains(p.Command, tc.want) {
+			t.Errorf("%s: command = %q, want it to contain %q", tc.name, p.Command, tc.want)
+		}
+		if tc.name == "default image" && (strings.Contains(p.Command, "-cuda") || strings.Contains(p.Command, "-vaapi")) {
+			t.Errorf("%s: default image named a GPU tag: %q", tc.name, p.Command)
+		}
+	}
+	// A variant this build does not know is not guessed at: the explicit tag is
+	// left out, and the compose file's own tag decides.
+	p := PlanFor(MethodDocker, "/usr/local/bin/polyemesis", Versions{Running: "v0.9.0", Offered: "v0.10.0", Variant: "rocm"})
+	if strings.Contains(p.Command, Image+":") {
+		t.Errorf("unknown variant: named a tag anyway: %q", p.Command)
+	}
+	if !strings.Contains(p.Command, "up -d") {
+		t.Errorf("unknown variant: lost the recreate: %q", p.Command)
+	}
+}
+
+func TestDetectVariant(t *testing.T) {
+	env := func(val string) func(string) string {
+		return func(k string) string {
+			if k == VariantEnv {
+				return val
+			}
+			return ""
+		}
+	}
+	for _, tc := range []struct {
+		env  string
+		want Variant
+	}{
+		{"", VariantDefault},
+		{"cuda", VariantCUDA},
+		{" VAAPI ", VariantVAAPI},
+		{"rocm", Variant("rocm")},
+	} {
+		if got := DetectVariant(env(tc.env)); got != tc.want {
+			t.Errorf("DetectVariant(%q) = %q, want %q", tc.env, got, tc.want)
+		}
+	}
+}
+
+// The Dockerfiles are where a variant is declared; a GPU Dockerfile that stops
+// declaring it silently turns its plan back into the CPU tag.
+func TestGPUDockerfilesDeclareTheirVariant(t *testing.T) {
+	for file, want := range map[string]string{
+		"../../Dockerfile.cuda":  "ENV " + VariantEnv + "=cuda",
+		"../../Dockerfile.vaapi": "ENV " + VariantEnv + "=vaapi",
+	} {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), want) {
+			t.Errorf("%s does not declare %q", file, want)
+		}
+	}
+	b, err := os.ReadFile("../../Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), VariantEnv) {
+		t.Errorf("the default Dockerfile declares a variant; its tag has no suffix")
 	}
 }

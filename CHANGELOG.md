@@ -28,6 +28,13 @@ its first tagged release.
   takes the running and offered versions as named fields, so the two strings
   cannot be passed the wrong way round. docs/UPGRADING.md said the same no-op
   pull and is corrected.
+- **A GPU container was told to pull the CPU image.** The CUDA and VA-API
+  images are published as `:0.10.0-cuda` and `:0.10.0-vaapi` and carry the
+  same version as the default image, so the upgrade plan named `:0.10.0`, and
+  that pull succeeds onto an image with no hardware encoder. The GPU
+  Dockerfiles now declare `POLYEMESIS_IMAGE_VARIANT`, and `upgrade.ImageTag`
+  takes the variant as a required argument, so it adds the suffix. A variant
+  this build does not recognise gets no tag in the plan.
 
 ## [0.10.0] — 2026-09-23
 

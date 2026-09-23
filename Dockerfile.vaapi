@@ -106,6 +106,13 @@ LABEL org.opencontainers.image.title="polyemesis" \
       org.opencontainers.image.vendor="polyemesis" \
       org.opencontainers.image.version="${VERSION}"
 
+# Which published image this is, read by the upgrade plan (upgrade.DetectVariant).
+# The binary inside is the same source with the same version stamp as the
+# default image, so only the image can say it is the vaapi one -- and without it
+# the plan tells a VA-API container to `docker pull ...:0.10.0`, a pull that
+# succeeds onto an image with no hardware encoder. The tag is `:0.10.0-vaapi`.
+ENV POLYEMESIS_IMAGE_VARIANT=vaapi
+
 
 # Ubuntu 26.04's FFmpeg is built with VA-API (verified: `ffmpeg -encoders` in
 # ubuntu:26.04 lists h264_vaapi, hevc_vaapi, av1_vaapi, h264_qsv, hevc_qsv and

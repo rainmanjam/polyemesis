@@ -215,8 +215,49 @@ const Image = "rainmanjam/polyemesis"
 // source naming the tag it is past, not a release.
 var releaseVersion = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$`)
 
-// ImageTag is the Docker tag a release is published under, or "" when tag is
-// not a release.
+// Variant is which of the published images this is. They share a release
+// version -- the GPU images are built from the same tag with the same VERSION
+// -- so the version alone cannot tell them apart, and the tag each is
+// published under differs by a suffix.
+type Variant string
+
+const (
+	// VariantDefault is the Alpine image, `:0.10.0`. No suffix.
+	VariantDefault Variant = ""
+	// VariantCUDA is Dockerfile.cuda, published as `:0.10.0-cuda`.
+	VariantCUDA Variant = "cuda"
+	// VariantVAAPI is Dockerfile.vaapi, published as `:0.10.0-vaapi`.
+	VariantVAAPI Variant = "vaapi"
+)
+
+// VariantEnv is the variable a GPU image declares its variant in (an ENV line
+// in Dockerfile.cuda and Dockerfile.vaapi). The IMAGE says what it is, because
+// nothing else can: the binary inside is built from the same source and stamped
+// with the same version whichever Dockerfile built it.
+const VariantEnv = "POLYEMESIS_IMAGE_VARIANT"
+
+// known reports whether release.yml publishes tags for this variant.
+func (v Variant) known() bool {
+	switch v {
+	case VariantDefault, VariantCUDA, VariantVAAPI:
+		return true
+	}
+	return false
+}
+
+// DetectVariant reads the variant the image declared, or VariantDefault when
+// it declared none. A value this build does not recognise is returned as it
+// is, not folded into the default: ImageTag then names no tag at all, which is
+// better than naming the CPU image to a container that is something else.
+func DetectVariant(env func(string) string) Variant {
+	if env == nil {
+		env = os.Getenv
+	}
+	return Variant(strings.ToLower(strings.TrimSpace(env(VariantEnv))))
+}
+
+// ImageTag is the Docker tag a release is published under for this variant, or
+// "" when tag is not a release or the variant is not one release.yml publishes.
 //
 // NOT the release tag. release.yml derives image tags with metadata-action's
 // `type=semver,pattern={{version}}`, which drops the leading v: the release
@@ -224,12 +265,22 @@ var releaseVersion = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]
 // printed the feed's tag verbatim told every Docker operator to pull a tag
 // that answers "not found". The one place that spelling is decided, so the
 // command cannot be built from the raw tag by accident.
-func ImageTag(tag string) string {
+//
+// The variant is a PARAMETER, not an afterthought, for the same reason. The GPU
+// images are `:0.10.0-cuda` and `:0.10.0-vaapi`, and `:0.10.0` exists too -- so
+// a GPU container told to pull it gets a pull that succeeds, onto an image with
+// no hardware encoder. A caller cannot ask for a tag without saying which
+// image it is for.
+func ImageTag(tag string, variant Variant) string {
 	tag = strings.TrimSpace(tag)
-	if !releaseVersion.MatchString(tag) {
+	if !releaseVersion.MatchString(tag) || !variant.known() {
 		return ""
 	}
-	return strings.TrimPrefix(tag, "v")
+	tag = strings.TrimPrefix(tag, "v")
+	if variant != VariantDefault {
+		tag += "-" + string(variant)
+	}
+	return tag
 }
 
 // Versions are the two versions a plan is about. NAMED rather than positional
@@ -244,6 +295,9 @@ type Versions struct {
 	// Offered is the tag the last update check found, in the release feed's
 	// spelling (`v0.10.0`). "" before any check has run.
 	Offered string
+	// Variant is the image this container runs (see DetectVariant). Only a
+	// container plan reads it; the tag it names carries its suffix.
+	Variant Variant
 }
 
 // PlanFor builds the plan for this box.
@@ -320,7 +374,7 @@ func PlanFor(m Method, binary string, v Versions) Plan {
 // and a rebuild. The published image is named as the alternative, because it
 // is the one path on which the update check can ever be comparable.
 func dockerCommand(v Versions) string {
-	tag := ImageTag(v.Offered)
+	tag := ImageTag(v.Offered, imageVariant(v))
 	if !releaseVersion.MatchString(strings.TrimSpace(v.Running)) {
 		cmd := "git pull && docker compose up -d --build   # built from source, so a pull changes nothing"
 		if tag != "" {
@@ -334,6 +388,25 @@ func dockerCommand(v Versions) string {
 		return "docker compose pull && docker compose up -d"
 	}
 	return fmt.Sprintf("docker compose pull && docker compose up -d   # or: docker pull %s:%s", Image, tag)
+}
+
+// imageVariant is the variant a container plan names a tag for. The image's
+// declaration wins; failing that, a source build of a GPU Dockerfile says
+// which one in its version stamp (`docker-cuda`, `docker-vaapi` -- the ARG
+// defaults there -- or `compose-cuda`, `compose-vaapi` from docker-compose.yml's
+// GPU services), which is what a build of a checkout that predates the
+// declaration still carries.
+func imageVariant(v Versions) Variant {
+	if v.Variant != VariantDefault {
+		return v.Variant
+	}
+	switch strings.TrimSpace(v.Running) {
+	case "docker-cuda", "compose-cuda":
+		return VariantCUDA
+	case "docker-vaapi", "compose-vaapi":
+		return VariantVAAPI
+	}
+	return VariantDefault
 }
 
 // writable reports whether this process can create a file in dir.
