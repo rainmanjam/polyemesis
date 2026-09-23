@@ -327,7 +327,16 @@ never written. Measured on a live host: the file did not grow by one byte
 across the stop, and `ffprobe` reported no duration on nearly two minutes of
 footage.
 
-That is fixed, and `scripts/acceptance-recording-stop.sh` holds it fixed. What
+That is fixed, and `scripts/acceptance-recording-stop.sh` holds it fixed. The
+same truncation had a second route that the shutdown ordering could not reach:
+a recorder or file destination stopped *after* its publisher had already left —
+the last segment once an ingest ended, turning recording off, `docker stop` on
+an idle server, the Stop button on a file destination. The feed was quiet
+before any signal was sent. Now, when a stopping consumer has not exited within
+0.3s on a silent feed, the relay sends it the packet it is waiting for. It exits
+in a fraction of a second with its file finalised
+(`TestARecorderStoppedOnAQuietFeedFinalisesItsFileInsteadOfBeingKilled`,
+`TestAFileDestinationStoppedOnAQuietFeedFinalisesItsFile`). What
 is **not** established is whether Windows was failing for the same reason. The
 mechanism is not platform-specific, so it may well have been — but nobody has
 run the suite there, so the row above still says what it says.
