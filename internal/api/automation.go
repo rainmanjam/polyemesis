@@ -331,11 +331,16 @@ func (s *Server) handleAlertsMeta(w http.ResponseWriter, r *http.Request) {
 // recent across notifiers, and LastError the most recent non-empty one, because
 // "when did anything last get through" and "what went wrong last" are questions
 // about the install, not about a programme.
+//
+// Deleted programmes stay in the counters (Manager.RetiredAlertStats): a
+// total that fell when a programme was deleted would read, to Prometheus, as
+// a counter reset.
 func (s *Server) alertStats() alerts.Stats {
 	var out alerts.Stats
 	if s.mgr == nil {
 		return out
 	}
+	out = s.mgr.RetiredAlertStats()
 	var errAt time.Time
 	for _, e := range s.mgr.Engines() {
 		st := e.Alerts().Stats()

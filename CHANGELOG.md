@@ -15,7 +15,9 @@ its first tagged release.
   `/api/v1/metrics` now has `polyemesis_alert_deliveries_total{result="sent"|"failed"}`
   and `polyemesis_alert_last_success_timestamp_seconds`, and MONITORING.md
   gives the Prometheus rule for "deliveries are failing and none is getting
-  through".
+  through". Both counters, and the Automation page's, keep a deleted
+  programme's deliveries, so removing a programme never lowers them and
+  Prometheus does not mistake the drop for a counter reset.
 
 ### Fixed
 

@@ -285,9 +285,10 @@ carries it too, summed over every programme:
 
 - `polyemesis_alert_deliveries_total{result="sent"}` and `{result="failed"}`
   count deliveries, not events: one delivery carries everything coalesced into
-  it, and a failure is counted once the retry budget above is spent. Each
-  programme's count starts again from 0 when its engine restarts, which
-  `increase()` and `rate()` treat as a counter reset.
+  it, and a failure is counted once the retry budget above is spent. A
+  deleted programme's deliveries stay in the total, so removing one never
+  lowers it; the count starts again from 0 only when the server process
+  restarts, which `increase()` and `rate()` treat as a counter reset.
 - `polyemesis_alert_last_success_timestamp_seconds` is the Unix time of the
   newest delivery that succeeded. It is **absent** until one has, not 0: a 0
   would make every quiet install look decades overdue.
