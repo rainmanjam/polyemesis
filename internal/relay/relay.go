@@ -91,7 +91,14 @@ type Hub struct {
 	deliverMu sync.Mutex
 	// cc is guarded by deliverMu; the totals it feeds are atomic because Stats
 	// reads them from the HTTP goroutine.
-	cc              continuity
+	cc continuity
+	// pes remembers which PIDs carry PES, for Wake. Guarded by deliverMu,
+	// like cc, and fed from the same place.
+	pes pesStarts
+	// lastRx is when the last datagram came through, in UnixNano. Wake reads it
+	// to tell a feed that has gone quiet from one that is still delivering --
+	// and a delivering feed wakes its readers by itself.
+	lastRx          atomic.Int64
 	tsPackets       atomic.Uint64
 	tsLost          atomic.Uint64
 	discontinuities atomic.Uint64
@@ -143,6 +150,9 @@ type subscriber struct {
 	// gotFirst latches the first successful send, so "relay first delivery" is
 	// logged once per subscriber rather than per datagram.
 	gotFirst bool
+	// wakes counts the wakes sent to this consumer, so each one continues the
+	// counter sequence the last left off. Guarded by Hub.deliverMu. See Wake.
+	wakes uint8
 }
 
 // New binds the hub's receive socket, on IPv4 loopback unless an option says
@@ -474,6 +484,8 @@ func (h *Hub) Deliver(pkt []byte) {
 }
 
 func (h *Hub) measure(dgram []byte) {
+	h.lastRx.Store(time.Now().UnixNano())
+	h.pes.learn(dgram)
 	packets, discos, lost := h.cc.inspect(dgram)
 	if packets == 0 {
 		return
@@ -546,6 +558,72 @@ func (h *Hub) fanout(pkt []byte) {
 		s.sendErrors = 0
 		h.txPackets.Add(1)
 	}
+}
+
+// quietAfter is how long the feed must have been silent before Wake acts.
+//
+// A floor, not a tuning knob. With packets arriving, FFmpeg answers SIGTERM on
+// its own in about a tenth of a second (see internal/engine/manager.go), and a
+// wake injected into a LIVE feed would cut the PES in flight short. The lowest
+// bitrate the relay carries -- audio-only at 128 kbit/s -- still sends a
+// 1316-byte datagram every ~80ms, so a quarter second of nothing is silence
+// rather than spacing.
+const quietAfter = 250 * time.Millisecond
+
+// Wake sends one consumer the packets that let a stopping FFmpeg finish.
+//
+// THE PROBLEM IT SOLVES. Every relay consumer reads udp:// with no read timeout,
+// deliberately: a destination has to ride through a quiet patch rather than
+// erroring off air (see ffmpeg.RelayProbeInputURL). The price was paid at stop
+// time. Once transcoding has begun, FFmpeg acts on a single SIGTERM only when
+// the demuxer hands it a packet, and its I/O interrupt callback fires only from
+// the SECOND signal -- which also aborts the trailer write. So a recorder or a
+// file destination stopped after its publisher had left sat out the whole
+// grace, was SIGKILLed, and left a Matroska file with no duration and no cues.
+// Measured: 8.0s and duration N/A; with a wake, milliseconds and a finalised
+// file. See engine.TestARecorderStoppedOnAQuietFeedFinalisesItsFileInsteadOfBeingKilled.
+//
+// WHAT IS SENT. One TS packet per PES-carrying PID the hub has seen, each with
+// payload_unit_start set and an empty PES header. The MPEG-TS demuxer emits a
+// PES when the NEXT one on its PID begins, so this completes the packet it was
+// holding -- real media, the last of the stream -- and the demux thread,
+// returning at last, finds the stop it was asked for. The PES it opens carries no
+// payload -- the packet is stuffed through its adaptation field -- so even a
+// repeated wake that completes it gives the muxer nothing. Continuity counters
+// continue each PID's own sequence, so the reader logs no discontinuity for it.
+//
+// ONLY INTO SILENCE, and only to the one named consumer. A feed still
+// delivering wakes its readers by itself, and every other subscriber on the hub
+// is still running. Returns whether anything was sent; false is normal for a
+// live feed, an unknown name, or a hub that has never seen a PES -- in which
+// case FFmpeg is still probing, where a single SIGTERM does interrupt the read.
+func (h *Hub) Wake(name string) bool {
+	h.mu.RLock()
+	s := h.subs[name]
+	h.mu.RUnlock()
+	if s == nil {
+		return false
+	}
+	if last := h.lastRx.Load(); last != 0 && time.Since(time.Unix(0, last)) < quietAfter {
+		return false
+	}
+	h.deliverMu.Lock()
+	dgrams := h.pes.wake(&h.cc, s.wakes)
+	if len(dgrams) > 0 {
+		s.wakes++
+	}
+	h.deliverMu.Unlock()
+	sent := false
+	for _, d := range dgrams {
+		if _, err := h.conn.WriteToUDP(d, s.addr); err == nil {
+			sent = true
+		}
+	}
+	if sent {
+		h.log.Info("relay woke a stopping consumer on a quiet feed",
+			"subscriber", s.name, "port", s.addr.Port)
+	}
+	return sent
 }
 
 // Close shuts the hub down.

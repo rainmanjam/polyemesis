@@ -8,6 +8,22 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A recording or file destination stopped after its publisher left is
+  finalised, not killed.** Relay consumers read with no timeout by design, so a
+  destination can ride through a quiet patch. On a silent feed, FFmpeg never
+  acts on a single SIGTERM, so these stops waited out the 8s grace and were
+  SIGKILLed. That left an MKV with no duration and no cues. Affected: the last
+  segment when an ingest ended, `recording.enabled=false`, `docker stop` on an
+  idle server, and the Stop button on a file destination. The supervisor now
+  wakes a stopping relay consumer that has not exited after 0.3s. The relay
+  sends that consumer alone one empty PES start per stream, which completes the
+  packet FFmpeg is holding, and only into a feed that has been silent for
+  0.25s. Measured: 8.0s and `duration=N/A` before, 0.3s and a finalised file
+  after. The no-timeout rule is untouched: a running destination still rides
+  through silence.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

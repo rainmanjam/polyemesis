@@ -61,6 +61,21 @@ var shortGraceKinds = map[string]time.Duration{
 // What this shortens is the wait before we stop pretending it might.
 const fastGrace = 1 * time.Second
 
+// wakeAfter is how long a stopping child with a Spec.WakeOnStop gets to answer
+// SIGTERM by itself before it is woken, and wakeEvery how often the wake is
+// repeated after that.
+//
+// wakeAfter sits above the 0.105s a healthy FFmpeg takes with its input still
+// flowing, so the ordinary stop never reaches it. It is repeated rather than
+// sent once because a single loopback datagram can be dropped, and because the
+// signal is delivered asynchronously: a wake that lands before FFmpeg has
+// registered the SIGTERM just completes a packet, and the next one finishes the
+// job. Both are far inside the 8s grace, which remains the backstop.
+const (
+	wakeAfter = 300 * time.Millisecond
+	wakeEvery = 500 * time.Millisecond
+)
+
 // graceFor returns the shutdown grace for a process kind. Unknown kinds -- and
 // the empty string -- get shutdownGrace, which is the point.
 func graceFor(kind string) time.Duration {

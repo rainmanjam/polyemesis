@@ -1868,6 +1868,11 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	proc := supervisor.New(e.log, supervisor.Spec{
 		Name: "recorder", Kind: "recorder", Bin: e.tools.FFmpeg, Args: args,
 		AutoRestart: true, OnLog: e.onLog, OnState: e.onState, LogSink: logSink{e},
+		// The recorder is the consumer this exists for: stopped after the
+		// publisher has gone -- the ingest ending, recording.enabled=false,
+		// `docker stop` on an idle server -- it used to be SIGKILLed with its
+		// last segment unfinalised. See relay.Hub.Wake.
+		WakeOnStop: relayWaker(e.hub, "recorder"),
 	})
 
 	e.mu.Lock()
@@ -1886,6 +1891,23 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	e.recorderSig = sig
 	e.mu.Unlock()
 	proc.Start()
+}
+
+// relayWaker is the Spec.WakeOnStop for a consumer subscribed to hub as name.
+//
+// Safe after the fact by construction: Wake does nothing for a name the hub no
+// longer holds, and every teardown here stops the process BEFORE it
+// unsubscribes, so the subscription is still there for as long as the wake can
+// be needed. The one overlap: a Stop whose context expires before its child is
+// reaped returns while the escalator is still running, and a successor that
+// subscribes under the same name in that window can be sent a wake too. That
+// costs it nothing it would notice -- a wake only ever reaches a feed that is
+// already silent, and the empty PES it opens carries no payload.
+func relayWaker(hub *relay.Hub, name string) func() {
+	if hub == nil {
+		return nil
+	}
+	return func() { hub.Wake(name) }
 }
 
 // reconcilePreview applies settings changes to the preview encoder, but never
