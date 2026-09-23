@@ -31,6 +31,19 @@ its first tagged release.
   example now says `scheme: https`, names `:443`, and verifies with
   `tls_config.ca_file` pointing at the install's local CA.
 
+- **The docs told systemd operators to move to 443 by editing a line that
+  cannot move them.** `INSTALL.md`, `TLS.md` and `CONFIGURATION.md` all said to
+  set `addr: ":443"` in `config.yaml`, but both systemd units and the image's
+  `CMD` pass `--addr`, and `main.go` applies the flag after loading the file:
+  the server came back on the same port with the same warning. They now say
+  where the port actually comes from on each install shape, including that the
+  compose file `install.sh --mode docker` writes is the one where the file does
+  win. `TLS.md` also now warns that the image's `HEALTHCHECK` is plain HTTP, so
+  turning TLS on inside the container marks a healthy server unhealthy, and
+  gives the HTTPS replacement. `INSTALL.md`'s code citations by line number —
+  two of them ranges that ran backwards — are symbol names now, and a guard
+  refuses a `file:line` citation in the operator docs.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

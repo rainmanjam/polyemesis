@@ -137,6 +137,14 @@ tls:
   hsts: true                      # safe here: publicly trusted certificate
 ```
 
+> **Under systemd, or with the repository's `docker-compose.yml`, the `addr`
+> line in `config.yaml` is not the one that counts.** Both systemd units
+> (`deploy/polyemesis.service` and the one `install.sh` writes) and the image's
+> `CMD` pass `--addr` on the command line, and the flag wins over the file. Set
+> `:443` there — `sudo systemctl edit --full polyemesis`, or `command:` in
+> compose — or the server comes back on 8080 with the same warning. See
+> [Binding, and the SSH tunnel](#binding-and-the-ssh-tunnel).
+
 Point an A/AAAA record at the box and open **80 and 443**. The certificate is
 issued lazily, on the first HTTPS handshake for that name, and renewed
 automatically.
@@ -199,6 +207,12 @@ grants for you. Keep 8443 if something in front of this box terminates TLS on
 
 That is a warning, not a refusal — a non-standard port is a legitimate choice,
 and polyemesis says it once at startup and serves anyway.
+
+The warning says `config.yaml` because that is the one place every install
+reads, but it is only the place that wins on a bare binary and on the compose
+file `install.sh --mode docker` writes. A systemd unit or the repository's
+compose file passes `--addr`, which overrides `addr:` — change the flag there,
+as the note under the first example says.
 
 Tradeoff: every browser warns until you
 [install the CA](#trusting-the-self-signed-ca), and mobile clients are genuinely
@@ -438,6 +452,23 @@ uncommenting for exactly this. It ships off because publishing `:80`
 unconditionally breaks `docker compose up` on any host already running a web
 server.
 
+**Change the healthcheck in the same edit.** The image's `HEALTHCHECK`, and the
+one in the repository's `docker-compose.yml`, is
+`wget -qO- http://127.0.0.1:8080/api/v1/health` — plain HTTP. Turn on any TLS
+mode inside the container and that request fails against a perfectly healthy
+server, the container is marked `unhealthy`, and an orchestrator that acts on
+health restarts it in a loop. Replace it with the HTTPS form on the port you
+serve:
+
+```yaml
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://127.0.0.1:8080/api/v1/health || exit 1"]
+```
+
+`--no-check-certificate` is right here rather than lax: the check runs inside
+the container against itself, and a self-signed certificate would otherwise
+fail it. The compose file `install.sh --mode docker` writes already does this.
+
 ## HSTS is opt-in, and here is why
 
 `tls.hsts` defaults to `false`. Turn it on only when you have a certificate a
@@ -490,6 +521,15 @@ Dockerfile's `CMD` has `-addr :8080`, `deploy/polyemesis.service` has
 `--addr :8080`, and `install.sh` writes one into the config.yaml it generates. A
 flag or a file key wins over the default. What is affected is a bare binary with
 no config.yaml, or a config.yaml with no `addr` key.
+
+**When both are set, the flag wins.** `cmd/polyemesis/main.go` applies `-addr`
+after it loads `config.yaml`, so on an install whose unit or container command
+passes `--addr`, editing `addr:` in the file and restarting changes nothing —
+the server comes back on the same port. That is every systemd install (the
+shipped unit and the one `install.sh` writes, which also puts the same value in
+`config.yaml`, so the two agree until you edit one) and the repository's
+`docker-compose.yml`, which runs the image's `CMD`. Change the port where it is
+passed, and change both if both are written.
 
 Plain HTTP on every
 interface is the single biggest practical exposure this product has: the login

@@ -40,6 +40,9 @@ var canonicalDriftTests = []string{
 	"TestDocVerifyCommandsFailLoudlyAndNameTheirURL",
 	"TestDocKeyUnreadableCountReadsTheWireShape",
 	"TestDocPrometheusExampleScrapesOverTLS",
+	"TestOperatorDocsCiteSymbolsNotLineNumbers",
+	"TestDocAddrAdviceNamesTheFlagThatBeatsIt",
+	"TestDocTLSWarnsTheImageHealthcheckIsPlainHTTP",
 }
 
 func TestTheDocsOnlyPathStillRunsTheDriftGuards(t *testing.T) {

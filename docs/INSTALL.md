@@ -956,19 +956,38 @@ tls mode=… hostname=…
 
 > **The startup warning about `:443` is not an error.** `internal/config`'s
 > `TLSPortWarning` prints it once at startup whenever TLS is being served and
-> the port read out of `addr` is neither `443` nor absent
-> (`internal/config/config.go:414-406`) — so `addr: "0.0.0.0:443"` silences it
-> just as `":443"` does, and nothing else does.
+> the port read out of the listen address is neither `443` nor absent (see
+> `TLSPortWarning` and `ListenPort` in `internal/config/config.go`) — so
+> `0.0.0.0:443` silences it just as `:443` does, and nothing else does.
 >
-> **Setting `addr: ":443"` is only half the fix on a systemd install.** The unit
-> runs unprivileged and cannot bind a port below 1024 without
-> `AmbientCapabilities=CAP_NET_BIND_SERVICE`, and `install.sh` grants that
-> **conditionally** — only when `tls.mode` is `acme`, or the port chosen *at
-> install time* is 443 or 80 (`scripts/install.sh:1508-1480`). So an operator
-> who declined the installer's "Serve HTTPS on 443?" offer and later edits
-> `config.yaml` gets a unit with no capability and a service that fails to bind.
-> Add both lines to the unit yourself, or use one of the alternatives
-> `deploy/polyemesis.service:51-57` lists (the
+> **On a systemd install, `addr:` in `config.yaml` changes nothing.** The
+> warning says to set `addr: ":443"` in `config.yaml`, and on the installs most
+> people have that is not where the port comes from. Both units pass the
+> address as a flag — `deploy/polyemesis.service` has `--addr :8080`, and the
+> unit `install.sh` writes has `--addr :<the port you chose>` — and a flag
+> beats the file (`main.go` applies `-addr` after loading `config.yaml`). Edit
+> the file, restart, and the server comes back on the same port with the same
+> warning. **Change the flag instead:** `sudo systemctl edit --full polyemesis`
+> and change `--addr` on the `ExecStart` line. (`install.sh` also writes the
+> same port into `config.yaml` as `addr:`, so the two agree until you edit one
+> of them; edit both.)
+>
+> The containers split. The repository's `docker-compose.yml` runs the image's
+> own `CMD`, which is `-addr :8080`, so there too the flag wins — override
+> `command:`. The compose file `install.sh --mode docker` writes replaces the
+> command with `-config /config.yaml` alone, so there `addr:` in `config.yaml`
+> *is* what counts; change it together with the `ports:` mapping and the
+> `healthcheck:` port beside it.
+>
+> **Then the capability.** The unit runs unprivileged and cannot bind a port
+> below 1024 without `AmbientCapabilities=CAP_NET_BIND_SERVICE`, and
+> `install.sh` grants that **conditionally** — only when `tls.mode` is `acme`,
+> or the port chosen *at install time* is 443 or 80 (the `caps` case in
+> `install_binary_mode`, `scripts/install.sh`). So an operator who declined the
+> installer's "Serve HTTPS on 443?" offer and later moves `--addr` to `:443`
+> gets a unit with no capability and a service that fails to bind. Add both
+> lines to the unit in the same edit, or use one of the alternatives the
+> `--- TLS ---` comment block in `deploy/polyemesis.service` lists (the
 > `net.ipv4.ip_unprivileged_port_start` sysctl, or a port forward).
 >
 > The operator this warning is really for is the one with a hand-written unit,
