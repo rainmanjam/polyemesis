@@ -237,12 +237,10 @@ func run(h *hooks) error {
 	// mistake, and the operator should hear about it in the same breath as a
 	// missing ffmpeg rather than after the engine has started.
 	h.progress("preparing tls")
-	provider, err := newTLSProvider(cfg)
+	provider, err := newTLSProvider(log, cfg)
 	if err != nil {
 		return err
 	}
-	log.Info("tls", "mode", provider.Mode(), "hostname", cfg.TLS.Hostname)
-	warnIfCAReplaced(log, provider, cfg.SelfSignedCACertPath())
 
 	// BEFORE the database, which is a move rather than an addition: this used
 	// to sit below, because the only things that needed it were the OAuth
@@ -521,7 +519,23 @@ func run(h *hooks) error {
 // newTLSProvider turns the config into a certificate provider. Resolution is
 // delegated to the config package so the listener, the banner and the API all
 // describe the same decision instead of each re-deriving it.
-func newTLSProvider(cfg config.Config) (*tlsx.Provider, error) {
+//
+// It also says what it decided, and -- the part that matters -- whether it
+// replaced the local CA. That warning lives here rather than beside the call
+// in run() so that there is no way to get a provider without it: it used to
+// be a separate line in run(), and deleting that line left every test green
+// while the one message UPGRADING.md promises an operator went silent.
+func newTLSProvider(log *slog.Logger, cfg config.Config) (*tlsx.Provider, error) {
+	provider, err := buildTLSProvider(cfg)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("tls", "mode", provider.Mode(), "hostname", cfg.TLS.Hostname)
+	warnIfCAReplaced(log, provider, cfg.SelfSignedCACertPath())
+	return provider, nil
+}
+
+func buildTLSProvider(cfg config.Config) (*tlsx.Provider, error) {
 	mode := cfg.ResolvedTLSMode()
 	opts := tlsx.Options{
 		Mode:      tlsx.Mode(mode),
