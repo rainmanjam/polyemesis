@@ -50,6 +50,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -275,8 +276,20 @@ func main() {
 	// A platform refusing at minute 30. The sink closes; the destination's
 	// FFmpeg loses its connection and exits; the supervisor is what has to
 	// notice and bring it back.
+	//
+	// THE DESTINATION MUST BE CONNECTED BEFORE ITS ENDPOINT CAN BE TAKEN AWAY.
+	// "Running" is not that: FFmpeg reports running while it is still probing
+	// its input, before it has opened its output at all. A fault injected then
+	// is a refused FIRST connect -- the wrong test, and a different one on
+	// every machine depending on how fast FFmpeg gets to its output.
+	if !waitForConnect(0, 60*time.Second) {
+		die("the destination never connected to the sink, so there is no connection " +
+			"for the endpoint to drop")
+	}
+	facts["FAULT_SINK_CONNECTS_BEFORE"] = strconv.FormatInt(sinkConnects.Load(), 10)
+
 	fmt.Println("\ninjecting: the destination's endpoint disappears")
-	_ = sink.Close()
+	fmt.Printf("  dropped the listener and %d live connection(s)\n", dropEndpoint(sink))
 
 	landed := waitFor("the supervisor to notice the endpoint had gone", 90*time.Second,
 		func(s snapshot) bool { return s.restarts > base.restarts })
@@ -407,16 +420,53 @@ func acceptForever(l net.Listener) {
 			return
 		}
 		sinkConnects.Add(1)
+		sinkMu.Lock()
+		sinkConns[c] = struct{}{}
+		sinkMu.Unlock()
 		go func() {
 			buf := make([]byte, 4096)
 			for {
 				if _, err := c.Read(buf); err != nil {
 					_ = c.Close()
+					sinkMu.Lock()
+					delete(sinkConns, c)
+					sinkMu.Unlock()
 					return
 				}
 			}
 		}()
 	}
+}
+
+// The sink's live connections, so the endpoint can be taken away from a
+// destination that is ALREADY CONNECTED to it.
+var (
+	sinkMu    sync.Mutex
+	sinkConns = map[net.Conn]struct{}{}
+)
+
+// dropEndpoint makes the endpoint go away: the listener AND every connection
+// it has accepted.
+//
+// CLOSING ONLY THE LISTENER BROKE NOTHING once FFmpeg was connected. A closed
+// listener refuses the NEXT connect; a destination already connected keeps its
+// socket, sits in the RTMP handshake this sink never answers, and reports
+// running. Against v0.10.0 the destination had not connected yet when the
+// listener closed (the sink had accepted nothing), so the "fault" was a
+// refused first connect and the suite passed; against main on 2026-09-23 it
+// had connected, the control never fired, and the suite failed with THE FAULT
+// DID NOT LAND. A platform that goes away at minute 30 drops the connection it
+// has, which is what this now does.
+func dropEndpoint(l net.Listener) int {
+	_ = l.Close()
+	sinkMu.Lock()
+	defer sinkMu.Unlock()
+	n := len(sinkConns)
+	for c := range sinkConns {
+		_ = c.Close()
+		delete(sinkConns, c)
+	}
+	return n
 }
 
 // waitForConnect polls the sink's accept counter, which only moves when the

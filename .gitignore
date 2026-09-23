@@ -19,6 +19,11 @@ internal/web/dist/*
 *.db
 *.db-wal
 *.db-shm
+# The one exception: each release's EMPTY database, as that tag's db.Open
+# wrote it, for the upgrade test in internal/db/previous_release_schema_test.go.
+# They hold schema and no rows. Narrow on purpose -- a real database holds
+# sealed stream keys and must never be committable by accident.
+!internal/db/testdata/release-v*.db
 
 # Key material, by NAME rather than by location.
 #

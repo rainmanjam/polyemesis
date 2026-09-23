@@ -461,11 +461,21 @@ still needs a real account to answer.
 ### The three that take time, and what each refuses to believe
 
 `#380` named three gaps that a 75-second suite cannot see by construction:
-duration, concurrency, and a fault arriving mid-stream. Each has a suite now,
-none is in the CI matrix, and all three are run by hand.
+duration, concurrency, and a fault arriving mid-stream. Each has a suite now.
+None is in ci.yml's matrix, which runs on every pull request. Duration (30
+minutes) and faults run every Monday in `.github/workflows/acceptance-longrun.yml`,
+and on demand from the Actions tab. Concurrency is still run by hand.
+
+The weekly run exists because hand runs stopped. The first run after the
+staging-readiness review (row 28) found both suites broken in ways only running
+them shows. The duration suite's 900-second watchdog killed every 30-minute run
+at minute fifteen. It now derives its deadline from `DURATION_MINUTES`. The
+faults suite's endpoint fault closed only the listener, and a destination
+already connected to it never noticed. The fault now drops the live connection
+as well.
 
 ```bash
-DURATION_MINUTES=10 ./scripts/acceptance-duration.sh   # memory, disk, churn over a real window
+DURATION_MINUTES=30 ./scripts/acceptance-duration.sh   # memory, disk, churn over a real window
 ./scripts/acceptance-concurrency.sh 6                  # what a destination costs, and whether N cost N times it
 ./scripts/acceptance-faults.sh                         # a fault arriving into a healthy broadcast
 ```

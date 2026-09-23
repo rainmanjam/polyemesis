@@ -87,3 +87,11 @@ ui/src/lib/contract/** text eol=lf
 # README, and the point of pinning is that it inherits the fix. Nothing renders
 # markdown differently for a \r, so there is no cost on the other side.
 *.md text eol=lf
+
+# The release databases in internal/db/testdata are SQLite files, and the
+# `**/testdata/** text eol=lf` rule above claims them as text. Git's own binary
+# detection usually wins, but "usually" is the word every entry above was
+# written to remove: a CRLF normalised out of a page is a corrupt database and
+# an upgrade test that fails as "Open refused a v0.x database". Last match
+# wins, so this line overrides the directory rule for these files.
+internal/db/testdata/*.db binary

@@ -593,6 +593,15 @@ poly_teardown_trap() {
   # The watchdog library is sourced by the suites, not by this one, so its
   # absence is a valid configuration rather than an error.
   if declare -f poly_watchdog_disarm >/dev/null 2>&1; then
+    # A run the watchdog killed is a failure whatever `$?` says. After the
+    # TERM, `$?` is the status of the last command that finished, and a
+    # thirty-minute acceptance-duration run killed at minute fifteen ended
+    # "POLY-VERDICT: PASS" on it. 124 is timeout(1)'s status for the same
+    # event. Asked before disarming, which removes the mark.
+    if [ "$rc" -eq 0 ] 2>/dev/null && declare -f poly_watchdog_fired >/dev/null 2>&1 &&
+      poly_watchdog_fired; then
+      rc=124
+    fi
     poly_watchdog_disarm
   fi
 

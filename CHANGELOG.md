@@ -503,6 +503,12 @@ its first tagged release.
   immediate reconnect after a blip: a new publisher is refused for three
   seconds (`srtserver.StaleAfter`) after the old one's last packet.
 
+- **The "newer schema" refusal names the right backup.** An older binary
+  refusing a database a newer release wrote told the operator to restore "a
+  backup taken before the rollback". That backup is the newer database again,
+  and it is refused the same way. The message now says to restore the backup
+  taken before the upgrade, which is the one `update.sh` makes.
+
 ### Security
 
 - **The self-signed local CA can now vouch only for this server.** It carried

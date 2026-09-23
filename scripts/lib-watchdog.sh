@@ -171,6 +171,12 @@ poly_watchdog_arm() {
       elapsed=$(( $(date +%s) - start ))
       if [ "$elapsed" -ge "$secs" ]; then
         poly__watchdog_report "$elapsed"
+        # A MARK THAT THE KILL WAS OURS, written before the TERM. The suite's
+        # EXIT trap is handed `$?`, and after a TERM that is whatever last
+        # finished -- usually 0 -- so poly_teardown_trap printed
+        # "POLY-VERDICT: PASS" for a run this had just killed. It reads this
+        # (poly_watchdog_fired) and fails the run instead.
+        : > "$POLY_STEP_FILE.fired"
         # TERM, not KILL: the suite's EXIT trap is what stops the engine and
         # reaps its FFmpeg children, and skipping it would leave the runner
         # holding ports that the next suite in the matrix needs.
@@ -180,6 +186,30 @@ poly_watchdog_arm() {
     done
   ) &
   poly__watchdog_pid=$!
+}
+
+# poly_watchdog_arm_for <run_secs> -- arm a deadline for a suite that is LONG
+# ON PURPOSE: its run length plus POLY_WATCHDOG_RUN_HEADROOM, or the ordinary
+# deadline if that is longer.
+#
+# acceptance-duration.sh broadcasts for DURATION_MINUTES and used to arm the
+# plain default. 900s is fifteen minutes, so every run of thirty -- the length
+# its own header says the slow faults need -- was killed halfway with a
+# WATCHDOG report, having measured nothing (measured 2026-09-23: killed at
+# 901s, exit 143, and -- until poly_watchdog_fired -- a closing line of
+# "POLY-VERDICT: PASS"). Asking the
+# caller to raise POLY_WATCHDOG_SECS by hand is the rung this replaces: the
+# deadline is derived from the number that makes the run long, so the two
+# cannot disagree.
+#
+# The headroom covers what surrounds the measured window: `go run` compiling
+# the driver, the server coming up, the report and the teardown trap. It is
+# still a deadline -- a run that wedges goes past it and is reported as before.
+POLY_WATCHDOG_RUN_HEADROOM="${POLY_WATCHDOG_RUN_HEADROOM:-300}"
+poly_watchdog_arm_for() {
+  local want=$(( $1 + POLY_WATCHDOG_RUN_HEADROOM ))
+  [ "$want" -ge "$POLY_WATCHDOG_SECS" ] || want="$POLY_WATCHDOG_SECS"
+  poly_watchdog_arm "$want"
 }
 
 # poly_watchdog_disarm -- stop the deadline. Call from the suite's EXIT trap.
@@ -201,6 +231,12 @@ poly_watchdog_disarm() {
   kill "$poly__watchdog_pid" 2>/dev/null
   wait "$poly__watchdog_pid" 2>/dev/null
   poly__watchdog_pid=""
-  [ -n "$POLY_STEP_FILE" ] && rm -f "$POLY_STEP_FILE"
+  [ -n "$POLY_STEP_FILE" ] && rm -f "$POLY_STEP_FILE" "$POLY_STEP_FILE.fired"
   return 0
+}
+
+# poly_watchdog_fired -- true if this suite's deadline fired. Ask BEFORE
+# poly_watchdog_disarm, which removes the mark.
+poly_watchdog_fired() {
+  [ -n "$POLY_STEP_FILE" ] && [ -e "$POLY_STEP_FILE.fired" ]
 }
