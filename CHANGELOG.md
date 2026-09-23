@@ -530,6 +530,13 @@ its first tagged release.
   govulncheck, npm-audit, semgrep) was red on `main` could still be tagged and
   published. The gate now requires a successful push-to-`main` run of both
   workflows and names each one that is missing.
+- **The workflow linter checks shell again.** The required `workflow lint`
+  job ran `actionlint -shellcheck=`, which turned shellcheck off for every
+  `run:` block. Nine real findings are now fixed, among them `sha256sum *`
+  with no `--` in the release checksums step, and a `sudo wc -l <` whose
+  redirect was never read as root. The seven PowerShell steps that shellcheck
+  was parsing as bash now declare `shell: pwsh`. With both done the flag is
+  removed, and a test keeps it off.
 
 ### Added
 

@@ -822,7 +822,10 @@ jobs:
       - name: Checksums
         run: |
           cd dist
-          sha256sum * > SHA256SUMS
+          # `--` so a file whose name starts with a dash is hashed, not parsed
+          # as an option. Names are written as given, which is the form
+          # install.sh and internal/upgrade look up.
+          sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
 
       # SHA256SUMS PROVES A DOWNLOAD IS INTACT, NOT THAT WE BUILT IT. It is

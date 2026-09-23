@@ -142,7 +142,7 @@ jobs:
             exit 0
           fi
           CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
-          echo "changed files:"; echo "$CHANGED" | sed 's/^/  /'
+          echo "changed files:"; printf '%s\n' "$CHANGED" | sed 's/^/  /'
           # Every line documentation? Then no suite can be affected by it.
           if [ -n "$CHANGED" ] && ! grep -qvE '^(docs/|[^/]*\.md$)' <<<"$CHANGED"; then
             echo "code=false" >> "$GITHUB_OUTPUT"
@@ -250,6 +250,10 @@ jobs:
 
           # -run matching NOTHING exits 0, so counting what actually ran is the
           # difference between a check and a green tick.
+          # Unquoted on purpose: pkgs is a space-separated list of ./dir paths
+          # from the grep above, none containing a space, and go test wants them
+          # as separate arguments.
+          # shellcheck disable=SC2086
           go test ${pkgs} -run 'Doc|Drift|Documented|Matches|Agrees|Restate' -v 2>&1 | tee /tmp/drift.log
           ran="$(grep -c '^=== RUN' /tmp/drift.log || true)"
           echo "doc-drift tests executed: ${ran}"
@@ -879,6 +883,9 @@ jobs:
         #
         # BtbN publishes ffmpeg-n8.1-latest-win64-gpl-8.1.zip from the SAME
         # release the Linux arm downloads: one source, one version, one retry.
+        # Declared, not left to the Windows default: actionlint hands an
+        # undeclared shell to shellcheck as bash (ci.yml `workflow lint`).
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip'
@@ -1270,6 +1277,9 @@ jobs:
       # here instead of on an operator's host.
       - name: Parse deploy/windows/uninstall.ps1 (#509)
         if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        # Declared, not left to the Windows default: actionlint hands an
+        # undeclared shell to shellcheck as bash (ci.yml `workflow lint`).
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $path = 'deploy/windows/uninstall.ps1'
@@ -1288,6 +1298,9 @@ jobs:
       # than the regex itself.
       - name: "uninstall.ps1: Get-PublishingFfmpeg detection (#509)"
         if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        # Declared, not left to the Windows default: actionlint hands an
+        # undeclared shell to shellcheck as bash (ci.yml `workflow lint`).
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $path = 'deploy/windows/uninstall.ps1'
@@ -1375,6 +1388,9 @@ jobs:
       # it.
       - name: "uninstall.ps1: Force/live-check/confirmation gate (#509)"
         if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        # Declared, not left to the Windows default: actionlint hands an
+        # undeclared shell to shellcheck as bash (ci.yml `workflow lint`).
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $path = 'deploy/windows/uninstall.ps1'
@@ -1506,6 +1522,9 @@ jobs:
       # and never re-read.
       - name: "uninstall.ps1: -RemoveData path guard (#552)"
         if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        # Declared, not left to the Windows default: actionlint hands an
+        # undeclared shell to shellcheck as bash (ci.yml `workflow lint`).
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $path = 'deploy/windows/uninstall.ps1'
@@ -1582,6 +1601,9 @@ jobs:
       # as LocalSystem got none, and a syntax error in it would have shipped.
       - name: Parse deploy/windows/install.ps1
         if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        # Declared, not left to the Windows default: actionlint hands an
+        # undeclared shell to shellcheck as bash (ci.yml `workflow lint`).
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $path = 'deploy/windows/install.ps1'
@@ -1600,6 +1622,9 @@ jobs:
       # policy: refuse on mismatch, refuse on absence unless told otherwise.
       - name: "install.ps1: checksum policy (#583)"
         if: needs.changes.outputs.code == 'true' && matrix.os == 'windows-latest'
+        # Declared, not left to the Windows default: actionlint hands an
+        # undeclared shell to shellcheck as bash (ci.yml `workflow lint`).
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $path = 'deploy/windows/install.ps1'
@@ -1842,19 +1867,27 @@ jobs:
             echo "::error::expected actionlint $ACTIONLINT_VERSION, got $installed"
             exit 1
           fi
-      # -shellcheck= and -pyflakes= disable those two integrations, and the
-      # reason belongs here rather than hidden in a flag. With shellcheck on,
-      # this job reports 38 findings on its first run, nearly all of them
-      # shellcheck failing to parse a run block that contains an Actions
-      # expression -- it reads the expansion as broken shell. A guard that fires
-      # 38 times on the day it is installed is one somebody turns off, and it
-      # would bury the class of finding this job exists for.
+      # SHELLCHECK IS ON. It was off (-shellcheck=) from the day this job was
+      # added, because its first run reported 38 findings, nearly all of them
+      # shellcheck failing to parse a run block -- and a guard that fires 38
+      # times on day one is one somebody turns off. By staging-readiness row 38
+      # what remained was nine real info/style findings (an unquoted expansion,
+      # `sha256sum *` with no `--`, a `sudo` that did not cover its redirect)
+      # and seven PowerShell steps shellcheck was parsing as bash because they
+      # relied on the Windows default shell. Those now declare `shell: pwsh`,
+      # the nine are fixed or carry a reasoned `# shellcheck disable=`, and the
+      # flag is gone. internal/testenv/actionlint_shellcheck_test.go keeps it
+      # gone and keeps every PowerShell step declaring its shell.
       #
-      # What stays on is the part that matters: workflow schema, job and step
-      # keys, `needs` references, matrix shapes, action input names, and the
-      # expression parser -- which is exactly what rejected sonar.yml and left a
-      # run with no jobs and no message.
-      - run: actionlint -color -shellcheck= -pyflakes=
+      # shellcheck is the runner image's own (ubuntu-latest ships it), not
+      # pinned here; a newer one can add findings, which is this job doing its
+      # work. -pyflakes= stays: no step here declares `shell: python`.
+      #
+      # The rest is what this job was for from the start: workflow schema, job
+      # and step keys, `needs` references, matrix shapes, action input names,
+      # and the expression parser -- which is exactly what rejected sonar.yml
+      # and left a run with no jobs and no message.
+      - run: actionlint -color -pyflakes=
 
   cross:
     name: cross-compile all release targets
@@ -2476,6 +2509,9 @@ jobs:
         run: |
           set +e
           echo "=== processes ==="
+          # ps, not pgrep: this wants etime, stat and the parent pid beside the
+          # command line, which pgrep -a does not print.
+          # shellcheck disable=SC2009
           ps -eo pid,ppid,etime,stat,args | grep -E "polyemesis|ffmpeg|ffprobe|mosquitto" | grep -v grep
 
           echo
