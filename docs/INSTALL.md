@@ -1051,9 +1051,12 @@ the path.
 **Check that backup before you rely on it.** The binary will answer for it:
 `-verify-backup <dir>` opens the copy with the same SQLite driver the server
 runs on, runs `PRAGMA integrity_check`, reads the schema, and exits. It writes
-nothing and runs no migration — migrating the backup would move the copy
-forward to the schema you are keeping a way back *from* — so it is safe against
-a backup you intend to keep.
+nothing to the backup and runs no migration — migrating the backup would move
+the copy forward to the schema you are keeping a way back *from* — so it is safe
+against a backup you intend to keep, and it works on a read-only directory or
+mount. It checks a private copy of `polyemesis.db` and its `-wal`, made in the
+system temporary directory (`$TMPDIR`, else `/tmp`) and deleted on exit, so that
+directory needs free space for one copy of the database.
 
 ```bash
 /usr/local/bin/polyemesis -verify-backup /var/backups/polyemesis-2026-07-26

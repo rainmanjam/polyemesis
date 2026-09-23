@@ -8,6 +8,15 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- `-verify-backup` no longer writes to the backup it checks. It opened
+  `polyemesis.db` read-write, so SQLite folded the `-wal` into the main file and
+  deleted both sidecars, although INSTALL.md says it writes nothing; and on a
+  read-only directory or mount — how the Docker `update.sh` hands it the backup
+  — it could not create the `-shm` and refused a good backup. It now verifies a
+  private copy in the temporary directory and leaves the backup byte-identical.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added
