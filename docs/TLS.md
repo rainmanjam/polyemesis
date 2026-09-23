@@ -229,8 +229,13 @@ that matters on a shared LAN.
 If you reach the box by LAN address rather than by name, put the address in
 `hostname` — an IP literal is accepted and becomes a SAN. A certificate naming
 only `polyemesis.lan` will still warn when you browse to `https://192.168.1.10`,
-because the name you typed is not in it. Changing `hostname` reissues the leaf
-on the next start; the CA, and everything that already trusts it, is untouched.
+because the name you typed is not in it. Changing `hostname` **replaces the
+CA** on the next start, and every client has to trust the new one: the CA is
+limited to the names it serves (see
+[What trusting the CA grants](#what-trusting-the-ca-grants)), so one issued for
+the old name cannot sign for the new. Pick the name before you install the CA
+anywhere. In a container, set it explicitly: left empty, it falls back to the
+system hostname, which there is the container ID and changes on every recreate.
 
 ### 3. Behind nginx / Caddy / Traefik
 
@@ -289,10 +294,12 @@ The generated material lives in `<dataDir>/tls/` (directory `0700`, private keys
 ```
 
 The CA is valid for ten years; the leaf for one, and it is regenerated
-automatically within 30 days of expiry or if you change `tls.hostname`. That
-split is on purpose: installing a CA into a browser, a phone and a keychain is
-the most tedious step of a homelab setup, and making you redo it annually would
-be a reason to give up on HTTPS entirely.
+automatically within 30 days of expiry. That split is on purpose: installing a
+CA into a browser, a phone and a keychain is the most tedious step of a homelab
+setup, and making you redo it annually would be a reason to give up on HTTPS
+entirely. The CA itself is replaced only when it nears expiry or when
+`tls.hostname` changes; either way the start logs a `WARN` with the new CA's
+path and fingerprint, and you remove the old CA and install the new one.
 
 Copy the CA to the machine you browse from and **check the fingerprint** against
 the `ca sha-256` line polyemesis prints at startup before you trust it:
@@ -353,6 +360,32 @@ Import-Certificate -FilePath .\polyemesis-ca.crt `
 enable it as a trusted root (iOS: *Settings → General → About → Certificate
 Trust Settings*). If that is more than you want to do, use mode `acme`, or reach
 the UI over the [SSH tunnel](#binding-and-the-ssh-tunnel).
+
+### What trusting the CA grants
+
+Installing a CA as a trusted root tells that machine to believe any
+certificate the CA signs. The CA's private key is `ca.key` on the server, so
+anyone who can read it — a shell on the box (expert mode is one; see
+[SECURITY.md](../SECURITY.md)), a copy of the data directory, a backup — can
+sign certificates that machine will accept.
+
+So the CA polyemesis generates carries **critical name constraints**: it can
+sign only for `tls.hostname`, `localhost`, `127.0.0.1` and `::1` (and the
+address itself, when `hostname` is an IP). A certificate signed with a stolen
+`ca.key` for your bank, your mail or any other site is rejected by every
+client that enforces name constraints, which current Chrome, Firefox, Safari,
+Windows and Go all do. A DNS constraint also covers names *below* it, so a
+CA for `polyemesis.lan` can sign for `x.polyemesis.lan`; that is the standard's
+semantics, not a choice. The name appears in the CA's own name —
+`polyemesis local CA (polyemesis.lan)` — so you can tell it apart in a trust
+store.
+
+Releases before this constraint generated a CA with none. An upgraded install
+replaces that CA on its first start; see
+[UPGRADING.md](UPGRADING.md#upgrading-past-0100-unreleased-on-main-the-self-signed-ca-is-replaced-once)
+for what to remove and reinstall. If you would rather no CA of yours were
+trusted anywhere, use mode `acme` or reach the UI over the
+[SSH tunnel](#binding-and-the-ssh-tunnel).
 
 ## Switching to Let's Encrypt
 

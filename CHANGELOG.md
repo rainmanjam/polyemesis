@@ -470,6 +470,15 @@ its first tagged release.
 
 ### Security
 
+- **The self-signed local CA can now vouch only for this server.** It carried
+  no name constraints, so anyone who read `<dataDir>/tls/ca.key` -- a shell
+  through expert mode, a backup, a stolen disk -- could mint a certificate for
+  any site that every client trusting the CA would accept. The CA is now
+  limited, by critical name constraints, to `tls.hostname`, `localhost` and
+  the loopback addresses. **An existing CA is replaced on the first start**,
+  and so is the CA whenever `tls.hostname` changes; the start logs a `WARN`
+  naming the new CA's file and fingerprint. Remove the old CA from every trust
+  store and install the new one: see `docs/UPGRADING.md`.
 - **Upgrading from 0.6.x no longer leaves plaintext stream keys in
   `polyemesis.db`.** `secure_delete` only zeroes what is freed while it is on,
   and every release before 0.7.0 ran without it: a real 0.6.0 install with five

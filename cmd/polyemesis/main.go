@@ -242,6 +242,7 @@ func run(h *hooks) error {
 		return err
 	}
 	log.Info("tls", "mode", provider.Mode(), "hostname", cfg.TLS.Hostname)
+	warnIfCAReplaced(log, provider, cfg.SelfSignedCACertPath())
 
 	// BEFORE the database, which is a move rather than an addition: this used
 	// to sit below, because the only things that needed it were the OAuth
@@ -540,6 +541,25 @@ func newTLSProvider(cfg config.Config) (*tlsx.Provider, error) {
 		opts.Hostname = host
 	}
 	return tlsx.New(opts)
+}
+
+// warnIfCAReplaced tells the operator that the local CA their clients trust
+// was just replaced, and what to do about it.
+//
+// A WARN rather than an Info because what follows is every browser, phone and
+// Prometheus that trusted the old CA refusing this box until someone acts,
+// and the log is the one place the operator is certain to look when that
+// starts. It names both halves of the fix: trust the new CA, and REMOVE the
+// old one -- an unconstrained CA left in a trust store keeps vouching for
+// anything its key signs, and that key may be in a backup somewhere.
+func warnIfCAReplaced(log *slog.Logger, provider *tlsx.Provider, caPath string) {
+	reason := provider.CAReplaced()
+	if reason == "" {
+		return
+	}
+	log.Warn("tls: the local CA was replaced; every client that trusted the old one will now see a certificate warning. "+
+		"Remove the old \"polyemesis local CA\" from each trust store and install the new one (see TLS.md, Trusting the self-signed CA)",
+		"reason", reason, "ca", caPath, "caSHA256", provider.CAFingerprint())
 }
 
 // startHTTPHelper brings up the plain-HTTP companion on :80 — the ACME HTTP-01

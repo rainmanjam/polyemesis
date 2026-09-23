@@ -93,7 +93,7 @@ func TestLeafIsRenewedNearExpiryWhileTheInstalledCASurvives(t *testing.T) {
 	}
 }
 
-func TestCAIsReplacedOnlyWhenItIsItselfNearExpiry(t *testing.T) {
+func TestCAIsReplacedWhenItIsItselfNearExpiry(t *testing.T) {
 	dir := t.TempDir()
 	first := newSelfSigned(t, dir, "box.local", 0)
 	firstCA := first.CAFingerprint()
@@ -174,7 +174,7 @@ func TestLeafAlwaysCarriesLocalhostAndLoopbackSANs(t *testing.T) {
 	}
 }
 
-func TestLeafIsReissuedWhenTheOperatorChangesTheHostname(t *testing.T) {
+func TestTheHostnameChangeReissuesTheLeafUnderANewCA(t *testing.T) {
 	dir := t.TempDir()
 
 	first := newSelfSigned(t, dir, "old.local", 0)
@@ -187,8 +187,15 @@ func TestLeafIsReissuedWhenTheOperatorChangesTheHostname(t *testing.T) {
 	if len(info.DNSNames) == 0 || info.DNSNames[0] != "new.local" {
 		t.Errorf("DNSNames = %v, want the new hostname first", info.DNSNames)
 	}
-	if second.CAFingerprint() != firstCA {
-		t.Error("changing the hostname replaced the CA; only the leaf needs reissuing")
+	// The CA is name-constrained to the names it serves (see
+	// caReplacementReason), so one limited to old.local cannot vouch for
+	// new.local: a hostname change is a new CA, and the operator is told to
+	// re-trust. This asserted the opposite before the CA was constrained.
+	if second.CAFingerprint() == firstCA {
+		t.Error("the CA limited to the old hostname was kept; it cannot sign for the new one")
+	}
+	if r := second.CAReplaced(); !strings.Contains(r, "tls.hostname") {
+		t.Errorf("CAReplaced() = %q, want it to name the hostname change", r)
 	}
 }
 
