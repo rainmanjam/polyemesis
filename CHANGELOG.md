@@ -93,6 +93,15 @@ its first tagged release.
   blank. `deploy/nginx.conf.example`, `INSTALL.md` and `TLS.md` now say to give
   it a hostname of its own and proxy `/`.
 
+- **`API.md` described `stop-all` as unscoped and never mentioned its
+  confirmation body.** It is scoped by `?source=` when one is given, and it
+  refuses without `{"confirm": true}` — so a script written from the page got a
+  `400` on every call. Both are documented now, with an example. The page also
+  says the refused-route table has fifteen rows of which thirteen are `GET`s
+  (a test computes both from `readScopeDeniedPatterns`), that `/hls/*` is
+  mounted at the root, and what `POST /routing/compile` takes: the profile,
+  wrapped in `{"profile": …}`.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

@@ -41,7 +41,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the thirteen denied below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the thirteen `GET`s among the fifteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 
 The middleware also lets `HEAD` through, and no route in this API is registered
@@ -148,8 +148,10 @@ appears rather than what was said.
 `GET /encoders` stays available, but `?redetect=` needs `admin`: it runs a test
 encode per candidate encoder and rewrites the install's capability cache.
 
-`/hls/*`, the dashboard's preview playlist, is now **session-only** — no bearer
-of either scope. Requesting a playlist starts the on-demand preview encoder and
+`/hls/*`, the dashboard's preview playlist, is **mounted at the root, not under
+`/api/v1`**: `/hls/{source}/index.m3u8` for a given programme, and the bare
+`/hls/index.m3u8` as an alias for the default one. It is now **session-only** — no
+bearer of either scope. Requesting a playlist starts the on-demand preview encoder and
 polling keeps it running, and hls.js in the console authenticates with the
 session cookie anyway.
 
@@ -557,10 +559,24 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 List rows arrive wrapped as `{"destination": ..., "routing": ...}` so the UI
 gets the compiled routing without a second round trip.
 
-`start-all` and `stop-all` act on **every** destination — there is no id list
-and no selection. Each row is driven through the same code as
+`start-all` and `stop-all` take no id list. **With `?source=<id>` they act on
+that programme's destinations only; without it, on every destination on the
+install** — on a multi-source install too, so name the programme unless you
+mean all of them. A `source` that is not a number or not a source on this
+install is `400 source_required`, and an install with no source at all answers
+`503 no_source`. Each row is driven through the same code as
 `/destinations/{id}/start` and `/stop`, so the bulk control is exactly N presses
 of the per-destination button and can never be more destructive than it.
+
+**`stop-all` needs a body of `{"confirm": true}`**, and answers `400` without
+it — no body, an empty object, or `"confirm": false`. It ends live broadcasts
+(below), and a dialog in the console is a confirmation a script or a replayed
+request never sees. `start-all` takes no body.
+
+```sh
+curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"confirm": true}' "$POLYEMESIS_URL/api/v1/destinations/stop-all?source=2"
+```
 
 The answer is a list, never a boolean:
 
@@ -680,7 +696,20 @@ against `platforms.go` too. The console asks; it does not derive.
 
 `POST /routing/compile` returns the filter graph a profile would produce,
 without saving anything. Useful for understanding what a selection actually
-does.
+does. The body wraps the profile — the same object a destination's `routing`
+holds — under `"profile"`, and the answer echoes it back with defaults applied
+beside the compiled result:
+
+```json
+{"profile": {"mode": "simple", "tracks": [{"track": 0, "enabled": true, "gain": 1.0}]}}
+```
+
+```json
+{"routing": {...}, "profile": {...}}
+```
+
+A profile that does not compile is `400` with `error` and the `profile` as
+understood, so a caller can see which field it was read as.
 
 It and `POST /routing/presets/{preset}` are programme-scoped and need
 `?source=<id>` on a multi-source install — see [Conventions](#conventions).

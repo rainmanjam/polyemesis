@@ -49,6 +49,8 @@ var canonicalDriftTests = []string{
 	"TestDocManualUpgradeCarriesUpdateShGuards",
 	"TestDocEveryReleaseHasAnUpgradeNote",
 	"TestDocProxyExamplesServeTheConsoleFromARoot",
+	"TestAPIDocRefusedRouteTableIsReadScopeDeniedPatterns",
+	"TestAPIDocStopAllStatesItsConfirmBodyAndScope",
 }
 
 func TestTheDocsOnlyPathStillRunsTheDriftGuards(t *testing.T) {
