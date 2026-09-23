@@ -32,44 +32,16 @@ step(){ printf "\n\033[1m%s\033[0m\n" "$1"; }
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
-# Standard library only -- no PyYAML. The shape is pinned by extract_step
-# itself: if the step is renamed or stops being a `run: |` block it prints
-# nothing and every case below fails loudly, which is the correct outcome for a
-# test whose subject has moved.
-extract_step() { # extract_step <step name> -> the step's run: body, dedented
-  python3 - "$WORKFLOW" "$1" <<'PY'
-import sys
-path, want = sys.argv[1], sys.argv[2]
-lines = open(path, encoding="utf-8").read().splitlines()
-i = 0
-while i < len(lines):
-    s = lines[i].strip()
-    if s in ("- name: " + want, '- name: "' + want + '"'):
-        break
-    i += 1
-else:
-    sys.exit("step not found: " + want)
-while i < len(lines) and lines[i].strip() != "run: |":
-    i += 1
-    if i < len(lines) and lines[i].lstrip().startswith("- name:"):
-        sys.exit("no `run: |` before the next step in: " + want)
-i += 1
-indent = len(lines[i]) - len(lines[i].lstrip())
-out = []
-while i < len(lines):
-    ln = lines[i]
-    if ln.strip() and (len(ln) - len(ln.lstrip())) < indent:
-        break
-    out.append(ln[indent:] if len(ln) >= indent else ln)
-    i += 1
-print("\n".join(out).rstrip())
-PY
-}
+# The extractor lives in lib-release-steps.sh because scripts/cut-release.sh
+# runs these same step bodies against the real repository before a tag exists.
+# shellcheck source=scripts/lib-release-steps.sh
+. "$SCRIPTS/lib-release-steps.sh"
+extract_step() { extract_workflow_step "$WORKFLOW" "$1"; }
 
 # ------------------------------------------------------------ changelog-gate
 
 GATE="$work/changelog-gate.sh"
-extract_step "Require the pushed tag to match CHANGELOG.md's top dated heading" > "$GATE"
+extract_step "$STEP_CHANGELOG_GATE" > "$GATE"
 if [ ! -s "$GATE" ]; then
   bad "could not extract changelog-gate's script from release.yml"
   printf "\n\033[1mSummary\033[0m\n  %d passed, %d failed\n" "$pass" "$fail"
@@ -216,7 +188,7 @@ step "7b. ci-gate requires security.yml as well as ci.yml, driven for real"
 # tagged and published. The step is extracted and run against a stub `gh` that
 # answers per workflow file, so what is tested is the gate, not a copy of it.
 CIGATE="$work/ci-gate.sh"
-extract_step "Require successful ci.yml and security.yml runs for this commit before publishing" > "$CIGATE"
+extract_step "$STEP_CI_GATE" > "$CIGATE"
 if [ ! -s "$CIGATE" ]; then
   bad "could not extract ci-gate's step from release.yml"
 elif ! command -v jq >/dev/null 2>&1; then

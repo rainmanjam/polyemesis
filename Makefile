@@ -365,6 +365,17 @@ release: ui ## Cross-compile release binaries into dist/
 	@echo
 	@ls -lh dist/
 
+# release.yml's gates, run here before the tag exists -- see
+# scripts/cut-release.sh. VERSION must be given on the command line: its
+# default above is `git describe`, which names the PREVIOUS tag, and a check of
+# that would pass or fail about the wrong release.
+.PHONY: tag
+tag: ## Check a release against release.yml's gates: make tag VERSION=vX.Y.Z [TAG=1 to tag and push]
+	@if [ "$(origin VERSION)" != "command line" ]; then \
+	  echo "make tag needs VERSION=vX.Y.Z on the command line"; exit 2; \
+	fi
+	@./scripts/cut-release.sh "$(VERSION)" $(if $(filter 1,$(TAG)),--tag,)
+
 # ------------------------------------------------------------------ docker
 
 .PHONY: docker

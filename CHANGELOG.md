@@ -531,6 +531,20 @@ its first tagged release.
   published. The gate now requires a successful push-to-`main` run of both
   workflows and names each one that is missing.
 
+### Added
+
+- **`scripts/cut-release.sh` (and `make tag VERSION=vX.Y.Z`) runs the release
+  gates before the tag exists.** Every gate in `release.yml` ran only after the
+  tag was pushed, so a wrong date meant deleting the tag, re-dating through a PR,
+  waiting 20+ minutes for CI on `main` and tagging again. The date must be today
+  in UTC, which is tomorrow after 17:00 in California. The script reads
+  `changelog-gate`, the empty-`[Unreleased]` check and `ci-gate` out of
+  `release.yml` and runs them against `HEAD`. It also refuses a commit with no
+  green release rehearsal, a dirty tree, a `HEAD` that is not `origin/main`, and
+  the last 15 minutes before midnight UTC. With `--tag` it cuts the annotated
+  tag. RELEASE-RUNBOOK.md no longer says that re-pushing a tag fixes a wrong
+  date. It cannot, because the gate reads the tagged commit.
+
 ## [0.10.0] — 2026-09-23
 
 ### Added

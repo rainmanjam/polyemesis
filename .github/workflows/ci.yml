@@ -615,6 +615,14 @@ jobs:
         run: ./scripts/test-release-gates.sh
         timeout-minutes: 5
 
+      # scripts/cut-release.sh runs those same gates before a tag exists and
+      # refuses; this drives each refusal against a throwaway repository with a
+      # bare local origin and a stub `gh`. A pre-tag check that never fires
+      # looks exactly like one that works. Pure shell, git and jq; seconds.
+      - if: needs.changes.outputs.code == 'true'
+        run: ./scripts/test-cut-release.sh
+        timeout-minutes: 5
+
       # The termination guard, and its tests, alongside the SBOM pair above for
       # the same reason and one of its own. #210: after #179/#180 the class had
       # ONE gate and its jurisdiction was .github/workflows -- a fixture carrying

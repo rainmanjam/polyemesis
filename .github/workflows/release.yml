@@ -336,7 +336,7 @@ jobs:
           # edit, because the previous message named the wrong entry entirely.
           heading_date="$(echo "${heading}" | sed -nE 's/^.*— ([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]*$/\1/p')"
           if [ -z "${heading_date}" ]; then
-            echo "::error::CHANGELOG.md's ${heading_version} heading is not dated: '${heading}'. A tag says this release shipped, so date it before tagging -- change it to '## [${heading_version}] — $(date -u +%Y-%m-%d)' and push the tag again. Refusing to publish."
+            echo "::error::CHANGELOG.md's ${heading_version} heading is not dated: '${heading}'. A tag says this release shipped, so date it before tagging -- change it to '## [${heading_version}] — $(date -u +%Y-%m-%d)' on main, then delete ${REF_NAME} and re-cut it on that new commit (scripts/cut-release.sh). Re-pushing the tag to this commit changes nothing: the gate reads CHANGELOG.md from the tagged commit. Refusing to publish."
             exit 1
           fi
 
@@ -350,12 +350,14 @@ jobs:
           # contradict. GHSA advisories point at this document.
           #
           # UTC, and exactly today. A midnight-boundary push fails here and the
-          # recovery is the same one the undated branch prints: re-date, re-tag.
+          # recovery is the same one the undated branch prints: re-date on main,
+          # re-tag THAT commit. scripts/cut-release.sh runs this step before the
+          # tag exists and refuses within 15 minutes of midnight UTC.
           # That is a rare annoyance; a silently wrong ship date is a permanent
           # false claim.
           today="$(date -u +%Y-%m-%d)"
           if [ "${heading_date}" != "${today}" ]; then
-            echo "::error::CHANGELOG.md's ${heading_version} heading is dated ${heading_date}, but this release is being published on ${today} (UTC). Change it to '## [${heading_version}] — ${today}', then delete and re-push ${REF_NAME}. Refusing to publish a release whose notes claim a ship date the artefacts contradict."
+            echo "::error::CHANGELOG.md's ${heading_version} heading is dated ${heading_date}, but this release is being published on ${today} (UTC). Change it to '## [${heading_version}] — ${today}' on main, let CI go green on that commit, then delete ${REF_NAME} and re-cut it on the new commit (scripts/cut-release.sh). Re-pushing the tag to this commit changes nothing: the gate reads CHANGELOG.md from the tagged commit. Refusing to publish a release whose notes claim a ship date the artefacts contradict."
             exit 1
           fi
 
