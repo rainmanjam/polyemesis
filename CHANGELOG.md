@@ -536,7 +536,9 @@ its first tagged release.
   with no `--` in the release checksums step, and a `sudo wc -l <` whose
   redirect was never read as root. The seven PowerShell steps that shellcheck
   was parsing as bash now declare `shell: pwsh`. With both done the flag is
-  removed, and a test keeps it off.
+  removed, and a test keeps it off. shellcheck itself is pinned (0.11.0, by
+  checksum) rather than taken from the runner image, whose 0.9.0 reports
+  findings 0.11.0 does not, so the verdict no longer depends on the image.
 
 ### Added
 

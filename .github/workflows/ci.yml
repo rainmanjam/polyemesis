@@ -1879,15 +1879,51 @@ jobs:
       # flag is gone. internal/testenv/actionlint_shellcheck_test.go keeps it
       # gone and keeps every PowerShell step declaring its shell.
       #
-      # shellcheck is the runner image's own (ubuntu-latest ships it), not
-      # pinned here; a newer one can add findings, which is this job doing its
-      # work. -pyflakes= stays: no step here declares `shell: python`.
+      # SHELLCHECK IS PINNED, like actionlint above, and handed over by path.
+      # The first version of this change used the runner image's shellcheck on
+      # the theory that an older one reports a subset of a newer one's findings.
+      # It does not: ubuntu-latest (24.04) ships 0.9.0, and 0.9.0 and 0.10.0 both
+      # report SC2015 on sonar.yml's `A && B || true` lines, which 0.11.0 -- the
+      # version on a developer's PATH -- does not. The same tree went green
+      # locally and would have gone red here. Finding sets move in both
+      # directions between releases, so the only verdict worth having is one
+      # from a named version: this job's result is now a property of this
+      # repository, not of whichever image GitHub rolled out that week. Bump
+      # SHELLCHECK_VERSION and its sha256 together, and run actionlint locally
+      # with -shellcheck= pointed at the same release before pushing.
+      # internal/testenv/actionlint_shellcheck_test.go keeps the pin, the
+      # checksum and the version assertion in place.
+      #
+      # Installed to $RUNNER_TEMP, not /usr/local/bin, so the image's own
+      # shellcheck is never shadowed for any later step and the path passed to
+      # actionlint is unambiguous. -pyflakes= stays: no step here declares
+      # `shell: python`.
+      - name: install shellcheck (pinned)
+        env:
+          SHELLCHECK_VERSION: 0.11.0
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -sSfL --proto '=https' --tlsv1.2 \
+            --retry 3 --retry-all-errors --retry-delay 5 --max-time 120 \
+            -o shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf shellcheck.tar.xz --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          rm -f shellcheck.tar.xz
+          installed="$(./shellcheck --version | sed -n 's/^version: //p')"
+          echo "shellcheck $installed"
+          if [ "$installed" != "$SHELLCHECK_VERSION" ]; then
+            echo "::error::expected shellcheck $SHELLCHECK_VERSION, got $installed"
+            exit 1
+          fi
       #
       # The rest is what this job was for from the start: workflow schema, job
       # and step keys, `needs` references, matrix shapes, action input names,
       # and the expression parser -- which is exactly what rejected sonar.yml
       # and left a run with no jobs and no message.
-      - run: actionlint -color -pyflakes=
+      - run: actionlint -color -pyflakes= -shellcheck="$RUNNER_TEMP/shellcheck"
 
   cross:
     name: cross-compile all release targets

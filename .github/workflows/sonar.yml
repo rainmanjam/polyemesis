@@ -188,7 +188,8 @@ jobs:
         # vitest needs is produced by a lifecycle hook. If a future dependency
         # does need one, this step fails visibly rather than silently reporting
         # less coverage -- which is the failure mode worth guarding.
-        run: npm ci --ignore-scripts --no-audit --no-fund && npm run coverage || true
+        run: |
+          { npm ci --ignore-scripts --no-audit --no-fund && npm run coverage; } || true
 
       # web/ is the marketing and documentation site. Only its two
       # markdown-pipeline modules are unit-tested, deliberately -- the harness
@@ -206,7 +207,8 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         working-directory: web
-        run: npm ci --ignore-scripts --no-audit --no-fund && npm run coverage || true
+        run: |
+          { npm ci --ignore-scripts --no-audit --no-fund && npm run coverage; } || true
 
       # THE VERSION, WITHOUT WHICH THE GATE ON main EVALUATES NOTHING.
       #

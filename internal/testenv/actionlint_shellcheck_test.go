@@ -29,14 +29,17 @@ import (
 // lint job with a wall of bash parse errors, which is the exact pressure that
 // put the flag there.
 
+type lintStep struct {
+	Name  string            `yaml:"name"`
+	Run   string            `yaml:"run"`
+	Shell string            `yaml:"shell"`
+	Env   map[string]string `yaml:"env"`
+}
+
 type lintWorkflow struct {
 	Jobs map[string]struct {
-		Name  string `yaml:"name"`
-		Steps []struct {
-			Name  string `yaml:"name"`
-			Run   string `yaml:"run"`
-			Shell string `yaml:"shell"`
-		} `yaml:"steps"`
+		Name  string     `yaml:"name"`
+		Steps []lintStep `yaml:"steps"`
 	} `yaml:"jobs"`
 }
 
@@ -62,6 +65,7 @@ func TestWorkflowLintRunsShellcheck(t *testing.T) {
 	}
 	invocations := 0
 	disable := regexp.MustCompile(`(^|\s)-shellcheck=(\s|$)`)
+	pinned := regexp.MustCompile(`(^|\s)-shellcheck=\S`)
 	for _, s := range job.Steps {
 		for _, line := range strings.Split(s.Run, "\n") {
 			line = strings.TrimSpace(line)
@@ -73,12 +77,45 @@ func TestWorkflowLintRunsShellcheck(t *testing.T) {
 				t.Errorf("the workflow lint job runs %q. An empty -shellcheck= turns shellcheck "+
 					"off for every run: block in every workflow. Fix what it reports instead "+
 					"(or declare `shell: pwsh` on PowerShell steps), and keep it on.", line)
+			} else if !pinned.MatchString(line) {
+				t.Errorf("the workflow lint job runs %q, which uses whatever shellcheck is on the "+
+					"runner's PATH. ubuntu-latest's is 0.9.0, which reports SC2015 findings the "+
+					"0.11.0 a developer runs does not, so the required check's verdict would "+
+					"depend on the runner image. Pass -shellcheck=<the pinned binary>.", line)
 			}
 		}
 	}
 	if invocations == 0 {
 		t.Fatal("the workflow lint job never invokes actionlint; this test would pass over nothing")
 	}
+	assertShellcheckPinned(t, job.Steps)
+}
+
+// assertShellcheckPinned requires a step that downloads shellcheck at a named
+// version, verifies it against a sha256, and asserts the version it installed.
+// The three together are what make the lint result a property of this
+// repository rather than of whichever runner image GitHub rolled out that week.
+func assertShellcheckPinned(t *testing.T, steps []lintStep) {
+	t.Helper()
+	sha := regexp.MustCompile(`^[0-9a-f]{64}$`)
+	for _, s := range steps {
+		if s.Env["SHELLCHECK_VERSION"] == "" {
+			continue
+		}
+		if !sha.MatchString(s.Env["SHELLCHECK_SHA256"]) {
+			t.Errorf("step %q installs shellcheck %s without a SHELLCHECK_SHA256 to verify it against",
+				s.Name, s.Env["SHELLCHECK_VERSION"])
+		}
+		if !strings.Contains(s.Run, "sha256sum -c") {
+			t.Errorf("step %q never runs `sha256sum -c`; the checksum in its env checks nothing", s.Name)
+		}
+		if !strings.Contains(s.Run, "shellcheck --version") {
+			t.Errorf("step %q never asserts the installed shellcheck's version", s.Name)
+		}
+		return
+	}
+	t.Error("the workflow lint job installs no pinned shellcheck (no step sets SHELLCHECK_VERSION). " +
+		"Without one it lints with the runner image's shellcheck, and the image decides the verdict.")
 }
 
 // PowerShell cmdlets and variables that never appear in a bash block here.
