@@ -153,11 +153,24 @@ test.describe("sources", () => {
     // Choosing the mode is itself an edit, so it is committed first. Otherwise
     // the Apply button asserted on below would already be showing and the blur
     // would prove nothing.
+    //
+    // The mode is chosen only when it is not SRT ALREADY, because the starting
+    // mode belongs to whatever ran before this test. auth.setup.ts creates the
+    // default source as SRT. This test used to pick SRT unconditionally and
+    // pass only because an earlier spec's settings save wiped that source's
+    // mode back to unset (the round-trip bug that
+    // TestASettingsRoundTripLeavesTheDefaultSourcesIngestAlone pins). With that
+    // fixed, the source was still SRT, picking SRT changed nothing, no Apply
+    // appeared, and the click timed out.
     const mode = page.getByTestId("ingest-mode").first();
-    await mode.click();
-    await page.getByRole("option", { name: "SRT", exact: true }).click();
-    const apply = page.getByRole("button", { name: /^Apply/ }).first();
-    await apply.click();
+    await expect(mode).toBeVisible();
+    if ((await mode.textContent())?.trim() !== "SRT") {
+      await mode.click();
+      await page.getByRole("option", { name: "SRT", exact: true }).click();
+      await page.getByRole("button", { name: /^Apply/ }).first().click();
+    }
+    await expect(mode).toHaveText("SRT");
+    // The precondition the blur is measured against: nothing pending.
     await expect(page.getByRole("button", { name: /^Apply/ })).toBeHidden();
 
     // The SRT latency field. The port this test was named for moved to
