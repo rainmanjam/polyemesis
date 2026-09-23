@@ -1139,6 +1139,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 				BitrateKbps: d.Process.Progress.BitrateKbps,
 				DropFrames:  d.Process.Progress.DropFrames,
 			}
+			md.OutTimeMS = d.Process.Progress.OutTimeMS
+			md.OutputBytes = d.Process.Progress.TotalSize
 		}
 		snap.Destinations = append(snap.Destinations, md)
 	}

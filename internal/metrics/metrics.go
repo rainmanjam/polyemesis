@@ -105,6 +105,17 @@ type Destination struct {
 	Kind     string
 	Platform string
 	Enabled  bool
+	// OutTimeMS and OutputBytes are how far this run's output has got, in
+	// media time and in bytes, from FFmpeg's progress report. Both restart
+	// from zero with the process, which is a counter reset to Prometheus.
+	//
+	// They are here because nothing else on the scrape moves when a sink stops
+	// reading. The child stays running, so _up stays 1 and _restarts_total
+	// stays flat, and the bitrate is FFmpeg's whole-run average from the last
+	// report before the write blocked -- frozen, and non-zero. These two stop
+	// advancing the moment delivery does.
+	OutTimeMS   int64
+	OutputBytes int64
 }
 
 // Relay is the fan-out hub's throughput.
@@ -262,10 +273,22 @@ func renderDestinations(d *doc, dests []Destination) {
 	}
 
 	d.family("polyemesis_destination_bitrate_bits_per_second", "gauge",
-		"Bitrate the destination is currently publishing.")
+		"Average bitrate FFmpeg reports for the destination's current run. It does not fall when delivery stalls; use rate() of polyemesis_destination_output_bytes_total for that.")
 	for _, dest := range sorted {
 		d.sample("polyemesis_destination_bitrate_bits_per_second",
 			dest.BitrateKbps*1000, ident(dest)...)
+	}
+
+	d.family("polyemesis_destination_output_seconds_total", "counter",
+		"Media time the destination's current run has delivered, in seconds. rate() is the delivery speed: about 1 while keeping up, 0 while stalled.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_output_seconds_total", float64(dest.OutTimeMS)/1000, ident(dest)...)
+	}
+
+	d.family("polyemesis_destination_output_bytes_total", "counter",
+		"Bytes the destination's current run has written.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_output_bytes_total", float64(dest.OutputBytes), ident(dest)...)
 	}
 
 	d.family("polyemesis_destination_restarts_total", "counter",

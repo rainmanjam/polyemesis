@@ -35,6 +35,12 @@ its first tagged release.
   process running, now produces `destination.down` with `reason: "stalled"`
   after the 10s dwell, and `destination.up` when data flows again. Broadcast
   lifecycle automation does not end a broadcast on a stall.
+- **A stalled destination is visible on `/metrics`.** New counters
+  `polyemesis_destination_output_seconds_total` and
+  `polyemesis_destination_output_bytes_total` stop advancing when delivery does;
+  nothing else on the scrape moved, since the process stays running and the
+  bitrate gauge is FFmpeg's whole-run average. That gauge's help text now says
+  so.
 
 ## [0.10.0] — 2026-09-23
 
