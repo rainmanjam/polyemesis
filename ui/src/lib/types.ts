@@ -754,7 +754,8 @@ export interface ProcessStatus {
   progress: Progress;
   // Set while the process is running but its output has not advanced for a
   // few seconds (a sink that stopped reading). progress.bitrateKbps and
-  // progress.speed read 0 then; the destination also carries a warning.
+  // progress.speed read 0 then. Also set while the ingest is lost; the
+  // destination-level `stalled` is the one that says the platform is at fault.
   stalled?: boolean;
   stalledSec?: number;
 }
@@ -772,6 +773,12 @@ export interface DestStatus {
   warnings: string[] | null;
   error?: string;
   process?: ProcessStatus | null;
+  /** The destination's own stall: its process is stalled while the source is
+   *  still arriving. False while the ingest is lost even though every
+   *  process.stalled is true then, because a lost source is not a platform
+   *  failing. The warning and polyemesis_destination_up follow this, not
+   *  process.stalled. */
+  stalled?: boolean;
   /** Why the LAST stop of this destination could not be confirmed: the stop
    *  ended on Stop's deadline arm, so SIGKILL was issued and never waited for
    *  and the child may still be running and still publishing.

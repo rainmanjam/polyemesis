@@ -81,9 +81,11 @@ type Process struct {
 	// converted to bits per second on the way out.
 	BitrateKbps float64
 	DropFrames  int64
-	// Stalled is the supervisor's verdict that the process is running but its
-	// output has not moved for supervisor.StallAfter. See renderDestinations
-	// for what it does to _up.
+	// Stalled is the engine's verdict that the destination is running but its
+	// output has not moved for supervisor.StallAfter while the source is
+	// arriving (engine.DestStatus.Stalled). Not the supervisor's per-process
+	// flag, which is also set on every destination while the ingest is lost.
+	// See renderDestinations for what it does to _up.
 	Stalled bool
 }
 
@@ -267,7 +269,9 @@ func renderDestinations(d *doc, dests []Destination) {
 	// long as the stall lasted, and the dashboard an operator reads said
 	// healthy (exploratory row 7). The state series still say running, which
 	// is true of the process; _up and _stalled say what happened to the
-	// stream. It is the meaning the destination.up hook already has.
+	// stream. It is the meaning the destination.up hook already has --
+	// including its exception: a stall because the ingest is lost is not
+	// counted, so a lost source does not read as every platform failing.
 	d.family("polyemesis_destination_up", "gauge",
 		"1 when the destination's FFmpeg process is running and its output is moving.")
 	for _, dest := range sorted {

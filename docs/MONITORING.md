@@ -127,7 +127,8 @@ polyemesis_ingest_up == 0 and on() polyemesis_sources > 0   # nobody is streamin
 polyemesis_destination_up == 0 and polyemesis_destination_enabled == 1
 rate(polyemesis_destination_restarts_total[15m]) > 0        # a flapping output
 polyemesis_destination_stalled == 1                         # connected, not delivering
-rate(polyemesis_destination_output_seconds_total[1m]) < 0.9 # keeping up badly
+rate(polyemesis_destination_output_seconds_total[1m]) < 0.9
+  and polyemesis_destination_up == 1                        # moving, but slowly
 polyemesis_recording_free_bytes < 20e9                      # disk filling up
 ```
 
@@ -142,17 +143,29 @@ destination reads `polyemesis_destination_up` 0 and
 process is still running, and restarts stay flat.
 `polyemesis_destination_bitrate_bits_per_second` reads 0 while the stall lasts.
 Otherwise it is FFmpeg's average over the whole run, so it only ever falls
-slowly. The same stall shows in `/api/v1/status`: the destination's `process`
-has `"stalled": true` and `stalledSec`, `progress.bitrateKbps` and
-`progress.speed` read 0, and `warnings` says it is stalled. A destination that
+slowly. The same stall shows in `/api/v1/status`: the destination has
+`"stalled": true`, its `process` has `"stalled": true` and `stalledSec`,
+`progress.bitrateKbps` and `progress.speed` read 0, and `warnings` says it is
+stalled. A destination that
 has not moved any media yet, for example one still in its probe window, is not
-stalled. While the ingest itself is lost, every destination stalls because
-there is nothing to send. `_up` and `_stalled` say so, but the warning is left
-to the ingest.
+stalled.
+
+**A lost ingest is not a destination stalling.** While the ingest is lost,
+every destination's output stops because there is nothing to send. That is
+`polyemesis_ingest_up` 0, said once. A destination stays `_up` 1 and
+`_stalled` 0 through it, and it has no warning, so the alert above does not
+fire once per destination for one missing source. The process itself still
+reports `"stalled": true` in `/api/v1/status`, and its bitrate reads 0, because
+both are true of the process. The destination's own `"stalled"` field, which
+`_up`, `_stalled` and the warning follow, stays false. This is the same rule
+the `destination.down` hook and the `falling_behind` alert apply.
 
 `polyemesis_destination_output_seconds_total` is the media time delivered, so
 its `rate()` is about 1 while a destination keeps up, below 1 while it is falling
-behind without stopping, and 0 while it is stuck. The fourth query uses it.
+behind without stopping, and 0 while it is stuck. The fifth query uses it,
+guarded by `_up == 1` so that it means moving but slowly. Without the guard it
+would fire on every disabled or stopped destination, whose rate is 0, and again
+on every stall that the stall query already reports.
 `polyemesis_destination_output_bytes_total` does the same in bytes, and `rate()`
 of it times 8 is the bitrate actually being sent now. Both reset with the
 process, which `rate()` handles.

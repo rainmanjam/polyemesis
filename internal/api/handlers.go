@@ -1180,7 +1180,11 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 			Restarts:    d.Process.Restarts,
 			BitrateKbps: d.Process.Progress.BitrateKbps,
 			DropFrames:  d.Process.Progress.DropFrames,
-			Stalled:     d.Process.Stalled,
+			// The destination's verdict, NOT d.Process.Stalled: the process
+			// flag is also set on every destination while the ingest is lost,
+			// and _up would then page once per destination for one lost
+			// source. See engine.DestStatus.Stalled.
+			Stalled: d.Stalled,
 		}
 		md.OutTimeMS = d.Process.Progress.OutTimeMS
 		md.OutputBytes = d.Process.Progress.TotalSize

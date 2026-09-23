@@ -54,11 +54,12 @@ func TestTheScrapeCarriesADestinationsOutputProgress(t *testing.T) {
 // A stalled destination is not up. Its process is running -- the state series
 // still says so -- but an operator's dashboard reads _up, and before this it
 // read 1 with a frozen non-zero bitrate for the whole of a stall (exploratory
-// row 7). The scrape now carries the supervisor's verdict: up 0, stalled 1,
-// and the bitrate the supervisor reports for a stalled run, which is 0.
+// row 7). The scrape now carries the engine's verdict (DestStatus.Stalled, the
+// supervisor's flag with the source arriving): up 0, stalled 1, and the bitrate
+// the supervisor reports for a stalled run, which is 0.
 func TestAStalledDestinationIsNotUpOnTheScrape(t *testing.T) {
 	stalled := engine.DestStatus{
-		ID: 1, Name: "D-default", Enabled: true,
+		ID: 1, Name: "D-default", Enabled: true, Stalled: true,
 		Process: &supervisor.Status{
 			State: supervisor.StateRunning, Stalled: true, StalledSec: 40,
 			Progress: ffmpeg.Progress{OutTimeMS: 117_973, TotalSize: 39_000_000},
@@ -81,6 +82,46 @@ func TestAStalledDestinationIsNotUpOnTheScrape(t *testing.T) {
 		`polyemesis_destination_state{id="1",name="D-default",state="running"}`:   "1",
 		`polyemesis_destination_up{id="2",name="Live"}`:                           "1",
 		`polyemesis_destination_stalled{id="2",name="Live"}`:                      "0",
+	} {
+		found := false
+		for _, line := range strings.Split(out, "\n") {
+			if v, ok := strings.CutPrefix(line, series+" "); ok {
+				found = true
+				if v != want {
+					t.Errorf("%s = %s, want %s", series, v, want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("series %s is missing from the scrape:\n%s", series, out)
+		}
+	}
+}
+
+// A destination is not down because the SOURCE is. With the ingest lost every
+// destination's output freezes, the supervisor marks each process stalled, and
+// before this the scrape turned that into up=0 on every running destination --
+// so `polyemesis_destination_up == 0 and polyemesis_destination_enabled == 1`,
+// the alert MONITORING.md says to write first, paged once per destination for
+// what polyemesis_ingest_up already says once. The hooks and alerts watchers
+// have both refused that reading since they were written; the engine now
+// decides it once (DestStatus.Stalled), and the scrape follows the engine.
+func TestAStallCausedByALostIngestDoesNotTakeADestinationDown(t *testing.T) {
+	d := engine.DestStatus{
+		ID: 1, Name: "D-default", Enabled: true,
+		// The process is frozen, as every one is with nothing arriving...
+		Process: &supervisor.Status{
+			State: supervisor.StateRunning, Stalled: true, StalledSec: 30,
+			Progress: ffmpeg.Progress{OutTimeMS: 117_973},
+		},
+		// ...and the engine, seeing the source gone, did not call it the
+		// destination's stall.
+		Stalled: false,
+	}
+	out := metrics.Render(metrics.Snapshot{Destinations: []metrics.Destination{metricsDestination(d)}})
+	for series, want := range map[string]string{
+		`polyemesis_destination_up{id="1",name="D-default"}`:      "1",
+		`polyemesis_destination_stalled{id="1",name="D-default"}`: "0",
 	} {
 		found := false
 		for _, line := range strings.Split(out, "\n") {
