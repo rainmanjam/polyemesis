@@ -286,6 +286,25 @@ rule now raises it. A rule with no event boxes ticked receives every type, so
 it starts receiving this one too; raise that rule's severity floor to
 `critical` if you want only deletions.
 
+### Upgrading past 0.10.0 (unreleased, on `main`): health reports a programme that is not running
+
+> Not yet in a tag, like the notes above.
+
+**What changed.** `GET /api/v1/health` used to answer `"status": "ok"` when
+some sources had an engine and some did not, because one running engine was
+enough. It now answers `"status": "degraded"` in that state, and the `engine`
+check's detail says how many are running, for example
+`"1 of 2 source(s) running"`. The HTTP code stays `200`: a restart would not
+bring a programme back whose engine could not be built, so this is not a
+reason for an orchestrator to kill the process.
+
+**What you might need to do.** Only if an external monitor alerts when
+`status` is not `ok`: it now alerts while a programme is down, which is the
+intent. Look at the `engine` check's detail to see which count is short, and at
+the server log for the `cannot build engine for source` or
+`cannot start engine for source` line that names it. A monitor that alerts on
+the HTTP code alone is unchanged.
+
 ### Upgrading to 0.10.0
 
 **No schema change.** `internal/db` is identical between `v0.9.0` and
