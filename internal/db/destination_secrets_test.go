@@ -1081,53 +1081,7 @@ func TestTheBackfillScrubsPlaintextABeforeSecureDeleteReleaseLeftBehind(t *testi
 	path := filepath.Join(dir, "polyemesis.db")
 	box := testBox(t)
 	const rows = 5
-
-	// The rows themselves are built by the current code on a SEPARATE file, so
-	// they are valid for today's schema; only their bytes are copied across.
-	seedPath := filepath.Join(dir, "seed.db")
-	seed := keyDB(t, seedPath)
-	for i := 0; i < rows; i++ {
-		d := validDest()
-		d.Name = fmt.Sprintf("dest-%03d", i)
-		d.StreamKey = residueNeedle(i)
-		if _, err := seed.CreateDestination(d); err != nil {
-			t.Fatalf("CreateDestination: %v", err)
-		}
-	}
-	if err := seed.Close(); err != nil {
-		t.Fatalf("close seed: %v", err)
-	}
-	// The target: schema and source, no destinations.
-	if err := keyDB(t, path).Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-
-	// A 0.6.0 connection: WAL, no secure_delete.
-	old, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
-	if err != nil {
-		t.Fatalf("open the pre-upgrade handle: %v", err)
-	}
-	old.SetMaxOpenConns(1)
-	var sd int
-	if err := old.QueryRow(`PRAGMA secure_delete`).Scan(&sd); err != nil || sd != 0 {
-		t.Fatalf("the pre-upgrade handle has secure_delete=%d (err %v), want 0: the "+
-			"fixture is not what a pre-0.7.0 binary wrote", sd, err)
-	}
-	if _, err := old.Exec(`ATTACH DATABASE ? AS seed`, seedPath); err != nil {
-		t.Fatalf("attach seed: %v", err)
-	}
-	for i := 1; i <= rows; i++ {
-		if _, err := old.Exec(`INSERT INTO main.destinations
-			SELECT * FROM seed.destinations WHERE id = ?`, i); err != nil {
-			t.Fatalf("write a pre-upgrade row: %v", err)
-		}
-	}
-	if _, err := old.Exec(`DETACH DATABASE seed`); err != nil {
-		t.Fatalf("detach seed: %v", err)
-	}
-	if err := old.Close(); err != nil {
-		t.Fatalf("close the pre-upgrade handle: %v", err)
-	}
+	writePreSealAtRestFile(t, dir, path, rows, nil)
 
 	total := func() (db, wal int) {
 		for i := 0; i < rows; i++ {
@@ -1162,5 +1116,123 @@ func TestTheBackfillScrubsPlaintextABeforeSecureDeleteReleaseLeftBehind(t *testi
 			t.Fatalf("destination %d reads back %q, want %q: the residue was removed "+
 				"by losing the key", i, got.StreamKey, residueNeedle(i-1))
 		}
+	}
+}
+
+// writePreSealAtRestFile leaves at path what a pre-0.7.0 binary would have: n
+// destinations holding residueNeedle(0..n-1) as plaintext stream keys, written
+// one INSERT at a time through a secure_delete-OFF handle, and the file at
+// PRAGMA user_version 0. Then, on that same handle, it runs extra (if any), so
+// a caller can add more 0.6.0-era history -- a delete, say.
+//
+// The rows themselves are built by the current code on a SEPARATE file, so
+// they are valid for today's schema; only their bytes are copied across. The
+// target's schema also comes from Open, which stamps user_version 1 -- and no
+// 0.6.0 file carries that stamp, so it is put back to 0 here. Without that the
+// upgrade below would scrub only because rows needed sealing, never because of
+// the version, and the version branch would go untested.
+func writePreSealAtRestFile(t *testing.T, dir, path string, n int, extra func(*sql.DB)) {
+	t.Helper()
+	seedPath := filepath.Join(dir, "seed.db")
+	seed := keyDB(t, seedPath)
+	for i := 0; i < n; i++ {
+		d := validDest()
+		d.Name = fmt.Sprintf("dest-%03d", i)
+		d.StreamKey = residueNeedle(i)
+		if _, err := seed.CreateDestination(d); err != nil {
+			t.Fatalf("CreateDestination: %v", err)
+		}
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("close seed: %v", err)
+	}
+	// The target: schema and source, no destinations.
+	if err := keyDB(t, path).Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// A 0.6.0 connection: WAL, no secure_delete.
+	old, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("open the pre-upgrade handle: %v", err)
+	}
+	old.SetMaxOpenConns(1)
+	var sd int
+	if err := old.QueryRow(`PRAGMA secure_delete`).Scan(&sd); err != nil || sd != 0 {
+		t.Fatalf("the pre-upgrade handle has secure_delete=%d (err %v), want 0: the "+
+			"fixture is not what a pre-0.7.0 binary wrote", sd, err)
+	}
+	if _, err := old.Exec(`ATTACH DATABASE ? AS seed`, seedPath); err != nil {
+		t.Fatalf("attach seed: %v", err)
+	}
+	for i := 1; i <= n; i++ {
+		if _, err := old.Exec(`INSERT INTO main.destinations
+			SELECT * FROM seed.destinations WHERE id = ?`, i); err != nil {
+			t.Fatalf("write a pre-upgrade row: %v", err)
+		}
+	}
+	if _, err := old.Exec(`DETACH DATABASE seed`); err != nil {
+		t.Fatalf("detach seed: %v", err)
+	}
+	if extra != nil {
+		extra(old)
+	}
+	if _, err := old.Exec(`PRAGMA user_version = 0`); err != nil {
+		t.Fatalf("reset user_version: %v", err)
+	}
+	var v int
+	if err := old.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil || v != 0 {
+		t.Fatalf("user_version=%d (err %v) after the reset, want 0", v, err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("close the pre-upgrade handle: %v", err)
+	}
+}
+
+// NOTHING LEFT TO SEAL IS NOT NOTHING LEFT TO SCRUB. A 0.6.0 file whose
+// destinations were deleted before the upgrade -- or whose only keys
+// MigrateStrandedStreamKeys blanked -- reaches the backfill with no row needing
+// a seal, so the "sealed something" trigger never fires. The plaintext the old
+// binary freed is still in the file, though: it ran with secure_delete off, so
+// a DELETE put the page on the freelist with its bytes intact. The only signal
+// left is user_version 0, and this is the test that the backfill acts on it.
+//
+// Mutation: change `if priorVersion < 1` in backfillDestinationStreamKeys to
+// `if false && priorVersion < 1`. The upgrade then only checkpoints, and this
+// test fails with every deleted key still in the db file.
+func TestTheBackfillScrubsAPreSealAtRestFileWithNothingLeftToSeal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "polyemesis.db")
+	box := testBox(t)
+	const rows = 5
+	writePreSealAtRestFile(t, dir, path, rows, func(old *sql.DB) {
+		if _, err := old.Exec(`DELETE FROM destinations`); err != nil {
+			t.Fatalf("delete the pre-upgrade rows: %v", err)
+		}
+	})
+
+	total := func() (db, wal int) {
+		for i := 0; i < rows; i++ {
+			d, w := rawResidue(t, path, residueNeedle(i))
+			db += d
+			wal += w
+		}
+		return db, wal
+	}
+	if db, wal := total(); db+wal == 0 {
+		t.Fatalf("no plaintext copies before the upgrade: a DELETE under secure_delete " +
+			"off should leave the freed bytes in place, so the fixture is not a 0.6.0 " +
+			"file and the assertion below is vacuous")
+	}
+
+	second := keyDB(t, path, WithSecretBox(box))
+	if got, err := second.ListDestinations(); err != nil || len(got) != 0 {
+		t.Fatalf("ListDestinations = %d rows (err %v), want 0: the fixture should "+
+			"leave nothing for the backfill to seal", len(got), err)
+	}
+	if db, wal := total(); db+wal != 0 {
+		t.Errorf("%d copies of deleted plaintext stream keys are still greppable after "+
+			"upgrading a user_version 0 file with nothing left to seal (db=%d wal=%d): "+
+			"the version alone has to trigger the scrub", db+wal, db, wal)
 	}
 }
