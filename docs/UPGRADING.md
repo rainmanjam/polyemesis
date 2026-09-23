@@ -580,14 +580,23 @@ database alone is not enough to publish, and the failure is silent until you go
 live. See [Upgrading to 0.7.0](#upgrading-to-070-sealed-stream-keys--breaking-to-roll-back).
 
 **The in-app rollback (`POST /api/v1/upgrade/rollback`) swaps the binary and
-nothing else.** It does not restore the database or `secret.key`. It is safe
-while the release you roll back from has not changed the schema version — true
-of every release so far — and it **refuses** once the database is on a schema
-the previous binary would not open, because that binary would refuse to start
-on it. The staged binary is recorded with the schema it opens
-(`<binary>.previous.schema`); `GET /api/v1/upgrade/plan` then reports
-`rollbackAvailable: false` with the reason in `rollbackBlocked`. When that
-happens, roll back with the four steps above. Either way, take and verify a
+nothing else.** It does not restore the database or `secret.key`, so it is
+safe only when the binary it puts back reads the data as it now stands. Two
+cases are not, and it **refuses** both:
+
+- The database is on a schema the previous binary would not open. That binary
+  would refuse to start on it. The staged binary is recorded with the schema
+  it opens (`<binary>.previous.schema`), and the rollback is refused once the
+  database is newer.
+- The rollback point has no such record, because the release that staged it
+  predates the record. It may be 0.6.x or older, which opens the same schema
+  but cannot read the stream keys 0.7.0 sealed: it would start, then fail every
+  publish. Nothing on disk tells it from a 0.7.x binary, so it is refused. This
+  happens once, on the first upgrade out of a release without the record.
+
+Either way `GET /api/v1/upgrade/plan` reports `rollbackAvailable: false` with
+the reason in `rollbackBlocked`, and the endpoint answers `409`. Roll back with
+the four steps above. Either way, take and verify a
 backup before the first start of a new release: it is the only rollback that
 covers the database.
 

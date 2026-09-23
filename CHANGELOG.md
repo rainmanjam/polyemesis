@@ -17,9 +17,10 @@ its first tagged release.
   Staging now records, beside `<binary>.previous`, the schema the outgoing
   binary opens; the upgrade plan reports `rollbackAvailable: false` with the
   reason in `rollbackBlocked`, and `POST /api/v1/upgrade/rollback` answers
-  `409` and moves nothing. A rollback point staged by an earlier release is
-  taken to open schema 1, which every earlier release did. Roll back through
-  the backup instead, as `docs/UPGRADING.md` describes.
+  `409` and moves nothing. A rollback point staged by an earlier release has
+  no such record and is refused too: a 0.6.x binary opens the same schema but
+  cannot read the stream keys 0.7.0 sealed, and nothing tells it from a 0.7.x
+  one. Roll back through the backup instead, as `docs/UPGRADING.md` describes.
 - **Routed tracks stay in step after a real-length failover outage.**
   The per-track realignment added for a failover to a source with fewer
   tracks was tested with a 5 s gap. In the field, with a 30 s outage, track 2

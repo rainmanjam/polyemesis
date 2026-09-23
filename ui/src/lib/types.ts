@@ -1758,11 +1758,12 @@ export interface UpgradePlan {
   command?: string;
   binaryPath?: string;
   /** A previous binary is staged and could be restored. False, with
-   *  `rollbackBlocked` set, when one is staged but would refuse the database
-   *  as it now stands. */
+   *  `rollbackBlocked` set, when one is staged but would not read the data
+   *  as it now stands, or when nothing records what it reads. */
   rollbackAvailable: boolean;
   /** Why the staged previous binary cannot be rolled back to -- the database
-   *  is on a newer schema than it opens. Shown verbatim; it names the backup
+   *  is on a newer schema than it opens, or it was staged by a release that
+   *  did not record which schema that is. Shown verbatim; it names the backup
    *  as the way back. */
   rollbackBlocked?: string;
   /** Why an upgrade is refused for a reason that is not about being on air --

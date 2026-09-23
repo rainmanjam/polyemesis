@@ -61,7 +61,8 @@ type Plan struct {
 	BinaryPath string `json:"binaryPath,omitempty"`
 	// RollbackAvailable reports that a previous binary is staged and could be
 	// restored. See PreviousPath. False, with RollbackBlocked saying why, when
-	// one is staged but would refuse the database as it now stands.
+	// one is staged but would refuse the database as it now stands, or has
+	// no record of which database it opens (see errNoSchemaRecord).
 	RollbackAvailable bool `json:"rollbackAvailable"`
 	// RollbackBlocked explains why a staged previous binary cannot be rolled
 	// back to. Empty when there is none, or when it can. See RollbackRefusal.
@@ -215,18 +216,30 @@ type Schema struct {
 	Understood int
 }
 
-// legacyPreviousSchema is what a rollback point with no schema record is taken
-// to understand. Such a point was left by a release before the record existed,
-// and every one of those opened schema 1 at most, so 1 is the truth or an
-// understatement -- and an understatement only ever refuses a rollback that
-// would have worked, never allows one that would not.
-const legacyPreviousSchema = 1
+// errNoSchemaRecord is a rollback point with no record of the schema its
+// binary opens: one staged by a release before the record existed.
+//
+// REFUSED, NOT GUESSED. Every such release opened schema 1, so "1" looks like
+// a safe assumption, and for the schema check alone it is. It is not safe for
+// the rollback: 0.6.x had the in-app rollback and no record, and a 0.6.x
+// binary opens a 0.7+ database -- same schema version -- but cannot read the
+// stream keys 0.7.0 sealed with secret.key, so it starts and then fails every
+// publish. Nothing on disk tells a 0.6.x rollback point from a 0.7.x one, so
+// the only answer that is never wrong is to send the operator to the backup.
+// The cost is one refused rollback, on the first upgrade out of a release
+// without the record; every point staged after that carries one.
+var errNoSchemaRecord = errors.New("no schema record")
 
 // RollbackRefusal says why the binary at PreviousPath(binary) must not be
 // rolled back to with the database at live, or "" when it can. binary is the
 // resolved path.
 func RollbackRefusal(binary string, live int) string {
 	understood, err := previousSchema(binary)
+	if errors.Is(err, errNoSchemaRecord) {
+		return "the previous binary was set aside by a release that did not record which database it opens; " +
+			"if it is 0.6.x or older it cannot read the stream keys 0.7.0 sealed and would fail every publish. " +
+			"Restore the backup taken before the upgrade instead (docs/UPGRADING.md, Rolling back)"
+	}
 	if err != nil {
 		return fmt.Sprintf("cannot tell which database schema the previous binary opens (%v); "+
 			"restore the backup taken before the upgrade instead", err)
@@ -242,7 +255,7 @@ func RollbackRefusal(binary string, live int) string {
 func previousSchema(binary string) (int, error) {
 	b, err := os.ReadFile(PreviousSchemaPath(binary))
 	if errors.Is(err, os.ErrNotExist) {
-		return legacyPreviousSchema, nil
+		return 0, errNoSchemaRecord
 	}
 	if err != nil {
 		return 0, err
@@ -656,8 +669,8 @@ func Stage(binary, staged, wantHex string, schema Schema) error {
 //
 // The schema record beside .previous (see Schema) is removed BEFORE .previous
 // changes and rewritten AFTER, so no interruption can leave a record that
-// describes a different binary. A missing record reads as
-// legacyPreviousSchema, which errs towards refusing a rollback.
+// describes a different binary. A missing record refuses the rollback (see
+// errNoSchemaRecord), so every interruption errs towards the backup.
 func install(binary, incoming, dir string, understood int) (bool, error) {
 	// 0o700: only the LIVE binary needs to be executable by whoever runs the
 	// service. A backup beside it is read by exactly one thing -- a rollback,
@@ -709,8 +722,8 @@ func install(binary, incoming, dir string, understood int) (bool, error) {
 	}
 	if err := writeSchemaRecord(binary, dir, understood); err != nil {
 		return true, fmt.Errorf("the new binary is installed and the previous one kept at %s, but which "+
-			"database schema it opens could not be recorded, so a rollback will assume schema %d: %w",
-			PreviousPath(binary), legacyPreviousSchema, err)
+			"database schema it opens could not be recorded, so the in-app rollback will refuse it: %w",
+			PreviousPath(binary), err)
 	}
 	return true, syncDir(dir)
 }

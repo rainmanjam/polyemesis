@@ -79,18 +79,32 @@ func TestRollbackRecordsTheSchemaOfTheBinaryItSetsAside(t *testing.T) {
 	}
 }
 
-// A rollback point left by a release before the record existed has none. Every
-// such release opened schema 1 at most, so that is what it is taken to open.
-func TestARollbackPointWithNoRecordIsTakenToOpenSchemaOne(t *testing.T) {
+// A rollback point left by a release before the record existed has none, and
+// is refused rather than assumed to open schema 1. 0.6.x had the in-app
+// rollback and no record: it opens a 0.7+ database -- same schema version --
+// and then cannot read a single stream key 0.7.0 sealed. Nothing on disk tells
+// that binary from a 0.7.x one, so the plan withholds the rollback, names the
+// reason, and Rollback refuses before anything moves.
+func TestARollbackPointWithNoRecordIsRefused(t *testing.T) {
 	bin := stagedOver(t, 1)
 	if err := os.Remove(PreviousSchemaPath(bin)); err != nil {
 		t.Fatal(err)
 	}
-	if why := RollbackRefusal(bin, 1); why != "" {
-		t.Errorf("RollbackRefusal(live 1) = %q, want none", why)
+	why := RollbackRefusal(bin, 1)
+	for _, want := range []string{"0.6.x", "backup"} {
+		if !strings.Contains(why, want) {
+			t.Errorf("RollbackRefusal(live 1) = %q, want it to mention %q", why, want)
+		}
 	}
-	if why := RollbackRefusal(bin, 2); why == "" {
-		t.Error("RollbackRefusal(live 2) = none, want a refusal: a pre-record binary opens schema 1 at most")
+	p := PlanFor(MethodSystemd, bin, Versions{Running: "v0.7.0", LiveSchema: 1})
+	if p.RollbackAvailable || p.RollbackBlocked != why {
+		t.Errorf("plan: RollbackAvailable=%v RollbackBlocked=%q, want it withheld with %q", p.RollbackAvailable, p.RollbackBlocked, why)
+	}
+	if err := Rollback(bin, Schema{Live: 1, Understood: 1}); !errors.Is(err, ErrRollbackRefused) {
+		t.Fatalf("Rollback = %v, want ErrRollbackRefused", err)
+	}
+	if b, _ := os.ReadFile(bin); string(b) != "v2" {
+		t.Errorf("a refused rollback changed the live binary to %q", b)
 	}
 }
 
@@ -115,7 +129,7 @@ func TestAnUnreadableSchemaRecordRefusesRatherThanGuesses(t *testing.T) {
 }
 
 // When the record cannot be written the upgrade has still happened, and the
-// caller is told both halves: installed, and what a rollback will assume.
+// caller is told both halves: installed, and that a rollback will be refused.
 func TestAStageWhoseSchemaRecordCannotBeWrittenSaysSo(t *testing.T) {
 	dir := tempDir(t)
 	bin := filepath.Join(dir, "polyemesis")
@@ -132,8 +146,8 @@ func TestAStageWhoseSchemaRecordCannotBeWrittenSaysSo(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := Stage(bin, staged, hashOf(t, staged), Schema{Live: 1, Understood: 1})
-	if err == nil || !strings.Contains(err.Error(), "installed") {
-		t.Fatalf("Stage = %v, want an error saying the binary is nonetheless installed", err)
+	if err == nil || !strings.Contains(err.Error(), "installed") || !strings.Contains(err.Error(), "refuse") {
+		t.Fatalf("Stage = %v, want an error saying the binary is nonetheless installed and a rollback will be refused", err)
 	}
 	if b, _ := os.ReadFile(bin); string(b) != "v2" {
 		t.Errorf("live binary = %q, want the new one", b)
