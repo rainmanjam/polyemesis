@@ -109,3 +109,17 @@ updates:
       # first pin. Merging any one of them alone breaks that invariant quietly.
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
+      # The CUDA line is held on purpose, and PERMANENTLY rather than dated:
+      # Dockerfile.cuda links no CUDA library (NVENC needs only the host
+      # driver), and the tag's NVIDIA_REQUIRE_CUDA check is what refuses to
+      # start on a host whose driver is behind. A newer CUDA line buys nothing
+      # and turns away working machines -- #857 proposed 12.6.3 -> 13.4.1 on the
+      # same Ubuntu, i.e. a higher driver floor for no change at all.
+      #
+      # Digest updates of the pinned tag still arrive, and they are how base
+      # image security fixes reach a digest-pinned FROM. Bump the CUDA line by
+      # hand, and only when moving to a new Ubuntu release (which is what
+      # decides the FFmpeg version) -- see the comment above FROM in
+      # Dockerfile.cuda.
+      - dependency-name: "nvidia/cuda"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
