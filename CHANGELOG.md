@@ -8,6 +8,10 @@ its first tagged release.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.11.0] — 2026-09-24
+
 ### Added
 
 - **`install.sh --version` and `update.sh --binary`: install a named release,
@@ -5101,7 +5105,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/rainmanjam/polyemesis/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/rainmanjam/polyemesis/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/rainmanjam/polyemesis/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/rainmanjam/polyemesis/compare/v0.7.0...v0.8.0
