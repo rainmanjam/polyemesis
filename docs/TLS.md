@@ -392,7 +392,7 @@ store.
 
 Releases before this constraint generated a CA with none. An upgraded install
 replaces that CA on its first start; see
-[UPGRADING.md](UPGRADING.md#upgrading-past-0100-unreleased-on-main-the-self-signed-ca-is-replaced-once)
+[UPGRADING.md](UPGRADING.md#the-self-signed-ca-is-replaced-once)
 for what to remove and reinstall. If you would rather no CA of yours were
 trusted anywhere, use mode `acme` or reach the UI over the
 [SSH tunnel](#binding-and-the-ssh-tunnel).
