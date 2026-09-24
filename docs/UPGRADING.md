@@ -233,10 +233,35 @@ instead.
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
-### Upgrading past 0.10.0 (unreleased, on `main`): the self-signed CA is replaced once
+### Upgrading to 0.11.0
 
-> Not yet in a tag — this note is here ahead of the release that carries it,
-> for anyone running `main`. It becomes that release's note when it is cut.
+**No schema change.** The schema version stamped into the database is still
+`1`, and nothing in 0.11.0 adds a table or a column. The one change it makes to
+stored data is setting `ingest.mode` to `srt` on sources the console created
+with no mode, which 0.10.0 reads like any other SRT source. So a 0.10.0 binary
+opens a database 0.11.0 has run against, and reinstalling the old binary is a
+working rollback. Restoring the backup you took is still the path this page
+recommends, because it is the one you can check.
+
+**Most installs have one thing to do: trust the new local CA**, if TLS mode is
+selfsigned. Everything else below applies only if you use the feature it
+names. Each item says whether it concerns you in its first line:
+
+- [The self-signed CA is replaced once](#the-self-signed-ca-is-replaced-once)
+- [Forwarded client addresses are believed only from trusted proxies](#forwarded-client-addresses-are-believed-only-from-trusted-proxies)
+- [First-run setup needs a setup code](#first-run-setup-needs-a-setup-code)
+- [Read-scoped tokens no longer read chat](#read-scoped-tokens-no-longer-read-chat)
+- [The login throttle counts IPv6 by /64 and has a shared budget](#the-login-throttle-counts-ipv6-by-64-and-has-a-shared-budget)
+- [The request log records route patterns](#the-request-log-records-route-patterns)
+- [Sources with no ingest mode become SRT](#sources-with-no-ingest-mode-become-srt)
+- [API deletes of a source, or of an on-air destination, must be confirmed](#api-deletes-of-a-source-or-of-an-on-air-destination-must-be-confirmed)
+- [config.yaml refuses a key it does not know](#configyaml-refuses-a-key-it-does-not-know)
+- [The unit `install.sh` writes no longer passes `--addr`](#the-unit-installsh-writes-no-longer-passes---addr)
+- [Alert keys name their programme](#alert-keys-name-their-programme)
+- [Health reports a programme that is not running](#health-reports-a-programme-that-is-not-running)
+
+#### The self-signed CA is replaced once
+
 > Only installs whose TLS mode resolves to **selfsigned** are affected; acme,
 > manual and off are untouched.
 
@@ -283,10 +308,7 @@ and changes on every recreate.
 **Rolling back** to a release before this one keeps working: it loads the new
 CA as it would any other.
 
-### Upgrading past 0.10.0 (unreleased, on `main`): forwarded client addresses are believed only from trusted proxies
-
-> Not yet in a tag — this note is here ahead of the release that carries it,
-> for anyone running `main`.
+#### Forwarded client addresses are believed only from trusted proxies
 
 **Only if you set `trustProxyHeaders: true`.** `X-Forwarded-For` and
 `X-Real-IP` are now read only when the connection comes from loopback or from
@@ -310,10 +332,7 @@ proxy` once, naming the peer, when this applies. It also warns at startup when
 `trustProxyHeaders` is on and the listener is public, and says whether
 `--addr` or `config.yaml` set it.
 
-### Upgrading past 0.10.0 (unreleased, on `main`): first-run setup needs a setup code
-
-> Not yet in a tag — this note is here ahead of the release that carries it,
-> for anyone running `main`.
+#### First-run setup needs a setup code
 
 **An install that already has an admin account: nothing to do.** It never
 makes a setup code, and signing in is unchanged. On its first boot it deletes
@@ -332,10 +351,7 @@ that creates the first admin should do one of these:
 
 See [INSTALL.md](INSTALL.md#the-first-run-setup-code).
 
-### Upgrading past 0.10.0 (unreleased, on `main`): read-scoped tokens no longer read chat
-
-> Not yet in a tag — this note is here ahead of the release that carries it,
-> for anyone running `main`.
+#### Read-scoped tokens no longer read chat
 
 **Only if something reads chat with a `read`-scoped API token.** `GET
 /api/v1/chat`, `/chat/messages`, `/chat/search` and `/chat/users` now answer a
@@ -349,10 +365,7 @@ A dashboard, bot or archiver that reads the messages themselves needs an
 the read token in that integration. Nothing else a read token could do has
 changed.
 
-### Upgrading past 0.10.0 (unreleased, on `main`): the login throttle counts IPv6 by /64 and has a shared budget
-
-> Not yet in a tag — this note is here ahead of the release that carries it,
-> for anyone running `main`.
+#### The login throttle counts IPv6 by /64 and has a shared budget
 
 **Usually nothing to do.** Two things changed in how failed sign-ins (and
 first-run setup attempts) are throttled:
@@ -375,10 +388,7 @@ second and it goes through. If that persists, the guessing is the incident —
 block the source at the firewall or reverse proxy; restarting the server resets
 the budget but not the attacker.
 
-### Upgrading past 0.10.0 (unreleased, on `main`): the request log records route patterns
-
-> Not yet in a tag — this note is here ahead of the release that carries it,
-> for anyone running `main`.
+#### The request log records route patterns
 
 **Only if you parse the server's log.** The `path` field of the `http` request
 log line is now the route pattern the request matched, not the URL it arrived
@@ -390,10 +400,7 @@ log. A request that matched no route is still logged with its real path, so
 A log query or alert that matched a specific ID in `path` no longer matches;
 match the pattern, and correlate with the request's other fields instead.
 
-### Upgrading past 0.10.0 (unreleased, on `main`): sources with no ingest mode become SRT
-
-> Not yet in a tag — this note is here ahead of the release that carries it,
-> for anyone running `main`. It becomes that release's note when it is cut.
+#### Sources with no ingest mode become SRT
 
 **What changed.** The shared SRT port (6000/udp) now admits a publisher only
 into a source whose ingest mode is **SRT**. On 0.10.0 it admitted any source,
@@ -434,10 +441,7 @@ line was meant for RTMP or pull: change its **Ingest** on the Sources page.
 It could not have been receiving RTMP or pulling while it had no mode, so
 nothing that worked before stops working.
 
-### Upgrading past 0.10.0 (unreleased, on `main`): API deletes of a source, or of an on-air destination, must be confirmed
-
-> Not yet in a tag — this note is here ahead of the release that carries it,
-> for anyone running `main`. It becomes that release's note when it is cut.
+#### API deletes of a source, or of an on-air destination, must be confirmed
 
 **What changed.** `DELETE /api/v1/sources/{id}` now refuses (`400`) unless the
 request carries `{"confirm": true, "destinations": N}`, with `N` the source's
@@ -456,9 +460,7 @@ that deletes its own idle or test destinations keeps working unchanged.
 delete, as in [the API reference](API.md#sources). Add `{"confirm": true}` to a
 destination delete that is meant to end its broadcast.
 
-### Upgrading past 0.10.0 (unreleased, on `main`): config.yaml refuses a key it does not know
-
-> Not yet in a tag — this note is here ahead of the release that carries it.
+#### config.yaml refuses a key it does not know
 
 **What changed.** A key `config.yaml` does not define — at the top level or
 inside `ffmpeg:` and `transcription:`, as `tls:` already did — now stops the
@@ -482,9 +484,7 @@ The same applies to `--log`. A value other than `debug`, `info`, `warn` or
 container command passes `--log warning` or similar, change it to `warn`
 before upgrading.
 
-### Upgrading past 0.10.0 (unreleased, on `main`): the unit `install.sh` writes no longer passes `--addr`
-
-> Not yet in a tag — this note is here ahead of the release that carries it.
+#### The unit `install.sh` writes no longer passes `--addr`
 
 **What changed.** The unit `install.sh` generates used to set the web port
 twice. It passed `--addr :<port>` in `ExecStart` and also wrote
@@ -498,9 +498,7 @@ say when the address came from `--addr`.
 the unit and `config.yaml` with the port you answer, so answer with the port you
 use. After that, change the port only in `config.yaml`.
 
-### Upgrading past 0.10.0 (unreleased, on `main`): alert keys name their programme
-
-> Not yet in a tag, like the note above.
+#### Alert keys name their programme
 
 **What changed.** An alert rule's `json` payload gives each alert a `key`.
 Three of them now end in the programme's id: `ingest` is now `ingest:<id>`,
@@ -519,9 +517,7 @@ rule now raises it. A rule with no event boxes ticked receives every type, so
 it starts receiving this one too; raise that rule's severity floor to
 `critical` if you want only deletions.
 
-### Upgrading past 0.10.0 (unreleased, on `main`): health reports a programme that is not running
-
-> Not yet in a tag, like the notes above.
+#### Health reports a programme that is not running
 
 **What changed.** `GET /api/v1/health` used to answer `"status": "ok"` when
 some sources had an engine and some did not, because one running engine was
