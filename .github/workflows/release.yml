@@ -682,6 +682,19 @@ jobs:
           # wrong about why, which is the most expensive way to be right.
           real=$(printf '%s\n' "$body" \
             | sed -E '/^_?Nothing yet\._?$/d' | sed '/^[[:space:]]*$/d')
+          # A REHEARSAL IS NOT A TAG. The weekly schedule and a dry-run dispatch
+          # build from main, where [Unreleased] is SUPPOSED to hold what has
+          # merged since the last release -- failing here made the rehearsal red
+          # every week it had anything to rehearse (first scheduled-shape run,
+          # 35943822582), and a rehearsal that is always red warns of nothing.
+          # So a non-tag run reports what a tag would have to fold and goes on.
+          # Strict unless GitHub says otherwise: cut-release.sh runs this body
+          # locally with no GITHUB_REF_TYPE, and a tag push sets it to "tag".
+          if [ -n "$real" ] && [ "${GITHUB_REF_TYPE:-tag}" != tag ]; then
+            n=$(printf '%s\n' "$real" | grep -c '^- ' || true)
+            echo "::notice::rehearsal: [Unreleased] holds $n entries; a tag cut now must fold them into its version first."
+            exit 0
+          fi
           if [ -n "$real" ]; then
             echo "::error::CHANGELOG.md still has entries under [Unreleased]. Fold them"
             echo "::error::into the version being tagged before releasing -- they sit ABOVE"
