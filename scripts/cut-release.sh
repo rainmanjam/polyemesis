@@ -140,7 +140,12 @@ if ! ( cd "$scratch" && REF_NAME="$tag" REF_TYPE=tag PUBLISH=true bash "$gate" )
 fi
 pass "changelog-gate: $(tail -1 "$work/out")"
 
-if ! ( cd "$scratch" && bash "$unrel" ) > "$work/out" 2>&1; then
+# AS A TAG, ALWAYS. The step reports rather than refuses when GITHUB_REF_TYPE
+# says the run is not a tag (a release.yml rehearsal from main), and this script
+# can itself run where GitHub has set that variable -- a Codespace, a CI job,
+# this script's own test on a pull request, which is where it was caught. What
+# this script is about to cut IS a tag, so it says so.
+if ! ( cd "$scratch" && GITHUB_REF_TYPE=tag bash "$unrel" ) > "$work/out" 2>&1; then
   cat "$work/out" >&2
   die "[Unreleased] is not empty (above). Fold those entries under the $tag heading on main first."
 fi
