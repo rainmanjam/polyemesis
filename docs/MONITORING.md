@@ -146,6 +146,20 @@ polyemesis_recording_free_bytes < 20e9                      # disk filling up
 polyemesis_source_engine_up == 0                            # a programme the server is not running
 ```
 
+Every query on this page, and the `polyemesis_alert_deliveries_total` one under
+[When the alerts themselves stop arriving](#when-the-alerts-themselves-stop-arriving),
+was run against Prometheus 3.15.0 scraping a real polyemesis instance — a local
+build with an RTMP source pushed by ffmpeg and a local RTMP destination — over
+`/api/v1/query`. All eight parse, every metric and label name matches
+`internal/metrics/metrics.go`, and each returns the shape this page describes:
+the "moving, but slowly" query in particular fired a real series once a
+locally-contended destination fell behind, confirming its semantics rather than
+just its syntax. That check caught one real bug — the failed-deliveries query
+originally used a bare `and`, which PromQL matches on every label including
+the one (`result`) that necessarily differs between its two sides, so it could
+never fire; it now reads `and ignoring(result)`, confirmed against this same
+Prometheus to actually match `failed` against `sent`.
+
 **The last is never normal.** `polyemesis_ingest_up` is 0 for a listener
 waiting on its streamer too, which is ordinary between shows.
 `polyemesis_source_engine_up` is 0 only when a configured programme has no
@@ -298,11 +312,19 @@ night sends nothing either:
 
 ```promql
 increase(polyemesis_alert_deliveries_total{result="failed"}[30m]) > 0
-  and increase(polyemesis_alert_deliveries_total{result="sent"}[30m]) == 0
+  and ignoring(result) increase(polyemesis_alert_deliveries_total{result="sent"}[30m]) == 0
 ```
 
-That is "deliveries are being attempted and none is getting through". Route it
-somewhere other than the webhooks it is about.
+That is "deliveries are being attempted and none is getting through". **The
+`ignoring(result)` is load-bearing, not decoration.** `and` without it matches
+series on *every* label including `result` itself, and the two sides of this
+query never carry the same `result` value — so a plain `and` compares each
+side against a label set the other side cannot have, the intersection is
+always empty, and the rule never fires no matter how badly deliveries are
+failing. `ignoring(result)` drops that one label from the match and keeps the
+rest (`job`, `instance`, and anything else a relabel added), which is what
+lets a `failed` sample on the left find its `sent` sibling on the right.
+Route it somewhere other than the webhooks it is about.
 
 #### A receiver on your own network
 
