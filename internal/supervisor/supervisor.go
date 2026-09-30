@@ -363,6 +363,15 @@ type Process struct {
 	// test can only hope the scheduler lands there, and a race that a test
 	// merely hopes for is a guard nothing defends.
 	stopWaited func()
+	// preKill, when set, runs in stop()'s deadline arm immediately before the
+	// kill it is about to issue -- after the (cmd, exited) snapshot was taken
+	// and after the inner tie-break select has confirmed the loop has not
+	// already finished. Nil outside tests. It is the seam that forces open the
+	// window a generation-unsafe kill needs: a hook here can drive an entire
+	// respawn to completion, live, while the kill this pinned snapshot exists
+	// to scope correctly is paused waiting to run. See killCmd's doc and
+	// TestStopsDeadlineKillDoesNotHitTheNextGeneration.
+	preKill func()
 
 	runMu   sync.Mutex
 	cancel  context.CancelFunc
@@ -738,6 +747,49 @@ func (p *Process) stop(ctx context.Context, retire bool) error {
 	p.mu.RLock()
 	gen := p.gen
 	p.mu.RUnlock()
+	// SNAPSHOT ONCE, HERE, AND REUSE IT FOR THE KILL BELOW -- and STILL UNDER
+	// runMu, which is what makes the snapshot provably this generation's and
+	// not a gap a successor can land in.
+	//
+	// terminate() takes its own snapshot internally, but if the deadline arm
+	// has to kill the child it must kill THIS generation's child -- the one
+	// terminate() just signalled -- and not whatever p.cmd happens to hold by
+	// the time that arm actually runs, which can be a long time after the
+	// deadline fires on a descheduled goroutine.
+	//
+	// Without this, p.kill() re-read p.cmd fresh at call time. Between
+	// ctx.Done() firing and that call running, this generation's child could
+	// already have been reaped -- by terminate()'s own escalator, which races
+	// this same deadline -- and a new generation could already have published
+	// its own cmd behind it, by Restart() or by a concurrent Start() from
+	// something that does not know this Stop is still unwinding. A stale
+	// re-read then kills the SUCCESSOR: SIGKILL on a child this stop was
+	// never asked to stop.
+	//
+	// TAKEN WHILE runMu IS STILL HELD CONTINUOUSLY FROM BEFORE p.running WENT
+	// FALSE, so this read cannot itself be the stale one -- not because
+	// p.running still reads true here (the write above already happened), but
+	// because no OTHER goroutine can have observed it false yet. Start()
+	// refuses to launch a new generation while p.running is true
+	// (supervisor.go's `if p.retired || p.running || p.startPending` guard),
+	// and reads p.running under this same runMu. A concurrent Start() is
+	// therefore either blocked on runMu right now, or ran and returned before
+	// this stop() call started -- in which case it necessarily saw p.running
+	// still true and is not the one that will publish a successor. Either way,
+	// nothing can have published a successor's cmd by this point: what cmdMu
+	// gives back here is either nil (never spawned, or already reaped with
+	// nothing new started) or this generation's own. A snapshot taken AFTER
+	// releasing runMu, even immediately after, leaves a gap in which this
+	// goroutine could be descheduled and a concurrent reap-then-respawn could
+	// publish a successor's cmd before the read ran.
+	//
+	// cmd and exited are per-spawn and never reused (see the field comments
+	// on Process.cmd and Process.exited), so pinning them here makes the kill
+	// below correct regardless of how long it is delayed or what the process
+	// does to p.cmd in the meantime.
+	p.cmdMu.Lock()
+	cmd, exited := p.cmd, p.exited
+	p.cmdMu.Unlock()
 	p.runMu.Unlock()
 
 	cancel()
@@ -759,11 +811,13 @@ func (p *Process) stop(ctx context.Context, retire bool) error {
 		//
 		// THE HARM IS THE FALSE ERROR, not a stray signal, and the distinction is
 		// worth stating because the obvious worry is the other one. runOnce clears
-		// p.cmd in its teardown BEFORE supervise closes `done`, so by the time
-		// this arm could run, p.kill() finds a nil cmd and does nothing. (If it
-		// did not, killGroup issues a raw syscall.Kill(-pid) that bypasses Go's
-		// ErrProcessDone guard and names a process GROUP by number -- so on a
-		// reaped pid that is a live hazard. It is simply not reachable here.)
+		// p.cmd in its teardown BEFORE supervise closes `done`, but the kill below
+		// does not read p.cmd -- it uses the (cmd, exited) snapshot taken above, so
+		// a teardown that ran in the meantime is visible as `exited` already closed
+		// and killCmd finds nothing to do. (If it did not, killGroup issues a raw
+		// syscall.Kill(-pid) that bypasses Go's ErrProcessDone guard and names a
+		// process GROUP by number -- so on a reaped pid that is a live hazard. It is
+		// simply not reachable here.)
 		//
 		// A caller told a clean stop failed does the wrong thing with it: the
 		// question Stop answers is "can I reuse what it was holding yet", and the
@@ -786,7 +840,11 @@ func (p *Process) stop(ctx context.Context, retire bool) error {
 			// it would hold whatever the caller is holding for an unbounded time.
 			// So the honest thing is to say so rather than to report a clean stop.
 			p.log.Warn("timed out waiting for process to exit; killing")
-			p.kill()
+			if p.preKill != nil {
+				p.preKill()
+			}
+			cmd, exited = p.cmdForKill(done, cmd, exited)
+			p.killCmd(cmd, exited)
 			err = fmt.Errorf("%w after %s: the child was sent SIGKILL and may still be running",
 				ErrStopDeadline, p.Name())
 		}
@@ -1338,7 +1396,23 @@ func (p *Process) terminate() {
 	}()
 }
 
-// kill sends SIGKILL to the child's whole process group.
+// kill sends SIGKILL to the child's whole process group, reading the CURRENT
+// p.cmd/p.exited. It exists for callers that have no generation of their own
+// to pin -- TestKillIsARefusalOnAReapedChild drives it directly against a
+// cmd/exited pair it planted itself -- and it is a thin wrapper over killCmd,
+// which holds the actual guard.
+//
+// stop() does NOT use this. See killCmd.
+func (p *Process) kill() {
+	p.cmdMu.Lock()
+	cmd, exited := p.cmd, p.exited
+	p.cmdMu.Unlock()
+	p.killCmd(cmd, exited)
+}
+
+// killCmd sends SIGKILL to cmd's whole process group, unless exited says it
+// has already been reaped. cmd and exited are the caller's own snapshot, not
+// re-read from p.cmd -- see the callers for why that is load-bearing.
 //
 // THE REAPED-CHECK IS THE POINT. #720. killGroup issues a raw
 // syscall.Kill(-pid, SIGKILL), which names a process GROUP BY NUMBER and
@@ -1351,10 +1425,68 @@ func (p *Process) terminate() {
 // functions, written as a comment beside the call it protects. The argument was
 // correct; it was not a device, and the family's other two members did not
 // settle for one.
-func (p *Process) kill() {
+//
+// TAKING (cmd, exited) AS PARAMETERS, RATHER THAN READING p.cmd/p.exited
+// ITSELF, is what makes stop()'s deadline-arm kill safe. That kill can run an
+// arbitrary amount of time after the deadline it is acting on -- ctx.Done()
+// firing only means the select noticed; the goroutine can be off the CPU for
+// a while before the code below actually runs. A fresh p.cmd read at that
+// later point can already belong to a NEW generation: this spawn reaped (by
+// its own terminate() escalator, which races this same deadline) and a
+// successor published behind it, by Restart() or by a concurrent Start()
+// from something that does not know this Stop is still unwinding. Reading
+// p.cmd there would kill the successor -- a child stop() was never asked to
+// stop -- instead of doing nothing, which is the correct outcome once the
+// child this Stop targeted is already gone. Pinning the pair at the moment
+// terminate() is called (see stop()) removes that window entirely: cmd and
+// exited are per-spawn and never reused, so this can only ever act on the one
+// generation the caller meant.
+// cmdForKill resolves what stop()'s deadline arm should kill, covering the
+// one case the pinned (cmd, exited) snapshot cannot answer by itself: cmd is
+// nil because this generation's spawn had not yet published p.cmd when stop()
+// took its snapshot (Start() has run; runOnce is still between cmd.Start()
+// and the cmdMu-guarded publish -- the same #126 window runOnce's own
+// post-publish ctx check exists for). Using a nil snapshot as-is would make
+// the kill a silent no-op and leave the process dependent on runOnce's own
+// self-terminate, which is real but only as fast as its own grace escalator.
+//
+// done is this generation's own done channel, confirmed open a moment ago by
+// the caller's outer select -- and a moment is enough: preKill, or plain
+// descheduling, can hold the caller between that check and this call for as
+// long as the scheduler likes, and in that gap THIS generation can finish,
+// `done` can close, and a pending Start can publish a successor's cmd behind
+// it. Re-reading p.cmd unconditionally at that point would hand killCmd the
+// successor -- so `done` is checked AGAIN here, and the two checks are not
+// the same question asked twice: this one is asked while holding p.cmdMu,
+// which is also what a respawn's publish needs (runOnce takes it to set
+// p.cmd, and again to clear it in teardown). A successor's publish therefore
+// cannot happen while this critical section holds the lock, so `done` still
+// open HERE means p.cmd, whatever it is, is still this generation's -- nil
+// (not yet published) or its own cmd, never a successor's. `done` already
+// closed here means this generation finished on its own while the kill was
+// paused: there is nothing of ITS to kill, and adopting whatever is in p.cmd
+// now would mean adopting a successor on purpose instead of by accident.
+//
+// Called unconditionally by stop(), but only acts when cmd is nil; a non-nil
+// snapshot is already this generation's own and is returned unchanged.
+func (p *Process) cmdForKill(done <-chan struct{}, cmd *exec.Cmd, exited chan struct{}) (*exec.Cmd, chan struct{}) {
+	if cmd != nil {
+		return cmd, exited
+	}
 	p.cmdMu.Lock()
-	cmd, exited := p.cmd, p.exited
-	p.cmdMu.Unlock()
+	defer p.cmdMu.Unlock()
+	select {
+	case <-done:
+		// This generation is already gone. Leave cmd nil: killCmd's own nil
+		// check makes that a no-op, which is the correct outcome -- nothing of
+		// THIS stop's is left to kill.
+		return nil, nil
+	default:
+		return p.cmd, p.exited
+	}
+}
+
+func (p *Process) killCmd(cmd *exec.Cmd, exited <-chan struct{}) {
 	if cmd == nil {
 		return
 	}
