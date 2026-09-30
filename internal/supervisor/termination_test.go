@@ -79,19 +79,57 @@ func TestTheGraceEscalatorStopsWaitingOnceTheChildIsReaped(t *testing.T) {
 	// Stop has returned, so the child is reaped -- that is what the nil above
 	// entails. The escalation has nothing left to escalate to, and the only
 	// question is whether it knows.
-	finished := make(chan struct{})
-	go func() { p.escalators.Wait(); close(finished) }()
-
+	//
+	// BLOCKING ON Wait() DIRECTLY, RATHER THAN RACING IT AGAINST A TIMER, is
+	// the fix for a flake this test had on a loaded Windows CI runner: pass
+	// once, fail once with no code change, pass again on rerun. The previous
+	// shape spawned a helper goroutine to call Wait() and close a channel, then
+	// selected on that channel against time.After(bound) -- which makes the
+	// verdict depend on which of TWO independently scheduled events a
+	// contended runner gets around to first: the escalator goroutine waking on
+	// `exited` and running Done() (itself gated behind the helper goroutine
+	// being scheduled at all), or the timer goroutine firing. Under scheduler
+	// contention both are delayed, and which one the runtime happens to wake
+	// first is exactly the kind of accident a bound this tight should not be
+	// deciding between -- the escalator was never sleeping the grace period,
+	// it was simply not yet scheduled, and the watchdog timer is no less
+	// susceptible to the same contention.
+	//
+	// A direct Wait() has no fine-grained timer to lose a race against: it
+	// returns the instant escalators.Done() runs, whatever that costs under
+	// load, and the duration is then measured and judged AFTER the fact rather
+	// than contested WHILE it happens.
+	//
+	// WATCHDOG IS A CIRCUIT BREAKER, NOT THE VERDICT. Wait() itself is still
+	// called with no deadline of its own, so it is never what decides pass or
+	// fail -- that is `waited > bound` below, a post-hoc comparison with
+	// nothing to race. The watchdog exists only so a genuine regression to the
+	// old unconditional sleep fails in seconds, with a clear message, instead
+	// of running out the clock on Go's global test timeout: 10s is generous
+	// enough above `bound` (3s) that ordinary scheduler jitter cannot reach it,
+	// and far enough below `grace` (60s) to still say something before the
+	// package's own budget is in danger.
+	const watchdog = 10 * time.Second
+	waitStart := time.Now()
+	waitDone := make(chan struct{})
+	go func() { p.escalators.Wait(); close(waitDone) }()
 	select {
-	case <-finished:
-	case <-time.After(bound):
-		t.Fatalf("terminate()'s grace goroutine was still running %s after Stop returned, "+
-			"with the child already reaped. The grace period for this Process is %s, so "+
-			"the escalator is waiting out a timer whose answer it already has: it is "+
-			"sleeping the grace period unconditionally rather than selecting on the "+
-			"child's exit. In production that is one goroutine per stop parked for %s, "+
+	case <-waitDone:
+	case <-time.After(watchdog):
+		t.Fatalf("terminate()'s grace goroutine was still running %s after Stop returned, with "+
+			"the child already reaped and the grace period for this Process at %s. %s is not "+
+			"scheduler jitter -- jitter is what `bound` (%s) exists to absorb -- this is the "+
+			"escalator actually stuck, or actually sleeping out the grace period.",
+			watchdog, grace, watchdog, bound)
+	}
+	if waited := time.Since(waitStart); waited > bound {
+		t.Fatalf("terminate()'s grace goroutine took %s to notice the child was already reaped "+
+			"and stop waiting, measured from when Stop returned. The grace period for this "+
+			"Process is %s, so the escalator is waiting out a timer whose answer it already "+
+			"has: it is sleeping the grace period unconditionally rather than selecting on "+
+			"the child's exit. In production that is one goroutine per stop parked for %s, "+
 			"paid per destination, holding a reference to an exec.Cmd it intends to kill.",
-			bound, grace, shutdownGrace)
+			waited.Round(time.Millisecond), grace, shutdownGrace)
 	}
 }
 

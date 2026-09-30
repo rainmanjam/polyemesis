@@ -81,3 +81,47 @@ func TestSourceLiveForCountsOnlyTheCurrentRun(t *testing.T) {
 		}
 	}
 }
+
+// THE BUG THIS PINS. sourceLiveFor's failover-feed branch used to read
+// f.UptimeSec -- the feed's uptime for its WHOLE PROCESS RUN, set once at
+// its first media and blind to any stall in between. A feed that freezes
+// and recovers without its process restarting (failover riding out a
+// dropout on the same feed) kept reporting that old, large uptime the
+// instant it resumed, so destinationStalled saw "the source has been back
+// for ages" and skipped the grace period StallAfter exists to give a
+// destination still catching up from the outage -- exactly the false
+// "stalled" TestStatusDecidesADestinationsStallFromTheSourceItReads checks
+// for the primary hub, but for the failover feed. LiveForSec is the field
+// that resets on a recovery instead of only on a respawn; this is that case
+// with a feed whose UptimeSec is still large from long before the stall.
+func TestSourceLiveForReadsTheFeedsRecoveryNotItsWholeRunUptime(t *testing.T) {
+	now := time.Now()
+	recovered := &FailoverStatus{
+		Active: sourceSlate,
+		Feed: &supervisor.Status{
+			State: supervisor.StateRunning,
+			// Old and large: this run has been on air for ten minutes --
+			// but it stalled and only just recovered.
+			UptimeSec: 600,
+			// Small: it has been live, unbroken, for a moment.
+			LiveForSec: 1,
+		},
+	}
+	if got := sourceLiveFor(nil, recovered, now); got >= supervisor.StallAfter {
+		t.Fatalf("live for %v, want under StallAfter (%v): the feed just recovered, "+
+			"UptimeSec (600s) must not be what this reads", got, supervisor.StallAfter)
+	}
+
+	steady := &FailoverStatus{
+		Active: sourceSlate,
+		Feed: &supervisor.Status{
+			State:      supervisor.StateRunning,
+			UptimeSec:  600,
+			LiveForSec: 600,
+		},
+	}
+	if got := sourceLiveFor(nil, steady, now); got < supervisor.StallAfter {
+		t.Fatalf("live for %v, want at least StallAfter: the feed has been live "+
+			"unbroken for the whole run", got)
+	}
+}
