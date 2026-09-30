@@ -253,6 +253,22 @@ type Status struct {
 	// it got.
 	Stalled    bool    `json:"stalled,omitempty"`
 	StalledSec float64 `json:"stalledSec,omitempty"`
+	// LiveForSec is how long THIS RUN's delivery has been unbroken: since
+	// mediaAt, or since the most recent moment media resumed after this run
+	// stalled -- whichever is later. 0 while nothing has moved yet.
+	//
+	// NOT JSON -- nothing on the dashboard reads it today, and UptimeSec
+	// already answers "since when has this process existed on air", a
+	// different and equally true question this field must not be confused
+	// with. It exists for callers that need "how long has the source been
+	// back", such as internal/engine's sourceLiveFor for the failover feed:
+	// UptimeSec runs from mediaAt for the whole run and is blind to an
+	// intervening stall, so a feed that freezes and recovers without its
+	// process restarting kept reporting the uptime from its very first
+	// media -- vouching for a source that had in fact just come back, and
+	// erasing the grace period destinationStalled depends on to tell a
+	// destination's own stall from one inherited from the outage.
+	LiveForSec float64 `json:"-"`
 }
 
 // Process is one supervised child.
@@ -285,7 +301,13 @@ type Process struct {
 	mediaAt time.Time
 	// movedAt is when this run's output time last advanced. Zero with mediaAt,
 	// and reset with it on every respawn. Status reads the stall off it.
-	movedAt   time.Time
+	movedAt time.Time
+	// liveSince is when this run's CURRENT unbroken stretch of delivery began:
+	// mediaAt the first time media moves, and reset to the moment of recovery
+	// whenever a gap of stallAfter or more separates two movements. Zero with
+	// mediaAt and movedAt, and reset with them on every respawn. Status reads
+	// LiveForSec off it. See LiveForSec for why this is not simply mediaAt.
+	liveSince time.Time
 	lastErr   string
 	nextRetry time.Time
 	progress  ffmpeg.Progress
@@ -1030,6 +1052,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	p.startedAt = time.Now()
 	p.mediaAt = time.Time{}
 	p.movedAt = time.Time{}
+	p.liveSince = time.Time{}
 	p.progress = ffmpeg.Progress{}
 	p.mu.Unlock()
 	p.setState(StateRunning, "")
@@ -1179,6 +1202,21 @@ func (p *Process) noteProgress(pr ffmpeg.Progress) {
 	// FFmpeg passes through; counted only on a rise, a child delivering below
 	// its old high read stalled until it climbed past it.
 	if pr.OutTimeMS != p.progress.OutTimeMS {
+		// liveSince resets HERE, on a recovery, and nowhere else.
+		//
+		// A recovery is this: the gap since the last movement had already
+		// reached stallAfter, so Status would have been reporting Stalled for
+		// it, and this block is the first since. The first movement of the
+		// run (movedAt still zero) is the same case by construction -- there
+		// is no earlier stretch to have continued.
+		//
+		// NOT stamped on every block. movedAt already is, and during ordinary
+		// delivery that is every block -- using it here would peg liveSince
+		// within one progress interval of "now" for ever, which answers "is
+		// it moving" and not "how long has it been moving without a break".
+		if p.movedAt.IsZero() || time.Since(p.movedAt) >= p.stallAfter {
+			p.liveSince = time.Now()
+		}
 		p.movedAt = time.Now()
 	}
 	p.progress = pr
@@ -1454,6 +1492,14 @@ func (p *Process) Status() Status {
 				// nothing that is stored.
 				st.Progress.BitrateKbps, st.Progress.Speed = 0, 0
 			}
+		}
+		// NOT st.Stalled: a process currently stalled is not live for any
+		// stretch right now, whatever it was before this stall began. Left
+		// unguarded, a caller that forgot its own Stalled check (sourceLiveFor
+		// remembers) would read a stale, non-zero figure from the stretch
+		// before the current stall instead of the 0 that is true of it.
+		if !p.liveSince.IsZero() && !st.Stalled {
+			st.LiveForSec = time.Since(p.liveSince).Seconds()
 		}
 	}
 	if p.state == StateReconnecting && !p.nextRetry.IsZero() {

@@ -591,16 +591,28 @@ func destinationStalled(p *supervisor.Status, ingestConfigured bool, sourceLive 
 // alone, it called every destination's stall a lost ingest and hid a platform
 // that had stopped taking data for as long as failover was on air. A feed that
 // is running and not itself stalled is arriving, for as long as it has moved
-// media. Not while the primary is active: the feed then only copies the
-// primary hub and freezes with it, a StallAfter later than the destinations
-// do, so it would briefly vouch for a source that is gone.
+// media WITHOUT A BREAK. Not while the primary is active: the feed then only
+// copies the primary hub and freezes with it, a StallAfter later than the
+// destinations do, so it would briefly vouch for a source that is gone.
+//
+// f.LiveForSec, NOT f.UptimeSec. UptimeSec runs from the feed's first media of
+// this PROCESS RUN and does not notice an intervening stall, so a feed that
+// freezes and recovers without its process restarting -- a source dropping out
+// and back in while failover stays on the same feed -- kept reporting an
+// uptime from long before the outage. destinationStalled read that as the
+// source having been back for well over StallAfter the instant it returned,
+// so every destination still catching up from the outage was immediately
+// blamed for its own stall with none of the grace period this function exists
+// to give it. LiveForSec is the same "since when has this been arriving"
+// question UptimeSec answers for the whole run, asked instead from the most
+// recent recovery.
 func sourceLiveFor(primary []stats.Sample, fo *FailoverStatus, now time.Time) time.Duration {
 	if fo != nil && fo.Active != "" && fo.Active != sourcePrimary {
 		f := fo.Feed
 		if f == nil || f.State != supervisor.StateRunning || f.Stalled {
 			return 0
 		}
-		return time.Duration(f.UptimeSec * float64(time.Second))
+		return time.Duration(f.LiveForSec * float64(time.Second))
 	}
 	if !ingestLive(primary, now) {
 		return 0
