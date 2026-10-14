@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
-import { ingestChipReading } from "@/lib/ingestChip";
+import { backupOnAir, ingestChipReading } from "@/lib/ingestChip";
 import { useMotionTransition } from "@/lib/motion";
 import { NavLink, Outlet, useLocation } from "react-router";
 
@@ -107,7 +107,7 @@ export function AppLayout({
   username: string;
   onSignOut: () => void;
 }) {
-  const { status, connected, frameError } = useLiveData();
+  const { status, connected, frameError, programme } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
 
@@ -194,7 +194,14 @@ export function AppLayout({
   //
   // The process is still consulted for the bitrate below, where it exists.
   const ingestLive = useIngestLive();
-  const ingestTone = ingestLive ? "live" : toneForState(ingest?.state);
+  // The standby carrying the show is not "offline", whatever the primary is
+  // doing; see backupOnAir.
+  // The status socket is install-wide, so a snapshot can belong to another
+  // programme; only trust its failover tier when it is the selected one (the
+  // same scoping Dashboard applies).
+  const failoverIsOurs = programme == null || status?.source?.id === programme;
+  const onBackup = failoverIsOurs && backupOnAir(status?.failover);
+  const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
   const liveCount =
     status?.destinations.filter((d) => d.process?.state === "running").length ?? 0;
 
@@ -263,7 +270,8 @@ export function AppLayout({
                 Absent is not a reading. Fall back to the state, exactly as the
                 SRT case does. #663. */}
             {(() => {
-              const r = ingestChipReading(ingest, ingestLive);
+              const r = ingestChipReading(ingest, ingestLive, onBackup);
+              if (r.kind === "backup") return t("chrome.ingestBackup");
               return r.kind === "bitrate" ? kbps(r.kbps) : stateLabel(r.state);
             })()}
           </span>

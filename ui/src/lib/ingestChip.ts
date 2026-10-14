@@ -7,7 +7,19 @@
  *  describes the code instead of calling it is the shape this audit keeps
  *  finding, so the expression moved here and both call it.
  */
-import type { ProcessState, ProcessStatus } from "./types";
+import type { FailoverStatus, ProcessState, ProcessStatus } from "./types";
+
+/** Whether the STANDBY ingest is what is carrying the broadcast right now.
+ *
+ *  The ingest chip and the Ingest card describe the primary (the process state,
+ *  the bitrate feed), so while failover has the backup on air they read
+ *  "Offline" over a show that is going out -- true of the primary, and a
+ *  contradiction of the ON AIR banner beside it. `backupLive !== false` rather
+ *  than `=== true`: an older server that omits the field still gets the honest
+ *  label, since `active` alone says the selector chose the backup. */
+export function backupOnAir(failover: FailoverStatus | null | undefined): boolean {
+  return failover?.active === "backup" && failover.backupLive !== false;
+}
 
 /** ingestChipReading answers what the chrome should print for the ingest.
  *
@@ -26,7 +38,12 @@ import type { ProcessState, ProcessStatus } from "./types";
 export function ingestChipReading(
   ingest: ProcessStatus | null | undefined,
   ingestLive: boolean,
-): { kind: "bitrate"; kbps: number } | { kind: "state"; state: ProcessState | null | undefined } {
+  onBackup = false,
+): { kind: "bitrate"; kbps: number } | { kind: "backup" } | { kind: "state"; state: ProcessState | null | undefined } {
+  // Before the bitrate and ingestLive branches: the process and the bitrate feed
+  // describe the primary, which can recover while a manual-return failover keeps
+  // the backup selected. "Running" for it would hide which ingest is on air.
+  if (onBackup) return { kind: "backup" };
   if (ingest?.state === "running" && ingest.progress?.bitrateKbps != null) {
     return { kind: "bitrate", kbps: ingest.progress.bitrateKbps };
   }

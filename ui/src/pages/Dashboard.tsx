@@ -13,6 +13,7 @@ import { laneLayout } from "@/lib/sourceLanes";
 import { cn } from "@/lib/utils";
 import { topRowLayout } from "@/lib/dashboardLayout";
 import { failoverNotice, type FailoverNotice } from "@/lib/failoverNotice";
+import { backupOnAir } from "@/lib/ingestChip";
 import { trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, RadioTower, RotateCcw, ShieldAlert, Square } from "lucide-react";
@@ -1204,7 +1205,11 @@ export function Dashboard() {
   // one definition of "a broadcast is going out"; ingest?.state is only the
   // process, consulted below for the bitrate where it exists. See #514.
   const ingestLive = useIngestLive();
-  const ingestTone = ingestLive ? "live" : toneForState(ingest?.state);
+  // While the standby is on air the primary's "Offline" is true and misleading:
+  // the show is going out. Say so instead of leaving a bare OFFLINE beside the
+  // on-air banner. `failoverState` is the programme-scoped snapshot.
+  const onBackup = backupOnAir(failoverState);
+  const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
   const source = status?.source;
   // The word a pipeline row uses when it has no process. "—" for unknown: a
   // settings read that has not landed is not a fact about the feature.
@@ -1501,10 +1506,19 @@ export function Dashboard() {
                 )}
               </CardTitle>
               <Badge variant={toneBadge[ingestTone]}>
-                {ingestLive ? stateLabel("running") : stateLabel(ingest?.state)}
+                {onBackup
+                  ? t("dash.ingestBackupOnAir")
+                  : ingestLive
+                    ? stateLabel("running")
+                    : stateLabel(ingest?.state)}
               </Badge>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
+              {onBackup && failoverState?.primaryLive !== true && (
+                <p className="rounded border border-warn/40 bg-warn/10 px-2 py-1 text-micro leading-relaxed text-warn">
+                  {t("dash.ingestPrimaryOffline")}
+                </p>
+              )}
               {attribution && (
                 <p className="rounded border border-border bg-muted/40 px-2 py-1 text-micro leading-relaxed text-muted-foreground">
                   {t("dash.ingestSharedFeed")}
