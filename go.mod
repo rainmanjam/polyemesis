@@ -2,6 +2,8 @@ module github.com/rainmanjam/polyemesis
 
 go 1.27.0
 
+toolchain go1.27.2
+
 require (
 	github.com/bluenviron/gortmplib v1.0.3
 	github.com/datarhei/gosrt v0.11.0
@@ -11,7 +13,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/shirou/gopsutil/v4 v4.26.8
 	golang.org/x/crypto v0.57.0
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 	golang.org/x/tools v0.49.0

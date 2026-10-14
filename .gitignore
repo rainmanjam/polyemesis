@@ -138,3 +138,6 @@ docs/investigations/
 # graphify build products. The graph is derived from the source and is rebuilt
 # on demand; committing it would put a large generated artifact in every diff.
 graphify-out/
+
+# /brag output (launch video renders and compositions)
+brag-output/
