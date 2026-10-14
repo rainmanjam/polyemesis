@@ -47,6 +47,14 @@ dishonesty.
 It is written down here because an undeclared exception is how a policy stops
 meaning anything.
 
+### `21-platforms.png`
+
+Settings → Platform credentials, photographed in the state every new install
+starts in: no developer app registered and no account connected, so the Client
+ID and Client secret fields are empty. It stays that way on purpose. Connecting
+needs live OAuth credentials for a real channel, and nothing here types into
+those fields. The website's "Platform sign-in" section uses it.
+
 Server and publisher run as two containers on one Docker network, dialling each
 other by name. That sidesteps [#28](https://github.com/rainmanjam/polyemesis/issues/28),
 where an SRT publisher on the host could not reach a listener bound IPv6-only.

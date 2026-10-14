@@ -600,3 +600,20 @@ test("settings — listeners, and the one-port design in the UI", async ({ page 
   // most of what the page is for.
   await page.screenshot({ path: `${OUT}/17-settings-full.png`, fullPage: true });
 });
+
+test("platforms — sign-in and credentials, honestly not connected", async ({ page }) => {
+  // Settings → Platform credentials, where each platform's account is attached.
+  // The seeded install has NO account connected and never will: that needs live
+  // OAuth credentials for a real channel. So this photographs the genuine
+  // not-connected state -- the capability table and the connect forms -- which
+  // is what a new install shows, and nothing is typed into any field.
+  await page.goto("/settings?tab=platforms");
+  await expect(page.getByText(/Platforms differ in how much/)).toBeVisible();
+  // Framed on the "why you need your own developer app" card, so the shot is
+  // that explanation and the first setup forms (Client ID, Client secret,
+  // connect) rather than the capability table above them, which is already
+  // the subject of its own section of the site.
+  await topOfFrame(page, page.getByText("Why you need your own developer app"));
+  await settle(page, 1500);
+  await page.screenshot({ path: `${OUT}/21-platforms.png` });
+});
