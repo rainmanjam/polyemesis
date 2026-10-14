@@ -25,7 +25,9 @@ describe("Settings ingest copy track limit", () => {
       const msgs = JSON.parse(readFileSync(join(LOCALES, file), "utf8")) as Record<string, string>;
       const text = msgs["set.ingestDesc"];
       expect(text, "set.ingestDesc missing").toBeTruthy();
-      const nums = (text.match(/\d+/g) ?? []).map(Number);
+      // RTMP "carries one" may be written as the digit 1 (ja: "1 本"), so 1 is
+      // allowed; every other number must be the real SRT track limit.
+      const nums = (text.match(/\d+/g) ?? []).map(Number).filter((n) => n !== 1);
       expect(nums).toEqual([maxTracks]);
     });
   }
