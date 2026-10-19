@@ -29,7 +29,7 @@
 # never the target architecture. The output is JavaScript and CSS, which are
 # architecture-independent, so emulating this stage under QEMU for an arm64
 # target would burn minutes to produce identical bytes.
-FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS ui
+FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS ui
 WORKDIR /src/ui
 # Copy manifests first so a dependency-only change reuses the install layer.
 COPY ui/package.json ui/package-lock.json* ./
