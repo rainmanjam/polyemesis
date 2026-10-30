@@ -99,6 +99,7 @@ describe("SetupChecklist: per-protocol addresses at step 2 (A1)", () => {
           addresses={[
             { proto: "rtmp", url: "rtmp://box:1935/live" },
             { proto: "srt", url: "srt://box:9000?streamid=a" },
+            { proto: "streamKey", url: "tok-123" },
           ]}
           onCopyAddress={onCopyAddress}
         />
@@ -107,5 +108,9 @@ describe("SetupChecklist: per-protocol addresses at step 2 (A1)", () => {
     fireEvent.click(screen.getByRole("button", { name: T("firstRun.copyAddress", { proto: "SRT" }) }));
     expect(onCopyAddress).toHaveBeenCalledWith({ proto: "srt", url: "srt://box:9000?streamid=a" });
     expect(screen.getByRole("button", { name: T("firstRun.copyAddress", { proto: "RTMP" }) })).toBeTruthy();
+    // The key is copied, never printed.
+    fireEvent.click(screen.getByRole("button", { name: T("firstRun.copyStreamKey") }));
+    expect(onCopyAddress).toHaveBeenCalledWith({ proto: "streamKey", url: "tok-123" });
+    expect(screen.queryByText("tok-123")).toBeNull();
   });
 });

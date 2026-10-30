@@ -24,9 +24,11 @@ const SEVERITY: Record<string, { icon: typeof Info; tone: string; label: Transla
 const FAMILIES = ["failover", "ingest", "destination", "other"] as const;
 type Family = (typeof FAMILIES)[number];
 const FAMILY_LABEL: Record<Family, TranslationKey> = {
-  failover: "timeline.filterFailover",
-  ingest: "timeline.filterIngest",
-  destination: "timeline.filterDestinations",
+  // The names the rest of the console uses for these, so a chip reads the
+  // same as the Settings card and the header chip it refers to.
+  failover: "set.failover",
+  ingest: "chrome.ingest",
+  destination: "route.destinations",
   other: "timeline.filterOther",
 };
 

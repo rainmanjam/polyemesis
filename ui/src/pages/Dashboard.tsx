@@ -872,7 +872,7 @@ function FailoverExposure({ notice }: { notice: FailoverNotice }) {
         <span className="text-foreground">{t("i18nSweep.noFailoverLead")}</span>{" "}
         {t("i18nSweep.noFailoverBody")}{" "}
         <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
-          {t("i18nSweep.noFailoverLink")}
+          {t("i18nSweep.noFailoverLink", { path: `${t("nav.settings")} → ${t("set.failover")}` })}
         </Link>
       </p>
     </div>
@@ -1486,12 +1486,13 @@ export function Dashboard() {
     }
   };
 
-  // A1: the selected programme's publish addresses for the checklist, one per
-  // protocol, host filled in. The stream-key row is a credential, not an
-  // address, and stays on the Sources page.
+  // A1: the selected programme's publish address for the checklist, host
+  // filled in. In RTMP mode the server sends the stream key as its own row
+  // (OBS wants server and key in two boxes, and the address alone reaches
+  // nothing), so it is offered as its own copy -- copied, never displayed.
   const checklistSource = sources.find((x) => x.id === programme) ?? sources[0];
   const checklistAddresses = checklistSource
-    ? publishRows(checklistSource.publishUrls, window.location.hostname).filter((r) => r.proto !== "streamKey")
+    ? publishRows(checklistSource.publishUrls, window.location.hostname)
     : [];
 
   const copyIngest = async () => {
@@ -1530,7 +1531,7 @@ export function Dashboard() {
             <SetupChecklist
               checklist={checklist}
               addresses={checklistAddresses}
-              onCopyAddress={(a) => copyToClipboard(t, a.url, a.proto.toUpperCase())}
+              onCopyAddress={(a) => copyToClipboard(t, a.url, a.proto === "streamKey" ? t("sources.streamKey") : a.proto.toUpperCase())}
               ingestUrl={system?.ingestUrl ?? ""}
               onCopyIngest={copyIngest}
               onAddDestination={() => {
@@ -1907,7 +1908,7 @@ export function Dashboard() {
           <SetupChecklist
             checklist={checklist}
             addresses={checklistAddresses}
-            onCopyAddress={(a) => copyToClipboard(t, a.url, a.proto.toUpperCase())}
+            onCopyAddress={(a) => copyToClipboard(t, a.url, a.proto === "streamKey" ? t("sources.streamKey") : a.proto.toUpperCase())}
             ingestUrl={system?.ingestUrl ?? ""}
             onCopyIngest={copyIngest}
             onAddDestination={() => {

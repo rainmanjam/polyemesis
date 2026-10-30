@@ -46,8 +46,8 @@ export function SetupChecklist({
   ingestUrl: string;
   onCopyIngest: () => void;
   onAddDestination: () => void;
-  /** The source's publish addresses, one per protocol, host filled in (A1).
-   *  The stream-key row is not an address and is left out by the caller. */
+  /** The source's publish rows, host filled in (A1): its address, and in RTMP
+   *  mode a `streamKey` row, offered as a copy and never displayed. */
   addresses?: readonly { proto: string; url: string }[];
   onCopyAddress?: (address: { proto: string; url: string }) => void;
 }>) {
@@ -178,7 +178,10 @@ export function SetupChecklist({
                               variant={i === 0 ? "default" : "outline"}
                               onClick={() => onCopyAddress(a)}
                             >
-                              <Copy /> {t("firstRun.copyAddress", { proto: a.proto.toUpperCase() })}
+                              <Copy />{" "}
+                              {a.proto === "streamKey"
+                                ? t("firstRun.copyStreamKey")
+                                : t("firstRun.copyAddress", { proto: a.proto.toUpperCase() })}
                             </Button>
                           ))}
                         </div>
