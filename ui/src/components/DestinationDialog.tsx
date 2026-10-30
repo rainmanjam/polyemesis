@@ -846,7 +846,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setAccountId("none");
       setRenditionId(PASSTHROUGH);
     }
-  }, [open, destination]);
+    // reloadAccounts is stable (useCallback with no deps), so listing it does
+    // not re-run this effect; it is listed because the effect calls it.
+  }, [open, destination, reloadAccounts]);
 
   const selectedPreset = useMemo(
     () => PRESETS.find((p) => p.id === presetId) ?? null,
