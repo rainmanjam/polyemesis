@@ -240,7 +240,7 @@ describe("track gain dial: a double push", () => {
 });
 
 describe("track gain dial: a status tick older than the dial's answer", () => {
-  // MUTATION: store every read in readLevels (drop the version check). Observed: FAIL.
+  // MUTATION: store every read in readLevels (drop the ticket check). Observed: FAIL.
   it("does not put the old gain back on the dial", async () => {
     let gain = 1;
     let slow = false;

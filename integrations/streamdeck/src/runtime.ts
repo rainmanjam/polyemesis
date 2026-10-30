@@ -162,8 +162,14 @@ export class Runtime {
    * double tap meant as mute-then-unmute ends muted. A tap while one is out is ignored instead.
    */
   private readonly tapping = new Set<string>();
-  /** Bumped on every write to destLevels, so a read that started before a write cannot overwrite it. */
-  private levelsVersion = 0;
+  /**
+   * Orders what the level cache holds. A read takes a ticket when it STARTS; a level change's answer
+   * takes one when it arrives. `levelsAt` is the ticket of what the cache holds now, and an answer with
+   * an older ticket is not stored: a status tick that started before a dial's answer cannot put the old
+   * gain back, and a tick that started before a tap's own read cannot replace what the tap reads.
+   */
+  private levelsClock = 0;
+  private levelsAt = 0;
   private readonly statuses = new Map<string, StatusPayload>();
   private readonly levels = new Map<string, LevelsReading | { error: true }>();
   private readonly lastMeterPaint = new Map<string, string>();
@@ -371,22 +377,22 @@ export class Runtime {
     }
   }
 
-  private storeLevels(list: DestinationLevels[]): void {
+  private storeLevels(list: DestinationLevels[], at: number): void {
     this.destLevels = new Map(list.map((d) => [d.id, d]));
-    this.levelsVersion++;
+    this.levelsAt = at;
   }
 
   /**
-   * Reads every destination's stored levels and caches them, unless the cache was written while the
-   * read was out. A write meanwhile (a level change's answer, or another read) is newer than this read,
-   * and a status tick that started before a dial's answer must not put the old gain back on the dial.
+   * Reads every destination's stored levels and caches them, unless the cache already holds something
+   * newer than this read: a read that started later, or a level change answered after this one started.
+   * Ordered by when the read STARTED, not by when it answered, so a slow older read never wins.
    */
   private async readLevels(): Promise<void> {
-    const version = this.levelsVersion;
+    const at = ++this.levelsClock;
     const list = await this.client!.destinations();
-    // Skipped only when a newer write is there to keep: a cache dropped meanwhile is refilled.
-    if (version !== this.levelsVersion && this.destLevels) return;
-    this.storeLevels(list);
+    // A cache dropped meanwhile (a failed read) holds nothing to keep, so it is refilled.
+    if (this.destLevels && at < this.levelsAt) return;
+    this.storeLevels(list, at);
   }
 
   /** The preset names, read once. A key shows the id until the list arrives. */
@@ -1043,7 +1049,7 @@ export class Runtime {
       this.levelRefused.delete(s.id);
       if (result.destination && this.destLevels) {
         this.destLevels.set(result.destination.id, result.destination);
-        this.levelsVersion++;
+        this.levelsAt = ++this.levelsClock;
       }
       return result;
     } catch (err) {
