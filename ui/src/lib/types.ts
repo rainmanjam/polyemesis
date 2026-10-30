@@ -2134,6 +2134,9 @@ export interface TimelineRow {
   /** The process whose log holds this row's detail ("dest:3", "ingest"), when
    *  there is exactly one. Drives the row's "Show log" link (A13). */
   process?: string;
+  /** The programme that process belongs to. The link is offered only on the
+   *  programme being viewed, because the log it opens is per programme. */
+  sourceId?: number;
 }
 
 export interface LogLine {

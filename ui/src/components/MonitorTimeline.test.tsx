@@ -95,4 +95,19 @@ describe("MonitorTimeline", () => {
     expect(link.getAttribute("href")).toBe("/monitoring?process=dest%3A3#process-log");
     expect(screen.getAllByRole("link")).toHaveLength(1);
   });
+
+  /* The timeline is install-wide; the log a link opens is the programme being
+   * viewed. Every programme has an "ingest", so a row about another
+   * programme's ingest must not open this one's. */
+  it("offers Show log only on rows about the programme being viewed", async () => {
+    listTimeline.mockResolvedValue([
+      { id: 5, at: "2026-10-30T10:00:00Z", type: "ingest.lost", severity: "critical",
+        title: "Ingest lost: Vertical", process: "ingest", sourceId: 2 },
+      { id: 4, at: "2026-10-30T09:00:00Z", type: "ingest.lost", severity: "critical",
+        title: "Ingest lost: Main", process: "ingest", sourceId: 1 },
+    ]);
+    render(<MemoryRouter><MonitorTimeline programme={1} /></MemoryRouter>);
+    await screen.findByRole("link", { name: "Show log: Ingest lost: Main" });
+    expect(screen.queryByRole("link", { name: "Show log: Ingest lost: Vertical" })).toBeNull();
+  });
 });

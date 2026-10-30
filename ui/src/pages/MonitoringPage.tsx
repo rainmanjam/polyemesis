@@ -832,7 +832,7 @@ export function MonitoringPage() {
 
       <div className="grid gap-3 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <div className="mb-3">
-        <MonitorTimeline />
+        <MonitorTimeline programme={programme} />
       </div>
 
       {/* ---------- processes ---------- */}

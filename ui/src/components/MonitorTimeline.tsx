@@ -42,7 +42,14 @@ function timelineFamily(type: string): Family {
 /** The stream's history, newest first: failovers, restarts and outages. An
  *  empty list says so, and a failed read says so, so nobody reads a broken
  *  fetch as a quiet stream. */
-export function MonitorTimeline() {
+export function MonitorTimeline({
+  programme = null,
+}: {
+  /** The programme the page is showing. The log a "Show log" link opens is
+   *  that programme's, so a row about another programme gets no link. Null is
+   *  "not narrowed", and every row's link is offered. */
+  programme?: number | null;
+} = {}) {
   const t = useT();
   const [rows, setRows] = useState<TimelineRow[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -124,7 +131,8 @@ export function MonitorTimeline() {
                         Lands on the FFmpeg log on this same page, filtered to
                         the process. Not offered where the server names no
                         single process: a dead link is worse than none. */}
-                    {row.process && (
+                    {row.process &&
+                      (programme === null || row.sourceId == null || row.sourceId === programme) && (
                       <Link
                         to={processLogHref(row.process)}
                         aria-label={`${t("reason.action.log")}: ${row.title}`}
