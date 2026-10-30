@@ -220,6 +220,7 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 
 	e.mu.Lock()
 	var toStop []*destination
+	var liveTry []liveCandidate
 	for id, d := range e.dests {
 		p, wanted := plans[id]
 		// A running destination whose hub is not the hub it would now be given
@@ -228,6 +229,23 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 		// a new one. A destination that has no hub yet (d.hub == nil) is not
 		// running and is judged on spec alone.
 		keep := keepDestination(d, p, wanted, wantHub[id])
+		if keep && d.graph != nil && p.row != nil && levelsDiffer(d.graph.get().FilterComplex, p.compiled.FilterComplex) {
+			// Same restart signature, different levels: a live change, decided
+			// below once the lock is released, since it does I/O. A copy
+			// destination's argv has no graph, so it has no level to move.
+			if copyPathOf(p.row) {
+				e.setLiveNoteLocked(id, liveNote{applied: liveApplied, reason: copyNoEffect})
+			} else {
+				liveTry = append(liveTry, liveCandidate{id: id, d: d, p: p})
+			}
+		}
+		if !keep && wanted && d.proc != nil && d.graph != nil && p.row != nil && p.err == "" &&
+			levelsDiffer(d.graph.get().FilterComplex, p.compiled.FilterComplex) {
+			// The levels moved, but so did something a command cannot carry, so
+			// the level reaches the output by this restart. Recorded so the
+			// operator is told a restart happened rather than nothing.
+			e.setLiveNoteLocked(id, liveNote{applied: liveRestart, reason: structuralRestart})
+		}
 		if !keep {
 			toStop = append(toStop, d)
 			delete(e.dests, id)
@@ -247,6 +265,34 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 		}
 	}
 	e.mu.Unlock()
+
+	// Live attempts, outside the lock. A refusal, a timeout, or a platform with no
+	// verified path falls back to the restart this function would otherwise have
+	// done, and the reason is recorded for the operator.
+	for _, c := range liveTry {
+		err := liveApplyTo(c.d.proc, c.d.graph, c.p.compiled)
+		e.mu.Lock()
+		if err == nil && e.dests[c.id] == c.d {
+			next := *c.d
+			next.compiled = c.p.compiled
+			e.dests[c.id] = &next
+			e.setLiveNoteLocked(c.id, liveNote{applied: liveApplied})
+			e.mu.Unlock()
+			continue
+		}
+		e.setLiveNoteLocked(c.id, liveNote{applied: liveRestart, reason: fallbackReason(err)})
+		if e.dests[c.id] == c.d {
+			delete(e.dests, c.id)
+			if c.d.proc != nil {
+				if e.retiring == nil {
+					e.retiring = map[int64]*destination{}
+				}
+				e.retiring[c.id] = c.d
+			}
+			toStop = append(toStop, c.d)
+		}
+		e.mu.Unlock()
+	}
 
 	for _, d := range toStop {
 		e.teardownDest(d)
@@ -521,6 +567,9 @@ func destSpecFor(log *slog.Logger, row *db.Destination, compiled routing.Result,
 // itself and nothing would ever be left running.
 func destArgvSig(s ffmpeg.DestSpec) string {
 	s.RelayURL = ""
+	// A named volume level is applied live (see live_gains.go), so a change of
+	// level alone must not move the signature. Anything else still does.
+	s.FilterComplex = ffmpeg.MaskLiveVolumes(s.FilterComplex)
 	return hashStrings(ffmpeg.DestinationArgs(s))
 }
 
@@ -911,8 +960,11 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		target = resolved
 	}
 
+	// The graph this process is spawned from. Every spawn reads it, so a level
+	// applied live is still in force after a crash or reconnect. See graphHolder.
+	graph := newGraphHolder(compiled)
 	buildArgs := func(out string) []string {
-		return e.destArgs(row, compiled, url, out)
+		return e.destArgs(row, graph.get(), url, out)
 	}
 
 	// Only a file destination needs a fresh argv per spawn, and only because
@@ -938,6 +990,12 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		}
 	}
 
+	if !writesAFile {
+		// Not a file: the argv is the same on every spawn but must still come from
+		// the holder, or a respawn would rebuild the level the process started at.
+		nextArgs = func() []string { return buildArgs(target) }
+	}
+
 	onProgress, watch := e.firstMediaLoggerWatched(row.Name, row.Kind)
 
 	// Declared before the Spec because OnLog's #674 re-probe handler closes
@@ -950,6 +1008,8 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		Bin:      e.tools.FFmpeg,
 		Args:     buildArgs(target),
 		NextArgs: nextArgs,
+		// Stdin is the live command channel for gain and mute (see supervisor).
+		LiveCommands: true,
 		// The minted key is passed as an EXTRA literal rather than left to
 		// inherit the row's registration, because it cannot: SecretSet.Scrub is
 		// a substring replace and the minted key ENDS WITH the operator's
@@ -1017,7 +1077,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	}
 	e.dests[row.ID] = &destination{
 		row: row, proc: proc, port: port, subName: subName, watch: watch,
-		compiled: compiled, hub: hub, spec: spec,
+		compiled: compiled, graph: graph, hub: hub, spec: spec,
 		multitrack: mt, vodDropped: vodDropped,
 	}
 	e.mu.Unlock()
@@ -1251,7 +1311,11 @@ func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.R
 	if wantsBackup(prev.row) {
 		want = backupSpecOf(prev.row, compiled, upstream)
 		if prev.backup != nil && prev.backupSpec == want {
-			return
+			if e.liveBackup(prev, compiled) {
+				return
+			}
+			// Refused live: fall through and restart the backup with the level
+			// it was given, so the new one takes effect.
 		}
 	} else if prev.backup == nil && prev.backupSub == "" && prev.backupPort == 0 &&
 		prev.backupSpec == "" && prev.backupErr == reason {
@@ -1340,24 +1404,29 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 		return
 	}
 
+	graph := newGraphHolder(compiled)
 	proc := supervisor.New(e.log, supervisor.Spec{
-		Name:        sub,
-		Kind:        "destination",
-		Bin:         e.tools.FFmpeg,
-		Args:        e.destArgs(d.row, compiled, url, backupTarget(d.row)),
-		Secrets:     destSecrets(d.row),
-		AutoRestart: true,
-		MinBackoff:  destPolicy(d.row).MinBackoff,
-		MaxBackoff:  destPolicy(d.row).MaxBackoff,
-		MaxRestarts: destPolicy(d.row).MaxRestarts,
-		OnLog:       e.onLog,
-		OnState:     e.onState,
-		LogSink:     logSink{e},
+		Name: sub,
+		Kind: "destination",
+		Bin:  e.tools.FFmpeg,
+		Args: e.destArgs(d.row, graph.get(), url, backupTarget(d.row)),
+		// Respawns of the backup read the same holder, so a live level survives them.
+		NextArgs:     func() []string { return e.destArgs(d.row, graph.get(), url, backupTarget(d.row)) },
+		LiveCommands: true,
+		Secrets:      destSecrets(d.row),
+		AutoRestart:  true,
+		MinBackoff:   destPolicy(d.row).MinBackoff,
+		MaxBackoff:   destPolicy(d.row).MaxBackoff,
+		MaxRestarts:  destPolicy(d.row).MaxRestarts,
+		OnLog:        e.onLog,
+		OnState:      e.onState,
+		LogSink:      logSink{e},
 		// The redundant output stops on the same quiet feed as its primary.
 		WakeOnStop: relayWaker(hub, sub),
 	})
 
 	d.backup = proc
+	d.backupGraph = graph
 	d.backupPort = port
 	d.backupSub = sub
 	d.backupSpec = spec

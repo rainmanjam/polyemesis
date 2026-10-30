@@ -552,6 +552,11 @@ type Server struct {
 	// state the delete's in-use guard exists to prevent. Neither handler is
 	// hot enough for the coarse scope to matter.
 	settingsMu sync.Mutex
+	// trackGainMu serialises POST /destinations/{id}/tracks/{track}/gain. Each
+	// is a read-modify-write of a whole profile followed by a reconcile whose
+	// outcome it reads back; two keys pressed together must not overwrite each
+	// other's change or read each other's outcome.
+	trackGainMu sync.Mutex
 
 	// preannounceMu guards announceFails, which the pre-announce sweep mutates
 	// and nothing else reads.
@@ -1052,6 +1057,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/destinations/{id}", s.handleGetDestination)
 			r.With(s.requireSource).Put("/destinations/{id}", s.handleUpdateDestination)
 			r.With(s.requireSource).Delete("/destinations/{id}", s.handleDeleteDestination)
+			// Live gain and mute for one track. Persists first, then reconciles; the
+			// response says whether the change went live or restarted. See
+			// destinations_track_gain.go.
+			r.With(s.requireSource).Post("/destinations/{id}/tracks/{track}/gain", s.handleSetTrackGain)
 			r.With(s.requireSource).Post("/destinations/{id}/start", s.handleStartDestination)
 			r.With(s.requireSource).Post("/destinations/{id}/stop", s.handleStopDestination)
 			r.With(s.requireSource).Post("/destinations/{id}/restart", s.handleRestartDestination)

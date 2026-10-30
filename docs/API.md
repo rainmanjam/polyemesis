@@ -659,6 +659,26 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 | `POST` | `/destinations/{id}/expert/preview`, `/dry-run` |
 | `POST` | `/destinations/{id}/facebook/end-broadcast` |
 | `GET` | `/destinations/{id}/facebook/stream-health` |
+| `POST` | `/destinations/{id}/tracks/{track}/gain` |
+
+`POST /destinations/{id}/tracks/{track}/gain` sets one track's mute or gain on a
+destination. The body takes `muted` (boolean), `gain` (a finite number above
+zero), or both. A zero gain is refused: use `"muted": true`, which keeps the
+track in the mix at level zero. A matrix mix takes a gain per cell, so `gain` is
+refused there. The change is stored first and the destination is then reconciled.
+The response is `{"applied": "live" | "restart", "reason"?: string, "destination": ...}`.
+`live` means the running process took the level on its command channel. `restart`
+means the level reaches the output through a (re)start, and `reason` says why: a
+command was refused or timed out, the platform has no verified live path (Windows),
+the change alters more than a level, or the destination is not running and the
+level is stored for when it starts. A copy destination (`audio.copy`) passes its
+audio through unchanged, so a level cannot apply: `409`, and nothing is stored.
+`404` when the track is not in the destination's selection. If the reconcile after
+the save fails, the answer is still `200` with the reconcile failure in `warnings`, because the
+change was stored. Requests are serialised, so two tracks changed at once do not
+overwrite each other. Admin scope; the destination's programme is the one asked.
+The destination status carries the same outcome as `levelChange`
+(`"applied live"` or `"applied by restart: <reason>"`).
 
 List rows arrive wrapped as `{"destination": ..., "routing": ...}` so the UI
 gets the compiled routing without a second round trip.

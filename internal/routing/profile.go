@@ -176,6 +176,10 @@ type TrackSel struct {
 	Track   int     `json:"track"`   // 0-based ingest track index
 	Enabled bool    `json:"enabled"` //
 	Gain    float64 `json:"gain"`    // 1.0 == unity == "100%" in the UI
+	// Muted silences the track in the mix WITHOUT removing it from the graph.
+	// It is applied live (see volume@ stages); toggling it never restarts a
+	// destination.
+	Muted bool `json:"muted,omitempty"`
 }
 
 // Cell is one square of the advanced mix matrix: how much of one source

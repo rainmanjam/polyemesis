@@ -251,6 +251,10 @@ type Engine struct {
 	// to a fresh goroutine rather than calling it inline.
 	reconcileMu sync.Mutex
 
+	// liveNotes records, per destination, what the last level change did:
+	// applied live, or by a restart and why. Read by the API. Guarded by mu.
+	liveNotes map[int64]liveNote
+
 	// heldMu guards heldPorts. Separate from e.mu because releasePort is called
 	// from teardown paths that already hold it.
 	heldMu sync.Mutex
@@ -576,6 +580,9 @@ type destination struct {
 	port     int
 	subName  string
 	compiled routing.Result
+	// graph is the graph the primary process is spawned from, shared with its
+	// NextArgs so respawns carry the last live level. See live_gains.go.
+	graph *graphHolder
 	// hub is where this destination reads from: the ingest hub for a
 	// passthrough destination, its rendition's own hub otherwise. Held so
 	// teardown unsubscribes from the same hub it subscribed to.
@@ -598,6 +605,9 @@ type destination struct {
 	backup     *supervisor.Process
 	backupPort int
 	backupSub  string
+	// backupGraph is the graph the backup process is spawned from, for the same
+	// reason as graph.
+	backupGraph *graphHolder
 	// backupSpec is the backup's OWN restart hash, deliberately not derived
 	// from spec. The two must cycle independently: a rotated backup key has to
 	// restart only the backup, and nothing about the backup may ever restart
