@@ -52,6 +52,8 @@ export const STREAM_DECK_KEYS = [
   "streamdeck.pi.presetLabel",
   "streamdeck.pi.presetHint",
   "streamdeck.pi.presetsFailed",
+  "streamdeck.pi.presetChoose",
+  "streamdeck.pi.presetMissing",
   "streamdeck.pi.installWide",
   "streamdeck.err.urlRequired",
   "streamdeck.err.urlInvalid",

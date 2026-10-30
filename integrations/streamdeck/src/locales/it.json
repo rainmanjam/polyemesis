@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "Preset di instradamento",
   "streamdeck.pi.presetHint": "Applicare un preset può riavviare le destinazioni di questo programma.",
   "streamdeck.pi.presetsFailed": "Impossibile caricare l'elenco dei preset.",
+  "streamdeck.pi.presetChoose": "Scegli un preset",
+  "streamdeck.pi.presetMissing": "{id} (non più presente in questa installazione)",
   "streamdeck.pi.installWide": "La registrazione è per l'intera installazione: questo tasto la cambia per tutti i programmi."
 }

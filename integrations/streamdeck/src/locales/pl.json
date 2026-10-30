@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "Ustawienie routingu",
   "streamdeck.pi.presetHint": "Zastosowanie ustawienia może zrestartować miejsca docelowe tego programu.",
   "streamdeck.pi.presetsFailed": "Nie udało się wczytać listy ustawień.",
+  "streamdeck.pi.presetChoose": "Wybierz preset",
+  "streamdeck.pi.presetMissing": "{id} (nie ma go już w tej instalacji)",
   "streamdeck.pi.installWide": "Nagrywanie dotyczy całej instalacji: ten przycisk przełącza je dla wszystkich programów."
 }

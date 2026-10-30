@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "Routeringspreset",
   "streamdeck.pi.presetHint": "Een preset toepassen kan de bestemmingen van dit programma opnieuw starten.",
   "streamdeck.pi.presetsFailed": "De presetlijst kon niet worden geladen.",
+  "streamdeck.pi.presetChoose": "Kies een preset",
+  "streamdeck.pi.presetMissing": "{id} (niet meer op deze installatie)",
   "streamdeck.pi.installWide": "Opname geldt voor de hele installatie: deze toets schakelt het voor elk programma."
 }

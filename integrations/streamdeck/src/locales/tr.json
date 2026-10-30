@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "Yönlendirme ön ayarı",
   "streamdeck.pi.presetHint": "Bir ön ayarı uygulamak bu programın hedeflerini yeniden başlatabilir.",
   "streamdeck.pi.presetsFailed": "Ön ayar listesi yüklenemedi.",
+  "streamdeck.pi.presetChoose": "Bir ön ayar seçin",
+  "streamdeck.pi.presetMissing": "{id} (artık bu kurulumda yok)",
   "streamdeck.pi.installWide": "Kayıt kurulumun tamamı için geçerlidir: bu tuş tüm programlar için açıp kapatır."
 }

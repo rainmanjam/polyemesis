@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "Preajuste de enrutamiento",
   "streamdeck.pi.presetHint": "Aplicar un preajuste puede reiniciar los destinos de este programa.",
   "streamdeck.pi.presetsFailed": "No se pudo cargar la lista de preajustes.",
+  "streamdeck.pi.presetChoose": "Elige un preajuste",
+  "streamdeck.pi.presetMissing": "{id} (ya no está en esta instalación)",
   "streamdeck.pi.installWide": "La grabación es para toda la instalación: esta tecla la activa o desactiva para todos los programas."
 }

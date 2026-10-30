@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "라우팅 프리셋",
   "streamdeck.pi.presetHint": "프리셋을 적용하면 이 프로그램의 대상이 다시 시작될 수 있습니다.",
   "streamdeck.pi.presetsFailed": "프리셋 목록을 불러올 수 없습니다.",
+  "streamdeck.pi.presetChoose": "프리셋 선택",
+  "streamdeck.pi.presetMissing": "{id} (이 설치에 더 이상 없음)",
   "streamdeck.pi.installWide": "녹화는 설치 전체에 적용됩니다. 이 키는 모든 프로그램의 녹화를 전환합니다."
 }

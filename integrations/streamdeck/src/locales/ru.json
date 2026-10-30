@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "Пресет маршрутизации",
   "streamdeck.pi.presetHint": "Применение пресета может перезапустить назначения этой программы.",
   "streamdeck.pi.presetsFailed": "Не удалось загрузить список пресетов.",
+  "streamdeck.pi.presetChoose": "Выберите пресет",
+  "streamdeck.pi.presetMissing": "{id} (больше нет в этой установке)",
   "streamdeck.pi.installWide": "Запись общая для установки: эта клавиша переключает её для всех программ."
 }

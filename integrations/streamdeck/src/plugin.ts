@@ -49,6 +49,11 @@ function applyGlobals(raw: Record<string, unknown>): void {
   savedGlobals = globals;
   rt().configure(globals);
   void rt().tick();
+  // A preset picker open while the pairing is saved listed its presets against the OLD pairing
+  // (or none). Send it a fresh list now, so pairing first and picking second works without a reopen.
+  if (streamDeck.ui.action?.manifestId === `${PLUGIN}.preset`) {
+    void presetList().then((list) => streamDeck.ui.sendToPropertyInspector(list));
+  }
 }
 
 /** Wraps an SDK action in the runtime's Surface shape. Keys and dials differ in which calls they accept. */

@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "Predefinição de roteamento",
   "streamdeck.pi.presetHint": "Aplicar uma predefinição pode reiniciar os destinos deste programa.",
   "streamdeck.pi.presetsFailed": "Não foi possível carregar a lista de predefinições.",
+  "streamdeck.pi.presetChoose": "Escolha uma predefinição",
+  "streamdeck.pi.presetMissing": "{id} (não existe mais nesta instalação)",
   "streamdeck.pi.installWide": "A gravação é da instalação inteira: esta tecla a liga ou desliga para todos os programas."
 }

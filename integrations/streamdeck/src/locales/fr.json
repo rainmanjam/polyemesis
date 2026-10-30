@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "Préréglage de routage",
   "streamdeck.pi.presetHint": "Appliquer un préréglage peut redémarrer les destinations de ce programme.",
   "streamdeck.pi.presetsFailed": "La liste des préréglages n'a pas pu être chargée.",
+  "streamdeck.pi.presetChoose": "Choisir un préréglage",
+  "streamdeck.pi.presetMissing": "{id} (n'existe plus sur cette installation)",
   "streamdeck.pi.installWide": "L'enregistrement concerne toute l'installation : cette touche le change pour tous les programmes."
 }

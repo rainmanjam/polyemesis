@@ -7,6 +7,10 @@
   let actionContext;
   let pluginUUID;
   let strings = {};
+  // The key's saved preset, and the install's list once it arrives. Kept apart because either can
+  // arrive first, and the picker must show the SAVED choice, never silently the first preset.
+  let savedPresetId = "";
+  let presetList = null;
 
   const $ = (id) => document.getElementById(id);
 
@@ -59,6 +63,7 @@
     const dest = Number($("destinationId").value);
     if (Number.isSafeInteger(dest) && dest > 0) payload.destinationId = dest;
     if ($("presetId").value) payload.presetId = $("presetId").value;
+    savedPresetId = $("presetId").value;
     send({ event: "setSettings", context: actionContext, payload });
     flashSaved();
   }
@@ -70,23 +75,38 @@
   }
 
   function showPresets(payload) {
-    const select = $("presetId");
     const error = $("err-preset");
-    const current = select.value;
     if (payload.key) {
       error.textContent = strings[payload.key] || strings["streamdeck.pi.presetsFailed"] || "";
       error.hidden = false;
+      renderPresets();
       return;
     }
     error.hidden = true;
-    select.replaceChildren();
-    (payload.presets || []).forEach((p) => {
-      const option = document.createElement("option");
-      option.value = p.id;
-      option.textContent = p.name;
-      select.appendChild(option);
-    });
-    select.value = current || select.value;
+    presetList = payload.presets || [];
+    renderPresets();
+  }
+
+  // An empty "choose" entry first, so nothing is chosen until the operator chooses: a key with no
+  // preset is unbound, and the picker says so rather than showing a preset the key does not hold.
+  // A saved preset the install no longer lists stays visible, marked, instead of vanishing.
+  function renderPresets() {
+    const select = $("presetId");
+    const option = (value, label) => {
+      const o = document.createElement("option");
+      o.value = value;
+      o.textContent = label;
+      return o;
+    };
+    select.replaceChildren(option("", strings["streamdeck.pi.presetChoose"] || ""));
+    const list = presetList || [];
+    list.forEach((p) => select.appendChild(option(p.id, p.name)));
+    if (savedPresetId && presetList && !list.some((p) => p.id === savedPresetId)) {
+      select.appendChild(option(savedPresetId, (strings["streamdeck.pi.presetMissing"] || "{id}").replace("{id}", savedPresetId)));
+    } else if (savedPresetId && !presetList) {
+      select.appendChild(option(savedPresetId, savedPresetId));
+    }
+    select.value = savedPresetId;
   }
 
   function showGlobal(settings) {
@@ -98,7 +118,8 @@
   function showAction(settings) {
     if (typeof settings.sourceId === "number") $("sourceId").value = String(settings.sourceId);
     if (typeof settings.destinationId === "number") $("destinationId").value = String(settings.destinationId);
-    if (typeof settings.presetId === "string") $("presetId").value = settings.presetId;
+    savedPresetId = typeof settings.presetId === "string" ? settings.presetId : "";
+    renderPresets();
   }
 
   function runTest() {
@@ -155,6 +176,8 @@
     $("block-destination").hidden = actionType !== "com.polyemesis.streamdeck.destination" && actionType !== "com.polyemesis.streamdeck.stop-destination";
     $("block-preset").hidden = actionType !== "com.polyemesis.streamdeck.preset";
     $("block-install-wide").hidden = actionType !== "com.polyemesis.streamdeck.record";
+    // Recording is install-wide: the Record key takes no programme, so it shows no programme field.
+    $("block-source").hidden = actionType === "com.polyemesis.streamdeck.record";
     socket = new WebSocket("ws://127.0.0.1:" + port);
     socket.onopen = function () {
       send({ event: registerEvent, uuid: uuid });

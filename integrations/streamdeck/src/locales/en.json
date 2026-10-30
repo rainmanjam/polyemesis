@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "Routing preset",
   "streamdeck.pi.presetHint": "Applying a preset can restart this programme's destinations.",
   "streamdeck.pi.presetsFailed": "The preset list could not be loaded.",
+  "streamdeck.pi.presetChoose": "Choose a preset",
+  "streamdeck.pi.presetMissing": "{id} (no longer on this install)",
   "streamdeck.pi.installWide": "Recording is install-wide: this key switches it for every programme."
 }

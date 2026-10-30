@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "Routing-Voreinstellung",
   "streamdeck.pi.presetHint": "Das Anwenden einer Voreinstellung kann die Ziele dieses Programms neu starten.",
   "streamdeck.pi.presetsFailed": "Die Voreinstellungsliste konnte nicht geladen werden.",
+  "streamdeck.pi.presetChoose": "Voreinstellung wählen",
+  "streamdeck.pi.presetMissing": "{id} (nicht mehr in dieser Installation)",
   "streamdeck.pi.installWide": "Die Aufnahme gilt für die gesamte Installation: Diese Taste schaltet sie für alle Programme."
 }

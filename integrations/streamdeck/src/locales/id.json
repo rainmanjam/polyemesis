@@ -52,5 +52,7 @@
   "streamdeck.pi.presetLabel": "Preset routing",
   "streamdeck.pi.presetHint": "Menerapkan preset dapat memulai ulang destinasi program ini.",
   "streamdeck.pi.presetsFailed": "Daftar preset tidak dapat dimuat.",
+  "streamdeck.pi.presetChoose": "Pilih preset",
+  "streamdeck.pi.presetMissing": "{id} (tidak ada lagi di instalasi ini)",
   "streamdeck.pi.installWide": "Rekaman berlaku untuk seluruh instalasi: tombol ini mengubahnya untuk semua program."
 }
