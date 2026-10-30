@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "0,01 ile 1 aralığının dışında. Sunucu bunu yok sayıp 0,8 kullanır.",
   "automod.deleteRule": "{name} kuralını sil",
   "automod.deleteRuleDesc": "Ayarlar kaydedilir kaydedilmez örüntü artık denetlenmez.",
-  "automod.deleteRuleTitle": "Bu kural silinsin mi?",
   "automod.endpoint": "Adres",
   "automod.endpointNote": "Sohbet tamamlama adresi. Boş bırakılırsa her çağrı başarısız olur.",
   "automod.instruction": "Yönerge",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "Bana gezdir",
   "firstRun.ingestHeading": "Alım adresi",
   "firstRun.badgeWaiting": "Bekliyor",
-  "firstRun.needSource": "Önce bir kaynak ekleyin."
+  "firstRun.needSource": "Önce bir kaynak ekleyin.",
+  "confirm.deleteTitle": "“{name}” silinsin mi?",
+  "sources.ingestPlaceholder": "Protokol seçin",
+  "sources.waitingForEncoder": "Kodlayıcı bekleniyor",
+  "sources.waitingForEncoderBody": "Kodlayıcıyı aşağıdaki adrese yönlendirin ve başlatın. İlk karede «Sinyal algılandı» durumuna geçer.",
+  "sources.signalDetected": "Sinyal algılandı",
+  "sources.signalDetectedBody": "Bu kaynağa bir kodlayıcı bağlı.",
+  "addDest.titleAdd": "Hedef ekle",
+  "addDest.titleEdit": "Hedefi düzenle",
+  "addDest.description": "Bu programın nereye gideceğini seçin. Ses ve video makul varsayılan ayarları kullanır, bu yüzden genellikle yalnızca platform ve yayın anahtarı yeterlidir. Ses ve video bölümlerini yalnızca değiştirmek istediğinizde açın.",
+  "addDest.howToGetKey": "Bu anahtar nasıl alınır",
+  "addDest.connectWithCode": "Kodla bağlan",
+  "addDest.ipOriginNote": "Bu sayfa bir IP adresiyle açıldı. Platformlar genellikle tanımadıkları bir adrese geri yönlendiremez, bu yüzden yönlendirmeli oturum açma başarısız olabilir. Sunuluyorsa kodla bağlanın."
 }

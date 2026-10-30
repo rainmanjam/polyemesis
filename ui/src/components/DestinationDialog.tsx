@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Check, ChevronsUpDown, ExternalLink, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import {
@@ -33,6 +33,8 @@ import {
 } from "@/lib/destinationSource";
 import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
 import { useT } from "@/lib/i18n";
+import { isIpLiteralHost, platformSupportsDeviceCode } from "@/lib/platformConnect";
+import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
 import {
   failedRead,
   mayClaim,
@@ -66,7 +68,9 @@ import type {
   Platform,
   PlatformAccount,
   Rendition,
+  PlatformCreds,
   PlatformPresetInfo,
+  SetupGuide,
   ServiceInfo,
   RenditionView,
   SourceView,
@@ -684,6 +688,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // it. The arrays below are derived with rowsOf, so every consumer that only
   // wants rows is unchanged; mayClaim guards the two places that say something.
   const [accountsRead, setAccountsRead] = useState<ReadState<PlatformAccount[]>>(pendingRead);
+  // The setup guides say which platforms can sign in with a code instead of
+  // a redirect. Only those get the in-place code path.
+  const [guidesRead, setGuidesRead] = useState<ReadState<SetupGuide[]>>(pendingRead);
+  const [deviceOpen, setDeviceOpen] = useState(false);
+  // The server refuses a device start without this platform's developer
+  // credentials, so the code path is offered only when they are stored. The
+  // same rule as Settings' platformConnectControls.
+  const [credsRead, setCredsRead] = useState<ReadState<PlatformCreds[]>>(pendingRead);
   const accounts = rowsOf(accountsRead);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
   // RenditionView, not Rendition. The view carries `destinations` and
@@ -749,12 +761,26 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [variantFps, setVariantFps] = useState("");
   const [variantErr, setVariantErr] = useState("");
 
-  useEffect(() => {
-    if (!open) return;
+  // Re-read after an account is connected in place, so the picker shows it
+  // without the dialog being closed and its half-filled form lost.
+  const reloadAccounts = useCallback(() => {
     api
       .listAccounts()
       .then((r) => setAccountsRead(okRead(r)))
       .catch(() => setAccountsRead(failedRead()));
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    reloadAccounts();
+    api
+      .platformGuides()
+      .then((r) => setGuidesRead(okRead(r)))
+      .catch(() => setGuidesRead(failedRead()));
+    api
+      .listCreds()
+      .then((r) => setCredsRead(okRead(r)))
+      .catch(() => setCredsRead(failedRead()));
     api
       .listRenditions()
       .then((r) => setRenditionsRead(okRead(r)))
@@ -829,7 +855,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setAccountId("none");
       setRenditionId(PASSTHROUGH);
     }
-  }, [open, destination]);
+    // reloadAccounts is stable (useCallback with no deps), so listing it does
+    // not re-run this effect; it is listed because the effect calls it.
+  }, [open, destination, reloadAccounts]);
 
   const selectedPreset = useMemo(
     () => PRESETS.find((p) => p.id === presetId) ?? null,
@@ -848,6 +876,16 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     () => (caps?.connect ? accounts.filter((a) => String(a.platform) === caps.connect) : []),
     [accounts, caps],
   );
+  // Only a platform whose setup guide says it has a device flow can be
+  // connected from inside this form without a redirect back to this origin.
+  const deviceCodeOK =
+    caps?.connect !== undefined &&
+    rowsOf(guidesRead).some((g) => g.platform === caps.connect && platformSupportsDeviceCode(g)) &&
+    rowsOf(credsRead).some((c) => String(c.platform) === caps.connect);
+  // A bare IP origin cannot be a registered redirect target on most platforms.
+  // Read from the browser: a self-signed certificate on a name is not visible
+  // here, and the dialog does not claim that it is.
+  const ipOrigin = typeof window !== "undefined" && isIpLiteralHost(window.location.hostname);
   // Whether the connected Facebook account publishes to a PAGE rather than a
   // profile, which decides whether an audience setting means anything at all.
   //
@@ -1090,16 +1128,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-md overflow-y-auto">
+      {/* Wider than the old max-w-md: the sections below (platform grid,
+          audio, video) need the room, and a narrow column is what made the
+          form read as one long scroll. The lead sentence says what the form is
+          for before any term of art appears. Terms (routing profile,
+          rendition) are explained where they are used, not here. */}
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit destination" : "Add destination"}</DialogTitle>
-          <DialogDescription>
-            This destination copies its video, and by default mixes and re-encodes its audio
-            from its own routing profile. An SRT or file destination can copy the audio too,
-            forwarding your encoder's tracks untouched. Put it on a rendition if the platform
-            will not take the source video — a rendition re-encodes video once for everyone
-            that shares it, and still leaves the audio to each destination.
-          </DialogDescription>
+          <DialogTitle>{editing ? t("addDest.titleEdit") : t("addDest.titleAdd")}</DialogTitle>
+          <DialogDescription>{t("addDest.description")}</DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
@@ -1352,11 +1389,22 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               ) : !mayClaim(accountsRead) ? (
                 <p className="text-sm text-muted-foreground">Checking for a linked account…</p>
               ) : (
-                <Button variant="outline" size="sm" asChild>
-                  <a href={api.connectUrl(caps.connect)}>
-                    <ExternalLink /> Connect {caps.name} account
-                  </a>
-                </Button>
+                <div className="flex flex-col gap-1.5">
+                  {/* The code path first where the platform has one: it stays
+                      on this page, so the form is kept. The redirect is the
+                      fallback, and it leaves the form. */}
+                  {deviceCodeOK && (
+                    <Button size="sm" onClick={() => setDeviceOpen(true)}>
+                      {t("addDest.connectWithCode")}
+                    </Button>
+                  )}
+                  {ipOrigin && <p className="text-sm text-muted-foreground">{t("addDest.ipOriginNote")}</p>}
+                  <Button variant={deviceCodeOK ? "outline" : "default"} size="sm" asChild>
+                    <a href={api.connectUrl(caps.connect)}>
+                      <ExternalLink /> Connect {caps.name} account
+                    </a>
+                  </Button>
+                </div>
               )}
               {/* The mixed case, spelled out. Kick's sign-in is worth having on
                   its own merits — chat, moderation, metadata, viewer count —
@@ -2459,21 +2507,29 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             </div>
           </details>
 
+          {/* The platform's long setup prose sits behind a disclosure, so the
+              form shows the fields first. Facebook's notes alone run to about a
+              thousand characters; read on every open, they buried the key field. */}
           {selectedPreset && (
-            <div className="flex flex-col gap-1 rounded-md border border-dashed p-2">
-              <p className="text-sm text-muted-foreground">{selectedPreset.notes}</p>
-              <p className="text-sm text-muted-foreground">{PRESET_DISCLAIMER}</p>
-              {selectedPreset.helpUrl && (
-                <a
-                  href={selectedPreset.helpUrl}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 text-sm underline underline-offset-2"
-                >
-                  <ExternalLink className="size-3" /> {selectedPreset.name} setup docs
-                </a>
-              )}
-            </div>
+            <details className="rounded-md border border-dashed p-2">
+              <summary className="cursor-pointer text-sm font-medium">
+                {t("addDest.howToGetKey")}
+              </summary>
+              <div className="flex flex-col gap-1 pt-2">
+                <p className="text-sm text-muted-foreground">{selectedPreset.notes}</p>
+                <p className="text-sm text-muted-foreground">{PRESET_DISCLAIMER}</p>
+                {selectedPreset.helpUrl && (
+                  <a
+                    href={selectedPreset.helpUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 text-sm underline underline-offset-2"
+                  >
+                    <ExternalLink className="size-3" /> {selectedPreset.name} setup docs
+                  </a>
+                )}
+              </div>
+            </details>
           )}
         </div>
 
@@ -2486,6 +2542,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             {editing ? "Save" : "Create"}
           </Button>
         </DialogFooter>
+        {deviceCodeOK && caps?.connect && (
+          <DeviceCodeDialog
+            platform={caps.connect}
+            platformName={caps.name}
+            open={deviceOpen}
+            onOpenChange={setDeviceOpen}
+            onConnected={reloadAccounts}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

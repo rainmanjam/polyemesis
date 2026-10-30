@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "En dehors de 0,01 à 1. Le serveur l'ignorerait et utiliserait 0,8.",
   "automod.deleteRule": "Supprimer la règle {name}",
   "automod.deleteRuleDesc": "Le motif cesse d'être vérifié dès que les réglages sont enregistrés.",
-  "automod.deleteRuleTitle": "Supprimer cette règle ?",
   "automod.endpoint": "Adresse",
   "automod.endpointNote": "L'adresse des chat completions. Une adresse vide fait échouer chaque appel.",
   "automod.instruction": "Consigne",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "Faites-moi visiter",
   "firstRun.ingestHeading": "Adresse d'ingestion",
   "firstRun.badgeWaiting": "En attente",
-  "firstRun.needSource": "Ajoutez d'abord une source."
+  "firstRun.needSource": "Ajoutez d'abord une source.",
+  "confirm.deleteTitle": "Supprimer « {name} » ?",
+  "sources.ingestPlaceholder": "Choisir le protocole",
+  "sources.waitingForEncoder": "En attente de l'encodeur",
+  "sources.waitingForEncoderBody": "Dirigez l'encodeur vers l'adresse ci-dessous, puis lancez-le. Cela passe à « Signal détecté » à la première image.",
+  "sources.signalDetected": "Signal détecté",
+  "sources.signalDetectedBody": "Un encodeur est connecté à cette source.",
+  "addDest.titleAdd": "Ajouter une destination",
+  "addDest.titleEdit": "Modifier la destination",
+  "addDest.description": "Choisissez où part ce programme. L'audio et la vidéo utilisent des réglages adaptés par défaut : il suffit en général de la plateforme et de sa clé. N'ouvrez les sections audio et vidéo que si vous voulez les modifier.",
+  "addDest.howToGetKey": "Comment obtenir cette clé",
+  "addDest.connectWithCode": "Se connecter avec un code",
+  "addDest.ipOriginNote": "Cette page est ouverte par adresse IP. Les plateformes ne peuvent généralement pas vous renvoyer vers une adresse qu'elles ne connaissent pas, la connexion par redirection peut donc échouer. Connectez-vous avec un code si l'option est proposée."
 }

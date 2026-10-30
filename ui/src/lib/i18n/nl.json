@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "Buiten 0,01 tot 1. De server zou dit negeren en 0,8 gebruiken.",
   "automod.deleteRule": "Regel {name} verwijderen",
   "automod.deleteRuleDesc": "Het patroon wordt niet meer gecontroleerd zodra de instellingen zijn opgeslagen.",
-  "automod.deleteRuleTitle": "Deze regel verwijderen?",
   "automod.endpoint": "Adres",
   "automod.endpointNote": "Het adres voor chat completions. Een leeg adres laat elke aanroep mislukken.",
   "automod.instruction": "Instructie",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "Laat me rondkijken",
   "firstRun.ingestHeading": "Ingest-adres",
   "firstRun.badgeWaiting": "Wacht",
-  "firstRun.needSource": "Voeg eerst een bron toe."
+  "firstRun.needSource": "Voeg eerst een bron toe.",
+  "confirm.deleteTitle": "“{name}” verwijderen?",
+  "sources.ingestPlaceholder": "Kies protocol",
+  "sources.waitingForEncoder": "Wachten op encoder",
+  "sources.waitingForEncoderBody": "Richt de encoder op het adres hieronder en start hem. Bij het eerste beeld verandert dit in «Signaal gedetecteerd».",
+  "sources.signalDetected": "Signaal gedetecteerd",
+  "sources.signalDetectedBody": "Er is een encoder met deze bron verbonden.",
+  "addDest.titleAdd": "Bestemming toevoegen",
+  "addDest.titleEdit": "Bestemming bewerken",
+  "addDest.description": "Kies waar dit programma naartoe gaat. Audio en video gebruiken verstandige standaardinstellingen, dus meestal heb je alleen het platform en de sleutel nodig. Open de audio- en videosecties alleen als je ze wilt wijzigen.",
+  "addDest.howToGetKey": "Zo haal je deze sleutel op",
+  "addDest.connectWithCode": "Verbinden met een code",
+  "addDest.ipOriginNote": "Deze pagina wordt geopend via een IP-adres. Platforms kunnen je meestal niet terugsturen naar een adres dat ze niet kennen, dus inloggen via doorverwijzing kan mislukken. Verbind met een code als die wordt aangeboden."
 }

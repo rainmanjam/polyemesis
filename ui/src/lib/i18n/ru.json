@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "Вне диапазона от 0,01 до 1. Сервер проигнорирует это значение и возьмёт 0,8.",
   "automod.deleteRule": "Удалить правило {name}",
   "automod.deleteRuleDesc": "Шаблон перестанет проверяться, как только настройки будут сохранены.",
-  "automod.deleteRuleTitle": "Удалить правило?",
   "automod.endpoint": "Адрес",
   "automod.endpointNote": "Адрес запросов к модели. Пустой адрес обрывает каждый вызов.",
   "automod.instruction": "Указание",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "Покажите, как всё устроено",
   "firstRun.ingestHeading": "Адрес приёма",
   "firstRun.badgeWaiting": "Ожидание",
-  "firstRun.needSource": "Сначала добавьте источник."
+  "firstRun.needSource": "Сначала добавьте источник.",
+  "confirm.deleteTitle": "Удалить «{name}»?",
+  "sources.ingestPlaceholder": "Выберите протокол",
+  "sources.waitingForEncoder": "Ожидание энкодера",
+  "sources.waitingForEncoderBody": "Направьте энкодер на адрес ниже и запустите его. Как только придёт первый кадр, статус сменится на «Сигнал обнаружен».",
+  "sources.signalDetected": "Сигнал обнаружен",
+  "sources.signalDetectedBody": "К этому источнику подключён энкодер.",
+  "addDest.titleAdd": "Добавить назначение",
+  "addDest.titleEdit": "Изменить назначение",
+  "addDest.description": "Выберите, куда отправляется эта программа. Звук и видео настроены по умолчанию разумно, поэтому обычно нужны только платформа и её ключ. Раскрывайте разделы звука и видео, только если хотите что-то изменить.",
+  "addDest.howToGetKey": "Как получить этот ключ",
+  "addDest.connectWithCode": "Подключить по коду",
+  "addDest.ipOriginNote": "Эта страница открыта по IP-адресу. Платформы обычно не могут вернуть вас на незнакомый адрес, поэтому вход с перенаправлением может не сработать. Подключите по коду, если он предложен."
 }

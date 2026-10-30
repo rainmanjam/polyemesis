@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "Fuori dall'intervallo 0,01–1. Il server lo ignorerebbe e userebbe 0,8.",
   "automod.deleteRule": "Elimina la regola {name}",
   "automod.deleteRuleDesc": "Il motivo smette di essere controllato appena le impostazioni vengono salvate.",
-  "automod.deleteRuleTitle": "Eliminare questa regola?",
   "automod.endpoint": "Indirizzo",
   "automod.endpointNote": "L'indirizzo delle chat completions. Se è vuoto, ogni chiamata fallisce.",
   "automod.instruction": "Istruzione",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "Fammi fare un giro",
   "firstRun.ingestHeading": "Indirizzo di ingest",
   "firstRun.badgeWaiting": "In attesa",
-  "firstRun.needSource": "Aggiungi prima una sorgente."
+  "firstRun.needSource": "Aggiungi prima una sorgente.",
+  "confirm.deleteTitle": "Eliminare «{name}»?",
+  "sources.ingestPlaceholder": "Scegli il protocollo",
+  "sources.waitingForEncoder": "In attesa dell'encoder",
+  "sources.waitingForEncoderBody": "Punta l'encoder sull'indirizzo qui sotto, poi avvialo. Diventa «Segnale rilevato» al primo fotogramma.",
+  "sources.signalDetected": "Segnale rilevato",
+  "sources.signalDetectedBody": "Un encoder è collegato a questa sorgente.",
+  "addDest.titleAdd": "Aggiungi destinazione",
+  "addDest.titleEdit": "Modifica destinazione",
+  "addDest.description": "Scegli dove va questo programma. Audio e video usano impostazioni predefinite sensate, quindi di solito basta la piattaforma e la sua chiave. Apri le sezioni audio e video solo se vuoi modificarle.",
+  "addDest.howToGetKey": "Come ottenere questa chiave",
+  "addDest.connectWithCode": "Collega con un codice",
+  "addDest.ipOriginNote": "Questa pagina è aperta tramite indirizzo IP. Le piattaforme di solito non possono rimandarti a un indirizzo che non conoscono, quindi l'accesso con reindirizzamento potrebbe non riuscire. Collega con un codice se disponibile."
 }

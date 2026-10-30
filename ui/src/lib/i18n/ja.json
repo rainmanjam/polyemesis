@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "0.01 から 1 の範囲外です。サーバーはこれを無視して 0.8 を使います。",
   "automod.deleteRule": "ルール {name} を削除",
   "automod.deleteRuleDesc": "設定を保存した時点で、このパターンは照合されなくなります。",
-  "automod.deleteRuleTitle": "このルールを削除しますか？",
   "automod.endpoint": "接続先",
   "automod.endpointNote": "対話補完の接続先です。空のままだと呼び出しはすべて失敗します。",
   "automod.instruction": "指示",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "ご案内します",
   "firstRun.ingestHeading": "取り込みアドレス",
   "firstRun.badgeWaiting": "待機中",
-  "firstRun.needSource": "先にソースを追加してください。"
+  "firstRun.needSource": "先にソースを追加してください。",
+  "confirm.deleteTitle": "「{name}」を削除しますか？",
+  "sources.ingestPlaceholder": "プロトコルを選択",
+  "sources.waitingForEncoder": "エンコーダーを待機中",
+  "sources.waitingForEncoderBody": "エンコーダーを下のアドレスに向けて開始してください。最初のフレームで「信号を検出」に変わります。",
+  "sources.signalDetected": "信号を検出",
+  "sources.signalDetectedBody": "このソースにエンコーダーが接続されています。",
+  "addDest.titleAdd": "送信先を追加",
+  "addDest.titleEdit": "送信先を編集",
+  "addDest.description": "この番組の送信先を選びます。音声と映像は適切な初期設定を使うので、通常はプラットフォームとストリームキーだけで足ります。音声と映像の項目は、変更したい場合にのみ開いてください。",
+  "addDest.howToGetKey": "このキーの取得方法",
+  "addDest.connectWithCode": "コードで接続",
+  "addDest.ipOriginNote": "このページは IP アドレスで開かれています。プラットフォームは未登録のアドレスへ戻せないことが多いため、リダイレクトによるサインインは失敗することがあります。提供されていればコードで接続してください。"
 }

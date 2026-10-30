@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "Di luar 0,01 sampai 1. Server akan mengabaikannya dan memakai 0,8.",
   "automod.deleteRule": "Hapus aturan {name}",
   "automod.deleteRuleDesc": "Pola berhenti diperiksa begitu pengaturan disimpan.",
-  "automod.deleteRuleTitle": "Hapus aturan ini?",
   "automod.endpoint": "Alamat",
   "automod.endpointNote": "Alamat chat completions. Alamat kosong membuat setiap panggilan gagal.",
   "automod.instruction": "Instruksi",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "Tunjukkan kepada saya",
   "firstRun.ingestHeading": "Alamat ingest",
   "firstRun.badgeWaiting": "Menunggu",
-  "firstRun.needSource": "Tambahkan sumber terlebih dahulu."
+  "firstRun.needSource": "Tambahkan sumber terlebih dahulu.",
+  "confirm.deleteTitle": "Hapus “{name}”?",
+  "sources.ingestPlaceholder": "Pilih protokol",
+  "sources.waitingForEncoder": "Menunggu encoder",
+  "sources.waitingForEncoderBody": "Arahkan encoder ke alamat di bawah, lalu mulai. Ini berubah menjadi «Sinyal terdeteksi» pada frame pertama.",
+  "sources.signalDetected": "Sinyal terdeteksi",
+  "sources.signalDetectedBody": "Sebuah encoder terhubung ke sumber ini.",
+  "addDest.titleAdd": "Tambah tujuan",
+  "addDest.titleEdit": "Edit tujuan",
+  "addDest.description": "Pilih tujuan program ini. Audio dan video memakai pengaturan standar yang wajar, jadi biasanya Anda hanya perlu platform dan kuncinya. Buka bagian audio dan video hanya jika ingin mengubahnya.",
+  "addDest.howToGetKey": "Cara mendapatkan kunci ini",
+  "addDest.connectWithCode": "Hubungkan dengan kode",
+  "addDest.ipOriginNote": "Halaman ini dibuka lewat alamat IP. Platform biasanya tidak bisa mengarahkan Anda kembali ke alamat yang tidak mereka kenal, jadi masuk lewat pengalihan bisa gagal. Hubungkan dengan kode jika tersedia."
 }

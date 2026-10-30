@@ -55,6 +55,7 @@ import { tokenNotEnforcedKey } from "@/lib/tokenNotice";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
 import { publishRows } from "@/lib/publish-url";
+import { ingestPhase, ingestSummary } from "@/lib/sourceIngest";
 import type { Source, SourceId, SourceView } from "@/lib/types";
 
 /* ===========================================================================
@@ -368,6 +369,11 @@ export function SourceCard({
   const setIngest = (changes: Partial<Source["ingest"]>) =>
     setDraft((d) => ({ ...d, ...changes }));
   const dirty = JSON.stringify(draft) !== JSON.stringify(source.ingest);
+  // The state of the feed as the server reports it, not as the draft reads.
+  // Derived from the saved source so an unsaved protocol change does not
+  // claim an encoder is waiting on a port that is not yet listening.
+  const phase = ingestPhase(source);
+  const summary = ingestSummary({ ...source, ingest: ing });
 
   return (
     <Card className={source.running ? undefined : "border-warn/40"}>
@@ -492,7 +498,20 @@ export function SourceCard({
                 aria-label={t("sources.ingest")}
                 data-testid="ingest-mode"
               >
-                <SelectValue />
+                <SelectValue placeholder={t("sources.ingestPlaceholder")}>
+                  {summary && (
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono text-[12px] font-semibold text-primary">
+                        {summary.proto}
+                      </span>
+                      {summary.detail && (
+                        <span className="font-mono text-[12px] text-muted-foreground">
+                          {summary.detail}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="srt">SRT</SelectItem>
@@ -571,6 +590,35 @@ export function SourceCard({
             </>
           )}
         </div>
+
+        {phase === "waiting" && (
+          <div
+            role="status"
+            className="flex items-start gap-3 rounded-md border border-dashed border-armed/40 bg-armed-dim/20 px-3 py-2"
+          >
+            <span
+              aria-hidden
+              className="mt-1 h-2 w-2 shrink-0 rounded-full bg-armed motion-safe:animate-pulse"
+            />
+            <div className="min-w-0">
+              <p className="text-[12px] font-semibold text-armed">{t("sources.waitingForEncoder")}</p>
+              <p className="text-[12px] text-muted-foreground">{t("sources.waitingForEncoderBody")}</p>
+            </div>
+          </div>
+        )}
+
+        {phase === "receiving" && (
+          <div
+            role="status"
+            className="flex items-start gap-3 rounded-md border border-live/30 bg-live-dim/20 px-3 py-2"
+          >
+            <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-live" />
+            <div className="min-w-0">
+              <p className="text-[12px] font-semibold text-live">{t("sources.signalDetected")}</p>
+              <p className="text-[12px] text-muted-foreground">{t("sources.signalDetectedBody")}</p>
+            </div>
+          </div>
+        )}
 
         {dirty && (
           /* The consequence, at the moment of decision. Applying reconciles

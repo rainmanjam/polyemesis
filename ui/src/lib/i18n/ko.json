@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "0.01에서 1 범위를 벗어났습니다. 서버는 이를 무시하고 0.8을 씁니다.",
   "automod.deleteRule": "규칙 {name} 삭제",
   "automod.deleteRuleDesc": "설정을 저장하는 즉시 이 패턴은 더 이상 검사되지 않습니다.",
-  "automod.deleteRuleTitle": "이 규칙을 삭제할까요?",
   "automod.endpoint": "주소",
   "automod.endpointNote": "대화 완성 요청 주소입니다. 비어 있으면 모든 호출이 실패합니다.",
   "automod.instruction": "지시문",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "둘러보기",
   "firstRun.ingestHeading": "수집 주소",
   "firstRun.badgeWaiting": "대기 중",
-  "firstRun.needSource": "먼저 소스를 추가하세요."
+  "firstRun.needSource": "먼저 소스를 추가하세요.",
+  "confirm.deleteTitle": "“{name}”을(를) 삭제하시겠습니까?",
+  "sources.ingestPlaceholder": "프로토콜 선택",
+  "sources.waitingForEncoder": "인코더 대기 중",
+  "sources.waitingForEncoderBody": "인코더를 아래 주소로 향하게 한 뒤 시작하세요. 첫 프레임이 들어오면 '신호 감지됨'으로 바뀝니다.",
+  "sources.signalDetected": "신호 감지됨",
+  "sources.signalDetectedBody": "이 소스에 인코더가 연결되어 있습니다.",
+  "addDest.titleAdd": "대상 추가",
+  "addDest.titleEdit": "대상 편집",
+  "addDest.description": "이 프로그램을 보낼 곳을 고르세요. 오디오와 비디오는 적절한 기본값을 쓰므로 보통은 플랫폼과 스트림 키만 있으면 됩니다. 오디오와 비디오 항목은 바꾸고 싶을 때만 여세요.",
+  "addDest.howToGetKey": "이 키를 얻는 방법",
+  "addDest.connectWithCode": "코드로 연결",
+  "addDest.ipOriginNote": "이 페이지는 IP 주소로 열려 있습니다. 플랫폼은 알지 못하는 주소로 되돌려 보내지 못하는 경우가 많아 리디렉션 로그인이 실패할 수 있습니다. 제공되면 코드로 연결하세요."
 }

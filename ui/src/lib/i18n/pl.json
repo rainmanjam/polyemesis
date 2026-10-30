@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "Poza zakresem 0,01–1. Serwer pominąłby to i użył 0,8.",
   "automod.deleteRule": "Usuń regułę {name}",
   "automod.deleteRuleDesc": "Wzorzec przestaje być sprawdzany, gdy tylko ustawienia zostaną zapisane.",
-  "automod.deleteRuleTitle": "Usunąć tę regułę?",
   "automod.endpoint": "Adres",
   "automod.endpointNote": "Adres usługi chat completions. Pusty sprawia, że każde wywołanie zawodzi.",
   "automod.instruction": "Instrukcja",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "Pokaż mi",
   "firstRun.ingestHeading": "Adres ingest",
   "firstRun.badgeWaiting": "Oczekuje",
-  "firstRun.needSource": "Najpierw dodaj źródło."
+  "firstRun.needSource": "Najpierw dodaj źródło.",
+  "confirm.deleteTitle": "Usunąć „{name}”?",
+  "sources.ingestPlaceholder": "Wybierz protokół",
+  "sources.waitingForEncoder": "Oczekiwanie na enkoder",
+  "sources.waitingForEncoderBody": "Skieruj enkoder na adres poniżej i uruchom go. Po pierwszej klatce zmieni się na „Wykryto sygnał”.",
+  "sources.signalDetected": "Wykryto sygnał",
+  "sources.signalDetectedBody": "Enkoder jest połączony z tym źródłem.",
+  "addDest.titleAdd": "Dodaj cel",
+  "addDest.titleEdit": "Edytuj cel",
+  "addDest.description": "Wybierz, dokąd trafia ten program. Dźwięk i obraz mają sensowne ustawienia domyślne, więc zwykle wystarczy platforma i jej klucz. Otwórz sekcje dźwięku i obrazu tylko wtedy, gdy chcesz je zmienić.",
+  "addDest.howToGetKey": "Jak uzyskać ten klucz",
+  "addDest.connectWithCode": "Połącz kodem",
+  "addDest.ipOriginNote": "Ta strona jest otwarta pod adresem IP. Platformy zwykle nie mogą odesłać Cię pod adres, którego nie znają, więc logowanie przez przekierowanie może się nie udać. Połącz kodem, jeśli jest dostępny."
 }

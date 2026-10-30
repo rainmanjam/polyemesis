@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "Fuera de 0,01 a 1. El servidor lo ignoraría y usaría 0,8.",
   "automod.deleteRule": "Eliminar la regla {name}",
   "automod.deleteRuleDesc": "El patrón deja de comprobarse en cuanto se guarden los ajustes.",
-  "automod.deleteRuleTitle": "¿Eliminar esta regla?",
   "automod.endpoint": "Dirección",
   "automod.endpointNote": "La dirección de chat completions. Una vacía hace fallar todas las llamadas.",
   "automod.instruction": "Instrucción",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "Muéstrame cómo funciona",
   "firstRun.ingestHeading": "Dirección de ingesta",
   "firstRun.badgeWaiting": "Esperando",
-  "firstRun.needSource": "Añade primero una fuente."
+  "firstRun.needSource": "Añade primero una fuente.",
+  "confirm.deleteTitle": "¿Eliminar «{name}»?",
+  "sources.ingestPlaceholder": "Elige el protocolo",
+  "sources.waitingForEncoder": "Esperando al codificador",
+  "sources.waitingForEncoderBody": "Apunta el codificador a la dirección de abajo e inícialo. Cambiará a «Señal detectada» con el primer fotograma.",
+  "sources.signalDetected": "Señal detectada",
+  "sources.signalDetectedBody": "Hay un codificador conectado a esta fuente.",
+  "addDest.titleAdd": "Añadir destino",
+  "addDest.titleEdit": "Editar destino",
+  "addDest.description": "Elige a dónde va este programa. El audio y el vídeo usan valores sensatos por defecto, así que normalmente solo necesitas la plataforma y su clave. Abre las secciones de audio y vídeo solo si quieres cambiarlas.",
+  "addDest.howToGetKey": "Cómo obtener esta clave",
+  "addDest.connectWithCode": "Conectar con un código",
+  "addDest.ipOriginNote": "Esta página se abre por dirección IP. Las plataformas suelen no poder devolverte a una dirección que no conocen, así que el inicio de sesión por redirección puede fallar. Conéctate con un código si se ofrece."
 }

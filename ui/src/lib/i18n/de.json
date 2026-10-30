@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "Außerhalb von 0,01 bis 1. Der Server würde dies ignorieren und 0,8 verwenden.",
   "automod.deleteRule": "Regel {name} löschen",
   "automod.deleteRuleDesc": "Das Muster wird nicht mehr geprüft, sobald die Einstellungen gespeichert sind.",
-  "automod.deleteRuleTitle": "Diese Regel löschen?",
   "automod.endpoint": "Adresse",
   "automod.endpointNote": "Die Adresse für Chat-Completions. Eine leere lässt jeden Aufruf scheitern.",
   "automod.instruction": "Anweisung",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "Zeig mir die Oberfläche",
   "firstRun.ingestHeading": "Ingest-Adresse",
   "firstRun.badgeWaiting": "Wartet",
-  "firstRun.needSource": "Fügen Sie zuerst eine Quelle hinzu."
+  "firstRun.needSource": "Fügen Sie zuerst eine Quelle hinzu.",
+  "confirm.deleteTitle": "„{name}“ löschen?",
+  "sources.ingestPlaceholder": "Protokoll wählen",
+  "sources.waitingForEncoder": "Warte auf Encoder",
+  "sources.waitingForEncoderBody": "Richte den Encoder auf die Adresse unten und starte ihn. Beim ersten Frame wechselt dies zu „Signal erkannt“.",
+  "sources.signalDetected": "Signal erkannt",
+  "sources.signalDetectedBody": "Ein Encoder ist mit dieser Quelle verbunden.",
+  "addDest.titleAdd": "Ziel hinzufügen",
+  "addDest.titleEdit": "Ziel bearbeiten",
+  "addDest.description": "Wählen Sie, wohin dieses Programm geht. Audio und Video nutzen sinnvolle Standardeinstellungen, meist brauchen Sie nur die Plattform und ihren Schlüssel. Öffnen Sie die Abschnitte für Audio und Video nur, wenn Sie sie ändern möchten.",
+  "addDest.howToGetKey": "So erhalten Sie diesen Schlüssel",
+  "addDest.connectWithCode": "Mit einem Code verbinden",
+  "addDest.ipOriginNote": "Diese Seite wird über eine IP-Adresse geöffnet. Plattformen können Sie oft nicht zu einer unbekannten Adresse zurückschicken, daher kann die Anmeldung per Weiterleitung fehlschlagen. Verbinden Sie sich mit einem Code, falls angeboten."
 }

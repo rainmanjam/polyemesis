@@ -165,7 +165,6 @@
   "automod.confidenceOutOfRange": "超出 0.01 到 1 的范围。服务器会忽略它并改用 0.8。",
   "automod.deleteRule": "删除规则 {name}",
   "automod.deleteRuleDesc": "设置一经保存，该模式就不再被检查。",
-  "automod.deleteRuleTitle": "删除这条规则？",
   "automod.endpoint": "地址",
   "automod.endpointNote": "对话补全的地址。留空会让每次调用都失败。",
   "automod.instruction": "指令",
@@ -1745,5 +1744,17 @@
   "firstRun.tour": "带我参观",
   "firstRun.ingestHeading": "接入地址",
   "firstRun.badgeWaiting": "等待中",
-  "firstRun.needSource": "请先添加源。"
+  "firstRun.needSource": "请先添加源。",
+  "confirm.deleteTitle": "删除“{name}”？",
+  "sources.ingestPlaceholder": "选择协议",
+  "sources.waitingForEncoder": "等待编码器",
+  "sources.waitingForEncoderBody": "将编码器指向下方地址并开始推流。收到第一帧后会变为“已检测到信号”。",
+  "sources.signalDetected": "已检测到信号",
+  "sources.signalDetectedBody": "已有编码器连接到此来源。",
+  "addDest.titleAdd": "添加目的地",
+  "addDest.titleEdit": "编辑目的地",
+  "addDest.description": "选择此节目的去向。音频和视频已使用合理的默认设置，通常只需选择平台并填写其推流密钥。只有需要更改时，才展开音频和视频部分。",
+  "addDest.howToGetKey": "如何获取此密钥",
+  "addDest.connectWithCode": "使用验证码连接",
+  "addDest.ipOriginNote": "此页面通过 IP 地址打开。平台通常无法跳转回其不认识的地址，因此重定向登录可能失败。如果提供验证码连接，请使用它。"
 }
