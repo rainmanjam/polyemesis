@@ -187,3 +187,22 @@ keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "au
     paths = [
       '''internal/diag/disclosure_test\.go''',
     ]
+
+    # A FOURTH block, for the Settings search index (A17). It is not a fixture
+    # and holds no secret: each row names an i18n catalogue key in a `key:`
+    # field, and two of them -- the GPU vendor and VRAM labels -- are dotted,
+    # mixed-case and long enough to clear generic-api-key's entropy bar.
+    #
+    # Same AND condition as the blocks above: only i18n keys of that exact
+    # shape, and only in this one file, so a real credential pasted into it is
+    # still a finding.
+    [[rules.allowlists]]
+    description = "i18n catalogue keys in the Settings search index"
+    condition = "AND"
+    regexTarget = "match"
+    regexes = [
+      '''key: "i18nSweep\.gpu[A-Za-z]+"''',
+    ]
+    paths = [
+      '''ui/src/lib/settingsSearch\.ts''',
+    ]
