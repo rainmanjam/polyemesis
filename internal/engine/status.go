@@ -396,7 +396,7 @@ func (e *Engine) Status() Status {
 	source := e.sourceInfoLocked()
 	// Under the same lock as e.ingest, so the mode and the child are one
 	// instant: a mode change swaps both inside reconcileIngest.
-	configured := ingestConfigured(ingest != nil, e.settings.Ingest.Mode)
+	configured := ingestConfigured(ingest != nil, e.settings.Ingest.Mode, !e.sourceDisabled)
 	e.mu.RUnlock()
 
 	// Read outside the lock: it is published atomically by reconcileOutputs and
@@ -604,9 +604,11 @@ func (e *Engine) Status() Status {
 //
 // RTMP and pull keep the old reading: their hub is fed only by the child, so a
 // source of either mode with no child (no publish token, a refused upload) has
-// nothing that could be arriving. Unset has nothing to listen with.
-func ingestConfigured(child bool, mode db.IngestMode) bool {
-	return child || mode == db.IngestSRT
+// nothing that could be arriving. Unset has nothing to listen with. A DISABLED
+// SRT source has nothing either: the listener refuses its encoder, and calling
+// it configured would raise ingest.lost for a programme that is switched off.
+func ingestConfigured(child bool, mode db.IngestMode, enabled bool) bool {
+	return child || (mode == db.IngestSRT && enabled)
 }
 
 // destinationStalled is DestStatus.Stalled: the process is running with its

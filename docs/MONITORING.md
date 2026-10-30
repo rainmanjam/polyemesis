@@ -231,7 +231,8 @@ the programme. Its ingest series read the listener instead. They are
 `running` (`_up` 1) while the listener is bound, whether or not an encoder is
 connected. They are `failed` when the SRT port is configured but nothing is
 bound to it, for example because another process holds the port. They are
-`stopped` when the SRT port is turned off (`0`). Before this, an SRT
+`stopped` when the SRT port is turned off (`0`) or the source is disabled,
+because the listener refuses a disabled source's encoder. Before this, an SRT
 programme read `_up` 0 and `stopped` even while its encoder was pushing, and
 `PolyemesisIngestDown` could not fire for it.
 The bitrate is what arrives at the relay, sampled every second, and it reads 0
@@ -469,7 +470,7 @@ difference between an alert and a mute button.
 
 | Event | Severity | Fires when |
 |---|---|---|
-| `ingest.lost` | `critical` | no data has arrived on a programme's ingest for **20 seconds**. Longer than a supervisor restart cycle on purpose: FFmpeg reconnecting to an RTMP endpoint is normal operation, not an incident. Nothing is raised when no ingest is configured at all — silence is then the expected state. An SRT source counts as configured although it has no ingest process, the same as an RTMP or pull source; before this fix `ingest.lost` never fired for SRT. Like RTMP and pull, it also fires once if nothing has arrived 20 seconds after the server starts |
+| `ingest.lost` | `critical` | no data has arrived on a programme's ingest for **20 seconds**. Longer than a supervisor restart cycle on purpose: FFmpeg reconnecting to an RTMP endpoint is normal operation, not an incident. Nothing is raised when no ingest is configured at all — silence is then the expected state. An enabled SRT source counts as configured although it has no ingest process, the same as an RTMP or pull source; before this fix `ingest.lost` never fired for SRT. Like RTMP and pull, it also fires once if nothing has arrived 20 seconds after the server starts |
 | `ingest.recovered` | `info` | the source is delivering again |
 | `destination.down` | `critical` | an **enabled** destination has not been delivering for **20 seconds**. A destination you turned off is not down, and turning it back on starts the clock fresh rather than firing on the time it spent disabled |
 | `destination.recovered` | `info` | it is delivering again |

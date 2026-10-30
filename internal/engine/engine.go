@@ -461,6 +461,14 @@ type Engine struct {
 	// the middle of command construction for no benefit -- a rotation cannot
 	// happen without a reconcile either.
 	sourceToken string
+	// sourceDisabled mirrors the source row's Enabled, inverted so the zero
+	// value (before the first reconcile, or a row that will not read) is the
+	// enabled reading the engine has always assumed. The shared SRT listener
+	// refuses a disabled source's encoder, so a disabled SRT programme has no
+	// ingest that could be lost; see ingestConfigured. Set where sourceName is,
+	// for the same reason: enabling or disabling a source goes through a
+	// reconcile.
+	sourceDisabled bool
 	// probeFailed is set while probes are failing, so the warning is logged on
 	// the transition rather than on every 3s retry.
 	probeFailed atomic.Bool
@@ -1408,6 +1416,7 @@ func (e *Engine) effectiveSettings() (db.Settings, error) {
 	e.mu.Lock()
 	e.sourceName = src.Name
 	e.sourceToken = src.Token
+	e.sourceDisabled = !src.Enabled
 	e.mu.Unlock()
 
 	return settings, nil
@@ -1419,6 +1428,16 @@ func (e *Engine) ingestToken() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.sourceToken
+}
+
+// SourceEnabled reports whether this programme's source row was enabled at
+// the last reconcile. The scrape reads it for an SRT programme, whose ingest
+// state is its listener's: a disabled source is refused by that listener.
+func (e *Engine) SourceEnabled() bool {
+	e.requireEngine("SourceEnabled")
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return !e.sourceDisabled
 }
 
 // SourceID reports which programme this engine owns, and 0 when there is no

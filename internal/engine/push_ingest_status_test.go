@@ -82,27 +82,41 @@ func TestAnSRTSourceIsAConfiguredIngestWithNoIngestProcess(t *testing.T) {
 		t.Error("alertSnapshot says an SRT source has no ingest configured: the hooks and events " +
 			"watchers then read every frozen destination as down/stalled, and ingest.lost can never fire")
 	}
+
+	// Disabled, the listener refuses its encoder: nothing to lose, no
+	// ingest.lost 20 seconds after boot for a programme switched off.
+	e.mu.Lock()
+	e.sourceDisabled = true
+	e.mu.Unlock()
+	if e.alertSnapshot(time.Now(), false).IngestConfigured {
+		t.Error("a disabled SRT source reads as a configured ingest")
+	}
 }
 
 // The counterpart: a programme whose ingest mode was never chosen, with no
 // child, really has nothing to lose -- a frozen destination there is its own.
 func TestAnUnsetIngestIsStillNotConfigured(t *testing.T) {
 	for _, tc := range []struct {
-		mode  db.IngestMode
-		child bool
-		want  bool
+		mode    db.IngestMode
+		child   bool
+		enabled bool
+		want    bool
 	}{
-		{db.IngestSRT, false, true},
-		{db.IngestRTMP, true, true},
-		{db.IngestPull, true, true},
-		{db.IngestUnset, false, false},
+		{db.IngestSRT, false, true, true},
+		{db.IngestRTMP, true, true, true},
+		{db.IngestPull, true, true, true},
+		{db.IngestUnset, false, true, false},
 		// An RTMP or pull source whose child was not spawned (no token, a
 		// refused upload) has nothing feeding its hub: the old reading stands.
-		{db.IngestRTMP, false, false},
-		{db.IngestPull, false, false},
+		{db.IngestRTMP, false, true, false},
+		{db.IngestPull, false, true, false},
+		// A DISABLED SRT source: the shared listener refuses its encoder, so
+		// there is nothing to lose and nothing to page about.
+		{db.IngestSRT, false, false, false},
 	} {
-		if got := ingestConfigured(tc.child, tc.mode); got != tc.want {
-			t.Errorf("ingestConfigured(child=%v, %q) = %v, want %v", tc.child, tc.mode, got, tc.want)
+		if got := ingestConfigured(tc.child, tc.mode, tc.enabled); got != tc.want {
+			t.Errorf("ingestConfigured(child=%v, %q, enabled=%v) = %v, want %v",
+				tc.child, tc.mode, tc.enabled, got, tc.want)
 		}
 	}
 }

@@ -98,6 +98,7 @@ var nilEngineAnswers = map[string]bool{
 	"Settings":        false,
 	"Silence":         false,
 	"SourceName":      false,
+	"SourceEnabled":   false,
 }
 
 // argumentlessEngineMethods is every exported method on *Engine that takes

@@ -1255,13 +1255,14 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 // same meaning an RTMP or pull child's state has: running while it is able to
 // receive -- waiting for the encoder or receiving it, which only the bitrate
 // tells apart -- failed when a port is configured and nothing is bound to it,
-// and stopped when the operator has turned the port off (port 0), which is a
-// decision rather than a fault and must not page.
+// and stopped when the operator has turned the port off (port 0) or disabled
+// the source (the listener refuses a disabled source's encoder). Those two are
+// decisions rather than faults and must not page.
 //
 // Every other mode's ingest IS its child, so with none it is stopped, as
 // before.
-func childlessIngestState(mode db.IngestMode, srtPort int, srtBound bool) supervisor.State {
-	if mode != db.IngestSRT {
+func childlessIngestState(mode db.IngestMode, enabled bool, srtPort int, srtBound bool) supervisor.State {
+	if mode != db.IngestSRT || !enabled {
 		return supervisor.StateStopped
 	}
 	switch {
@@ -1318,8 +1319,8 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 			// the shared listener feeds the hub directly -- and the listener
 			// is then what carries the state. See childlessIngestState.
 			set := e.Settings()
-			in.State = string(childlessIngestState(set.Ingest.Mode, set.Listeners.SRTPort,
-				s.mgr.ListenerBound(db.IngestSRT)))
+			in.State = string(childlessIngestState(set.Ingest.Mode, e.SourceEnabled(),
+				set.Listeners.SRTPort, s.mgr.ListenerBound(db.IngestSRT)))
 		}
 		if b := e.Monitor().Bitrate(); len(b) > 0 {
 			in.BitrateKbps = b[len(b)-1].Kbps

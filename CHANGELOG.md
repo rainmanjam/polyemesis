@@ -223,7 +223,7 @@ its first tagged release.
   `failed` half of `PolyemesisIngestDown` could never fire for one. They now
   read the shared SRT listener: `running` while it is bound, `failed` when
   the SRT port is configured and nothing is bound, and `stopped` when the port
-  is turned off. MQTT's `live` is now whether the stream is arriving. It had
+  is turned off or the source is disabled. MQTT's `live` is now whether the stream is arriving. It had
   read `false` for SRT throughout, and `true` for RTMP from the first show
   onwards. An SRT programme's MQTT bitrate is the relay's.
 
