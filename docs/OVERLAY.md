@@ -76,7 +76,8 @@ An overlay shows a message only after automatic moderation has judged it:
   they do in the console.
 
 If you hide or delete a message, or ban its author, after it's on screen, it
-leaves every overlay straight away.
+leaves every overlay straight away. An overlay that reconnects, for example
+after OBS reloads the source, is never sent a removed message again.
 
 Each line carries the viewer's display name, colour, role dots and text. It
 carries no user IDs, account names or moderation data. Emote images aren't

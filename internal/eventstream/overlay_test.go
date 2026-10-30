@@ -148,3 +148,61 @@ func TestADisplayLineSurvivesRedactionTyped(t *testing.T) {
 		t.Errorf("a credential-shaped string survived redaction: %q", d.Text)
 	}
 }
+
+// TestARetractedLineIsNeverReplayedToAnOverlay: the replay ring holds every
+// chat.display. An overlay that reconnects with an id from before a line that
+// has since been retracted -- an OBS reload, a network blip -- must not be
+// replayed that line, not even for the frame before its chat.undisplay. The
+// retraction scrubs the line from overlay replay at the moment it is
+// published, so it holds whether the resume point is before the line, between
+// the line and its retraction, or unprovable (a gap replays everything held).
+func TestARetractedLineIsNeverReplayedToAnOverlay(t *testing.T) {
+	h := NewHub()
+	start := h.boot + "-0"
+	h.Publish(Envelope{Type: TypeChatDisplay, Data: DisplayLine{ID: "keep", Platform: "twitch", Text: "fine"}})
+	h.Publish(Envelope{Type: TypeChatDisplay, Data: DisplayLine{ID: "gone", Platform: "twitch", Text: "removed later"}})
+	between := h.boot + "-2"
+	// Same id on another platform is a different line and must survive.
+	h.Publish(Envelope{Type: TypeChatDisplay, Data: DisplayLine{ID: "gone", Platform: "youtube", Text: "other platform"}})
+	h.Publish(Envelope{Type: TypeChatUndisplay, Data: DisplayRemoval{Platform: "twitch", IDs: []string{"gone"}}})
+
+	for name, lastID := range map[string]string{"before the line": start, "after the line": between, "unprovable": "nope-1"} {
+		sub, replay, _ := h.Subscribe(Filter{Overlay: &OverlayView{}}, lastID)
+		sub.Close()
+		var texts []string
+		for _, env := range replay {
+			if d, ok := env.Data.(DisplayLine); ok {
+				texts = append(texts, d.Text)
+				if d.Text == "removed later" {
+					t.Errorf("resume %s: the retracted line was replayed to an overlay", name)
+				}
+			}
+		}
+		if name != "after the line" && !containsStr(texts, "fine") {
+			t.Errorf("resume %s: replay %v lost a line that was never retracted", name, texts)
+		}
+		if !containsStr(texts, "other platform") {
+			t.Errorf("resume %s: replay %v lost the other platform's line with the same id", name, texts)
+		}
+	}
+
+	// An admin subscriber sees moderation anyway: it is replayed the line AND
+	// the retraction after it, in order, which is the history as it happened.
+	_, admin, _ := h.Subscribe(Filter{}, start)
+	var seq []Type
+	for _, env := range admin {
+		seq = append(seq, env.Type)
+	}
+	if len(seq) != 4 || seq[3] != TypeChatUndisplay {
+		t.Errorf("admin replay = %v, want all three lines then the retraction", seq)
+	}
+}
+
+func containsStr(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}

@@ -300,6 +300,11 @@ it here. Read tokens are refused it, as they are refused chat.
 Unlike `chat.message`, a line is published only after automod has judged the
 message. A message automod removes is never published here.
 
+Replay treats a removed line differently for an overlay key: a `chat.display`
+that a later `chat.undisplay` removed is never replayed to an overlay, whatever
+`Last-Event-ID` it resumes from. An admin subscriber is replayed both events,
+in the order they happened.
+
 ### Alerts
 
 `alert` carries the operator alert exactly as a rule would deliver it, after the

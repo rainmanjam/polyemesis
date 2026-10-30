@@ -282,6 +282,12 @@ type Envelope struct {
 	Failure *failreason.Reason `json:"failure,omitempty"`
 	// Data is the type-specific payload for the families no webhook carries.
 	Data any `json:"data,omitempty"`
+
+	// retracted marks a ring entry -- a chat.display -- that a later
+	// chat.undisplay took off screen. Never serialised; set only on the ring's
+	// copy, under the hub's lock, and read by the overlay policy so a
+	// reconnecting overlay is never replayed a line that was removed.
+	retracted bool
 }
 
 // FromHook converts a webhook edge into an envelope. The one conversion, so the

@@ -162,6 +162,12 @@ func (p *overlayPolicy) admits(env Envelope) bool {
 	if !OverlayVisible(env.Type) {
 		return false
 	}
+	// A line retracted since it was published is never REPLAYED to an
+	// overlay. The live send happened before the retraction existed, and the
+	// chat.undisplay that followed it is what removed it there.
+	if env.retracted {
+		return false
+	}
 	pl := displayPlatform(env)
 	if pl == "" {
 		return false
@@ -246,6 +252,7 @@ func (h *Hub) Publish(env Envelope) {
 	h.seq++
 	env.ID = h.boot + "-" + strconv.FormatUint(h.seq, 10)
 	h.ring = append(h.ring, env)
+	h.scrubRetractedLocked(env)
 	h.pruneLocked(now)
 	for s := range h.subs {
 		if !wants(s.topics, s.read, s.overlay, env) {
@@ -255,6 +262,31 @@ func (h *Hub) Publish(env Envelope) {
 		case s.c <- env:
 		default:
 			h.dropLocked(s, true)
+		}
+	}
+}
+
+// scrubRetractedLocked marks every held chat.display a chat.undisplay names, so
+// overlay replay skips it (see overlayPolicy.admits). Done when the retraction
+// is PUBLISHED rather than worked out at replay time, so it holds for any
+// resume point -- before the line, between the line and its retraction, or a
+// gap that replays everything held. Admin replay is unaffected: it is sent the
+// line and then the retraction, which is what happened.
+func (h *Hub) scrubRetractedLocked(env Envelope) {
+	rm, ok := env.Data.(DisplayRemoval)
+	if !ok || env.Type != TypeChatUndisplay || len(rm.IDs) == 0 {
+		return
+	}
+	gone := make(map[string]bool, len(rm.IDs))
+	for _, id := range rm.IDs {
+		gone[id] = true
+	}
+	for i := range h.ring {
+		if h.ring[i].Type != TypeChatDisplay {
+			continue
+		}
+		if d, ok := h.ring[i].Data.(DisplayLine); ok && d.Platform == rm.Platform && gone[d.ID] {
+			h.ring[i].retracted = true
 		}
 	}
 }

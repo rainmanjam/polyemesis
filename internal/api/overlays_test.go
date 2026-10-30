@@ -544,3 +544,41 @@ func overlayServer(t *testing.T) (*httptest.Server, http.Handler, func(*http.Req
 	srv, _, h, sign, hub := eventsServer(t)
 	return srv, h, sign, hub
 }
+
+// TestAReconnectingOverlayIsNotReplayedARetractedLine is the replay half of the
+// moderation promise, over HTTP: an OBS source that reloads and resumes with
+// Last-Event-ID from before a line that was since hidden must not get that line
+// back, even for one frame.
+func TestAReconnectingOverlayIsNotReplayedARetractedLine(t *testing.T) {
+	srv, h, sign, hub := overlayServer(t)
+	o := createOverlay(t, h, sign, "All", nil)
+
+	hub.Publish(eventstream.Envelope{Type: eventstream.TypeChatDisplay, Data: eventstream.DisplayLine{ID: "before", Platform: "twitch", Text: "first"}})
+	hub.Publish(eventstream.Envelope{Type: eventstream.TypeChatDisplay, Data: eventstream.DisplayLine{ID: "hidden", Platform: "twitch", Text: "HIDDEN LINE"}})
+	hub.Publish(eventstream.Envelope{Type: eventstream.TypeChatUndisplay, Data: eventstream.DisplayRemoval{Platform: "twitch", IDs: []string{"hidden"}}})
+	hub.Publish(eventstream.Envelope{Type: eventstream.TypeChatDisplay, Data: eventstream.DisplayLine{ID: "end", Platform: "twitch", Text: "SENTINEL"}})
+
+	// An id this hub cannot place is a gap, which replays EVERYTHING held:
+	// the widest resume there is.
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/overlay/events", nil)
+	req.Header.Set(OverlayKeyHeader, o.OBSKey)
+	req.Header.Set("Last-Event-ID", "x-0")
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = res.Body.Close() })
+	frames := collectUntil(t, bufio.NewReader(res.Body), "SENTINEL")
+	var texts []any
+	for _, f := range frames {
+		if d, ok := f.Env.Data.(map[string]any); ok {
+			texts = append(texts, d["text"])
+			if d["text"] == "HIDDEN LINE" {
+				t.Error("a reconnecting overlay was replayed a retracted line")
+			}
+		}
+	}
+	if len(texts) < 2 {
+		t.Errorf("replay %v: the resume replayed nothing, so the absence proves nothing", texts)
+	}
+}
