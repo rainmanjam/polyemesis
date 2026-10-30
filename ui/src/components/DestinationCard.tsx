@@ -39,7 +39,7 @@ import { duration, kbps } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
 import { reportingStreamCount } from "@/lib/stream-health";
 import type { DestStatus } from "@/lib/types";
-import { useT, useStateLabel } from "@/lib/i18n";
+import { useT, useTN, useStateLabel } from "@/lib/i18n";
 
 const PLATFORM_LABEL: Record<string, string> = {
   youtube: "YouTube",
@@ -118,6 +118,7 @@ export function DestinationCard({
   trackLabels?: (string | undefined)[] | null;
 }) {
   const t = useT();
+  const tn = useTN();
   // The two halves of #506: a stop that can be taken back, and a refusal to
   // honour a click on a button whose action changed a moment ago.
   const held = useHeldStop(onStop);
@@ -499,15 +500,13 @@ export function DestinationCard({
             held a container header and no video, and the only trace of the real
             file was a restart counter moving from 0 to 1.
 
-            Literal English, following the artefact link directly above it. The
-            keyed strings in this card are labels and buttons; these two are
-            inline artefact names, and the catalogue has fifteen locales that a
-            machine translation of this sentence would not serve well. */}
+            One key for the whole sentence; the file name is a slot, so each
+            language puts it where its own word order wants it. */}
         {dest.rolledOverTo && (
           <p className="text-[10px] text-muted-foreground">
-            Recording continued in{" "}
-            <span className="font-mono">{dest.rolledOverTo.split("/").pop()}</span>
-            {" "}— the configured file already held footage and is never overwritten.
+            {tn("dash.rolledOverTo", {
+              file: <span className="font-mono">{dest.rolledOverTo.split("/").pop()}</span>,
+            })}
           </p>
         )}
 
