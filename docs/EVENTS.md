@@ -177,6 +177,10 @@ real producer, to actually be emitted.
 | `chat.moderation` | chat | no | A moderation action was taken, by an operator or by automod. |
 | `chat.display` | overlay | no | A chat line cleared for on-screen display: judged by automod and stripped to what an overlay shows. |
 | `chat.undisplay` | overlay | no | Chat lines that were cleared for display are gone and must leave the screen. |
+| `poll.display` | overlay | no | A poll as the on-stream widget shows it: question, options and totals, with no platform breakdown. |
+| `poll.started` | poll | yes | A poll opened: question, options, duration, and where it was announced. |
+| `poll.vote` | poll | yes | A poll's running tallies changed; sent at most once a second, never once per vote. |
+| `poll.ended` | poll | yes | A poll closed, at its time or early: the final tallies with the per-platform breakdown. |
 | `alert` | alert | partly | An operator alert fired or resolved. |
 | `stream.gap` | stream | yes | Events this connection asked to replay are no longer held; reconcile over REST. |
 
@@ -310,10 +314,40 @@ it here. Read tokens are refused it, as they are refused chat.
 Unlike `chat.message`, a line is published only after automod has judged the
 message. A message automod removes is never published here.
 
+`poll.display` is the poll widget's projection (see [POLLS.md](POLLS.md)):
+`{id, question, options: [{label, votes}], total, state, endsAt, endedAt?}`.
+It names no platform and no voter. Every overlay key receives it whatever its
+platform filter, because there is nothing platform-specific in it to filter.
+It is republished every 15 seconds while a poll is open, so an overlay that
+connects mid-poll draws it without waiting for a vote.
+
 Replay treats a removed line differently for an overlay key: a `chat.display`
 that a later `chat.undisplay` removed is never replayed to an overlay, whatever
 `Last-Event-ID` it resumes from. An admin subscriber is replayed both events,
 in the order they happened.
+
+### Polls
+
+The `poll` topic is a polyemesis-run chat poll (see [POLLS.md](POLLS.md)).
+All three types carry the same payload, the poll as it stands:
+
+```json
+{"id": 12, "question": "Next map?", "state": "open",
+ "options": [{"label": "Dust", "votes": 41, "byPlatform": {"twitch": 30, "youtube": 11}},
+             {"label": "Mirage", "votes": 17, "byPlatform": {"twitch": 9, "youtube": 8}}],
+ "total": 58, "byPlatform": {"twitch": 39, "youtube": 19},
+ "durationSeconds": 120, "startedAt": "…", "endsAt": "…",
+ "announced": [{"platform": "twitch", "ok": true}],
+ "native": [{"platform": "twitch", "status": "mirrored", "votes": [12, 3]}]}
+```
+
+`state` is `open`, `closing`, `ended` or `interrupted`. `closing` is the few
+seconds after the time is up while automod finishes judging the last votes.
+`poll.vote` is coalesced: at most one a second while votes are arriving.
+
+There is no voter in any of them, by design. Who voted for what never
+leaves the poll counter, so a read token is sent these events: it gets the
+same counts the dashboard shows and nothing more.
 
 ### Alerts
 
@@ -441,7 +475,7 @@ stream works over HTTP/1.1 and HTTP/2 unchanged. The server sets no write
 timeout, which would end every stream. Each write has its own deadline instead,
 so a client that stops reading does not hold a connection open for ever.
 
-## Coming with #14, #4 and #6
+## Coming with #4 and #6
 
 These are agreed but **not emitted yet**. The features that produce them do not
 exist in this build. Each will be added to the catalogue by the feature that
@@ -450,7 +484,6 @@ consumer against them yet.
 
 | Planned | Comes with | What it will carry |
 |---|---|---|
-| `poll.started`, `poll.vote`, `poll.ended` | #14 cross-platform chat polls | a polyemesis-run poll, its tallies and result |
 | `viewers.sample` | #4 cross-platform analytics | the periodic per-platform viewer sample |
 | a `degraded: …` reason on failover switches | #6 degraded-link failover | why a link was judged degraded |
 

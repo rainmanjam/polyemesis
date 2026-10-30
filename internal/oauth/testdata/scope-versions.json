@@ -46,6 +46,20 @@
     ]
   },
   {
+    "platform": "twitch",
+    "scopeVersion": 5,
+    "scopes": [
+      "channel:manage:broadcast",
+      "channel:manage:polls",
+      "channel:read:stream_key",
+      "chat:edit",
+      "chat:read",
+      "moderator:manage:banned_users",
+      "moderator:manage:chat_messages",
+      "moderator:manage:chat_settings"
+    ]
+  },
+  {
     "platform": "vimeo",
     "scopeVersion": 1,
     "scopes": [

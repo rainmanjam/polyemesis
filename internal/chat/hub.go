@@ -97,6 +97,8 @@ type Hub struct {
 
 	// display is the on-screen overlay's sink (see display.go), or nil.
 	display DisplaySink
+	// tap is the poll counter's view of the same verdicts (display.go), or nil.
+	tap Tap
 
 	store     Store
 	bus       Publisher
@@ -493,6 +495,7 @@ func (h *Hub) retract(r *runner, messageID string) {
 		Platform: r.platform, Account: r.account, MessageIDs: []string{messageID},
 	})
 	h.retractDisplay(r.platform, r.account, []string{messageID})
+	h.tapMessage(r.platform, r.account, messageID)
 }
 
 // retractUser removes every message from one author, or -- with an empty
@@ -529,6 +532,9 @@ func (h *Hub) retractUser(r *runner, authorID string) {
 		})
 		h.retractDisplay(r.platform, r.account, ids)
 	}
+	// Outside the len(ids) check: the person was removed whether or not the
+	// ring still held anything they said.
+	h.tapAuthor(r.platform, r.account, authorID)
 }
 
 // forgetHistory drops every history entry matching drop, preserving order, and

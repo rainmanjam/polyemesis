@@ -52,6 +52,8 @@ const (
 	// TopicOverlay is the display projection of chat that an OBS overlay key
 	// may read: see DisplayLine and OverlayVisible.
 	TopicOverlay Topic = "overlay"
+	// TopicPoll is the cross-platform chat poll (#14, internal/polls).
+	TopicPoll Topic = "poll"
 )
 
 // Event types. The destination and ingest names are the webhook trigger names
@@ -76,6 +78,10 @@ const (
 	TypeChatModeration        Type = "chat.moderation"
 	TypeChatDisplay           Type = "chat.display"
 	TypeChatUndisplay         Type = "chat.undisplay"
+	TypePollStarted           Type = "poll.started"
+	TypePollVote              Type = "poll.vote"
+	TypePollEnded             Type = "poll.ended"
+	TypePollDisplay           Type = "poll.display"
 	TypeAlert                 Type = "alert"
 	TypeStreamGap             Type = "stream.gap"
 )
@@ -128,6 +134,7 @@ func alertOnTheTimeline(env Envelope) bool {
 // polls (#14), viewer samples (#4), the failover degraded reason (#6) -- is
 // added HERE, by that feature, together with the test that proves its producer
 // emits it. Until then it is documented under "Coming with …" and nowhere else.
+// Polls did exactly that.
 var catalogue = []Spec{
 	// Destinations. Status is readable by a read token over REST and /ws
 	// already; none of these carries a URL or a stream key, and every free-text
@@ -168,6 +175,19 @@ var catalogue = []Spec{
 	// it is still chat a viewer wrote under their name.
 	{TypeChatDisplay, TopicOverlay, Withheld, "A chat line cleared for on-screen display: judged by automod and stripped to what an overlay shows.", nil},
 	{TypeChatUndisplay, TopicOverlay, Withheld, "Chat lines that were cleared for display are gone and must leave the screen.", nil},
+	// The poll widget's projection: question, option labels and totals, and
+	// nothing else -- no platform, so a Twitch-only scene shows no rival's
+	// name, and no voter. Withheld from read tokens like every overlay row;
+	// they get the same numbers, with the breakdown, from the poll topic.
+	{TypePollDisplay, TopicOverlay, Withheld, "A poll as the on-stream widget shows it: question, options and totals, with no platform breakdown.", nil},
+
+	// Polls (#14). Granted: the payload is the operator's question, the
+	// options and per-platform COUNTS. Who voted for what stays inside
+	// internal/polls and has no field on any payload, so a read token -- like
+	// the dashboard -- sees the result and never a voter's id or name.
+	{TypePollStarted, TopicPoll, Granted, "A poll opened: question, options, duration, and where it was announced.", nil},
+	{TypePollVote, TopicPoll, Granted, "A poll's running tallies changed; sent at most once a second, never once per vote.", nil},
+	{TypePollEnded, TopicPoll, Granted, "A poll closed, at its time or early: the final tallies with the per-platform breakdown.", nil},
 
 	// Operator alerts, fired and resolved, after alerts.Event.Redacted. A read
 	// token gets the ones GET /timeline already shows it and no others: the
@@ -185,6 +205,7 @@ var catalogue = []Spec{
 var overlayVisible = map[Type]bool{
 	TypeChatDisplay:   true,
 	TypeChatUndisplay: true,
+	TypePollDisplay:   true,
 }
 
 // OverlayVisible reports whether an overlay key may be sent t.
@@ -224,6 +245,30 @@ type DisplayBadge struct {
 type DisplayRemoval struct {
 	Platform string   `json:"platform"`
 	IDs      []string `json:"ids"`
+}
+
+// PollDisplay is a poll as the on-stream widget draws it. AN ALLOWLIST, like
+// DisplayLine: question, option labels and totals. There is deliberately no
+// platform (the widget is logo-free and is shown on every overlay, including a
+// Twitch-only one) and no voter of any kind.
+type PollDisplay struct {
+	// ID tells one poll from the next, so a widget resets rather than mixing
+	// two polls' bars. Opaque.
+	ID       string              `json:"id"`
+	Question string              `json:"question"`
+	Options  []PollDisplayOption `json:"options"`
+	Total    int                 `json:"total"`
+	// State is "open", "closing" (counting the last votes automod is still
+	// judging) or "ended".
+	State   string     `json:"state"`
+	EndsAt  time.Time  `json:"endsAt"`
+	EndedAt *time.Time `json:"endedAt,omitempty"`
+}
+
+// PollDisplayOption is one bar of the widget.
+type PollDisplayOption struct {
+	Label string `json:"label"`
+	Votes int    `json:"votes"`
 }
 
 // Catalogue returns every emitted type, in the order docs/EVENTS.md lists them.

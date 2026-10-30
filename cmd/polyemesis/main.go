@@ -30,6 +30,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/logtz"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
+	"github.com/rainmanjam/polyemesis/internal/polls"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
@@ -416,6 +417,18 @@ func run(h *hooks) error {
 	overlayGate := overlay.New(streamHub)
 	hub.SetDisplay(overlayGate)
 	go overlayGate.Run(ctx)
+	// Chat polls (#14). The counter taps the same verdicts the overlay gate
+	// gets, plus why each removed message went (chat.Tap), and publishes the
+	// poll events into the same hub. A poll open when the last process
+	// stopped lost its votes with it: marked interrupted, never a result.
+	if n, err := store.InterruptOpenPolls(time.Now()); err != nil {
+		log.Warn("polls: could not mark interrupted polls", "err", err)
+	} else if n > 0 {
+		log.Info("polls: a poll was open when the server stopped; marked interrupted", "count", n)
+	}
+	pollEngine := polls.New(store, streamHub, polls.WithSender(hub), polls.WithLogger(log))
+	hub.SetTap(pollEngine)
+	go pollEngine.Run(ctx)
 
 	srv := api.New(api.Options{
 		Diag:      diagRecorder,
@@ -427,6 +440,7 @@ func run(h *hooks) error {
 		Hooks:         hookd,
 		Stream:        streamHub,
 		OverlayGate:   overlayGate,
+		Polls:         pollEngine,
 		SetupCode:     setupCode,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
@@ -437,6 +451,8 @@ func run(h *hooks) error {
 		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
 	})
 	go srv.RefreshLoop(ctx)
+	// The native Twitch poll mirror reads accounts and tokens through the API.
+	pollEngine.SetMirror(srv.PollMirror())
 	// Pre-announces scheduled Facebook broadcasts, so a show on a schedule has
 	// an event page before it starts. Best-effort by construction: it runs
 	// ahead of the stream and nothing downstream waits on it, so a failure

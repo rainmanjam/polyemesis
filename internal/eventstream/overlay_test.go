@@ -21,16 +21,25 @@ func everyCataloguedType(h *Hub) {
 			env.Data = DisplayRemoval{Platform: "twitch", IDs: []string{"d1"}}
 		case TypeChatMessage:
 			env.Data = map[string]any{"platform": "twitch", "text": "raw", "author": map[string]any{"id": "42"}}
+		case TypePollDisplay:
+			env.Data = PollDisplay{ID: "p1", Question: "Next map?", State: "open",
+				Options: []PollDisplayOption{{Label: "Dust", Votes: 3}, {Label: "Mirage", Votes: 1}}, Total: 4}
+		case TypePollStarted, TypePollVote, TypePollEnded:
+			// The admin and read-token payload, with its per-platform
+			// breakdown: an overlay must never be sent it.
+			env.Data = map[string]any{"id": 1, "question": "Next map?",
+				"byPlatform": map[string]int{"twitch": 3, "youtube": 1}}
 		}
 		h.Publish(env)
 	}
 }
 
 // TestAnOverlaySubscriberIsSentOnlyTheDisplayProjection: an overlay key is the
-// narrowest principal there is. Of every type in the catalogue it gets the two
-// overlay rows and nothing else -- not chat.message (which carries author ids
-// and accounts), not chat.moderation, not destination status, not alerts --
-// whatever topics it asks for.
+// narrowest principal there is. Of every type in the catalogue it gets the
+// three overlay rows and nothing else -- not chat.message (which carries author
+// ids and accounts), not chat.moderation, not the poll.* events with their
+// per-platform breakdown, not destination status, not alerts -- whatever
+// topics it asks for.
 func TestAnOverlaySubscriberIsSentOnlyTheDisplayProjection(t *testing.T) {
 	h := NewHub()
 	ov, _, _ := h.Subscribe(Filter{
@@ -50,7 +59,7 @@ func TestAnOverlaySubscriberIsSentOnlyTheDisplayProjection(t *testing.T) {
 	for _, env := range got {
 		types = append(types, env.Type)
 	}
-	want := []Type{TypeChatDisplay, TypeChatUndisplay}
+	want := []Type{TypeChatDisplay, TypeChatUndisplay, TypePollDisplay}
 	if !reflect.DeepEqual(types, want) {
 		t.Fatalf("overlay subscriber got %v, want exactly %v", types, want)
 	}
@@ -59,10 +68,15 @@ func TestAnOverlaySubscriberIsSentOnlyTheDisplayProjection(t *testing.T) {
 // TestOnlyTheOverlayRowsAreOverlayVisible pins the closed set: adding a type to
 // it is a decision about what a key in an OBS URL may see, and must be made
 // here, in a reviewed diff, rather than by a catalogue row's topic.
+//
+// poll.display was added by #14, deliberately: the poll widget is drawn from
+// the same key as the chat overlay, and what it is sent is the totals-only
+// projection (PollDisplay), never the poll.* payload with its per-platform
+// breakdown.
 func TestOnlyTheOverlayRowsAreOverlayVisible(t *testing.T) {
 	for _, s := range Catalogue() {
 		visible := OverlayVisible(s.Type)
-		should := s.Type == TypeChatDisplay || s.Type == TypeChatUndisplay
+		should := s.Type == TypeChatDisplay || s.Type == TypeChatUndisplay || s.Type == TypePollDisplay
 		if visible != should {
 			t.Errorf("%s: overlay-visible = %v, want %v", s.Type, visible, should)
 		}
@@ -205,4 +219,77 @@ func containsStr(xs []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// TestAPollIsShownOnEveryOverlayWhateverItsPlatformFilter: the poll widget is
+// platform-neutral -- totals only, no platform named anywhere in it -- so the
+// Twitch-only overlay that must not show a rival's logo can still show the
+// poll. That is a typed exception to "a payload with no platform is
+// withheld", and only for the PollDisplay type on the poll.display row: the
+// same payload on another row, or another payload on this row, still fails
+// closed.
+func TestAPollIsShownOnEveryOverlayWhateverItsPlatformFilter(t *testing.T) {
+	h := NewHub()
+	tw, _, _ := h.Subscribe(Filter{Overlay: &OverlayView{Platforms: []string{"twitch"}}}, "")
+	defer tw.Close()
+	poll := PollDisplay{ID: "p1", Question: "q", State: "open", Options: []PollDisplayOption{{Label: "a"}, {Label: "b"}}}
+	h.Publish(Envelope{Type: TypePollDisplay, Data: poll})
+	// Wrong row for the payload, and wrong payload for the row.
+	h.Publish(Envelope{Type: TypeChatDisplay, Data: poll})
+	h.Publish(Envelope{Type: TypePollDisplay, Data: map[string]any{"question": "q"}})
+	got := drain(tw)
+	if len(got) != 1 || got[0].Type != TypePollDisplay {
+		t.Fatalf("the Twitch overlay got %v, want exactly the one poll.display", got)
+	}
+}
+
+// TestAPollDisplayCarriesNoPlatformOrVoterField: the projection's JSON field
+// set is closed, like DisplayLine's. A per-platform breakdown would put a
+// rival platform's name on a Twitch-only scene, and a voter's name or id on
+// any scene; neither has a field to travel in.
+func TestAPollDisplayCarriesNoPlatformOrVoterField(t *testing.T) {
+	ended := time.Unix(2, 0)
+	b, err := json.Marshal(PollDisplay{ID: "p1", Question: "q", State: "ended", Total: 2,
+		Options: []PollDisplayOption{{Label: "a", Votes: 2}, {Label: "b"}},
+		EndsAt:  time.Unix(1, 0), EndedAt: &ended})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{"id": true, "question": true, "options": true, "total": true,
+		"state": true, "endsAt": true, "endedAt": true}
+	for k := range m {
+		if !allowed[k] {
+			t.Errorf("PollDisplay has field %q, which is not on the overlay allowlist", k)
+		}
+	}
+	for _, o := range m["options"].([]any) {
+		for k := range o.(map[string]any) {
+			if k != "label" && k != "votes" {
+				t.Errorf("a PollDisplay option has field %q", k)
+			}
+		}
+	}
+	for _, banned := range []string{"platform", "byPlatform", "voter", "author", "userId", "name", "account"} {
+		if strings.Contains(string(b), `"`+banned+`"`) {
+			t.Errorf("PollDisplay JSON carries %q", banned)
+		}
+	}
+}
+
+// TestAPollDisplaySurvivesRedactionTyped: the overlay policy recognises the
+// poll by its TYPE, so redaction must keep it one while it scrubs the text.
+func TestAPollDisplaySurvivesRedactionTyped(t *testing.T) {
+	env := Envelope{Type: TypePollDisplay, Data: PollDisplay{Question: "rtmp://x/live/sk_live_abcdefghijklmnop",
+		Options: []PollDisplayOption{{Label: "rtmp://y/app/sk_live_qrstuvwxyzabcdef"}}}}.redacted()
+	d, ok := env.Data.(PollDisplay)
+	if !ok {
+		t.Fatalf("redaction changed the payload to %T", env.Data)
+	}
+	if strings.Contains(d.Question, "sk_live_abcdefghijklmnop") || strings.Contains(d.Options[0].Label, "sk_live_qrstuvwxyzabcdef") {
+		t.Errorf("a credential-shaped string survived redaction: %+v", d)
+	}
 }

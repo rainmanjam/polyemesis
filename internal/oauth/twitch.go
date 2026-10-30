@@ -77,6 +77,11 @@ func (t *Twitch) Scopes() []string {
 		"moderator:manage:chat_messages",
 		"moderator:manage:banned_users",
 		"moderator:manage:chat_settings",
+		// Native polls (#14): a chat poll is mirrored as a Twitch poll and its
+		// votes merged in. Twitch runs polls for Affiliates and Partners only;
+		// on any other channel the mirror is skipped with that reason and the
+		// chat poll runs as usual. See twitch_polls.go.
+		"channel:manage:polls",
 	}
 }
 
@@ -89,6 +94,10 @@ func (t *Twitch) Scopes() []string {
 // this stays off until Twitch documents support. The flow is still a
 // confidential client: the secret never leaves the server, the code is bound to
 // a whitelisted redirect URI, and the state is single-use.
+// ScopeVersion 5 adds channel:manage:polls, for mirroring a chat poll as a
+// native Twitch poll (#14). Every connected Twitch account is asked to
+// reconnect once; until it is, its polls simply are not mirrored.
+//
 // ScopeVersion 4 adds the three moderation scopes to the set: stream key,
 // channel write, the two chat scopes, message deletion, bans, and the
 // channel-wide chat settings (slow mode, follower-only, moderator delay).
@@ -98,7 +107,7 @@ func (t *Twitch) Scopes() []string {
 // mid-broadcast. This bump is the difference between the account list saying
 // "reconnect to enable moderation" and an operator finding out when the delete
 // button fails on the message they needed gone.
-func (t *Twitch) ScopeVersion() int { return 4 }
+func (t *Twitch) ScopeVersion() int { return 5 }
 
 func (t *Twitch) PKCE() bool { return false }
 

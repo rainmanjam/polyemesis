@@ -40,6 +40,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
+	"github.com/rainmanjam/polyemesis/internal/polls"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
@@ -517,6 +518,8 @@ type Server struct {
 	// rotated or revoked (overlays.go).
 	overlayGate  *overlay.Gate
 	overlayKicks overlayKicker
+	// polls is the chat poll counter (#14), or nil without chat. polls.go.
+	polls *polls.Engine
 
 	// lifecycle drives platform broadcast state -- when a broadcast goes live,
 	// and when it ends. Nil when the server was built without a store, which is
@@ -701,6 +704,9 @@ type Options struct {
 	Stream *eventstream.Hub
 	// OverlayGate is the chat overlay's display gate. Optional.
 	OverlayGate *overlay.Gate
+	// Polls is the chat poll counter. Optional; the poll routes answer 503
+	// without it.
+	Polls *polls.Engine
 
 	// SetupCode is what POST /setup must be sent on an install with no admin.
 	// Leaving it nil is safe in the only direction that matters: setup is then
@@ -737,6 +743,7 @@ func New(o Options) *Server {
 		hooks:         o.Hooks,
 		stream:        o.Stream,
 		overlayGate:   o.OverlayGate,
+		polls:         o.Polls,
 		version:       o.Version,
 		diag:          o.Diag,
 		diagLevel:     o.DiagLevel,
@@ -1401,6 +1408,15 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Post("/chat/bans", s.handleChatBan)
 			r.Delete("/chat/bans", s.handleChatUnban)
 			r.Post("/chat/send", s.handleChatSend)
+
+			// Chat polls (#14). Results are counts with no voter in them, so
+			// the GETs follow the method rule; starting and ending one posts
+			// into every chat, so both are admin. See polls.go.
+			r.Get("/polls", s.handleListPolls)
+			r.Post("/polls", s.handleStartPoll)
+			r.Get("/polls/export", s.handleExportPolls)
+			r.Get("/polls/{id}", s.handleGetPoll)
+			r.Post("/polls/{id}/end", s.handleEndPoll)
 		})
 
 		// A scraper has no CSRF token to double-submit, and this route is a
@@ -1562,6 +1578,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 	// on a request that matched.
 	r.Get(OverlayPath+OverlayKeyPath+"{key}", ovPage)
 	r.Get(OverlayPath+"/dock"+OverlayKeyPath+"{key}", ovPage)
+	// The poll widget (#14): the same overlay key, a separate OBS source so
+	// it can be placed apart from the chat lines.
+	r.Get(OverlayPath+"/poll", ovPage)
+	r.Get(OverlayPath+"/poll"+OverlayKeyPath+"{key}", ovPage)
 
 	if h, err := s.uiHandler(); err == nil {
 		r.NotFound(h.ServeHTTP)

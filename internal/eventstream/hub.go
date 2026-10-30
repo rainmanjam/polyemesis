@@ -162,6 +162,12 @@ func (p *overlayPolicy) admits(env Envelope) bool {
 	if !OverlayVisible(env.Type) {
 		return false
 	}
+	// The one platform-neutral payload, admitted on its own row only and to
+	// every overlay: it names no platform, so a platform filter has nothing
+	// to filter (TestAPollIsShownOnEveryOverlayWhateverItsPlatformFilter).
+	if _, ok := env.Data.(PollDisplay); ok {
+		return env.Type == TypePollDisplay
+	}
 	// A line retracted since it was published is never REPLAYED to an
 	// overlay. The live send happened before the retraction existed, and the
 	// chat.undisplay that followed it is what removed it there.
@@ -458,6 +464,15 @@ func (e Envelope) redacted() Envelope {
 		e.Data = d
 		return e
 	case DisplayRemoval:
+		return e
+	case PollDisplay:
+		d.Question = alerts.Redact(d.Question)
+		opts := make([]PollDisplayOption, len(d.Options))
+		for i, o := range d.Options {
+			opts[i] = PollDisplayOption{Label: alerts.Redact(o.Label), Votes: o.Votes}
+		}
+		d.Options = opts
+		e.Data = d
 		return e
 	}
 	if e.Data != nil {
