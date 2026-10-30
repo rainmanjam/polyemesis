@@ -100,6 +100,18 @@ its first tagged release.
 
 ### Changed
 
+- **Twitch sign-in now uses PKCE.** Connecting a Twitch account sends an S256
+  `code_challenge`, and the token exchange sends the matching `code_verifier`
+  along with the client secret. A leaked authorization code is no use to anyone
+  but the server that asked for it. Twitch's discovery document began
+  advertising `code_challenge_methods_supported: ["S256"]` on 2026-10-19. The
+  weekly `oauth (live platforms)` check caught the change and has failed on
+  `main` since. That check now asserts S256 the way it does for Google: Twitch
+  advertises it, `Twitch.PKCE()` is on, and the consent URL carries it. It will
+  fail if Twitch withdraws S256. Accounts that were already connected are not
+  affected: refresh sends no verifier. A sign-in started before the upgrade and
+  finished after it still exchanges without a verifier.
+
 - **Deploying this release restarts every running destination once.** The
   destination argv changed: each mixed track gained its named `volume@` stage,
   and `-nostdin` is gone from destination processes everywhere except Windows.

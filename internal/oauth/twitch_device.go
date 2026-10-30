@@ -55,7 +55,9 @@ var _ DeviceFlower = (*Twitch)(nil)
 // connected through -- but a confidential client is not obliged to present its
 // secret here, and sending a parameter the documented request does not contain
 // risks a rejection nobody could debug. Same doctrine as the PKCE decision in
-// twitch.go: do not send Twitch parameters Twitch has not written down.
+// twitch.go: do not send Twitch parameters Twitch has not written down. (PKCE
+// is now on there precisely because Twitch has since written it down, in its
+// discovery document.)
 func (t *Twitch) StartDeviceAuth(ctx context.Context, clientID string) (*DeviceAuth, error) {
 	var out struct {
 		DeviceCode      string `json:"device_code"`
