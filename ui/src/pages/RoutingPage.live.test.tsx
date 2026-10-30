@@ -261,6 +261,28 @@ describe("live mute on the routing page", () => {
   });
 });
 
+describe("a live level shows what the server stored", () => {
+  // MUTATION: merge `change` instead of storedLevel(res, ...) in applyLevel. Observed: FAIL.
+  it("merges the answer's stored gain, not the request's own value", async () => {
+    // The server holds a different gain from the one asked for (a clamp, or
+    // another client's change that landed first).
+    setTrackLevel.mockImplementation(async (_id: number, track: number) => {
+      const tr = stored.profile.tracks.find((s) => s.track === track)!;
+      tr.gain = 0.6;
+      return { applied: "live", destination: structuredClone(stored) } as TrackLevelResult;
+    });
+    await renderPage();
+    // An unsaved edit, so the next Save sends the draft the answer was merged into.
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    const thumb = screen.getAllByRole("slider")[0];
+    await act(async () => fireEvent.keyDown(thumb, { key: "ArrowLeft" }));
+    await waitFor(() => expect(setTrackLevel).toHaveBeenCalledWith(7, 0, { gain: 0.95 }, 3));
+    await waitFor(() => expect(screen.getAllByText("60%").length).toBeGreaterThan(0));
+    await save();
+    expect(savedTracks().find((s) => s.track === 0)?.gain).toBe(0.6);
+  });
+});
+
 describe("a stored mute survives every routing-page save path", () => {
   it("another track's checkbox", async () => {
     await renderPage();

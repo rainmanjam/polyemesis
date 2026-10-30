@@ -50,6 +50,8 @@ import {
   destinationLiveBlock,
   levelOutcome,
   setMuted,
+  storedLevel,
+  LevelSequencer,
   trackLiveBlock,
   withLevel,
   type LevelChange,
@@ -210,6 +212,9 @@ export function RoutingPage() {
     outcome: LevelOutcome;
   } | null>(null);
   const liveSeq = useRef<Record<number, number>>({});
+  // Per destination AND track: answers for two tracks commute, so only a later
+  // request for the same track can supersede one.
+  const levelSeq = useRef(new LevelSequencer());
   // Refusals the stored row could not predict: a 409 keyed by the destination,
   // a 404 by "destination:track". Cleared by a save, which changes what the
   // server holds.
@@ -512,17 +517,27 @@ export function RoutingPage() {
       const dest = selectedIdRef.current;
       if (dest == null) return;
       const seq = (liveSeq.current[dest] = (liveSeq.current[dest] ?? 0) + 1);
+      const key = `${dest}:${track}`;
+      const trackSeq = levelSeq.current.next(key);
       try {
         const res = await api.setTrackLevel(dest, track, change, editedSourceId);
+        // An answer older than one already shown for this track is dropped:
+        // the server serialises the requests, so the newer answer already
+        // carries this one's effect, and applying it now would put an old
+        // level back on screen.
+        if (!levelSeq.current.accept(key, trackSeq)) return;
+        // What the server STORED, not what was asked for. Merged per track
+        // rather than replaced wholesale, so answers for two tracks commute and
+        // the draft's unsaved edits on other fields survive.
+        const level = storedLevel(res, track, change);
         // Stored: the list must say so whatever else happens, or Discard and the
-        // next Save would put the old level back. Merged per track rather than
-        // replaced wholesale, so answers for two tracks commute.
+        // next Save would put the old level back.
         // The list write below must not reseed whichever draft is on screen: if
         // it is this destination's, the level is merged into it here; if the
         // operator has moved on, that destination's stored row did not change.
         keepDraftFor.current = selectedIdRef.current;
         if (selectedIdRef.current === dest) {
-          setProfile((p) => (p ? withLevel(p, track, change) : p));
+          setProfile((p) => (p ? withLevel(p, track, level) : p));
         }
         setList((prev) =>
           prev.map((row) =>
@@ -531,7 +546,7 @@ export function RoutingPage() {
                   ...row,
                   destination: {
                     ...row.destination,
-                    profile: withLevel(row.destination.profile, track, change),
+                    profile: withLevel(row.destination.profile, track, level),
                   },
                 }
               : row,
