@@ -254,6 +254,10 @@ type Engine struct {
 	// liveNotes records, per destination, what the last level change did:
 	// applied live, or by a restart and why. Read by the API. Guarded by mu.
 	liveNotes map[int64]liveNote
+	// levelRespawning holds the processes respawnStaleLevels has already asked
+	// to restart, so two upstream events in quick succession cycle a stale
+	// destination once rather than twice. Guarded by mu.
+	levelRespawning map[*supervisor.Process]bool
 
 	// heldMu guards heldPorts. Separate from e.mu because releasePort is called
 	// from teardown paths that already hold it.
@@ -1636,8 +1640,10 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		// written, which nothing has ever recorded.
 		OnProgress: e.ingestProgressLogger(),
 		OnLog:      e.onLog,
-		OnState:    e.onState,
-		LogSink:    logSink{e},
+		// Each spawn is a new streamer session, which can change the decoded
+		// format under every destination. See respawnStaleLevels.
+		OnState: e.onUpstreamState,
+		LogSink: logSink{e},
 	})
 
 	e.mu.Lock()
