@@ -1052,6 +1052,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/destinations/{id}", s.handleGetDestination)
 			r.With(s.requireSource).Put("/destinations/{id}", s.handleUpdateDestination)
 			r.With(s.requireSource).Delete("/destinations/{id}", s.handleDeleteDestination)
+			// Live gain and mute for one track. Persists first, then reconciles; the
+			// response says whether the change went live or restarted. See
+			// destinations_track_gain.go.
+			r.With(s.requireSource).Post("/destinations/{id}/tracks/{track}/gain", s.handleSetTrackGain)
 			r.With(s.requireSource).Post("/destinations/{id}/start", s.handleStartDestination)
 			r.With(s.requireSource).Post("/destinations/{id}/stop", s.handleStopDestination)
 			r.With(s.requireSource).Post("/destinations/{id}/restart", s.handleRestartDestination)

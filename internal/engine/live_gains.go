@@ -201,3 +201,11 @@ func (e *Engine) DestinationLive(id int64) (applied, reason string, ok bool) {
 	n, ok := e.liveNotes[id]
 	return n.applied, n.reason, ok
 }
+
+// ForgetDestinationLive drops the recorded outcome for a destination, so the
+// next reconcile's answer is the only one an API caller can see.
+func (e *Engine) ForgetDestinationLive(id int64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.liveNotes, id)
+}
