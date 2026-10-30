@@ -833,6 +833,10 @@ const NOT_A_VALUE: Record<string, string> = {
     'a sparse set keyed "platform/action/checker"; every cell of the matrix writes into it, and there is no leaf to give a value to',
   version:
     "a branded SettingsVersion the server assigns and no page can mint: the version of the document the page read, sent back so a save from a stale read is refused (409) instead of reverting somebody else's change. Never a control",
+  "automod.model.categoryActions":
+    "a sparse map keyed by model category; the per-category selects on the model card (automod-category-<name>) write into it, and an absent key means the default action",
+  "automod.secondary.categoryActions":
+    "not read: the fallback checker applies the primary's category table (db.AutomodSettings.Secondary)",
   "playout.sourceId":
     "a branded SourceId, edited by PlayoutPage's ProgrammeCard Select whose options are the live source list plus 'default'. The walk cannot mint a SourceId that is in that domain, so it cannot fingerprint the control -- but the control exists and #774 is what added it. This is the Select-domain limit this file's header names, not a missing control",
 };
@@ -844,6 +848,18 @@ const NOT_A_CONTROL: Record<string, string> = {
     "read-only. The password is never returned by any API; it is set through the separate mq-pw field and PUT /settings/mqtt-password, and this flag only reports that one is stored",
   "automod.model.hasApiKey":
     "read-only, same shape as mqtt.hasPassword -- the key has its own endpoint and is never in the settings blob",
+  "automod.model.tested":
+    "derived on the way out from the Test pass table; a value sent back is ignored. The Test button is what changes it",
+  "automod.secondary.tested":
+    "derived on the way out from the Test pass table, same as automod.model.tested",
+  "automod.secondary.hasApiKey":
+    "read-only, same shape as automod.model.hasApiKey -- the fallback's key has its own row and is set through PUT /settings/automod-key with checker=secondary",
+  "automod.secondary.action":
+    "not read: the fallback checker applies the primary's actions, so the card has one action table, not two",
+  "automod.secondary.timeoutForBan":
+    "not read: the fallback checker applies the primary's viewer-silence duration",
+  "automod.secondary.instruction":
+    "not read: both checkers are asked with the primary's instruction",
   "automod.rules[].id":
     "server-assigned. A rule's identity is not something an operator types",
 };
@@ -894,6 +910,15 @@ const BOUND_BUT_UNMEASURABLE: Array<{
     boundAt: {
       file: "src/pages/PlayoutPage.tsx",
       needle: 'value={v.renditionId == null ? "source" : String(v.renditionId)}',
+    },
+  },
+  {
+    path: "automod.secondary.enabled",
+    why:
+      "a Switch locked until the fallback checker's Test has passed for the connection on screen (the server refuses the save otherwise), so a fixture with no Test run cannot move it",
+    boundAt: {
+      file: "src/components/AutomodModelChecker.tsx",
+      needle: "onCheckedChange={(v) => onPatch({ enabled: v })}",
     },
   },
   {

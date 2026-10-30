@@ -15,6 +15,9 @@ import type {
   TokenScope,
   AutomodMatrixView,
   AutomodModelStats,
+  AutomodSlot,
+  AutomodTestRequest,
+  AutomodTestResult,
   BitrateSample,
   BroadcastEnd,
   BulkDestReport,
@@ -494,8 +497,18 @@ export const api = {
   automodStats: () => get<AutomodModelStats>("/automod/stats"),
   /** Sets or clears the model API key. Empty clears it. The key is never
    *  returned by any endpoint, so the UI can only ever report that one is set. */
-  setAutomodKey: (key: string) =>
-    put<{ hasApiKey: boolean }>("/settings/automod-key", { key }),
+  setAutomodKey: (key: string, checker?: AutomodSlot) =>
+    put<{ hasApiKey: boolean }>(
+      "/settings/automod-key",
+      // The primary sends no `checker`, which is what every server reads as
+      // the primary -- including one that predates there being two.
+      checker === undefined || checker === "primary" ? { key } : { key, checker },
+    ),
+  /** Runs the Test button: three synthetic messages against the connection
+   *  on screen, with the checker's sealed key. A pass is what lets the server
+   *  accept that checker being switched on. */
+  testAutomodChecker: (req: AutomodTestRequest) =>
+    post<AutomodTestResult>("/automod/test", req),
 
   // --- media uploads ---
   media: () => get<MediaFile[]>("/media"),
