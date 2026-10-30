@@ -97,7 +97,9 @@ func runScript(t *testing.T, srvURL, token string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(py, "-I", driver, stubDir, scriptDir, srvURL, token)
+	// -B: no __pycache__ beside the shipped script; -I: isolated from the
+	// caller's environment and user site-packages.
+	cmd := exec.Command(py, "-I", "-B", driver, stubDir, scriptDir, srvURL, token)
 	cmd.Dir = t.TempDir()
 	done := make(chan struct{})
 	var out []byte
