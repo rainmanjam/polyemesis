@@ -2823,6 +2823,7 @@ func (e *Engine) SwitchSource(kind string) error {
 // selector deciding again, and a pin left on a source that is the problem
 // would make the refresh pointless.
 func (e *Engine) FixSource() error {
+	e.requireEngine("FixSource")
 	if err := e.SwitchSource("auto"); err != nil {
 		return err
 	}
