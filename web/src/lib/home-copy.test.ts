@@ -49,3 +49,57 @@ describe("time-to-first-stream copy (S2)", () => {
     }
   });
 });
+
+/* THE HERO (S1). The hero is the one place a reader decides whether to keep
+ * reading, so its shape is pinned here: one outcome headline, one subhead
+ * sentence, one copy-able install action that is the primary control, the
+ * quickstart as a text link, the calculator below the actions, and the real
+ * routing product in the first screen. */
+describe("the home hero (S1)", () => {
+  const home = pages("index.astro");
+  const hero = home.slice(home.indexOf("<section class=\"relative overflow-hidden"));
+  const heroBody = hero.slice(0, hero.indexOf("</section>"));
+  const h1 = heroBody.slice(heroBody.indexOf("<h1"), heroBody.indexOf("</h1>"));
+  const sub = heroBody.slice(heroBody.indexOf("rise rise-3"), heroBody.indexOf("</p>", heroBody.indexOf("rise rise-3")));
+
+  it("sets the headline with at most one forced line break", () => {
+    expect((h1.match(/<br/g) ?? []).length).toBeLessThanOrEqual(1);
+  });
+
+  it("states the subhead in one sentence", () => {
+    const text = sub.replace(/<[^>]+>/g, " ");
+    const sentences = text.split(/[.!?](\s|$)/).filter((s) => s.trim().length > 0);
+    expect(sentences.length).toBe(1);
+  });
+
+  it("makes copying the install command the primary action", () => {
+    expect(heroBody).toMatch(/btn btn-primary[^>]*data-copy-target="install-command"/);
+    expect(heroBody).toMatch(/Copy install command/);
+  });
+
+  it("names the install command's code element for that copy action", () => {
+    expect(heroBody).toMatch(/codeId="install-command"/);
+  });
+
+  it("keeps the quickstart as a text link, not a second button", () => {
+    const anchor = /<a\s+href="\/docs\/quickstart"[^>]*>/.exec(heroBody);
+    expect(anchor).not.toBeNull();
+    expect(anchor![0]).not.toMatch(/btn-primary|btn-ghost/);
+  });
+
+  it("puts the calculator link below the primary action", () => {
+    expect(heroBody.indexOf("Copy install command")).toBeGreaterThan(-1);
+    expect(heroBody.indexOf('href="/calculator"')).toBeGreaterThan(heroBody.indexOf("Copy install command"));
+  });
+
+  it("cuts the install caveat out of the hero, leaving the quickstart to carry it", () => {
+    // The docker command itself legitimately contains /udp; the caveat prose
+    // about it does not belong in the hero any more.
+    expect(heroBody).not.toMatch(/SRT is UDP/);
+    expect(heroBody).not.toMatch(/1935 is published/);
+  });
+
+  it("shows the real routing product in the first screen", () => {
+    expect(heroBody).toMatch(/src=\{routing\}/);
+  });
+});

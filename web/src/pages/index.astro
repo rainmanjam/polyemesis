@@ -4,7 +4,7 @@ import CodeBlock from "../components/CodeBlock.astro";
 import MixMatrix from "../components/MixMatrix.astro";
 import SpecStrip from "../components/SpecStrip.astro";
 import LoudnessBars from "../components/LoudnessBars.astro";
-import HeroRouting from "../components/HeroRouting.astro";
+import routing from "../assets/shots/02-routing.png";
 import { Picture } from "astro:assets";
 import meters from "../assets/shots/04-meters.png";
 /* Counted, never typed. A literal "23 documents" in the CTA below is a claim
@@ -52,216 +52,111 @@ const features = [
   path="/"
 >
   {/* ---------------------------------------------------------------- hero */}
+  {/* THE HERO IS SHAPED AROUND ONE ACTION AND ONE PICTURE (S1, approved).
+      Outcome headline, one-sentence subhead, then the install command with a
+      primary Copy button. The quickstart is a text link, not a second button,
+      because a hero with two equal buttons has no primary action. The
+      calculator sits BELOW the actions: it answers "what will this cost my
+      uplink" after the reader has decided to install, so it no longer sits
+      between the subhead and the command. The first screen shows the real
+      routing UI, not a CSS drawing of it.
+
+      The install caveat (password, /udp, port 1935) is cut to one sentence
+      here. The quickstart carries the full version, and the port reasons are
+      written out there with the commands that need them. */}
   <section class="relative overflow-hidden border-b border-line">
     <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
     <div class="wrap relative grid gap-12 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-28">
       <div class="max-w-xl">
-        {/* THE DOT IS GONE, and it was the smallest of the accent findings and
-            the clearest. A filled green disc is this product's LIVE indicator —
-            it means a destination is up, and it means that in the panel to the
-            right of this chip, in the meters on /features, and in the
-            application itself. Beside the words "MIT licensed" it means
-            nothing, and a status light that means nothing anywhere teaches a
-            reader to stop reading status lights everywhere.
-
-            Nothing replaces it. A grey dot would be the same decoration with
-            the meaning drained out; the chip's border already says "this is a
-            label" without help. */}
         <span class="chip rise rise-1">MIT licensed · self-hosted</span>
 
-        {/* "One stream in. A different mix out of each." — the shape the social
-            card settled on, and it is a better opening than the old headline for
-            one reason: it states the trade in the reader's terms (what they send,
-            what comes out) rather than in the product's (six tracks, platforms).
-            The old one named OBS in the first three words, which excludes every
-            reader who arrived from a hardware encoder. */}
-        {/* THREE LINES, AND docs/DESIGN-SYSTEM.md ASKS FOR TWO. This is the one
-            place the design note could not be executed as written, so the
-            measurement is recorded here rather than left for the next person to
-            rediscover by trying it.
-
-            The headline is 42 characters. This column is max-w-xl (576px) and
-            the type is 3.4rem, which measures ~0.47em per character in Space
-            Grotesk Bold — about 24 characters per line. Two lines therefore
-            needs the longest of them to be ≤24 characters, and the best split
-            at a word boundary is 26 ("One stream in. A different" / "mix out of
-            each."). It does not fit at any break, and it gets worse going down:
-            at the lg breakpoint itself, 1024px, the copy cell is 493px and a
-            two-line headline would need the type dropped to ~2.3rem — which
-            trades the "large type" half of the same finding for the "two lines"
-            half.
-
-            Rendered at 1440px, the two-line version wrapped to three anyway and
-            left "each." alone on the third — an orphan the eye reads as a
-            mistake. A composed break beats an accidental one, so the breaks
-            stay, one clause per line.
-
-            WHAT WOULD ACTUALLY FIX IT is in the report accompanying this
-            change: every site the design note draws from — Linear, Modal, Neon
-            — has a SINGLE-COLUMN hero, where the headline gets the full 1240px
-            and two lines is free. The two-column hero is what makes the rule
-            unreachable, not the headline.
-
-            THE HIGHLIGHT IS THE ACCENT NOW, NOT THE LIVE COLOUR. "different
-            mix" was painted --color-live, which this system reserves for a
-            destination that is actually up — the same reservation the amber
-            rule at the top of global.css states for the signal path and that
-            check-build enforces. Green in a headline spends the colour that
-            makes a green dot legible in the panel eighteen inches to the right.
-            The accent is what a headline is allowed to use, and this is one of
-            the three places docs/DESIGN-SYSTEM.md gives it: the announcement
-            bar, half the headline, the primary CTA. */}
+        {/* One outcome line. The break is the one composed break in the
+            headline, between the two clauses; the highlight is the accent. */}
         <h1 class="rise rise-2 mt-6 text-balance text-4xl font-bold leading-[1.08] sm:text-5xl lg:text-[3.4rem]">
           One stream in.<br />
-          A <span class="text-primary-bright">different mix</span><br />
-          out of each.
+          A <span class="text-primary-bright">different mix</span> out of each.
         </h1>
 
         <p class="rise rise-3 mt-6 text-pretty text-lg leading-relaxed text-muted">
-          Self-hosted restreaming with per-destination audio routing. Video is
-          copied, not re-encoded. Every live platform takes exactly one stereo
-          pair, so normally you pick one mix for everyone — polyemesis ingests
-          once over SRT and lets you choose, per destination, which tracks get
-          summed into the feed it receives.
+          Self-hosted restreaming: one ingest goes out to every platform, and you
+          choose which audio tracks each one gets, so a copyrighted song can stay
+          off the VOD.
         </p>
 
-        {/* THE FIRST THING THE HERO OFFERS IS THE COMMAND, because that is
-            literally what the visitor is about to do: this ships as one static
-            binary or one container and is installed from a shell. A hero whose
-            primary control is a signup-shaped button describes a product that
-            does not exist here, and the strip that used to sit under the buttons
-            said the same thing in 12px grey — unreadable, uncopyable, and
-            already drifted from README.md (no `--name`, no `:latest`, no 1935).
-
-            COPIED VERBATIM FROM README.md's "Try it". An invented invocation is
-            the fastest way to be caught by the one audience guaranteed to paste
-            it into a terminal, and a command that half-works is worse than none:
-            the container it creates has fixed port mappings and has to be
-            destroyed to fix them. */}
-        {/* ABOVE THE COMMAND, and only just. The command is still the hero's
-            primary control -- this ships as a container and that is what a
-            visitor is about to paste. But "how much bandwidth does this need"
-            is the question asked before the install, not after it, and a
-            visitor who cannot answer it does not run the command at all. So it
-            sits directly above, as a link rather than a second button
-            competing with the copy control. */}
-        {/* ONE ENTRY MOMENT FOR THE WHOLE CONTROL GROUP, which is what this
-            wrapper is for and its only job.
-
-            The three blocks inside it — the calculator link, the command, the
-            two buttons — used to enter separately: two of them shared rise-3
-            with the subhead (arriving from three places on the screen at the
-            same instant, which is a flicker rather than a sequence), one had
-            rise-4, and the buttons had no rise at all, so the single most
-            important control in the hero was the one element that did not
-            participate in the page's arrival.
-
-            They are one thing to a reader — "here is how you start" — so they
-            are one thing to the cascade. The hero now reads top to bottom in
-            four steps and hands off to the product panel on the fifth. */}
         <div class="rise rise-4">
-          {/* A LINK, WHICH IS WHAT THE COMMENT ABOVE SAYS IT IS. It was written
-              `class="btn btn-ghost"` — the same outlined button as "Install
-              guide" thirty lines below — so the hero shipped three buttons and a
-              rule about two, and the reasoning directly above it described a
-              control that did not exist. docs/DESIGN-SYSTEM.md's website section
-              is explicit: one filled primary and one outlined secondary, never
-              more, because a hero with three equal-weight controls has no primary
-              action at all. The rule the code contradicted is the one that was
-              right, so the code moved. */}
           <div class="mt-8">
-            <a
-              href="/calculator"
-              class="text-sm text-fg underline decoration-line underline-offset-4 transition-colors hover:decoration-primary-bright"
-            >
-              Bandwidth calculator →
-            </a>
-            {/* Under the button, not beside it. Inline, the sentence wrapped
-                around the button's right edge at every width between a phone and
-                a wide desktop -- a ragged second line starting under the middle
-                of a control reads as a caption that lost its anchor. Below it,
-                the line breaks where the column does, like every other paragraph
-                on the page. */}
-            <p class="mt-3 max-w-md text-sm leading-relaxed text-subtle">
-              What one stream to several platforms costs your uplink, per month.
-            </p>
-          </div>
-
-          <div class="mt-6">
             <CodeBlock
               label="docker"
+              codeId="install-command"
               code={`docker run -d --name polyemesis \\
   -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
   -v polyemesis-data:/data \\
   rainmanjam/polyemesis:latest`}
             />
-            <p class="mt-3 text-sm leading-relaxed text-subtle">
-              Then open <span class="font-mono text-fg">http://localhost:8080</span> and set an
-              admin password on the first-run screen. Note the
-              <span class="font-mono text-fg">/udp</span> on 6000 — SRT is UDP, and omitting the
-              suffix is the classic reason an ingest silently receives nothing.
-              1935 is published even if you plan to use SRT: a container's port
-              map is frozen when it is created, so adding RTMP later means
-              recreating the container.
-            </p>
           </div>
 
-          {/* THE DOCS ARE THE CALL TO ACTION, not a footer link. Nobody signs up
-              for a self-hosted binary; they decide whether they can operate it,
-              and the only thing that answers that is the documentation. So the
-              primary control is the quickstart and the secondary is the install
-              guide — both rendered from the repository's own files, so neither can
-              promise something the software does not do. */}
-          {/* The tertiary link is NOT accent-coloured, and this is the accent
-              audit applied at the one place it costs something. It was
-              text-primary-bright, sitting 12px from the filled primary button in
-              a lighter shade of the same colour — two controls, one hue, no
-              hierarchy between them. It keeps every affordance that matters (the
-              arrow, the underline on hover, a real focus ring) and gains the
-              accent only on hover, so approaching it is what lights it up. */}
-          <div class="mt-7 flex flex-wrap items-center gap-3">
-            <a href="/docs/quickstart" class="btn btn-primary">Read the quickstart</a>
-            <a href="/docs/install" class="btn btn-ghost">Install guide</a>
-            <a
-              href="#matrix"
-              class="inline-block py-2 text-sm text-fg transition-colors hover:text-primary-bright hover:underline"
+          {/* The primary control copies the same text the block shows. It is
+              named by id rather than found through the box, so it can sit
+              outside it. The copy script reads the id at click time. */}
+          <div class="mt-5 flex flex-wrap items-center gap-x-6 gap-y-3">
+            {/* NOT data-code-copy: check-build pairs each <pre> with exactly one
+                of those, and the block already has its own Copy. This button is
+                a second, named route to the same text, so it carries its own
+                attribute and the one delegated listener handles both. */}
+            <button
+              type="button"
+              class="btn btn-primary"
+              data-copy-target="install-command"
             >
-              See the routing →
+              Copy install command
+            </button>
+            <a
+              href="/docs/quickstart"
+              class="text-sm text-fg underline decoration-line underline-offset-4 transition-colors hover:decoration-primary-bright"
+            >
+              Read the quickstart →
             </a>
           </div>
-          {/* "Pre-release, one maintainer, MIT — where it loses is written down
-              too" USED TO BE HERE, in 14px --color-subtle under the buttons: the
-              least prominent line in the hero, carrying the most important thing
-              a stranger can be told about this project. It is now the
-              announcement bar (components/Announce.astro), which is the first
-              line of every page — so it is said once, at the top, rather than
-              twice on the page a reader is least likely to have scrolled. */}
-          <p class="mt-3 text-sm text-subtle">Three steps: run the container, open the admin screen, point OBS at it.</p>
+
+          <p class="mt-4 text-sm text-subtle">
+            Needs Docker. The ports and the first-run admin password are in the
+            <a href="/docs/quickstart" class="text-fg underline decoration-line underline-offset-4 hover:text-primary-bright">quickstart</a>.
+          </p>
+
+          <p class="mt-8 text-sm text-subtle">
+            Planning bandwidth first?
+            <a
+              href="/calculator"
+              class="text-fg underline decoration-line underline-offset-4 transition-colors hover:decoration-primary-bright"
+            >
+              Bandwidth calculator →
+            </a>
+          </p>
         </div>
       </div>
 
-      {/* The hero visual is the signal path itself, not a screenshot floating
-          at an angle. Both design passes reached that independently: the
-          product's architecture IS the argument, so the page opens with it.
-
-          It is now the ROUTING TABLE rather than the track fan-out. Same claim,
-          told from the other end: the old panel showed six tracks going in and
-          left the reader to infer that the outputs differed, while this one
-          shows four destinations whose mixes visibly differ and whose loudness
-          differs because of it. The fan-out survives further down the page in
-          MixMatrix, where there is room to be explicit about it. */}
-      {/* Centred against the copy rather than pinned to the top. The panel is
-          shorter than the text column, and top-aligning left a hole under it
-          that read as a missing element. */}
+      {/* The routing UI itself, cropped to the destination list and the track
+          checkboxes. Cropped in CSS, not by a second image file, so the
+          screenshot the docs and features page use stays the single source. */}
       <div class="relative flex items-center">
-        {/* LAST IN THE CASCADE, on purpose. It shared rise-3 with the subhead
-            and the calculator block, so the product panel — the thing the whole
-            hero is an argument for — arrived in the middle of the copy instead
-            of after it. Landing it last makes the page-load one sentence: this
-            is what it is, this is how you start, and here it is running. */}
-        <div class="rise rise-5 w-full">
-          <HeroRouting />
-        </div>
+        <figure class="rise rise-5 w-full">
+          <div class="aspect-[4/3] overflow-hidden rounded-token border border-line bg-surface">
+            <Picture
+              src={routing}
+              formats={["avif", "webp"]}
+              fallbackFormat="webp"
+              widths={[480, 720, 960, 1440]}
+              sizes="(min-width: 1024px) 560px, calc(100vw - 2.5rem)"
+              alt="The polyemesis routing screen: a destination list on the left and, on the right, a checkbox per track for the selected destination."
+              loading="eager"
+              decoding="async"
+              class="h-full w-full object-cover object-top"
+            />
+          </div>
+          <figcaption class="mt-3 font-mono text-[11px] text-subtle">
+            The routing screen from a running install.
+          </figcaption>
+        </figure>
       </div>
     </div>
   </section>
