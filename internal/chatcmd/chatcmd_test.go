@@ -12,6 +12,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/events"
 )
 
 // Chat commands (#6): `!bitrate` for anyone, `!switch` and `!fix` for the
@@ -274,5 +275,48 @@ func TestEveryModeratorActionIsLoggedWithWhoRanIt(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("log %q does not record %q", out, want)
 		}
+	}
+}
+
+// Run is the production path: a chat message the hub publishes on the bus is
+// answered, and the loop ends with its context.
+func TestRunAnswersAChatMessageFromTheBus(t *testing.T) {
+	r := newRig(t)
+	r.h.opts.Now = time.Now
+	bus := events.NewBroker()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { r.h.Run(ctx, bus); close(done) }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for len(r.send.all()) == 0 && time.Now().Before(deadline) {
+		bus.Publish(events.TypeChat, chat.Message{ID: "x", Platform: db.PlatformTwitch, Text: "!bitrate", At: time.Now()})
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(r.send.all()) == 0 {
+		t.Fatal("a !bitrate published on the bus was never answered")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after its context ended")
+	}
+	New(Options{}).Run(context.Background(), nil) // no bus: returns at once
+}
+
+type failingSender struct{}
+
+func (failingSender) Send(context.Context, string) ([]chat.SendResult, error) {
+	return nil, errors.New("no platform connected")
+}
+
+// A reply that cannot be sent is logged, not fatal, and not retried in a loop.
+func TestAReplyThatCannotBeSentIsLogged(t *testing.T) {
+	r := newRig(t)
+	r.h.opts.Sender = failingSender{}
+	r.say(msg("!bitrate", false))
+	if !strings.Contains(r.logBuf.String(), "reply failed") {
+		t.Errorf("a failed reply was not logged: %q", r.logBuf.String())
 	}
 }
