@@ -6,11 +6,11 @@ import (
 )
 
 // The shapes a video decoder's join-time burst takes. warmupSliceError is the
-// one classify() files as an error and the one the website capture counted 189
-// of; the others are the same burst as other decoders and FFmpeg versions print
-// it. The image's FFmpeg 8.1, decoding a stream cut between two keyframes, also
-// prints "non-existing PPS 0 referenced", "no frame!" and "Missing reference
-// picture" -- all from the same "[h264 @ 0x...]" context.
+// line that made "189 ERRORS": on the seeded demo install every process that
+// decodes the relay (preview, renditions, destinations, loudness probes, the
+// meters) logged about 190 of it, alternating with "non-existing PPS 0
+// referenced", all between 0.5 s and 2 s after its spawn. The others are the
+// same burst as other decoders and FFmpeg versions print it.
 const (
 	warmupSliceError = "[h264 @ 0x7f3a2c004b80] decode_slice_header error"
 	warmupMMCO       = "[h264 @ 0x7f3a2c004b80] mmco: unref short failure"
