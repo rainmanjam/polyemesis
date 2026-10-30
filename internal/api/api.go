@@ -1004,6 +1004,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 
 			r.Get("/settings", s.handleGetSettings)
 			r.Put("/settings", s.handlePutSettings)
+			// The Record key's switch: one install-wide bit, written on its own so
+			// the key never reads and rewrites the whole document. GET is readable;
+			// POST is admin by method. See recording_toggle.go.
+			r.Get("/recording", s.handleGetRecording)
+			r.Post("/recording", s.handleSetRecording)
 			// Its own route because the password must never travel outward in
 			// the settings blob -- see handlePutMQTTPassword.
 			r.Put("/settings/mqtt-password", s.handlePutMQTTPassword)

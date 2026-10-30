@@ -12,17 +12,17 @@
   "guardedFloor": 23,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 232,
-    "swept": 66,
+    "methodPatternPairs": 234,
+    "swept": 67,
     "excused": 50,
-    "denied": 116,
+    "denied": 117,
     "nonTrieProbes": 12,
     "shapesEmitted": 27,
     "shapesNotInspected": 3
   },
   "partition": {
     "differential": 8,
-    "invariant": 52,
+    "invariant": 53,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 2,
     "unstable": 4
@@ -894,6 +894,18 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/recording",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/recording",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/recordings",
       "coverage": "swept",
       "zeroSource": "unguarded"
@@ -1678,6 +1690,11 @@
       "path": "/api/v1/processes",
       "pattern": "GET /api/v1/processes",
       "class": "unstable"
+    },
+    {
+      "path": "/api/v1/recording",
+      "pattern": "GET /api/v1/recording",
+      "class": "invariant"
     },
     {
       "path": "/api/v1/recordings",
