@@ -489,6 +489,18 @@ func healthByID(status any) map[int64]map[string]any {
 	return out
 }
 
+// destinationRows unwraps GET /destinations, whose items are
+// {"destination": row, "routing": compiled}.
+func destinationRows(v any) []any {
+	var out []any
+	for _, item := range asList(v, "") {
+		if d, ok := pick(item, "destination")["destination"]; ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // destSummary is a destination row reduced to what an agent needs to name and
 // act on it. The read-safe view has already masked the URL; it is kept so an
 // agent can tell two YouTube destinations apart by their server.
@@ -553,7 +565,7 @@ func mcpCatalogue() []mcpTool {
 				}
 				health := healthByID(st)
 				out := []any{}
-				for _, d := range asList(rows, "") {
+				for _, d := range destinationRows(rows) {
 					sum := destSummary(d)
 					if a.Source != nil {
 						if sid, ok := jsonInt(sum["sourceId"]); !ok || sid != *a.Source {
@@ -902,7 +914,7 @@ func mcpCatalogue() []mcpTool {
 						return nil, err
 					}
 					would := []any{}
-					for _, d := range asList(rows, "") {
+					for _, d := range destinationRows(rows) {
 						sum := pick(d, "id", "name", "platform", "enabled", "sourceId")
 						if a.Source != nil {
 							if sid, ok := jsonInt(sum["sourceId"]); !ok || sid != *a.Source {

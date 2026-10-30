@@ -735,6 +735,43 @@ func TestHostileToolArgumentsAreRefusedBeforeAnythingIsDispatched(t *testing.T) 
 	}
 }
 
+// list_destinations and go_live's preview name the destinations. GET
+// /destinations wraps each row as {"destination": ..., "routing": ...}, and a
+// tool that picked fields from the wrapper answered a list of empty objects --
+// found in the Docker e2e, not by any test, which is why this one exists.
+func TestListDestinationsAndTheGoLivePreviewNameEachDestination(t *testing.T) {
+	rig := newMCPRig(t)
+	cs := mcpClient(t, rig.h, rig.admin)
+	rows, err := rig.store.ListDestinations()
+	if err != nil || len(rows) == 0 {
+		t.Fatalf("fixture destinations: %v", err)
+	}
+	for _, call := range []struct {
+		tool string
+		args map[string]any
+	}{{"list_destinations", nil}, {"go_live", nil}} {
+		text, _ := callText(t, cs, call.tool, call.args)
+		for _, d := range rows {
+			if !strings.Contains(text, `"name":`+mcpJSON(t, d.Name)) || !strings.Contains(text, `"id":`+mcpJSON(t, d.ID)) {
+				t.Errorf("%s does not name destination %d %q:\n%s", call.tool, d.ID, d.Name, text)
+			}
+		}
+	}
+	text, _ := callText(t, cs, "list_destinations", nil)
+	if !strings.Contains(text, `"health"`) {
+		t.Errorf("list_destinations carries no health:\n%s", text)
+	}
+}
+
+func mcpJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 // A preset name that fails the pattern is refused before ANY request is made,
 // not merely refused: no GET /routing/presets, no GET /destinations/{id}. The
 // allowlist is the second line; this pins the first.
