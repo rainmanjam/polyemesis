@@ -225,6 +225,19 @@ describe("TrackRows live gain from the keyboard", () => {
     expect(mute().getAttribute("aria-disabled")).toBeNull();
   });
 
+  // MUTATION: drop the send in the unmount cleanup. Observed: FAIL.
+  it("a gain still gathering when the rows unmount is sent, not dropped", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const l = live();
+    renderRows(l);
+    await press();
+    expect(l.onGain).not.toHaveBeenCalled();
+    cleanup();
+    expect(l.onGain).toHaveBeenCalledWith(0, 0.95);
+    await debounce();
+    expect(l.onGain).toHaveBeenCalledTimes(1);
+  });
+
   it("a gain committed while a mute is out waits for the mute's answer", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     let finish: () => void = () => {};

@@ -192,11 +192,22 @@ export function TrackRows({
     if (!q) queues.current.set(index, (q = { inFlight: false }));
     return q;
   };
+  // Leaving the page does not drop a level the operator already set: a gain
+  // still gathering goes now, to the destination it was set on (the send was
+  // bound at commit). Its answer lands in the page's own state, not here.
   useEffect(() => {
     const all = queues.current;
     return () => {
-      for (const q of all.values()) if (q.timer !== undefined) window.clearTimeout(q.timer);
-      all.clear();
+      for (const [index, q] of all) {
+        if (q.timer === undefined) continue;
+        window.clearTimeout(q.timer);
+        q.timer = undefined;
+        // One still out sends the latest when it answers (finish), as before.
+        if (q.inFlight || q.pending === undefined) continue;
+        const { value, send } = q.pending;
+        q.pending = undefined;
+        void send(index, value);
+      }
     };
   }, []);
   const idle = (q: RowQueue) => !q.inFlight && q.pending === undefined && q.timer === undefined;

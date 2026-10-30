@@ -106,11 +106,6 @@ export class LevelSequencer {
     this.accepted.set(key, seq);
     return true;
   }
-
-  /** True while `seq` is the newest request issued for `key`. */
-  latest(key: string, seq: number): boolean {
-    return this.issued.get(key) === seq;
-  }
 }
 
 /** What the operator is told after a live change. */
