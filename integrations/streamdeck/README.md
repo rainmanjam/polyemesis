@@ -4,10 +4,14 @@ An Elgato Stream Deck plugin for a polyemesis install. It shows what each
 destination is really doing, starts and stops destinations, and shows the
 audio meters on a Stream Deck+ dial.
 
-It talks to the install over its REST API and WebSocket. It needs a pairing
-token. It does not run any media itself.
+It talks to the install over its REST API. It needs a pairing token. It does not
+run any media itself.
 
 ## Requirements
+
+Meters poll `GET /api/v1/levels` per programme. A WebSocket is not used for them,
+because a levels frame on `/ws` carries no engine id, so on a multi-programme
+install the socket interleaves every programme's meters.
 
 - Stream Deck app 7.1 or later, and the plugin runs on Node 24 (the README of
   `@elgato/streamdeck` states both requirements).
@@ -36,7 +40,7 @@ action settings, so it does not travel with a profile export.
 | Go live | Starts every destination on the key's programme. Needs admin. |
 | Stop all | Hold to stop every destination on the key's programme. Shows how many YouTube broadcasts a stop would end, and refuses if that count cannot be loaded. Needs admin. |
 | Failover | Shows which source is on air. Tap to hand control back to automatic. Needs admin. |
-| Meter (dial) | One channel's level. Shows NO FEED when levels stop arriving. |
+| Meter (dial) | The loudest channel on this install's meters, read from `GET /levels` for the key's programme. Shows NO FEED when the server reports the feed stale or unreachable. |
 
 Track mute is not included. The engine cannot change a track's gain without
 restarting the destination's stream, and that decision is still open.
@@ -46,13 +50,16 @@ restarting the destination's stream, and that decision is still open.
 ```sh
 npm ci
 npm test          # vitest: the key mapping, the runtime, the client, the manifest
+npm run coverage  # the same tests with lcov, read by SonarCloud
 npm run typecheck # tsc --noEmit
 npm run build     # bundles src/plugin.ts into com.polyemesis.streamdeck.sdPlugin/bin
+                  # and writes ui/strings.js from the catalogs
 node scripts/icons.mjs   # regenerates the placeholder PNG icons
 ```
 
 The icons are flat colour placeholders. They are not final artwork.
 
 Strings live in `src/locales/*.json`, in the same fifteen locales the UI ships.
+The inspector reads `ui/strings.js`, which the build generates from those files.
 Stream Deck's own manifest localisation covers only de, en, es, fr, ja, ko,
 zh_CN and zh_TW, and the manifest is still English-only.

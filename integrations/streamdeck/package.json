@@ -10,16 +10,16 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@elgato/streamdeck": "3.0.4",
-    "@elgato/utils": "0.6.2",
-    "ws": "8.22.0"
+    "@elgato/utils": "0.6.2"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
-    "@types/ws": "8.18.2",
+    "@vitest/coverage-v8": "5.0.5",
     "esbuild": "0.28.2",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
