@@ -262,3 +262,33 @@ func TestListenClearsSegmentsLeftByAPreviousRun(t *testing.T) {
 		t.Fatal("a stale segment survived Listen")
 	}
 }
+
+// A LINE THAT IS DROPPING SAYS SO, while it is still filling and the pump is
+// asleep, and once rather than once a datagram.
+func TestALineThatRunsOutOfRoomReportsItOnceWhileStillFilling(t *testing.T) {
+	var reports atomic.Int32
+	var reason atomic.Value
+	lim := Limits{MemBudget: DefaultSegmentBytes, SegmentBytes: DefaultSegmentBytes}
+	l, err := Listen(Config{Delay: 10 * time.Minute, Limits: lim, Out: func([]byte) {},
+		OnDrop: func(err error) {
+			reports.Add(1)
+			if err != nil {
+				reason.Store(err.Error())
+			}
+		}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	// Spilling is off and the budget is one segment, so a few segments in the
+	// line is out of room.
+	sendAll(t, l, 4000)
+	waitFor(t, "a drop report", 3*time.Second, func() bool { return reports.Load() > 0 })
+	time.Sleep(100 * time.Millisecond)
+	if n := reports.Load(); n != 1 {
+		t.Fatalf("OnDrop called %d times inside one report window", n)
+	}
+	if r, _ := reason.Load().(string); r == "" {
+		t.Fatal("the drop report carried no reason")
+	}
+}

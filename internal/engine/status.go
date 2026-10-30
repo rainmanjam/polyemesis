@@ -617,6 +617,26 @@ func (e *Engine) Status() Status {
 			st.Destinations = append(st.Destinations, ds)
 		}
 	}
+	// A destination still airing its delayed tail whose ROW IS GONE -- deleted
+	// mid-drain by something that did not cut it. It is on the air, so it must
+	// be visible, and visible means cuttable: Stop now finds it by id.
+	listed := make(map[int64]bool, len(st.Destinations))
+	for _, ds := range st.Destinations {
+		listed[ds.ID] = true
+	}
+	for id, dr := range draining {
+		if listed[id] || dr.row == nil {
+			continue
+		}
+		st.Destinations = append(st.Destinations, DestStatus{
+			ID: id, Name: dr.row.Name, Kind: dr.row.Kind, Platform: dr.row.Platform,
+			SourceID: dr.row.SourceID, DelaySeconds: dr.row.DelaySeconds,
+			Summary: dr.compiled.Summary, Process: procStatus(dr.proc),
+			BackupProcess: procStatus(dr.backup), Delay: delayStatusOf(dr.delay),
+			Warnings: []string{"this destination was deleted while its delayed tail was " +
+				"still airing; Cut now ends it"},
+		})
+	}
 	return st
 }
 

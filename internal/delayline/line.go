@@ -31,6 +31,9 @@ const (
 	// releaseSlack is how early a datagram may go out to share a wake with the
 	// one before it.
 	releaseSlack = time.Millisecond
+	// DropReportEvery spaces OnDrop calls: a full disk drops a segment a
+	// second, and one report a minute is news, sixty is noise.
+	DropReportEvery = time.Minute
 	// MaxDelay is the agreed ceiling.
 	MaxDelay = 15 * time.Minute
 )
@@ -54,7 +57,10 @@ type Config struct {
 	OnFirstDue func()
 	// Out receives each datagram at its release time, from one goroutine.
 	Out func([]byte)
-	Log *slog.Logger
+	// OnDrop is told when the buffer has started dropping for want of room,
+	// with the reason. At most once per DropReportEvery, from the pump.
+	OnDrop func(err error)
+	Log    *slog.Logger
 }
 
 // Status is a Line's state for the status page, events and metrics.
@@ -153,6 +159,8 @@ func (l *Line) read() {
 	defer l.wg.Done()
 	defer close(l.inputDone)
 	pkt := make([]byte, 2048)
+	var dropsSeen uint64
+	var lastDropReport time.Time
 	for {
 		n, err := l.conn.Read(pkt)
 		if err != nil {
@@ -172,6 +180,15 @@ func (l *Line) read() {
 		}
 		if err := l.buf.Push(time.Now(), pkt[:n]); err != nil {
 			continue
+		}
+		// Drops happen here, on the push that seals a segment with nowhere to
+		// go -- including while the line is still filling and the pump is
+		// asleep -- so they are reported from here.
+		if l.cfg.OnDrop != nil {
+			if d := l.buf.Dropped(); d > dropsSeen && time.Since(lastDropReport) >= DropReportEvery {
+				dropsSeen, lastDropReport = d, time.Now()
+				l.cfg.OnDrop(l.buf.Err())
+			}
 		}
 		select {
 		case l.wake <- struct{}{}:

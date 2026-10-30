@@ -231,6 +231,14 @@ type Engine struct {
 	// retiring, a separate map because the entry has left e.dests; unlike it,
 	// for up to fifteen minutes, so Status, Stop now and shutdown all look here.
 	draining map[int64]*destination
+	// drains is install-wide when a Manager built this engine (it replaces
+	// this engine's own before Start), so a start in ANY programme cuts a drain
+	// of the same destination id in any other. Never two publishers on a key.
+	drains *drainRegistry
+	// cutRequested marks destinations whose next stop must CUT, not drain:
+	// Stop now, stop-all and delete (CutOnStop). Guarded by e.mu, consumed by
+	// the stopDestinations pass that follows.
+	cutRequested map[int64]bool
 
 	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
 	// time a VAAPI rendition actually starts.
@@ -746,6 +754,7 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		rolledOver: map[int64]string{},
 		retiring:   map[int64]*destination{},
 		draining:   map[int64]*destination{},
+		drains:     newDrainRegistry(),
 		loudStore:  meters.NewStore(),
 		playProcs:  map[string]*supervisor.Process{},
 		// Promoted fields cannot be set in a composite literal; the placeholder
@@ -1126,6 +1135,7 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	for id, d := range e.draining {
 		dests = append(dests, d)
 		delete(e.draining, id)
+		e.drains.remove(id, e)
 	}
 	rends := make([]*rendition, 0, len(e.rends))
 	for _, r := range e.rends {

@@ -231,7 +231,20 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 		}
 	}
 
+	// Which leaving destinations still have a row, read before the lock.
+	var leaving []int64
+	e.mu.RLock()
+	for id, d := range e.dests {
+		if _, wanted := plans[id]; !wanted && d.delay != nil {
+			leaving = append(leaving, id)
+		}
+	}
+	e.mu.RUnlock()
+	stillThere := e.rowsStillThere(leaving)
+
 	e.mu.Lock()
+	cutReq := e.cutRequested
+	e.cutRequested = nil
 	var toStop, toDrain []*destination
 	var liveTry []liveCandidate
 	var repoints []delayRepoint
@@ -271,11 +284,13 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 			// operator is told a restart happened rather than nothing.
 			e.setLiveNoteLocked(id, liveNote{applied: liveRestart, reason: structuralRestart})
 		}
-		if !keep && !wanted && d.delay != nil && d.proc != nil {
-			// STOPPED, DISABLED OR REMOVED, AND DELAYED: FLUSH. The tail plays
-			// out before the FFmpeg stops, so the audience sees the end of the
-			// programme rather than a cut Delay before it. Stop now (CutDelay)
-			// ends it early. See the table in delay.go.
+		if !keep && !wanted && d.delay != nil && d.proc != nil && stillThere[id] && !cutReq[id] {
+			// STOPPED OR DISABLED, AND DELAYED: FLUSH. The tail plays out
+			// before the FFmpeg stops, so the audience sees the end of the
+			// programme rather than a cut Delay before it. A DELETED row and a
+			// cut request (Stop now, stop-all, delete) fall through to the cut
+			// below instead: the delay exists to keep things off the air, and
+			// those are the operator saying so. See the table in delay.go.
 			delete(e.dests, id)
 			if e.draining == nil {
 				e.draining = map[int64]*destination{}
@@ -439,17 +454,12 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			e.reconcileBackup(id, &next, backupCompiled(p), p.upstream)
 			continue
 		}
-		// Started again while its delayed tail is still playing out: the drain
-		// is cut first. Two FFmpegs publishing one key is a conflict the
-		// platform resolves by dropping one of them, and the operator asked
-		// for the new one.
-		cut := e.takeDrainingLocked(id)
 		e.mu.Unlock()
-		if cut != nil {
-			e.log.Info("broadcast delay: destination started again while draining; cutting the old tail",
-				"dest", cut.row.Name)
-			e.teardownDest(cut)
-		}
+		// Started again while a delayed tail of it is still playing out -- in
+		// this programme or any other: that drain is cut first. Two FFmpegs
+		// publishing one key is a conflict the platform resolves by dropping
+		// one of them, and the operator asked for the new one.
+		e.cutDrainAnywhere(id)
 
 		if p.err != "" {
 			e.mu.Lock()
@@ -1237,6 +1247,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		}
 		e.log.Info("destination buffering its broadcast delay", "dest", row.Name,
 			"delay", time.Duration(row.DelaySeconds)*time.Second)
+		e.streamDelay(row, dd, DelayBuffering, "")
 	} else {
 		proc.Start()
 	}

@@ -63,6 +63,7 @@ const (
 	TypeDestinationRestarted  Type = "destination.restarted"
 	TypeDestinationLevel      Type = "destination.level"
 	TypeDestinationRolledOver Type = Type(hooks.TriggerDestinationRolledOver)
+	TypeDestinationDelay      Type = "destination.delay"
 	TypeIngestPublished       Type = Type(hooks.TriggerIngestPublished)
 	TypeIngestDisconnected    Type = Type(hooks.TriggerIngestDisconnected)
 	TypeFailoverSwitched      Type = "failover.switched"
@@ -138,6 +139,7 @@ var catalogue = []Spec{
 	{TypeDestinationRestarted, TopicDestination, Granted, "A destination's process was respawned after it exited.", nil},
 	{TypeDestinationLevel, TopicDestination, Granted, "A level (gain or mute) change reached a destination, applied live or by a restart.", nil},
 	{TypeDestinationRolledOver, TopicDestination, Granted, "A file destination continued into a new file because the configured one already held footage.", nil},
+	{TypeDestinationDelay, TopicDestination, Granted, "A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, or dropping; data carries the delay and the buffer.", nil},
 
 	// Ingest and failover.
 	{TypeIngestPublished, TopicIngest, Granted, "Data started arriving on a programme's ingest.", nil},

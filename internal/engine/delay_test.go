@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/binary"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -206,7 +207,7 @@ func TestStopNowCutsADrainingDestinationAtOnce(t *testing.T) {
 	if e.CutDelay(row.ID) {
 		t.Fatal("a second Stop now found a drain to cut")
 	}
-	files, _ := filepath.Glob(filepath.Join(delaySpillDir(e.cfg.DataDir, row.ID), "*"))
+	files, _ := filepath.Glob(filepath.Join(delayRoot(e.cfg.DataDir), "*", "*"))
 	if len(files) != 0 {
 		t.Fatalf("Stop now left the spill behind: %v", files)
 	}
@@ -411,8 +412,8 @@ func TestABufferingDestinationIsMarkedSoTheAlertWatcherDoesNotCallItDown(t *test
 // alone: the line deletes it wholesale, so nothing an operator typed may reach
 // the path.
 func TestTheSpillDirectoryIsTheDataDirectoryAndTheNumericIDOnly(t *testing.T) {
-	got := delaySpillDir("/srv/polyemesis", 42)
-	if want := filepath.Join("/srv/polyemesis", "delay", "42"); got != want {
+	got := delaySpillDir("/srv/polyemesis", 42, 7)
+	if want := filepath.Join("/srv/polyemesis", "delay", "42-7"); got != want {
 		t.Fatalf("spill dir = %q, want %q", got, want)
 	}
 }
@@ -439,4 +440,202 @@ func TestADroppingBufferPutsAWarningOnTheCard(t *testing.T) {
 	if !strings.Contains(w, "3 MB") || !strings.Contains(w, "disk budget") {
 		t.Fatalf("warning = %q", w)
 	}
+}
+
+// startDraining starts a delayed destination with a long delay, feeds it, and
+// stops it plainly, leaving it draining.
+func startDraining(t *testing.T, e *Engine, row *db.Destination) *destination {
+	t.Helper()
+	if err := e.startDest(delayPlan(row), e.hub, 0); err != nil {
+		t.Fatalf("startDest: %v", err)
+	}
+	feed(e.hub, 20)
+	row.Enabled = false
+	if _, err := e.store.UpdateDestination(row); err != nil {
+		t.Fatal(err)
+	}
+	e.stopDestinations(map[int64]destPlan{})
+	d := drainingOf(e, row.ID)
+	if d == nil {
+		t.Fatal("setup: a plain stop did not drain")
+	}
+	return d
+}
+
+func longDelayRow(t *testing.T, e *Engine) *db.Destination {
+	t.Helper()
+	row := delayedRow(t, e)
+	row.DelaySeconds = 600
+	if _, err := e.store.UpdateDestination(row); err != nil {
+		t.Fatal(err)
+	}
+	return row
+}
+
+// DELETE CUTS. Deleting a destination is not a request to keep airing it, so
+// a delayed one with no row left is cut at once -- whatever is buffered never
+// reaches the platform.
+//
+// Mutation: drop `stillThere[id] &&` from the drain condition in
+// stopDestinations. This test then finds the deleted destination draining.
+func TestDeletingADelayedDestinationCutsItAtOnceInsteadOfDraining(t *testing.T) {
+	e, _ := storeEngine(t)
+	row := longDelayRow(t, e)
+	if err := e.startDest(delayPlan(row), e.hub, 0); err != nil {
+		t.Fatalf("startDest: %v", err)
+	}
+	d := destOf(e, row.ID)
+	feed(e.hub, 20)
+	if err := e.store.DeleteDestination(row.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.stopDestinations(map[int64]destPlan{})
+	if drainingOf(e, row.ID) != nil {
+		t.Fatal("a deleted destination was left airing its buffered tail")
+	}
+	if st := d.proc.Status().State; st != supervisor.StateStopped {
+		t.Fatalf("the deleted destination's FFmpeg is %q", st)
+	}
+	if got := d.delay.hub.Stats().RxPackets; got != 0 {
+		t.Fatalf("%d buffered datagrams reached the platform side after the delete", got)
+	}
+}
+
+// STOP-ALL (AND STOP NOW) CUT. CutOnStop marks the destination before the
+// reconcile, so the stop that follows never starts a drain at all.
+//
+// Mutation: drop `&& !cutReq[id]` from the drain condition. This test then
+// finds the destination draining after a stop-all.
+func TestACutRequestMakesTheFollowingStopCutInsteadOfDrain(t *testing.T) {
+	e, _ := storeEngine(t)
+	row := longDelayRow(t, e)
+	if err := e.startDest(delayPlan(row), e.hub, 0); err != nil {
+		t.Fatalf("startDest: %v", err)
+	}
+	feed(e.hub, 20)
+	row.Enabled = false
+	if _, err := e.store.UpdateDestination(row); err != nil {
+		t.Fatal(err)
+	}
+	e.CutOnStop(row.ID)
+	start := time.Now()
+	e.stopDestinations(map[int64]destPlan{})
+	if drainingOf(e, row.ID) != nil || destOf(e, row.ID) != nil {
+		t.Fatal("a stop with a cut request drained")
+	}
+	if took := time.Since(start); took > stopTimeout {
+		t.Fatalf("the cutting stop took %s", took)
+	}
+	// Consumed: the next plain stop of something else is not cut by it.
+	e.mu.RLock()
+	left := len(e.cutRequested)
+	e.mu.RUnlock()
+	if left != 0 {
+		t.Fatal("a cut request outlived the stop it was for")
+	}
+}
+
+// A DESTINATION DELETED WHILE DRAINING IS STILL VISIBLE AND STILL CUTTABLE. It
+// is on the air; a status that dropped it with its row would leave the
+// operator unable to see it, let alone stop it.
+func TestADestinationDeletedWhileDrainingIsListedAndCanBeCut(t *testing.T) {
+	e, _ := storeEngine(t)
+	row := longDelayRow(t, e)
+	startDraining(t, e, row)
+	if err := e.store.DeleteDestination(row.ID); err != nil {
+		t.Fatal(err)
+	}
+	st := statusFor(t, e, row.ID)
+	if st.Delay == nil || st.Delay.Phase != DelayDraining {
+		t.Fatalf("deleted-but-draining status = %+v", st.Delay)
+	}
+	if !e.CutDelay(row.ID) {
+		t.Fatal("Stop now could not find the deleted destination's drain")
+	}
+	for _, ds := range e.Status().Destinations {
+		if ds.ID == row.ID {
+			t.Fatal("a cut, deleted destination is still listed")
+		}
+	}
+}
+
+// TWO LINES FOR ONE ID NEVER SHARE A SPILL DIRECTORY, so neither can clear or
+// delete the other's buffered programme.
+//
+// Mutation: drop the nonce from delaySpillDir. The directories then collide
+// and closing the first deletes the second's.
+func TestTwoLinesForTheSameDestinationHaveTheirOwnSpillDirectories(t *testing.T) {
+	e, _ := storeEngine(t)
+	row := longDelayRow(t, e)
+	a, err := e.buildDelay(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := e.buildDelay(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.dir == b.dir {
+		t.Fatalf("both lines spill to %s", a.dir)
+	}
+	if err := os.WriteFile(filepath.Join(b.dir, "marker"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("the second line's directory is not there: %v", err)
+	}
+	e.closeDelay(a)
+	if _, err := os.Stat(filepath.Join(b.dir, "marker")); err != nil {
+		t.Fatalf("closing one line deleted the other's spill: %v", err)
+	}
+	if _, err := os.Stat(a.dir); !os.IsNotExist(err) {
+		t.Fatal("a closed line left its own spill behind")
+	}
+	e.closeDelay(b)
+}
+
+// THE STARTUP SWEEP REMOVES ONLY WHAT NO LIVE LINE OWNS.
+func TestTheStartupSweepRemovesStaleSpillAndLeavesLiveSpillAlone(t *testing.T) {
+	data := t.TempDir()
+	root := delayRoot(data)
+	stale := filepath.Join(root, "9-1")
+	live := filepath.Join(root, "9-2")
+	for _, d := range []string{stale, live} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	liveSpill.Store(live, true)
+	t.Cleanup(func() { liveSpill.Delete(live) })
+	sweepDelayRoot(data)
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatal("the sweep left a previous run's spill behind")
+	}
+	if _, err := os.Stat(live); err != nil {
+		t.Fatalf("the sweep deleted a live line's spill: %v", err)
+	}
+}
+
+// ONE PUBLISHER PER KEY, ACROSS PROGRAMMES. A destination draining in one
+// engine is cut when the same id starts in another engine sharing the
+// install's registry.
+//
+// Mutation: make cutDrainAnywhere return false without cutting. The old
+// engine's drain then survives the second start.
+func TestStartingADestinationInAnotherEngineCutsItsDrainFirst(t *testing.T) {
+	a, _ := storeEngine(t)
+	b, _ := storeEngine(t)
+	b.drains = a.drains
+	rowA := longDelayRow(t, a)
+	rowB := longDelayRow(t, b)
+	if rowA.ID != rowB.ID {
+		t.Fatalf("setup: ids %d and %d differ", rowA.ID, rowB.ID)
+	}
+	old := startDraining(t, a, rowA)
+	b.startDestinations(map[int64]destPlan{rowB.ID: delayPlan(rowB)})
+	if drainingOf(a, rowA.ID) != nil {
+		t.Fatal("two publishers: the other programme's drain survived a start of the same id")
+	}
+	if st := old.proc.Status().State; st != supervisor.StateStopped {
+		t.Fatalf("the old publisher is %q", st)
+	}
+	a.Stop()
+	b.Stop()
 }

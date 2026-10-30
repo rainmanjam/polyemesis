@@ -39,6 +39,11 @@ import (
 // destinations would quietly bind onto the first programme's traffic. One
 // allocator, handed to every engine.
 type Manager struct {
+	// drains is the install-wide record of which engine has which destination
+	// draining its broadcast delay, shared by every engine this builds. See
+	// drainRegistry.
+	drains *drainRegistry
+
 	log   *slog.Logger
 	cfg   config.Config
 	store *db.DB
@@ -315,6 +320,7 @@ func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg
 		tools:   tools,
 		bus:     bus,
 		alloc:   relay.NewPortAllocator(relayPortBase, relayPortSpan),
+		drains:  newDrainRegistry(),
 		engines: map[int64]*Engine{},
 		host:    stats.NewHost(),
 	}
@@ -553,6 +559,9 @@ func (m *Manager) Sync() error {
 		// operator already had and silently not on the one they just added.
 		// See engineSettings.
 		m.applyEngineSettings(eng, m.engineSettingsSnapshot())
+		// Before Start, so no destination this engine starts can miss a drain
+		// of the same id in another programme.
+		eng.drains = m.drains
 		if err := eng.Start(ctx); err != nil {
 			m.log.Error("cannot start engine for source", "source", id, "err", err)
 			eng.Stop()

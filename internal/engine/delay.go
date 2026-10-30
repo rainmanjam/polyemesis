@@ -6,11 +6,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/delayline"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/fsperm"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 )
@@ -30,12 +33,15 @@ import (
 //
 //	cause                                     buffer
 //	----------------------------------------  ---------------------------------
-//	stopped / disabled / stop-all / removed   DRAINS: the tail plays out, then
+//	stopped / disabled (one destination)      DRAINS: the tail plays out, then
 //	                                          the FFmpeg stops (flush on stop)
 //	the same with ?now=true ("Stop now")      cut at once
-//	Stop now on a destination already         cut at once
+//	stop-all                                  cut at once (CutOnStop)
+//	deleted                                   cut at once: no row, no drain
+//	Stop now / delete on one already          cut at once
 //	  draining
-//	started again while still draining        the drain is cut, then a fresh start
+//	started again while still draining,       the drain is cut, then a fresh
+//	  in this programme or any other          start (drainRegistry)
 //	any restart (spec change, incl. the       cut; the new run buffers from empty,
 //	  delay itself)                           which the UI warns about
 //	the upstream hub replaced under it        RE-POINTED: the line's input moves
@@ -65,6 +71,8 @@ type destDelay struct {
 	// inPort is the line's input port, subscribed to the upstream hub as inSub.
 	inPort int
 	inSub  string
+	// dir is this line's own spill directory; see delaySpillDir.
+	dir string
 
 	mu sync.Mutex
 	// upstream is the hub the line's input is subscribed to now. It moves on a
@@ -76,6 +84,8 @@ type destDelay struct {
 	// due is set (under the engine's e.mu) when OnFirstDue fires: the processes
 	// may start. A backup published after it is started at once.
 	due bool
+	// cut is set by Stop now, so the drain's end is reported as a cut.
+	cut atomic.Bool
 }
 
 // delayDestSubName is the line's subscription on the upstream hub. A name of
@@ -86,21 +96,35 @@ func delayDestSubName(id int64) string { return destSubName(id, "delay") }
 // delayRoot is where every delayed destination of every programme spills.
 func delayRoot(dataDir string) string { return filepath.Join(dataDir, "delay") }
 
-// delaySpillDir is one destination's spill directory. Built only from the
-// data directory and the numeric id -- never from anything an operator typed --
-// because the line deletes the whole directory when it starts and stops.
-func delaySpillDir(dataDir string, id int64) string {
-	return filepath.Join(delayRoot(dataDir), strconv.FormatInt(id, 10))
+// delaySpillDir is ONE LINE'S spill directory: the data directory, the
+// numeric id, and a nonce unique to the line. Built only from those -- never
+// from anything an operator typed -- because the line deletes the whole
+// directory when it starts and stops.
+//
+// THE NONCE IS THE POINT. Keyed by id alone, a second line for the same
+// destination -- a restart while the old one drains, or the same id in another
+// programme's engine -- would clear the first line's directory on Listen and
+// delete it on Close, taking still-unreleased programme with it.
+func delaySpillDir(dataDir string, id int64, nonce uint64) string {
+	return filepath.Join(delayRoot(dataDir),
+		strconv.FormatInt(id, 10)+"-"+strconv.FormatUint(nonce, 10))
 }
 
-// sweptDelayRoots records the data directories whose delay root has been
-// cleared in this process. Once per process, not per engine: engines are built
-// whenever a programme is added, and a second one sweeping the root would
-// delete a running destination's spill out from under it.
+// spillNonce numbers lines within this process. Unique per process is unique
+// enough: the startup sweep removes everything a previous process left.
+var spillNonce atomic.Uint64
+
+// liveSpill is every spill directory a line in this process owns. The sweep
+// removes only what is NOT here, so it cannot delete a running line's buffer
+// whichever engine or goroutine runs it.
+var liveSpill sync.Map
+
+// sweptDelayRoots records the data directories already swept in this process.
 var sweptDelayRoots sync.Map
 
-// sweepDelayRoot clears the spill a crashed previous run left behind. Those
-// segments are an old programme, and nothing must ever release them.
+// sweepDelayRoot clears the spill a crashed previous run left behind -- those
+// segments are an old programme, and nothing must ever release them -- once
+// per process, and only the directories no live line owns.
 func sweepDelayRoot(dataDir string) {
 	if dataDir == "" {
 		return
@@ -109,7 +133,17 @@ func sweepDelayRoot(dataDir string) {
 	if _, done := sweptDelayRoots.LoadOrStore(root, true); done {
 		return
 	}
-	_ = os.RemoveAll(root)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, ent := range entries {
+		path := filepath.Join(root, ent.Name())
+		if _, live := liveSpill.Load(path); live {
+			continue
+		}
+		_ = os.RemoveAll(path)
+	}
 }
 
 // delayFloorBytes is the free space a spill must leave on the data volume: the
@@ -156,7 +190,17 @@ func (e *Engine) buildDelay(row *db.Destination) (*destDelay, error) {
 	id := row.ID
 	delay := time.Duration(row.DelaySeconds) * time.Second
 	sweepDelayRoot(e.cfg.DataDir)
-	dir := delaySpillDir(e.cfg.DataDir, row.ID)
+	dir := delaySpillDir(e.cfg.DataDir, row.ID, spillNonce.Add(1))
+	// Registered BEFORE the directory exists, so a sweep that lists it has
+	// necessarily already seen it claimed.
+	liveSpill.Store(dir, true)
+	dd.dir = dir
+	built := false
+	defer func() {
+		if !built {
+			liveSpill.Delete(dir)
+		}
+	}()
 	if err := os.MkdirAll(delayRoot(e.cfg.DataDir), 0o700); err != nil {
 		return nil, fmt.Errorf("broadcast delay: %w", err)
 	}
@@ -185,8 +229,16 @@ func (e *Engine) buildDelay(row *db.Destination) (*destDelay, error) {
 		},
 		Lead:       delayline.DefaultLead,
 		OnFirstDue: func() { e.delayDue(id, dd) },
-		Out:        hub.Deliver,
-		Log:        e.log.With("dest", row.Name),
+		OnDrop: func(err error) {
+			msg := "the buffer ran out of room"
+			if err != nil {
+				msg = err.Error()
+			}
+			e.log.Warn("broadcast delay: dropping data to keep the delay", "dest", row.Name, "reason", msg)
+			e.streamDelay(row, dd, delayEventDropping, msg)
+		},
+		Out: hub.Deliver,
+		Log: e.log.With("dest", row.Name),
 	}, port)
 	if err != nil {
 		e.releasePort(port)
@@ -194,6 +246,7 @@ func (e *Engine) buildDelay(row *db.Destination) (*destDelay, error) {
 		return nil, err
 	}
 	dd.line, dd.hub, dd.inPort = line, hub, port
+	built = true
 	return dd, nil
 }
 
@@ -246,7 +299,8 @@ func (e *Engine) closeDelay(dd *destDelay) {
 		return
 	}
 	dd.detach()
-	dd.line.Close()
+	dd.line.Close() // deletes dd.dir, and only dd.dir
+	liveSpill.Delete(dd.dir)
 	e.releasePort(dd.inPort)
 	_ = dd.hub.Close()
 }
@@ -287,6 +341,7 @@ func (e *Engine) delayDue(id int64, dd *destDelay) {
 	}
 	e.log.Info("broadcast delay: the delayed feed is about to reach this destination; starting it",
 		"dest", d.row.Name, "delay", dd.line.Delay())
+	e.streamDelay(d.row, dd, DelayOnAir, "")
 	e.publishStatus()
 }
 
@@ -294,10 +349,12 @@ func (e *Engine) delayDue(id int64, dd *destDelay) {
 // stopped. The destination sits in e.draining meanwhile (moved there under
 // e.mu by the caller), so Status still reports it and Stop now can find it.
 func (e *Engine) beginDrain(d *destination) {
+	e.drains.add(d.row.ID, e)
 	d.delay.detach()
 	done := d.delay.line.Drain()
 	e.log.Info("broadcast delay: destination stopped; the delayed tail is playing out before it ends",
 		"dest", d.row.Name, "remaining", d.delay.line.Status().DrainRemaining.Round(time.Second))
+	e.streamDelay(d.row, d.delay, DelayDraining, "")
 	go func() {
 		<-done
 		e.finishDrain(d)
@@ -310,6 +367,7 @@ func (e *Engine) finishDrain(d *destination) {
 	mine := e.draining[d.row.ID] == d
 	if mine {
 		delete(e.draining, d.row.ID)
+		e.drains.remove(d.row.ID, e)
 		if e.retiring == nil {
 			e.retiring = map[int64]*destination{}
 		}
@@ -320,7 +378,14 @@ func (e *Engine) finishDrain(d *destination) {
 		// Shutdown or a new start took it first and tears it down itself.
 		return
 	}
+	// Read before the teardown closes the line: a drain that ended because
+	// the tail ran out is "drained", one ended by Stop now is "cut".
+	ended := delayEventDrained
+	if d.delay.cut.Load() {
+		ended = delayEventCut
+	}
 	e.teardownDest(d)
+	e.streamDelay(d.row, nil, ended, "")
 	e.mu.Lock()
 	if e.retiring[d.row.ID] == d {
 		delete(e.retiring, d.row.ID)
@@ -341,9 +406,12 @@ func (e *Engine) CutDelay(id int64) bool {
 	}
 	// Closing the line closes its drain channel, and the drain goroutine does
 	// the teardown -- one path, whoever ends the drain.
+	d.delay.cut.Store(true)
 	d.delay.line.Close()
-	// Wait for it, so a caller reading status back sees it stopped.
-	for range 200 {
+	// Wait for it, so a caller reading status back sees it stopped: bounded by
+	// the FFmpeg's own stop deadline and a margin.
+	deadline := time.Now().Add(stopTimeout + 2*time.Second)
+	for time.Now().Before(deadline) {
 		e.mu.RLock()
 		_, still := e.draining[id]
 		_, going := e.retiring[id]
@@ -354,16 +422,6 @@ func (e *Engine) CutDelay(id int64) bool {
 		time.Sleep(25 * time.Millisecond)
 	}
 	return true
-}
-
-// takeDrainingLocked removes a draining destination so a caller can cut it
-// itself: a new start of the same destination, or shutdown. Under e.mu.
-func (e *Engine) takeDrainingLocked(id int64) *destination {
-	d := e.draining[id]
-	if d != nil {
-		delete(e.draining, id)
-	}
-	return d
 }
 
 // DelayStatus is a delayed destination's buffer on the status payload.
@@ -394,6 +452,49 @@ const (
 	DelayOnAir     = "on-air"
 	DelayDraining  = "draining"
 )
+
+// destination.delay event reasons beyond the three phases: how a drain ended,
+// and the buffer dropping data to keep the delay.
+const (
+	delayEventDrained  = "drained"
+	delayEventCut      = "cut"
+	delayEventDropping = "dropping"
+)
+
+// streamDelay announces a broadcast delay changing phase on the #17 stream.
+// Called with no engine lock held. dd may be nil once the line is gone.
+//
+// Nothing secret: the destination is named by id, name and platform as on
+// every destination event, and the data is the delay and buffer figures.
+func (e *Engine) streamDelay(row *db.Destination, dd *destDelay, reason, detail string) {
+	hub := e.Stream()
+	if hub == nil || row == nil {
+		return
+	}
+	data := map[string]any{"seconds": row.DelaySeconds}
+	if dd != nil {
+		if st := delayStatusOf(dd); st != nil {
+			data["fill"] = st.Fill
+			data["bufferedSeconds"] = st.BufferedSeconds
+			data["memBytes"] = st.MemBytes
+			data["diskBytes"] = st.DiskBytes
+			if st.DrainRemainingSeconds > 0 {
+				data["drainRemainingSeconds"] = st.DrainRemainingSeconds
+			}
+			if st.DroppedBytes > 0 {
+				data["droppedBytes"] = st.DroppedBytes
+			}
+		}
+	}
+	hub.Publish(eventstream.Envelope{
+		Type:        eventstream.TypeDestinationDelay,
+		Source:      &hooks.SourceRef{ID: e.sourceID, Name: e.SourceName()},
+		Destination: &hooks.DestinationRef{ID: row.ID, Name: row.Name, Platform: string(row.Platform)},
+		Reason:      reason,
+		Error:       detail,
+		Data:        data,
+	})
+}
 
 func delayStatusOf(dd *destDelay) *DelayStatus {
 	if dd == nil {
@@ -447,4 +548,96 @@ func delayHoldsBack(d DestStatus) bool {
 // must hear "disabled" while viewers are still watching.
 func delayStillPublishing(d DestStatus) bool {
 	return d.Delay != nil && d.Delay.Phase == DelayDraining
+}
+
+// drainRegistry is which engine has which destination id draining.
+//
+// INSTALL-WIDE, NOT PER ENGINE. e.draining answers "is this destination
+// draining in my programme", and a start in a DIFFERENT programme's engine
+// never asked it -- so moving a destination between programmes, or an id seen
+// by two engines, could start a second publisher on the platform key while the
+// first still played its tail out. Every start consults this first.
+type drainRegistry struct {
+	mu sync.Mutex
+	by map[int64]*Engine
+}
+
+func newDrainRegistry() *drainRegistry { return &drainRegistry{by: map[int64]*Engine{}} }
+
+func (r *drainRegistry) add(id int64, e *Engine) {
+	r.mu.Lock()
+	r.by[id] = e
+	r.mu.Unlock()
+}
+
+// remove forgets id, but only if e is the engine that registered it.
+func (r *drainRegistry) remove(id int64, e *Engine) {
+	r.mu.Lock()
+	if r.by[id] == e {
+		delete(r.by, id)
+	}
+	r.mu.Unlock()
+}
+
+func (r *drainRegistry) owner(id int64) *Engine {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.by[id]
+}
+
+// cutDrainAnywhere cuts a drain of id in whichever engine holds one, and
+// returns once it is torn down. Called before every start.
+func (e *Engine) cutDrainAnywhere(id int64) bool {
+	owner := e.drains.owner(id)
+	if owner == nil {
+		return false
+	}
+	e.log.Info("broadcast delay: destination started while a delayed tail of it is still playing; "+
+		"cutting the tail so only one publisher holds the key", "dest", id)
+	return owner.CutDelay(id)
+}
+
+// CutOnStop marks a destination so that the stop about to happen CUTS its
+// delayed tail instead of draining it. Stop now, stop-all and delete set it:
+// a broadcast delay exists so an operator can keep something off the air, and
+// "flush on stop" must never mean "what is buffered airs whatever you do".
+func (e *Engine) CutOnStop(id int64) {
+	e.mu.Lock()
+	if e.cutRequested == nil {
+		e.cutRequested = map[int64]bool{}
+	}
+	e.cutRequested[id] = true
+	e.mu.Unlock()
+}
+
+// CutOnStop marks id for a cutting stop in every engine.
+func (m *Manager) CutOnStop(id int64) {
+	for _, e := range m.Engines() {
+		e.CutOnStop(id)
+	}
+}
+
+// CutDelay is Stop now across the install: it cuts a drain of id wherever one
+// is playing. Reports whether there was one.
+func (m *Manager) CutDelay(id int64) bool {
+	if e := m.drains.owner(id); e != nil {
+		return e.CutDelay(id)
+	}
+	return false
+}
+
+// rowsStillThere reports which of ids still have a row. A delayed destination
+// leaving the running set drains only on a plain stop of a row that still
+// exists; a DELETED one is cut, since deleting is not a request to keep
+// airing it. Called BEFORE e.mu is taken: it reads the store.
+func (e *Engine) rowsStillThere(ids []int64) map[int64]bool {
+	out := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		if _, err := e.store.GetDestination(id); err == nil {
+			out[id] = true
+		}
+		// An error is treated as deleted: the safe answer when it is unclear
+		// whether the operator still wants this on the air is to cut.
+	}
+	return out
 }

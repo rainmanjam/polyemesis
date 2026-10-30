@@ -46,6 +46,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -105,6 +106,8 @@ type Buffer struct {
 	seq    uint64     // spill file counter
 	stats  Stats
 	failed error // the last spill error, for the status line
+	// dropped mirrors stats.DroppedPackets for Dropped's lock-free read.
+	dropped atomic.Uint64
 }
 
 // Stats is a snapshot of the buffer.
@@ -259,6 +262,7 @@ func (b *Buffer) dropLocked(s *segment) {
 	b.stats.Packets -= s.packets
 	b.stats.Bytes -= s.bytes
 	b.stats.DroppedPackets += uint64(s.packets)
+	b.dropped.Store(b.stats.DroppedPackets)
 	b.stats.DroppedBytes += uint64(s.bytes)
 	if s.data != nil {
 		b.stats.MemBytes -= int64(cap(s.data))
@@ -391,6 +395,10 @@ func (b *Buffer) Newest() (at time.Time, ok bool) {
 	}
 	return b.epoch.Add(time.Duration(b.queue[len(b.queue)-1].last)), true
 }
+
+// Dropped is the count of datagrams refused for want of room so far.
+// Lock-free, because the line asks after every datagram it reads.
+func (b *Buffer) Dropped() uint64 { return b.dropped.Load() }
 
 // Err is the last spill or read-back failure, nil once a spill succeeds again.
 func (b *Buffer) Err() error {
