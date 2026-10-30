@@ -76,84 +76,70 @@ function register(a: Action<JsonObject>, kind: SurfaceKind, raw: Record<string, 
   rt().add(surfaceFor(a, kind, keySettings(raw)));
 }
 
-@action({ UUID: `${PLUGIN}.destination` })
-export class DestinationKey extends SingletonAction {
+/**
+ * The lifecycle every polyemesis action shares: register its surface when it appears or
+ * its settings change, drop it when it leaves. Each action declares only its kind and
+ * the presses it handles.
+ */
+abstract class PolyAction extends SingletonAction {
+  abstract readonly kind: SurfaceKind;
+
   override onWillAppear(ev: WillAppearEvent): void {
-    register(ev.action, "destination", ev.payload.settings);
+    register(ev.action, this.kind, ev.payload.settings);
   }
+
   override onDidReceiveSettings(ev: DidReceiveSettingsEvent): void {
-    register(ev.action, "destination", ev.payload.settings);
+    register(ev.action, this.kind, ev.payload.settings);
   }
+
   override onWillDisappear(ev: WillDisappearEvent): void {
     rt().remove(ev.action.id);
   }
+}
+
+@action({ UUID: `${PLUGIN}.destination` })
+export class DestinationKey extends PolyAction {
+  readonly kind = "destination" as const;
+
   override onKeyDown(ev: KeyDownEvent): Promise<void> {
     return rt().pressDestination(ev.action.id);
   }
 }
 
 @action({ UUID: `${PLUGIN}.go-live` })
-export class GoLiveKey extends SingletonAction {
-  override onWillAppear(ev: WillAppearEvent): void {
-    register(ev.action, "goLive", ev.payload.settings);
-  }
-  override onDidReceiveSettings(ev: DidReceiveSettingsEvent): void {
-    register(ev.action, "goLive", ev.payload.settings);
-  }
-  override onWillDisappear(ev: WillDisappearEvent): void {
-    rt().remove(ev.action.id);
-  }
+export class GoLiveKey extends PolyAction {
+  readonly kind = "goLive" as const;
+
   override onKeyDown(ev: KeyDownEvent): Promise<void> {
     return rt().pressGoLive(ev.action.id);
   }
 }
 
 @action({ UUID: `${PLUGIN}.stop-all` })
-export class StopAllKey extends SingletonAction {
-  override onWillAppear(ev: WillAppearEvent): void {
-    register(ev.action, "stopAll", ev.payload.settings);
-  }
-  override onDidReceiveSettings(ev: DidReceiveSettingsEvent): void {
-    register(ev.action, "stopAll", ev.payload.settings);
-  }
-  override onWillDisappear(ev: WillDisappearEvent): void {
-    rt().remove(ev.action.id);
-  }
+export class StopAllKey extends PolyAction {
+  readonly kind = "stopAll" as const;
+
   override onKeyDown(ev: KeyDownEvent): Promise<void> {
     return rt().pressStopDown(ev.action.id);
   }
+
   override onKeyUp(ev: KeyUpEvent): Promise<void> {
     return rt().pressStopUp(ev.action.id);
   }
 }
 
 @action({ UUID: `${PLUGIN}.failover` })
-export class FailoverKey extends SingletonAction {
-  override onWillAppear(ev: WillAppearEvent): void {
-    register(ev.action, "failover", ev.payload.settings);
-  }
-  override onDidReceiveSettings(ev: DidReceiveSettingsEvent): void {
-    register(ev.action, "failover", ev.payload.settings);
-  }
-  override onWillDisappear(ev: WillDisappearEvent): void {
-    rt().remove(ev.action.id);
-  }
+export class FailoverKey extends PolyAction {
+  readonly kind = "failover" as const;
+
   override onKeyDown(ev: KeyDownEvent): Promise<void> {
     return rt().pressFailover(ev.action.id);
   }
 }
 
 @action({ UUID: `${PLUGIN}.meter` })
-export class MeterDial extends SingletonAction {
-  override onWillAppear(ev: WillAppearEvent): void {
-    register(ev.action, "meter", ev.payload.settings);
-  }
-  override onDidReceiveSettings(ev: DidReceiveSettingsEvent): void {
-    register(ev.action, "meter", ev.payload.settings);
-  }
-  override onWillDisappear(ev: WillDisappearEvent): void {
-    rt().remove(ev.action.id);
-  }
+export class MeterDial extends PolyAction {
+  readonly kind = "meter" as const;
 }
 
 /** A connection check on the values the inspector is showing, not the saved ones. */

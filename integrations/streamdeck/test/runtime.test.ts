@@ -425,6 +425,80 @@ describe("connection that starts unreachable", () => {
   });
 });
 
+describe("dial after the install stops answering", () => {
+  it("goes to NO FEED when the token is revoked, instead of holding the last bar", async () => {
+    // A revoked token refuses every route. The dial-only deck below polls only /levels,
+    // so the refusal has to be seen there, not only on /status.
+    let revoked = false;
+    const refused = (ok: Route): Route => (req) => (revoked ? { status: 401, body: '{"error":"revoked"}' } : ok(req) as TransportResponse);
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": refused(json(200, STATUS_7)),
+      "GET /api/v1/levels": refused(json(200, { levels: { peak: [[-30]], rms: [[-30]] }, feed: "live" })),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const dial = surface("m", "meter", { sourceId: 7 });
+    rt.add(dial);
+    await rt.tick();
+    await rt.tickMeters();
+    expect(dial.feedback.at(-1)).toMatchObject({ value: "-30 dB" });
+    expect(rt.isAdmin).toBe(true);
+
+    revoked = true;
+    await rt.tickMeters();
+    expect(dial.feedback.at(-1)).toMatchObject({ value: "NO FEED", indicator: 0 });
+    // A dial-only deck never polls /status, so the refusal must also drop the admin state here.
+    expect(rt.isAdmin).toBe(false);
+  });
+
+  it("paints an unpaired install's dial as NO FEED rather than leaving it unpainted", async () => {
+    const { rt } = runtimeFor({});
+    rt.configure({});
+    const dial = surface("m", "meter", {});
+    rt.add(dial);
+    await rt.tick();
+    await rt.tickMeters();
+    expect(dial.feedback.at(-1)).toMatchObject({ value: "NO FEED" });
+  });
+});
+
+describe("overlapping clock ticks", () => {
+  it("does not stack meter or status requests while one is still in flight", async () => {
+    const counts = { levels: 0, status: 0 };
+    const transport: Transport = {
+      async send(req) {
+        const path = req.url.pathname;
+        if (path.endsWith("/auth/connection")) return { status: 200, body: JSON.stringify({ name: "x", prefix: "p", scope: "read", adminScope: false }) };
+        if (path.endsWith("/levels")) {
+          counts.levels++;
+          return new Promise<TransportResponse>(() => {});
+        }
+        if (path.endsWith("/status")) {
+          counts.status++;
+          return new Promise<TransportResponse>(() => {});
+        }
+        return { status: 404, body: "{}" };
+      },
+    };
+    const sched = manualScheduler();
+    const rt = new Runtime("en", () => transport, sched.schedule);
+    rt.configure(PAIRED);
+    await rt.verify();
+    rt.add(surface("m", "meter", { sourceId: 7 }));
+    rt.add(surface("d", "destination", { sourceId: 7, destinationId: 5 }));
+
+    void rt.tickMeters();
+    void rt.tickMeters();
+    void rt.tickMeters();
+    void rt.tick();
+    void rt.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(counts.levels).toBe(1);
+    expect(counts.status).toBe(1);
+  });
+});
+
 describe("armed stop face", () => {
   it("keeps the count and the held state through a periodic repaint", async () => {
     const { rt, sched } = runtimeFor({

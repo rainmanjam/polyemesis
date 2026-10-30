@@ -67,6 +67,10 @@ export class Runtime {
   private readonly statuses = new Map<string, StatusPayload>();
   private readonly levels = new Map<string, LevelsReading | { error: true }>();
   private readonly lastMeterPaint = new Map<string, string>();
+  /** One status refresh at a time. A tick that arrives while one is in flight is skipped, not queued. */
+  private statusBusy = false;
+  /** One meter poll at a time, for the same reason. A dropped packet must not stack requests. */
+  private meterBusy = false;
 
   constructor(
     private readonly locale: string,
@@ -141,21 +145,27 @@ export class Runtime {
 
   /** Refreshes the status cache and repaints every key. Runs every couple of seconds. */
   async tick(): Promise<void> {
-    if (!this.client) {
+    if (this.statusBusy) return;
+    this.statusBusy = true;
+    try {
+      if (!this.client) {
+        await this.paintAll();
+        return;
+      }
+      // A bad token is not retried: each attempt is a credential check the install logs.
+      // An unreachable install is retried on every tick, so keys recover when it returns.
+      if (!this.connection && this.connectionError?.kind !== "unauthorized") {
+        await this.verify().catch(() => undefined);
+      }
+      if (!this.connection) {
+        await this.paintAll();
+        return;
+      }
+      await this.refreshStatuses();
       await this.paintAll();
-      return;
+    } finally {
+      this.statusBusy = false;
     }
-    // A bad token is not retried: each attempt is a credential check the install logs.
-    // An unreachable install is retried on every tick, so keys recover when it returns.
-    if (!this.connection && this.connectionError?.kind !== "unauthorized") {
-      await this.verify().catch(() => undefined);
-    }
-    if (!this.connection) {
-      await this.paintAll();
-      return;
-    }
-    await this.refreshStatuses();
-    await this.paintAll();
   }
 
   private async refreshStatuses(): Promise<void> {
@@ -181,21 +191,41 @@ export class Runtime {
 
   // ---- meter clock -------------------------------------------------------
 
-  /** Refreshes each programme's levels and repaints the dials whose face changed. Runs several times a second. */
+  /**
+   * Refreshes each programme's levels and repaints the dials. Runs several times a second.
+   * With no connection the dials are repainted as NO FEED, so they never hold a bar that
+   * the install can no longer vouch for.
+   */
   async tickMeters(): Promise<void> {
-    if (!this.client || !this.connection) return;
-    const scopes = new Set<string>();
-    for (const s of this.surfaces.values()) if (s.kind === "meter") scopes.add(scopeKey(s.settings.sourceId));
-    for (const key of scopes) {
-      try {
-        const sourceId = key === ALL_SCOPE ? undefined : Number(key);
-        this.levels.set(key, await this.client.levels(sourceId));
-      } catch {
-        // No answer is NO FEED, not the last reading held on screen.
-        this.levels.set(key, { error: true });
+    if (this.meterBusy) return;
+    this.meterBusy = true;
+    try {
+      if (!this.client || !this.connection) {
+        this.levels.clear();
+        await this.paintMeters();
+        return;
       }
+      const scopes = new Set<string>();
+      for (const s of this.surfaces.values()) if (s.kind === "meter") scopes.add(scopeKey(s.settings.sourceId));
+      for (const key of scopes) {
+        try {
+          const sourceId = key === ALL_SCOPE ? undefined : Number(key);
+          this.levels.set(key, await this.client.levels(sourceId));
+        } catch (err) {
+          // No answer is NO FEED, not the last reading held on screen. A refused token
+          // here matters as much as on /status, and a dial-only deck never polls /status,
+          // so this is where a revoked token is noticed.
+          this.levels.set(key, { error: true });
+          if (err instanceof ApiError && (err.kind === "unauthorized" || err.kind === "untrusted")) {
+            this.connection = undefined;
+            this.connectionError = err;
+          }
+        }
+      }
+      await this.paintMeters();
+    } finally {
+      this.meterBusy = false;
     }
-    await this.paintMeters();
   }
 
   // ---- painting ----------------------------------------------------------
