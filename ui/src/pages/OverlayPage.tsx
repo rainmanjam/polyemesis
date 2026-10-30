@@ -5,7 +5,7 @@ import {
   addLine,
   expireLines,
   fetchOverlayConfig,
-  keyFromHash,
+  overlayLocation,
   removeLines,
   runOverlayStream,
   type OverlayConfig,
@@ -17,12 +17,13 @@ const DOCK_LINES = 200;
 
 type Phase = { kind: "loading" } | { kind: "denied" } | { kind: "ready"; config: OverlayConfig };
 
-/** The chat overlay (/overlay) and dock (/overlay/dock), for OBS.
+/** The chat overlay (/overlay) and dock (/overlay/dock), for OBS, and their
+ *  path-key forms (/overlay/k/{key}, /overlay/dock/k/{key}).
  *
  *  Like PublicPlayer it runs with NO SESSION and outside the console's shell:
  *  it never calls /auth/me, never opens the telemetry socket, never reads the
- *  CSRF cookie. Its only credential is the overlay key in the URL fragment,
- *  sent to exactly two endpoints in a header.
+ *  CSRF cookie. Its only credential is the overlay key in the URL fragment
+ *  or path, sent to exactly two endpoints in a header.
  *
  *  The page background is TRANSPARENT so OBS composites the lines over the
  *  scene. A failure on the overlay draws NOTHING -- an error banner would be
@@ -30,8 +31,11 @@ type Phase = { kind: "loading" } | { kind: "denied" } | { kind: "ready"; config:
  *  what went wrong. */
 export function OverlayPage() {
   const t = useT();
-  const dock = window.location.pathname.replace(/\/+$/, "").endsWith("/dock");
-  const [key] = useState(() => keyFromHash(window.location.hash));
+  // Read once, like the key: an OBS source never navigates. Null cannot happen
+  // here (App routes only overlay paths to this page), and reads as no key.
+  const [{ key, dock }] = useState(
+    () => overlayLocation(window.location.pathname, window.location.hash) ?? { key: "", dock: false },
+  );
   // No key in the URL is decided at once, not in an effect.
   const [phase, setPhase] = useState<Phase>(() => (key ? { kind: "loading" } : { kind: "denied" }));
   const [lines, setLines] = useState<ShownLine[]>([]);

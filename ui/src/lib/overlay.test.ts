@@ -5,6 +5,8 @@ import {
   addLine,
   expireLines,
   keyFromHash,
+  overlayLocation,
+  overlayPathUrl,
   overlayUrl,
   removeLines,
   runOverlayStream,
@@ -27,6 +29,41 @@ describe("the OBS URL", () => {
   it("reads no key from an empty or foreign fragment", () => {
     expect(keyFromHash("")).toBe("");
     expect(keyFromHash("#scene=2")).toBe("");
+  });
+  // The path form exists for an OBS that drops the fragment. It is the second
+  // choice, not the default: a reverse proxy in front of polyemesis logs paths.
+  it("builds the path form with the key as one escaped segment, and no query or fragment", () => {
+    const u = new URL(overlayPathUrl("https://box.example", "pov_abc-_1"));
+    expect(u.pathname).toBe("/overlay/k/pov_abc-_1");
+    expect(u.search).toBe("");
+    expect(u.hash).toBe("");
+    expect(new URL(overlayPathUrl("https://box.example", "pov_k", true)).pathname).toBe("/overlay/dock/k/pov_k");
+    expect(overlayPathUrl("https://box.example", "a/b")).toBe("https://box.example/overlay/k/a%2Fb");
+  });
+});
+
+describe("which page this is, and its key", () => {
+  it("reads every overlay URL the server serves, both forms, overlay and dock", () => {
+    expect(overlayLocation("/overlay", "#key=pov_a")).toEqual({ key: "pov_a", dock: false });
+    expect(overlayLocation("/overlay/dock", "#key=pov_a")).toEqual({ key: "pov_a", dock: true });
+    expect(overlayLocation("/overlay/k/pov_a", "")).toEqual({ key: "pov_a", dock: false });
+    // The dock is told apart by its prefix, not by a path that ends in /dock:
+    // the path form ends in the key.
+    expect(overlayLocation("/overlay/dock/k/pov_a", "")).toEqual({ key: "pov_a", dock: true });
+    expect(overlayLocation("/overlay/k/pov_a%2Db/", "")).toEqual({ key: "pov_a-b", dock: false });
+    expect(overlayLocation("/overlay/", "")).toEqual({ key: "", dock: false });
+  });
+  // Both present only when somebody edited a URL by hand. The path is the one
+  // the page was served under, so it wins; the fragment is not a fallback for
+  // a path key that is present.
+  it("prefers the path key when the URL carries both", () => {
+    expect(overlayLocation("/overlay/k/pov_path", "#key=pov_frag")).toEqual({ key: "pov_path", dock: false });
+  });
+  it("is not an overlay page for anything else, including near misses", () => {
+    for (const p of ["/", "/overlays", "/overlay/x", "/overlay/k", "/overlay/k/", "/overlay/k/a/b",
+      "/overlay/dock/x", "/overlay/dock/k/", "/settings/overlay", "/watch"]) {
+      expect(overlayLocation(p, "#key=pov_a"), p).toBeNull();
+    }
   });
 });
 

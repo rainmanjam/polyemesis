@@ -6,6 +6,7 @@ import { LiveDataProvider } from "@/components/LiveDataProvider";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { api, ApiError } from "@/lib/api";
 import { onSessionEnded } from "@/lib/session";
+import { overlayLocation } from "@/lib/overlay";
 import { useT } from "@/lib/i18n";
 import { AppLayout } from "@/components/AppLayout";
 import { AuthScreen } from "@/pages/AuthScreen";
@@ -70,11 +71,11 @@ const OverlayPage = lazy(() =>
 );
 
 /** Whether this page load is the chat overlay or its dock (/overlay,
- *  /overlay/dock): an OBS browser source with no session, decided before the
- *  gate for the same reason as the player. */
+ *  /overlay/dock, or either with the key in the path): an OBS browser source
+ *  with no session, decided before the gate for the same reason as the player.
+ *  The same parser the page reads its key with, so the two cannot disagree. */
 function isOverlayRoute(): boolean {
-  const p = window.location.pathname.replace(/\/+$/, "");
-  return p === "/overlay" || p === "/overlay/dock";
+  return overlayLocation(window.location.pathname, window.location.hash) !== null;
 }
 
 /** Whether this page load is the public player.

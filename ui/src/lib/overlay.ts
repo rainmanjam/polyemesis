@@ -99,10 +99,52 @@ export function overlayUrl(origin: string, key: string, dock = false): string {
   return `${origin}/overlay${dock ? "/dock" : ""}#key=${encodeURIComponent(key)}`;
 }
 
+/** The OBS URL with the key in the PATH: /overlay/k/{key}, /overlay/dock/k/{key}.
+ *
+ *  For an OBS browser source that drops the fragment, which leaves the
+ *  fragment URL with no key at all. It is the SECOND choice, and the settings
+ *  page offers it as such: a path reaches the server, so a reverse proxy in
+ *  front of polyemesis writes it into its own access log, where polyemesis
+ *  cannot scrub it. polyemesis's own log records the route pattern instead,
+ *  and the page sends Referrer-Policy: no-referrer, so neither of those
+ *  carries it. The page still sends the key as X-Overlay-Key; the server
+ *  never reads it from the path. */
+export function overlayPathUrl(origin: string, key: string, dock = false): string {
+  return `${origin}/overlay${dock ? "/dock" : ""}/k/${encodeURIComponent(key)}`;
+}
+
 /** Reads the key back out of the fragment. */
 export function keyFromHash(hash: string): string {
   const h = hash.startsWith("#") ? hash.slice(1) : hash;
   return new URLSearchParams(h).get("key") ?? "";
+}
+
+/** /overlay, /overlay/dock, /overlay/k/{key} or /overlay/dock/k/{key}. */
+const OVERLAY_PATH = /^\/overlay(\/dock)?(?:\/k\/([^/]+))?$/;
+
+/** Whether this page is the overlay or its dock, and its key -- or null when
+ *  the path is not one of the four the server serves the overlay page on.
+ *
+ *  ONE PARSER FOR BOTH QUESTIONS, because they used to be two and disagreed:
+ *  the app decided "overlay" by exact match on /overlay and /overlay/dock, and
+ *  the page decided "dock" by a path ending in /dock. The path form ends in its
+ *  key, so it would have been a login screen inside OBS, or an overlay drawn as
+ *  a dock.
+ *
+ *  A key in the path wins over one in the fragment. Both appear only in a URL
+ *  edited by hand, and the path is the one the page was served under. */
+export function overlayLocation(pathname: string, hash: string): { key: string; dock: boolean } | null {
+  const m = OVERLAY_PATH.exec(pathname.replace(/\/+$/, ""));
+  if (!m) return null;
+  let key = "";
+  if (m[2]) {
+    try {
+      key = decodeURIComponent(m[2]);
+    } catch {
+      key = ""; // a malformed escape is no key, and the server answers 401
+    }
+  }
+  return { key: key || keyFromHash(hash), dock: Boolean(m[1]) };
 }
 
 // ---------------------------------------------------------------- the rules

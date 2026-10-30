@@ -8,6 +8,7 @@ import { failedRead, mayClaim, okRead, pendingRead, readFailed, type ReadState }
 import {
   OVERLAY_FONTS,
   OVERLAY_LIMITS,
+  overlayPathUrl,
   overlayUrl,
   type ChatOverlay,
   type OverlayFont,
@@ -391,6 +392,22 @@ export function OverlayEditor({
                 {overlay.obsKey.slice(0, 12)}…
               </span>
               <span className="text-micro text-muted-foreground">{t("overlay.obsHint")}</span>
+              {/* The key-in-path form, second and smaller on purpose. Some OBS
+                  builds drop the fragment, which leaves the URL above with no
+                  key; this one works there. It is not the default because a
+                  path reaches the server, so a reverse proxy in front of it
+                  logs the key -- the hint says so rather than hiding it. */}
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="ghost"
+                  onClick={() => copyToClipboard(t, overlayPathUrl(origin, overlay.obsKey), t("overlay.obsUrl"))}>
+                  <Copy /> {t("overlay.copyObsPathUrl")}
+                </Button>
+                <Button size="sm" variant="ghost"
+                  onClick={() => copyToClipboard(t, overlayPathUrl(origin, overlay.obsKey, true), t("overlay.dockUrl"))}>
+                  <Copy /> {t("overlay.copyDockPathUrl")}
+                </Button>
+              </div>
+              <span className="text-micro text-muted-foreground">{t("overlay.pathHint")}</span>
               <span className="text-micro text-muted-foreground">
                 {t("overlay.holdHint", { seconds: Math.round(meta.maxHoldMs / 1000) })}
               </span>

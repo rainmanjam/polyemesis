@@ -44,6 +44,27 @@ describe("the overlay page", () => {
     await waitFor(() => expect(document.querySelectorAll(".overlay-line").length).toBe(1));
   });
 
+  // The path-key form (/overlay/dock/k/{key}), for an OBS that drops the
+  // fragment: the key goes in the same header as the fragment form's, and the
+  // page is the dock, though its path does not end in /dock.
+  it("reads the key from the path and sends it in the header, on the dock too", async () => {
+    window.history.replaceState(null, "", "/overlay/dock/k/pov_pathkey");
+    const keys: (string | null)[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      keys.push(new Headers(init?.headers).get("X-Overlay-Key"));
+      if (String(url).endsWith("/overlay/config")) {
+        return new Response(JSON.stringify({ name: "x", platforms: [], style: style("classic") }), { status: 200 });
+      }
+      return sse("a", "one");
+    }));
+    const { container } = render(<OverlayPage />);
+    await waitFor(() => expect(screen.getByText("one")).toBeTruthy());
+    expect(keys.length).toBeGreaterThan(0);
+    expect(keys.every((k) => k === "pov_pathkey")).toBe(true);
+    // The dock's solid background, not the overlay's transparent one.
+    expect((container.firstElementChild as HTMLElement).style.background).not.toBe("transparent");
+  });
+
   it("draws nothing, not an error, when the key is refused", async () => {
     window.history.replaceState(null, "", "/overlay#key=pov_bad");
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 401 })));

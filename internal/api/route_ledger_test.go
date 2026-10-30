@@ -666,6 +666,12 @@ var excusedRoutes = map[string]coverageExcus{
 	// The chat overlay and dock pages: the same SPA bundle, sessionless.
 	"GET /overlay":      spa(),
 	"GET /overlay/dock": spa(),
+	// The path-key forms of the same two pages. {key} is never read by the
+	// server -- the page reads it from its own URL and sends it in
+	// X-Overlay-Key -- so the bytes are the SPA bundle whatever is in the path,
+	// for every principal including one holding a valid overlay key there.
+	"GET /overlay/k/{key}":      spa(),
+	"GET /overlay/dock/k/{key}": spa(),
 	// The overlay key's two routes. Outside every auth group, and a read
 	// token is nothing to them: without the overlay's own key in its own
 	// header every principal gets the same 401. The counterparts open them

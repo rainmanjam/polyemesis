@@ -1552,6 +1552,13 @@ func (s *Server) registerRoutes(r chi.Router) {
 	ovPage := s.overlayPageHandler()
 	r.Get(OverlayPath, ovPage)
 	r.Get(OverlayPath+"/dock", ovPage)
+	// The path-key forms, for an OBS that drops the URL fragment. The handler
+	// never reads {key}: the page does, from location.pathname, and sends it as
+	// OverlayKeyHeader like the fragment form. Registered as patterns so the
+	// access log records "/overlay/k/{key}" -- the key never reaches a log line
+	// on a request that matched.
+	r.Get(OverlayPath+OverlayKeyPath+"{key}", ovPage)
+	r.Get(OverlayPath+"/dock"+OverlayKeyPath+"{key}", ovPage)
 
 	if h, err := s.uiHandler(); err == nil {
 		r.NotFound(h.ServeHTTP)

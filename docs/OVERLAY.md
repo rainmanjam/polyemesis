@@ -22,6 +22,11 @@ For the dock, select **Copy dock URL**. In OBS, open **Docks → Custom Browser
 Docks**, then paste the URL. The dock uses a denser layout on a solid
 background and keeps the last 200 lines.
 
+If the overlay stays empty in OBS, your OBS may be dropping the part of the
+URL after `#`, which is where the key is. Use **Copy OBS URL (key in path)** or
+**Copy dock URL (key in path)** instead. See
+[The key in the path](#the-key-in-the-path) for the trade-off.
+
 Restyling an overlay doesn't change its URL. An open overlay picks up the new
 style the next time it reconnects; you can force that by refreshing the source
 in OBS.
@@ -98,6 +103,36 @@ https://your-server/overlay#key=pov_…
 The key is the part after `#`. Browsers never send that part to a server, so
 it never appears in the server's logs, a proxy's logs or a `Referer` header.
 The overlay page sends it to the server in a request header instead.
+
+### The key in the path
+
+Some OBS browser sources drop the part after `#`, which leaves the URL above
+with no key, and the overlay stays empty. For those, Settings also offers the
+key in the path:
+
+```
+https://your-server/overlay/k/pov_…
+https://your-server/overlay/dock/k/pov_…
+```
+
+The page reads the key from its own address and sends it in the same request
+header, so the key works exactly as it does in the `#` form. What changes is
+who sees the address:
+
+- **Polyemesis's own log never records it.** A request that matches the route
+  is logged as `/overlay/k/{key}`, and any other path has `pov_` keys replaced
+  with `pov_[redacted]` before it is logged.
+- **No `Referer` carries it.** The page is sent with
+  `Referrer-Policy: no-referrer`.
+- **A reverse proxy in front of polyemesis can log it.** nginx, Caddy and
+  Traefik write the request path to their own access logs by default, and
+  polyemesis can't reach those. This is why the `#` form stays the default.
+
+Use the path form only if the `#` form doesn't work in your OBS. If you run a
+proxy and use it, treat the proxy's access log as holding the key, or rotate
+the key if that log is shared.
+
+### What the key can reach
 
 The key can read only two things: the overlay's own style and its filtered
 display stream. It isn't an API token. It can't call any other API route, open

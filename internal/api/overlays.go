@@ -34,17 +34,32 @@ import (
 //     its holder the public chat the overlay was already putting on stream,
 //     after automod, without author ids -- and nothing else.
 //
-// It travels in a header, never a query string. The OBS URL carries it in the
-// FRAGMENT (#key=...), which a browser never sends to a server, never writes
-// into a Referer and no proxy logs; the overlay page reads it there and sends
-// it as OverlayKeyHeader. loggedPath also scrubs pov_ keys from any path it
-// does log, for the operator who pastes one in the wrong place.
+// It travels to these handlers in a header, never a query string. The OBS URL
+// carries it in the FRAGMENT (#key=...), which a browser never sends to a
+// server, never writes into a Referer and no proxy logs; the overlay page reads
+// it there and sends it as OverlayKeyHeader.
+//
+// Some OBS builds drop the fragment, so the same pages are also served at
+// OverlayPath+OverlayKeyPath+"{key}" and its dock twin. The handler never
+// reads {key} -- the page reads it from location.pathname and sends the same
+// header, so the credential check above is unchanged. What the path form
+// gives up is the proxy: a path reaches the server, and a reverse proxy in
+// front of it logs paths. Inside polyemesis it is covered twice: a matched
+// request logs its route PATTERN ("/overlay/k/{key}", see loggedPath), and
+// loggedPath scrubs pov_ keys from any raw path it does log. Referrer-Policy:
+// no-referrer keeps it out of a Referer. The settings page offers the
+// fragment form first for the proxy's sake.
 
 // OverlayKeyHeader is the one place an overlay key is read from.
 const OverlayKeyHeader = "X-Overlay-Key"
 
 // OverlayPath is the overlay page; OverlayPath+"/dock" is the dock.
 const OverlayPath = "/overlay"
+
+// OverlayKeyPath is the path-key form's segment: OverlayPath+OverlayKeyPath+key
+// and OverlayPath+"/dock"+OverlayKeyPath+key serve the same pages as the
+// fragment URLs, for an OBS that drops the fragment. See the header above.
+const OverlayKeyPath = "/k/"
 
 // overlayRecheck is how often an open display stream re-reads its key from the
 // store. Rotation and revocation end streams at once through overlayKicker;
@@ -334,7 +349,8 @@ func (s *Server) handleOverlayEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // overlayPageHandler serves the SPA for the overlay and dock pages, which
-// render without a session: the page reads its key from the URL fragment.
+// render without a session: the page reads its key from the URL fragment, or
+// from the path on the path-key routes.
 //
 // index.html is served with its background made TRANSPARENT before the first
 // paint. The shell paints the body dark inline (so the console never flashes

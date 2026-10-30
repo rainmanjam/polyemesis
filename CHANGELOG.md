@@ -10,6 +10,13 @@ its first tagged release.
 
 ### Added
 
+- **Chat overlay URLs with the key in the path.** Some OBS browser sources drop
+  the part of a URL after `#`, where the overlay key is, and the overlay stays
+  empty. `/overlay/k/{key}` and `/overlay/dock/k/{key}` serve the same pages,
+  and Settings offers them under **Copy OBS URL (key in path)**. The `#` form
+  stays the default, because a reverse proxy logs paths. Polyemesis's own log
+  never records the key, and the pages send `Referrer-Policy: no-referrer`. See
+  [docs/OVERLAY.md](docs/OVERLAY.md#the-key-in-the-path).
 - **MCP server.** `POST /mcp` lets Claude Desktop, Claude Code or any Model
   Context Protocol client read what is on air and, with an admin token, act on
   it. Setup, with config examples, is in [docs/MCP.md](docs/MCP.md).

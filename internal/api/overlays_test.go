@@ -401,7 +401,14 @@ func TestTheOverlayKeyNeverReachesTheAccessLog(t *testing.T) {
 		{http.MethodGet, "/api/v1/overlay/" + o.OBSKey, false},            // 404
 		{http.MethodGet, "/overlay/" + o.OBSKey, false},                   // SPA fallback
 		{http.MethodGet, "/overlay?key=" + o.OBSKey, false},               // page
-		{http.MethodGet, "/api/v1/nope/" + o.OBSKey + "/x", false},        // 404
+		// The path-key forms (OverlayKeyPath). A matched route logs its
+		// PATTERN, so the key is gone by construction; the third has a
+		// trailing segment no route matches, so its raw path is logged and the
+		// pov_ scrub is what keeps the key out.
+		{http.MethodGet, OverlayPath + OverlayKeyPath + o.OBSKey, false},
+		{http.MethodGet, OverlayPath + "/dock" + OverlayKeyPath + o.OBSKey, false},
+		{http.MethodGet, OverlayPath + OverlayKeyPath + o.OBSKey + "/x", false},
+		{http.MethodGet, "/api/v1/nope/" + o.OBSKey + "/x", false}, // 404
 	} {
 		r := httptest.NewRequest(rq.method, rq.path, nil)
 		if rq.header {
@@ -413,17 +420,35 @@ func TestTheOverlayKeyNeverReachesTheAccessLog(t *testing.T) {
 	if !strings.Contains(out, "path=") {
 		t.Fatal("nothing was logged; the test is not observing the access log")
 	}
+	// The path-key pages were reached and logged as their pattern, so the
+	// absence below is about lines that exist.
+	for _, want := range []string{
+		"path=" + OverlayPath + OverlayKeyPath + "{key}",
+		"path=" + OverlayPath + "/dock" + OverlayKeyPath + "{key}",
+		"path=" + OverlayPath + OverlayKeyPath + db.OverlayKeyPrefix + "[redacted]/x",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no access-log line carries %q:\n%s", want, out)
+		}
+	}
 	secret := strings.TrimPrefix(o.OBSKey, db.OverlayKeyPrefix)
 	if strings.Contains(out, secret) {
 		t.Errorf("the overlay key reached the log:\n%s", out)
 	}
 }
 
-// TestTheOverlayPagesSendNoReferrer: Referrer-Policy on both pages, and no
-// caching of a page whose URL carries a credential.
+// TestTheOverlayPagesSendNoReferrer: Referrer-Policy on every overlay and dock
+// page, the path-key forms included, and no caching of a page whose URL
+// carries a credential.
 func TestTheOverlayPagesSendNoReferrer(t *testing.T) {
 	_, h, _, _ := overlayServer(t)
-	for _, p := range []string{OverlayPath, OverlayPath + "/dock"} {
+	// The path-key forms carry a real-looking key: what the page is served
+	// must not depend on it, and its URL is the one a Referer would leak.
+	key := db.OverlayKeyPrefix + "AbCdEfGhIjKlMnOpQrStUvWxYz012345"
+	for _, p := range []string{
+		OverlayPath, OverlayPath + "/dock",
+		OverlayPath + OverlayKeyPath + key, OverlayPath + "/dock" + OverlayKeyPath + key,
+	} {
 		w := do(t, h, httptest.NewRequest(http.MethodGet, p, nil))
 		if got := w.Header().Get("Referrer-Policy"); got != "no-referrer" {
 			t.Errorf("%s: Referrer-Policy %q", p, got)

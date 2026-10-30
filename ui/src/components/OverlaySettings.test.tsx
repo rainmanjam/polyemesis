@@ -99,11 +99,23 @@ describe("the overlay style editor", () => {
 
   it("copies an OBS URL with the key in the fragment", async () => {
     render(<OverlayEditor overlay={overlay()} meta={meta} onChanged={vi.fn()} onDeleted={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Copy OBS URL/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Copy dock URL/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Copy OBS URL$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Copy dock URL$/ }));
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
     expect(writeText).toHaveBeenNthCalledWith(1, `${window.location.origin}/overlay#key=pov_testkey123456789`);
     expect(writeText).toHaveBeenNthCalledWith(2, `${window.location.origin}/overlay/dock#key=pov_testkey123456789`);
+  });
+
+  // The path form is offered beside the fragment form, not instead of it: the
+  // fragment never reaches any server, and a path reaches a reverse proxy's log.
+  it("also offers the key-in-path URLs, for an OBS that drops the fragment, with the trade-off said", async () => {
+    render(<OverlayEditor overlay={overlay()} meta={meta} onChanged={vi.fn()} onDeleted={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Copy OBS URL \(key in path\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Copy dock URL \(key in path\)/ }));
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
+    expect(writeText).toHaveBeenNthCalledWith(1, `${window.location.origin}/overlay/k/pov_testkey123456789`);
+    expect(writeText).toHaveBeenNthCalledWith(2, `${window.location.origin}/overlay/dock/k/pov_testkey123456789`);
+    expect(screen.getByText(/reverse proxy/)).toBeTruthy();
   });
 
   it("offers no URL for a revoked overlay, only a new key", () => {
