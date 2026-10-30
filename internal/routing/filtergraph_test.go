@@ -41,7 +41,7 @@ func TestZeroValuedOptionalFieldsChangeNothing(t *testing.T) {
 			p:    simple(NormAuto, 0),
 			src:  stereoSource(3),
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "two tracks, auto limiter",
@@ -51,7 +51,7 @@ func TestZeroValuedOptionalFieldsChangeNothing(t *testing.T) {
 				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 				"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
-				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_norm]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "loudnorm keeps its original fixed parameters forever",
@@ -61,14 +61,14 @@ func TestZeroValuedOptionalFieldsChangeNothing(t *testing.T) {
 				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 				"[a_mix]loudnorm=I=-16:TP=-1.5:LRA=11[a_norm];" +
-				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_norm]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "5.1 downmix",
 			p:    simple(NormAuto, 0),
 			src:  Source{Tracks: []Track{{Index: 0, Channels: 6, Layout: "5.1"}}},
 			want: "[0:a:0]pan=stereo|c0=0.4143*c0+0.2929*c2+0.2929*c4|c1=0.4143*c1+0.2929*c2+0.2929*c5[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "matrix mode",
@@ -78,7 +78,7 @@ func TestZeroValuedOptionalFieldsChangeNothing(t *testing.T) {
 			}},
 			src: stereoSource(2),
 			want: "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];" +
-				"[a_t1]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t1]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "annotated source with no destination policy and no denoise",
@@ -89,7 +89,7 @@ func TestZeroValuedOptionalFieldsChangeNothing(t *testing.T) {
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];" +
 				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "excludeRoles set but the source is unannotated",
@@ -98,7 +98,7 @@ func TestZeroValuedOptionalFieldsChangeNothing(t *testing.T) {
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];" +
 				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "loudness target present but normalization explicitly off",
@@ -107,7 +107,7 @@ func TestZeroValuedOptionalFieldsChangeNothing(t *testing.T) {
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];" +
 				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "loudness target present but the limiter was chosen explicitly",
@@ -115,14 +115,14 @@ func TestZeroValuedOptionalFieldsChangeNothing(t *testing.T) {
 			src:  stereoSource(2),
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
 				"[a_t0]alimiter=limit=0.95:level=disabled[a_norm];" +
-				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_norm]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "zero delay adds no adelay",
 			p:    withDelay(simple(NormOff, 0), 0),
 			src:  stereoSource(1),
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 		},
 	}
 
@@ -156,7 +156,7 @@ func TestDenoiseIsPerTrackAndBeforeTheSum(t *testing.T) {
 			p:    simple(NormOff, 0),
 			src:  annotate(stereoSource(2), TrackAnnotation{Track: 0, Role: RoleMic, Denoise: true}),
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1," + DenoiseFilter + "[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "only the annotated track is denoised",
@@ -166,7 +166,7 @@ func TestDenoiseIsPerTrackAndBeforeTheSum(t *testing.T) {
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];" +
 				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1," + DenoiseFilter + ",aresample=async=1:first_pts=0[a_t1];" +
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "denoise sits after the downmix, on the two surviving channels",
@@ -174,7 +174,7 @@ func TestDenoiseIsPerTrackAndBeforeTheSum(t *testing.T) {
 			src: annotate(Source{Tracks: []Track{{Index: 0, Channels: 6, Layout: "5.1"}}},
 				TrackAnnotation{Track: 0, Denoise: true}),
 			want: "[0:a:0]pan=stereo|c0=0.4143*c0+0.2929*c2+0.2929*c4|c1=0.4143*c1+0.2929*c2+0.2929*c5," + DenoiseFilter + "[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "an annotation for a track this destination does not take is inert",
@@ -182,7 +182,7 @@ func TestDenoiseIsPerTrackAndBeforeTheSum(t *testing.T) {
 			src: annotate(stereoSource(2),
 				TrackAnnotation{Track: 1, Denoise: true}),
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 		},
 	}
 
@@ -228,7 +228,7 @@ func TestDuckingGraphTopology(t *testing.T) {
 				"[a_t0]asplit=2[a_t0_mix][a_t0_key];" +
 				"[a_t1][a_t0_key]sidechaincompress=" + params + "[a_duck];" +
 				"[a_t0_mix][a_duck]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "two targets are summed once and ducked once",
@@ -241,7 +241,7 @@ func TestDuckingGraphTopology(t *testing.T) {
 				"[a_t1][a_t2]amix=inputs=2:duration=longest:normalize=0[a_duckin];" +
 				"[a_duckin][a_t0_key]sidechaincompress=" + params + "[a_duck];" +
 				"[a_t0_mix][a_duck]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "two triggers are summed into one detector key",
@@ -255,7 +255,7 @@ func TestDuckingGraphTopology(t *testing.T) {
 				"[a_t0_key][a_t1_key]amix=inputs=2:duration=longest:normalize=0[a_duckkey];" +
 				"[a_t2][a_duckkey]sidechaincompress=" + params + "[a_duck];" +
 				"[a_t0_mix][a_t1_mix][a_duck]amix=inputs=3:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "the duck takes the first target's place in the mix order",
@@ -268,7 +268,7 @@ func TestDuckingGraphTopology(t *testing.T) {
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_duckin];" +
 				"[a_duckin][a_t2_key]sidechaincompress=" + params + "[a_duck];" +
 				"[a_duck][a_t2_mix]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "a trigger this destination does not carry is tapped straight off the ingest",
@@ -277,7 +277,7 @@ func TestDuckingGraphTopology(t *testing.T) {
 			want: "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 				"[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_k0];" +
 				"[a_t1][a_k0]sidechaincompress=" + params + "[a_duck];" +
-				"[a_duck]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_duck]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "a tapped trigger is denoised too, so room noise cannot open the duck",
@@ -286,7 +286,7 @@ func TestDuckingGraphTopology(t *testing.T) {
 			want: "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 				"[0:a:0]pan=stereo|c0=1*c0|c1=1*c1," + DenoiseFilter + ",aresample=async=1:first_pts=0[a_k0];" +
 				"[a_t1][a_k0]sidechaincompress=" + params + "[a_duck];" +
-				"[a_duck]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_duck]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "an unsorted target list compiles to the same graph as a sorted one",
@@ -299,7 +299,7 @@ func TestDuckingGraphTopology(t *testing.T) {
 				"[a_t1][a_t2]amix=inputs=2:duration=longest:normalize=0[a_duckin];" +
 				"[a_duckin][a_t0_key]sidechaincompress=" + params + "[a_duck];" +
 				"[a_t0_mix][a_duck]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 		},
 	}
 
@@ -407,7 +407,7 @@ func TestDuckingThatCannotBeBuiltIsSkippedWithAWarning(t *testing.T) {
 			p:    withDucking(simple(NormOff, 0), Ducking{Trigger: []int{0}, Target: []int{1}}),
 			src:  stereoSource(2),
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 			warning: "none of its target tracks are in this destination's mix",
 		},
 		{
@@ -417,7 +417,7 @@ func TestDuckingThatCannotBeBuiltIsSkippedWithAWarning(t *testing.T) {
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];" +
 				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 			warning: "none of its trigger tracks are present on the ingest",
 		},
 		{
@@ -427,7 +427,7 @@ func TestDuckingThatCannotBeBuiltIsSkippedWithAWarning(t *testing.T) {
 				RoleMusic),
 			src: annotate(stereoSource(2), TrackAnnotation{Track: 1, Role: RoleMusic}),
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 			warning: "none of its target tracks are in this destination's mix",
 		},
 	}
@@ -482,7 +482,7 @@ func TestLoudnessTarget(t *testing.T) {
 			wantNorm: NormLoudnorm,
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
 				"[a_t0]loudnorm=I=-14:TP=-1:LRA=11[a_norm];" +
-				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_norm]aresample=48000:async=1[aout]",
 		},
 		{
 			name:     "a target arms loudnorm under auto, replacing the limiter",
@@ -493,7 +493,7 @@ func TestLoudnessTarget(t *testing.T) {
 				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 				"[a_mix]loudnorm=I=-14:TP=-1:LRA=11[a_norm];" +
-				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_norm]aresample=48000:async=1[aout]",
 		},
 		{
 			name:     "a target arms loudnorm under auto even for a single track",
@@ -502,7 +502,7 @@ func TestLoudnessTarget(t *testing.T) {
 			wantNorm: NormLoudnorm,
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
 				"[a_t0]loudnorm=I=-16:TP=-1:LRA=11[a_norm];" +
-				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_norm]aresample=48000:async=1[aout]",
 		},
 		{
 			name: "every parameter is honoured",
@@ -512,7 +512,7 @@ func TestLoudnessTarget(t *testing.T) {
 			wantNorm: NormLoudnorm,
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
 				"[a_t0]loudnorm=I=-23:TP=-2.5:LRA=7[a_norm];" +
-				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_norm]aresample=48000:async=1[aout]",
 		},
 		{
 			name:     "explicit off is never overridden by a target",
@@ -520,7 +520,7 @@ func TestLoudnessTarget(t *testing.T) {
 			src:      stereoSource(1),
 			wantNorm: NormOff,
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 		},
 		{
 			name:     "an explicit limiter is never overridden by a target",
@@ -531,7 +531,7 @@ func TestLoudnessTarget(t *testing.T) {
 				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 				"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
-				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_norm]aresample=48000:async=1[aout]",
 		},
 	}
 
@@ -577,20 +577,20 @@ func TestDelay(t *testing.T) {
 			delay: 250,
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
 				"[a_t0]adelay=delays=250:all=1[a_delay];" +
-				"[a_delay]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_delay]aresample=48000:async=1[aout]",
 		},
 		{
 			name:  "the broadcast moderation delay is just a big positive delay",
 			delay: MaxDelayMS,
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
 				"[a_t0]adelay=delays=30000:all=1[a_delay];" +
-				"[a_delay]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_delay]aresample=48000:async=1[aout]",
 		},
 		{
 			name:  "negative delay leaves the audio graph alone and asks for video to be held",
 			delay: -120,
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 			wantVideo: 120,
 		},
 	}
@@ -621,7 +621,7 @@ func TestDelaySitsAfterLoudnessAndBeforeResample(t *testing.T) {
 	}
 	want := "[a_mix]loudnorm=I=-14:TP=-1:LRA=11[a_norm];" +
 		"[a_norm]adelay=delays=40:all=1[a_delay];" +
-		"[a_delay]aresample=48000:async=1:first_pts=0[aout]"
+		"[a_delay]aresample=48000:async=1[aout]"
 	if !strings.Contains(res.FilterComplex, want) {
 		t.Errorf("\n got  %s\n want it to contain %s", res.FilterComplex, want)
 	}
@@ -647,14 +647,14 @@ func TestExcludeRolesDropsTracksBeforeTheMix(t *testing.T) {
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];" +
 				"[0:a:2]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t2];" +
 				"[a_t0][a_t2]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 			wantTracks: []int{0, 2},
 		},
 		{
 			name: "two roles at once",
 			p:    withExcludes(simple(NormOff, 0, 1, 2), RoleMusic, RoleGame),
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 			wantTracks: []int{0},
 		},
 		{
@@ -664,7 +664,7 @@ func TestExcludeRolesDropsTracksBeforeTheMix(t *testing.T) {
 				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 				"[0:a:2]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t2];" +
 				"[a_t0][a_t1][a_t2]amix=inputs=3:duration=longest:normalize=0[a_mix];" +
-				"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_mix]aresample=48000:async=1[aout]",
 			wantTracks: []int{0, 1, 2},
 		},
 	}
@@ -755,7 +755,7 @@ func TestAllStagesTogetherInSignalChainOrder(t *testing.T) {
 		"[a_t0_mix][a_duck]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 		"[a_mix]loudnorm=I=-14:TP=-1:LRA=11[a_norm];" +
 		"[a_norm]adelay=delays=200:all=1[a_delay];" +
-		"[a_delay]aresample=48000:async=1:first_pts=0[aout]"
+		"[a_delay]aresample=48000:async=1[aout]"
 	if withoutVolumeStages(res.FilterComplex) != want {
 		t.Errorf("\n got  %s\n want %s", res.FilterComplex, want)
 	}

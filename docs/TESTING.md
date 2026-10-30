@@ -125,7 +125,7 @@ editor should read:
 [0:a:1]pan=stereo|c0=1*c0|c1=1*c0,aresample=async=1:first_pts=0[a_t1];
 [a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];
 [a_mix]alimiter=limit=0.95:level=disabled[a_norm];
-[a_norm]aresample=48000:async=1:first_pts=0[aout]
+[a_norm]aresample=48000:async=1[aout]
 ```
 
 (Shown wrapped for readability; it is one line.)
@@ -430,6 +430,7 @@ And one that is deliberately not in the matrix:
 
 ```bash
 ./scripts/acceptance-multistream.sh  # one source to four platforms, each with its own mix
+./scripts/acceptance-audio-drift.sh  # audio stays on the video's timeline through a format-changing failover
 ```
 
 `acceptance-multistream.sh` is the second odd one out, and for the opposite
@@ -445,6 +446,17 @@ through `ps(1)`, and the suite's own step 8 measures that it stayed off every
 argv, log and artifact. See issue #141 for why the question it asks is
 "does each destination receive ITS mix" rather than "does a platform accept two
 audio tracks".
+
+`acceptance-audio-drift.sh` is Docker-only and runs for about four minutes
+per mode, which is why it is local. It runs the server and an RTMP sink in
+containers, and fails over onto a source that decodes at another sample rate:
+a 44.1 kHz mono backup (`DRIFT_MODE=backup`), or the 48 kHz stereo slate under a
+44.1 kHz mono primary (`DRIFT_MODE=slate`). Then it brings the primary back. It
+measures what the sink received from one destination that rode both switches
+and one that the engine restarted. Each destination must have no audio hidden
+behind its timestamps, must end within 100 ms of its video, and must have no
+runtime-length silence. `POLYEMESIS_IMAGE` tests an existing image instead of
+building this checkout.
 
 The *other* half of that question — can a destination SEND two audio tracks at
 all — is measured in-process instead, by

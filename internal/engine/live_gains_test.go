@@ -18,7 +18,7 @@ func liveGraph(trk0, trk1 string) routing.Result {
 			"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,volume@trk1=volume=" + trk1 +
 			",aresample=async=1:first_pts=0[a_t1];" +
 			"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
-			"[a_mix]aresample=48000:async=1:first_pts=0[aout]",
+			"[a_mix]aresample=48000:async=1[aout]",
 	}
 }
 

@@ -322,6 +322,18 @@ its first tagged release.
 
 ### Fixed
 
+- **Audio no longer falls behind the video after a format-changing failover.**
+  When a failover switched to a source with a different sample rate or channel
+  count, a destination that rode the switch could put silence in front of its
+  audio. The silence was as long as the stream had been running, so the audio
+  stayed that far behind the video until the destination restarted. Measured:
+  96 s behind after a failover 98 s in. Switching onto a backup encoder at
+  another rate does this. So does switching onto the slate (always 48 kHz
+  stereo) under a 44.1 kHz or mono primary. Destinations that mix one track
+  now stay in sync and keep their connection. A destination that mixes several
+  tracks still gets the silence at such a switch. See
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 - **Show log works on timeline rows about another programme.** Every
   programme's ingest is named `ingest`, so these rows had no link. The link now
   names the row's programme, and Monitoring switches to that programme before
