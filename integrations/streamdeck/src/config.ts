@@ -29,6 +29,10 @@ export interface KeySettings {
   presetId?: string;
   /** A 0-based ingest track index, for the track mute key and the gain dial. Track 0 is a real track. */
   track?: number;
+  /** The poll key's poll (#14). Not secrets: the question and options are posted in public chat. */
+  pollQuestion?: string;
+  pollOptions?: string[];
+  pollDuration?: number;
 }
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -74,12 +78,26 @@ export function trackIndex(raw: unknown): number | undefined {
   return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : undefined;
 }
 
+/**
+ * The poll key's options: one per line in the inspector, saved as a list. Blank lines are dropped;
+ * the server checks the count and lengths and says what is wrong.
+ */
+export function pollOptions(raw: unknown): string[] | undefined {
+  const lines = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/\r?\n/) : [];
+  const out = lines.filter((o): o is string => typeof o === "string").map((o) => o.trim()).filter((o) => o !== "");
+  return out.length > 0 ? out : undefined;
+}
+
 export function keySettings(raw: Record<string, unknown> | undefined): KeySettings {
   const preset = typeof raw?.presetId === "string" ? raw.presetId.trim() : "";
+  const question = typeof raw?.pollQuestion === "string" ? raw.pollQuestion.trim() : "";
   return {
     sourceId: positiveId(raw?.sourceId),
     destinationId: positiveId(raw?.destinationId),
     presetId: preset === "" ? undefined : preset,
     track: trackIndex(raw?.track),
+    pollQuestion: question === "" ? undefined : question,
+    pollOptions: pollOptions(raw?.pollOptions),
+    pollDuration: positiveId(raw?.pollDuration),
   };
 }

@@ -653,3 +653,22 @@ CREATE TABLE IF NOT EXISTS mcp_access (
     levels     TEXT    NOT NULL DEFAULT '["read"]',  -- JSON array of read|content|control
     updated_at INTEGER NOT NULL DEFAULT 0
 );
+-- Chat polls (#14, internal/polls). One row per poll, written when it opens and
+-- again when it closes.
+--
+-- result is the poll's JSON as the API serves it: question, options, totals and
+-- the per-platform breakdown. It holds COUNTS ONLY. Who voted for what is kept
+-- in memory by the counter for the life of the poll and is never written here,
+-- so neither the history nor its export can name a voter.
+CREATE TABLE IF NOT EXISTS polls (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    question    TEXT    NOT NULL,
+    options     TEXT    NOT NULL,              -- JSON array of option labels
+    duration_s  INTEGER NOT NULL,
+    state       TEXT    NOT NULL,              -- open | ended | interrupted
+    started_at  INTEGER NOT NULL,
+    ends_at     INTEGER NOT NULL,
+    ended_at    INTEGER NOT NULL DEFAULT 0,
+    result      TEXT    NOT NULL DEFAULT '{}'  -- JSON polls.Result
+);
+CREATE INDEX IF NOT EXISTS idx_polls_started ON polls(started_at);

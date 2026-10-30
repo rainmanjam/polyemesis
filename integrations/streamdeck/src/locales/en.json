@@ -83,5 +83,15 @@
   "streamdeck.gain.matrix": "matrix: use UI",
   "streamdeck.state.buffering": "Buffering delay",
   "streamdeck.state.draining": "Airing delay tail",
-  "streamdeck.delay.marker": "Delay {seconds}s"
+  "streamdeck.delay.marker": "Delay {seconds}s",
+  "streamdeck.poll.start": "Start poll",
+  "streamdeck.poll.live": "Poll on",
+  "streamdeck.poll.votes": "{count} votes · {time}",
+  "streamdeck.poll.closing": "Counting",
+  "streamdeck.poll.holdEnd": "Hold to end",
+  "streamdeck.poll.notSet": "Set the poll",
+  "streamdeck.pi.pollQuestion": "Poll question",
+  "streamdeck.pi.pollOptions": "Options, one per line (2 to 6)",
+  "streamdeck.pi.pollDuration": "Duration (seconds)",
+  "streamdeck.pi.pollHint": "Press to start the poll in every chat. While it runs, the key shows the votes and time left; hold it to end the poll early."
 }

@@ -83,5 +83,15 @@
   "streamdeck.gain.matrix": "matris: UI kullanın",
   "streamdeck.state.buffering": "Gecikme doluyor",
   "streamdeck.state.draining": "Kalan yayında",
-  "streamdeck.delay.marker": "Gecikme {seconds}sn"
+  "streamdeck.delay.marker": "Gecikme {seconds}sn",
+  "streamdeck.poll.start": "Anketi başlat",
+  "streamdeck.poll.live": "Anket sürüyor",
+  "streamdeck.poll.votes": "{count} oy · {time}",
+  "streamdeck.poll.closing": "Sayılıyor",
+  "streamdeck.poll.holdEnd": "Bitirmek için basılı tut",
+  "streamdeck.poll.notSet": "Anketi ayarla",
+  "streamdeck.pi.pollQuestion": "Anket sorusu",
+  "streamdeck.pi.pollOptions": "Seçenekler, her satıra bir tane (2 ile 6 arası)",
+  "streamdeck.pi.pollDuration": "Süre (saniye)",
+  "streamdeck.pi.pollHint": "Anketi her sohbette başlatmak için basın. Sürerken tuş oyları ve kalan süreyi gösterir; erken bitirmek için basılı tutun."
 }

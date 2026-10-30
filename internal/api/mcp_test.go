@@ -139,13 +139,13 @@ func (r mcpRig) mcpEvents() []alerts.Event {
 // that asks the catalogue what is in the catalogue cannot fail.
 var (
 	mcpWantReadTools = []string{
-		"get_destination", "get_levels", "get_status", "get_stop_impact", "get_timeline",
+		"get_destination", "get_levels", "get_polls", "get_status", "get_stop_impact", "get_timeline",
 		"list_destinations", "list_recordings", "list_routing_presets", "list_sources",
 	}
 	mcpWantContentTools = []string{"get_chat_user", "search_chat", "search_transcripts"}
 	mcpWantWriteTools   = []string{
-		"apply_routing_preset", "create_clip", "go_live", "retry_destination", "schedule_broadcast",
-		"set_recording", "set_track_level", "start_destination", "stop_all_destinations",
+		"apply_routing_preset", "create_clip", "end_poll", "go_live", "retry_destination", "schedule_broadcast",
+		"set_recording", "set_track_level", "start_destination", "start_poll", "stop_all_destinations",
 		"stop_destination", "switch_failover_source",
 	}
 )
@@ -176,6 +176,9 @@ func mcpSampleArgs() map[string]map[string]any {
 		"set_recording":          {"enabled": true},
 		"switch_failover_source": {"input": "auto"},
 		"create_clip":            {"seconds": 5},
+		"get_polls":              {"limit": 5},
+		"start_poll":             {"question": "Next map?", "options": []string{"Dust", "Mirage"}, "durationSeconds": 60, "confirm": true},
+		"end_poll":               {"pollId": 1, "confirm": true},
 		"schedule_broadcast": {"name": "evening show", "action": "start", "kind": "once",
 			"destinationIds": []int{1}, "runAt": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)},
 	}

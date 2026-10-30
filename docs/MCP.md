@@ -118,6 +118,7 @@ than one programme it is required, as `?source=` is in the API.
 | `list_recordings` | Recordings: when, how long, how large, and whether a transcript exists | `GET /recordings` |
 | `get_timeline` | Recent events and alerts. `limit` (1–500), `minSeverity` | `GET /timeline` |
 | `get_stop_impact` | What a stop would end, including live YouTube broadcasts | `GET /destinations/stop-impact` |
+| `get_polls` | The running chat poll and recent ones: votes per option and per platform, no voters. `limit` (1–100) | `GET /polls` |
 
 ### Content level: `mcp-admin` token only
 
@@ -145,6 +146,8 @@ is [fenced as untrusted](#untrusted-viewer-content).
 | `switch_failover_source` | Force primary, backup, slate or playlist, or hand back to `auto` | | `POST /failover/source` |
 | `create_clip` | Cut the last N seconds (1–3600) into a clip | | `POST /clips` |
 | `schedule_broadcast` | Schedule destinations to start or stop, once or daily/weekly | **yes, for a stop** | `POST /schedules` |
+| `start_poll` | Start a [chat poll](POLLS.md): `question`, 2–6 `options`, `durationSeconds`, `mirrorTwitch`, `mirrorYouTube`. Without confirm, answers with the exact message it would post | **yes** | `POST /polls` |
+| `end_poll` | End the running poll early; the result is posted in every chat. `pollId`. Without confirm, answers with the poll it would end | **yes** | `POST /polls/{id}/end` |
 
 Every tool carries MCP annotations. Read and content tools are `readOnlyHint`.
 The stop family, retry, presets, `set_recording` and `schedule_broadcast` are

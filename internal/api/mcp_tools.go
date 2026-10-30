@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 	"unicode"
 
@@ -18,6 +19,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
+	"github.com/rainmanjam/polyemesis/internal/polls"
 )
 
 // The MCP tool catalogue. Every entry names the REST request(s) it makes; see
@@ -715,6 +717,32 @@ func mcpCatalogue() []mcpTool {
 			},
 		},
 		{
+			name: "get_polls", title: "Chat polls", tier: mcpRead,
+			description: "The running chat poll, if any, and recent finished ones, newest first: question, options, vote counts per option and per platform. Counts only; no voter is named.",
+			props: map[string]any{
+				"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "description": "How many finished polls (default 10)."},
+			},
+			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+				var a struct {
+					Limit int `json:"limit"`
+				}
+				if err := decodeArgs(raw, &a); err != nil {
+					return nil, err
+				}
+				if a.Limit == 0 {
+					a.Limit = 10
+				}
+				if a.Limit < 1 || a.Limit > 100 {
+					return nil, argErr("limit must be 1 to 100")
+				}
+				v, err := c.call(http.MethodGet, "/polls", url.Values{"limit": {strconv.Itoa(a.Limit)}}, nil)
+				if err != nil {
+					return nil, err
+				}
+				return c.result(v, false)
+			},
+		},
+		{
 			name: "get_timeline", title: "Timeline and alerts", tier: mcpRead,
 			description: "Recent events and alerts, newest first: destinations failing and recovering, failover switches, disk and loudness warnings.",
 			props: map[string]any{
@@ -1161,6 +1189,69 @@ func mcpCatalogue() []mcpTool {
 			},
 		},
 		{
+			name: "start_poll", title: "Start a chat poll", tier: mcpWrite,
+			confirms:    "every call: it posts into every connected chat as the streamer",
+			description: "Start a chat poll: a question with 2 to 6 options, open for 15 to 3600 seconds. It is announced in every connected chat as the streamer, so it needs confirm:true; without it, answers with the exact message that would be posted. Viewers vote by typing the option's number. One poll at a time.",
+			props: map[string]any{
+				"question": map[string]any{"type": "string", "minLength": 1, "maxLength": polls.MaxQuestion},
+				"options": map[string]any{"type": "array", "minItems": polls.MinOptions, "maxItems": polls.MaxOptions,
+					"items": map[string]any{"type": "string", "minLength": 1, "maxLength": polls.MaxOption}},
+				"durationSeconds": map[string]any{"type": "integer", "minimum": int(polls.MinDuration / time.Second),
+					"maximum": int(polls.MaxDuration / time.Second)},
+				"mirrorTwitch":  map[string]any{"type": "boolean", "description": "Also run it as a native Twitch poll where the channel allows; that chat then votes there."},
+				"mirrorYouTube": map[string]any{"type": "boolean", "description": "Also run it as a YouTube live poll (2 to 4 options, 40 quota units); that chat then votes there."},
+				"confirm":       schemaConfirm,
+			},
+			required: []string{"question", "options", "durationSeconds"},
+			run:      runStartPoll,
+		},
+		{
+			name: "end_poll", title: "End the chat poll", tier: mcpWrite, destructive: true,
+			confirms:    "every call: it closes the poll early and posts the result into every connected chat as the streamer",
+			description: "End the running chat poll early. The result is announced in every chat as the streamer, so it needs confirm:true; without it, answers with the poll it would end.",
+			props: map[string]any{
+				"pollId":  map[string]any{"type": "integer", "minimum": 1, "maximum": mcpMaxID, "description": "From get_polls."},
+				"confirm": schemaConfirm,
+			},
+			required: []string{"pollId"},
+			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+				var a struct {
+					PollID  int64 `json:"pollId"`
+					Confirm bool  `json:"confirm"`
+				}
+				if err := decodeArgs(raw, &a); err != nil {
+					return nil, err
+				}
+				if err := checkID("pollId", a.PollID); err != nil {
+					return nil, err
+				}
+				c.target = fmt.Sprintf("poll %d", a.PollID)
+				if !a.Confirm {
+					// The preview is a READ of GET /polls, which writes nothing
+					// and so is not audited: the poll as it stands, if it is the
+					// running one, so the user sees which question ends.
+					v, err := c.call(http.MethodGet, "/polls", url.Values{"limit": {"1"}}, nil)
+					if err != nil {
+						return nil, err
+					}
+					var running any
+					if cur, ok := v.(map[string]any)["current"].(map[string]any); ok {
+						if id, ok := jsonInt(cur["id"]); ok && id == a.PollID {
+							running = pick(cur, "id", "question", "options", "total", "state", "endsAt")
+						}
+					}
+					return c.refusal("Not done: ending this poll closes it now and posts its result into every "+
+						"connected chat as the streamer. Show the user which poll this is, then call end_poll "+
+						"again with confirm:true.", map[string]any{"pollId": a.PollID, "running": running})
+				}
+				v, err := c.call(http.MethodPost, fmt.Sprintf("/polls/%d/end", a.PollID), nil, nil)
+				if err != nil {
+					return nil, err
+				}
+				return c.result(v, false)
+			},
+		},
+		{
 			name: "schedule_broadcast", title: "Schedule a start or stop", tier: mcpWrite, destructive: true,
 			confirms: "a scheduled stop, which ends live broadcasts when it runs. A scheduled start ends " +
 				"nothing, and is listed under Automation, where it can be deleted before it runs.",
@@ -1180,6 +1271,36 @@ func mcpCatalogue() []mcpTool {
 			run:      runSchedule,
 		},
 	}
+}
+
+// runStartPoll validates locally so the preview shows exactly what would be
+// posted, then starts the poll through POST /polls. The question and options
+// are cleaned the way the engine cleans them, so the preview cannot differ
+// from the announcement.
+func runStartPoll(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		polls.Spec
+		Confirm bool `json:"confirm"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	spec, err := a.Spec.Normalise()
+	if err != nil {
+		return nil, argErr("%s", strings.TrimPrefix(err.Error(), polls.ErrInvalid.Error()+": "))
+	}
+	c.target = "chat poll"
+	if !a.Confirm {
+		return c.refusal("Not done: starting a poll posts this message into every connected chat as the "+
+			"streamer. Show it to the user, then call start_poll again with confirm:true.",
+			map[string]any{"announcement": polls.StartText(spec), "options": spec.Options,
+				"durationSeconds": spec.DurationSeconds})
+	}
+	v, err := c.call(http.MethodPost, "/polls", nil, spec)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
 }
 
 // destAction is start, stop and retry: one destination, one POST.

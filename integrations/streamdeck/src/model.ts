@@ -158,3 +158,20 @@ export interface TrackLevelResult {
   /** The stored destination after the change, when the answer carries one the plugin can read. */
   destination?: DestinationLevels;
 }
+
+/** The running chat poll (#14), as GET /polls answers `current`. Counts only: the server sends no voter. */
+export interface PollSummary {
+  id: number;
+  question: string;
+  /** "open" or "closing" while it runs. */
+  state: string;
+  total: number;
+  endsAt: string;
+}
+
+/** What a poll key starts: the body of POST /polls. */
+export interface PollSpec {
+  question: string;
+  options: string[];
+  durationSeconds: number;
+}

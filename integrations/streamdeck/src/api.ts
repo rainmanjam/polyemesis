@@ -3,6 +3,8 @@ import type {
   DestinationLevels,
   Feed,
   LevelsReading,
+  PollSpec,
+  PollSummary,
   PresetSummary,
   RecordingState,
   StatusPayload,
@@ -145,6 +147,33 @@ export class PolyemesisClient {
   /** Switches recording on or off for the whole install. Needs an admin token. */
   setRecording(enabled: boolean): Promise<RecordingState> {
     return this.call("POST", "/recording", undefined, { enabled });
+  }
+
+  /** The running chat poll, or null when none is. Any scope may read it: it is counts only. */
+  async currentPoll(): Promise<PollSummary | null> {
+    const body = await this.call<{ current?: unknown }>("GET", "/polls", undefined, undefined, { limit: "1" });
+    const c = body?.current as Partial<PollSummary> | null | undefined;
+    if (c === null || c === undefined) return null;
+    if (!Number.isSafeInteger(c.id) || typeof c.state !== "string" || typeof c.endsAt !== "string") {
+      throw new ApiError("malformed", 200, "the poll was not the expected shape");
+    }
+    return {
+      id: c.id as number,
+      question: typeof c.question === "string" ? c.question : "",
+      state: c.state,
+      total: typeof c.total === "number" ? c.total : 0,
+      endsAt: c.endsAt,
+    };
+  }
+
+  /** Starts a chat poll, announced in every chat. Needs an admin token. */
+  startPoll(spec: PollSpec): Promise<unknown> {
+    return this.call("POST", "/polls", undefined, spec);
+  }
+
+  /** Ends the running poll early. Needs an admin token. */
+  endPoll(id: number): Promise<unknown> {
+    return this.call("POST", `/polls/${id}/end`);
   }
 
   /** The routing presets this install offers. Needs no programme. */

@@ -40,6 +40,16 @@ var redactAllowlist = map[string]string{
 	"internal/alerts/webhook_disclosure_test.go": "asserts that Redact is a NO-OP on an https " +
 		"webhook path, so nobody records \"also run Redact on LastError\" as the #160 fix.",
 
+	// --- chat polls, #14 ---
+	"internal/polls/engine.go": "best-effort pass over a platform's own error text (a failed " +
+		"chat send, a failed native-poll read) before it is shown on the poll or logged. No " +
+		"credential is in that text by construction -- tokens travel in headers, never in the " +
+		"message -- so there is no literal to declare; the events hub's RedactTree runs again " +
+		"on the poll.* payload.",
+	"internal/api/polls.go": "the same residual pass over Twitch's error text (a refused Create " +
+		"Poll, a failed token refresh) shown as a native mirror's reason. The access token is " +
+		"only ever a header; this is the outer net, not the boundary.",
+
 	// --- the supervisor residual, #150 ---
 	"internal/supervisor/supervisor.go": "the RESIDUAL half of Process.scrub and CommandString. " +
 		"The boundary in both is Spec.Secrets (exact literals), applied FIRST and PER " +

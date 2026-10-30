@@ -1,15 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "@/lib/i18n";
 import { ChatOverlayView } from "@/components/overlay/ChatOverlayView";
+import { PollWidgetView } from "@/components/overlay/PollWidgetView";
 import {
   addLine,
+  applyPoll,
   expireLines,
   fetchOverlayConfig,
   overlayLocation,
+  pollVisible,
   removeLines,
   runOverlayStream,
   type OverlayConfig,
+  type OverlayStyle,
   type ShownLine,
+  type ShownPoll,
 } from "@/lib/overlay";
 
 /** The dock keeps more scrollback than any overlay draws. */
@@ -30,17 +35,16 @@ type Phase = { kind: "loading" } | { kind: "denied" } | { kind: "ready"; config:
  *  burned into the broadcast; the dock, which only the operator sees, says
  *  what went wrong. */
 export function OverlayPage() {
-  const t = useT();
   // Read once, like the key: an OBS source never navigates. Null cannot happen
   // here (App routes only overlay paths to this page), and reads as no key.
-  const [{ key, dock }] = useState(
-    () => overlayLocation(window.location.pathname, window.location.hash) ?? { key: "", dock: false },
+  const [loc] = useState(
+    () => overlayLocation(window.location.pathname, window.location.hash) ?? { key: "", dock: false, poll: false },
   );
-  // No key in the URL is decided at once, not in an effect.
-  const [phase, setPhase] = useState<Phase>(() => (key ? { kind: "loading" } : { kind: "denied" }));
-  const [lines, setLines] = useState<ShownLine[]>([]);
-  const [connected, setConnected] = useState(false);
+  if (loc.poll) return <PollOverlay overlayKey={loc.key} />;
+  return <ChatOverlay overlayKey={loc.key} dock={loc.dock} />;
+}
 
+function useTransparentPage() {
   // Transparent page, for the life of this page. Set on html and body because
   // the console's stylesheet paints both.
   useEffect(() => {
@@ -53,6 +57,69 @@ export function OverlayPage() {
       document.documentElement.classList.remove("overlay-page");
     };
   }, []);
+}
+
+/** The poll widget (/overlay/poll, #14). Same key, same style and same display
+ *  stream as the chat overlay, but it draws ONLY poll.display: the chat lines
+ *  are not handed to it at all. Nothing is drawn while no poll is running, and
+ *  a failure draws nothing -- an error on this page would be on stream. */
+function PollOverlay({ overlayKey: key }: { overlayKey: string }) {
+  const [style, setStyle] = useState<OverlayStyle | null>(null);
+  const [poll, setPoll] = useState<ShownPoll | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useTransparentPage();
+
+  useEffect(() => {
+    if (!key) return;
+    const ctl = new AbortController();
+    const run = async () => {
+      const config = await fetchOverlayConfig(key, ctl.signal);
+      if (!config) return;
+      setStyle(config.style);
+      await runOverlayStream(
+        key,
+        {
+          onPoll: (p) => setPoll((cur) => applyPoll(cur, p, Date.now())),
+          onDenied: () => {
+            setPoll(null);
+            setStyle(null);
+          },
+          onConnect: async () => {
+            const fresh = await fetchOverlayConfig(key, ctl.signal).catch(() => undefined);
+            if (fresh) setStyle(fresh.style);
+          },
+        },
+        ctl.signal,
+      );
+    };
+    run().catch(() => {
+      if (!ctl.signal.aborted) setStyle(null);
+    });
+    return () => ctl.abort();
+  }, [key]);
+
+  // The countdown and the linger after the end both read the clock.
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (!style || !poll || !pollVisible(poll, now)) return null;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "transparent", padding: "0.75rem", boxSizing: "border-box" }}>
+      <PollWidgetView poll={poll} style={style} now={now} />
+    </div>
+  );
+}
+
+function ChatOverlay({ overlayKey: key, dock }: { overlayKey: string; dock: boolean }) {
+  const t = useT();
+  // No key in the URL is decided at once, not in an effect.
+  const [phase, setPhase] = useState<Phase>(() => (key ? { kind: "loading" } : { kind: "denied" }));
+  const [lines, setLines] = useState<ShownLine[]>([]);
+  const [connected, setConnected] = useState(false);
+
+  useTransparentPage();
 
   // maxLines is read through a ref: the stream's handlers are created once,
   // and a restyle that changes it arrives on a later reconnect.

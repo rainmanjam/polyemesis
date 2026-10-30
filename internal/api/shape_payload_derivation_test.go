@@ -301,6 +301,9 @@ func mediaTypeShapeClaims() map[string]mediaTypeClaim {
 				"segment of the live stream, which is why this is not streaming-media."},
 		"application/octet-stream": {Shape: "file-download",
 			Why: "the stem download's fallback type, also through serveFileDownload."},
+		"text/csv": {Shape: "file-download",
+			Why: "the chat poll export (#14), GET /polls/export: an attachment with a " +
+				"Content-Disposition, counts only."},
 		"application/x-pem-file": {Shape: "file-download",
 			Why: "the CA certificate download; the fourth of the four Content-Disposition " +
 				"sites the header family already names."},

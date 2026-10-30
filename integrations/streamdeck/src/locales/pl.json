@@ -83,5 +83,15 @@
   "streamdeck.gain.matrix": "macierz: użyj UI",
   "streamdeck.state.buffering": "Bufor opóźnienia",
   "streamdeck.state.draining": "Nadaje końcówkę",
-  "streamdeck.delay.marker": "Opóźn. {seconds}s"
+  "streamdeck.delay.marker": "Opóźn. {seconds}s",
+  "streamdeck.poll.start": "Start ankiety",
+  "streamdeck.poll.live": "Ankieta trwa",
+  "streamdeck.poll.votes": "{count} głosów · {time}",
+  "streamdeck.poll.closing": "Liczenie",
+  "streamdeck.poll.holdEnd": "Przytrzymaj, by zakończyć",
+  "streamdeck.poll.notSet": "Ustaw ankietę",
+  "streamdeck.pi.pollQuestion": "Pytanie ankiety",
+  "streamdeck.pi.pollOptions": "Opcje, jedna w wierszu (od 2 do 6)",
+  "streamdeck.pi.pollDuration": "Czas trwania (sekundy)",
+  "streamdeck.pi.pollHint": "Naciśnij, by rozpocząć ankietę na każdym czacie. W trakcie klawisz pokazuje głosy i pozostały czas; przytrzymaj go, by zakończyć ją wcześniej."
 }

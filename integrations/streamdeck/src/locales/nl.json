@@ -83,5 +83,15 @@
   "streamdeck.gain.matrix": "matrix: gebruik UI",
   "streamdeck.state.buffering": "Vertraging vult",
   "streamdeck.state.draining": "Rest in de lucht",
-  "streamdeck.delay.marker": "Vertr. {seconds}s"
+  "streamdeck.delay.marker": "Vertr. {seconds}s",
+  "streamdeck.poll.start": "Peiling starten",
+  "streamdeck.poll.live": "Peiling loopt",
+  "streamdeck.poll.votes": "{count} stemmen · {time}",
+  "streamdeck.poll.closing": "Telling",
+  "streamdeck.poll.holdEnd": "Vasthouden om te stoppen",
+  "streamdeck.poll.notSet": "Peiling instellen",
+  "streamdeck.pi.pollQuestion": "Vraag van de peiling",
+  "streamdeck.pi.pollOptions": "Opties, één per regel (2 tot 6)",
+  "streamdeck.pi.pollDuration": "Duur (seconden)",
+  "streamdeck.pi.pollHint": "Druk om de peiling in elke chat te starten. Zolang hij loopt, toont de toets de stemmen en de resterende tijd; houd hem vast om eerder te stoppen."
 }

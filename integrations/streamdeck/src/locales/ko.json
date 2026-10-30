@@ -83,5 +83,15 @@
   "streamdeck.gain.matrix": "매트릭스: UI 사용",
   "streamdeck.state.buffering": "지연 채우는 중",
   "streamdeck.state.draining": "지연분 송출 중",
-  "streamdeck.delay.marker": "지연 {seconds}초"
+  "streamdeck.delay.marker": "지연 {seconds}초",
+  "streamdeck.poll.start": "투표 시작",
+  "streamdeck.poll.live": "투표 중",
+  "streamdeck.poll.votes": "{count}표 · {time}",
+  "streamdeck.poll.closing": "집계 중",
+  "streamdeck.poll.holdEnd": "길게 눌러 종료",
+  "streamdeck.poll.notSet": "투표 설정",
+  "streamdeck.pi.pollQuestion": "투표 질문",
+  "streamdeck.pi.pollOptions": "선택지, 한 줄에 하나 (2~6개)",
+  "streamdeck.pi.pollDuration": "시간 (초)",
+  "streamdeck.pi.pollHint": "누르면 모든 채팅에서 투표가 시작됩니다. 진행 중에는 키에 표 수와 남은 시간이 표시되며, 길게 누르면 일찍 끝낼 수 있습니다."
 }

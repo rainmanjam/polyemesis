@@ -83,5 +83,15 @@
   "streamdeck.gain.matrix": "матриця: через UI",
   "streamdeck.state.buffering": "Набір затримки",
   "streamdeck.state.draining": "В ефірі хвіст",
-  "streamdeck.delay.marker": "Затримка {seconds}с"
+  "streamdeck.delay.marker": "Затримка {seconds}с",
+  "streamdeck.poll.start": "Почати опитування",
+  "streamdeck.poll.live": "Опитування триває",
+  "streamdeck.poll.votes": "{count} голосів · {time}",
+  "streamdeck.poll.closing": "Підрахунок",
+  "streamdeck.poll.holdEnd": "Утримуйте, щоб завершити",
+  "streamdeck.poll.notSet": "Налаштуйте опитування",
+  "streamdeck.pi.pollQuestion": "Питання опитування",
+  "streamdeck.pi.pollOptions": "Варіанти, по одному в рядку (від 2 до 6)",
+  "streamdeck.pi.pollDuration": "Тривалість (секунди)",
+  "streamdeck.pi.pollHint": "Натисніть, щоб почати опитування в усіх чатах. Поки воно триває, клавіша показує голоси й залишок часу; утримуйте її, щоб завершити раніше."
 }

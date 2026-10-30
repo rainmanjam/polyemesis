@@ -185,6 +185,19 @@ export class PresetKey extends PolyAction {
   }
 }
 
+@action({ UUID: `${PLUGIN}.poll` })
+export class PollKey extends PolyAction {
+  readonly kind = "poll" as const;
+
+  override onKeyDown(ev: KeyDownEvent): Promise<void> {
+    return rt().pressPollDown(ev.action.id);
+  }
+
+  override onKeyUp(ev: KeyUpEvent): Promise<void> {
+    return rt().pressHoldUp(ev.action.id);
+  }
+}
+
 @action({ UUID: `${PLUGIN}.failover` })
 export class FailoverKey extends PolyAction {
   readonly kind = "failover" as const;
@@ -244,6 +257,7 @@ streamDeck.actions.registerAction(new StopAllKey());
 streamDeck.actions.registerAction(new StopDestinationKey());
 streamDeck.actions.registerAction(new RecordKey());
 streamDeck.actions.registerAction(new PresetKey());
+streamDeck.actions.registerAction(new PollKey());
 streamDeck.actions.registerAction(new FailoverKey());
 streamDeck.actions.registerAction(new TrackMuteKey());
 streamDeck.actions.registerAction(new TrackGainDial());

@@ -108,6 +108,7 @@ import type {
   TimelineRow,
 } from "./types";
 import type { ChatOverlay, OverlayInput, OverlaysResponse } from "./overlay";
+import type { Poll, PollSpec, PollsResponse } from "./polls";
 
 const BASE = "/api/v1";
 
@@ -581,6 +582,12 @@ export const api = {
   mcpAccess: () => get<McpAccess>("/mcp/access"),
   setMcpAccess: (enabled: boolean, levels?: McpLevel[]) =>
     put<McpAccess>("/mcp/access", levels ? { enabled, levels } : { enabled }),
+  // --- chat polls (#14) ---
+  /** The running poll (or null) and the history, newest first. */
+  listPolls: (limit?: number) => get<PollsResponse>("/polls" + (limit ? `?limit=${limit}` : "")),
+  startPoll: (spec: PollSpec) => post<Poll>("/polls", spec),
+  /** Ends it early. The result may still say "closing" for a few seconds. */
+  endPoll: (id: number) => post<Poll>(`/polls/${id}/end`),
 
   // --- chat overlays (session-only) ---
   listOverlays: () => get<OverlaysResponse>("/overlays"),

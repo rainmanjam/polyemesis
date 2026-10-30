@@ -539,13 +539,18 @@ document has advertised S256 since October 2026. There is nothing to configure.
 Accounts that were already connected keep refreshing as they did, because PKCE
 only applies to a new authorization.
 
-Scopes requested, all seven: `channel:read:stream_key` (the key),
+Scopes requested, all eight: `channel:read:stream_key` (the key),
 `channel:manage:broadcast` (title and category at go-live), `chat:read` and
 `chat:edit` (the unified chat pane), and the three that make the Moderation row
 above read *Works* — `moderator:manage:chat_messages` (delete a message),
 `moderator:manage:banned_users` (ban, timeout, and lift either) and
 `moderator:manage:chat_settings`. The moderation three only work in a channel
 the connected account already moderates; Twitch answers 403 otherwise.
+`channel:manage:polls` mirrors a [chat poll](POLLS.md) as a native Twitch poll;
+Twitch runs polls for Affiliates and Partners only, and on any other channel
+the mirror is skipped and the chat poll runs as usual. It was added in scope
+version 5, so a Twitch account connected before it is marked "reconnect
+needed" once.
 
 Granting a scope does not upgrade a token you already hold — if you connected
 Twitch before chat landed, disconnect and reconnect once.

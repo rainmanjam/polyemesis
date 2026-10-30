@@ -83,5 +83,15 @@
   "streamdeck.gain.matrix": "матрица: через UI",
   "streamdeck.state.buffering": "Набор задержки",
   "streamdeck.state.draining": "В эфире хвост",
-  "streamdeck.delay.marker": "Задержка {seconds}с"
+  "streamdeck.delay.marker": "Задержка {seconds}с",
+  "streamdeck.poll.start": "Начать опрос",
+  "streamdeck.poll.live": "Опрос идёт",
+  "streamdeck.poll.votes": "{count} голосов · {time}",
+  "streamdeck.poll.closing": "Подсчёт",
+  "streamdeck.poll.holdEnd": "Удерживайте, чтобы завершить",
+  "streamdeck.poll.notSet": "Настройте опрос",
+  "streamdeck.pi.pollQuestion": "Вопрос опроса",
+  "streamdeck.pi.pollOptions": "Варианты, по одному на строку (от 2 до 6)",
+  "streamdeck.pi.pollDuration": "Длительность (секунды)",
+  "streamdeck.pi.pollHint": "Нажмите, чтобы начать опрос во всех чатах. Пока он идёт, клавиша показывает голоса и оставшееся время; удерживайте её, чтобы завершить раньше."
 }

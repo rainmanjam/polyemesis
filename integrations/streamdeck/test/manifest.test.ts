@@ -105,7 +105,7 @@ describe("manifest", () => {
 
   it("exposes exactly the actions the plugin implements, and the dial is an encoder", () => {
     expect(manifest.Actions.map((a) => a.UUID.replace(`${manifest.UUID}.`, "")).sort()).toEqual(
-      ["destination", "failover", "go-live", "meter", "preset", "record", "stop-all", "stop-destination", "track-gain", "track-mute"],
+      ["destination", "failover", "go-live", "meter", "poll", "preset", "record", "stop-all", "stop-destination", "track-gain", "track-mute"],
     );
     expect(manifest.Actions.find((a) => a.UUID.endsWith(".meter"))!.Controllers).toEqual(["Encoder"]);
     expect(manifest.Actions.find((a) => a.UUID.endsWith(".track-gain"))!.Controllers).toEqual(["Encoder"]);

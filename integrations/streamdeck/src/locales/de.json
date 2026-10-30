@@ -83,5 +83,15 @@
   "streamdeck.gain.matrix": "Matrix: UI nutzen",
   "streamdeck.state.buffering": "Verzögerung füllt",
   "streamdeck.state.draining": "Rest läuft noch",
-  "streamdeck.delay.marker": "Verzög. {seconds}s"
+  "streamdeck.delay.marker": "Verzög. {seconds}s",
+  "streamdeck.poll.start": "Umfrage starten",
+  "streamdeck.poll.live": "Umfrage läuft",
+  "streamdeck.poll.votes": "{count} Stimmen · {time}",
+  "streamdeck.poll.closing": "Zählung",
+  "streamdeck.poll.holdEnd": "Halten zum Beenden",
+  "streamdeck.poll.notSet": "Umfrage einrichten",
+  "streamdeck.pi.pollQuestion": "Umfragefrage",
+  "streamdeck.pi.pollOptions": "Optionen, eine pro Zeile (2 bis 6)",
+  "streamdeck.pi.pollDuration": "Dauer (Sekunden)",
+  "streamdeck.pi.pollHint": "Drücken, um die Umfrage in jedem Chat zu starten. Während sie läuft, zeigt die Taste Stimmen und Restzeit; halten, um sie vorzeitig zu beenden."
 }

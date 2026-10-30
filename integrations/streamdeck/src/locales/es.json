@@ -83,5 +83,15 @@
   "streamdeck.gain.matrix": "matriz: usa la UI",
   "streamdeck.state.buffering": "Llenando retardo",
   "streamdeck.state.draining": "Emitiendo cola",
-  "streamdeck.delay.marker": "Retardo {seconds}s"
+  "streamdeck.delay.marker": "Retardo {seconds}s",
+  "streamdeck.poll.start": "Iniciar encuesta",
+  "streamdeck.poll.live": "Encuesta activa",
+  "streamdeck.poll.votes": "{count} votos · {time}",
+  "streamdeck.poll.closing": "Contando",
+  "streamdeck.poll.holdEnd": "Mantén para terminar",
+  "streamdeck.poll.notSet": "Configura la encuesta",
+  "streamdeck.pi.pollQuestion": "Pregunta de la encuesta",
+  "streamdeck.pi.pollOptions": "Opciones, una por línea (de 2 a 6)",
+  "streamdeck.pi.pollDuration": "Duración (segundos)",
+  "streamdeck.pi.pollHint": "Pulsa para iniciar la encuesta en todos los chats. Mientras dura, la tecla muestra los votos y el tiempo restante; mantenla para terminarla antes."
 }

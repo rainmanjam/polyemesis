@@ -83,5 +83,15 @@
   "streamdeck.gain.matrix": "矩阵：请用界面",
   "streamdeck.state.buffering": "延迟缓冲中",
   "streamdeck.state.draining": "播出延迟尾段",
-  "streamdeck.delay.marker": "延迟 {seconds} 秒"
+  "streamdeck.delay.marker": "延迟 {seconds} 秒",
+  "streamdeck.poll.start": "开始投票",
+  "streamdeck.poll.live": "投票中",
+  "streamdeck.poll.votes": "{count} 票 · {time}",
+  "streamdeck.poll.closing": "统计中",
+  "streamdeck.poll.holdEnd": "长按结束",
+  "streamdeck.poll.notSet": "设置投票",
+  "streamdeck.pi.pollQuestion": "投票问题",
+  "streamdeck.pi.pollOptions": "选项，每行一个 (2 到 6 个)",
+  "streamdeck.pi.pollDuration": "时长 (秒)",
+  "streamdeck.pi.pollHint": "按下即可在所有聊天中开始投票。进行中按键会显示票数和剩余时间；长按可提前结束。"
 }

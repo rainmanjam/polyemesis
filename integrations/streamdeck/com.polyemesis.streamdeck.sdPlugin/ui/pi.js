@@ -20,6 +20,7 @@
   // The actions whose inspector picks a destination from a list and one of its tracks.
   const TRACK_ACTIONS = ["com.polyemesis.streamdeck.track-mute", "com.polyemesis.streamdeck.track-gain"];
   const isTrackAction = () => TRACK_ACTIONS.indexOf(actionType) >= 0;
+  const isPollAction = () => actionType === "com.polyemesis.streamdeck.poll";
 
   const $ = (id) => document.getElementById(id);
 
@@ -76,6 +77,16 @@
     if (isTrackAction() && Number.isSafeInteger(track) && track >= 0) payload.track = track;
     if ($("presetId").value) payload.presetId = $("presetId").value;
     savedPresetId = $("presetId").value;
+    if (isPollAction()) {
+      // The poll key's poll: what it posts into every chat when pressed. The plugin drops blank
+      // lines and the server checks the rest, so nothing is second-guessed here.
+      const question = $("pollQuestion").value.trim();
+      if (question) payload.pollQuestion = question;
+      const options = $("pollOptions").value.split(/\r?\n/).map((o) => o.trim()).filter((o) => o !== "");
+      if (options.length > 0) payload.pollOptions = options;
+      const duration = Number($("pollDuration").value);
+      if (Number.isSafeInteger(duration) && duration > 0) payload.pollDuration = duration;
+    }
     send({ event: "setSettings", context: actionContext, payload });
     flashSaved();
   }
@@ -203,6 +214,9 @@
     if (typeof settings.destinationId === "number") $("destinationId").value = String(settings.destinationId);
     savedPresetId = typeof settings.presetId === "string" ? settings.presetId : "";
     renderPresets();
+    if (typeof settings.pollQuestion === "string") $("pollQuestion").value = settings.pollQuestion;
+    if (Array.isArray(settings.pollOptions)) $("pollOptions").value = settings.pollOptions.join("\n");
+    if (typeof settings.pollDuration === "number") $("pollDuration").value = String(settings.pollDuration);
     if (isTrackAction()) {
       savedDestinationId = typeof settings.destinationId === "number" ? String(settings.destinationId) : "";
       savedTrack = typeof settings.track === "number" ? String(settings.track) : "";
@@ -269,8 +283,9 @@
     $("block-track").hidden = !isTrackAction();
     $("block-preset").hidden = actionType !== "com.polyemesis.streamdeck.preset";
     $("block-install-wide").hidden = actionType !== "com.polyemesis.streamdeck.record";
-    // Recording is install-wide: the Record key takes no programme, so it shows no programme field.
-    $("block-source").hidden = actionType === "com.polyemesis.streamdeck.record";
+    $("block-poll").hidden = !isPollAction();
+    // Recording and polls are install-wide: those keys take no programme, so they show no programme field.
+    $("block-source").hidden = actionType === "com.polyemesis.streamdeck.record" || isPollAction();
     socket = new WebSocket("ws://127.0.0.1:" + port);
     socket.onopen = function () {
       send({ event: registerEvent, uuid: uuid });
@@ -285,6 +300,7 @@
     $("trackDestination").addEventListener("change", onDestinationChange);
     $("track").addEventListener("change", onTrackChange);
     $("presetId").addEventListener("change", saveAction);
+    ["pollQuestion", "pollOptions", "pollDuration"].forEach((f) => $(f).addEventListener("change", saveAction));
     $("test").addEventListener("click", runTest);
   };
 })();

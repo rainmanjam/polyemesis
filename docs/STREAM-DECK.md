@@ -114,7 +114,7 @@ for an install with a publicly trusted certificate.
 A stop is a **hold**, because stopping a YouTube destination ends its broadcast
 for good. Press and hold for 1.5 seconds. The key loads the count of YouTube
 broadcasts the stop would end when you press it, and releasing early cancels.
-Every other key acts on a tap, except Routing preset, which is also a hold.
+Every other key acts on a tap, except Routing preset, which is also a hold, and Chat poll, which is held to end a running poll.
 
 | Action | Tap or hold | What it does | Needs |
 |---|---|---|---|
@@ -126,6 +126,7 @@ Every other key acts on a tap, except Routing preset, which is also a hold.
 | **Routing preset** | Hold | Applies a routing preset to the key's programme. Applying one can restart that programme's destinations. | Admin |
 | **Failover** | Tap | Shows which source is on air: primary, backup, playlist or slate. Tapping hands control back to automatic. | Read to show; admin to switch |
 | **Mute track** | Tap | Mutes or unmutes one track on one destination. See [Track mute and the gain dial](#track-mute-and-the-gain-dial). | Read to show; admin to switch |
+| **Chat poll** | Tap to start; hold to end | Starts the [chat poll](POLLS.md) set on the key: a question, 2 to 6 options (one per line) and a duration. While it runs the key shows **Poll on** with the votes so far and the time left, then **Counting** while the last votes are judged. Hold it to end the poll early. Install-wide, so it takes no programme. | Admin |
 | **Meter** (dial) | — | The loudest channel on the key's programme, read from `GET /api/v1/levels` five times a second. | Read |
 | **Track gain** (dial) | Turn, push, touch | One track's gain on one destination. See below. | Read to show; admin to change |
 

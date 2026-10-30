@@ -83,5 +83,15 @@
   "streamdeck.gain.matrix": "matrice : utiliser l'UI",
   "streamdeck.state.buffering": "Différé en cours",
   "streamdeck.state.draining": "Fin différée à l’antenne",
-  "streamdeck.delay.marker": "Différé {seconds}s"
+  "streamdeck.delay.marker": "Différé {seconds}s",
+  "streamdeck.poll.start": "Lancer le sondage",
+  "streamdeck.poll.live": "Sondage en cours",
+  "streamdeck.poll.votes": "{count} votes · {time}",
+  "streamdeck.poll.closing": "Décompte",
+  "streamdeck.poll.holdEnd": "Maintenir pour terminer",
+  "streamdeck.poll.notSet": "Configurer le sondage",
+  "streamdeck.pi.pollQuestion": "Question du sondage",
+  "streamdeck.pi.pollOptions": "Choix, un par ligne (2 à 6)",
+  "streamdeck.pi.pollDuration": "Durée (secondes)",
+  "streamdeck.pi.pollHint": "Appuyez pour lancer le sondage dans tous les chats. Pendant qu'il tourne, la touche affiche les votes et le temps restant ; maintenez-la pour le terminer plus tôt."
 }

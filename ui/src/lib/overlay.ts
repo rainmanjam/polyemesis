@@ -113,14 +113,26 @@ export function overlayPathUrl(origin: string, key: string, dock = false): strin
   return `${origin}/overlay${dock ? "/dock" : ""}/k/${encodeURIComponent(key)}`;
 }
 
+/** The poll widget's OBS URL (#14): the same key, its own page, so the poll can
+ *  be placed apart from the chat lines. Key in the fragment, like overlayUrl. */
+export function pollWidgetUrl(origin: string, key: string): string {
+  return `${origin}/overlay/poll#key=${encodeURIComponent(key)}`;
+}
+
+/** The poll widget with the key in the path, for an OBS that drops fragments.
+ *  Same caveat as overlayPathUrl: a reverse proxy logs the path. */
+export function pollWidgetPathUrl(origin: string, key: string): string {
+  return `${origin}/overlay/poll/k/${encodeURIComponent(key)}`;
+}
+
 /** Reads the key back out of the fragment. */
 export function keyFromHash(hash: string): string {
   const h = hash.startsWith("#") ? hash.slice(1) : hash;
   return new URLSearchParams(h).get("key") ?? "";
 }
 
-/** /overlay, /overlay/dock, /overlay/k/{key} or /overlay/dock/k/{key}. */
-const OVERLAY_PATH = /^\/overlay(\/dock)?(?:\/k\/([^/]+))?$/;
+/** /overlay, /overlay/dock or /overlay/poll, each optionally with /k/{key}. */
+const OVERLAY_PATH = /^\/overlay(?:\/(dock|poll))?(?:\/k\/([^/]+))?$/;
 
 /** Whether this page is the overlay or its dock, and its key -- or null when
  *  the path is not one of the four the server serves the overlay page on.
@@ -131,9 +143,14 @@ const OVERLAY_PATH = /^\/overlay(\/dock)?(?:\/k\/([^/]+))?$/;
  *  key, so it would have been a login screen inside OBS, or an overlay drawn as
  *  a dock.
  *
+ *  The poll widget (/overlay/poll) is a third page on the same parser.
+ *
  *  A key in the path wins over one in the fragment. Both appear only in a URL
  *  edited by hand, and the path is the one the page was served under. */
-export function overlayLocation(pathname: string, hash: string): { key: string; dock: boolean } | null {
+export function overlayLocation(
+  pathname: string,
+  hash: string,
+): { key: string; dock: boolean; poll: boolean } | null {
   // Trailing slashes trimmed by hand: /\/+$/ backtracks on a long run of them.
   let end = pathname.length;
   while (end > 1 && pathname[end - 1] === "/") end--;
@@ -147,7 +164,7 @@ export function overlayLocation(pathname: string, hash: string): { key: string; 
       key = ""; // a malformed escape is no key, and the server answers 401
     }
   }
-  return { key: key || keyFromHash(hash), dock: Boolean(m[1]) };
+  return { key: key || keyFromHash(hash), dock: m[1] === "dock", poll: m[1] === "poll" };
 }
 
 // ---------------------------------------------------------------- the rules
@@ -201,6 +218,67 @@ export const PLATFORM_MARK: Record<string, { label: string; color: string }> = {
   rumble: { label: "RMBL", color: "#85c742" },
 };
 
+// ---------------------------------------------------------- the poll widget
+
+/** A poll as the widget draws it (eventstream.PollDisplay): labels and totals.
+ *  There is no platform and no voter in it, by construction -- the widget is
+ *  logo-free and shown on every overlay whatever its platform filter. */
+export interface PollDisplay {
+  id: string;
+  question: string;
+  options: { label: string; votes: number }[];
+  total: number;
+  state: "open" | "closing" | "ended" | string;
+  endsAt: string;
+  endedAt?: string;
+}
+
+/** A poll on screen, plus when this client received its latest update. */
+export interface ShownPoll extends PollDisplay {
+  receivedAt: number;
+}
+
+/** How long a finished poll's result stays on screen. */
+export const POLL_LINGER_MS = 20_000;
+
+/** How far the OBS machine's clock may disagree with the server's before an
+ *  ended poll replayed on reconnect is judged by the server's end time. */
+const CLOCK_SLACK_MS = 60_000;
+
+/** Applies a poll.display. Events arrive in order, so the newest always wins --
+ *  for the same poll an update, for a new id a replacement. Anything that does
+ *  not look like a poll is ignored. */
+export function applyPoll(_current: ShownPoll | null, next: PollDisplay, now: number): ShownPoll | null {
+  if (!next || typeof next.id !== "string" || !Array.isArray(next.options)) return _current;
+  return { ...next, receivedAt: now };
+}
+
+/** Whether the widget shows the poll now: while it is open or closing, and for
+ *  POLL_LINGER_MS after it ended. An ended poll replayed on a reconnect long
+ *  after it finished is not shown again: judged by when it arrived AND by the
+ *  server's end time, with slack for a skewed clock. */
+export function pollVisible(p: ShownPoll | null, now: number, lingerMs = POLL_LINGER_MS): boolean {
+  if (!p) return false;
+  if (p.state === "open" || p.state === "closing") return true;
+  if (p.state !== "ended") return false;
+  if (now - p.receivedAt >= lingerMs) return false;
+  const ended = p.endedAt ? Date.parse(p.endedAt) : NaN;
+  if (!Number.isNaN(ended) && now - ended >= lingerMs + CLOCK_SLACK_MS) return false;
+  return true;
+}
+
+/** Each option's share of the votes, whole percent, 0 when nobody voted. */
+export function pollPercents(p: PollDisplay): number[] {
+  return p.options.map((o) => (p.total > 0 ? Math.round((o.votes * 100) / p.total) : 0));
+}
+
+/** Seconds until the poll closes, never negative. */
+export function pollSecondsLeft(p: PollDisplay, now: number): number {
+  const ends = Date.parse(p.endsAt);
+  if (Number.isNaN(ends)) return 0;
+  return Math.max(0, Math.ceil((ends - now) / 1000));
+}
+
 // ---------------------------------------------------------- the stream
 
 /** One server-sent event. */
@@ -243,8 +321,11 @@ export class SSEParser {
 }
 
 export interface StreamHandlers {
-  onLine: (line: DisplayLine) => void;
-  onRemove: (ids: string[]) => void;
+  onLine?: (line: DisplayLine) => void;
+  onRemove?: (ids: string[]) => void;
+  /** The poll widget's projection. Only the poll page listens; the chat
+   *  overlay and dock leave it unset and never draw a poll. */
+  onPoll?: (p: PollDisplay) => void;
   /** The key was refused (401): rotated, revoked or mistyped. Not retried. */
   onDenied: () => void;
   onState?: (connected: boolean) => void;
@@ -335,11 +416,14 @@ function dispatch(f: SSEFrame, h: StreamHandlers): void {
   } catch {
     return;
   }
-  if (env.type === "chat.display" && env.data && typeof env.data === "object") {
-    h.onLine(env.data as DisplayLine);
-  } else if (env.type === "chat.undisplay" && env.data && typeof env.data === "object") {
+  if (!env.data || typeof env.data !== "object") return;
+  if (env.type === "chat.display") {
+    h.onLine?.(env.data as DisplayLine);
+  } else if (env.type === "chat.undisplay") {
     const ids = (env.data as { ids?: unknown }).ids;
-    if (Array.isArray(ids)) h.onRemove(ids.filter((x): x is string => typeof x === "string"));
+    if (Array.isArray(ids)) h.onRemove?.(ids.filter((x): x is string => typeof x === "string"));
+  } else if (env.type === "poll.display") {
+    h.onPoll?.(env.data as PollDisplay);
   }
   // Anything else is ignored: the server sends nothing else to an overlay key.
 }
