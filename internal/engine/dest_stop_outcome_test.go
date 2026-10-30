@@ -48,6 +48,10 @@ const engineFakeChildStderr = "POLYEMESIS_ENGINE_FAKE_CHILD_STDERR"
 // last path segment of its own final argument. See the branch that reads it.
 const engineFakeChildEchoLast = "POLYEMESIS_ENGINE_FAKE_CHILD_ECHO_LAST"
 
+// engineFakeChildAstats makes the fake child print astats level frames on
+// stdout until it is signalled, standing in for the meters sidecar.
+const engineFakeChildAstats = "POLYEMESIS_ENGINE_FAKE_CHILD_ASTATS"
+
 // The second argument after engineFakeChildFlag that turns the fake child into
 // an FFmpeg -progress writer, frozen or moving. Arguments, not environment,
 // because one test runs both kinds at once.
@@ -86,6 +90,17 @@ func TestMain(m *testing.M) {
 		}
 		fmt.Fprintln(os.Stderr, prefix+last)
 		os.Exit(1)
+	}
+	if os.Getenv(engineFakeChildAstats) != "" {
+		// A stand-in for the meters sidecar: astats frames on stdout, the shape
+		// ffmpeg.ParseLevels reads, every 100ms for one stereo track. Keyed on
+		// the environment for the reason above -- the engine builds the argv.
+		for n := 0; ; n++ {
+			fmt.Printf("frame:%d pts:%d pts_time:%d\n"+
+				"lavfi.astats.1.Peak_level=-12.0\nlavfi.astats.1.RMS_level=-18.0\n"+
+				"lavfi.astats.2.Peak_level=-12.0\nlavfi.astats.2.RMS_level=-18.0\n", n, n, n)
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 	if len(os.Args) > 2 && os.Args[1] == engineFakeChildFlag &&
 		(os.Args[2] == engineFakeChildProgressFrozen || os.Args[2] == engineFakeChildProgressMoving) {
