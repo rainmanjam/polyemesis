@@ -24,6 +24,7 @@
 package failreason
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -334,4 +335,24 @@ func containsAny(s string, subs ...string) bool {
 		}
 	}
 	return false
+}
+
+// Sentence is the reason in English, for the outlets that have no catalogue to
+// translate from: the alert text (and so the timeline, which stores it), the
+// webhook and the server log. It names the cause, then the two facts that
+// change what the operator does next -- held, and a rotated key -- and for an
+// unknown cause ends with FFmpeg's own line, because "unknown failure" alone is
+// a message nobody can act on.
+func (r Reason) Sentence() string {
+	s := r.Cause.Label()
+	if r.Held {
+		s += fmt.Sprintf("; held after %d quick rejections, press Retry once it is fixed", r.Rejections)
+	}
+	if r.KeyChanged {
+		s += "; the connected platform account reports a different stream key, refresh it"
+	}
+	if r.Cause == Unknown && r.Line != "" {
+		s += ": " + r.Line
+	}
+	return s
 }

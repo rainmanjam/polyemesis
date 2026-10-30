@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
 )
 
@@ -161,6 +162,12 @@ type Event struct {
 	// routinely contains a full rtmps:// URL with the stream key on the end.
 	// Redacted on the way in, in Dispatcher.Publish, never here.
 	Error string
+	// Cause, Held and KeyChanged are the classified failure behind a
+	// destination.down (internal/failreason), empty for every other edge. See
+	// Envelope.Cause.
+	Cause      failreason.Cause
+	Held       bool
+	KeyChanged bool
 }
 
 // Delivery bounds. The retry budget is short on purpose: retries block the

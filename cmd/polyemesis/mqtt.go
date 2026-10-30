@@ -355,6 +355,13 @@ func (r *mqttRunner) snapshot() mqtt.Snapshot {
 				Error:     e.ScrubDestinationText(d.ID, d.Error),
 				Rendition: d.RenditionName, At: now,
 			}
+			// The classified failure. The line is scrubbed by the supervisor
+			// already and scrubbed again here, for Error's reason above: it is
+			// FFmpeg stderr, and this topic is retained.
+			if r := d.Reason; r != nil {
+				ds.Cause, ds.Held = string(r.Cause), r.Held
+				ds.CauseDetail = e.ScrubDestinationText(d.ID, r.Line)
+			}
 			if d.Process != nil {
 				ds.BitrateKbps = d.Process.Progress.BitrateKbps
 				ds.UptimeSec = d.Process.UptimeSec

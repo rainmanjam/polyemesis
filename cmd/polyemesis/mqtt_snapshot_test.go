@@ -7,6 +7,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
+	"github.com/rainmanjam/polyemesis/internal/failreason"
 )
 
 // fakeMQTTEngine is an mqttEngine whose destination statuses the test chooses.
@@ -168,5 +169,40 @@ func TestSnapshotCarriesTheOrdinaryFields(t *testing.T) {
 	if d.Error != "" {
 		t.Errorf("DestState.Error = %q for a destination with no error; a bare mask on a "+
 			"healthy destination reads as a fault", d.Error)
+	}
+}
+
+// TestTheRetainedDestTopicCarriesTheCauseScrubbed is the MQTT outlet of #20.
+// The cause code and the held flag reach the retained topic, and the FFmpeg
+// line behind them goes through the same sink scrub as Error -- it is the same
+// stderr, and the line that explains a refused key is the line that prints the
+// key. The supervisor scrubbed it already; this pins that the sink does not
+// rely on that.
+func TestTheRetainedDestTopicCarriesTheCauseScrubbed(t *testing.T) {
+	const streamKey = "SENTINEL-mqtt-cause-51ab0e"
+	fake := &fakeMQTTEngine{
+		id: 7, name: "Main programme",
+		dests: map[int64]string{42: streamKey},
+		status: engine.Status{
+			Destinations: []engine.DestStatus{{
+				ID: 42, Name: "twitch", Kind: db.DestRTMP, Platform: db.PlatformTwitch, Enabled: true,
+				Reason: &failreason.Reason{
+					Cause: failreason.KeyRejected, Held: true,
+					Line: "Error opening output rtmp://live.example/app/" + streamKey + ": I/O error",
+				},
+			}},
+		},
+	}
+	r := &mqttRunner{version: "test", engines: func() []mqttEngine { return []mqttEngine{fake} }}
+	snap := r.snapshot()
+	if len(snap.Sources) != 1 || len(snap.Sources[0].Dests) != 1 {
+		t.Fatalf("snapshot = %#v, want one destination", snap.Sources)
+	}
+	d := snap.Sources[0].Dests[0]
+	if d.Cause != "key_rejected" || !d.Held {
+		t.Errorf("cause=%q held=%v, want key_rejected and held", d.Cause, d.Held)
+	}
+	if strings.Contains(d.CauseDetail, streamKey) || !strings.Contains(d.CauseDetail, "I/O error") {
+		t.Errorf("causeDetail = %q: want the diagnostic kept and the key gone", d.CauseDetail)
 	}
 }

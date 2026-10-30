@@ -289,3 +289,17 @@ func TestEveryCauseHasAnEnglishLabel(t *testing.T) {
 		seen[l] = c
 	}
 }
+
+// TestTheSentenceNamesHeldAndARotatedKey: the two facts that change what the
+// operator does next must survive into the English every non-UI outlet uses.
+func TestTheSentenceNamesHeldAndARotatedKey(t *testing.T) {
+	s := Reason{Cause: KeyRejected, Held: true, Rejections: 3, KeyChanged: true}.Sentence()
+	for _, want := range []string{"stream key rejected", "held after 3 quick rejections", "different stream key"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("%q does not say %q", s, want)
+		}
+	}
+	if got := (Reason{Cause: Unknown, Line: "Broken pipe"}).Sentence(); got != "unknown failure: Broken pipe" {
+		t.Errorf("unknown sentence = %q", got)
+	}
+}

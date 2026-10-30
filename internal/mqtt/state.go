@@ -91,8 +91,21 @@ type DestState struct {
 	// Running is the engine's verdict, not the process's: a destination whose
 	// routing graph would not compile has no process at all, and that is as
 	// down as a crashed one.
-	Running     bool      `json:"running"`
-	Error       string    `json:"error,omitempty"`
+	Running bool   `json:"running"`
+	Error   string `json:"error,omitempty"`
+	// Cause is why the destination is failing, as the same code the status
+	// JSON, the webhook and the alert carry (internal/failreason). Held is
+	// set while polyemesis has stopped retrying. CauseDetail is the FFmpeg
+	// line the verdict rests on, scrubbed with the destination's own secret
+	// set exactly as Error is -- this topic is RETAINED.
+	//
+	// FLAT, and without the status JSON's keyChanged: a field name containing
+	// "key" is refused on this tree by TestNoPayloadFieldIsNamedLikeACredential,
+	// and that rule is worth more than one boolean. A rotated key reaches Home
+	// Assistant as cause key_rejected; the one-click fix is in the console.
+	Cause       string    `json:"cause,omitempty"`
+	Held        bool      `json:"held,omitempty"`
+	CauseDetail string    `json:"causeDetail,omitempty"`
 	BitrateKbps float64   `json:"bitrateKbps"`
 	UptimeSec   float64   `json:"uptimeSec"`
 	Restarts    int       `json:"restarts"`

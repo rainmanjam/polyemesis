@@ -231,10 +231,17 @@ func (w *Watcher) watchDestinations(s alerts.Snapshot, now time.Time) []Event {
 				// the lifecycle coordinator) reads as a crash.
 				reason = "stalled"
 			}
-			out = append(out, Event{
+			ev := Event{
 				Trigger: TriggerDestinationDown, At: now, Source: w.src,
 				Destination: &ref, Reason: reason, Error: d.Error,
-			})
+			}
+			// Only for a failure. A disabled destination is the operator's
+			// decision, and a cause left over from its last failed run would
+			// tell a script that the disable was a key rejection.
+			if r := d.Reason; r != nil && d.Enabled {
+				ev.Cause, ev.Held, ev.KeyChanged = r.Cause, r.Held, r.KeyChanged
+			}
+			out = append(out, ev)
 		}
 	}
 

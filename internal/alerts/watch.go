@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/failreason"
 )
 
 // Watcher defaults.
@@ -106,6 +108,11 @@ type DestState struct {
 	Running  bool
 	Platform string
 	Error    string
+	// Reason is the engine's classified failure (engine.DestStatus.Reason),
+	// nil when nothing was classified -- a destination that could not be
+	// built has an Error and no run to classify. Its Line is already scrubbed
+	// by the supervisor; the text it lands in is redacted again on Publish.
+	Reason *failreason.Reason
 	// OutTimeMS is the output timestamp from this destination's latest FFmpeg
 	// progress block, in milliseconds, and 0 when there is no process or it
 	// has not moved any media yet. The watcher derives the delivery rate from
@@ -505,6 +512,18 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 				Title: "Destination down: " + d.Name,
 				Text:  d.Name + " has not been delivering for " + short(now.Sub(st.since)) + ".",
 				At:    now,
+			}
+			// THE REASON GOES IN THE TEXT, not only in a field. The timeline
+			// records Title and Text and drops Fields (engine.go's recorder),
+			// so a reason carried only as a field would reach Slack and be
+			// missing from the history page an operator reads afterwards.
+			// "cause" is the same machine-readable name the status JSON, MQTT
+			// and the webhook envelope use.
+			if r := d.Reason; r != nil {
+				ev.Text += " Reason: " + r.Sentence() + "."
+				ev = ev.WithField("reason", r.Cause.Label()).
+					WithField("cause", string(r.Cause)).
+					WithField("detail", r.Line)
 			}
 			out = append(out, ev.WithField("destination", d.Name).
 				WithField("platform", d.Platform).

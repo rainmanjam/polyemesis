@@ -523,6 +523,9 @@ func (d *Dispatcher) deliver(ctx context.Context, w *worker, ev Event) {
 		Destination: ev.Destination,
 		Reason:      ev.Reason,
 		Error:       ev.Error,
+		Cause:       ev.Cause,
+		Held:        ev.Held,
+		KeyChanged:  ev.KeyChanged,
 	}
 	body, err := Encode(env)
 	if err != nil {
