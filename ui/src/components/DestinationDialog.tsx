@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { Check, ChevronsUpDown, ExternalLink, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import {
@@ -32,7 +33,8 @@ import {
   sourceIsChosen,
 } from "@/lib/destinationSource";
 import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
-import { useT } from "@/lib/i18n";
+import { useT, type TranslationKey } from "@/lib/i18n";
+import { DEST_STEPS, stepForError, type DestStep } from "@/lib/destinationSteps";
 import { isIpLiteralHost, platformSupportsDeviceCode } from "@/lib/platformConnect";
 import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
 import { InfoHint } from "@/components/InfoHint";
@@ -69,6 +71,7 @@ import type {
   Platform,
   PlatformAccount,
   Rendition,
+  TlsMode,
   PlatformCreds,
   PlatformPresetInfo,
   SetupGuide,
@@ -749,6 +752,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     [service, url],
   );
   const [busy, setBusy] = useState(false);
+  // Which step of the dialog is showing (A6), and the reason Save sent the
+  // operator back to one. Every step stays mounted, so moving between them
+  // keeps what was typed.
+  const [step, setStep] = useState<DestStep>(1);
+  const [stepError, setStepError] = useState<string | null>(null);
+  const [tlsMode, setTlsMode] = useState<TlsMode | null>(null);
   // The variant form: an operator wanting "this tier but 4500 kbps for the
   // constrained uplink". Deliberately NOT a per-destination override of the
   // shared encode — there is no such thing, and there must not be: editing the
@@ -773,6 +782,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
   useEffect(() => {
     if (!open) return;
+    // Every open starts at the first step with nothing to complain about.
+    setStep(1);
+    setStepError(null);
+    api.tlsStatus().then(
+      (tls) => setTlsMode(tls.mode),
+      () => setTlsMode(null),
+    );
     reloadAccounts();
     api
       .platformGuides()
@@ -887,6 +903,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // Read from the browser: a self-signed certificate on a name is not visible
   // here, and the dialog does not claim that it is.
   const ipOrigin = typeof window !== "undefined" && isIpLiteralHost(window.location.hostname);
+  // A self-signed certificate is invisible from the page, but the server
+  // knows what it is serving (A5). Read once per open; unknown reads as no.
+  const selfSigned = tlsMode === "selfsigned";
+  // Either way the platform's redirect back to this origin is unlikely to
+  // work, so the code path leads and says why.
+  const codeFirst = ipOrigin || selfSigned;
   // Where the redirect sign-in comes back to, and the server's reasons it may
   // not (A5). Shown before the operator follows the link, because following it
   // leaves this form.
@@ -1041,6 +1063,25 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const manualKey = caps ? supportOf(caps, "streamKey") === "manual" : false;
   const unsupported = caps?.tier === "unsupported";
 
+  // What Save checks before it asks the server: the two step-1 facts the
+  // server would refuse without. Either sends the operator to step 1 with the
+  // reason, rather than a disabled button that says nothing about why.
+  const saveFromStep = () => {
+    if (!name.trim()) {
+      setStep(1);
+      setStepError(t("addDest.needName"));
+      requestAnimationFrame(() => document.getElementById("dest-name")?.focus());
+      return;
+    }
+    if (!sourceIsChosen(sourceId, choices)) {
+      setStep(1);
+      setStepError(t("addDest.needSource"));
+      return;
+    }
+    setStepError(null);
+    void save();
+  };
+
   const save = async () => {
     setBusy(true);
     try {
@@ -1126,7 +1167,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         onOpenChange(false);
         return;
       }
-      toast.error(err instanceof Error ? err.message : "Could not save the destination.");
+      const message = err instanceof Error ? err.message : t("addDest.saveFailed");
+      toast.error(message);
+      // To the step the refusal is about (A6), with the sentence beside it.
+      const at = stepForError(message);
+      if (at) setStep(at);
+      setStepError(message);
     } finally {
       setBusy(false);
     }
@@ -1139,13 +1185,18 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           form read as one long scroll. The lead sentence says what the form is
           for before any term of art appears. Terms (routing profile,
           rendition) are explained where they are used, not here. */}
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+      {/* A full-screen sheet below sm (A6): four steps of fields in a centred
+          box on a phone left a strip of page around a form too narrow to read. */}
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:max-w-none max-sm:rounded-none max-sm:border-0">
         <DialogHeader>
           <DialogTitle>{editing ? t("addDest.titleEdit") : t("addDest.titleAdd")}</DialogTitle>
           <DialogDescription>{t("addDest.description")}</DialogDescription>
         </DialogHeader>
 
+        <DestinationSteps step={step} onStep={setStep} />
+
         <div className="flex flex-col gap-3">
+          <StepPanel n={1} step={step}>
           <div className="flex flex-col gap-1">
             <Label htmlFor="dest-name">{t("dest.name")}</Label>
             <Input
@@ -1355,6 +1406,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             </div>
           )}
 
+          </StepPanel>
+
+          <StepPanel n={2} step={step}>
           <div className="flex flex-col gap-1">
             <Label>{t("dest.transport")}</Label>
             <Select value={kind} onValueChange={(v) => changeKind(v as DestKind)}>
@@ -1379,6 +1433,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   connect path is offered only when the server actually
                   answered. */}
               {platformAccounts.length > 0 ? (
+                <>
                 <Select value={accountId} onValueChange={setAccountId}>
                   <SelectTrigger data-testid="connected-account-picker">
                     <SelectValue />
@@ -1395,6 +1450,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     ))}
                   </SelectContent>
                 </Select>
+                {/* The linked account as a chip (A5): its health from the
+                    server's last refresh, a way to unlink it from this
+                    destination, and the way to manage it, which stays in
+                    Settings. */}
+                {(() => {
+                  const linked = platformAccounts.find((a) => String(a.id) === accountId);
+                  return linked ? <AccountChip account={linked} onUnlink={() => setAccountId("none")} /> : null;
+                })()}
+                </>
               ) : readFailed(accountsRead) ? (
                 <p className="text-sm text-muted-foreground">
                   The connected accounts could not be read, so this cannot say whether{" "}
@@ -1414,6 +1478,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     </Button>
                   )}
                   {ipOrigin && <p className="text-sm text-muted-foreground">{t("addDest.ipOriginNote")}</p>}
+                  {selfSigned && !ipOrigin && (
+                    <p className="text-sm text-muted-foreground">{t("addDest.selfSignedNote")}</p>
+                  )}
+                  {codeFirst && !deviceCodeOK && (
+                    <p className="text-sm text-warn">{t("addDest.noCodePath", { platform: caps.name })}</p>
+                  )}
                   <Button variant={deviceCodeOK ? "outline" : "default"} size="sm" asChild>
                     <a href={api.connectUrl(caps.connect)}>
                       <ExternalLink /> {t("addDest.connectAccount", { platform: caps.name })}
@@ -1557,8 +1627,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             </div>
           )}
 
+          </StepPanel>
+
           {/* Video and audio sit together on purpose: what a platform receives
-              is one answer with two halves, and the pairing is the feature. */}
+              is one answer with two halves, and the pairing is the feature.
+              Since A6 they are two steps of the same dialog, Audio before
+              Video and advanced, and every value still saves together. */}
+          <StepPanel n={4} step={step}>
           {/* Two cards, not a <Select>.
               A dropdown presents copying and encoding as the same kind of
               choice. They are not: copying is `-c:v copy` and costs nothing,
@@ -1913,7 +1988,20 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               </span>
             )}
           </fieldset>
+          </StepPanel>
 
+          <StepPanel n={3} step={step}>
+          {/* Which ingest tracks reach this destination is the routing profile,
+              set on the Routing page; this step is the audio encode. */}
+          <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+            <span>{t("addDest.routingNote")}</span>
+            <InfoHint body="addDest.routingHelp" title="addDest.routingTitle" />
+            {editing && (
+              <Link to={`/routing/${destination.id}`} className="text-primary-bright underline-offset-4 hover:underline">
+                {t("addDest.openRouting")}
+              </Link>
+            )}
+          </p>
           {canCopyAudio && (
             <div className="flex flex-col gap-1">
               <Label htmlFor="dest-audio-copy">Audio</Label>
@@ -2022,6 +2110,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             </div>
           </div>
 
+          </StepPanel>
+
+          <StepPanel n={4} step={step}>
           {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
             <div className="flex flex-col gap-3 rounded-md border border-warn/40 bg-warn/5 p-2">
               <p className="text-xs font-medium">{t("dest.compliance")}</p>
@@ -2537,6 +2628,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             </div>
           </details>
 
+          </StepPanel>
+
+          <StepPanel n={2} step={step}>
           {/* The platform's long setup prose sits behind a disclosure, so the
               form shows the fields first. Facebook's notes alone run to about a
               thousand characters; read on every open, they buried the key field. */}
@@ -2561,16 +2655,40 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               </div>
             </details>
           )}
+          </StepPanel>
         </div>
 
-        <DialogFooter>
+        {stepError && (
+          <p role="alert" className="text-sm text-down">
+            {stepError}
+          </p>
+        )}
+
+        <DialogFooter className="gap-2 sm:justify-between">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             {t("common.cancel")}
           </Button>
-          <Button onClick={save} disabled={busy || !name.trim() || !sourceIsChosen(sourceId, choices)}>
-            {busy && <Loader2 className="animate-spin" />}
-            {editing ? t("common.save") : t("hooks.create")}
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {step > 1 && (
+              <Button variant="outline" onClick={() => setStep((s) => (s - 1) as DestStep)}>
+                {t("addDest.back")}
+              </Button>
+            )}
+            {step < 4 && (
+              <Button variant={editing ? "outline" : "default"} onClick={() => setStep((s) => (s + 1) as DestStep)}>
+                {t("addDest.next")}
+              </Button>
+            )}
+            {/* Save on every step when editing: the operator who came to change
+                a key should not walk past three steps to keep it. A new
+                destination saves from the last step, after it has been seen. */}
+            {(editing || step === 4) && (
+              <Button onClick={saveFromStep} disabled={busy}>
+                {busy && <Loader2 className="animate-spin" />}
+                {editing ? t("common.save") : t("hooks.create")}
+              </Button>
+            )}
+          </div>
         </DialogFooter>
         {deviceCodeOK && caps?.connect && (
           <DeviceCodeDialog
@@ -2585,3 +2703,108 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     </Dialog>
   );
 }
+
+/** The four-step header (A6). Every step is reachable at any time, adding or
+ *  editing: the steps order the form, they do not gate it. */
+function DestinationSteps({ step, onStep }: Readonly<{ step: DestStep; onStep: (s: DestStep) => void }>) {
+  const t = useT();
+  const label: Record<DestStep, TranslationKey> = {
+    1: "addDest.stepPlatform",
+    2: "addDest.stepConnect",
+    3: "addDest.stepAudio",
+    4: "addDest.stepVideo",
+  };
+  return (
+    <ol className="grid grid-cols-2 gap-1.5 sm:grid-cols-4" aria-label={t("addDest.stepsLabel")}>
+      {DEST_STEPS.map((n) => (
+        <li key={n}>
+          <button
+            type="button"
+            onClick={() => onStep(n)}
+            aria-current={n === step ? "step" : undefined}
+            data-testid={`dest-step-${n}`}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-sm transition-colors",
+              n === step
+                ? "border-primary bg-primary-dim text-foreground"
+                : "border-border text-muted-foreground hover:bg-card-raised hover:text-foreground",
+            )}
+          >
+            <span
+              className={cn(
+                "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border font-mono text-xs",
+                n === step ? "border-primary-bright text-primary-bright" : "border-border-strong",
+              )}
+              aria-hidden="true"
+            >
+              {n}
+            </span>
+            <span className="truncate">{t(label[n])}</span>
+          </button>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** One step's fields. Hidden rather than unmounted, so what was typed on a
+ *  step survives leaving it. */
+function StepPanel({ n, step, children }: Readonly<{ n: DestStep; step: DestStep; children: ReactNode }>) {
+  return (
+    <div hidden={n !== step} className="flex flex-col gap-3" data-step={n}>
+      {children}
+    </div>
+  );
+}
+
+const HEALTH_TONE: Record<NonNullable<PlatformAccount["health"]>["state"], "live" | "warn" | "down"> = {
+  ok: "live",
+  expiring: "warn",
+  refreshFailing: "down",
+  expired: "down",
+};
+
+const HEALTH_LABEL: Record<NonNullable<PlatformAccount["health"]>["state"], TranslationKey> = {
+  ok: "addDest.healthOk",
+  expiring: "addDest.healthExpiring",
+  refreshFailing: "addDest.healthFailing",
+  expired: "addDest.healthExpired",
+};
+
+/** The account a destination is linked to, and how it is doing (A5). */
+export function AccountChip({ account, onUnlink }: Readonly<{ account: PlatformAccount; onUnlink: () => void }>) {
+  const t = useT();
+  const health = account.health;
+  const expires = account.expiresAt && !account.expiresAt.startsWith("0001") ? new Date(account.expiresAt) : null;
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card-raised px-2 py-1.5"
+      data-testid="account-chip"
+    >
+      {health && <StatusDot tone={HEALTH_TONE[health.state]} size="sm" />}
+      <span className="text-sm font-medium">{account.accountName}</span>
+      {health && (
+        <span className={cn("text-sm", health.state === "ok" ? "text-muted-foreground" : HEALTH_TONE[health.state] === "warn" ? "text-warn" : "text-down")}>
+          {t(HEALTH_LABEL[health.state])}
+        </span>
+      )}
+      {health?.state !== "ok" && expires && (
+        <span className="tnum font-mono text-sm text-muted-foreground">
+          {t("addDest.expiresAt", { date: expires.toLocaleString() })}
+        </span>
+      )}
+      {health?.state === "refreshFailing" && health.lastError && (
+        <span className="basis-full text-sm text-muted-foreground">{health.lastError}</span>
+      )}
+      <span className="ml-auto flex items-center gap-1">
+        <Button type="button" variant="ghost" size="sm" onClick={onUnlink}>
+          {t("addDest.unlink")}
+        </Button>
+        <Button type="button" variant="ghost" size="sm" asChild>
+          <Link to="/settings?tab=platforms">{t("addDest.manageAccounts")}</Link>
+        </Button>
+      </span>
+    </div>
+  );
+}
+
