@@ -127,6 +127,11 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	case noted:
 	case !changed:
 		applied, reason = "live", "no change to apply"
+	case rw != "":
+		// The reconcile failed before it could say anything about this
+		// destination. The level is stored but nothing confirmed it reached the
+		// running output, so it must not be reported as live.
+		applied, reason = "restart", "the level is stored but the running pipeline could not be updated; it takes effect on the next start"
 	case eng == nil || !eng.DestinationRunning(id):
 		applied, reason = "restart", "the destination is not running; the level is stored and takes effect when it starts"
 	default:
