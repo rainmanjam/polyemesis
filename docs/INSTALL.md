@@ -616,7 +616,7 @@ is not in this table, or you are reading this much later, run
 rather than trusting the row.
 
 **8.x is the exercised version, not an unknown.** The `Dockerfile` pins
-`FFMPEG_VERSION=8.1.2-r0`, verified on linux/amd64 and linux/arm64, and the host
+`FFMPEG_VERSION=8.1.3-r0`, verified on linux/amd64 and linux/arm64, and the host
 test suites pin BtbN's `n8.1-latest-…-gpl-8.1` build on Linux and Windows. The
 suites moved off 6.1.1 deliberately: running a version nobody deploys meant a
 defect fatal on one and survivable on the other could stay invisible here for

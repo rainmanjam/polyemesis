@@ -289,7 +289,7 @@ jobs:
       # BtbN's `latest` release tag is ROLLING: the same asset name can serve a
       # newer build over time. A cache keyed on the name therefore FREEZES the
       # build CI runs, which is a deliberate trade and the right one here --
-      # the Dockerfile pins FFMPEG_VERSION=8.1.2-r0, so a CI FFmpeg that also
+      # the Dockerfile pins FFMPEG_VERSION=8.1.3-r0, so a CI FFmpeg that also
       # stops moving is closer to what users get, not further from it. The
       # weekly scheduled container suite is what catches upstream drift, and it
       # builds the image rather than reading this cache.
@@ -754,7 +754,7 @@ jobs:
       # BtbN's `latest` release tag is ROLLING: the same asset name can serve a
       # newer build over time. A cache keyed on the name therefore FREEZES the
       # build CI runs, which is a deliberate trade and the right one here --
-      # the Dockerfile pins FFMPEG_VERSION=8.1.2-r0, so a CI FFmpeg that also
+      # the Dockerfile pins FFMPEG_VERSION=8.1.3-r0, so a CI FFmpeg that also
       # stops moving is closer to what users get, not further from it. The
       # weekly scheduled container suite is what catches upstream drift, and it
       # builds the image rather than reading this cache.

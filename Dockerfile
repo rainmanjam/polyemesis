@@ -130,13 +130,13 @@ LABEL org.opencontainers.image.title="polyemesis" \
 #   3. Confirm the new build still has SRT before shipping it:
 #      docker run --rm <image> ffmpeg -protocols | tr ' ' '\n' | grep -x srt
 #
-# 8.1.2-r0 verified on linux/amd64 and linux/arm64: srt + rtmp protocols,
+# 8.1.3-r0 verified on linux/amd64 and linux/arm64: srt + rtmp protocols,
 # libx264 and native aac encoders all present.
 #
 # The trailing grep is not decoration: it fails the build rather than shipping
 # an image whose multitrack SRT ingest cannot work. `grep srt` would be no check
 # at all — every build lists `srtp`, which is a different protocol.
-ARG FFMPEG_VERSION=8.1.2-r0
+ARG FFMPEG_VERSION=8.1.3-r0
 RUN apk add --no-cache "ffmpeg=${FFMPEG_VERSION}" ca-certificates tzdata \
  && adduser -D -u 10001 polyemesis \
  && ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
