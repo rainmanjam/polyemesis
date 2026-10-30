@@ -350,7 +350,7 @@ export function GoLiveComposer() {
           {t("golive.title")}
         </CardTitle>
         <span className="font-mono text-micro text-muted-foreground">
-          {targets.length === 1 ? "1 account" : `${targets.length} accounts`}
+          {targets.length === 1 ? t("i18nSweep.accountsOne") : t("i18nSweep.accountsMany", { count: targets.length })}
         </span>
       </CardHeader>
 
@@ -385,8 +385,7 @@ export function GoLiveComposer() {
               />
               {overLimit.length > 0 && (
                 <p className="text-micro text-down">
-                  Too long for {overLimit.map((t) => t.platform).join(", ")}; that platform will be
-                  reported as failed and the others still pushed.
+                  {t("i18nSweep.titleTooLong", { platforms: overLimit.map((o) => o.platform).join(", ") })}
                 </p>
               )}
             </div>
@@ -420,8 +419,9 @@ export function GoLiveComposer() {
               )}
               {noDescription.length > 0 && (
                 <p className="text-micro text-muted-foreground">
-                  {noDescription.map((t) => t.platform).join(", ")} has no description field, so
-                  this is skipped there rather than failed.
+                  {t("i18nSweep.noDescriptionField", {
+                    platforms: noDescription.map((o) => o.platform).join(", "),
+                  })}
                 </p>
               )}
             </div>
@@ -436,7 +436,7 @@ export function GoLiveComposer() {
               />
               {categoryHint && (
                 <p className="text-micro text-muted-foreground">
-                  {categoryHint} Type the name — polyemesis looks up the id.
+                  {categoryHint} {t("i18nSweep.categoryTypeName")}
                 </p>
               )}
             </div>
@@ -451,9 +451,7 @@ export function GoLiveComposer() {
                   onChange={(e) => setTags(e.target.value)}
                 />
                 <span className="text-micro text-muted-foreground">
-                  Comma separated. These REPLACE the existing tags rather than adding to them,
-                  because that is what each platform's API does. Applies to{" "}
-                  {tagTargets.map((t) => t.platform).join(", ")}.
+                  {t("i18nSweep.tagsReplace", { platforms: tagTargets.map((o) => o.platform).join(", ") })}
                 </span>
               </div>
             )}
@@ -463,7 +461,7 @@ export function GoLiveComposer() {
                 <div className="flex items-center justify-between gap-2">
                   <Label>{t("dash.broadcastSettings")}</Label>
                   <span className="text-micro text-muted-foreground">
-                    {broadcastAccounts.map((w) => w.platform).join(", ")} only
+                    {t("i18nSweep.platformsOnly", { platforms: broadcastAccounts.map((w) => w.platform).join(", ") })}
                   </span>
                 </div>
 
@@ -476,7 +474,7 @@ export function GoLiveComposer() {
                     onChange={(e) => setScheduledStart(e.target.value)}
                   />
                   <span className="text-micro text-muted-foreground">
-                    Leave empty to keep the current one.
+                    {t("i18nSweep.leaveEmptyKeep")}
                   </span>
                 </div>
 
@@ -489,9 +487,9 @@ export function GoLiveComposer() {
 
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { id: "dvr", label: "DVR", value: dvr, set: setDvr },
-                    { id: "autostart", label: "Auto-start", value: autoStart, set: setAutoStart },
-                    { id: "autostop", label: "Auto-stop", value: autoStop, set: setAutoStop },
+                    { id: "dvr", label: t("i18nSweep.dvr"), value: dvr, set: setDvr },
+                    { id: "autostart", label: t("i18nSweep.autoStart"), value: autoStart, set: setAutoStart },
+                    { id: "autostop", label: t("i18nSweep.autoStop"), value: autoStop, set: setAutoStop },
                   ].map((f) => (
                     <div key={f.id} className="flex flex-col gap-1">
                       <Label htmlFor={`golive-${f.id}`}>{f.label}</Label>
@@ -506,7 +504,7 @@ export function GoLiveComposer() {
                             "off". An omitted field keeps whatever the platform
                             has; sending false turns the feature off. */}
                         <option value="">{t("dash.leaveUnchanged")}</option>
-                        <option value="on">On</option>
+                        <option value="on">{t("i18nSweep.on")}</option>
                         <option value="off">{t("dash.off")}</option>
                       </select>
                     </div>
@@ -523,16 +521,17 @@ export function GoLiveComposer() {
                 <Megaphone /> {busy ? t("dash.pushing") : t("dash.pushToPlatforms")}
               </Button>
               <span className="text-micro text-muted-foreground">
-                Applies to {accepts("title").length === 1 ? t("dash.theConnectedAccount") : t("dash.everyConnectedAccount")}.
+                {t("i18nSweep.appliesTo", {
+                  who: accepts("title").length === 1 ? t("dash.theConnectedAccount") : t("dash.everyConnectedAccount"),
+                })}
               </span>
             </div>
 
             {withCompliance.length > 0 && (
               <p className="text-micro text-muted-foreground">
-                This push also sends the compliance settings stored on{" "}
-                {withCompliance.map((t) => t.accountName || t.platform).join(", ")} &mdash;
-                visibility, made-for-kids and content labels are configured per destination, not
-                here, and go out whether or not you change anything above.
+                {t("i18nSweep.pushSendsCompliance", {
+                  accounts: withCompliance.map((o) => o.accountName || o.platform).join(", "),
+                })}
               </p>
             )}
           </div>
@@ -580,14 +579,14 @@ export function GoLiveComposer() {
 
                     {res.applied.length > 0 && (
                       <p className="text-micro text-muted-foreground">
-                        Set {res.applied.join(", ")}
-                        {res.category && ` — category “${res.category}”`}
-                        {res.target && ` on ${res.target}`}
+                        {t("i18nSweep.pushApplied", { fields: res.applied.join(", ") })}
+                        {res.category && ` — ${t("i18nSweep.pushCategory", { category: res.category })}`}
+                        {res.target && ` ${t("i18nSweep.pushOnTarget", { target: res.target })}`}
                       </p>
                     )}
                     {res.skipped && res.skipped.length > 0 && (
                       <p className="text-micro text-muted-foreground">
-                        Not supported here: {res.skipped.join(", ")}
+                        {t("i18nSweep.pushNotSupported", { fields: res.skipped.join(", ") })}
                       </p>
                     )}
                     {res.message && <p className="text-micro text-down">{res.message}</p>}
@@ -844,6 +843,7 @@ function BulkDestinationControl({
 /** The failover exposure line. Renders nothing when there is nothing to say,
  *  which is the common case on a correctly configured install. */
 function FailoverExposure({ notice }: { notice: FailoverNotice }) {
+  const t = useT();
   if (notice.kind === "none") return null;
 
   return (
@@ -855,17 +855,11 @@ function FailoverExposure({ notice }: { notice: FailoverNotice }) {
     >
       <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
       <p className="text-muted-foreground">
-        <span className="text-foreground">
-          If the encoder disconnects, this broadcast ends.
-        </span>{" "}
-        Without failover the destination restarts and takes the platform
-        connection with it, and a completed YouTube broadcast cannot return to
-        live. Turning it on in{" "}
+        <span className="text-foreground">{t("i18nSweep.noFailoverLead")}</span>{" "}
+        {t("i18nSweep.noFailoverBody")}{" "}
         <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
-          Settings → Failover
-        </Link>{" "}
-        holds the connection up with a standby ingest, a looping file or a
-        slate. It costs a remux hop.
+          {t("i18nSweep.noFailoverLink")}
+        </Link>
       </p>
     </div>
   );
@@ -1535,7 +1529,7 @@ export function Dashboard() {
               setDialogOpen(true);
             }}
           >
-            <Plus /> Add destination
+            <Plus /> {t("firstRun.addDestination")}
           </Button>
         }
       />
@@ -1615,7 +1609,7 @@ export function Dashboard() {
             <CardHeader className="flex-row items-center justify-between">
               <CardTitle className="flex items-center gap-2">
                 <StatusDot tone={ingestTone} />
-                Ingest
+                {t("chrome.ingest")}
                 {/* WHOSE INGEST. Only on an install with more than one
                     programme, where the answer is not obvious and the feed
                     behind these figures is not scoped to either. */}
@@ -1776,7 +1770,7 @@ export function Dashboard() {
                 <span className="text-tiny text-muted-foreground">{t("dash.renditions")}</span>
                 {renditions.length === 0 ? (
                   <span className="font-mono text-micro text-muted-foreground">
-                    none — every destination is on passthrough
+                    {t("i18nSweep.noRenditions")}
                   </span>
                 ) : (
                   renditions.map((r) => (
@@ -1789,7 +1783,7 @@ export function Dashboard() {
                         <span className="truncate text-tiny">{r.name}</span>
                       </div>
                       <span className="tnum shrink-0 font-mono text-micro text-muted-foreground">
-                        {r.consumers === 1 ? "1 dest" : `${r.consumers} dests`}
+                        {r.consumers === 1 ? t("i18nSweep.destsOne") : t("i18nSweep.destsMany", { count: r.consumers })}
                       </span>
                     </div>
                   ))
@@ -1806,7 +1800,7 @@ export function Dashboard() {
       <div className="mt-4">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-[13px] font-semibold tracking-tight">
-            Destinations
+            {t("route.destinations")}
             <span className="ml-1.5 font-mono text-tiny font-normal text-muted-foreground">
               {destinations.length}
             </span>
@@ -1890,7 +1884,7 @@ export function Dashboard() {
                   setDialogOpen(true);
                 }}
               >
-                <Plus /> Add destination
+                <Plus /> {t("firstRun.addDestination")}
               </Button>
             </CardContent>
           </Card>

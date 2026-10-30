@@ -90,6 +90,22 @@ const FRAGMENTS = [
   // Dashboard's results placeholder, both on operator-facing paths.
   "will restart immediately on the source video",
   "Results appear here, one row per platform",
+  // A19 sweep, second pass: the on-air chrome, the destination card, the
+  // go-live composer and the first-run password form.
+  "This button just changed to",
+  "Scheduled Facebook broadcast",
+  "A large-type state view",
+  "destinations live",
+  "has no description field",
+  "These REPLACE the existing tags",
+  "Leave empty to keep the current one",
+  "This push also sends the compliance settings",
+  "Not supported here:",
+  "If the encoder disconnects, this broadcast ends",
+  "every destination is on passthrough",
+  "could not be understood and was dropped",
+  "length helps more than symbols",
+  "This password protects the admin UI",
 ];
 
 /* Bare single-word labels cannot be fragments: "Cancel" is a substring of

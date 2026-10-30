@@ -43,6 +43,16 @@ function scorePassword(pw: string): { score: number; label: string } {
   return { score, label: ["", "weak", "fair", "good", "strong"][score] };
 }
 
+/** The strength word for each score, translated at render. Index 0 is never
+ *  shown: an empty password has no label. */
+const STRENGTH_KEYS = [
+  "i18nSweep.strengthWeak",
+  "i18nSweep.strengthWeak",
+  "i18nSweep.strengthFair",
+  "i18nSweep.strengthGood",
+  "i18nSweep.strengthStrong",
+] as const;
+
 export function AuthScreen({
   mode,
   onDone,
@@ -65,7 +75,7 @@ export function AuthScreen({
 
     if (isSetup) {
       if (password.length < MIN_PASSWORD) {
-        toast.error(`Password must be at least ${MIN_PASSWORD} characters.`);
+        toast.error(t("i18nSweep.passwordTooShort", { count: MIN_PASSWORD }));
         return;
       }
       if (password !== confirm) {
@@ -179,9 +189,9 @@ export function AuthScreen({
                         ))}
                       </div>
                       <span className="text-[10px] text-muted-foreground" aria-live="polite">
-                        At least {MIN_PASSWORD} characters
-                        {scorePassword(password).label ? ` · ${scorePassword(password).label}` : ""}
-                        {password.length > 0 && password.length < 20 ? " · length helps more than symbols" : ""}
+                        {t("i18nSweep.passwordMin", { count: MIN_PASSWORD })}
+                        {scorePassword(password).label ? ` · ${t(STRENGTH_KEYS[scorePassword(password).score])}` : ""}
+                        {password.length > 0 && password.length < 20 ? ` · ${t("i18nSweep.passwordLengthHelps")}` : ""}
                       </span>
                       {/* WHAT THIS PASSWORD DOES, AND WHAT IT DOES NOT.
                           It protects the UI and the API. It encrypts nothing:
@@ -195,10 +205,7 @@ export function AuthScreen({
                           disabled -- which is by design, and is otherwise found
                           out during a restore, which is the worst moment. */}
                       <p className="mt-2 rounded border border-border bg-card-raised/40 p-2 text-[10px] leading-relaxed text-muted-foreground">
-                        This password protects the admin UI and API. Your stream keys
-                        and OAuth tokens are encrypted separately, with a key file in
-                        the data directory — back that up alongside the database, or
-                        your destinations will not open after a restore.
+                        {t("i18nSweep.passwordProtects")}
                       </p>
                     </>
                   )}

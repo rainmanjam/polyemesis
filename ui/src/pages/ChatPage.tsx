@@ -146,9 +146,9 @@ export function ChatPage() {
             {frameError && (
               <Badge
                 variant="warn"
-                title="A message from the server could not be understood and was dropped."
+                title={t("i18nSweep.chatPageFrameErrorHint")}
               >
-                frame error
+                {t("i18nSweep.frameError")}
               </Badge>
             )}
             <Button variant="ghost" size="icon-sm" onClick={() => void reload()} aria-label={t("chatpage.reload")}>
