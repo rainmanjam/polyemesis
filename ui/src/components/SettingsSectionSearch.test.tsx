@@ -10,6 +10,7 @@ const labels = {
   pipeline: "Pipeline",
   platforms: "Platforms",
   security: "Security",
+  danger: "Danger zone",
   debug: "Debug",
 } as const;
 

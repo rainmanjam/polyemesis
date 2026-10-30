@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
-import { useSearchParams } from "react-router";
+import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { SettingsSectionSearch } from "@/components/SettingsSectionSearch";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
@@ -33,7 +33,7 @@ import { AutomodConfig } from "@/components/AutomodConfig";
 import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
-import { DebugSettings } from "@/components/DebugSettings";
+import { DangerZone } from "@/components/DangerZone";
 import { PairingCheck } from "@/components/PairingCheck";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -187,6 +187,7 @@ export function SettingsPage() {
   // deliberately gets the tab and the explanation on it, which is a different
   // thing from being put there.
   const tab = params.get("tab") ?? (sourceCount === 0 ? "pipeline" : "ingest");
+  const navigate = useNavigate();
 
   // The OAuth round trip is a full navigation, so its outcome comes back in
   // the query string rather than as an XHR response.
@@ -303,6 +304,9 @@ export function SettingsPage() {
     }
   };
 
+  // The old Debug tab's address, kept working (A17).
+  if (tab === "debug") return <Navigate to="/system" replace />;
+
   if (loadFailed) {
     return (
       <div className="flex h-full items-center justify-center p-3 text-center text-sm text-muted-foreground">
@@ -342,9 +346,11 @@ export function SettingsPage() {
           pipeline: t("set.tabPipeline"),
           platforms: t("set.tabPlatforms"),
           security: t("set.tabSecurity"),
+          danger: t("danger.title"),
           debug: t("set.tabDebug"),
         }}
-        onPick={(v) => setParams({ tab: v })}
+        // Debug lives on the System page now (A17); the search still finds it.
+        onPick={(v) => (v === "debug" ? navigate("/system") : setParams({ tab: v }))}
       />
 
       {/* The sections run down a left rail on wide screens and stack on narrow
@@ -361,11 +367,12 @@ export function SettingsPage() {
           <TabsTrigger value="pipeline">{t("set.tabPipeline")}</TabsTrigger>
           <TabsTrigger value="platforms">{t("set.tabPlatforms")}</TabsTrigger>
           <TabsTrigger value="security">{t("set.tabSecurity")}</TabsTrigger>
-          {/* Last, and beside Security rather than filed by subject: the export
-              is the only control here that hands a copy of this server's logs to
-              somebody else, and the tab an operator reaches for when thinking
-              about disclosure is the one next to it. */}
-          <TabsTrigger value="debug">{t("set.tabDebug")}</TabsTrigger>
+          {/* Last, set apart and in the down tone (A17): the section that only
+              holds what cannot be undone. Debug, which used to sit here, is on
+              the System page. */}
+          <TabsTrigger value="danger" className="text-down lg:mt-3">
+            {t("danger.title")}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="ingest">
@@ -423,8 +430,8 @@ export function SettingsPage() {
         <TabsContent value="security">
           <SecuritySettings system={system} />
         </TabsContent>
-        <TabsContent value="debug">
-          <DebugSettings />
+        <TabsContent value="danger">
+          <DangerZone />
         </TabsContent>
       </Tabs>
     </div>
@@ -2147,8 +2154,8 @@ function PlatformCapabilityMatrix() {
               <TableRow>
                 <TableHead>{t("set.platform")}</TableHead>
                 {CAPABILITY_COLUMNS.map((c) => (
-                  <TableHead key={c.key} title={c.help}>
-                    {c.label}
+                  <TableHead key={c.key} title={t(c.help)}>
+                    {t(c.label)}
                   </TableHead>
                 ))}
               </TableRow>
@@ -2167,9 +2174,9 @@ function PlatformCapabilityMatrix() {
                       <Badge
                         variant={p.tier === "unsupported" ? "warn" : "outline"}
                         className="w-fit"
-                        title={tierInfo(p.tier).help}
+                        title={t(tierInfo(p.tier).help)}
                       >
-                        {tierInfo(p.tier).label}
+                        {t(tierInfo(p.tier).label)}
                       </Badge>
                     </div>
                   </TableCell>
@@ -2183,9 +2190,9 @@ function PlatformCapabilityMatrix() {
                         <Badge
                           variant={info.variant}
                           className="normal-case"
-                          title={p.reasons?.[c.key] ?? info.help}
+                          title={p.reasons?.[c.key] ?? t(info.help)}
                         >
-                          {info.label}
+                          {t(info.label)}
                         </Badge>
                       </TableCell>
                     );
@@ -2200,9 +2207,9 @@ function PlatformCapabilityMatrix() {
           {SUPPORT_LEGEND.map((l) => (
             <span key={l.key} className="flex items-center gap-1.5">
               <Badge variant={l.variant} className="normal-case">
-                {l.label}
+                {t(l.label)}
               </Badge>
-              <span className="text-micro text-muted-foreground">{l.help}</span>
+              <span className="text-micro text-muted-foreground">{t(l.help)}</span>
             </span>
           ))}
         </div>

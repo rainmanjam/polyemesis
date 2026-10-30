@@ -33,6 +33,7 @@ import {
   MessagesSquare,
   Radio,
   Scissors,
+  Cpu,
   Settings as SettingsIcon,
   Sliders,
   X,
@@ -101,6 +102,7 @@ const NAV: NavItem[] = [
   { to: "/jobs", labelKey: "nav.jobs", icon: ListChecks },
   { to: "/automation", labelKey: "nav.automation", icon: CalendarClock },
   { to: "/monitoring", labelKey: "nav.monitoring", icon: Activity },
+  { to: "/system", labelKey: "nav.system", icon: Cpu },
   { to: "/settings", labelKey: "nav.settings", icon: SettingsIcon },
 ];
 

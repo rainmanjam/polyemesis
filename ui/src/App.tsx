@@ -19,6 +19,7 @@ import { RoutingPage } from "@/pages/RoutingPage";
 import { RenditionsPage } from "@/pages/RenditionsPage";
 import { RecordingsPage } from "@/pages/RecordingsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { SystemPage } from "@/pages/SystemPage";
 import { Loader2 } from "lucide-react";
 
 // Monitoring is the only page that pulls in recharts — several hundred
@@ -233,6 +234,7 @@ export default function App() {
                 }
               />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/system" element={<SystemPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>
