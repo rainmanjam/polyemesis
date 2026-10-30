@@ -367,9 +367,33 @@ func (m *Model) ask(ctx context.Context, text string) (modelVerdict, error) {
 		return modelVerdict{}, fmt.Errorf("model returned no choices")
 	}
 
+	content := []byte(out.Choices[0].Message.Content)
 	var v modelVerdict
-	if err := json.Unmarshal([]byte(out.Choices[0].Message.Content), &v); err != nil {
+	if err := json.Unmarshal(content, &v); err != nil {
 		return modelVerdict{}, fmt.Errorf("model verdict was not the requested JSON: %w", err)
+	}
+
+	// PRESENCE, checked separately. json_object mode promises an object, not
+	// this object, and an object without our fields decodes cleanly into
+	// abusive=false, confidence=0 -- "not abusive", with no error. Real models
+	// do this: ShieldGemma answered {"No": null} and Granite Guardian
+	// {"assistant":"No"}, and both read as a healthy checker that never fires.
+	// Pointers, because a zero value cannot tell "absent" or null from a real
+	// false or 0. The messages are fixed text: they reach LastError, and the
+	// reply is model-authored (see errUnknownCategory).
+	var required struct {
+		Abusive    *bool    `json:"abusive"`
+		Confidence *float64 `json:"confidence"`
+	}
+	if err := json.Unmarshal(content, &required); err != nil {
+		return modelVerdict{}, fmt.Errorf("model verdict was not the requested JSON: %w", err)
+	}
+	if required.Abusive == nil || required.Confidence == nil {
+		return modelVerdict{}, errors.New(
+			"model verdict is missing abusive or confidence, so it cannot be read as a verdict")
+	}
+	if v.Confidence < 0 || v.Confidence > 1 {
+		return modelVerdict{}, errors.New("model verdict's confidence is outside 0..1")
 	}
 	return v, nil
 }
