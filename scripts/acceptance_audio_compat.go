@@ -56,13 +56,21 @@ func main() {
 	// session and the CSRF token that goes with it.
 	login()
 
+	// ONE DELIBERATE BREAK, in 0.12.0 (I4, live track gain). Every mixed track
+	// now carries a named volume@trk<N> stage after its pan, and a track's gain
+	// moved out of the pan coefficients into that stage, so FFmpeg's command
+	// channel can change it on a running destination. The audio is identical
+	// (0.5*c0 in the pan and volume=0.5 after it are the same multiply), but the
+	// string is not, and that is why every destination restarts once on the
+	// upgrade -- see docs/UPGRADING.md. These goldens are the post-I4 strings;
+	// any further change to them is a break that needs the same justification.
 	cases := []golden{
 		{
 			// The single most common profile in existence: one track, straight
 			// through. Nothing may touch it.
 			name:    "one track, no normalisation",
 			profile: simple([]int{0}, "off", 48000),
-			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
+			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];" +
 				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
 		},
 		{
@@ -72,8 +80,8 @@ func main() {
 			// as a concept.
 			name:    "two tracks, auto normalisation",
 			profile: simple([]int{0, 1}, "auto", 48000),
-			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t0];" +
-				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
+			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1,aresample=async=1:first_pts=0[a_t0];" +
+				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,volume@trk1=volume=1,aresample=async=1:first_pts=0[a_t1];" +
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 				"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
 				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
@@ -83,9 +91,9 @@ func main() {
 			// coefficients the new per-track stages sit next to.
 			name:    "three tracks with gains",
 			profile: gains(map[int]float64{0: 0.5, 1: 1.0, 2: 1.25}, "auto", 44100),
-			want: "[0:a:0]pan=stereo|c0=0.5*c0|c1=0.5*c1,aresample=async=1:first_pts=0[a_t0];" +
-				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
-				"[0:a:2]pan=stereo|c0=1.25*c0|c1=1.25*c1,aresample=async=1:first_pts=0[a_t2];" +
+			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=0.5,aresample=async=1:first_pts=0[a_t0];" +
+				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,volume@trk1=volume=1,aresample=async=1:first_pts=0[a_t1];" +
+				"[0:a:2]pan=stereo|c0=1*c0|c1=1*c1,volume@trk2=volume=1.25,aresample=async=1:first_pts=0[a_t2];" +
 				"[a_t0][a_t1][a_t2]amix=inputs=3:duration=longest:normalize=0[a_mix];" +
 				"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
 				"[a_norm]aresample=44100:async=1:first_pts=0[aout]",
@@ -96,7 +104,7 @@ func main() {
 			// not the new default target.
 			name:    "loudnorm with no target",
 			profile: simple([]int{0}, "loudnorm", 48000),
-			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
+			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];" +
 				"[a_t0]loudnorm=I=-16:TP=-1.5:LRA=11[a_norm];" +
 				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
 		},
