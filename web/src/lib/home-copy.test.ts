@@ -146,3 +146,24 @@ describe("the home plan strip (S3)", () => {
     expect(home).toMatch(/Checked 16 September 2026/);
   });
 });
+
+/* THE BUILD-TIME TRUST SIGNALS (S4). The star count and release come from
+ * GitHub at build time and are printed only when that read succeeded. A
+ * literal count in the source would be a fabricated figure that goes stale. */
+describe("the home trust line (S4)", () => {
+  const source = pages("index.astro");
+
+  it("reads the repository figures at build time through the helper", () => {
+    expect(source).toMatch(/import \{ fetchRepoStats \} from "\.\.\/lib\/github-stats"/);
+    expect(source).toMatch(/await fetchRepoStats\(\)/);
+  });
+
+  it("prints a star count only from the fetched value, never a typed number", () => {
+    expect(source).not.toMatch(/\b\d+\s+stars?\b/);
+    expect(source).toMatch(/\{repo\s*&&\s*\(?[\s\S]*?repo\.stars/);
+  });
+
+  it("keeps a plain source link when the fetch fails", () => {
+    expect(source).toMatch(/Read the source →/);
+  });
+});

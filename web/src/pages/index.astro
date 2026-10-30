@@ -12,6 +12,11 @@ import meters from "../assets/shots/04-meters.png";
  * would fail — the page would simply be wrong about the thing it is inviting
  * you to read. docs.mjs is the allowlist, so it is also the count. */
 import { PUBLISHED } from "../data/docs.mjs";
+/* Read from GitHub at build time, and null when that read fails. The trust
+ * line below prints the star count and release only when this is present, so
+ * a failed fetch yields a plain link, never a number. See lib/github-stats.ts. */
+import { fetchRepoStats } from "../lib/github-stats";
+const repo = await fetchRepoStats();
 
 const features = [
   {
@@ -474,6 +479,12 @@ const features = [
             rel="noopener"
             class="text-fg transition-colors hover:text-primary-bright hover:underline">Read the source →</a
           >
+          {repo && (
+            <span class="text-subtle">
+              {repo.stars} {repo.stars === 1 ? "star" : "stars"} on GitHub
+              {repo.release && <> · latest release {repo.release}</>}
+            </span>
+          )}
         </div>
       </div>
     </div>
