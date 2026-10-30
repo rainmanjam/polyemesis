@@ -111,8 +111,8 @@ is [fenced as untrusted](#untrusted-viewer-content).
 | `schedule_broadcast` | Schedule destinations to start or stop, once or daily/weekly | **yes, for a stop** | `POST /schedules` |
 
 Every tool carries MCP annotations. Read and content tools are `readOnlyHint`.
-The stop family, retry and presets are `destructiveHint`, because they
-interrupt or end output. Clients such as Claude use these hints to decide what
+The stop family, retry, presets, `set_recording` and `schedule_broadcast` are
+`destructiveHint`, because they interrupt or end output, or can. Clients such as Claude use these hints to decide what
 to ask you before calling a tool.
 
 There is no tool for expert FFmpeg arguments, their preview or their dry run,
@@ -193,7 +193,8 @@ Every write tool call that reaches the API publishes an
 [`mcp.action` audit event](MONITORING.md#security-and-configuration-events)
 titled **Action via MCP (*token name*)**. It names the tool, the token, the
 target, the outcome (`done (200)`, `refused (409)`) and the client's address.
-A stop is `warning`, everything else `info`. The API's own audit events still
+A call that ends something (a stop, recording off, a scheduled stop) is
+`warning`; everything else is `info`. The API's own audit events still
 fire too: a clip made over MCP also sends `clip.captured`.
 
 Like every audit event, `mcp.action` goes to your [alert rules](MONITORING.md)
