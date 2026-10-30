@@ -2,6 +2,7 @@ package db
 
 import (
 	"time"
+	"unicode/utf8"
 )
 
 // Retention for the operator timeline. Both caps apply on every write: the
@@ -25,11 +26,17 @@ type TimelineEvent struct {
 	Detail   string
 }
 
+// clip cuts s to the text limit without splitting a multi-byte character: it
+// backs off to the last rune boundary at or before the limit.
 func clip(s string) string {
 	if len(s) <= timelineTextLimit {
 		return s
 	}
-	return s[:timelineTextLimit]
+	cut := timelineTextLimit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // RecordTimelineEvent appends one event and prunes what the caps no longer

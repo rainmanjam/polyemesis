@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 var tlBase = time.Date(2026, 10, 29, 20, 0, 0, 0, time.UTC)
@@ -91,5 +92,28 @@ func TestTimelineClipsOversizedText(t *testing.T) {
 	got, _ := d.ListTimelineEvents(1)
 	if len(got) != 1 || len(got[0].Title) > timelineTextLimit || len(got[0].Detail) > timelineTextLimit {
 		t.Fatalf("text not clipped to %d: title %d detail %d", timelineTextLimit, len(got[0].Title), len(got[0].Detail))
+	}
+}
+
+// Clipping counts bytes, and a Japanese or Korean destination name is three
+// bytes a character. A cut that lands inside one must back off to the
+// character before it, or the stored text is not valid UTF-8 and the timeline
+// shows replacement characters for the whole row.
+func TestTimelineClipKeepsWholeCharacters(t *testing.T) {
+	d := testDB(t)
+	// 1 ASCII byte then 200 three-byte runes: byte 300 falls mid-rune.
+	title := "a" + strings.Repeat("日", 200)
+	if err := d.RecordTimelineEvent(TimelineEvent{At: tlBase, Type: "destination.down", Severity: "warning", Title: title}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	got, err := d.ListTimelineEvents(1)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("list: %v (%d rows)", err, len(got))
+	}
+	if !utf8.ValidString(got[0].Title) {
+		t.Fatalf("clipped title is not valid UTF-8 (%d bytes)", len(got[0].Title))
+	}
+	if len(got[0].Title) > timelineTextLimit {
+		t.Fatalf("title %d bytes exceeds limit %d", len(got[0].Title), timelineTextLimit)
 	}
 }
