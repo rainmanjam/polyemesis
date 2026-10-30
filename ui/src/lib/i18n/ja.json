@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "購読者 {count} · ポート {port}",
   "i18nSweep.monTsMissing": "TS パケット {total} 中 {lost} 欠落 · 途切れ {breaks}",
   "dash.stopCountLoading": "このストップで終了する YouTube 配信を数えています…",
-  "dash.stopCountFailed": "このストップで終了する配信数を読み込めなかったため、「すべて停止」は利用できません。閉じてからもう一度お試しください。"
+  "dash.stopCountFailed": "このストップで終了する配信数を読み込めなかったため、「すべて停止」は利用できません。閉じてからもう一度お試しください。",
+  "reason.cause.key_rejected": "ストリームキーが拒否されました",
+  "reason.cause.platform_not_ready": "プラットフォームの準備ができていません",
+  "reason.cause.dns": "サーバー名を解決できません",
+  "reason.cause.connection_refused": "接続が拒否されました",
+  "reason.cause.timeout": "接続がタイムアウトしました",
+  "reason.cause.tls": "安全な接続 (TLS) に失敗しました",
+  "reason.cause.codec_rejected": "コーデックまたは形式が拒否されました",
+  "reason.cause.upload_too_slow": "アップロードが遅すぎます",
+  "reason.cause.unknown": "不明な障害",
+  "reason.held": "{count} 回すぐに拒否されたため保留中です。再試行は停止しました。",
+  "reason.retry": "再試行",
+  "reason.keyChanged": "{platform} のキーが変更されました — クリックして更新",
+  "reason.ffmpegSaid": "FFmpeg の出力: {line}"
 }

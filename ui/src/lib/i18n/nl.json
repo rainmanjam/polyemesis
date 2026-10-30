@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "{count} afnemers · poort {port}",
   "i18nSweep.monTsMissing": "{lost} van {total} TS-pakketten ontbreken · {breaks} onderbrekingen",
   "dash.stopCountLoading": "Tellen van de YouTube-uitzendingen die deze stop zou beëindigen…",
-  "dash.stopCountFailed": "Het aantal uitzendingen dat deze stop zou beëindigen kon niet worden geladen, dus 'Alles stoppen' is niet beschikbaar. Sluit en probeer opnieuw."
+  "dash.stopCountFailed": "Het aantal uitzendingen dat deze stop zou beëindigen kon niet worden geladen, dus 'Alles stoppen' is niet beschikbaar. Sluit en probeer opnieuw.",
+  "reason.cause.key_rejected": "Streamsleutel geweigerd",
+  "reason.cause.platform_not_ready": "Platform niet gereed",
+  "reason.cause.dns": "Servernaam kan niet worden opgezocht",
+  "reason.cause.connection_refused": "Verbinding geweigerd",
+  "reason.cause.timeout": "Verbinding verlopen",
+  "reason.cause.tls": "Beveiligde verbinding (TLS) mislukt",
+  "reason.cause.codec_rejected": "Codec of formaat geweigerd",
+  "reason.cause.upload_too_slow": "Upload te traag",
+  "reason.cause.unknown": "Onbekende fout",
+  "reason.held": "Gepauzeerd na {count} snelle weigeringen. Opnieuw proberen is gestopt.",
+  "reason.retry": "Opnieuw proberen",
+  "reason.keyChanged": "Sleutel van {platform} gewijzigd — klik om bij te werken",
+  "reason.ffmpegSaid": "FFmpeg meldde: {line}"
 }

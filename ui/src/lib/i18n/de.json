@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "{count} Abnehmer · Port {port}",
   "i18nSweep.monTsMissing": "{lost} von {total} TS-Paketen fehlen · {breaks} Brüche",
   "dash.stopCountLoading": "Die YouTube-Übertragungen, die dieser Stopp beenden würde, werden gezählt…",
-  "dash.stopCountFailed": "Die Anzahl der Übertragungen, die dieser Stopp beenden würde, konnte nicht geladen werden. „Alle stoppen“ ist daher nicht verfügbar. Schließen und erneut versuchen."
+  "dash.stopCountFailed": "Die Anzahl der Übertragungen, die dieser Stopp beenden würde, konnte nicht geladen werden. „Alle stoppen“ ist daher nicht verfügbar. Schließen und erneut versuchen.",
+  "reason.cause.key_rejected": "Streamschlüssel abgelehnt",
+  "reason.cause.platform_not_ready": "Plattform nicht bereit",
+  "reason.cause.dns": "Servername nicht auflösbar",
+  "reason.cause.connection_refused": "Verbindung abgelehnt",
+  "reason.cause.timeout": "Zeitüberschreitung der Verbindung",
+  "reason.cause.tls": "Sichere Verbindung (TLS) fehlgeschlagen",
+  "reason.cause.codec_rejected": "Codec oder Format abgelehnt",
+  "reason.cause.upload_too_slow": "Upload zu langsam",
+  "reason.cause.unknown": "Unbekannter Fehler",
+  "reason.held": "Nach {count} schnellen Ablehnungen angehalten. Es wird nicht mehr neu versucht.",
+  "reason.retry": "Erneut versuchen",
+  "reason.keyChanged": "Schlüssel bei {platform} geändert — zum Aktualisieren klicken",
+  "reason.ffmpegSaid": "FFmpeg meldete: {line}"
 }

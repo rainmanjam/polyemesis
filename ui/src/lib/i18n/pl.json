@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "Odbiorcy: {count} · port {port}",
   "i18nSweep.monTsMissing": "Brakuje {lost} z {total} pakietów TS · przerwy: {breaks}",
   "dash.stopCountLoading": "Liczenie transmisji YouTube, które to zatrzymanie zakończy…",
-  "dash.stopCountFailed": "Nie udało się wczytać liczby transmisji, które to zatrzymanie zakończy, więc „Zatrzymaj wszystko” jest niedostępne. Zamknij i spróbuj ponownie."
+  "dash.stopCountFailed": "Nie udało się wczytać liczby transmisji, które to zatrzymanie zakończy, więc „Zatrzymaj wszystko” jest niedostępne. Zamknij i spróbuj ponownie.",
+  "reason.cause.key_rejected": "Klucz transmisji odrzucony",
+  "reason.cause.platform_not_ready": "Platforma nie jest gotowa",
+  "reason.cause.dns": "Nie można rozwiązać nazwy serwera",
+  "reason.cause.connection_refused": "Połączenie odrzucone",
+  "reason.cause.timeout": "Przekroczono czas połączenia",
+  "reason.cause.tls": "Bezpieczne połączenie (TLS) nie powiodło się",
+  "reason.cause.codec_rejected": "Kodek lub format odrzucony",
+  "reason.cause.upload_too_slow": "Wysyłanie zbyt wolne",
+  "reason.cause.unknown": "Nieznany błąd",
+  "reason.held": "Wstrzymano po {count} szybkich odrzuceniach. Ponawianie zatrzymane.",
+  "reason.retry": "Ponów",
+  "reason.keyChanged": "Klucz {platform} się zmienił — kliknij, aby zaktualizować",
+  "reason.ffmpegSaid": "FFmpeg zgłosił: {line}"
 }

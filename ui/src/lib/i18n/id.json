@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "{count} pelanggan · port {port}",
   "i18nSweep.monTsMissing": "{lost} dari {total} paket TS hilang · {breaks} putus",
   "dash.stopCountLoading": "Menghitung siaran YouTube yang akan dihentikan…",
-  "dash.stopCountFailed": "Jumlah siaran yang akan dihentikan tidak dapat dimuat, jadi Hentikan semua tidak tersedia. Tutup lalu coba lagi."
+  "dash.stopCountFailed": "Jumlah siaran yang akan dihentikan tidak dapat dimuat, jadi Hentikan semua tidak tersedia. Tutup lalu coba lagi.",
+  "reason.cause.key_rejected": "Kunci stream ditolak",
+  "reason.cause.platform_not_ready": "Platform belum siap",
+  "reason.cause.dns": "Nama server tidak dapat di-resolve",
+  "reason.cause.connection_refused": "Koneksi ditolak",
+  "reason.cause.timeout": "Waktu koneksi habis",
+  "reason.cause.tls": "Koneksi aman (TLS) gagal",
+  "reason.cause.codec_rejected": "Codec atau format ditolak",
+  "reason.cause.upload_too_slow": "Unggahan terlalu lambat",
+  "reason.cause.unknown": "Kegagalan tidak dikenal",
+  "reason.held": "Ditahan setelah {count} penolakan cepat. Percobaan ulang dihentikan.",
+  "reason.retry": "Coba lagi",
+  "reason.keyChanged": "Kunci {platform} berubah — klik untuk memperbarui",
+  "reason.ffmpegSaid": "FFmpeg berkata: {line}"
 }

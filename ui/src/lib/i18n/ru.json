@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "Подписчиков: {count} · порт {port}",
   "i18nSweep.monTsMissing": "Потеряно {lost} из {total} пакетов TS · разрывов: {breaks}",
   "dash.stopCountLoading": "Подсчёт трансляций YouTube, которые завершит эта остановка…",
-  "dash.stopCountFailed": "Не удалось загрузить число трансляций, которые завершит эта остановка, поэтому «Остановить всё» недоступно. Закройте окно и попробуйте снова."
+  "dash.stopCountFailed": "Не удалось загрузить число трансляций, которые завершит эта остановка, поэтому «Остановить всё» недоступно. Закройте окно и попробуйте снова.",
+  "reason.cause.key_rejected": "Ключ трансляции отклонён",
+  "reason.cause.platform_not_ready": "Платформа не готова",
+  "reason.cause.dns": "Имя сервера не разрешается",
+  "reason.cause.connection_refused": "В соединении отказано",
+  "reason.cause.timeout": "Время соединения истекло",
+  "reason.cause.tls": "Сбой защищённого соединения (TLS)",
+  "reason.cause.codec_rejected": "Кодек или формат отклонён",
+  "reason.cause.upload_too_slow": "Слишком медленная отдача",
+  "reason.cause.unknown": "Неизвестный сбой",
+  "reason.held": "Остановлено после {count} быстрых отказов. Повторы прекращены.",
+  "reason.retry": "Повторить",
+  "reason.keyChanged": "Ключ {platform} изменился — нажмите, чтобы обновить",
+  "reason.ffmpegSaid": "Вывод FFmpeg: {line}"
 }

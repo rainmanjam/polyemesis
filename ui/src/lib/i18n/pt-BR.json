@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "{count} assinantes · porta {port}",
   "i18nSweep.monTsMissing": "{lost} de {total} pacotes TS ausentes · {breaks} quebras",
   "dash.stopCountLoading": "Contando as transmissões do YouTube que esta parada encerraria…",
-  "dash.stopCountFailed": "Não foi possível carregar a contagem de transmissões que esta parada encerraria, então 'Parar tudo' não está disponível. Feche e tente de novo."
+  "dash.stopCountFailed": "Não foi possível carregar a contagem de transmissões que esta parada encerraria, então 'Parar tudo' não está disponível. Feche e tente de novo.",
+  "reason.cause.key_rejected": "Chave de transmissão recusada",
+  "reason.cause.platform_not_ready": "Plataforma não está pronta",
+  "reason.cause.dns": "O nome do servidor não resolve",
+  "reason.cause.connection_refused": "Conexão recusada",
+  "reason.cause.timeout": "A conexão expirou",
+  "reason.cause.tls": "Falha na conexão segura (TLS)",
+  "reason.cause.codec_rejected": "Codec ou formato recusado",
+  "reason.cause.upload_too_slow": "Envio lento demais",
+  "reason.cause.unknown": "Falha desconhecida",
+  "reason.held": "Em espera após {count} recusas rápidas. As novas tentativas pararam.",
+  "reason.retry": "Tentar de novo",
+  "reason.keyChanged": "A chave do {platform} mudou — clique para atualizar",
+  "reason.ffmpegSaid": "O FFmpeg disse: {line}"
 }

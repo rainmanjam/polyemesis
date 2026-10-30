@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "Підписників: {count} · порт {port}",
   "i18nSweep.monTsMissing": "Втрачено {lost} з {total} пакетів TS · розривів: {breaks}",
   "dash.stopCountLoading": "Підрахунок трансляцій YouTube, які завершить ця зупинка…",
-  "dash.stopCountFailed": "Не вдалося завантажити кількість трансляцій, які завершить ця зупинка, тож «Зупинити все» недоступна. Закрийте вікно і спробуйте ще раз."
+  "dash.stopCountFailed": "Не вдалося завантажити кількість трансляцій, які завершить ця зупинка, тож «Зупинити все» недоступна. Закрийте вікно і спробуйте ще раз.",
+  "reason.cause.key_rejected": "Ключ трансляції відхилено",
+  "reason.cause.platform_not_ready": "Платформа не готова",
+  "reason.cause.dns": "Ім’я сервера не розпізнається",
+  "reason.cause.connection_refused": "У з’єднанні відмовлено",
+  "reason.cause.timeout": "Час з’єднання вичерпано",
+  "reason.cause.tls": "Збій захищеного з’єднання (TLS)",
+  "reason.cause.codec_rejected": "Кодек або формат відхилено",
+  "reason.cause.upload_too_slow": "Надто повільне відвантаження",
+  "reason.cause.unknown": "Невідомий збій",
+  "reason.held": "Зупинено після {count} швидких відмов. Повтори припинено.",
+  "reason.retry": "Повторити",
+  "reason.keyChanged": "Ключ {platform} змінився — натисніть, щоб оновити",
+  "reason.ffmpegSaid": "Вивід FFmpeg: {line}"
 }

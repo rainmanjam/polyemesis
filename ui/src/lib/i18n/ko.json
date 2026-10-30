@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "구독자 {count} · 포트 {port}",
   "i18nSweep.monTsMissing": "TS 패킷 {total}개 중 {lost}개 누락 · 끊김 {breaks}회",
   "dash.stopCountLoading": "이 중지로 종료될 YouTube 방송을 세는 중…",
-  "dash.stopCountFailed": "이 중지로 종료될 방송 수를 불러오지 못해 '모두 중지'를 사용할 수 없습니다. 닫은 뒤 다시 시도하세요."
+  "dash.stopCountFailed": "이 중지로 종료될 방송 수를 불러오지 못해 '모두 중지'를 사용할 수 없습니다. 닫은 뒤 다시 시도하세요.",
+  "reason.cause.key_rejected": "스트림 키가 거부되었습니다",
+  "reason.cause.platform_not_ready": "플랫폼이 준비되지 않았습니다",
+  "reason.cause.dns": "서버 이름을 확인할 수 없습니다",
+  "reason.cause.connection_refused": "연결이 거부되었습니다",
+  "reason.cause.timeout": "연결 시간이 초과되었습니다",
+  "reason.cause.tls": "보안 연결(TLS)에 실패했습니다",
+  "reason.cause.codec_rejected": "코덱 또는 형식이 거부되었습니다",
+  "reason.cause.upload_too_slow": "업로드가 너무 느립니다",
+  "reason.cause.unknown": "알 수 없는 오류",
+  "reason.held": "빠른 거부가 {count}회 이어져 보류되었습니다. 재시도가 중지되었습니다.",
+  "reason.retry": "다시 시도",
+  "reason.keyChanged": "{platform} 키가 변경되었습니다 — 클릭하여 업데이트",
+  "reason.ffmpegSaid": "FFmpeg 출력: {line}"
 }

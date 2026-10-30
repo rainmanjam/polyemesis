@@ -763,6 +763,40 @@ export interface ProcessStatus {
   // destination-level `stalled` is the one that says the platform is at fault.
   stalled?: boolean;
   stalledSec?: number;
+  /** Why the most recent run failed (internal/failreason). Absent while
+   *  nothing has failed since the last start. */
+  reason?: FailureReason;
+}
+
+/** The classified cause of a failure. The codes are a published contract:
+ *  the same strings reach MQTT, webhooks and alert payloads. */
+export type FailureCause =
+  | "key_rejected"
+  | "platform_not_ready"
+  | "dns"
+  | "connection_refused"
+  | "timeout"
+  | "tls"
+  | "codec_rejected"
+  | "upload_too_slow"
+  | "unknown";
+
+/** failreason.Reason, field for field. */
+export interface FailureReason {
+  cause: FailureCause;
+  /** The FFmpeg line the verdict rests on, already scrubbed of credentials.
+   *  For "unknown" it is the raw last thing FFmpeg said. */
+  line?: string;
+  /** The run ended within the quick window of its spawn. */
+  quick?: boolean;
+  /** Retrying has stopped after repeated quick rejections; Retry lifts it. */
+  held?: boolean;
+  /** How many quick, holdable rejections in a row this reason ends. */
+  rejections?: number;
+  /** The connected platform account reports a different stream key. */
+  keyChanged?: boolean;
+  /** When the run ended, ISO time. */
+  at: string;
 }
 
 export interface DestStatus {
@@ -794,6 +828,9 @@ export interface DestStatus {
    *  so cannot say this. It arrives in every status snapshot, not only on the
    *  POST response, which is why the card can render it with no API change. */
   stopWarning?: string;
+  /** Why this destination is failing, or delivering too slowly. Absent while
+   *  nothing is wrong. See internal/engine/failreason.go. */
+  reason?: FailureReason;
   /** How the most recent per-track gain or mute change took effect (I4):
    *  "applied live", "applied live: <reason>" or "applied by restart: <reason>".
    *  Absent until a level change has been recorded for this destination. */

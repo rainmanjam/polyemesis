@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "{count} 个订阅者 · 端口 {port}",
   "i18nSweep.monTsMissing": "{total} 个 TS 包中缺失 {lost} 个 · 中断 {breaks} 次",
   "dash.stopCountLoading": "正在统计此次停止将结束的 YouTube 直播…",
-  "dash.stopCountFailed": "无法加载此次停止将结束的直播数量，因此“全部停止”不可用。请关闭后重试。"
+  "dash.stopCountFailed": "无法加载此次停止将结束的直播数量，因此“全部停止”不可用。请关闭后重试。",
+  "reason.cause.key_rejected": "推流密钥被拒绝",
+  "reason.cause.platform_not_ready": "平台尚未就绪",
+  "reason.cause.dns": "无法解析服务器名称",
+  "reason.cause.connection_refused": "连接被拒绝",
+  "reason.cause.timeout": "连接超时",
+  "reason.cause.tls": "安全连接 (TLS) 失败",
+  "reason.cause.codec_rejected": "编解码器或格式被拒绝",
+  "reason.cause.upload_too_slow": "上传速度过慢",
+  "reason.cause.unknown": "未知故障",
+  "reason.held": "连续 {count} 次被快速拒绝，已暂停。不再重试。",
+  "reason.retry": "重试",
+  "reason.keyChanged": "{platform} 的密钥已更改 — 点击更新",
+  "reason.ffmpegSaid": "FFmpeg 输出：{line}"
 }

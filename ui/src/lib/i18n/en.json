@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "{count} subscribers · port {port}",
   "i18nSweep.monTsMissing": "{lost} of {total} TS packets missing · {breaks} breaks",
   "dash.stopCountLoading": "Counting the YouTube broadcasts this stop would end…",
-  "dash.stopCountFailed": "The count of broadcasts this stop would end could not be loaded, so Stop all is unavailable. Close and try again."
+  "dash.stopCountFailed": "The count of broadcasts this stop would end could not be loaded, so Stop all is unavailable. Close and try again.",
+  "reason.cause.key_rejected": "Stream key rejected",
+  "reason.cause.platform_not_ready": "Platform not ready",
+  "reason.cause.dns": "Server name does not resolve",
+  "reason.cause.connection_refused": "Connection refused",
+  "reason.cause.timeout": "Connection timed out",
+  "reason.cause.tls": "Secure (TLS) connection failed",
+  "reason.cause.codec_rejected": "Codec or format rejected",
+  "reason.cause.upload_too_slow": "Upload too slow",
+  "reason.cause.unknown": "Unknown failure",
+  "reason.held": "Held after {count} quick rejections. Retrying has stopped.",
+  "reason.retry": "Retry",
+  "reason.keyChanged": "{platform}'s key changed — click to update",
+  "reason.ffmpegSaid": "FFmpeg said: {line}"
 }

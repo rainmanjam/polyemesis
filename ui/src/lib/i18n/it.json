@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "{count} sottoscrittori · porta {port}",
   "i18nSweep.monTsMissing": "{lost} pacchetti TS mancanti su {total} · {breaks} interruzioni",
   "dash.stopCountLoading": "Conteggio delle dirette YouTube che questo stop terminerebbe…",
-  "dash.stopCountFailed": "Non è stato possibile caricare il conteggio delle dirette che questo stop terminerebbe, quindi «Ferma tutto» non è disponibile. Chiudi e riprova."
+  "dash.stopCountFailed": "Non è stato possibile caricare il conteggio delle dirette che questo stop terminerebbe, quindi «Ferma tutto» non è disponibile. Chiudi e riprova.",
+  "reason.cause.key_rejected": "Chiave di streaming rifiutata",
+  "reason.cause.platform_not_ready": "Piattaforma non pronta",
+  "reason.cause.dns": "Il nome del server non si risolve",
+  "reason.cause.connection_refused": "Connessione rifiutata",
+  "reason.cause.timeout": "Connessione scaduta",
+  "reason.cause.tls": "Connessione sicura (TLS) non riuscita",
+  "reason.cause.codec_rejected": "Codec o formato rifiutato",
+  "reason.cause.upload_too_slow": "Caricamento troppo lento",
+  "reason.cause.unknown": "Errore sconosciuto",
+  "reason.held": "In pausa dopo {count} rifiuti rapidi. I nuovi tentativi sono sospesi.",
+  "reason.retry": "Riprova",
+  "reason.keyChanged": "La chiave di {platform} è cambiata — fai clic per aggiornarla",
+  "reason.ffmpegSaid": "FFmpeg ha detto: {line}"
 }

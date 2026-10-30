@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "{count} abone · bağlantı noktası {port}",
   "i18nSweep.monTsMissing": "{total} TS paketinden {lost} tanesi eksik · {breaks} kesinti",
   "dash.stopCountLoading": "Bu durdurmanın sonlandıracağı YouTube yayınları sayılıyor…",
-  "dash.stopCountFailed": "Bu durdurmanın sonlandıracağı yayın sayısı yüklenemedi, bu yüzden 'Tümünü durdur' kullanılamıyor. Kapatıp yeniden deneyin."
+  "dash.stopCountFailed": "Bu durdurmanın sonlandıracağı yayın sayısı yüklenemedi, bu yüzden 'Tümünü durdur' kullanılamıyor. Kapatıp yeniden deneyin.",
+  "reason.cause.key_rejected": "Yayın anahtarı reddedildi",
+  "reason.cause.platform_not_ready": "Platform hazır değil",
+  "reason.cause.dns": "Sunucu adı çözümlenemiyor",
+  "reason.cause.connection_refused": "Bağlantı reddedildi",
+  "reason.cause.timeout": "Bağlantı zaman aşımına uğradı",
+  "reason.cause.tls": "Güvenli bağlantı (TLS) başarısız",
+  "reason.cause.codec_rejected": "Codec veya biçim reddedildi",
+  "reason.cause.upload_too_slow": "Yükleme çok yavaş",
+  "reason.cause.unknown": "Bilinmeyen hata",
+  "reason.held": "{count} hızlı retten sonra bekletiliyor. Yeniden deneme durdu.",
+  "reason.retry": "Yeniden dene",
+  "reason.keyChanged": "{platform} anahtarı değişti — güncellemek için tıklayın",
+  "reason.ffmpegSaid": "FFmpeg çıktısı: {line}"
 }

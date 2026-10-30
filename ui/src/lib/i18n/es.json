@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "{count} suscriptores · puerto {port}",
   "i18nSweep.monTsMissing": "faltan {lost} de {total} paquetes TS · {breaks} cortes",
   "dash.stopCountLoading": "Contando las transmisiones de YouTube que este stop terminaría…",
-  "dash.stopCountFailed": "No se pudo cargar el recuento de transmisiones que terminaría este stop, así que «Detener todo» no está disponible. Cierra y vuelve a intentarlo."
+  "dash.stopCountFailed": "No se pudo cargar el recuento de transmisiones que terminaría este stop, así que «Detener todo» no está disponible. Cierra y vuelve a intentarlo.",
+  "reason.cause.key_rejected": "Clave de transmisión rechazada",
+  "reason.cause.platform_not_ready": "La plataforma no está lista",
+  "reason.cause.dns": "El nombre del servidor no se resuelve",
+  "reason.cause.connection_refused": "Conexión rechazada",
+  "reason.cause.timeout": "Tiempo de conexión agotado",
+  "reason.cause.tls": "Falló la conexión segura (TLS)",
+  "reason.cause.codec_rejected": "Códec o formato rechazado",
+  "reason.cause.upload_too_slow": "Subida demasiado lenta",
+  "reason.cause.unknown": "Fallo desconocido",
+  "reason.held": "En pausa tras {count} rechazos rápidos. Ya no se reintenta.",
+  "reason.retry": "Reintentar",
+  "reason.keyChanged": "La clave de {platform} cambió — haz clic para actualizarla",
+  "reason.ffmpegSaid": "FFmpeg dijo: {line}"
 }

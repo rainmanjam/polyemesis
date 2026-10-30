@@ -1989,5 +1989,18 @@
   "i18nSweep.monSubscribers": "{count} abonnés · port {port}",
   "i18nSweep.monTsMissing": "{lost} paquets TS manquants sur {total} · {breaks} ruptures",
   "dash.stopCountLoading": "Décompte des diffusions YouTube que cet arrêt terminerait…",
-  "dash.stopCountFailed": "Le décompte des diffusions que cet arrêt terminerait n'a pas pu être chargé : « Tout arrêter » est indisponible. Fermez et réessayez."
+  "dash.stopCountFailed": "Le décompte des diffusions que cet arrêt terminerait n'a pas pu être chargé : « Tout arrêter » est indisponible. Fermez et réessayez.",
+  "reason.cause.key_rejected": "Clé de stream refusée",
+  "reason.cause.platform_not_ready": "Plateforme pas prête",
+  "reason.cause.dns": "Le nom du serveur ne se résout pas",
+  "reason.cause.connection_refused": "Connexion refusée",
+  "reason.cause.timeout": "Délai de connexion dépassé",
+  "reason.cause.tls": "Échec de la connexion sécurisée (TLS)",
+  "reason.cause.codec_rejected": "Codec ou format refusé",
+  "reason.cause.upload_too_slow": "Envoi trop lent",
+  "reason.cause.unknown": "Échec inconnu",
+  "reason.held": "En pause après {count} refus rapides. Les nouvelles tentatives sont arrêtées.",
+  "reason.retry": "Réessayer",
+  "reason.keyChanged": "La clé {platform} a changé — cliquez pour la mettre à jour",
+  "reason.ffmpegSaid": "FFmpeg a dit : {line}"
 }

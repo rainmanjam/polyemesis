@@ -40,6 +40,7 @@ import { toneBadge, toneForState } from "@/lib/signal";
 import { reportingStreamCount } from "@/lib/stream-health";
 import type { DestStatus } from "@/lib/types";
 import { useT, useStateLabel } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 const PLATFORM_LABEL: Record<string, string> = {
   youtube: "YouTube",
@@ -128,6 +129,8 @@ export function DestinationCard({
   const running = state === "running";
   const progress = dest.process?.progress;
   const warnings = dest.warnings ?? [];
+  const reason = dest.enabled ? dest.reason : undefined;
+  const platformLabel = PLATFORM_LABEL[dest.platform] ?? dest.platform;
 
   /* --- Facebook broadcast lifecycle -------------------------------------
    *
@@ -368,7 +371,53 @@ export function DestinationCard({
             <StatusReason reason={dest.error} step={null} asOf={null} />
           </div>
         )}
-        {!dest.error && dest.process?.lastError && state !== "running" && (
+        {/* #20: WHY, classified. Shown in place of the raw lastError when the
+            server classified the failure, because "Stream key rejected" is the
+            sentence an operator acts on and the exit status in front of
+            FFmpeg's last line is not. The raw line survives for an unknown
+            cause, which is the one case it is the only clue. Rendered while
+            RUNNING too: a slow upload does not exit, and it is the cause most
+            in need of naming. */}
+        {!dest.error && reason && (
+          <div
+            data-testid="card-failure-reason"
+            className={cn(
+              "flex flex-col gap-1.5 rounded border px-2 py-1 text-sm",
+              reason.held ? "border-down/30 bg-down-dim text-down" : "border-warn/30 bg-warn-dim text-warn",
+            )}
+          >
+            <div className="flex items-start gap-1.5">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+              <StatusReason
+                reason={
+                  reason.cause === "unknown" && reason.line
+                    ? `${t(`reason.cause.${reason.cause}`)} — ${t("reason.ffmpegSaid", { line: reason.line })}`
+                    : t(`reason.cause.${reason.cause}`)
+                }
+                step={t("foundation.status.step.destination", { platform: platformLabel })}
+                asOf={reason.at}
+              />
+            </div>
+            {reason.held && (
+              <p className="text-[11px]">{t("reason.held", { count: reason.rejections ?? 0 })}</p>
+            )}
+            {(reason.held || reason.keyChanged) && (
+              <div className="flex flex-wrap gap-1.5">
+                {reason.keyChanged && (
+                  <Button size="sm" variant="secondary" onClick={onRefreshKey}>
+                    <KeyRound /> {t("reason.keyChanged", { platform: platformLabel })}
+                  </Button>
+                )}
+                {reason.held && (
+                  <Button size="sm" variant="outline" onClick={onRestart} disabled={busy}>
+                    <RefreshCw /> {t("reason.retry")}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {!dest.error && !reason && dest.process?.lastError && state !== "running" && (
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <StatusReason
