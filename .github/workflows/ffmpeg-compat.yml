@@ -1,0 +1,160 @@
+name: ffmpeg compat (9.0 and the 6.1 floor)
+
+# THE FFMPEG-USING PACKAGES AGAINST THE VERSIONS THE IMAGE DOES NOT SHIP.
+#
+# ci.yml pins its Linux and Windows lanes to the 8.1 line on purpose: that is
+# what the Docker image ships (Dockerfile, FFMPEG_VERSION=8.1.3-r0), and a CI
+# FFmpeg that differs from the image tests a product nobody runs. That leaves
+# two versions operators really do run with no automated check at all:
+#
+#   - 9.0, what Homebrew, Arch, Debian sid and BtbN's n9.0 builds hand to a
+#     binary-mode install today, and what the image moves to once a stable
+#     Alpine packages it;
+#   - the 6.x floor polyemesis still accepts (internal/ffmpeg MinMajorVersion),
+#     which is Ubuntu 24.04's stock 6.1.1 and the CUDA image's FFmpeg.
+#
+# NOT A REQUIRED CHECK, deliberately. The required set is the 8.1 lanes, which
+# decide whether a change works on what ships. This reports drift on the other
+# two before an operator does, and a red leg here is a finding to read, not a
+# merge block.
+#
+# Cost, measured 2026-10-29 in a linux container on the same package list:
+# the slowest package (engine) takes 95-107 s and the packages run in parallel,
+# so a leg is about two minutes of tests plus setup -- roughly 4-5 runner
+# minutes per leg, two legs, on a matching pull request and once a week.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Wednesdays, 05:23 UTC: off the hour, and off the Monday suites' minutes.
+    - cron: "23 5 * * 3"
+  pull_request:
+    paths:
+      # The packages that shell out to FFmpeg or parse what it prints.
+      - "internal/ffmpeg/**"
+      - "internal/supervisor/**"
+      - "internal/engine/**"
+      - "internal/media/**"
+      - "internal/meters/**"
+      - "internal/clipper/**"
+      - "internal/clips/**"
+      - "internal/playlistmedia/**"
+      - "internal/transcribe/**"
+      - "internal/recording/**"
+      - "internal/rtmpserver/**"
+      - "internal/srtserver/**"
+      - "internal/multitrack/**"
+      - "internal/uploadprobe/**"
+      - "go.mod"
+      - "go.sum"
+      # THIS FILE COUNTS, for the reason obs-multitrack.yml gives.
+      - ".github/workflows/ffmpeg-compat.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ffmpeg-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compat:
+    name: "ffmpeg ${{ matrix.ffmpeg.line }}"
+    runs-on: ubuntu-latest
+    # About two minutes of tests and one 130 MB download. The ceiling assumes
+    # the download stalls through every retry and the slowest package still
+    # finishes; GitHub's default is six hours.
+    timeout-minutes: 20
+    strategy:
+      # Both answers are wanted when both break.
+      fail-fast: false
+      matrix:
+        ffmpeg:
+          # ONE DATED BUILD EACH, BY HASH, from a MONTH-END BtbN release: those
+          # are the ones BtbN keeps (scripts/install.sh says why; a daily is gone
+          # in two weeks). Never a 9.0.0 or 9.0.1 build -- both carry the
+          # scheduler change 9.0.2 reverted (FFmpeg 9d4ca2122).
+          - line: "9.0"
+            tag: autobuild-2026-09-30-13-08
+            asset: ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz
+            sha256: 68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269
+            skip: ""
+          - line: "6.1 (floor)"
+            tag: autobuild-2025-08-31-13-00
+            asset: ffmpeg-n6.1.3-linux64-gpl-6.1.tar.xz
+            sha256: 400f9ca9d8ea3f812660cf7a00b9bfed944175cd9d6bd0c9b6257cf99376a75c
+            # What 6.1 CANNOT do, measured rather than assumed (2026-10-29,
+            # n6.1.3): multitrack FLV and two audio streams in one flv need 7.1
+            # ("at most one audio stream is supported in flv"), and 6.1 does
+            # not honour SIGTERM on a quiet feed, so a stop waits out the grace
+            # and kills. These are the documented below-7.1 limitations
+            # (docs/FAQ.md, docs/INSTALL.md), not regressions; skipped by name
+            # here so everything else on the floor still has to pass.
+            skip: "TestEnhancedRTMPMultitrackSurvivesTheSharedListenerInOrder|TestTwoDistinctMixesReachAnRTMPFarEnd|TestARecorderStoppedOnAQuietFeedFinalisesItsFileInsteadOfBeingKilled|TestAFileDestinationStoppedOnAQuietFeedFinalisesItsFile"
+    env:
+      # A missing ffmpeg/ffprobe is a failure here, never a skip.
+      POLYEMESIS_REQUIRE_FFMPEG: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache FFmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ffmpeg-${{ runner.os }}-${{ matrix.ffmpeg.asset }}
+
+      - name: Install FFmpeg ${{ matrix.ffmpeg.line }}
+        timeout-minutes: 6
+        env:
+          FFCACHE: /tmp/ffcache
+          TAG: ${{ matrix.ffmpeg.tag }}
+          ASSET: ${{ matrix.ffmpeg.asset }}
+          WANT: ${{ matrix.ffmpeg.sha256 }}
+        run: |
+          set -euo pipefail
+          if [ -x "$FFCACHE/ffmpeg" ] && [ -x "$FFCACHE/ffprobe" ]; then
+            echo "ffmpeg restored from cache"
+          else
+            for attempt in 1 2 3; do
+              if curl -fsSL --proto '=https' --proto-redir '=https' \
+                   --retry 3 --retry-all-errors --retry-delay 5 \
+                   --connect-timeout 20 --max-time 90 \
+                   -o /tmp/ff.tar.xz \
+                   "https://github.com/BtbN/FFmpeg-Builds/releases/download/${TAG}/${ASSET}"; then
+                break
+              fi
+              echo "ffmpeg download attempt $attempt failed"
+              [ "$attempt" = 3 ] && exit 1
+              sleep 5
+            done
+            # The hash comes from this file, not from the release serving the
+            # tarball.
+            echo "${WANT}  /tmp/ff.tar.xz" | sha256sum -c -
+            mkdir -p /tmp/ffbuild && tar xf /tmp/ff.tar.xz --strip-components=1 -C /tmp/ffbuild
+            mkdir -p "$FFCACHE"
+            cp /tmp/ffbuild/bin/ffmpeg /tmp/ffbuild/bin/ffprobe "$FFCACHE/"
+          fi
+          sudo install -m 0755 "$FFCACHE/ffmpeg"  /usr/local/bin/ffmpeg
+          sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
+          ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
+          ffmpeg -hide_banner -version | head -1
+          ffprobe -hide_banner -version | head -1
+
+      - name: FFmpeg-using packages
+        env:
+          SKIP: ${{ matrix.ffmpeg.skip }}
+        run: |
+          set -euo pipefail
+          args=(-count=1 -timeout 20m)
+          if [ -n "$SKIP" ]; then args+=(-skip "^(${SKIP})$"); fi
+          go test "${args[@]}" \
+            ./internal/ffmpeg/ ./internal/supervisor/ ./internal/engine/ \
+            ./internal/media/ ./internal/meters/ ./internal/clipper/ \
+            ./internal/clips/ ./internal/playlistmedia/ ./internal/transcribe/ \
+            ./internal/recording/ ./internal/rtmpserver/ ./internal/srtserver/ \
+            ./internal/multitrack/ ./internal/uploadprobe/
