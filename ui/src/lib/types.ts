@@ -45,6 +45,8 @@ export interface TrackSel {
   track: number;
   enabled: boolean;
   gain: number;
+  /** Silenced at volume 0 but still in the graph, so unmuting is a live change. */
+  muted?: boolean;
 }
 
 export interface MatrixCell {

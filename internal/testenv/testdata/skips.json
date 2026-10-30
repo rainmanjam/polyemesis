@@ -88,7 +88,7 @@
       "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
     }
   ],
-  "total": 104,
+  "total": 106,
   "byPackage": {
     "cmd/polyemesis": 1,
     "internal/api": 7,
@@ -107,7 +107,7 @@
     "internal/scheduler": 1,
     "internal/secrets": 1,
     "internal/srtserver": 3,
-    "internal/supervisor": 1,
+    "internal/supervisor": 3,
     "internal/transcribe": 2,
     "internal/upgrade": 8
   },
@@ -184,6 +184,17 @@
         "internal/supervisor": "0 -> 1 (committed at 1 already; the new site is real)"
       },
       "why": "THREE new sites, each environmental and each saying so in its message. internal/supervisor: the quiet-relay stop test needs SIGTERM, which Windows does not deliver -- the Unix run is the one that proves an unfinalised file is now finalised. internal/engine: the recording free-space floor test needs a volume that reports free-space figures; a platform that reports none cannot halt on the floor, and the test says so rather than passing over nothing. internal/db: the corrupt-page boot test skips only when this SQLite build refuses to open the damaged file at all, in which case the fault already surfaces at boot, which is the property being tested. None of the three fires because the thing under test changed."
+    }
+  ],
+  "raisedBy7": [
+    {
+      "pr": "ux-overhaul (I4 live track gain)",
+      "from": 104,
+      "to": 106,
+      "packages": {
+        "internal/supervisor": "1 -> 3"
+      },
+      "why": "TWO new sites, both in the one test that proves a running FFmpeg changes a track's volume without a restart (live_ffmpeg_test.go), and both environmental. testing.Short(): the test runs a real FFmpeg for about 8 s, the same reason every other real-binary test in the tree honours -short. Windows: the live command channel is deliberately disabled there (destinations keep -nostdin and every level change restarts), so there is nothing to prove; the restart fallback Windows does take is covered by the engine's reconcile tests on every OS. A missing FFmpeg goes through testenv.FFmpegBinary, not a bare skip. Neither fires because the thing under test changed. Raised by hand: -update-skips would drop this provenance."
     }
   ]
 }
