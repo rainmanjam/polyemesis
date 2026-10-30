@@ -6,7 +6,7 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { AcrossTheRoom } from "@/components/AcrossTheRoom";
 import { attention, onAir } from "@/lib/attention";
 import type { SignalTone } from "@/lib/signal";
-import type { Status } from "@/lib/types";
+import type { FailoverStatus, Status } from "@/lib/types";
 import { useStateLabel, useT } from "@/lib/i18n";
 import { healthVerdict } from "@/lib/healthVerdict";
 import { duration } from "@/lib/format";
@@ -46,7 +46,15 @@ function headline(state: ReturnType<typeof onAir>): { text: string; tone: Signal
   return { text: "Off air", tone: state.enabled > 0 ? "armed" : "idle" };
 }
 
-export function OnAirBar({ status }: { status: Status | null | undefined }) {
+export function OnAirBar({
+  status,
+  failover,
+}: {
+  status: Status | null | undefined;
+  /** The programme-scoped failover tier, from the Dashboard. Not read from
+   *  `status`, which is install-wide and can be another programme's. */
+  failover?: FailoverStatus | null;
+}) {
   const stateLabel = useStateLabel();
   const t = useT();
   const [roomOpen, setRoomOpen] = useState(false);
@@ -57,7 +65,8 @@ export function OnAirBar({ status }: { status: Status | null | undefined }) {
   // ingest process at all (#514), so on a healthy SRT install this is null and
   // the verdict simply omits the stability clause rather than inventing one.
   const ingestUptime = status?.ingest?.state === "running" ? status.ingest.uptimeSec : null;
-  const verdict = healthVerdict(air, items, ingestUptime);
+  const offPrimary = !!failover && failover.active !== "primary" && failover.active !== "";
+  const verdict = healthVerdict(air, items, ingestUptime, offPrimary);
 
   /* Follow a row to the card it describes.
    *

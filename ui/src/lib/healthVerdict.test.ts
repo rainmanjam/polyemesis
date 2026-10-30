@@ -59,6 +59,12 @@ describe("healthVerdict", () => {
     expect(healthVerdict(air({ live: 5, enabled: 5 }), [ingest], 760)).toBeNull();
   });
 
+  it("gives no healthy verdict while the broadcast is on a backup or a slate", () => {
+    // Every destination is running and fed by the slate. The verdict must not
+    // say "All healthy" directly above a red "Slate on air" banner.
+    expect(healthVerdict(air({ live: 5, enabled: 5 }), [], 760, true)).toBeNull();
+  });
+
   it("reports uptime as null when the ingest has none to report (SRT, #514)", () => {
     expect(healthVerdict(air({ live: 2, enabled: 2 }), [], null)).toEqual({
       kind: "healthy",

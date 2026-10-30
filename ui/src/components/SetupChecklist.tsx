@@ -1,4 +1,5 @@
 import { Check, Copy } from "lucide-react";
+import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -93,7 +94,7 @@ export function SetupChecklist({
               style={{ width: `${(checklist.done / 5) * 100}%` }}
             />
           </span>
-          <span className="tnum font-mono text-tiny text-muted-foreground">
+          <span className="tnum font-mono text-xs text-muted-foreground">
             {t("firstRun.progress", { done: checklist.done, total: 5 })}
           </span>
         </div>
@@ -138,16 +139,18 @@ export function SetupChecklist({
                   </span>
                   {note && <span className="text-sm text-muted-foreground">{note}</span>}
 
-                  {id === 2 && state !== "done" && (
+                  {/* The address is only worth showing once there is a source to
+                      publish to. Before that it is an address to nothing. */}
+                  {id === 2 && state === "next" && (
                     <div className="mt-1 flex flex-col gap-1">
-                      <span className="text-micro uppercase tracking-wide text-muted-foreground">
+                      <span className="text-xs uppercase tracking-wide text-muted-foreground">
                         {t("firstRun.ingestHeading")}
                       </span>
                       <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
                       {urlCarriesCredential(ingestUrl) ? (
                         <SecretCode value={ingestUrl} />
                       ) : (
-                        <code className="min-w-0 flex-1 truncate font-mono text-tiny">{ingestUrl}</code>
+                        <code className="min-w-0 flex-1 truncate font-mono text-xs">{ingestUrl}</code>
                       )}
                       <Button
                         variant="ghost"
@@ -158,6 +161,14 @@ export function SetupChecklist({
                         <Copy />
                       </Button>
                       </div>
+                    </div>
+                  )}
+
+                  {id === 1 && state === "next" && (
+                    <div className="mt-1">
+                      <Button size="sm" variant="outline" asChild>
+                        <Link to="/sources">{t("empty.goToSources")}</Link>
+                      </Button>
                     </div>
                   )}
 

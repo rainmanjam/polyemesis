@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import { Dashboard } from "./Dashboard";
@@ -238,6 +238,28 @@ describe("Dashboard: the first-run checklist replaces the empty-destinations sen
       "an operator with a source and no destination gets one sentence and no next step",
     ).toBeTruthy();
     expect(screen.queryByText(translate("en", "dash.noDestinations"))).toBeNull();
+  });
+});
+
+describe("Dashboard: a fresh install starts the checklist at step one", () => {
+  it("shows the checklist on an install with no source yet", async () => {
+    const before = routes["/api/v1/setup"];
+    routes["/api/v1/setup"] = { needsSetup: false, minPasswordChars: 8, sources: 0 };
+    try {
+      draw();
+      expect(
+        await screen.findByText(translate("en", "firstRun.title")),
+        "a fresh install gets the explanation and nothing that says what to do next",
+      ).toBeTruthy();
+      // Two links to Sources on this screen: the explanation card's, and the
+      // checklist's first step. The checklist's is the one under test.
+      const checklist = screen.getByTestId("setup-checklist");
+      expect(
+        within(checklist).getByRole("link", { name: translate("en", "empty.goToSources") }),
+      ).toBeTruthy();
+    } finally {
+      routes["/api/v1/setup"] = before;
+    }
   });
 });
 

@@ -192,7 +192,7 @@ describe("FailoverControl: the full-width state banner", () => {
     draw({ active: "backup", switchedAt: new Date(Date.now() - 134_000).toISOString() });
 
     const ticker = Array.from(document.querySelectorAll('[aria-hidden="true"]')).find((el) =>
-      /2m \d\ds/.test(el.textContent ?? ""),
+      /00:02:1\d/.test(el.textContent ?? ""),
     );
     expect(ticker, "the ticking figure is not hidden from assistive tech").toBeTruthy();
     expect(document.querySelector('[aria-live="polite"]')?.textContent).not.toMatch(/\ds/);

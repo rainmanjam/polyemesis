@@ -14,17 +14,6 @@ export function failoverElapsedSeconds(switchedAt: string, nowMs: number): numbe
   return Math.max(0, Math.floor((nowMs - at) / 1000));
 }
 
-/** "45s", "2m 14s", "1h 02m". Seconds are dropped once an hour has passed,
- *  because a banner that ticks every second should not jitter at the end. */
-export function formatElapsed(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${String(m % 60).padStart(2, "0")}m`;
-}
-
 /** The banner's colour is its severity. The backup and the playlist are a
  *  degraded picture the audience still gets; a slate is no picture at all. The
  *  primary draws no banner, so it has no tone. */

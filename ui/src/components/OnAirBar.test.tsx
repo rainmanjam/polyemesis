@@ -140,6 +140,21 @@ describe("OnAirBar verdict line", () => {
     expect(screen.getByRole("button", { name: translate("en", "health.verdictShow") })).toBeTruthy();
   });
 
+  it("does not claim healthy while the broadcast is on the slate", () => {
+    const st = {
+      ingest: null,
+      destinations: [proc("running"), proc("running", { id: did(2) })],
+    } as unknown as Status;
+    render(
+      <OnAirBar
+        status={st}
+        failover={{ active: "slate", switchedAt: "", switches: 1, primaryLive: false, backupLive: false, backupEnabled: false, slateEnabled: true }}
+      />,
+    );
+
+    expect(screen.queryByText(translate("en", "health.verdictHealthy", { count: 2 }))).toBeNull();
+  });
+
   it("does not claim healthy while an enabled destination is quietly stopped", () => {
     render(<OnAirBar status={status([proc("running"), proc("stopped", { id: did(2) })])} />);
 

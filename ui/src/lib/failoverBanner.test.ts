@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { failoverElapsedSeconds, formatElapsed, failoverBannerTone, failoverSinceClock } from "./failoverBanner";
+import { failoverElapsedSeconds, failoverBannerTone, failoverSinceClock } from "./failoverBanner";
 
 describe("failoverElapsedSeconds", () => {
   const now = Date.parse("2026-10-29T20:33:14Z");
@@ -19,14 +19,6 @@ describe("failoverElapsedSeconds", () => {
 
   it("clamps a switch stamped in the future (clock skew) to zero", () => {
     expect(failoverElapsedSeconds("2026-10-29T20:40:00Z", now)).toBe(0);
-  });
-});
-
-describe("formatElapsed", () => {
-  it("formats seconds, minutes and hours", () => {
-    expect(formatElapsed(45)).toBe("45s");
-    expect(formatElapsed(134)).toBe("2m 14s");
-    expect(formatElapsed(3725)).toBe("1h 02m");
   });
 });
 

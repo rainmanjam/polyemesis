@@ -17,7 +17,6 @@ import {
   failoverBannerTone,
   failoverElapsedSeconds,
   failoverSinceClock,
-  formatElapsed,
 } from "@/lib/failoverBanner";
 import { backupOnAir } from "@/lib/ingestChip";
 import { trackLabels } from "@/lib/trackLabels";
@@ -1012,7 +1011,7 @@ function FailoverElapsed({ switchedAt }: { switchedAt: string }) {
   if (secs === null) return null;
   return (
     <span aria-hidden="true" className="tnum font-mono text-sm">
-      {formatElapsed(secs)}
+      {duration(secs)}
     </span>
   );
 }
@@ -1453,6 +1452,23 @@ export function Dashboard() {
       <div className="p-3">
         <PageHeader title={t("dash.title")} subtitle={t("dash.subtitle")} />
         <NoProgrammeYet title={t("empty.dashTitle")} body={t("empty.dashBody")} />
+        {/* The same checklist as a configured install, starting at step one. The
+         * explanation above is kept, because it is the one place that says what
+         * a programme is. The checklist is the state, and it is what reopens
+         * when the last source is removed. */}
+        {checklist && (
+          <div className="mt-3">
+            <SetupChecklist
+              checklist={checklist}
+              ingestUrl={system?.ingestUrl ?? ""}
+              onCopyIngest={copyIngest}
+              onAddDestination={() => {
+                setEditing(null);
+                setDialogOpen(true);
+              }}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -1486,7 +1502,7 @@ export function Dashboard() {
           air, then what is wrong; the preview, the ingest card and the
           destination grid below are the detail behind those two answers rather
           than a flat inventory of the install. See components/OnAirBar.tsx. */}
-      <OnAirBar status={status} />
+      <OnAirBar status={status} failover={failoverState} />
 
       {/* THE WAY BACK, directly under what is on air. See FailoverControl: it
           renders nothing at all unless this broadcast is off its primary ingest

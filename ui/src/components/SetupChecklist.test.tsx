@@ -72,6 +72,13 @@ describe("SetupChecklist", () => {
     expect(onAdd).toHaveBeenCalledOnce();
   });
 
+  it("sends a fresh install to the sources page, and shows no address to publish to", () => {
+    draw({ sourceCount: 0, signal: false, destinations: 0 });
+    const link = screen.getByRole("link", { name: T("empty.goToSources") });
+    expect(link.getAttribute("href")).toBe("/sources");
+    expect(screen.queryByText("rtmp://192.168.1.20:1935/live/studio-a")).toBeNull();
+  });
+
   it("offers the tour as a way to the detail, not as the only help", () => {
     draw({ sourceCount: 1, signal: false, destinations: 0 });
     expect(screen.getByRole("button", { name: T("firstRun.tour") })).toBeTruthy();

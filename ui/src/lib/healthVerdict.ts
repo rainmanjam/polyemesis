@@ -16,8 +16,16 @@ export function healthVerdict(
   air: OnAir,
   items: readonly AttentionItem[],
   ingestUptimeSec: number | null,
+  /** True while the broadcast is on its backup, a playlist or a slate. The
+   *  attention list does not raise failover at all (its rows are destinations
+   *  and the ingest), so without this a slate with every destination running
+   *  would read "All healthy" directly above the failover banner. */
+  offPrimary = false,
 ): HealthVerdict | null {
   if (air.enabled === 0) return null;
+  // Off the primary is not healthy, whatever the destinations report. The
+  // failover banner says what is on air; this line must not contradict it.
+  if (offPrimary) return null;
 
   const destItems = items.filter((i) => i.destinationId);
   if (destItems.length > 0) {
