@@ -6,8 +6,10 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { AcrossTheRoom } from "@/components/AcrossTheRoom";
 import { attention, onAir } from "@/lib/attention";
 import type { SignalTone } from "@/lib/signal";
-import type { Status } from "@/lib/types";
-import { useStateLabel } from "@/lib/i18n";
+import type { FailoverStatus, Status } from "@/lib/types";
+import { useStateLabel, useT } from "@/lib/i18n";
+import { healthVerdict } from "@/lib/healthVerdict";
+import { duration } from "@/lib/format";
 
 /* ===========================================================================
    The first tier of the dashboard: what is on air, then what is wrong.
@@ -44,12 +46,27 @@ function headline(state: ReturnType<typeof onAir>): { text: string; tone: Signal
   return { text: "Off air", tone: state.enabled > 0 ? "armed" : "idle" };
 }
 
-export function OnAirBar({ status }: { status: Status | null | undefined }) {
+export function OnAirBar({
+  status,
+  failover,
+}: {
+  status: Status | null | undefined;
+  /** The programme-scoped failover tier, from the Dashboard. Not read from
+   *  `status`, which is install-wide and can be another programme's. */
+  failover?: FailoverStatus | null;
+}) {
   const stateLabel = useStateLabel();
+  const t = useT();
   const [roomOpen, setRoomOpen] = useState(false);
   const air = onAir(status?.destinations);
   const items = attention(status);
   const head = headline(air);
+  // The ingest's uptime only means something while it is running. SRT has no
+  // ingest process at all (#514), so on a healthy SRT install this is null and
+  // the verdict simply omits the stability clause rather than inventing one.
+  const ingestUptime = status?.ingest?.state === "running" ? status.ingest.uptimeSec : null;
+  const offPrimary = !!failover && failover.active !== "primary" && failover.active !== "";
+  const verdict = healthVerdict(air, items, ingestUptime, offPrimary);
 
   /* Follow a row to the card it describes.
    *
@@ -98,6 +115,40 @@ export function OnAirBar({ status }: { status: Status | null | undefined }) {
           <span className="flex items-center gap-1.5 text-[12px] text-down">
             <StatusDot tone="down" size="sm" />
             {air.failed} failed
+          </span>
+        )}
+
+        {/* THE ANSWER TO "IS EVERYTHING FINE, AND WHAT NEEDS ME?" in one line.
+            Healthy says so and how long the ingest has held; attention says how
+            many and gives a way to the first one. Derived in lib/healthVerdict,
+            from the same rows the list below is drawn from. */}
+        {verdict?.kind === "healthy" && (
+          <span className="flex items-center gap-1.5 text-[12px] text-foreground">
+            <StatusDot tone="live" size="sm" />
+            <span data-testid="health-verdict">
+              {t("health.verdictHealthy", { count: verdict.count })}
+            </span>
+            {verdict.uptimeSec !== null && (
+              <span className="tnum font-mono text-muted-foreground">
+                {t("health.verdictIngest", { uptime: duration(verdict.uptimeSec) })}
+              </span>
+            )}
+          </span>
+        )}
+        {verdict?.kind === "attention" && (
+          <span className="flex items-center gap-2 text-[12px] text-warn">
+            <StatusDot tone="warn" size="sm" />
+            <span data-testid="health-verdict">
+              {t("health.verdictAttention", { count: verdict.count, total: verdict.total })}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[12px]"
+              onClick={() => reveal(`dest-${verdict.firstDestinationId}`)}
+            >
+              {t("health.verdictShow")}
+            </Button>
           </span>
         )}
 

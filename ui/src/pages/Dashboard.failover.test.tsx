@@ -176,3 +176,45 @@ describe("FailoverControl: the way back to the primary ingest", () => {
     expect(screen.queryByRole("button", { name: RETURN })).toBeNull();
   });
 });
+
+describe("FailoverControl: the full-width state banner", () => {
+  it("names the time the switch happened, in the live region", () => {
+    draw({ active: "backup", switchedAt: "2026-09-09T10:00:00Z" });
+
+    // The state change is what a screen reader should announce. The "since"
+    // time is static and sits inside the live region.
+    const live = document.querySelector('[aria-live="polite"]');
+    expect(live?.textContent).toContain("since");
+  });
+
+  it("keeps the ticking duration out of assistive tech", () => {
+    // Announced every second, it would drown out everything else on the page.
+    draw({ active: "backup", switchedAt: new Date(Date.now() - 134_000).toISOString() });
+
+    const ticker = Array.from(document.querySelectorAll('[aria-hidden="true"]')).find((el) =>
+      /00:02:1\d/.test(el.textContent ?? ""),
+    );
+    expect(ticker, "the ticking figure is not hidden from assistive tech").toBeTruthy();
+    expect(document.querySelector('[aria-live="polite"]')?.textContent).not.toMatch(/\ds/);
+  });
+
+  it("draws no 'since' time for the zero time the server sends before a switch", () => {
+    draw({ active: "backup", switchedAt: "0001-01-01T00:00:00Z" });
+
+    expect(document.body.textContent).not.toContain("since");
+  });
+
+  it("is red for a slate, where the audience gets no picture", () => {
+    draw({ active: "slate", switchedAt: "2026-09-09T10:00:00Z" });
+
+    const banner = screen.getByRole("region", { name: "Failover" });
+    expect(banner.className).toContain("border-down/40");
+  });
+
+  it("is amber for the backup ingest", () => {
+    draw({ active: "backup", switchedAt: "2026-09-09T10:00:00Z" });
+
+    const banner = screen.getByRole("region", { name: "Failover" });
+    expect(banner.className).toContain("border-warn/40");
+  });
+});

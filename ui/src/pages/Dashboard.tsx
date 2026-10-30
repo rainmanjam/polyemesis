@@ -13,6 +13,11 @@ import { laneLayout } from "@/lib/sourceLanes";
 import { cn } from "@/lib/utils";
 import { topRowLayout } from "@/lib/dashboardLayout";
 import { failoverNotice, type FailoverNotice } from "@/lib/failoverNotice";
+import {
+  failoverBannerTone,
+  failoverElapsedSeconds,
+  failoverSinceClock,
+} from "@/lib/failoverBanner";
 import { backupOnAir } from "@/lib/ingestChip";
 import { trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -25,6 +30,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
+import { GoLiveSheet } from "@/components/GoLiveSheet";
+import { goLiveRows, youtubeBroadcastsAtRisk, type GoLiveRow } from "@/lib/goLive";
+import { SetupChecklist } from "@/components/SetupChecklist";
+import { setupChecklist } from "@/lib/setupChecklist";
 import { DestinationCard } from "@/components/DestinationCard";
 import { DestinationHoldNote } from "@/components/DestinationHoldNote";
 import { DestinationDialog } from "@/components/DestinationDialog";
@@ -646,13 +655,22 @@ const bulkTone: Record<BulkDestOutcome, SignalTone> = {
 };
 
 function BulkDestinationControl({
-  count,
+  destinations,
+  sources,
   onFinished,
-}: Readonly<{ count: number; onFinished: () => void }>) {
+}: Readonly<{
+  destinations: readonly DestStatus[];
+  sources: readonly SourceView[];
+  onFinished: () => void;
+}>) {
   const t = useT();
   const [report, setReport] = useState<BulkDestReport | null>(null);
-  const [busy, setBusy] = useState<"start" | "stop" | null>(null);
+  const [busy, setBusy] = useState(false);
+  // The sheet's rows, frozen when it opens. See GoLiveSheet.
+  const [sheetRows, setSheetRows] = useState<GoLiveRow[] | null>(null);
   const confirmStopAll = useConfirm<true>();
+  const count = destinations.length;
+  const youtube = youtubeBroadcastsAtRisk(destinations);
 
   const bulkLabel: Record<BulkDestOutcome, string> = {
     started: t("dash.bulkStarted"),
@@ -662,84 +680,65 @@ function BulkDestinationControl({
     skipped: t("dash.bulkSkipped"),
   };
 
-  const run = async (action: "start" | "stop") => {
-    setBusy(action);
-    // Cleared rather than left standing: a list from the previous press sitting
-    // under a spinner reads as this press's answer, and the row that has not
-    // been touched yet is exactly the one an operator would misread.
+  // STOP ALL ONLY. Starting moved to the Go live sheet, which lists every
+  // destination before anything fires and starts each one through the same
+  // per-destination path the card uses (see lib/goLive.ts).
+  const stopAll = async () => {
+    setBusy(true);
     setReport(null);
     try {
-      const res =
-        action === "start" ? await api.startAllDestinations() : await api.stopAllDestinations();
+      const res = await api.stopAllDestinations();
       setReport(res);
-      // The count, not a verdict. "Six of eight started" is a sentence an
-      // operator can act on; "failed" over eight destinations of which two
-      // refused is one they have to go and decode.
-      const done = res.results.filter(
-        (r) => r.outcome === "started" || r.outcome === "stopped",
-      ).length;
+      const done = res.results.filter((r) => r.outcome === "stopped").length;
       const params = { done, total: res.results.length };
       if (done === res.results.length) {
-        toast.success(
-          action === "start" ? t("dash.bulkStartDone", params) : t("dash.bulkStopDone", params),
-        );
+        toast.success(t("dash.bulkStopDone", params));
       } else {
-        // Not an error toast: the request succeeded and every destination has
-        // an answer. The rows below say which ones did not take.
-        toast.warning(
-          action === "start"
-            ? t("dash.bulkStartPartial", params)
-            : t("dash.bulkStopPartial", params),
-        );
+        toast.warning(t("dash.bulkStopPartial", params));
       }
       onFinished();
     } catch (err) {
-      // A refusal of the WHOLE request -- no engine, no permission. Nothing was
-      // reported per destination because nothing got that far.
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : action === "start"
-            ? t("dash.bulkStartFailed")
-            : t("dash.bulkStopFailed"),
-      );
+      toast.error(err instanceof Error ? err.message : t("dash.bulkStopFailed"));
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
   if (count === 0) return null;
 
+  const stopDescription =
+    youtube > 0
+      ? `${t("dash.stopAllConsequence", { count: String(count) })} ${t("golive.stopYoutube", { count: youtube })}`
+      : t("dash.stopAllConsequence", { count: String(count) });
+
   return (
     <div className="mb-3 flex flex-col gap-2 rounded-md border border-border p-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={busy !== null} onClick={() => void run("start")}>
-          <Play /> {busy === "start" ? t("dash.bulkStarting") : t("dash.startAll")}
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={() => {
+            setSheetRows(goLiveRows(destinations, sources));
+          }}
+        >
+          <Play /> {t("golive.trigger")}
         </Button>
         <Button
           size="sm"
           variant="outline"
-          disabled={busy !== null}
+          disabled={busy}
           onClick={() => confirmStopAll.ask(true)}
         >
-          <Square /> {busy === "stop" ? t("dash.bulkStopping") : t("dash.stopAll")}
+          <Square /> {busy ? t("dash.bulkStopping") : t("dash.stopAll")}
         </Button>
-        <span className="text-micro text-muted-foreground">
-          {t("dash.bulkAppliesTo", { count })}
-        </span>
       </div>
 
-      {/* Starts are paced on the server, so the button stays busy for a while
-          on a long list. Saying why turns a stuck-looking dashboard into one
-          that is visibly working. */}
-      <p className="text-micro text-muted-foreground">{t("dash.bulkPacingNote")}</p>
-
-      {/* ---------- what each destination did ---------- */}
-      <div aria-live="polite" className="flex flex-col gap-1.5">
-        {report === null ? (
-          <p className="text-tiny text-muted-foreground">{t("dash.bulkResultsEmpty")}</p>
-        ) : (
-          report.results.map((res) => {
+      {/* Results appear only once there are some. An empty "results appear
+          here" line sat under the buttons on every visit, and the sheet already
+          says what a press is about to do. */}
+      {report !== null && (
+        <div aria-live="polite" className="flex flex-col gap-1.5">
+          {report.results.map((res) => {
             const tone = bulkTone[res.outcome];
             return (
               <div
@@ -756,9 +755,7 @@ function BulkDestinationControl({
                   </div>
                   <Badge variant={toneBadge[tone]}>{bulkLabel[res.outcome]}</Badge>
                 </div>
-                {/* WHY, on every row that is not a clean start or stop. A row
-                    that only says "Failed" sends the operator to the card to
-                    find out what this request already knows. */}
+                {/* WHY, on every row that is not a clean stop. */}
                 {res.message && (
                   <p
                     className={`text-micro ${
@@ -770,9 +767,21 @@ function BulkDestinationControl({
                 )}
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
+
+      <GoLiveSheet
+        open={sheetRows !== null}
+        onOpenChange={(o) => {
+          if (!o) setSheetRows(null);
+        }}
+        rows={sheetRows ?? []}
+        live={destinations}
+        youtubeAtRisk={youtube}
+        onStart={(id) => api.startDestination(id).then(() => undefined)}
+        onFinished={onFinished}
+      />
 
       <ConfirmDestructive
         open={confirmStopAll.open}
@@ -782,9 +791,9 @@ function BulkDestinationControl({
         // the verb "Stop all".
         subject={{ unnamed: true }}
         title={t("dash.stopAllTitle", { count })}
-        description={t("dash.stopAllConsequence", { count: String(count) })}
+        description={stopDescription}
         confirmLabel={t("dash.stopAll")}
-        onConfirm={() => run("stop")}
+        onConfirm={() => stopAll()}
       />
     </div>
   );
@@ -893,17 +902,39 @@ export function FailoverControl({
   const name = (kind: FailoverSource) =>
     FAILOVER_LABEL[kind] ? t(FAILOVER_LABEL[kind]) : kind;
   const target = confirm.target ?? "primary";
+  // Amber for a degraded picture the audience still gets, red for a slate.
+  // A pin on the primary has no severity of its own, so it reads as amber.
+  const severity = failoverBannerTone(state.active) ?? "warn";
+  const since = failoverSinceClock(state.switchedAt);
 
   return (
     <section
-      className="mb-3 flex flex-col gap-2 rounded-md border border-warn/40 bg-warn-dim px-2.5 py-2"
+      className={cn(
+        "mb-3 flex w-full flex-col gap-2 rounded-md border px-3 py-2.5",
+        severity === "down" ? "border-down/40 bg-down-dim" : "border-warn/40 bg-warn-dim",
+      )}
       aria-label={t("dash.failoverTitle")}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-warn" />
-        <span className="text-[11px] font-medium">
-          {t("dash.failoverOnAir", { source: name(state.active) })}
-        </span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <ShieldAlert
+          className={cn("h-4 w-4 shrink-0", severity === "down" ? "text-down" : "text-warn")}
+        />
+        {/* THE LIVE REGION IS THE STATE, NOT THE CLOCK. The source and the
+            switch time change only when the broadcast changes source, so this
+            is the one thing a screen reader should announce. The elapsed
+            figure sits outside it and is hidden from assistive tech: a figure
+            that ticks every second would be read out every second. */}
+        <div aria-live="polite" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-sm font-semibold">
+            {t("dash.failoverOnAir", { source: name(state.active) })}
+          </span>
+          {since && (
+            <span className="text-sm text-muted-foreground">
+              {t("failover.bannerSince", { time: since })}
+            </span>
+          )}
+        </div>
+        <FailoverElapsed switchedAt={state.switchedAt} />
         <Badge variant="outline">
           {pinned ? t("dash.failoverByHand") : t("dash.failoverAutomatic")}
         </Badge>
@@ -913,9 +944,9 @@ export function FailoverControl({
           than re-derived here: it names the cause ("the primary ingest stopped
           delivering") and a paraphrase computed from `active` alone could only
           restate the effect, which is the half already on screen above. */}
-      {state.reason && <p className="text-[10px] text-muted-foreground">{state.reason}</p>}
+      {state.reason && <p className="text-sm text-muted-foreground">{state.reason}</p>}
 
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         {onPrimary
           ? t("dash.failoverPinnedHere")
           : manualReturn
@@ -929,7 +960,7 @@ export function FailoverControl({
           is back. Without this line the operator presses the button, gets a
           success toast, and watches the backup keep going out. */}
       {!onPrimary && !state.primaryLive && (
-        <p className="text-[10px] text-warn">{t("dash.failoverPrimaryDown")}</p>
+        <p className="text-sm font-medium text-warn">{t("dash.failoverPrimaryDown")}</p>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -964,6 +995,24 @@ export function FailoverControl({
         onConfirm={() => onSwitch(target)}
       />
     </section>
+  );
+}
+
+/** The ticking "for 2m 14s" figure. Its own component so the one-second tick
+ *  re-renders this span and nothing else: the Dashboard is 1800 lines and a
+ *  tick in the parent would redraw all of them every second. */
+function FailoverElapsed({ switchedAt }: { switchedAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const secs = failoverElapsedSeconds(switchedAt, now);
+  if (secs === null) return null;
+  return (
+    <span aria-hidden="true" className="tnum font-mono text-sm">
+      {duration(secs)}
+    </span>
   );
 }
 
@@ -1251,6 +1300,18 @@ export function Dashboard() {
    * See lib/dashboardLayout.ts and #614. */
   const topRow = topRowLayout(lanes.laned);
 
+  /* The first-run checklist, shown in place of the "no destinations" sentence
+   * when a source exists and nothing is configured to send it anywhere. Every
+   * tick is derived from what the server reports now (lib/setupChecklist), so
+   * an operator who loses their source or encoder sees the list reopen rather
+   * than a stored "done" over an empty page. Null while the source count has
+   * not arrived: that is drawn as the plain card, never as a guessed checklist. */
+  const checklist = setupChecklist({
+    sourceCount,
+    signal: ingestLive,
+    destinations: destinations.length,
+  });
+
   /* ONE CARD, rendered from the GLOBAL index rather than a per-group one.
    *
    * The move arrows reorder the whole list and the order is persisted whole, so
@@ -1391,6 +1452,23 @@ export function Dashboard() {
       <div className="p-3">
         <PageHeader title={t("dash.title")} subtitle={t("dash.subtitle")} />
         <NoProgrammeYet title={t("empty.dashTitle")} body={t("empty.dashBody")} />
+        {/* The same checklist as a configured install, starting at step one. The
+         * explanation above is kept, because it is the one place that says what
+         * a programme is. The checklist is the state, and it is what reopens
+         * when the last source is removed. */}
+        {checklist && (
+          <div className="mt-3">
+            <SetupChecklist
+              checklist={checklist}
+              ingestUrl={system?.ingestUrl ?? ""}
+              onCopyIngest={copyIngest}
+              onAddDestination={() => {
+                setEditing(null);
+                setDialogOpen(true);
+              }}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -1424,7 +1502,7 @@ export function Dashboard() {
           air, then what is wrong; the preview, the ingest card and the
           destination grid below are the detail behind those two answers rather
           than a flat inventory of the install. See components/OnAirBar.tsx. */}
-      <OnAirBar status={status} />
+      <OnAirBar status={status} failover={failoverState} />
 
       {/* THE WAY BACK, directly under what is on air. See FailoverControl: it
           renders nothing at all unless this broadcast is off its primary ingest
@@ -1718,7 +1796,8 @@ export function Dashboard() {
             below the buttons needs the full width to put a destination name and
             a refusal on one line. */}
         <BulkDestinationControl
-          count={destinations.length}
+          destinations={destinations}
+          sources={sources}
           onFinished={() => setRefreshKey((k) => k + 1)}
         />
 
@@ -1746,6 +1825,16 @@ export function Dashboard() {
               <p className="text-sm text-muted-foreground">{t("dash.loadingDestinations")}</p>
             </CardContent>
           </Card>
+        ) : destinations.length === 0 && checklist ? (
+          <SetupChecklist
+            checklist={checklist}
+            ingestUrl={system?.ingestUrl ?? ""}
+            onCopyIngest={copyIngest}
+            onAddDestination={() => {
+              setEditing(null);
+              setDialogOpen(true);
+            }}
+          />
         ) : destinations.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
