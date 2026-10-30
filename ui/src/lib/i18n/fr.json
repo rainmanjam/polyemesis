@@ -2130,5 +2130,13 @@
   "auto.tzHint": "Nom IANA. Vide signifie UTC.",
   "auto.destinationsNoneHint": "Aucune sélection signifie toutes les destinations, ce que « lancer l'émission » veut généralement dire.",
   "auto.graceHint": "Avec quel retard une occurrence peut encore être exécutée après un redémarrage. Au-delà, elle est ignorée.",
-  "onAir.endAll": "Tout arrêter"
+  "onAir.endAll": "Tout arrêter",
+  "firstRun.tourHint": "Nouveau ici ? La visite guidée présente toujours chaque commande.",
+  "firstRun.addressesTitle": "Adresses d'ingest",
+  "firstRun.addressesBody": "Copiez-en une dans votre encodeur. Chaque protocole a sa propre adresse.",
+  "firstRun.signalBadge": "Signal",
+  "firstRun.noSignalBadge": "Aucun signal",
+  "firstRun.waitingTitle": "En attente d'un encodeur",
+  "firstRun.waitingBody": "Commencez à diffuser vers l'une des adresses ci-dessus et ce panneau affichera le signal dès son arrivée.",
+  "firstRun.copyRow": "Copier {label}"
 }

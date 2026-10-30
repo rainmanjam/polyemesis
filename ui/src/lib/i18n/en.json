@@ -2130,5 +2130,13 @@
   "auto.tzHint": "IANA name. Empty means UTC.",
   "auto.destinationsNoneHint": "None selected means every destination, which is what \"start the show\" usually means.",
   "auto.graceHint": "How late an occurrence may still be acted on after a restart. Past it, the occurrence is skipped.",
-  "onAir.endAll": "End all"
+  "onAir.endAll": "End all",
+  "firstRun.tourHint": "New here? The guided tour still covers each control.",
+  "firstRun.addressesTitle": "Ingest addresses",
+  "firstRun.addressesBody": "Copy one into your encoder. Each protocol has its own address.",
+  "firstRun.signalBadge": "Signal",
+  "firstRun.noSignalBadge": "No signal",
+  "firstRun.waitingTitle": "Waiting for an encoder",
+  "firstRun.waitingBody": "Start streaming to any address above and this panel shows the signal as it arrives.",
+  "firstRun.copyRow": "Copy {label}"
 }

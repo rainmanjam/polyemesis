@@ -2130,5 +2130,13 @@
   "auto.tzHint": "IANA-naam. Leeg betekent UTC.",
   "auto.destinationsNoneHint": "Niets geselecteerd betekent elke bestemming, wat ‘de show starten’ meestal betekent.",
   "auto.graceHint": "Hoe laat een moment na een herstart nog mag worden uitgevoerd. Daarna wordt het overgeslagen.",
-  "onAir.endAll": "Alles beëindigen"
+  "onAir.endAll": "Alles beëindigen",
+  "firstRun.tourHint": "Nieuw hier? De rondleiding behandelt nog steeds elk onderdeel.",
+  "firstRun.addressesTitle": "Ingest-adressen",
+  "firstRun.addressesBody": "Kopieer er een naar je encoder. Elk protocol heeft een eigen adres.",
+  "firstRun.signalBadge": "Signaal",
+  "firstRun.noSignalBadge": "Geen signaal",
+  "firstRun.waitingTitle": "Wachten op een encoder",
+  "firstRun.waitingBody": "Begin met streamen naar een van de adressen hierboven; dit paneel toont het signaal zodra het binnenkomt.",
+  "firstRun.copyRow": "{label} kopiëren"
 }

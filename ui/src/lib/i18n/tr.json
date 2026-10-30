@@ -2130,5 +2130,13 @@
   "auto.tzHint": "IANA adı. Boş bırakılırsa UTC.",
   "auto.destinationsNoneHint": "Hiçbiri seçilmezse tüm hedefler kapsanır; \"yayını başlat\" genellikle bu anlama gelir.",
   "auto.graceHint": "Yeniden başlatmadan sonra bir tetiklemenin ne kadar geç hâlâ çalıştırılabileceği. Bu süre geçince atlanır.",
-  "onAir.endAll": "Tümünü bitir"
+  "onAir.endAll": "Tümünü bitir",
+  "firstRun.tourHint": "Yeni misiniz? Rehberli tur her denetimi hâlâ anlatıyor.",
+  "firstRun.addressesTitle": "Ingest adresleri",
+  "firstRun.addressesBody": "Birini kodlayıcınıza kopyalayın. Her protokolün kendi adresi vardır.",
+  "firstRun.signalBadge": "Sinyal var",
+  "firstRun.noSignalBadge": "Sinyal yok",
+  "firstRun.waitingTitle": "Kodlayıcı bekleniyor",
+  "firstRun.waitingBody": "Yukarıdaki adreslerden birine yayına başlayın; sinyal geldiği anda bu panelde görünür.",
+  "firstRun.copyRow": "{label} kopyala"
 }

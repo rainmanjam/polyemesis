@@ -2130,5 +2130,13 @@
   "auto.tzHint": "IANA-Name. Leer bedeutet UTC.",
   "auto.destinationsNoneHint": "Keine Auswahl bedeutet alle Ziele — das, was „die Sendung starten“ meistens heißt.",
   "auto.graceHint": "Wie spät ein Termin nach einem Neustart noch ausgeführt werden darf. Danach wird er übersprungen.",
-  "onAir.endAll": "Alle beenden"
+  "onAir.endAll": "Alle beenden",
+  "firstRun.tourHint": "Neu hier? Die Tour erklärt weiterhin jedes Bedienelement.",
+  "firstRun.addressesTitle": "Ingest-Adressen",
+  "firstRun.addressesBody": "Kopiere eine davon in deinen Encoder. Jedes Protokoll hat seine eigene Adresse.",
+  "firstRun.signalBadge": "Signal",
+  "firstRun.noSignalBadge": "Kein Signal",
+  "firstRun.waitingTitle": "Warte auf einen Encoder",
+  "firstRun.waitingBody": "Starte das Streaming an eine der Adressen oben, und dieses Feld zeigt das Signal, sobald es ankommt.",
+  "firstRun.copyRow": "{label} kopieren"
 }

@@ -2130,5 +2130,13 @@
   "auto.tzHint": "IANA 名称。留空表示 UTC。",
   "auto.destinationsNoneHint": "不选择任何项即表示所有推流目标，这通常就是“开播”的意思。",
   "auto.graceHint": "重启后某次触发最晚还能执行多久。超过此时间，该次触发将被跳过。",
-  "onAir.endAll": "全部结束"
+  "onAir.endAll": "全部结束",
+  "firstRun.tourHint": "刚来？引导教程仍会逐一介绍每个控件。",
+  "firstRun.addressesTitle": "推流地址",
+  "firstRun.addressesBody": "将其中一个复制到编码器中。每种协议都有自己的地址。",
+  "firstRun.signalBadge": "有信号",
+  "firstRun.noSignalBadge": "无信号",
+  "firstRun.waitingTitle": "正在等待编码器",
+  "firstRun.waitingBody": "开始向上方任一地址推流，信号一到达，此面板就会显示。",
+  "firstRun.copyRow": "复制 {label}"
 }

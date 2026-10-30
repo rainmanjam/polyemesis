@@ -2130,5 +2130,13 @@
   "auto.tzHint": "Nama IANA. Kosong berarti UTC.",
   "auto.destinationsNoneHint": "Tidak memilih apa pun berarti semua tujuan, yang biasanya dimaksud dengan \"mulai acaranya\".",
   "auto.graceHint": "Seberapa terlambat sebuah kejadian masih boleh dijalankan setelah restart. Lewat dari itu, kejadian dilewati.",
-  "onAir.endAll": "Akhiri semua"
+  "onAir.endAll": "Akhiri semua",
+  "firstRun.tourHint": "Baru di sini? Tur terpandu tetap menjelaskan setiap kontrol.",
+  "firstRun.addressesTitle": "Alamat ingest",
+  "firstRun.addressesBody": "Salin salah satunya ke encoder Anda. Setiap protokol punya alamatnya sendiri.",
+  "firstRun.signalBadge": "Sinyal",
+  "firstRun.noSignalBadge": "Tidak ada sinyal",
+  "firstRun.waitingTitle": "Menunggu encoder",
+  "firstRun.waitingBody": "Mulai streaming ke salah satu alamat di atas dan panel ini menampilkan sinyal begitu tiba.",
+  "firstRun.copyRow": "Salin {label}"
 }

@@ -2130,5 +2130,13 @@
   "auto.tzHint": "IANA 名。空欄は UTC を意味します。",
   "auto.destinationsNoneHint": "何も選ばなければすべての配信先が対象になります。「番組を始める」とは通常そういう意味です。",
   "auto.graceHint": "再起動後、どれだけ遅れても実行を許すかです。それを過ぎた回はスキップされます。",
-  "onAir.endAll": "すべて終了"
+  "onAir.endAll": "すべて終了",
+  "firstRun.tourHint": "初めてですか？ガイドツアーで各操作を確認できます。",
+  "firstRun.addressesTitle": "インジェストアドレス",
+  "firstRun.addressesBody": "いずれかをエンコーダーにコピーしてください。プロトコルごとにアドレスが異なります。",
+  "firstRun.signalBadge": "信号あり",
+  "firstRun.noSignalBadge": "信号なし",
+  "firstRun.waitingTitle": "エンコーダーを待機中",
+  "firstRun.waitingBody": "上のいずれかのアドレスへ配信を開始すると、信号が届いた時点でこのパネルに表示されます。",
+  "firstRun.copyRow": "{label} をコピー"
 }

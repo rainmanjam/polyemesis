@@ -2130,5 +2130,13 @@
   "auto.tzHint": "Nome IANA. Vazio significa UTC.",
   "auto.destinationsNoneHint": "Nenhum selecionado significa todos os destinos, que é o que \"começar o programa\" costuma significar.",
   "auto.graceHint": "Quanto atraso uma ocorrência ainda pode ter para ser executada após um reinício. Depois disso, ela é pulada.",
-  "onAir.endAll": "Encerrar tudo"
+  "onAir.endAll": "Encerrar tudo",
+  "firstRun.tourHint": "É novo aqui? O tour guiado ainda explica cada controle.",
+  "firstRun.addressesTitle": "Endereços de ingest",
+  "firstRun.addressesBody": "Copie um para o seu codificador. Cada protocolo tem seu próprio endereço.",
+  "firstRun.signalBadge": "Sinal",
+  "firstRun.noSignalBadge": "Sem sinal",
+  "firstRun.waitingTitle": "Aguardando um codificador",
+  "firstRun.waitingBody": "Comece a transmitir para qualquer endereço acima e este painel mostra o sinal assim que ele chegar.",
+  "firstRun.copyRow": "Copiar {label}"
 }

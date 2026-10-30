@@ -2130,5 +2130,13 @@
   "auto.tzHint": "Nazwa IANA. Puste oznacza UTC.",
   "auto.destinationsNoneHint": "Brak wyboru oznacza wszystkie cele — zwykle właśnie to znaczy „uruchom program”.",
   "auto.graceHint": "Jak późno po ponownym uruchomieniu można jeszcze wykonać wystąpienie. Po tym czasie zostaje pominięte.",
-  "onAir.endAll": "Zakończ wszystko"
+  "onAir.endAll": "Zakończ wszystko",
+  "firstRun.tourHint": "Pierwszy raz? Przewodnik nadal omawia każdą kontrolkę.",
+  "firstRun.addressesTitle": "Adresy ingestu",
+  "firstRun.addressesBody": "Skopiuj jeden do enkodera. Każdy protokół ma własny adres.",
+  "firstRun.signalBadge": "Sygnał",
+  "firstRun.noSignalBadge": "Brak sygnału",
+  "firstRun.waitingTitle": "Oczekiwanie na enkoder",
+  "firstRun.waitingBody": "Zacznij nadawać na dowolny adres powyżej, a ten panel pokaże sygnał, gdy tylko dotrze.",
+  "firstRun.copyRow": "Kopiuj: {label}"
 }

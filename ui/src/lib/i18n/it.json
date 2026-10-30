@@ -2130,5 +2130,13 @@
   "auto.tzHint": "Nome IANA. Vuoto significa UTC.",
   "auto.destinationsNoneHint": "Nessuna selezione significa tutte le destinazioni, che è ciò che di solito si intende con «avvia lo show».",
   "auto.graceHint": "Con quanto ritardo un'occorrenza può ancora essere eseguita dopo un riavvio. Oltre, viene saltata.",
-  "onAir.endAll": "Termina tutto"
+  "onAir.endAll": "Termina tutto",
+  "firstRun.tourHint": "Nuovo qui? Il tour guidato spiega ancora ogni comando.",
+  "firstRun.addressesTitle": "Indirizzi di ingest",
+  "firstRun.addressesBody": "Copiane uno nel tuo encoder. Ogni protocollo ha il proprio indirizzo.",
+  "firstRun.signalBadge": "Segnale",
+  "firstRun.noSignalBadge": "Nessun segnale",
+  "firstRun.waitingTitle": "In attesa di un encoder",
+  "firstRun.waitingBody": "Inizia a trasmettere verso uno degli indirizzi qui sopra e questo pannello mostrerà il segnale appena arriva.",
+  "firstRun.copyRow": "Copia {label}"
 }
