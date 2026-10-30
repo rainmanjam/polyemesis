@@ -529,6 +529,7 @@ describe("per-destination stop key", () => {
   it("counts this destination alone on press, and on confirm stops only it", async () => {
     const { rt, net, sched } = runtimeFor({
       "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": json(200, STATUS_7),
       "GET /api/v1/destinations/stop-impact": COUNT_1,
       "POST /api/v1/destinations/5/stop": json(200, { enabled: false }),
     });
@@ -536,6 +537,7 @@ describe("per-destination stop key", () => {
     await rt.verify();
     const key = surface("k", "stopOne", { sourceId: 7, destinationId: 5 });
     rt.add(key);
+    await rt.tick();
 
     await rt.pressStopOneDown("k");
     expect(key.titles.at(-1)).toContain("1 YouTube will end");
@@ -552,6 +554,7 @@ describe("per-destination stop key", () => {
   it("refuses when the destination's count cannot be loaded, and sends no stop", async () => {
     const { rt, net, sched } = runtimeFor({
       "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": json(200, STATUS_7),
       "GET /api/v1/destinations/stop-impact": json(404, { error: "not found" }),
       "POST /api/v1/destinations/5/stop": json(200, {}),
     });
@@ -559,6 +562,7 @@ describe("per-destination stop key", () => {
     await rt.verify();
     const key = surface("k", "stopOne", { sourceId: 7, destinationId: 5 });
     rt.add(key);
+    await rt.tick();
 
     await rt.pressStopOneDown("k");
     expect(key.alerts).toBe(1);
@@ -578,6 +582,7 @@ describe("per-destination stop key", () => {
     await rt.verify();
     const key = surface("k", "stopOne", { sourceId: 7 });
     rt.add(key);
+    await rt.tick();
 
     await rt.pressStopOneDown("k");
     expect(key.alerts).toBe(1);
@@ -587,6 +592,7 @@ describe("per-destination stop key", () => {
   it("sends nothing from a read token and says so on the key", async () => {
     const { rt, net } = runtimeFor({
       "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/status": json(200, STATUS_7),
       "GET /api/v1/destinations/stop-impact": COUNT_1,
       "POST /api/v1/destinations/5/stop": json(200, {}),
     });
@@ -594,6 +600,7 @@ describe("per-destination stop key", () => {
     await rt.verify();
     const key = surface("k", "stopOne", { sourceId: 7, destinationId: 5 });
     rt.add(key);
+    await rt.tick();
 
     await rt.pressStopOneDown("k");
     expect(key.titles.at(-1)).toContain("Needs admin token");
@@ -603,12 +610,14 @@ describe("per-destination stop key", () => {
   it("sends no stop when released before the hold completes", async () => {
     const { rt, net, sched } = runtimeFor({
       "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": json(200, STATUS_7),
       "GET /api/v1/destinations/stop-impact": COUNT_1,
       "POST /api/v1/destinations/5/stop": json(200, {}),
     });
     rt.configure(PAIRED);
     await rt.verify();
     rt.add(surface("k", "stopOne", { sourceId: 7, destinationId: 5 }));
+    await rt.tick();
 
     await rt.pressStopOneDown("k");
     await rt.pressHoldUp("k");
@@ -620,6 +629,7 @@ describe("per-destination stop key", () => {
   it("stops the destination it was pressed on, not one the settings name by the time the hold completes", async () => {
     const { rt, net, sched } = runtimeFor({
       "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": json(200, STATUS_7),
       "GET /api/v1/destinations/stop-impact": COUNT_1,
       "POST /api/v1/destinations/5/stop": json(200, {}),
       "POST /api/v1/destinations/9/stop": json(200, {}),
@@ -628,12 +638,51 @@ describe("per-destination stop key", () => {
     await rt.verify();
     const key = surface("k", "stopOne", { sourceId: 7, destinationId: 5 });
     rt.add(key);
+    await rt.tick();
 
     await rt.pressStopOneDown("k");
     key.settings.destinationId = 9;
     sched.fireAll();
     await flush();
     expect(net.writes().map((r) => r.url.pathname)).toEqual(["/api/v1/destinations/5/stop"]);
+  });
+  it("refuses a key whose destination is on another programme, and sends nothing", async () => {
+    const { rt, net, sched } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": json(200, STATUS_7),
+      "GET /api/v1/destinations/stop-impact": COUNT_1,
+      "POST /api/v1/destinations/9/stop": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    // Destination 9 is on programme 9 in STATUS_7. A key bound to programme 7 must not stop it.
+    const key = surface("k", "stopOne", { sourceId: 7, destinationId: 9 });
+    rt.add(key);
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.unbound);
+
+    await rt.pressStopOneDown("k");
+    expect(key.alerts).toBe(1);
+    expect(net.sent.some((r) => r.url.pathname.includes("stop-impact"))).toBe(false);
+    sched.fireAll();
+    await flush();
+    expect(net.writes()).toHaveLength(0);
+  });
+
+  it("refuses until a status has been read, so the key never acts on a destination it has not seen", async () => {
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/destinations/stop-impact": COUNT_1,
+      "POST /api/v1/destinations/5/stop": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("k", "stopOne", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+
+    await rt.pressStopOneDown("k");
+    expect(key.alerts).toBe(1);
+    expect(net.sent.some((r) => r.url.pathname.includes("stop-impact"))).toBe(false);
   });
 });
 

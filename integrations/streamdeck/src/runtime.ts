@@ -467,14 +467,29 @@ export class Runtime {
     const s = this.surfaces.get(id);
     if (!s || !this.client) return;
     if (!(await this.requireAdmin(s))) return;
+    // The same ownership rule the face uses: the destination must be on this key's programme, as the
+    // last status read says. The server ignores ?source= on a per-destination stop, so this check is the
+    // only thing that keeps the key from stopping a destination the face says it does not own.
     const destinationId = s.settings.destinationId;
-    if (destinationId === undefined) {
+    const owned = destinationId !== undefined && this.ownsDestination(s, destinationId);
+    if (destinationId === undefined || !owned) {
       await s.setTitle(t(this.locale, "streamdeck.state.missing"));
       await s.showAlert();
       return;
     }
     this.armed.set(id, { destinationId, sourceId: s.settings.sourceId });
     await this.armStop(s, () => this.client!.stopImpactFor(destinationId));
+  }
+
+  /**
+   * True when the last status read for this key's programme lists the destination on that programme.
+   * With no status yet, or a status that does not list it, nothing is owned.
+   */
+  private ownsDestination(s: Surface, destinationId: number): boolean {
+    const payload = this.statuses.get(scopeKey(s.settings.sourceId));
+    const dest = payload?.destinations?.find((d) => d.id === destinationId);
+    if (!dest) return false;
+    return s.settings.sourceId === undefined || dest.sourceId === s.settings.sourceId;
   }
 
   /** Loads the count through the hold. A refused count is refused here, and nothing arms. */
