@@ -1767,6 +1767,8 @@
   "addDest.howToGetKey": "Comment obtenir cette clé",
   "addDest.connectWithCode": "Se connecter avec un code",
   "addDest.ipOriginNote": "Cette page est ouverte par adresse IP. Les plateformes ne peuvent généralement pas vous renvoyer vers une adresse qu'elles ne connaissent pas, la connexion par redirection peut donc échouer. Connectez-vous avec un code si l'option est proposée.",
+  "addDest.connectAccount": "Connecter un compte {platform}",
+  "addDest.redirectReturnsTo": "Se connecte sur le site de la plateforme, quitte ce formulaire et revient à :",
   "automod.deleteRuleTitle": "Supprimer cette règle ?",
   "routing.saveBar.changed": "Modifications de routage non enregistrées pour {name}. Rien n'est appliqué avant l'enregistrement.",
   "routing.saveBar.discard": "Annuler",

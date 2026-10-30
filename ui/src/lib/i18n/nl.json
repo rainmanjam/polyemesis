@@ -1767,6 +1767,8 @@
   "addDest.howToGetKey": "Zo haal je deze sleutel op",
   "addDest.connectWithCode": "Verbinden met een code",
   "addDest.ipOriginNote": "Deze pagina wordt geopend via een IP-adres. Platforms kunnen je meestal niet terugsturen naar een adres dat ze niet kennen, dus inloggen via doorverwijzing kan mislukken. Verbind met een code als die wordt aangeboden.",
+  "addDest.connectAccount": "{platform}-account koppelen",
+  "addDest.redirectReturnsTo": "Meldt je aan op de site van het platform, verlaat dit formulier en keert terug naar:",
   "automod.deleteRuleTitle": "Deze regel verwijderen?",
   "routing.saveBar.changed": "Niet-opgeslagen routingwijzigingen voor {name}. Er wordt niets toegepast tot je opslaat.",
   "routing.saveBar.discard": "Weggooien",

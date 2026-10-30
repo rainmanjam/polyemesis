@@ -1767,6 +1767,8 @@
   "addDest.howToGetKey": "Cara mendapatkan kunci ini",
   "addDest.connectWithCode": "Hubungkan dengan kode",
   "addDest.ipOriginNote": "Halaman ini dibuka lewat alamat IP. Platform biasanya tidak bisa mengarahkan Anda kembali ke alamat yang tidak mereka kenal, jadi masuk lewat pengalihan bisa gagal. Hubungkan dengan kode jika tersedia.",
+  "addDest.connectAccount": "Hubungkan akun {platform}",
+  "addDest.redirectReturnsTo": "Masuk di situs platform, meninggalkan formulir ini, lalu kembali ke:",
   "automod.deleteRuleTitle": "Hapus aturan ini?",
   "routing.saveBar.changed": "Perubahan rute yang belum disimpan untuk {name}. Tidak ada yang diterapkan sebelum Anda menyimpan.",
   "routing.saveBar.discard": "Buang",

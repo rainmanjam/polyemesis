@@ -1767,6 +1767,8 @@
   "addDest.howToGetKey": "Bu anahtar nasıl alınır",
   "addDest.connectWithCode": "Kodla bağlan",
   "addDest.ipOriginNote": "Bu sayfa bir IP adresiyle açıldı. Platformlar genellikle tanımadıkları bir adrese geri yönlendiremez, bu yüzden yönlendirmeli oturum açma başarısız olabilir. Sunuluyorsa kodla bağlanın.",
+  "addDest.connectAccount": "{platform} hesabını bağla",
+  "addDest.redirectReturnsTo": "Platformun sitesinde oturum açar, bu formdan çıkar ve şuraya döner:",
   "automod.deleteRuleTitle": "Bu kural silinsin mi?",
   "routing.saveBar.changed": "{name} için kaydedilmemiş yönlendirme değişiklikleri. Kaydedene kadar hiçbir şey uygulanmaz.",
   "routing.saveBar.discard": "Vazgeç",

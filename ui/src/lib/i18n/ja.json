@@ -1767,6 +1767,8 @@
   "addDest.howToGetKey": "このキーの取得方法",
   "addDest.connectWithCode": "コードで接続",
   "addDest.ipOriginNote": "このページは IP アドレスで開かれています。プラットフォームは未登録のアドレスへ戻せないことが多いため、リダイレクトによるサインインは失敗することがあります。提供されていればコードで接続してください。",
+  "addDest.connectAccount": "{platform} アカウントを接続",
+  "addDest.redirectReturnsTo": "プラットフォームのサイトでサインインし、このフォームを離れてから次の場所に戻ります：",
   "automod.deleteRuleTitle": "このルールを削除しますか？",
   "routing.saveBar.changed": "{name} のルーティング変更は未保存です。保存するまで適用されません。",
   "routing.saveBar.discard": "破棄",

@@ -1767,6 +1767,8 @@
   "addDest.howToGetKey": "How to get this key",
   "addDest.connectWithCode": "Connect with a code",
   "addDest.ipOriginNote": "This page is opened by IP address. Platforms usually cannot send you back to an address they do not know, so the redirect sign-in may fail. Connect with a code if it is offered.",
+  "addDest.connectAccount": "Connect {platform} account",
+  "addDest.redirectReturnsTo": "Signs in on the platform's site, leaves this form, and returns to:",
   "automod.deleteRuleTitle": "Delete this rule?",
   "routing.saveBar.changed": "Unsaved routing changes for {name}. Nothing is applied until you save.",
   "routing.saveBar.discard": "Discard",

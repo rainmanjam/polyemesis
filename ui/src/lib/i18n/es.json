@@ -1767,6 +1767,8 @@
   "addDest.howToGetKey": "Cómo obtener esta clave",
   "addDest.connectWithCode": "Conectar con un código",
   "addDest.ipOriginNote": "Esta página se abre por dirección IP. Las plataformas suelen no poder devolverte a una dirección que no conocen, así que el inicio de sesión por redirección puede fallar. Conéctate con un código si se ofrece.",
+  "addDest.connectAccount": "Conectar cuenta de {platform}",
+  "addDest.redirectReturnsTo": "Inicia sesión en el sitio de la plataforma, sale de este formulario y vuelve a:",
   "automod.deleteRuleTitle": "¿Eliminar esta regla?",
   "routing.saveBar.changed": "Cambios de enrutamiento sin guardar para {name}. No se aplica nada hasta que guardes.",
   "routing.saveBar.discard": "Descartar",

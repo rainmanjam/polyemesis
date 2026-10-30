@@ -1767,6 +1767,8 @@
   "addDest.howToGetKey": "So erhalten Sie diesen Schlüssel",
   "addDest.connectWithCode": "Mit einem Code verbinden",
   "addDest.ipOriginNote": "Diese Seite wird über eine IP-Adresse geöffnet. Plattformen können Sie oft nicht zu einer unbekannten Adresse zurückschicken, daher kann die Anmeldung per Weiterleitung fehlschlagen. Verbinden Sie sich mit einem Code, falls angeboten.",
+  "addDest.connectAccount": "{platform}-Konto verbinden",
+  "addDest.redirectReturnsTo": "Meldet dich auf der Website der Plattform an, verlässt dieses Formular und kehrt zurück zu:",
   "automod.deleteRuleTitle": "Diese Regel löschen?",
   "routing.saveBar.changed": "Nicht gespeicherte Routing-Änderungen für {name}. Nichts wird übernommen, bis du speicherst.",
   "routing.saveBar.discard": "Verwerfen",

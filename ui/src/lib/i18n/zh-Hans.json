@@ -1767,6 +1767,8 @@
   "addDest.howToGetKey": "如何获取此密钥",
   "addDest.connectWithCode": "使用验证码连接",
   "addDest.ipOriginNote": "此页面通过 IP 地址打开。平台通常无法跳转回其不认识的地址，因此重定向登录可能失败。如果提供验证码连接，请使用它。",
+  "addDest.connectAccount": "连接 {platform} 账号",
+  "addDest.redirectReturnsTo": "将在平台网站上登录，离开此表单，并返回到：",
   "automod.deleteRuleTitle": "删除这条规则？",
   "routing.saveBar.changed": "{name} 的路由更改尚未保存。保存前不会应用任何内容。",
   "routing.saveBar.discard": "放弃",

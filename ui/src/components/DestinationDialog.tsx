@@ -886,6 +886,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // Read from the browser: a self-signed certificate on a name is not visible
   // here, and the dialog does not claim that it is.
   const ipOrigin = typeof window !== "undefined" && isIpLiteralHost(window.location.hostname);
+  // Where the redirect sign-in comes back to, and the server's reasons it may
+  // not (A5). Shown before the operator follows the link, because following it
+  // leaves this form.
+  const connectGuide =
+    caps?.connect !== undefined ? rowsOf(guidesRead).find((g) => g.platform === caps.connect) : undefined;
   // Whether the connected Facebook account publishes to a PAGE rather than a
   // profile, which decides whether an audience setting means anything at all.
   //
@@ -1401,9 +1406,20 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   {ipOrigin && <p className="text-sm text-muted-foreground">{t("addDest.ipOriginNote")}</p>}
                   <Button variant={deviceCodeOK ? "outline" : "default"} size="sm" asChild>
                     <a href={api.connectUrl(caps.connect)}>
-                      <ExternalLink /> Connect {caps.name} account
+                      <ExternalLink /> {t("addDest.connectAccount", { platform: caps.name })}
                     </a>
                   </Button>
+                  {connectGuide?.redirectPath && (
+                    <p className="flex flex-wrap items-baseline gap-1 text-sm text-muted-foreground">
+                      {t("addDest.redirectReturnsTo")}
+                      <code className="break-all font-mono text-xs text-foreground">{connectGuide.redirectPath}</code>
+                    </p>
+                  )}
+                  {connectGuide?.redirectWarnings?.map((w) => (
+                    <p key={w} className="text-sm text-warn">
+                      {w}
+                    </p>
+                  ))}
                 </div>
               )}
               {/* The mixed case, spelled out. Kick's sign-in is worth having on
