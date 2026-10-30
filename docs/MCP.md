@@ -350,7 +350,10 @@ with the header `Authorization: Bearer <token>`.
 ## Testing with the MCP Inspector
 
 The official [MCP Inspector][inspector] has a CLI mode, which is a quick way to
-see what an assistant would see:
+see what an assistant would see. Turn MCP on and use an MCP token first: with
+MCP off, the Inspector reports the `404` an unknown endpoint gets, and with
+any other token it reports the server's "not an MCP token" `403`. `tools/list`
+shows exactly the tools the token's tier and the enabled levels allow.
 
 ```sh
 npx @modelcontextprotocol/inspector@2.13.0 --cli https://stream.example.com/mcp \
