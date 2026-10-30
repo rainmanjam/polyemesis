@@ -42,7 +42,7 @@ describe("JobsPage, the policy Save button", () => {
     expect(src).not.toContain("{!dirty && (");
     // One Save left, in the dirty bar, and the bar is sticky because this tab
     // is a long two-column grid.
-    expect(src.split("Save policy").length - 1).toBe(1);
+    expect(src.split('t("jobs.savePolicy")').length - 1).toBe(1);
     expect(src).toContain('className="sticky top-0 z-10 flex items-center justify-end gap-2');
   });
 });

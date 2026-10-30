@@ -75,3 +75,27 @@ describe("MixMatrix Clear", () => {
     expect(screen.queryByRole("button", { name: /undo/i })).toBeNull();
   });
 });
+
+describe("MixMatrix undo beyond Clear (A14)", () => {
+  it("walks back a quick fill, then the Clear before it, one step at a time", () => {
+    const seen: MatrixCell[][] = [];
+    render(<Host initial={cells} seen={seen} />);
+    fireEvent.click(screen.getByRole("button", { name: /clear/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Track 1 only" }));
+    expect(seen[seen.length - 1].length).toBeGreaterThan(0);
+    // The last step was a fill, so the button is a plain Undo, not "Undo clear".
+    fireEvent.click(screen.getByRole("button", { name: /^undo$/i }));
+    expect(seen[seen.length - 1]).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: /undo clear/i }));
+    expect(seen[seen.length - 1]).toEqual(cells);
+    expect(screen.queryByRole("button", { name: /undo/i })).toBeNull();
+  });
+
+  it("undoes with Ctrl+Z inside the matrix", () => {
+    const seen: MatrixCell[][] = [];
+    render(<Host initial={cells} seen={seen} />);
+    fireEvent.click(screen.getByRole("button", { name: /clear/i }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /^clear$/i }), { key: "z", ctrlKey: true });
+    expect(seen[seen.length - 1]).toEqual(cells);
+  });
+});

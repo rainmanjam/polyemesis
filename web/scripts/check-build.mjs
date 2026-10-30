@@ -1254,6 +1254,49 @@ for (const { rel, page, factsDate } of sourcedPages) {
   }
 }
 
+/* NO WORD GLUED TO AN INLINE ELEMENT. Astro drops the whitespace between a run
+ * of text and an element when the two are on different source lines:
+ *
+ *     This page is rendered from
+ *     <a href=...>docs/API.md</a>
+ *     in the repository
+ *
+ * ships as "rendered from<a>docs/API.md</a>in the repository", which reads as
+ * "rendered fromdocs/API.mdin the repository". It looks right in the source,
+ * so only the built HTML shows it. The fix is an explicit {" "} at the end of
+ * the line, as the home page already does.
+ *
+ * Checked on the copy this repository writes in .astro files. The rendered
+ * Markdown bodies (article.doc-prose) are left out: there `<code>GET</code>s` is
+ * the author's choice, and Markdown does not collapse whitespace this way.
+ * Empty elements (the decorative bullet dots) and <pre> are left out too. */
+{
+  const INLINE = "a|em|strong|code|span|kbd|abbr|b|i";
+  const glueBefore = new RegExp(`([A-Za-z0-9,;:)])<(${INLINE})\\b[^>]*>`, "g");
+  const glueAfter = new RegExp(`</(${INLINE})>([A-Za-z0-9(])`, "g");
+  const text = (s) => s.replace(/<[^>]*>/g, "");
+  for (const page of pages) {
+    const html = readFileSync(join(DIST, page), "utf8")
+      .replace(/<(head|script|style|svg|pre)\b[\s\S]*?<\/\1>/g, "")
+      .replace(/<article class="doc-prose[\s\S]*?<\/article>/g, "")
+      .replace(new RegExp(`<(${INLINE})\\b[^>]*><\\/\\1>`, "g"), "");
+    const glued = [];
+    for (const m of html.matchAll(glueBefore)) {
+      glued.push(`"${text(html.slice(Math.max(0, m.index - 40), m.index + 1)).slice(-24)}<${m[2]}>"`);
+    }
+    for (const m of html.matchAll(glueAfter)) {
+      glued.push(`"</${m[1]}>${text(html.slice(m.index + m[0].length - 1, m.index + m[0].length + 24))}"`);
+    }
+    if (glued.length) {
+      fail.push(
+        `${page} has ${glued.length} word(s) glued to an inline element, so the reader sees two ` +
+          `words run together: ${glued.slice(0, 6).join(", ")}${glued.length > 6 ? ", …" : ""}. ` +
+          `End the source line with {" "} before the element (or after it).`,
+      );
+    }
+  }
+}
+
 if (fail.length) {
   console.error("build checks FAILED:\n" + fail.map((f) => "  - " + f).join("\n"));
   process.exit(1);

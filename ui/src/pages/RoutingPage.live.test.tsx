@@ -389,8 +389,12 @@ describe("a stored mute survives every routing-page save path", () => {
 
   it("a preset, which carries the mute over for a track it keeps", async () => {
     await renderPage();
+    // Not one of the three starters, so it sits behind More recipes (A14).
+    await act(async () => fireEvent.click(screen.getByTestId("more-recipes")));
     await act(async () => fireEvent.click(screen.getAllByRole("button", { name: /mix a/i })[0]));
     await waitFor(() => expect(api.applyPreset).toHaveBeenCalled());
+    // Reviewed before it lands in the draft (A14).
+    await act(async () => fireEvent.click(await screen.findByRole("button", { name: "Apply preset" })));
     await save();
     const sent = savedTracks();
     expect(sent.find((s) => s.track === 1)?.muted).toBe(true);

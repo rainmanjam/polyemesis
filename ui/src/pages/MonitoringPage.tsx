@@ -55,7 +55,7 @@ import {
   type LogLine,
   type ProcessInfo,
 } from "@/lib/types";
-import { useT, type TranslationKey, useStateLabel } from "@/lib/i18n";
+import { useT, useTN, type TranslationKey, useStateLabel } from "@/lib/i18n";
 
 const LOG_LEVEL_CLASS: Record<string, string> = {
   fatal: "text-down",
@@ -132,6 +132,7 @@ const DRY_RUN_LABEL: Record<DryRunResult["verdict"], TranslationKey> = {
  *  have to look at the whole line first. */
 export function ExpertPanel() {
   const t = useT();
+  const tn = useTN();
   const [dests, setDests] = useState<Destination[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [draft, setDraft] = useState<ExpertDraft>({ inputArgs: "", outputArgs: "" });
@@ -280,11 +281,7 @@ export function ExpertPanel() {
 
       <CardContent className="flex flex-col gap-2.5">
         <p className="text-tiny text-muted-foreground">
-          These two strings are appended to the generated command — input arguments immediately
-          before <code className="font-mono">-i</code>, output arguments immediately before the
-          publish target. Nothing else is replaced, so the routing graph this destination was
-          configured with still decides which audio tracks it receives. Read the resolved command
-          below before applying.
+          {tn("mon.expertIntro", { flag: <code className="font-mono">-i</code> })}
         </p>
 
         {selected === "" ? (
@@ -371,8 +368,7 @@ export function ExpertPanel() {
                   onCheckedChange={(v) => setAck(v === true)}
                 />
                 <Label htmlFor="expert-ack" className="cursor-pointer">
-                  I understand this overrides what polyemesis otherwise guarantees for this
-                  destination.
+                  {t("mon.expertAck")}
                 </Label>
               </div>
             )}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
-import { useSearchParams } from "react-router";
+import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { SettingsSectionSearch } from "@/components/SettingsSectionSearch";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
@@ -33,8 +33,8 @@ import { AutomodConfig } from "@/components/AutomodConfig";
 import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
-import { DebugSettings } from "@/components/DebugSettings";
 import { OverlaySettings } from "@/components/OverlaySettings";
+import { DangerZone } from "@/components/DangerZone";
 import { PairingCheck } from "@/components/PairingCheck";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -79,7 +79,7 @@ import {
   RESTART_COMMAND,
   type AcmeStance,
 } from "@/lib/acme-guidance";
-import { useT, type TranslationKey } from "@/lib/i18n";
+import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
 import {
@@ -188,6 +188,7 @@ export function SettingsPage() {
   // deliberately gets the tab and the explanation on it, which is a different
   // thing from being put there.
   const tab = params.get("tab") ?? (sourceCount === 0 ? "pipeline" : "ingest");
+  const navigate = useNavigate();
 
   // The OAuth round trip is a full navigation, so its outcome comes back in
   // the query string rather than as an XHR response.
@@ -304,6 +305,9 @@ export function SettingsPage() {
     }
   };
 
+  // The old Debug tab's address, kept working (A17).
+  if (tab === "debug") return <Navigate to="/system" replace />;
+
   if (loadFailed) {
     return (
       <div className="flex h-full items-center justify-center p-3 text-center text-sm text-muted-foreground">
@@ -344,9 +348,11 @@ export function SettingsPage() {
           platforms: t("set.tabPlatforms"),
           overlays: t("set.tabOverlays"),
           security: t("set.tabSecurity"),
+          danger: t("danger.title"),
           debug: t("set.tabDebug"),
         }}
-        onPick={(v) => setParams({ tab: v })}
+        // Debug lives on the System page now (A17); the search still finds it.
+        onPick={(v) => (v === "debug" ? navigate("/system") : setParams({ tab: v }))}
       />
 
       {/* The sections run down a left rail on wide screens and stack on narrow
@@ -367,11 +373,12 @@ export function SettingsPage() {
               to rotate one. */}
           <TabsTrigger value="overlays">{t("set.tabOverlays")}</TabsTrigger>
           <TabsTrigger value="security">{t("set.tabSecurity")}</TabsTrigger>
-          {/* Last, and beside Security rather than filed by subject: the export
-              is the only control here that hands a copy of this server's logs to
-              somebody else, and the tab an operator reaches for when thinking
-              about disclosure is the one next to it. */}
-          <TabsTrigger value="debug">{t("set.tabDebug")}</TabsTrigger>
+          {/* Last, set apart and in the down tone (A17): the section that only
+              holds what cannot be undone. Debug, which used to sit here, is on
+              the System page. */}
+          <TabsTrigger value="danger" className="text-down lg:mt-3">
+            {t("danger.title")}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="ingest">
@@ -432,8 +439,8 @@ export function SettingsPage() {
         <TabsContent value="security">
           <SecuritySettings system={system} />
         </TabsContent>
-        <TabsContent value="debug">
-          <DebugSettings />
+        <TabsContent value="danger">
+          <DangerZone />
         </TabsContent>
       </Tabs>
     </div>
@@ -454,6 +461,7 @@ function IngestSettings({
   saving: boolean;
 }) {
   const t = useT();
+  const tn = useTN();
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings]);
   // This page had no idea whether a broadcast was running: it never read live
@@ -499,7 +507,7 @@ function IngestSettings({
               </SelectContent>
             </Select>
             {system && !system.ffmpeg.hasLibsrt && draft.ingest.mode === "srt" && (
-              <span className="text-micro text-warn">{t("set.noLibsrt")}</span>
+              <span className="text-sm text-warn">{t("set.noLibsrt")}</span>
             )}
           </div>
 
@@ -542,7 +550,7 @@ function IngestSettings({
                     })
                   }
                 />
-                <span className="text-micro text-muted-foreground">{t("set.passphraseNote")}</span>
+                <span className="text-sm text-muted-foreground">{t("set.passphraseNote")}</span>
               </div>
             </>
           ) : (
@@ -580,7 +588,7 @@ function IngestSettings({
                     })
                   }
                 />
-                <span className="text-micro text-muted-foreground">{t("set.streamKeyNote")}</span>
+                <span className="text-sm text-muted-foreground">{t("set.streamKeyNote")}</span>
               </div>
             </>
           )}
@@ -592,11 +600,9 @@ function IngestSettings({
               The button says what will happen rather than "Save", because a
               label an operator reads is worth more than a dialog they dismiss. */}
           {live && (
-            <p className="flex items-start gap-1.5 text-tiny text-warn">
+            <p className="flex items-start gap-1.5 text-sm text-warn">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              A stream is arriving now. Saving restarts the ingest, which
-              disconnects the encoder and drops everyone watching. The encoder
-              will reconnect on its own once it is pointed at the new settings.
+              {t("set.ingestLiveWarn")}
             </p>
           )}
           <Button
@@ -621,7 +627,7 @@ function IngestSettings({
             {urlCarriesCredential(system?.ingestUrl ?? "") ? (
               <SecretCode value={system?.ingestUrl ?? ""} />
             ) : (
-              <code className="min-w-0 flex-1 break-all font-mono text-micro text-muted-foreground">
+              <code className="min-w-0 flex-1 break-all font-mono text-sm text-muted-foreground">
                 {system?.ingestUrl ?? "…"}
               </code>
             )}
@@ -629,10 +635,10 @@ function IngestSettings({
               <Copy />
             </Button>
           </div>
-          <p className="text-micro text-muted-foreground">
-            For multitrack, use OBS → Settings → Output → Recording, set type to Custom Output
-            (FFmpeg), container <code className="font-mono">mpegts</code>, and enable the audio
-            tracks you want to send. The README has the exact field values.
+          <p className="text-sm text-muted-foreground">
+            {tn("set.multitrackObsHint", {
+              container: <code className="font-mono">mpegts</code>,
+            })}
           </p>
           <FfmpegBadges system={system} />
         </CardContent>
@@ -755,7 +761,7 @@ function FfmpegBadges({ system }: { system: SystemInfo | null }) {
    * before it renders at all, so a null here means the read FAILED and saying
    * so is the whole difference between a blank panel and an answer. */
   if (!system) {
-    return <span className="text-tiny text-muted-foreground">{t("set.ffmpegUnknown")}</span>;
+    return <span className="text-sm text-muted-foreground">{t("set.ffmpegUnknown")}</span>;
   }
   return (
     <div className="mt-1 flex flex-wrap gap-1">
@@ -777,7 +783,7 @@ function FfmpegBadges({ system }: { system: SystemInfo | null }) {
               ? t("set.drawtextOk") : t("set.drawtextMissing")
           }
         >
-          text overlays {system.ffmpeg.filters?.includes("drawtext") ? t("set.yes") : t("set.no")}
+          {t("set.textOverlaysBadge")} {system.ffmpeg.filters?.includes("drawtext") ? t("set.yes") : t("set.no")}
         </Badge>
       )}
     </div>
@@ -880,6 +886,7 @@ function PipelineSettings({
   saveError: string | null;
 }) {
   const t = useT();
+  const tn = useTN();
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings]);
   // Held here and never seeded from the server: the password is not in the
@@ -916,7 +923,7 @@ function PipelineSettings({
           see. It is also the only place a Save now exists on this tab, so it
           has to be reachable from everywhere in it. */}
       <div className="sticky top-0 z-10 flex items-center gap-2 rounded-md border border-border bg-background/95 px-2 py-1.5 backdrop-blur">
-        <span className={cn("mr-auto text-tiny", dirty ? "text-warn" : "text-muted-foreground")}>
+        <span className={cn("mr-auto text-sm", dirty ? "text-warn" : "text-muted-foreground")}>
           {dirty ? t("set.pipelineUnsaved") : t("set.pipelineOneSave")}
         </span>
         <Button size="sm" onClick={saveTab} disabled={saving || !dirty}>
@@ -951,12 +958,12 @@ function PipelineSettings({
               placeholder={t("set.displayTimeZonePlaceholder")}
               onChange={(e) => setDraft({ ...draft, display: { timeZone: e.target.value } })}
             />
-            <span className="text-[10px] text-muted-foreground">{t("set.displayTimeZoneNote")}</span>
+            <span className="text-sm text-muted-foreground">{t("set.displayTimeZoneNote")}</span>
             {/* Warned rather than refused -- see zoneResolves. The line is the
                 only thing between a typo and a console that reads UTC for ever
                 with nothing saying why. */}
             {!zoneResolves(draft.display?.timeZone ?? "") && (
-              <span className="text-[10px] text-warn">{t("set.displayTimeZoneUnknown")}</span>
+              <span className="text-sm text-warn">{t("set.displayTimeZoneUnknown")}</span>
             )}
           </div>
         </CardContent>
@@ -976,7 +983,7 @@ function PipelineSettings({
               onCheckedChange={(v) => setDraft({ ...draft, synth: { silenceOnVideoOnly: v } })}
             />
           </div>
-          <span className="text-micro text-muted-foreground">{t("set.synthesiseNote")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.synthesiseNote")}</span>
         </CardContent>
       </Card>
 
@@ -999,8 +1006,8 @@ function PipelineSettings({
               }
               className="w-28"
             />
-            <span className="text-micro text-muted-foreground">{t("set.staggerNote")}</span>
-            <span className="text-micro text-muted-foreground">
+            <span className="text-sm text-muted-foreground">{t("set.staggerNote")}</span>
+            <span className="text-sm text-muted-foreground">
               {t("set.staggerReconnectNote")}</span>
           </div>
         </CardContent>
@@ -1031,7 +1038,7 @@ function PipelineSettings({
                 }
                 className="w-28"
               />
-              <span className="text-micro text-muted-foreground">0 keeps everything, forever.</span>
+              <span className="text-sm text-muted-foreground">{t("set.chatRetentionZero")}</span>
             </div>
 
             <div className="flex flex-col gap-1">
@@ -1050,7 +1057,7 @@ function PipelineSettings({
                 }
                 className="w-32"
               />
-              <span className="text-micro text-muted-foreground">{t("set.chatKeepNote")}</span>
+              <span className="text-sm text-muted-foreground">{t("set.chatKeepNote")}</span>
             </div>
 
             {/* THE SWEEP THAT MAKES THE TWO ABOVE TRUE ON DISK. Retention and
@@ -1080,7 +1087,7 @@ function PipelineSettings({
                 }
                 className="w-28"
               />
-              <span className="text-[10px] text-muted-foreground">{t("set.chatPurgeNote")}</span>
+              <span className="text-sm text-muted-foreground">{t("set.chatPurgeNote")}</span>
             </div>
 
             <div className="flex flex-col gap-1">
@@ -1099,7 +1106,7 @@ function PipelineSettings({
                 }
                 className="w-32"
               />
-              <span className="text-micro text-muted-foreground">{t("set.chatSendNote")}</span>
+              <span className="text-sm text-muted-foreground">{t("set.chatSendNote")}</span>
             </div>
 
             {/* YOUTUBE IS THE ONLY PLATFORM HERE THAT BILLS FOR CHAT. Twitch is
@@ -1124,7 +1131,7 @@ function PipelineSettings({
                 }
                 className="w-32"
               />
-              <span className="text-micro text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {t("set.chatYouTubeQuotaNote")}
               </span>
             </div>
@@ -1158,23 +1165,21 @@ function PipelineSettings({
                 }
                 className="w-32"
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {t("set.chatYouTubeReserveNote")}
               </span>
             </div>
           </div>
 
-          <span className="text-micro text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             {t("set.chatBothApply")} {t("set.chatFloorWhy")}
           </span>
-          <span className="text-micro text-muted-foreground">{t("set.chatNotOnlyDisk")}</span>
-          <span className="text-micro text-muted-foreground">{t("set.chatSmall")}</span>
-          <span className="text-micro text-muted-foreground">
-            <strong>{t("set.chatSendOnConnectShort")}</strong> is a different kind of number from the other two. Those
-            bound what is kept on disk; this one is a buffer held in memory, allocated in full
-            whether or not anyone is talking. It is what a browser receives the instant it opens the
-            page, before any of the stored history is queried &mdash; so raising it costs memory all
-            the time to make the first screen fuller.
+          <span className="text-sm text-muted-foreground">{t("set.chatNotOnlyDisk")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.chatSmall")}</span>
+          <span className="text-sm text-muted-foreground">
+            {tn("set.chatSendOnConnectWhy", {
+              name: <strong>{t("set.chatSendOnConnectShort")}</strong>,
+            })}
           </span>
         </CardContent>
       </Card>
@@ -1219,10 +1224,10 @@ function PipelineSettings({
               }
               className="w-28"
             />
-            <span className="text-micro text-muted-foreground">{t("set.attemptsNote")}</span>
+            <span className="text-sm text-muted-foreground">{t("set.attemptsNote")}</span>
           </div>
-          <span className="text-micro text-muted-foreground">{t("set.attemptsRetryable")}</span>
-          <span className="text-micro text-muted-foreground">{t("set.attemptsBackoff")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.attemptsRetryable")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.attemptsBackoff")}</span>
         </CardContent>
       </Card>
 
@@ -1247,7 +1252,7 @@ function PipelineSettings({
               }
             />
           </div>
-          <span className="text-micro text-muted-foreground">{t("set.failoverRemuxNote")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.failoverRemuxNote")}</span>
 
           {draft.failover?.enabled && (
             <>
@@ -1265,7 +1270,7 @@ function PipelineSettings({
                     })
                   }
                 />
-                <span className="text-micro text-muted-foreground">{t("set.graceNote")}</span>
+                <span className="text-sm text-muted-foreground">{t("set.graceNote")}</span>
               </div>
 
               <div className="flex flex-col gap-1">
@@ -1287,7 +1292,7 @@ function PipelineSettings({
                     <SelectItem value="auto">{t("set.returnAutomatic")}</SelectItem>
                   </SelectContent>
                 </Select>
-                <span className="text-micro text-muted-foreground">{t("set.returnManualNote")}</span>
+                <span className="text-sm text-muted-foreground">{t("set.returnManualNote")}</span>
               </div>
 
               {draft.failover?.return === "auto" && (
@@ -1349,7 +1354,7 @@ function PipelineSettings({
                         })
                       }
                     />
-                    <span className="text-micro text-muted-foreground">{t("set.slateImageNote")}</span>
+                    <span className="text-sm text-muted-foreground">{t("set.slateImageNote")}</span>
                   </div>
 
                   <div className="flex flex-col gap-1">
@@ -1369,7 +1374,7 @@ function PipelineSettings({
                         })
                       }
                     />
-                    <span className="text-micro text-muted-foreground">{t("set.slateColourNote")}</span>
+                    <span className="text-sm text-muted-foreground">{t("set.slateColourNote")}</span>
                   </div>
 
                   {/* THE SLATE'S OWN ENCODE. All three land in
@@ -1409,7 +1414,7 @@ function PipelineSettings({
                       }
                       className="w-28"
                     />
-                    <span className="text-[10px] text-muted-foreground">{t("set.slateBitrateNote")}</span>
+                    <span className="text-sm text-muted-foreground">{t("set.slateBitrateNote")}</span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
@@ -1466,7 +1471,7 @@ function PipelineSettings({
                       />
                     </div>
                   </div>
-                  <span className="text-[10px] text-muted-foreground">{t("set.slateEncoderNote")}</span>
+                  <span className="text-sm text-muted-foreground">{t("set.slateEncoderNote")}</span>
                 </>
               )}
 
@@ -1491,7 +1496,7 @@ function PipelineSettings({
                   }
                 />
               </div>
-              <span className="text-micro text-muted-foreground">{t("set.playLoopNote")}</span>
+              <span className="text-sm text-muted-foreground">{t("set.playLoopNote")}</span>
 
               {draft.failover?.playlist?.enabled && (
                 <PlaylistEditor
@@ -1528,10 +1533,8 @@ function PipelineSettings({
               onCheckedChange={(v) => setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: v } })}
             />
           </div>
-          <span className="text-micro text-muted-foreground">
-            <strong>{t("set.mqtt5Only")}</strong> A broker pinned to 3.1.1 will not complete a connection
-            at all &mdash; it is not a degraded mode. Mosquitto 2.x, EMQX and the Home Assistant
-            add-on are all fine.
+          <span className="text-sm text-muted-foreground">
+            {tn("set.mqtt5Why", { only: <strong>{t("set.mqtt5Only")}</strong> })}
           </span>
 
           {draft.mqtt?.enabled && (
@@ -1553,7 +1556,7 @@ function PipelineSettings({
                     setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, brokerUrl: e.target.value } })
                   }
                 />
-                <span className="text-micro text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("set.brokerUrlNote")}
                 </span>
                 {/* Said at the point of configuration rather than left to the
@@ -1563,7 +1566,7 @@ function PipelineSettings({
                     a trusted LAN is the normal Home Assistant setup and what our
                     own documentation recommends. */}
                 {(draft.mqtt?.brokerUrl ?? "").startsWith("mqtt://") && (
-                  <span className="text-micro text-warn">
+                  <span className="text-sm text-warn">
                     {t("set.brokerPlainNote")}
                   </span>
                 )}
@@ -1585,12 +1588,12 @@ function PipelineSettings({
                   <SecretInput
                     id="mq-pw"
                     value={mqttPassword}
-                    placeholder={draft.mqtt?.hasPassword ? "(unchanged)" : ""}
+                    placeholder={draft.mqtt?.hasPassword ? t("set.unchangedPlaceholder") : ""}
                     onChange={(e) => setMqttPassword(e.target.value)}
                   />
                 </div>
               </div>
-              <span className="text-micro text-muted-foreground">{t("set.passwordNote")}</span>
+              <span className="text-sm text-muted-foreground">{t("set.passwordNote")}</span>
               {draft.mqtt?.hasPassword && (
                 <Button
                   size="sm"
@@ -1626,7 +1629,7 @@ function PipelineSettings({
                   />
                 </div>
               </div>
-              <span className="text-micro text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {t("set.topicPrefixNote")}
               </span>
 
@@ -1664,7 +1667,7 @@ function PipelineSettings({
                   />
                 </div>
               </div>
-              <span className="text-micro text-muted-foreground">{t("set.intervalNote")}</span>
+              <span className="text-sm text-muted-foreground">{t("set.intervalNote")}</span>
 
               <div className="flex flex-col gap-1">
                 <Label htmlFor="mq-cid">{t("set.clientId")}</Label>
@@ -1676,7 +1679,7 @@ function PipelineSettings({
                     setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, clientId: e.target.value } })
                   }
                 />
-                <span className="text-micro text-muted-foreground">{t("set.clientIdNote")}</span>
+                <span className="text-sm text-muted-foreground">{t("set.clientIdNote")}</span>
               </div>
 
               <div className="flex items-center justify-between">
@@ -1780,7 +1783,7 @@ function PipelineSettings({
                 })
               }
             />
-            <span className="text-micro text-muted-foreground">{t("set.previewIdleNote")}</span>
+            <span className="text-sm text-muted-foreground">{t("set.previewIdleNote")}</span>
           </div>
         </CardContent>
       </Card>
@@ -1865,7 +1868,7 @@ function PipelineSettings({
               />
             </div>
           </div>
-          <span className="text-micro text-muted-foreground">{t("set.logsBoundNote")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.logsBoundNote")}</span>
         </CardContent>
       </Card>
 
@@ -1937,14 +1940,8 @@ function MultitrackHardware({
             on knowing that Twitch reads the DECLARATION, so the mechanism is
             stated here rather than left to be inferred from a refusal. */}
         <Experimental>{t("set.ebExperimental")}</Experimental>
-        <span className="text-micro text-muted-foreground">
-          Twitch grants Enhanced Broadcasting only to a client with a GPU it supports, and it checks
-          what it is told: a zero vendor ID, a vendor it does not know and an out-of-date driver are
-          each refused by name. polyemesis does not fill this in for you — it can read the PCI vendor
-          ID of a render node on Linux and nothing else, and sending that one field with zeros in the
-          rest would be describing a machine that does not exist. Leaving it empty is fine and is the
-          normal state: nothing is asked, and a destination with the toggle on simply publishes to
-          the ordinary Twitch ingest and says so once.
+        <span className="text-sm text-muted-foreground">
+          {t("set.ebGpuWhy")}
         </span>
         {gpus.map((g, i) => (
           <div key={i} className="flex flex-col gap-2 rounded-md border border-border p-2">
@@ -2046,10 +2043,8 @@ function MultitrackHardware({
             {/* Optional, and said so rather than left for the operator to
                 discover by saving. A number invented to fill a box is worse
                 than an empty one: Twitch checks these. */}
-            <span className="text-micro text-muted-foreground">
-              Device ID, video memory and shared system memory are optional — leave them at zero
-              rather than guessing. The model and the vendor are not: a vendor ID of zero is refused
-              by name.
+            <span className="text-sm text-muted-foreground">
+              {t("set.ebGpuOptional")}
             </span>
           </div>
         ))}
@@ -2111,7 +2106,7 @@ function PlatformSettings() {
 
       {(readFailed(guides) || readFailed(creds) || readFailed(accounts)) && (
         <Card>
-          <CardContent className="flex items-start gap-1.5 py-3 text-tiny text-warn">
+          <CardContent className="flex items-start gap-1.5 py-3 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>{t("set.platformReadFailed")}</span>
           </CardContent>
@@ -2156,8 +2151,8 @@ function PlatformCapabilityMatrix() {
               <TableRow>
                 <TableHead>{t("set.platform")}</TableHead>
                 {CAPABILITY_COLUMNS.map((c) => (
-                  <TableHead key={c.key} title={c.help}>
-                    {c.label}
+                  <TableHead key={c.key} title={t(c.help)}>
+                    {t(c.label)}
                   </TableHead>
                 ))}
               </TableRow>
@@ -2176,9 +2171,9 @@ function PlatformCapabilityMatrix() {
                       <Badge
                         variant={p.tier === "unsupported" ? "warn" : "outline"}
                         className="w-fit"
-                        title={tierInfo(p.tier).help}
+                        title={t(tierInfo(p.tier).help)}
                       >
-                        {tierInfo(p.tier).label}
+                        {t(tierInfo(p.tier).label)}
                       </Badge>
                     </div>
                   </TableCell>
@@ -2192,9 +2187,9 @@ function PlatformCapabilityMatrix() {
                         <Badge
                           variant={info.variant}
                           className="normal-case"
-                          title={p.reasons?.[c.key] ?? info.help}
+                          title={t(p.reasons?.[c.key] ?? info.help)}
                         >
-                          {info.label}
+                          {t(info.label)}
                         </Badge>
                       </TableCell>
                     );
@@ -2209,9 +2204,9 @@ function PlatformCapabilityMatrix() {
           {SUPPORT_LEGEND.map((l) => (
             <span key={l.key} className="flex items-center gap-1.5">
               <Badge variant={l.variant} className="normal-case">
-                {l.label}
+                {t(l.label)}
               </Badge>
-              <span className="text-micro text-muted-foreground">{l.help}</span>
+              <span className="text-sm text-muted-foreground">{t(l.help)}</span>
             </span>
           ))}
         </div>
@@ -2220,11 +2215,11 @@ function PlatformCapabilityMatrix() {
             to be misread as "no". Saying it plainly costs a sentence and saves
             an operator concluding a feature is blocked when it was only never
             checked. */}
-        <p className="text-micro text-muted-foreground">
-          Unverified means exactly that: polyemesis does not do it today and nobody here has read
-          the platform's API either way. It is never a refusal — if you can make it work, it
-          works, and we would rather be told than guess. Only “not possible” is a checked
-          absence.
+        <p className="text-sm text-muted-foreground">
+          {t("caps.unverifiedMeans", {
+            unverified: t("caps.supportUnknown"),
+            no: t("caps.supportNo"),
+          })}
         </p>
 
         {PLATFORM_CAPABILITIES.filter((p) => p.readFirst).map((p) => (
@@ -2237,15 +2232,15 @@ function PlatformCapabilityMatrix() {
             }
           >
             <div className="flex items-center gap-1.5">
-              <span className="text-tiny font-medium">{p.name}</span>
-              <Badge variant={p.tier === "unsupported" ? "warn" : "outline"}>read first</Badge>
+              <span className="text-sm font-medium">{p.name}</span>
+              <Badge variant={p.tier === "unsupported" ? "warn" : "outline"}>{t("caps.readFirstBadge")}</Badge>
             </div>
             <p
               className={
-                p.tier === "unsupported" ? "text-micro text-warn" : "text-micro text-muted-foreground"
+                p.tier === "unsupported" ? "text-sm text-warn" : "text-sm text-muted-foreground"
               }
             >
-              {p.readFirst}
+              {p.readFirst && t(p.readFirst)}
             </p>
           </div>
         ))}
@@ -2420,7 +2415,7 @@ export function PlatformCredCard({
           <AccordionItem value="steps" className="border-b-0">
             <AccordionTrigger>{t("set.stepByStep")}</AccordionTrigger>
             <AccordionContent>
-              <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-tiny text-muted-foreground">
+              <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-sm text-muted-foreground">
                 {guide.steps.map((s, i) => (
                   <li key={i}>{s}</li>
                 ))}
@@ -2429,20 +2424,20 @@ export function PlatformCredCard({
                 <div className="mt-2 flex flex-col gap-1">
                   <Label>{t("set.redirectUri")}</Label>
                   <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
-                    <code className="min-w-0 flex-1 break-all font-mono text-micro">
+                    <code className="min-w-0 flex-1 break-all font-mono text-sm">
                       {guide.redirectPath}
                     </code>
                     <Button variant="ghost" size="icon-sm" onClick={copyRedirect} aria-label={t("set.copy")}>
                       {copied ? <Check className="text-live" /> : <Copy />}
                     </Button>
                   </div>
-                  <span className="text-micro text-muted-foreground">{t("set.redirectNote")}</span>
+                  <span className="text-sm text-muted-foreground">{t("set.redirectNote")}</span>
                   {/* Above the credential fields on purpose: registering the
                       right URI has to happen before the credentials matter. */}
                   {guide.redirectWarnings?.map((warning) => (
                     <div
                       key={warning}
-                      className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-micro text-warn"
+                      className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn"
                     >
                       <AlertTriangle className="mt-px size-3 shrink-0" />
                       <span>{warning}</span>
@@ -2494,7 +2489,7 @@ export function PlatformCredCard({
                 one that ran and failed, and a platform outage must not be
                 reported as the operator's mistake. */}
             {check && (
-              <div className="flex items-start gap-2 text-micro">
+              <div className="flex items-start gap-2 text-sm">
                 <Badge
                   variant={
                     check.state === "verified"
@@ -2560,12 +2555,12 @@ export function PlatformCredCard({
                       <div className="flex items-center gap-1.5">
                         <span className="truncate text-sm">{a.accountName}</span>
                         {a.reconnect?.needed && (
-                          <Badge variant="outline" className="border-warn text-micro text-warn">
+                          <Badge variant="outline" className="border-warn text-sm text-warn">
                             {t("i18nSweep.reconnectNeeded")}
                           </Badge>
                         )}
                       </div>
-                      <div className="font-mono text-micro text-muted-foreground">{a.accountRef}</div>
+                      <div className="font-mono text-sm text-muted-foreground">{a.accountRef}</div>
                       {/* What the capability matrix two cards up promises, on
                           the account it is a promise about. "Viewers: Works"
                           read as a claim nobody could check until this was
@@ -2579,7 +2574,7 @@ export function PlatformCredCard({
                           the point is that a token cannot gain a permission it
                           was not issued with, which is nobody's mistake. */}
                       {a.reconnect?.needed && (
-                        <div className="mt-0.5 text-micro text-warn">
+                        <div className="mt-0.5 text-sm text-warn">
                           {a.reconnect.reason}
                           {a.reconnect.missing && a.reconnect.missing.length > 0 && (
                             <> {t("i18nSweep.missingScopes")} <code>{a.reconnect.missing.join(", ")}</code></>
@@ -2597,7 +2592,7 @@ export function PlatformCredCard({
                     </Button>
                   </div>
                 ))}
-                <span className="text-micro text-muted-foreground">{t("set.multiAccountNote")}</span>
+                <span className="text-sm text-muted-foreground">{t("set.multiAccountNote")}</span>
               </div>
             )}
           </>
@@ -2648,7 +2643,7 @@ export function PlatformCredCard({
             {inUse?.message}
             {inUse && inUse.destinations.length > 0 && (
               <span className="mt-2 flex flex-col gap-0.5">
-                <span className="text-micro uppercase tracking-wider text-muted-foreground">
+                <span className="text-sm uppercase tracking-wider text-muted-foreground">
                   {t("set.disconnectInUseList")}
                 </span>
                 {/* NAMED, not counted. "3 destinations" is not something an
@@ -2805,12 +2800,14 @@ function expiryTone(daysRemaining: number): SignalTone {
   return "live";
 }
 
-function expiryLabel(cert: CertInfo): string {
+function expiryLabel(cert: CertInfo, t: Translator): string {
   if (cert.expired) {
     const ago = Math.abs(cert.daysRemaining);
-    return ago === 0 ? "expired today" : `expired ${ago} day${ago === 1 ? "" : "s"} ago`;
+    if (ago === 0) return t("set.certExpiredToday");
+    return t(ago === 1 ? "set.certExpiredAgoOne" : "set.certExpiredAgoMany", { n: ago });
   }
-  return `${cert.daysRemaining} day${cert.daysRemaining === 1 ? "" : "s"} left`;
+  const n = cert.daysRemaining;
+  return t(n === 1 ? "set.certDaysLeftOne" : "set.certDaysLeftMany", { n });
 }
 
 /** The config.yaml the current mode corresponds to, filled in with the values
@@ -2943,25 +2940,25 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
 
   return (
     <div className="flex flex-col gap-2 border-t border-border pt-2">
-      <span className="text-tiny text-muted-foreground">{t("set.acmeTitle")}</span>
-      <p className="text-micro text-muted-foreground">{t(acmeStanceCopy[stance])}</p>
+      <span className="text-sm text-muted-foreground">{t("set.acmeTitle")}</span>
+      <p className="text-sm text-muted-foreground">{t(acmeStanceCopy[stance])}</p>
 
       {offersPreflight(stance) && (
         <>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="acme-host" className="text-micro">
+            <Label htmlFor="acme-host" className="text-sm">
               {t("set.acmeHostname")}
             </Label>
             <Input
               id="acme-host"
-              className="h-7 font-mono text-tiny"
+              className="h-7 font-mono text-sm"
               placeholder="stream.example.com"
               value={hostname}
               onChange={(e) => setHostname(e.target.value)}
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="acme-email" className="text-micro">
+            <Label htmlFor="acme-email" className="text-sm">
               {t("set.acmeEmailLabel")}
             </Label>
             {/* Never sent to this server: it only ever appears in the YAML
@@ -2969,12 +2966,12 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
             <Input
               id="acme-email"
               type="email"
-              className="h-7 font-mono text-tiny"
+              className="h-7 font-mono text-sm"
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-            <p className="text-micro text-muted-foreground">{t("set.acmeEmailHint")}</p>
+            <p className="text-sm text-muted-foreground">{t("set.acmeEmailHint")}</p>
           </div>
           <Button
             size="sm"
@@ -2987,33 +2984,33 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
             {checking ? t("set.acmeRunning") : t("set.acmeRun")}
           </Button>
 
-          {checkError && <p className="text-micro text-down">{checkError}</p>}
+          {checkError && <p className="text-sm text-down">{checkError}</p>}
 
           {result && (
             <>
-              <p className={`text-micro ${result.ready ? toneText.live : toneText.down}`}>
+              <p className={`text-sm ${result.ready ? toneText.live : toneText.down}`}>
                 {result.ready ? t("set.acmeReady") : t("set.acmeBlocked")}
               </p>
               <ul className="flex flex-col gap-1.5">
                 {result.checks.map((c) => (
                   <li key={c.id} className="flex flex-col">
-                    <span className={`text-micro font-medium ${toneText[acmeCheckTone[c.status]]}`}>
+                    <span className={`text-sm font-medium ${toneText[acmeCheckTone[c.status]]}`}>
                       {t(acmeCheckLabel[c.id])}
                     </span>
-                    <span className="text-micro text-muted-foreground">{c.detail}</span>
+                    <span className="text-sm text-muted-foreground">{c.detail}</span>
                   </li>
                 ))}
               </ul>
               {/* Said before the snippet, not after it: a failed order costs an
                   hour, and the operator reads downward. */}
-              <p className="text-micro text-warn">{t("set.acmeRateLimit")}</p>
+              <p className="text-sm text-warn">{t("set.acmeRateLimit")}</p>
               <div className="flex items-center justify-between">
-                <span className="text-tiny text-muted-foreground">{t("set.acmeThen")}</span>
+                <span className="text-sm text-muted-foreground">{t("set.acmeThen")}</span>
                 <Button size="sm" variant="ghost" onClick={copySnippet}>
                   {copied ? <Check /> : <Copy />} {t("set.copy")}
                 </Button>
               </div>
-              <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-micro text-muted-foreground">
+              <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-sm text-muted-foreground">
                 {snippet}
               </pre>
             </>
@@ -3026,6 +3023,7 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
 
 function TransportSecurity({ system }: { system: SystemInfo | null }) {
   const t = useT();
+  const tn = useTN();
   const [tls, setTls] = useState<TlsStatus | null>(null);
   const [loadError, setLoadError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -3057,26 +3055,26 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {!tls && !loadError && (
-          <div className="flex items-center gap-2 text-tiny text-muted-foreground">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" /> {t("i18nSweep.readingCertificate")}
           </div>
         )}
-        {loadError && <p className="text-tiny text-down">{loadError}</p>}
+        {loadError && <p className="text-sm text-down">{loadError}</p>}
 
         {tls && (
           <>
             <div className="flex items-center justify-between">
-              <span className="text-tiny text-muted-foreground">{t("set.mode")}</span>
+              <span className="text-sm text-muted-foreground">{t("set.mode")}</span>
               <div className="flex items-center gap-1.5">
                 {tls.configured === "auto" && (
-                  <span className="text-micro text-muted-foreground">auto resolved to</span>
+                  <span className="text-sm text-muted-foreground">{t("set.tlsAutoResolvedTo")}</span>
                 )}
                 <Badge variant={toneBadge[modeTone(tls)]}>{t(tlsModeLabel[tls.mode])}</Badge>
               </div>
             </div>
 
             {tls.mode === "off" && (
-              <p className="text-micro text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 {tls.trustProxyHeaders
                   ? t("set.proxyTerminatesTls") : t("set.noEncryption")}
               </p>
@@ -3085,24 +3083,24 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             {cert ? (
               <>
                 <div className="flex items-center justify-between gap-2 border-t border-border pt-2">
-                  <span className="text-tiny text-muted-foreground">{t("set.expires")}</span>
+                  <span className="text-sm text-muted-foreground">{t("set.expires")}</span>
                   <span className="flex items-baseline gap-1.5">
-                    <code className="tnum font-mono text-micro">{timestamp(cert.notAfter)}</code>
-                    <span className={`tnum text-micro ${toneText[expiryTone(cert.daysRemaining)]}`}>
-                      {expiryLabel(cert)}</span>
+                    <code className="tnum font-mono text-sm">{timestamp(cert.notAfter)}</code>
+                    <span className={`tnum text-sm ${toneText[expiryTone(cert.daysRemaining)]}`}>
+                      {expiryLabel(cert, t)}</span>
                   </span>
                 </div>
                 <div className="flex items-start justify-between gap-2">
-                  <span className="shrink-0 text-tiny text-muted-foreground">{t("set.issuer")}</span>
-                  <span className="min-w-0 break-all text-right text-micro">{cert.issuer}</span>
+                  <span className="shrink-0 text-sm text-muted-foreground">{t("set.issuer")}</span>
+                  <span className="min-w-0 break-all text-right text-sm">{cert.issuer}</span>
                 </div>
                 <div className="flex items-start justify-between gap-2">
-                  <span className="shrink-0 text-tiny text-muted-foreground">{t("set.subject")}</span>
-                  <span className="min-w-0 break-all text-right text-micro">{cert.subject}</span>
+                  <span className="shrink-0 text-sm text-muted-foreground">{t("set.subject")}</span>
+                  <span className="min-w-0 break-all text-right text-sm">{cert.subject}</span>
                 </div>
                 <div className="flex items-start justify-between gap-2">
-                  <span className="shrink-0 text-tiny text-muted-foreground">{t("set.validFor")}</span>
-                  <code className="min-w-0 break-all text-right font-mono text-micro">
+                  <span className="shrink-0 text-sm text-muted-foreground">{t("set.validFor")}</span>
+                  <code className="min-w-0 break-all text-right font-mono text-sm">
                     {sans.length ? sans.join(", ") : "—"}
                   </code>
                 </div>
@@ -3112,27 +3110,27 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
               // repeating the API's wording underneath it reads as a fault.
               tls.mode !== "off" &&
               tls.certificateError && (
-                <p className="border-t border-border pt-2 text-micro text-muted-foreground">
+                <p className="border-t border-border pt-2 text-sm text-muted-foreground">
                   {tls.certificateError}
                 </p>
               )
             )}
 
-            {tls.hstsWarning && <p className="text-micro text-warn">{tls.hstsWarning}</p>}
+            {tls.hstsWarning && <p className="text-sm text-warn">{tls.hstsWarning}</p>}
             {tls.hsts && (
-              <p className="text-micro text-muted-foreground">
-                HSTS is on. Browsers will refuse plain HTTP to
-                <code className="mx-1 font-mono">{tls.hostname || "this host"}</code>
-                until the max-age lapses; there is no server-side undo.
+              <p className="text-sm text-muted-foreground">
+                {tn("set.hstsOn", {
+                  host: <code className="mx-1 font-mono">{tls.hostname || t("set.thisHost")}</code>,
+                })}
               </p>
             )}
 
             {tls.caAvailable && (
               <div className="flex flex-col gap-1.5 border-t border-border pt-2">
-                <span className="text-tiny text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("i18nSweep.localCa")}
                 </span>
-                <code className="tnum break-all rounded border border-border bg-background p-1.5 font-mono text-micro leading-relaxed text-muted-foreground">
+                <code className="tnum break-all rounded border border-border bg-background p-1.5 font-mono text-sm leading-relaxed text-muted-foreground">
                   {tls.caFingerprint}
                 </code>
                 {/* A plain link, not XHR: this is a file the browser saves, and
@@ -3143,26 +3141,26 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
                     <Download /> {t("i18nSweep.downloadCa")}
                   </a>
                 </Button>
-                <p className="text-micro text-muted-foreground">
-                  Install it to stop the browser warning, after checking the fingerprint above
-                  matches the one your browser shows.
+                <p className="text-sm text-muted-foreground">
+                  {t("set.caInstallIntro")}
                   <span className="mt-1 block">
-                    <strong className="font-medium text-foreground">macOS</strong> — open it in
-                    Keychain Access, add to System, then set it to “Always Trust”.
+                    {tn("set.caMacos", {
+                      os: <strong className="font-medium text-foreground">macOS</strong>,
+                    })}
                   </span>
                   <span className="block">
-                    <strong className="font-medium text-foreground">Linux</strong> — copy to
-                    <code className="mx-1 font-mono">/usr/local/share/ca-certificates/</code>and run
-                    <code className="mx-1 font-mono">update-ca-certificates</code>.
+                    {tn("set.caLinux", {
+                      os: <strong className="font-medium text-foreground">Linux</strong>,
+                      dir: <code className="mx-1 font-mono">/usr/local/share/ca-certificates/</code>,
+                      cmd: <code className="mx-1 font-mono">update-ca-certificates</code>,
+                    })}
                   </span>
                   <span className="block">
-                    <strong className="font-medium text-foreground">Windows</strong> — import into
-                    “Trusted Root Certification Authorities” for the local machine.
+                    {tn("set.caWindows", {
+                      os: <strong className="font-medium text-foreground">Windows</strong>,
+                    })}
                   </span>
-                  <span className="mt-1 block">
-                    Firefox and Chrome keep their own stores on some platforms and may need it
-                    imported there too.
-                  </span>
+                  <span className="mt-1 block">{t("set.caBrowsers")}</span>
                 </p>
               </div>
             )}
@@ -3170,12 +3168,12 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             <LetsEncryptWalkthrough tls={tls} />
 
             <div className="flex items-center justify-between border-t border-border pt-2">
-              <span className="text-tiny text-muted-foreground">config.yaml</span>
+              <span className="text-sm text-muted-foreground">config.yaml</span>
               <Button size="sm" variant="ghost" onClick={copyYaml}>
                 {copied ? <Check /> : <Copy />} {t("set.copy")}
               </Button>
             </div>
-            <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-micro text-muted-foreground">
+            <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-sm text-muted-foreground">
               {tlsYaml(tls)}
             </pre>
           </>
@@ -3190,15 +3188,13 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             operator to find it. See ui/src/lib/tourSteps.ts. */}
         <div data-tour="data-directory" className="flex flex-col gap-2">
           <div className="flex items-start justify-between gap-2 border-t border-border pt-2">
-            <span className="shrink-0 text-tiny text-muted-foreground">{t("set.dataDirectory")}</span>
-            <code className="min-w-0 break-all text-right font-mono text-micro">
+            <span className="shrink-0 text-sm text-muted-foreground">{t("set.dataDirectory")}</span>
+            <code className="min-w-0 break-all text-right font-mono text-sm">
               {system?.dataDir ?? "—"}
             </code>
           </div>
-          <p className="text-micro text-muted-foreground">
-            OAuth tokens and client secrets are encrypted at rest with NaCl secretbox, keyed by
-            <code className="mx-1 font-mono">secret.key</code> in that directory. Back it up with the
-            database, or connected accounts must be re-authorised.
+          <p className="text-sm text-muted-foreground">
+            {tn("set.secretKeyNote", { file: <code className="mx-1 font-mono">secret.key</code> })}
           </p>
         </div>
       </CardContent>
@@ -3307,14 +3303,14 @@ function ApiTokens() {
             {busy ? <Loader2 className="animate-spin" /> : <KeyRound />} {t("i18nSweep.createToken")}
           </Button>
         </form>
-        <span className="text-micro text-muted-foreground">
+        <span className="text-sm text-muted-foreground">
           {scope === "read" ? t("set.tokenScopeReadHint") : t("set.tokenScopeAdminHint")}
         </span>
 
         {minted && (
           <div className="flex flex-col gap-1.5 rounded border border-warn/50 bg-warn/5 p-2">
-            <span className="text-tiny font-medium">
-              Copy {minted.token.name} now — it is never shown again.
+            <span className="text-sm font-medium">
+              {t("set.tokenCopyNow", { name: minted.token.name })}
             </span>
             <div className="flex items-center gap-1.5">
               <SecretCode value={minted.plaintext} />
@@ -3322,36 +3318,36 @@ function ApiTokens() {
                 {copied ? <Check /> : <Copy />} {copied ? t("clipedit.copied") : t("common.copy")}
               </Button>
             </div>
-            <span className="text-micro text-muted-foreground">{t("set.tokenHashNote")}</span>
+            <span className="text-sm text-muted-foreground">{t("set.tokenHashNote")}</span>
           </div>
         )}
 
         {readFailed(tokens) ? (
-          <span className="text-tiny text-warn">{t("set.tokensUnread")}</span>
+          <span className="text-sm text-warn">{t("set.tokensUnread")}</span>
         ) : !mayClaim(tokens) ? (
-          <span className="text-tiny text-muted-foreground">{t("set.tokensLoading")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.tokensLoading")}</span>
         ) : tokens.value.length === 0 ? (
-          <span className="text-tiny text-muted-foreground">{t("set.noTokens")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.noTokens")}</span>
         ) : (
           <div className="flex flex-col gap-1">
-            {tokens.value.map((t) => (
+            {tokens.value.map((tok) => (
               <div
-                key={t.id}
+                key={tok.id}
                 className="flex items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1.5"
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate text-sm">{t.name}</span>
+                    <span className="truncate text-sm">{tok.name}</span>
                     {/* Admin is the one worth spotting in a list, so it is the
                         one that gets the loud variant. A read token is the
                         expected case and reads as ordinary. */}
-                    <Badge variant={t.scope === "admin" ? "warn" : "outline"}>
-                      {t.scope}
+                    <Badge variant={tok.scope === "admin" ? "warn" : "outline"}>
+                      {tok.scope}
                     </Badge>
                   </div>
-                  <div className="font-mono text-micro text-muted-foreground">
-                    {t.prefix}… · created {new Date(t.createdAt).toLocaleDateString()} ·{" "}
-                    {tokenLastUsed(t)}
+                  <div className="font-mono text-sm text-muted-foreground">
+                    {tok.prefix}… · {t("set.tokenCreated", { date: new Date(tok.createdAt).toLocaleDateString() })} ·{" "}
+                    {tokenLastUsed(tok, t)}
                   </div>
                 </div>
                 {/* Asks, and asks with the name typed. Revoking is
@@ -3364,8 +3360,8 @@ function ApiTokens() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => confirmRevoke.ask(t)}
-                  aria-label={`Revoke ${t.name}`}
+                  onClick={() => confirmRevoke.ask(tok)}
+                  aria-label={t("set.tokenRevokeAria", { name: tok.name })}
                 >
                   <Trash2 />
                 </Button>
@@ -3397,8 +3393,8 @@ function ApiTokens() {
 }
 
 /** The server sends the zero time for a token nothing has presented yet. */
-function tokenLastUsed(t: ApiToken): string {
+function tokenLastUsed(t: ApiToken, tr: Translator): string {
   const used = new Date(t.lastUsedAt);
-  if (Number.isNaN(used.getTime()) || used.getUTCFullYear() <= 1) return "never used";
-  return `last used ${used.toLocaleString()}`;
+  if (Number.isNaN(used.getTime()) || used.getUTCFullYear() <= 1) return tr("set.tokenNeverUsed");
+  return tr("set.tokenLastUsed", { at: used.toLocaleString() });
 }

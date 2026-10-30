@@ -55,6 +55,12 @@ async function openEditor(page: Page, name: string) {
   return dialog;
 }
 
+/** The dialog is four steps since A6: the account is on step 2, the Facebook
+ *  block on step 4. Steps stay mounted, so moving keeps what was set. */
+async function goStep(dialog: ReturnType<Page["getByRole"]>, n: 1 | 2 | 3 | 4) {
+  await dialog.getByTestId(`dest-step-${n}`).click();
+}
+
 /** Stores one audience against a destination and returns the HTTP status,
  *  rather than throwing on a refusal. */
 async function saveAudience(page: Page, id: number, value: string): Promise<number> {
@@ -117,6 +123,7 @@ test.describe("the Facebook block writes what an operator types", () => {
 
     try {
       const dialog = await openEditor(page, "e2e fb controls");
+      await goStep(dialog, 4);
 
       // --- crosspost: the list starts empty, so the ADD button is the control.
       // A heading over an empty space is what the old guard could not tell apart
@@ -205,6 +212,7 @@ test.describe("the Facebook block writes what an operator types", () => {
 
     try {
       const dialog = await openEditor(page, "e2e fb audiences");
+      await goStep(dialog, 4);
       await dialog.getByTestId("fb-audience-picker").click();
 
       // The values the select is actually offering, read off the DOM rather
@@ -297,9 +305,11 @@ test.describe("a Page account is not offered a personal audience", () => {
     try {
       await withAccount(page, "page:998877");
       const dialog = await openEditor(page, "e2e fb page acct");
+      await goStep(dialog, 2);
 
       await dialog.getByTestId("connected-account-picker").click();
       await page.getByRole("option", { name: "E2E stub account" }).click();
+      await goStep(dialog, 4);
 
       // The control is GONE, and something says why. Both halves: a setting
       // that vanishes with no statement of why reads as the form losing it.
@@ -341,9 +351,11 @@ test.describe("a Page account is not offered a personal audience", () => {
       // hiding it on a guess would take away a setting that does work.
       await withAccount(page, "user:112233");
       const dialog = await openEditor(page, "e2e fb profile acct");
+      await goStep(dialog, 2);
 
       await dialog.getByTestId("connected-account-picker").click();
       await page.getByRole("option", { name: "E2E stub account" }).click();
+      await goStep(dialog, 4);
 
       await expect(
         dialog.getByTestId("fb-audience-picker"),

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 // The timecode and sprite functions this component draws with live in lib
 // because the clip editor needs them too. See lib/timeline.ts for why they are
 // not here.
@@ -179,6 +180,7 @@ export function Timeline({
   onMoveWindow,
   className,
 }: TimelineProps) {
+  const t = useT();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
@@ -352,7 +354,7 @@ export function Timeline({
         {onChangeIn && (
           <Handle
             kind="in"
-            label="Clip in-point"
+            label={t("signature.timeline.inPoint")}
             valueMs={inMs}
             leftPx={toPx(inMs)}
             width={width}
@@ -362,7 +364,7 @@ export function Timeline({
         {onChangeOut && (
           <Handle
             kind="out"
-            label="Clip out-point"
+            label={t("signature.timeline.outPoint")}
             valueMs={outMs}
             leftPx={toPx(outMs)}
             width={width}

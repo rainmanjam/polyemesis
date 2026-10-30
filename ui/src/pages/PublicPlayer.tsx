@@ -199,11 +199,10 @@ export function PublicPlayer() {
     return (
       <Shell>
         <h1 className="text-base font-semibold text-neutral-100">
-          This stream is private
+          {t("player.privateTitle")}
         </h1>
         <p className="mt-2 max-w-sm text-sm text-neutral-400">
-          The link you followed is missing its playback token, or the token has
-          been changed. Ask whoever shared it for a current link.
+          {t("player.missingToken")}
         </p>
       </Shell>
     );
@@ -214,7 +213,7 @@ export function PublicPlayer() {
       <Shell>
         <h1 className="text-base font-semibold text-neutral-100">{t("player.notLive")}</h1>
         <p className="mt-2 max-w-sm text-sm text-neutral-400">
-          This page will start playing on its own when the broadcast begins.
+          {t("player.willStart")}
         </p>
       </Shell>
     );
@@ -242,14 +241,14 @@ export function PublicPlayer() {
 
           {!playing && (
             <div className="pointer-events-none absolute left-3 top-3 rounded bg-black/70 px-2 py-1 text-[11px] text-neutral-300">
-              Connecting…
+              {t("player.connecting")}
             </div>
           )}
 
           {playing && (
             <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-1.5 rounded bg-black/70 px-2 py-1 text-[11px] font-medium text-red-400">
               <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-              LIVE
+              {t("player.liveBadge")}
             </div>
           )}
         </div>
@@ -273,8 +272,7 @@ export function PublicPlayer() {
           </span>
           {view.variants && view.variants.length > 1 && (
             <span>
-              {view.variants.length} quality options — your player picks one
-              automatically
+              {t("player.qualityOptions", { n: view.variants.length })}
             </span>
           )}
         </div>
@@ -284,7 +282,7 @@ export function PublicPlayer() {
         {window.self === window.top && (
           <details className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-3">
             <summary className="cursor-pointer text-xs text-neutral-400">
-              Embed this player
+              {t("player.embed")}
             </summary>
             <textarea
               readOnly

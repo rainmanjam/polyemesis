@@ -60,22 +60,12 @@ test("dashboard — the hero shot", async ({ page }) => {
     { text: "Offline", exact: true },
   ]);
 
-  // The fan-out, framed on its own.
-  //
-  // THE SHOT ABOVE IS THE TOP OF THE PAGE AND THE TOP OF THE PAGE IS THE
-  // INGEST CARD, which reports OFFLINE with no bitrate while 200 MB of video
-  // is demonstrably on the relay. That is not this harness getting it wrong:
-  // engine.Status() fills `ingest` from the ingest CHILD PROCESS, and under the
-  // one-port design there is no such process -- the Go SRT listener delivers
-  // straight to the hub. AppLayout already computes liveness from the relay
-  // instead and says "Live" in the header of the same screenshot; the
-  // dashboard card does not. web/src/pages/features.astro has been omitting
-  // the dashboard capture over exactly this.
-  //
-  // So the differentiator gets a frame that tells the truth: thirteen
-  // destinations across five platforms and three rendition tiers, which is the
-  // claim that is actually being made and the one every card in it supports.
-  // Delete this shot, not that one, when the ingest card is fixed.
+  // The fan-out, framed on its own: thirteen destinations across five
+  // platforms and three rendition tiers, each card with its own tracks. This
+  // used to stand in for the hero above, whose ingest card first read OFFLINE
+  // over a live relay and then showed whichever programme reported last; both
+  // are fixed (lib/dashboardFacts programmeSnapshot), and the site now shows
+  // 01-dashboard.png itself. This frame stays for the per-destination claim.
   // The heading, by role and prefix. Its text is "Destinations" followed by the
   // count in a sibling span, so an exact text match on the word alone matches
   // nothing at all -- and a locator that matches nothing waits out its timeout
@@ -115,7 +105,14 @@ test("dashboard — two programmes, and the lanes that divide them", async ({ pa
   // not rendered at all, so their absence means the seed did not take -- and a
   // shot of a single-programme dashboard filed as the multi-programme one is
   // worse than no shot.
-  const laneHeading = page.getByText("Studio B — panel show").first();
+  //
+  // Matched on "Studio B", not on a full name, because two seeders feed this
+  // spec and they name the second programme differently: seed_demo.go
+  // (capture-media.sh) says "Studio B — panel show", demo-seed.fixture.json
+  // (demo-seed.sh) says "Commentary Booth — Studio B". The full-name match made
+  // this shot fail on every demo-seed run, so the site's capture set was always
+  // one short. Visible-only, so the closed programme picker cannot satisfy it.
+  const laneHeading = page.getByText(/Studio B/).filter({ visible: true }).first();
   await expect(
     laneHeading,
     "no lane heading for the second programme, so this is a single-programme " +
@@ -146,6 +143,68 @@ test("routing — the thing nothing else does", async ({ page }) => {
     await settle(page, 400);
     await page.screenshot({ path: `${OUT}/03-routing-filtergraph.png` });
   }
+
+  // THE HOME PAGE HERO, AS ITS OWN FRAME (UX Council S1).
+  //
+  // The hero used to crop 02-routing.png in CSS: the whole 1440px screen scaled
+  // into a ~560px box, so the track names printed at about 5px and the crop
+  // offsets were tuned to one capture's pixel layout and broke on the next.
+  // This is the part the pitch is about, at a size it can be read: the track
+  // rows of the selected destination, the music track visibly not sent, and the
+  // music-rights switch that keeps it out.
+  //
+  // The selected destination is the first in the list, which the fixture makes
+  // YouTube with the music bed excluded. Asserted rather than assumed: a hero
+  // photographing a destination that DOES carry the music would argue against
+  // the sentence beside it.
+  //
+  // A SKIP, NOT A FAILURE, when it is missing. capture-media.sh runs this same
+  // spec against seed_demo.go's install, whose first destination carries the
+  // music; failing here would stop that script before it compresses or copies
+  // anything, over a frame it was never going to use. demo-seed.sh's fixture
+  // is the one the hero is taken from.
+  const excluded = await page
+    .getByText("Music excluded", { exact: false })
+    .first()
+    .waitFor({ state: "visible", timeout: 20_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!excluded) {
+    test.info().annotations.push({
+      type: "skipped-shot",
+      description: "02-routing-hero.png: the selected destination carries the music, so the hero frame would contradict the home page",
+    });
+    return;
+  }
+  // At 1024px wide, not 1440. The hero column is ~560 CSS px, and at 1440 the
+  // track card is 1000px of mostly meter bar, which the column shrinks until
+  // the track names are unreadable again. At 1024 the card is ~600px, so the
+  // hero shows it at close to its real size.
+  const fullViewport = page.viewportSize()!;
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await settle(page, 800);
+  const simpleTab = page.getByText("Simple", { exact: true }).first();
+  // Scrolled to the top and then back down past the app's sticky header,
+  // which otherwise sits over the tab row the clip starts on.
+  await simpleTab.evaluate((el) => {
+    el.scrollIntoView({ block: "start", behavior: "instant" });
+    let box: HTMLElement | null = el.parentElement;
+    while (box && !(box.scrollHeight > box.clientHeight && getComputedStyle(box).overflowY !== "visible")) {
+      box = box.parentElement;
+    }
+    (box ?? document.scrollingElement!).scrollBy(0, -88);
+  });
+  await settle(page, 800);
+  const top = (await simpleTab.boundingBox())!;
+  const tail = (await page.getByText("Also exclude", { exact: false }).first().boundingBox())!;
+  const vw = page.viewportSize()!.width;
+  const x = Math.max(0, top.x - 14);
+  const y = Math.max(0, top.y - 10);
+  await page.screenshot({
+    path: `${OUT}/02-routing-hero.png`,
+    clip: { x, y, width: vw - 12 - x, height: tail.y + tail.height + 18 - y },
+  });
+  await page.setViewportSize(fullViewport);
 });
 
 test("meters — loudness measured after routing", async ({ page }) => {
@@ -357,7 +416,68 @@ test("renditions — the ladder, shared across destinations", async ({ page }) =
 test("monitoring — every process, with its own FFmpeg output", async ({ page }) => {
   await page.goto("/monitoring");
   await settle(page, 2500);
-  await page.screenshot({ path: `${OUT}/07-monitoring.png` });
+  // THE WHOLE PAGE NOW, process list and log included. This frame used to stop
+  // above the process list, because every child that decodes video from the
+  // relay joins it mid-GOP and, until the next keyframe, FFmpeg's h264 decoder
+  // complains once a frame -- and the supervisor counted that burst as errors,
+  // so a healthy install showed "189 ERRORS" on whichever process started last.
+  // The supervisor now logs a video decoder's lines as info until the process's
+  // first output frame (internal/supervisor/warmup.go), so a healthy install
+  // shows no errors, and the page can be photographed as it is.
+  //
+  // Framed on the process list, with the log filtered to one process: the
+  // claim is "every process, with its own FFmpeg output", and the filtered log
+  // is the "its own".
+  const processes = page.getByText("Processes", { exact: true }).first();
+  await topOfFrame(page, processes);
+
+  // The log opens on Errors, and on a healthy install that view is empty --
+  // which is the point, and is also a picture of nothing. All shows the lines.
+  await page.getByRole("button", { name: "All", exact: true }).click();
+
+  // One process's own output. The preview first: it restarts whenever a
+  // dashboard opens, so its join-time decoder warm-up is the most recent
+  // thing in the log, now as info lines rather than errors -- the case this
+  // frame exists to show honestly. The console keeps the last 800 lines across
+  // every process, so a child that started minutes ago may have scrolled out;
+  // any process that still has lines will do.
+  const empty = page.getByText("No lines match this view.", { exact: true });
+  const select = page.getByRole("combobox").filter({ hasText: /All processes|:|^preview$|^meters$/ }).first();
+  await select.click();
+  const names = (await page.getByRole("option").allInnerTexts()).filter((n) => n !== "All processes");
+  await page.keyboard.press("Escape");
+  const order = [...names.filter((n) => n === "preview"), ...names.filter((n) => n !== "preview")];
+  let shown = "";
+  for (const name of order) {
+    await select.click();
+    await page.getByRole("option", { name, exact: true }).click();
+    await settle(page, 600);
+    if ((await empty.count()) === 0) {
+      shown = name;
+      break;
+    }
+  }
+  expect(shown, "no process has any lines left in the console's log").not.toBe("");
+  await settle(page, 1500);
+
+  // NO FALSE ERRORS: no per-process error chip, and the log's own count at 0.
+  // Asserted rather than hoped: a frame showing "N errors" on a healthy stream
+  // is the product looking broken, which this harness refuses to photograph.
+  const falseErrors = page.getByText(/^\d+ errors?$/);
+  await expect(falseErrors).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByText("Errors 0", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^No errors in the last \d+ s$/)).toBeVisible();
+  // And the filtered log has lines in it: an empty log would be a picture of
+  // nothing, whatever its count says.
+  await expect(page.getByText("No lines match this view.", { exact: true })).toHaveCount(0);
+  // Every running process has an uptime: the meters used to read --:--:--
+  // for their whole life, because their stdout is level data and the
+  // supervisor never heard that media was flowing.
+  await shoot(page, `${OUT}/07-monitoring.png`, [
+    { text: "No lines match this view.", exact: true },
+    { text: "--:--:--", exact: true },
+  ]);
+  await expect(falseErrors).toHaveCount(0);
 });
 
 /* The video. One take, no cuts, following the same argument as the stills:
@@ -436,7 +556,7 @@ test("routing mix matrix — channel-level control", async ({ page }) => {
   await page.screenshot({ path: `${OUT}/08-mix-matrix.png` });
 });
 
-/* THE ONE STUBBED SHOT, AND IT IS DECLARED RATHER THAN QUIET.
+/* THE FIRST STUBBED SHOT, AND IT IS DECLARED RATHER THAN QUIET.
  *
  * Everything else in this file photographs a real polyemesis doing real work:
  * a real ingest, real destinations, real bytes. Chat cannot be. A message
@@ -453,7 +573,7 @@ test("routing mix matrix — channel-level control", async ({ page }) => {
  * running but no platform account is attached yet" -- under a test named "four
  * platforms in one hub". The picture argued the opposite of its own title.
  *
- * Recorded in docs/media/README.md as the single exception to "generated, not
+ * Recorded in docs/media/README.md as an exception to "generated, not
  * hand-made", because an undeclared exception is how a policy stops meaning
  * anything.
  */
@@ -616,4 +736,78 @@ test("platforms — sign-in and credentials, honestly not connected", async ({ p
   await topOfFrame(page, page.getByText("Why you need your own developer app"));
   await settle(page, 1500);
   await page.screenshot({ path: `${OUT}/21-platforms.png` });
+});
+
+/* THE SECOND STUBBED SHOT, DECLARED FOR THE SAME REASON AS CHAT.
+ *
+ * 21-platforms.png is the one-time setup a new install starts in, and it is
+ * honest -- but it was the only picture of platform sign-in, so the site showed
+ * empty Client ID fields and a greyed Save button under a section promising
+ * "stop pasting stream keys". That is the end state nobody sees until they have
+ * a real channel to connect (UX Council S5).
+ *
+ * So this serves the end state to the REAL Settings page: a registered app and
+ * one connected account per platform. Every name is obviously a demo name, the
+ * client id says "demo" and "not-real" in plain words, and nothing resembles a
+ * credential. What is genuine is the page: the connected-account rows, the
+ * reconnect logic, the viewer-count readout. What is fabricated is only whose
+ * channel it is. Listed in docs/media/README.md beside 09-chat.png. */
+const DEMO_ACCOUNTS = [
+  { platform: "youtube", accountName: "Demo Studio (YouTube)", accountRef: "channel/demo-studio" },
+  { platform: "twitch", accountName: "demo_studio", accountRef: "user/demo_studio" },
+  { platform: "facebook", accountName: "Demo Studio Page", accountRef: "page/demo-studio" },
+] as const;
+
+test("platforms — connected, the end state of the one-time setup", async ({ page }) => {
+  const now = new Date();
+  const later = new Date(now.getTime() + 30 * 24 * 3600 * 1000).toISOString();
+  await page.route(
+    (url) => url.pathname === "/api/v1/platforms/credentials",
+    (route) =>
+      route.fulfill({
+        json: DEMO_ACCOUNTS.map((a) => ({
+          platform: a.platform,
+          clientId: `demo-${a.platform}-client-not-real`,
+          hasSecret: true,
+          updatedAt: now.toISOString(),
+        })),
+      }),
+  );
+  await page.route(
+    (url) => url.pathname === "/api/v1/platforms/accounts",
+    (route) =>
+      route.fulfill({
+        json: DEMO_ACCOUNTS.map((a, i) => ({
+          id: i + 1,
+          platform: a.platform,
+          accountName: a.accountName,
+          accountRef: a.accountRef,
+          expiresAt: later,
+          scopes: "",
+          scopeVer: 0,
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+          reconnect: { needed: false },
+        })),
+      }),
+  );
+  // Offline, because it is: the seeded RTMP destinations point at .invalid
+  // hosts and are disabled, so no platform is carrying this demo. A viewer
+  // count here would be a number nobody measured.
+  await page.route(
+    (url) => /^\/api\/v1\/platforms\/accounts\/\d+\/stats$/.test(url.pathname),
+    (route) => route.fulfill({ json: { supported: true, stats: { live: false } } }),
+  );
+
+  await page.goto("/settings?tab=platforms");
+  await expect(page.getByText(/Platforms differ in how much/)).toBeVisible();
+  const connected = page.getByText("Connected accounts").first();
+  await expect(
+    connected,
+    "the stubbed accounts did not render, so this would photograph the empty form under a 'connected' name",
+  ).toBeVisible({ timeout: 20_000 });
+  await topOfFrame(page, page.getByText("Why you need your own developer app"));
+  await page.evaluate(() => window.scrollBy(0, -16));
+  await settle(page, 1500);
+  await page.screenshot({ path: `${OUT}/22-platforms-connected.png` });
 });

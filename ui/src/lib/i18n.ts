@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { createElement, Fragment, useCallback, useSyncExternalStore, type ReactNode } from "react";
 
 import de from "./i18n/de.json";
 import en from "./i18n/en.json";
@@ -191,6 +191,40 @@ export function useT(): Translator {
   const lang = useLanguage();
   return useCallback<Translator>(
     (key, params) => translate(lang, key, params),
+    [lang],
+  );
+}
+
+export type NodeParams = Record<string, ReactNode>;
+
+/** A template with React nodes in its `{name}` slots, for a sentence that has a
+ *  <strong>, a <code> or a link in the middle of it.
+ *
+ *  ONE KEY PER SENTENCE. The alternative, a key for each run of text between
+ *  the tags, fixes English word order into every language: a Japanese or German
+ *  sentence puts the emphasised phrase somewhere else, and three fragments
+ *  cannot move it. Here the translator moves `{b}` wherever the grammar wants
+ *  it, and the placeholder test still checks every slot survived. A slot with
+ *  no node is left as written, the same as translate() does. */
+export function interpolateNodes(template: string, params: NodeParams): ReactNode {
+  const parts = template.split(/(\{\w+\})/).filter((p) => p !== "");
+  return createElement(
+    Fragment,
+    null,
+    ...parts.map((part) => {
+      const slot = /^\{(\w+)\}$/.exec(part);
+      return slot && slot[1] in params ? params[slot[1]] : part;
+    }),
+  );
+}
+
+export type NodeTranslator = (key: TranslationKey, params: NodeParams) => ReactNode;
+
+/** useT for sentences with markup in them: `tn("key", { b: <strong>…</strong> })`. */
+export function useTN(): NodeTranslator {
+  const lang = useLanguage();
+  return useCallback<NodeTranslator>(
+    (key, params) => interpolateNodes(CATALOGUES[lang][key] ?? en[key], params),
     [lang],
   );
 }

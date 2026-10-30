@@ -226,7 +226,7 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
                     <Badge variant={tone ? toneBadge[tone] : "outline"}>{label}</Badge>
                   </div>
                   {st?.state === "attention" && (
-                    <div className="mt-0.5 text-[11px] text-down">
+                    <div className="mt-0.5 text-sm text-down">
                       {st.detail ?? t("playlist.missingUpload")}
                     </div>
                   )}
@@ -236,7 +236,7 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
                       field. Folding it in would make it unreachable, since
                       the row it belongs to is never "attention". */}
                   {st?.warning && (
-                    <div className="mt-0.5 text-[11px] text-warn" data-testid="playlist-item-warning">
+                    <div className="mt-0.5 text-sm text-warn" data-testid="playlist-item-warning">
                       {st.warning}
                     </div>
                   )}
@@ -299,7 +299,7 @@ export function PlaylistEditor({ items, onChange }: PlaylistEditorProps) {
           grammar -- and "Media" stays untranslated inside it deliberately,
           because it names the card an operator is being sent to look for, which
           still reads "Media" on screen. */}
-      <span className="text-[10px] text-muted-foreground">{t("playlist.hint")}</span>
+      <span className="text-sm text-muted-foreground">{t("playlist.hint")}</span>
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import type { TranslationKey } from "@/lib/i18n";
+
 /* What one track's meter column is entitled to say.
  *
  * The column had two strings for four situations, so two of them were lies —
@@ -52,10 +54,10 @@ export function trackSignal(a: {
 
 /** The words, kept beside the decision so the two cannot drift.
  *
- *  Literal English to match every other string in TrackRows and its siblings
- *  under components/signature, none of which is keyed. */
-export const TRACK_SIGNAL_TEXT: Record<Exclude<TrackSignal, "meter">, string> = {
-  offline: "meter feed offline",
-  waiting: "waiting for stream",
-  notMeasured: "not measured",
+ *  Catalogue keys, translated at render like every other string in TrackRows
+ *  and its siblings under components/signature: the family moved together. */
+export const TRACK_SIGNAL_TEXT: Record<Exclude<TrackSignal, "meter">, TranslationKey> = {
+  offline: "signature.signal.offline",
+  waiting: "clips.waitingForStream",
+  notMeasured: "signature.signal.notMeasured",
 };

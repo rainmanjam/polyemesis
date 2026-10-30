@@ -7,6 +7,7 @@ const labels = {
   platforms: "Platforms",
   overlays: "Overlays",
   security: "Security",
+  danger: "Danger zone",
   debug: "Debug",
 } as const;
 
@@ -30,7 +31,7 @@ describe("searchSettings", () => {
     expect(searchSettings("security", de)).toEqual([]);
   });
 
-  it("keeps the rail order fixed and covers the five sections the page has", () => {
-    expect(SETTINGS_TABS).toEqual(["ingest", "pipeline", "platforms", "overlays", "security", "debug"]);
+  it("keeps the rail order fixed: five sections, the Danger zone last, and Debug (on the System page) after it", () => {
+    expect(SETTINGS_TABS).toEqual(["ingest", "pipeline", "platforms", "overlays", "security", "danger", "debug"]);
   });
 });

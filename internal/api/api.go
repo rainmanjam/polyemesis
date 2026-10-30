@@ -380,6 +380,9 @@ func (s *Server) storageVerdict() recording.StorageState {
 // Server wires the HTTP layer to everything else.
 type Server struct {
 	log *slog.Logger
+	// acctHealth is each connected account's last token-refresh outcome (A5).
+	// The zero value is ready; see account_health.go.
+	acctHealth accountHealthBook
 	// diag is the debug-mode recorder and diagLevel the runtime log level it
 	// moves with. Both nil on a build without debug mode, which the handlers
 	// report as recording:false rather than as a missing route.

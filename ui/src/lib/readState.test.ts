@@ -69,7 +69,7 @@ describe("SettingsPage: the API token list", () => {
     // Revoking is irreversible in the strongest sense the app has: the
     // plaintext is gone everywhere. Removing a platform credential in the same
     // file already required typing; this was one click.
-    expect(src()).toContain("confirmRevoke.ask(t)");
+    expect(src()).toContain("confirmRevoke.ask(tok)");
     expect(src()).not.toContain("onClick={() => revoke(t)}");
     const dialog = src().slice(src().indexOf("open={confirmRevoke.open}"));
     expect(dialog.slice(0, 600)).toContain("requireTyping");

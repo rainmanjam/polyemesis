@@ -257,6 +257,33 @@ its first tagged release.
   (about 5.8:1). Labels and values on six configuration surfaces move from
   9–11 px to the 12 px step.
 
+- **UX Council gaps, in the app.** The dashboard's setup checklist lists
+  every publish address with its own copy button and a Signal / No signal
+  badge (A1). A source that starts receiving shows a live thumbnail and an Add
+  destination button (A2). Linked platform accounts carry a `health` field
+  from the last token refresh (`ok`, `expiring`, `refreshFailing`, `expired`)
+  in `GET /api/v1/platforms/accounts`, and the destination dialog shows it on
+  an account chip (A5). The destination dialog is four steps over one form
+  (Platform, Connect or key, Audio, Video and advanced) and leads with Connect
+  with a code on a self-signed server (A6). The routing save bar counts the
+  pending changes and lists what moves on air before Save (A7). The on-air
+  strip shows the time on air and an End all button (A8). Presets open a
+  review before they apply, the matrix has an undo history, and three starter
+  presets stay in view (A14). Debug recording moves to a System page, and
+  Settings ends with a Danger zone (A17). Delete dialogs count what still uses
+  the thing being deleted (A18). Routing, Renditions, playout, meters, chat,
+  clips, library, Jobs, Automation, Monitoring, Settings and the destination
+  dialog go through the catalogue in all fifteen locales (A19). Twelve-pixel
+  text and the muted foreground reach the remaining configuration surfaces
+  (B2), and Polish, Turkish, Russian and Ukrainian text draws in the app's own
+  faces (B3).
+
+- **UX Council gaps, on the site.** The features page's screenshots are
+  recaptured from a seeded install with a release version in the header,
+  including the connected platforms list, the dashboard and the full
+  Monitoring page (S5). The home page uses one track layout throughout and
+  leaves the Twitch GPU detail to the Twitch page (S7).
+
 - **The site's hero leads with the outcome and a copy-first install action.**
   The install command and a Copy button come first and the quickstart becomes a
   text link, which reverses the earlier docs-first order. The CSS drawing is
@@ -303,6 +330,40 @@ its first tagged release.
   `deploy/prometheus/alerts.yml`, and checks that every query on the Grafana
   dashboard parses (`scripts/promtool-check.sh`, Prometheus 3.15.0 pinned by
   digest).
+- **A healthy install no longer shows "189 ERRORS".** Every process that
+  decodes video from the relay joins it mid-GOP, and until the next keyframe
+  FFmpeg's decoder complains once a frame. Those lines were counted as errors
+  on the preview card and in Monitoring. A video decoder's lines are now logged
+  as info until the process's first output frame, or for 8 s after the spawn
+  when no frame count is reported. A decode error after that still counts.
+  Those warm-up lines are also never a destination's failure reason. A run
+  that died during warm-up had been shown one as its reason, on the card, in
+  alerts and in webhooks. A real failure printed after them still classifies.
+
+- **The meters and loudness processes show an uptime.** Their stdout is level
+  data, so the supervisor never learned that media was flowing, and Monitoring
+  showed `--:--:--` for as long as they ran.
+
+- **The dashboard's Ingest and Pipeline cards follow the programme selected
+  in the header.** On an install with several programmes they showed whichever
+  one had reported last. The Ingest card's state, bitrate, track count, video
+  line and publish address, and the Pipeline card's recorder, preview, meters,
+  relay subscribers and renditions, are now the selected programme's, and read
+  "—" until that programme reports.
+
+- **A four-track source shows four audio chips.** Destination cards always drew
+  six. They now draw one per track of the card's own programme.
+
+- **Routing presets pick the music track from the track roles.** The preset
+  pickers defaulted music to Track 1 whatever the annotations said. Music, mic
+  and clean now default to the tracks annotated with those roles, and a track
+  the operator picks is never overwritten.
+
+- **No words run together on the site.** Astro drops the space between text and
+  a link or inline element on the next source line, so the comparison,
+  download, docs, vs, features and multistream pages read "rendered
+  fromdocs/API.mdin the repository". The site build now fails on any such
+  join.
 
 - **An automod model reply without `abusive` or `confidence` is a failure, not
   a pass.** Such a reply (`{}`, `{"No": null}`) used to read as "not abusive"

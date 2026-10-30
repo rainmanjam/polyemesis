@@ -57,13 +57,7 @@ export function FacebookStreamHealthPanel({ state }: { state: HealthState }) {
 
       <Body state={state} t={t} />
 
-      {/* Literal English, deliberately, and the same call DestinationDialog.tsx
-          :1861-1863 makes for the multitrack explanation beside its switch:
-          long explanatory prose next to a per-destination control is left
-          untranslated rather than pushed through fifteen catalogues, because a
-          paragraph that drifts in fourteen languages is worse than one that is
-          only in one. Every label, button and toast around it IS translated;
-          this is the sentence that mitigates the choice.
+      {/* Keyed in the A19 sweep, like every label, button and toast around it.
 
           It is here at all because of what this pane does to the OTHER cards.
           An operator with Facebook, Twitch and YouTube side by side sees
@@ -72,10 +66,7 @@ export function FacebookStreamHealthPanel({ state }: { state: HealthState }) {
           bitrate or frame rate anywhere in its API, so there is nothing to show
           and nothing missing. Saying which is the whole job of this sentence. */}
       <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
-        Facebook is the only connected platform that publishes ingest numbers.
-        Twitch, YouTube and Kick do not report bitrate or frame rate at all, so
-        there is nothing to show on their cards — that is the platform, not this
-        destination.
+        {t("dash.fbOnlyPlatformWithNumbers")}
       </p>
     </div>
   );

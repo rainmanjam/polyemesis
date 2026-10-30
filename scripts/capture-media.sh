@@ -117,7 +117,9 @@ echo "==> building the UI and the capture image"
 ( cd "$ROOT" && make build >/dev/null ) || { echo "make build failed"; exit 1; }
 GOARCH_LOCAL="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
 ( cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH_LOCAL" \
-    go build -o "$WORK/polyemesis-linux" ./cmd/polyemesis ) || {
+    go build -trimpath \
+      -ldflags "-s -w -X main.version=${CAPTURE_VERSION:-$(git describe --tags --abbrev=0 2>/dev/null || echo dev)}" \
+      -o "$WORK/polyemesis-linux" ./cmd/polyemesis ) || {
   echo "cross-compile for the container failed"; exit 1; }
 docker build -q -t "$IMAGE" -f - "$WORK" >/dev/null <<'DOCKERFILE' || { echo "docker build failed"; exit 1; }
 FROM alpine:3.20

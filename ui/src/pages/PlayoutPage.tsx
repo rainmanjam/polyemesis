@@ -134,7 +134,7 @@ export function PlayoutPage() {
         setSettings(saved);
         setView(await api.playout());
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not save");
+        toast.error(err instanceof Error ? err.message : t("play.saveFailed"));
         // Re-read rather than leave the form showing a value the server
         // rejected, which would look saved.
         void refresh();
@@ -142,7 +142,7 @@ export function PlayoutPage() {
         setBusy(false);
       }
     },
-    [settings, refresh],
+    [settings, refresh, t],
   );
 
   const savePublish = useCallback(
@@ -156,12 +156,12 @@ export function PlayoutPage() {
         await api.updatePlayoutPublish(body);
         setView(await api.playout());
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not save");
+        toast.error(err instanceof Error ? err.message : t("play.saveFailed"));
       } finally {
         setBusy(false);
       }
     },
-    [],
+    [t],
   );
 
   const rotate = useCallback(async () => {
@@ -198,7 +198,7 @@ export function PlayoutPage() {
         subtitle={t("play.subtitle")}
         actions={
           <div className="flex items-center gap-2">
-            <span className="text-tiny text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               {play.enabled ? t("common.enabled") : t("common.disabled")}
             </span>
             <Switch
@@ -219,8 +219,7 @@ export function PlayoutPage() {
         <Card className="mb-3 border-warn/40">
           <CardContent className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
             <ShieldAlert className="h-4 w-4 shrink-0 text-warn" />
-            Playout is enabled but the packager is not running on this server.
-            Nothing is being published.
+            {t("play.packagerNotRunning")}
           </CardContent>
         </Card>
       )}
@@ -244,17 +243,14 @@ export function PlayoutPage() {
               <Stat labelKey="play.onDisk" value={fmtBytes(usage.bytes)} />
             </div>
             {analytics.uncounted > 0 && (
-              <p className="mt-3 text-tiny text-muted-foreground">
-                {analytics.uncounted} viewers arrived with the session table full.
-                They are being served normally; only the count is short. Raise the
-                session cap below to measure them.
+              <p className="mt-3 text-sm text-muted-foreground">
+                {t("play.uncountedViewers", { count: analytics.uncounted })}
               </p>
             )}
             {usage.overLimit && (
-              <p className="mt-3 flex items-start gap-1.5 text-tiny text-down">
+              <p className="mt-3 flex items-start gap-1.5 text-sm text-down">
                 <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0" />
-                The disk cap is below one playlist window. Raise it or lower the
-                bitrate — segments viewers are mid-playback on cannot be deleted.
+                {t("play.diskCapBelowWindow")}
               </p>
             )}
             <div className="mt-3">
@@ -271,7 +267,7 @@ export function PlayoutPage() {
                 }}
               >
                 <RotateCw />
-                Reset counters
+                {t("play.resetCounters")}
               </Button>
             </div>
           </CardContent>
@@ -360,8 +356,7 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
         <span>
           <span className="font-medium">{t("play.private")}</span>{" "}
           <span className="text-muted-foreground">
-            Only a signed-in administrator can watch. Turn on “Public” below to
-            share a link.
+            {t("play.privateBanner", { public: t("play.public") })}
           </span>
         </span>
       </div>
@@ -373,12 +368,10 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
         <Globe className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
         <span>
           <span className="font-medium text-destructive">
-            This stream is public to the internet.
+            {t("play.exposedTitle")}
           </span>{" "}
           <span className="text-muted-foreground">
-            Anyone who reaches this server can watch without a password or a
-            link they had to be given. Switch protection back to “Playback link”
-            below to close it.
+            {t("play.exposedBody", { mode: t("play.playbackLink") })}
           </span>
         </span>
       </div>
@@ -390,8 +383,7 @@ function ExposureBanner({ view }: { view: PlayoutAdminView }) {
       <span>
         <span className="font-medium">{t("play.unlisted")}</span>{" "}
         <span className="text-muted-foreground">
-          Anyone holding the playback link can watch, without signing in. The
-          link is the password — treat it like one.
+          {t("play.unlistedBanner")}
         </span>
       </span>
     </div>
@@ -490,12 +482,12 @@ function CopyField({
           readOnly
           value={value}
           onFocus={(e) => e.currentTarget.select()}
-          className={cn("text-tiny", mono && "font-mono")}
+          className={cn("text-sm", mono && "font-mono")}
         />
         <Button
           variant="secondary"
           size="icon-sm"
-          aria-label={`Copy ${label}`}
+          aria-label={t("play.copyAria", { label })}
           onClick={() => {
             navigator.clipboard
               .writeText(value)
@@ -509,7 +501,7 @@ function CopyField({
           {copied ? <Check /> : <Copy />}
         </Button>
       </div>
-      {hint && <p className="text-tiny text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -574,12 +566,11 @@ export function ShareCard({
             rows={3}
             value={view.urls.embed}
             onFocus={(e) => e.currentTarget.select()}
-            className="font-mono text-tiny"
+            className="font-mono text-sm"
           />
           {!play.allowCrossOrigin && (
-            <p className="text-tiny text-warn">
-              Embedding on another site also needs “Allow cross-origin” on. Without
-              it the player only works on pages served from this server.
+            <p className="text-sm text-warn">
+              {t("play.embedNeedsCrossOrigin", { setting: t("play.allowCrossOrigin") })}
             </p>
           )}
         </div>
@@ -594,7 +585,7 @@ export function ShareCard({
               <KeyRound />
               {t("play.rotate")}
             </Button>
-            <p className="mt-1 text-tiny text-muted-foreground">
+            <p className="mt-1 text-sm text-muted-foreground">
               {t("play.rotateHint")}
             </p>
             <ConfirmDestructive
@@ -660,14 +651,14 @@ function ProtectionCard({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="token">
-                Playback link — a secret in the URL, or an HTTP basic password
+                {t("play.protectionToken")}
               </SelectItem>
               <SelectItem value="open">
-                Open — anyone who can reach this server
+                {t("play.protectionOpen")}
               </SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-tiny text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {view.protection === "token"
               ? t("play.basicPasswordNote") : t("play.noCredentialNote")}
           </p>
@@ -676,7 +667,7 @@ function ProtectionCard({
         <div className="flex items-start justify-between gap-3 rounded-md border border-border p-2.5">
           <div>
             <p className="text-sm font-medium">{t("play.public")}</p>
-            <p className="text-tiny text-muted-foreground">{t("play.publicNote")}</p>
+            <p className="text-sm text-muted-foreground">{t("play.publicNote")}</p>
           </div>
           <Switch
             checked={play.public}
@@ -689,7 +680,7 @@ function ProtectionCard({
         <div className="flex items-start justify-between gap-3 rounded-md border border-border p-2.5">
           <div>
             <p className="text-sm font-medium">{t("play.allowCrossOrigin")}</p>
-            <p className="text-tiny text-muted-foreground">{t("play.crossOriginNote")}</p>
+            <p className="text-sm text-muted-foreground">{t("play.crossOriginNote")}</p>
           </div>
           <Switch
             checked={play.allowCrossOrigin}
@@ -765,7 +756,7 @@ export function VariantsCard({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Radio className="h-3.5 w-3.5" />
-          Ladder
+          {t("play.ladder")}
         </CardTitle>
         <CardDescription>
             {t("play.rungNote")}
@@ -790,13 +781,13 @@ export function VariantsCard({
                 <Switch
                   checked={v.enabled}
                   disabled={busy}
-                  aria-label={`Enable ${v.name}`}
+                  aria-label={t("hooks.enableAria", { name: v.name })}
                   onCheckedChange={(enabled) => update(i, { enabled })}
                 />
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-micro">{t("play.name")}</Label>
+                <Label className="text-sm">{t("play.name")}</Label>
                 {/* Uncontrolled, and committed on blur rather than on every
                     keystroke: a rename is a directory move and a muxer
                     restart, so saving mid-word would cycle the stream once per
@@ -815,7 +806,7 @@ export function VariantsCard({
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-micro">{t("play.videoSource")}</Label>
+                <Label className="text-sm">{t("play.videoSource")}</Label>
                 <Select
                   value={v.renditionId == null ? "source" : String(v.renditionId)}
                   disabled={busy}
@@ -838,7 +829,7 @@ export function VariantsCard({
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-micro">{t("play.audioTrack")}</Label>
+                <Label className="text-sm">{t("play.audioTrack")}</Label>
                 {/* Committed on blur for the same reason the name is: each
                     save restarts this rung's muxer. */}
                 <Input
@@ -861,21 +852,21 @@ export function VariantsCard({
 
               <div className="flex items-center gap-1 pb-1">
                 {st?.running && st.bandwidth > 0 && (
-                  <Badge variant="outline" className="font-mono text-micro">
+                  <Badge variant="outline" className="font-mono text-sm">
                     {Math.round(st.bandwidth / 1000)}k
                     {st.height ? ` · ${st.height}p` : ""}
                   </Badge>
                 )}
                 {st?.viewers ? (
-                  <Badge variant="outline" className="text-micro">
-                    {st.viewers} watching
+                  <Badge variant="outline" className="text-sm">
+                    {t("stats.watching", { count: st.viewers })}
                   </Badge>
                 ) : null}
                 <Button
                   variant="ghost"
                   size="icon-sm"
                   disabled={busy}
-                  aria-label={`Remove ${v.name}`}
+                  aria-label={t("playlist.remove", { name: v.name })}
                   onClick={() =>
                     confirmRemove.ask({ index: i, name: v.name, viewers: st?.viewers ?? 0 })
                   }
@@ -885,7 +876,7 @@ export function VariantsCard({
               </div>
 
               {st?.error && (
-                <p className="text-tiny text-down sm:col-span-5">{st.error}</p>
+                <p className="text-sm text-down sm:col-span-5">{st.error}</p>
               )}
             </div>
           );
@@ -899,7 +890,7 @@ export function VariantsCard({
             onClick={add}
           >
             <Plus />
-            Add a rung
+            {t("play.addRung")}
           </Button>
         </div>
       </CardContent>
@@ -968,7 +959,7 @@ function NumberField({
           else setDraft(String(value));
         }}
       />
-      {hint && <p className="text-tiny text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -1009,9 +1000,8 @@ function PackagingCard({
               <SelectItem value="hls+dash">{t("play.hlsDash")}</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-tiny text-muted-foreground">
-            DASH is muxed by the same process from the same copied video — no
-            second encode.
+          <p className="text-sm text-muted-foreground">
+            {t("play.dashNote")}
           </p>
         </div>
 
@@ -1038,7 +1028,7 @@ function PackagingCard({
         <NumberField
           id="playout-dvr"
           label={t("play.dvrWindow")}
-          hint="0 is live only. Anything longer lets viewers seek back."
+          hint={t("play.dvrHint")}
           value={play.dvrWindowSeconds}
           min={0}
           max={43200}

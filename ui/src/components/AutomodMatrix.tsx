@@ -310,13 +310,13 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                   answer is: nothing here can be switched on
                                   until this checker is configured, below. */}
                               {ready && !ready.ready && (
-                                <div className="font-normal text-[10px] text-muted-foreground">
+                                <div className="font-normal text-sm text-muted-foreground">
                                   {t(ready.reason)}
                                 </div>
                               )}
                               <button
                                 type="button"
-                                className="mt-0.5 text-[10px] font-normal text-muted-foreground underline"
+                                className="mt-0.5 text-sm font-normal text-muted-foreground underline"
                                 onClick={() => setColumn(platform, c, false)}
                               >
                                 {t("automod.clearColumn")}
@@ -334,7 +334,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                               {t(ACTION_KEYS[action])}
                               {IRREVERSIBLE.includes(action) && (
                                 <span
-                                  className="rounded bg-warn/15 px-1 text-[10px] text-warn"
+                                  className="rounded bg-warn/15 px-1 text-sm text-warn"
                                   title={t("automod.noUndoTitle")}
                                 >
                                   {t("automod.noUndo")}
@@ -346,13 +346,13 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                             {isOperable(action) ? (
                               <button
                                 type="button"
-                                className="text-[10px] text-muted-foreground underline"
+                                className="text-sm text-muted-foreground underline"
                                 onClick={() => setRow(platform, action, false)}
                               >
                                 {t("automod.clearRow")}
                               </button>
                             ) : (
-                              <div className="text-[10px] text-muted-foreground">
+                              <div className="text-sm text-muted-foreground">
                                 {t("automod.flagRecordedOnly")}
                               </div>
                             )}
@@ -388,7 +388,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                      line and these switches were already
                                      disagreeing about what "armed" means. */
                                   <span
-                                    className="cursor-help text-[10px] text-muted-foreground"
+                                    className="cursor-help text-sm text-muted-foreground"
                                     title={t("automod.alwaysOnTitle")}
                                   >
                                     {t("automod.alwaysOn")}
@@ -420,7 +420,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                      nothing, and "not configured" would send
                                      an operator to fix the wrong thing. */
                                   <span
-                                    className="cursor-help text-[10px] text-muted-foreground"
+                                    className="cursor-help text-sm text-muted-foreground"
                                     title={t(ready.reason)}
                                   >
                                     {t("automod.notConfigured")}
@@ -441,7 +441,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
                                      the operator believing this channel is
                                      protected. */
                                   <span
-                                    className="cursor-help text-[10px] text-muted-foreground"
+                                    className="cursor-help text-sm text-muted-foreground"
                                     title={cell?.reason ?? t("automod.notSupportedHere")}
                                   >
                                     {t("automod.notApplicable")}

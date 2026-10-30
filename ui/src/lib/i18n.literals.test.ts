@@ -19,10 +19,10 @@ import { fileURLToPath } from "node:url";
  * impossible is these particular strings quietly going back to literals.
  *
  * DELIBERATELY NOT KEYED, and why:
- *   - lib/trackSignal.ts's "waiting for stream" and its two siblings: the
- *     meter-row status words of components/signature, a family that is not
- *     keyed as a whole. Keying one of three words in a row would give a row
- *     that is two-thirds English; the family moves together or not at all.
+ *   - (No longer an exception: lib/trackSignal.ts's "waiting for stream" and
+ *     its two siblings, the meter-row status words of components/signature,
+ *     were keyed in the A19 sweep together with the rest of that family —
+ *     except MixMatrix.tsx, whose "Out" is why the exclusion below remains.)
  *   - "Waiting for the first look at the incoming stream…" is the ENGINE's
  *     status sentence (internal/engine), sent over the wire, not a UI string.
  *   - "Flag harassment, threats, slurs…" is the model's default instruction: a
@@ -116,7 +116,7 @@ const FRAGMENTS = [
  * "onCancel", so a substring hit would be a false positive on every handler.
  * They are matched as exact JSX text instead, between tags, so a prop or an
  * identifier never matches. Restricted to the two directories that are fully
- * keyed; components/signature is the unkeyed family (see trackSignal.ts). */
+ * keyed; components/signature stays excluded until MixMatrix.tsx's "Out" is keyed. */
 const JSX_LABELS = ["Cancel", "Save", "Create", "Delete rendition", "Out", "Go live"];
 
 function jsxLabelHits(body: string): string[] {

@@ -3,7 +3,17 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { audioTrackCount, ingestAttribution, ingestBitrateKbps, mergeStatusDestinations, processAbsence } from "./dashboardFacts";
+import {
+  attributableBitrate,
+  audioTrackCount,
+  ingestAttribution,
+  ingestBitrateKbps,
+  mergeStatusDestinations,
+  processAbsence,
+  programmeIngestLive,
+  programmeSnapshot,
+  relayRate,
+} from "./dashboardFacts";
 import type { SourceInfo } from "./types";
 
 /* The three claims the dashboard used to make without evidence.
@@ -89,19 +99,41 @@ describe("Dashboard, wired to these decisions", () => {
 
   it("takes each pipeline row's absent word from the feature's own setting", () => {
     const src = dashboard();
-    expect(src).toContain('["Recorder", status?.recorder, absentLabel(featureEnabled?.recording)]');
-    expect(src).toContain('["Meters", status?.meters, absentLabel(featureEnabled?.meters)]');
+    expect(src).toContain('["Recorder", programmeStatus?.recorder, absentLabel(featureEnabled?.recording)]');
+    expect(src).toContain('["Meters", programmeStatus?.meters, absentLabel(featureEnabled?.meters)]');
     // The hard-coded word this replaced, which was the operator's own setting
     // read back at them whatever the truth was.
-    expect(src).not.toContain('["Recorder", status?.recorder, "disabled"]');
-    expect(src).not.toContain('["Meters", status?.meters, "disabled"]');
+    expect(src).not.toContain('["Recorder", programmeStatus?.recorder, "disabled"]');
+    expect(src).not.toContain('["Meters", programmeStatus?.meters, "disabled"]');
   });
 
   it("labels the Ingest card with the programme the snapshot came from", () => {
     const src = dashboard();
     expect(src).toContain("ingestAttribution(sourceCount, source)");
     expect(src).toContain("{attribution.name}");
-    expect(src).toContain('t("dash.ingestSharedFeed")');
+  });
+
+  it("scopes the Ingest card to the selected programme rather than the last writer", () => {
+    const src = dashboard();
+    // The card's figures come from the held, programme-scoped snapshot...
+    expect(src).toContain("programmeSnapshot(prev, status, programme)");
+    expect(src).toContain("const ingest = programmeStatus?.ingest;");
+    expect(src).toContain("const source = programmeStatus?.source;");
+    // ...the publish address is the selected programme's, not the default's...
+    expect(src).toMatch(/api\s*\.system\(programme\)/);
+    expect(src).not.toMatch(/api\s*\.system\(\)/);
+    // ...so the raw install-wide snapshot no longer feeds it,
+    expect(src).not.toContain("const ingest = status?.ingest;");
+    expect(src).not.toContain("const source = status?.source;");
+    // and the note that said "these follow whoever reported last" is gone,
+    // because that is no longer what the card does.
+    expect(src).not.toContain('t("dash.ingestSharedFeed")');
+  });
+
+  it("sizes each card's track chips from its own programme's ingest, not a constant six", () => {
+    expect(dashboard()).toContain("trackCount={trackCount(sourceOf(d.sourceId), d.sourceId)}");
+    const card = readFileSync(join(ROOT, "ui/src/components/DestinationCard.tsx"), "utf8");
+    expect(card).toContain("<TrackSummary tracks={dest.tracks} labels={trackLabels} count={trackCount} />");
   });
 
   it("renders the server's destination-hold reason", () => {
@@ -196,3 +228,108 @@ describe("mergeStatusDestinations across the two snapshot shapes", () => {
     expect(merged.map((d) => d.id).sort()).toEqual([1, 2]);
   });
 })
+
+
+/* THE INGEST CARD FOLLOWS THE PROGRAMME IN THE HEADER.
+ *
+ * Every engine publishes its status onto one install-wide socket, so the app's
+ * `status` alternates between programmes. The card used to print whichever one
+ * spoke last. programmeSnapshot holds the last frame that names the selected
+ * programme, which is the same device failoverState already used. */
+describe("programmeSnapshot", () => {
+  const snap = (id: number, kbps: number) =>
+    ({ source: { id, name: `P${id}` }, ingest: { progress: { bitrateKbps: kbps } } }) as unknown as Parameters<
+      typeof programmeSnapshot
+    >[1];
+
+  it("takes a frame that names the selected programme", () => {
+    const a = snap(1, 4000);
+    expect(programmeSnapshot(null, a, 1)).toBe(a);
+  });
+
+  it("ignores another programme's frame and keeps the selected one's", () => {
+    const a = snap(1, 4000);
+    const b = snap(2, 900);
+    expect(programmeSnapshot(a, b, 1)).toBe(a);
+  });
+
+  it("shows nothing rather than another programme's figures before the selected one reports", () => {
+    expect(programmeSnapshot(null, snap(2, 900), 1)).toBeNull();
+  });
+
+  it("drops the held frame when the operator switches programme", () => {
+    // The middle case: the held snapshot is Studio A's, the header now says
+    // Studio B, and B has not spoken yet. Holding A would be the original bug
+    // in a slower form.
+    expect(programmeSnapshot(snap(1, 4000), snap(1, 4100), 2)).toBeNull();
+    expect(programmeSnapshot(snap(1, 4000), null, 2)).toBeNull();
+  });
+
+  it("passes everything through while no programme is selected", () => {
+    const b = snap(2, 900);
+    expect(programmeSnapshot(null, b, null)).toBe(b);
+  });
+});
+
+describe("relayRate", () => {
+  it("has no rate from a first sample", () => {
+    expect(relayRate(null, 1000, 0)).toEqual({ atMs: 0, rxBytes: 1000, kbps: null });
+  });
+
+  it("is the programme's own received bytes over time, in kbit/s", () => {
+    const first = relayRate(null, 0, 0);
+    // 1,250,000 bytes in 2 s = 5000 kbit/s.
+    expect(relayRate(first, 1_250_000, 2000)?.kbps).toBe(5000);
+  });
+
+  it("waits for a second's worth of bytes rather than dividing by a burst", () => {
+    // Status frames are also published on every process transition, so two
+    // can land milliseconds apart.
+    const first = relayRate(null, 0, 0);
+    expect(relayRate(first, 50_000, 100)).toBe(first);
+  });
+
+  it("starts again when the counter goes backwards (the engine restarted)", () => {
+    const first = relayRate(null, 9_000_000, 0);
+    expect(relayRate(first, 10, 2000)).toEqual({ atMs: 2000, rxBytes: 10, kbps: null });
+  });
+
+  it("is nothing without a relay figure", () => {
+    expect(relayRate({ atMs: 0, rxBytes: 1, kbps: 3 }, undefined, 2000)).toBeNull();
+  });
+});
+
+describe("attributableBitrate", () => {
+  const series = [{ kbps: 5200 }];
+
+  it("uses the relay series on a single-programme install", () => {
+    expect(attributableBitrate(1, series, null)).toBe(series);
+    expect(attributableBitrate(null, series, 900)).toBe(series);
+  });
+
+  it("uses the programme's own relay rate on a multi-programme install, never the shared series", () => {
+    // stats frames carry {system, bitrate} and no source id: the series belongs
+    // to whichever engine published last, so printing it as the selected
+    // programme's bitrate would be another show's number.
+    expect(attributableBitrate(2, series, 900)).toEqual([{ kbps: 900 }]);
+    expect(attributableBitrate(2, series, null)).toEqual([]);
+  });
+});
+
+describe("programmeIngestLive", () => {
+  const probed = { probed: true } as Pick<SourceInfo, "probed">;
+  const unprobed = { probed: false } as Pick<SourceInfo, "probed">;
+
+  it("is the series' answer on a single-programme install", () => {
+    expect(programmeIngestLive(true, 1, null, null)).toBe(true);
+    expect(programmeIngestLive(false, 1, probed, 900)).toBe(false);
+  });
+
+  it("is the selected programme's own probe and bytes on a multi-programme install", () => {
+    expect(programmeIngestLive(false, 3, probed, 900)).toBe(true);
+    // Another programme's bytes in the shared series do not make this one live.
+    expect(programmeIngestLive(true, 3, probed, 0)).toBe(false);
+    expect(programmeIngestLive(true, 3, probed, null)).toBe(false);
+    expect(programmeIngestLive(true, 3, unprobed, 900)).toBe(false);
+  });
+});

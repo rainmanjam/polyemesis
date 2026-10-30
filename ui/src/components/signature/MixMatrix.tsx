@@ -25,6 +25,10 @@ import { gainDbLabel, gainState } from "@/lib/matrixGain";
 
 const MAX_GAIN = 2;
 
+/** How many edits Undo can walk back. A matrix edit is one cell, so this is a
+ *  session's worth of typing, not a version history. */
+const UNDO_DEPTH = 50;
+
 /** Arrow key to [row, column] step. Rows are the two output channels, so
  *  up and down are really "the other one". */
 const NAV_STEP: Record<string, [number, number]> = {
@@ -49,14 +53,32 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMa
   const t = useT();
   // The header maps over tracks as `t`, so it speaks through this name.
   const say = t;
-  /** What the last Clear removed, and the empty list it handed back. Undo is
-   *  offered only while `cells` is still that very list: an edit, a preset, a
-   *  discard or a switch to another destination all replace it, and then the
-   *  offer is gone rather than writing old cells over new ones (A14). */
-  const [cleared, setCleared] = useState<{ removed: MatrixCell[]; now: MatrixCell[] } | null>(
+  /** Every edit made here, newest last, and the list the latest one handed
+   *  back. Undo walks it back one step at a time: a cell typed, a polarity
+   *  flipped, a quick fill or a Clear (A14). It is offered only while `cells`
+   *  is still that very list: a preset, a discard or a switch to another
+   *  destination all replace it from outside, and then the history is gone
+   *  rather than writing old cells over new ones. */
+  const [history, setHistory] = useState<{ past: { cells: MatrixCell[]; clear: boolean }[]; now: MatrixCell[] } | null>(
     null,
   );
-  const undoAvailable = cleared !== null && cells === cleared.now;
+  const past = history !== null && cells === history.now ? history.past : [];
+  const undoAvailable = past.length > 0;
+  const lastWasClear = undoAvailable && past[past.length - 1].clear;
+
+  /** Every change made here goes through this, so each one can be undone. */
+  const commit = (next: MatrixCell[], clear = false) => {
+    setHistory({ past: [...past, { cells, clear }].slice(-UNDO_DEPTH), now: next });
+    onChange(next);
+  };
+
+  const undo = () => {
+    if (!undoAvailable) return;
+    const prev = past[past.length - 1].cells;
+    setHistory({ past: past.slice(0, -1), now: prev });
+    onChange(prev);
+  };
+
   /** Fast lookup keyed by track/channel/out. */
   const index = useMemo(() => {
     const m = new Map<string, MatrixCell>();
@@ -83,8 +105,7 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMa
     const next =
       clamped > 0 ? [...without, { track, channel, out, gain: clamped, ...invert }] : without;
     next.sort((a, b) => a.track - b.track || a.out - b.out || a.channel - b.channel);
-    setCleared(null);
-    onChange(next);
+    commit(next);
   };
 
   /** Flips one connected cell's polarity. An off cell has nothing to invert. */
@@ -97,20 +118,11 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMa
     // keeps whatever polarity it held at that position, which after a re-sort is
     // another cell's.
     const flipped: MatrixCell = { ...cur, invert: !cur.invert };
-    setCleared(null);
-    onChange(cells.map((c) => (c === cur ? flipped : c)));
+    commit(cells.map((c) => (c === cur ? flipped : c)));
   };
 
   const clearAll = () => {
-    const empty: MatrixCell[] = [];
-    if (cells.length > 0) setCleared({ removed: cells, now: empty });
-    onChange(empty);
-  };
-
-  const undoClear = () => {
-    if (!cleared || !undoAvailable) return;
-    onChange(cleared.removed);
-    setCleared(null);
+    if (cells.length > 0) commit([], true);
   };
 
   const totalCols = tracks.reduce((n, t) => n + t.channels, 0);
@@ -145,20 +157,29 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMa
   );
 
   return (
-    <div className="flex flex-col gap-2">
+    <div
+      className="flex flex-col gap-2"
+      // Ctrl+Z / Cmd+Z anywhere in the matrix. The cells are controlled inputs,
+      // so the browser's own undo has nothing to walk back.
+      onKeyDown={(e) => {
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z" && undoAvailable) {
+          e.preventDefault();
+          undo();
+        }
+      }}
+    >
       <div className="flex items-center justify-between">
         <div className="text-sm text-muted-foreground">
-          {totalCols} source channel{totalCols === 1 ? "" : "s"} → 2 output channels.
-          Gain 0–2 per cell; 0 removes the connection.
+          {t("routing.matrix.summary", { count: totalCols })}
         </div>
         <div className="flex items-center gap-1">
           {undoAvailable && (
-            <Button variant="ghost" size="sm" onClick={undoClear}>
-              <Undo2 /> {t("routing.matrix.undoClear")}
+            <Button variant="ghost" size="sm" onClick={undo} title={t("routing.matrix.undoHint")}>
+              <Undo2 /> {lastWasClear ? t("routing.matrix.undoClear") : t("routing.matrix.undo")}
             </Button>
           )}
           <Button variant="ghost" size="sm" onClick={clearAll}>
-            <RotateCcw /> Clear
+            <RotateCcw /> {t("mon.clear")}
           </Button>
         </div>
       </div>
@@ -181,7 +202,7 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMa
                     ti > 0 && "border-l border-border-strong",
                   )}
                 >
-                  Track {t.index + 1}
+                  {say("lib.trackLabel", { n: t.index + 1 })}
                   <span className="ml-1 font-mono normal-case text-muted-foreground">
                     {t.layout}
                   </span>
@@ -276,7 +297,7 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMa
           not mistaken for audio already off air. */}
       {onMute && <p className="text-sm text-muted-foreground">{t("routing.matrix.muteOnSave")}</p>}
 
-      <MatrixQuickFills tracks={tracks} onApply={onChange} />
+      <MatrixQuickFills tracks={tracks} onApply={(next) => commit(next)} />
     </div>
   );
 }
@@ -407,6 +428,8 @@ function MatrixQuickFills({
   tracks: SourceTrack[];
   onApply: (cells: MatrixCell[]) => void;
 }) {
+  // Loops below name each track `t`, so the translator gets its own name.
+  const say = useT();
   const identity = () => {
     const out: MatrixCell[] = [];
     for (const t of tracks) {
@@ -451,16 +474,16 @@ function MatrixQuickFills({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-sm uppercase tracking-wider text-muted-foreground">Fill</span>
+      <span className="text-sm uppercase tracking-wider text-muted-foreground">{say("routing.matrix.fill")}</span>
       <Button variant="outline" size="sm" onClick={identity}>
-        All tracks 1:1
+        {say("routing.matrix.fillIdentity")}
       </Button>
       <Button variant="outline" size="sm" onClick={firstTrackOnly}>
-        Track 1 only
+        {say("routing.matrix.fillFirst")}
       </Button>
       {hasSurround && (
         <Button variant="outline" size="sm" onClick={rearsOnly}>
-          Surround rears only
+          {say("routing.matrix.fillRears")}
         </Button>
       )}
     </div>

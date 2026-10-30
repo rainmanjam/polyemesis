@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { Label } from "@/components/ui/label";
 import type { OverlayAnchor } from "@/lib/types";
+import { useT, type TranslationKey } from "@/lib/i18n";
 
 // A 3x3 grid for choosing where an overlay sits, replacing a nine-item dropdown.
 //
@@ -13,29 +14,31 @@ import type { OverlayAnchor } from "@/lib/types";
 // Nine cells is the whole reason this is worth a component: it is small enough
 // to show every option at once, which is the case a select is worst at.
 
-const ANCHORS: { key: OverlayAnchor; label: string }[] = [
-  { key: "top-left", label: "Top left" },
-  { key: "top-center", label: "Top centre" },
-  { key: "top-right", label: "Top right" },
-  { key: "middle-left", label: "Middle left" },
-  { key: "center", label: "Centre" },
-  { key: "middle-right", label: "Middle right" },
-  { key: "bottom-left", label: "Bottom left" },
-  { key: "bottom-center", label: "Bottom centre" },
-  { key: "bottom-right", label: "Bottom right" },
+const ANCHORS: { key: OverlayAnchor; label: TranslationKey }[] = [
+  { key: "top-left", label: "anchor.topLeft" },
+  { key: "top-center", label: "anchor.topCentre" },
+  { key: "top-right", label: "anchor.topRight" },
+  { key: "middle-left", label: "anchor.middleLeft" },
+  { key: "center", label: "anchor.centre" },
+  { key: "middle-right", label: "anchor.middleRight" },
+  { key: "bottom-left", label: "anchor.bottomLeft" },
+  { key: "bottom-center", label: "anchor.bottomCentre" },
+  { key: "bottom-right", label: "anchor.bottomRight" },
 ];
 
 export function AnchorGrid({
   value,
   onChange,
   disabled,
-  label = "Position",
+  label,
 }: {
   value: OverlayAnchor;
   onChange: (v: OverlayAnchor) => void;
   disabled?: boolean;
   label?: string;
 }) {
+  const t = useT();
+  const groupLabel = label ?? t("anchor.position");
   const cells = useRef<(HTMLButtonElement | null)[]>([]);
   const index = Math.max(
     0,
@@ -59,10 +62,10 @@ export function AnchorGrid({
 
   return (
     <div className="flex flex-col gap-1">
-      <Label>{label}</Label>
+      <Label>{groupLabel}</Label>
       <div
         role="radiogroup"
-        aria-label={label}
+        aria-label={groupLabel}
         className="grid w-fit grid-cols-3 gap-0.5 rounded-md border border-border bg-muted p-0.5"
       >
         {ANCHORS.map((a, i) => {
@@ -79,8 +82,8 @@ export function AnchorGrid({
               // The name is what a screen reader announces, so it carries the
               // words the dropdown used to show. Sighted users get the
               // position from the grid; unsighted users get it from here.
-              aria-label={a.label}
-              title={a.label}
+              aria-label={t(a.label)}
+              title={t(a.label)}
               disabled={disabled}
               // Roving tabindex: one tab stop for the whole group, then arrows
               // within it. Nine tab stops for one setting would be worse than
@@ -121,7 +124,7 @@ export function AnchorGrid({
           );
         })}
       </div>
-      <span className="text-muted-foreground text-[10px]">{ANCHORS[index].label}</span>
+      <span className="text-muted-foreground text-[10px]">{t(ANCHORS[index].label)}</span>
     </div>
   );
 }

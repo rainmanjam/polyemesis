@@ -33,6 +33,7 @@ import {
   MessagesSquare,
   Radio,
   Scissors,
+  Cpu,
   Settings as SettingsIcon,
   Sliders,
   X,
@@ -101,6 +102,7 @@ const NAV: NavItem[] = [
   { to: "/jobs", labelKey: "nav.jobs", icon: ListChecks },
   { to: "/automation", labelKey: "nav.automation", icon: CalendarClock },
   { to: "/monitoring", labelKey: "nav.monitoring", icon: Activity },
+  { to: "/system", labelKey: "nav.system", icon: Cpu },
   { to: "/settings", labelKey: "nav.settings", icon: SettingsIcon },
 ];
 
@@ -700,7 +702,7 @@ export function PageHeader({
     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
       <div>
         <h1 className="text-display font-semibold tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-1 text-tiny text-muted-foreground">{subtitle}</p>}
+        {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
       </div>
       {actions && <div className="flex items-center gap-1.5">{actions}</div>}
     </div>

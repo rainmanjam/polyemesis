@@ -35,6 +35,6 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     labelKey: "nav.group.settings",
-    routes: ["/settings"],
+    routes: ["/system", "/settings"],
   },
 ];

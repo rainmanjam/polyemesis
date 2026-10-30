@@ -378,6 +378,8 @@ type Process struct {
 	// Reset on every respawn with mediaAt.
 	rate []rateSample
 	logs *ring
+	// warmup bounds the decoder warm-up after each spawn. See warmup.go.
+	warmup time.Duration
 	// liveArgs is the argv of the most recent spawn. Equal to spec.Args unless
 	// spec.NextArgs resolved something different for this run.
 	liveArgs []string
@@ -503,6 +505,7 @@ func New(log *slog.Logger, spec Spec) *Process {
 		grace:      graceFor(spec.Kind),
 		drain:      drainGrace,
 		stallAfter: StallAfter,
+		warmup:     decoderWarmup,
 	}
 }
 
@@ -1303,11 +1306,18 @@ func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 				continue
 			}
 			deliverReply(liveCur, line)
-			level := classify(line)
+			level := p.levelOf(line)
 			p.appendLog(line, level)
-			tail = append(tail, line)
-			if len(tail) > tailLines {
-				tail = tail[1:]
+			// A line the decoder warm-up demoted (levelOf said info where
+			// classify did not) stays out of the classifier's tail. Otherwise a
+			// run that died mid-warm-up was given that burst as its failure
+			// reason -- the line the log had just called harmless, shown on the
+			// card, the alert and the webhook. See warmup_reason_test.go.
+			if level != "info" || classify(line) == "info" {
+				tail = append(tail, line)
+				if len(tail) > tailLines {
+					tail = tail[1:]
+				}
 			}
 			if level == "error" || level == "fatal" {
 				lastLines = append(lastLines, line)

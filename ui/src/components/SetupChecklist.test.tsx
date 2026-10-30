@@ -10,7 +10,7 @@
  * does not say why. */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { SetupChecklist } from "./SetupChecklist";
 import { setupChecklist } from "@/lib/setupChecklist";
@@ -45,13 +45,15 @@ describe("SetupChecklist", () => {
     expect(screen.getByText(T("firstRun.progress", { done: 1, total: 5 }))).toBeTruthy();
   });
 
-  it("makes the encoder step the one next action, and shows the ingest address there", () => {
+  it("makes the encoder step the one next action, and shows the ingest address beside it", () => {
     draw({ sourceCount: 1, signal: false, destinations: 0 });
-    expect(screen.getByText("rtmp://192.168.1.20:1935/live/studio-a")).toBeTruthy();
+    // The addresses card (A1) holds the address, with the live signal reading.
+    expect(within(screen.getByTestId("setup-addresses")).getByText("rtmp://192.168.1.20:1935/live/studio-a")).toBeTruthy();
+    expect(within(screen.getByTestId("setup-addresses")).getByText(T("firstRun.waitingTitle"))).toBeTruthy();
     expect(screen.getByText(T("firstRun.badgeNext"))).toBeTruthy();
   });
 
-  it("copies the ingest address from the encoder step", () => {
+  it("copies the ingest address from the addresses card", () => {
     const onCopy = vi.fn();
     draw({ sourceCount: 1, signal: false, destinations: 0 }, { onCopy });
     fireEvent.click(screen.getByRole("button", { name: T("dash.copyIngestUrl") }));
@@ -112,5 +114,17 @@ describe("SetupChecklist: per-protocol addresses at step 2 (A1)", () => {
     fireEvent.click(screen.getByRole("button", { name: T("firstRun.copyStreamKey") }));
     expect(onCopyAddress).toHaveBeenCalledWith({ proto: "streamKey", url: "tok-123" });
     expect(screen.queryByText("tok-123")).toBeNull();
+  });
+});
+
+describe("SetupChecklist addresses card (A1)", () => {
+  it("is absent until there is a source, and flips to Signal when bytes arrive", () => {
+    draw({ sourceCount: 0, signal: false, destinations: 0 });
+    expect(screen.queryByTestId("setup-addresses")).toBeNull();
+    cleanup();
+    draw({ sourceCount: 1, signal: true, destinations: 0 });
+    const card = within(screen.getByTestId("setup-addresses"));
+    expect(card.getByText(T("firstRun.signalBadge"))).toBeTruthy();
+    expect(card.getByText(T("firstRun.stepSignalDone"))).toBeTruthy();
   });
 });

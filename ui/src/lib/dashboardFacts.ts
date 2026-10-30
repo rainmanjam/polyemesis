@@ -1,4 +1,4 @@
-import type { SourceInfo } from "./types";
+import type { SourceInfo, Status } from "./types";
 
 /* What the dashboard is allowed to assert, as plain functions.
  *
@@ -172,4 +172,96 @@ export function mergeStatusDestinations(
 export interface DestStatusLike {
   id: number;
   sourceId?: number | null;
+}
+
+/** The status snapshot the Ingest card describes: the last one that names the
+ *  programme selected in the header, or null until that programme reports.
+ *
+ *  The status socket is install-wide -- every engine publishes onto it and the
+ *  app keeps the last frame -- so reading `status.ingest` straight through put
+ *  whichever programme spoke last on the card, and ingestAttribution could only
+ *  NAME the wrong programme rather than stop showing it. Every frame carries
+ *  `source.id`, so the selected programme's own frames are on the wire; this
+ *  keeps those and ignores the rest, the device failoverState already uses.
+ *
+ *  Null rather than another programme's frame when the selected one has not
+ *  reported yet -- including right after the operator switches programme, when
+ *  the held frame is the OLD programme's. "—" on the card is true; the other
+ *  show's bitrate under this one's name is not.
+ *
+ *  With no programme selected (none resolved, or an install with none) there is
+ *  nothing to scope to, and the frame passes through as it always did. */
+export function programmeSnapshot(
+  held: Status | null,
+  incoming: Status | null,
+  programme: number | null,
+): Status | null {
+  if (programme == null) return incoming;
+  if (incoming?.source?.id === programme) return incoming;
+  if (held?.source?.id === programme) return held;
+  return null;
+}
+
+/** One programme's relay throughput, from its own status frames.
+ *
+ *  Each engine's status frame carries `relay` -- that engine's hub counters --
+ *  so `relay.rxBytes` is the one byte count on the wire that names a
+ *  programme. The rate is its change between two of the programme's frames.
+ *  A first sample, or one after the counter went backwards (the engine
+ *  restarted), has no rate yet. Frames less than a second apart keep the old
+ *  baseline: status is also published on every process transition, and a
+ *  rate over a few milliseconds is noise. */
+export interface RelaySample {
+  atMs: number;
+  rxBytes: number;
+  kbps: number | null;
+}
+
+export function relayRate(
+  prev: RelaySample | null,
+  rxBytes: number | undefined,
+  atMs: number,
+): RelaySample | null {
+  if (rxBytes === undefined) return null;
+  if (!prev || rxBytes < prev.rxBytes) return { atMs, rxBytes, kbps: null };
+  const dt = atMs - prev.atMs;
+  if (dt < 1000) return prev;
+  // bytes * 8 / ms = kbit/s
+  return { atMs, rxBytes, kbps: Math.round(((rxBytes - prev.rxBytes) * 8) / dt) };
+}
+
+/** The bytes-arriving series the Ingest card may use for the selected
+ *  programme.
+ *
+ *  `stats` frames are `{system, bitrate}` and carry NO source id (engine
+ *  statsLoop), and the REST /stats read answers for the default engine. On a
+ *  multi-programme install that series is whichever engine published last, so
+ *  ingestBitrateKbps's SRT fallback would print another programme's bitrate
+ *  as this one's. There the programme's own relay rate (relayRate) stands in
+ *  for it, and nothing at all when that is not known yet. */
+export function attributableBitrate(
+  sourceCount: number | null,
+  series: { kbps: number }[],
+  programmeKbps: number | null,
+): { kbps: number }[] {
+  if (sourceCount === null || sourceCount <= 1) return series;
+  return programmeKbps === null ? [] : [{ kbps: programmeKbps }];
+}
+
+/** Whether the SELECTED programme is live, for the Ingest card.
+ *
+ *  useIngestLive reads the unattributed series above plus the unscoped
+ *  `source` frame, so on a multi-programme install another programme's bytes
+ *  turned this card "Live" and hid its own failure reason. There it is this
+ *  programme's own probed layout AND its own relay bytes arriving -- the same
+ *  two conditions useIngestLive asks, each from a figure that names the
+ *  programme. */
+export function programmeIngestLive(
+  seriesLive: boolean,
+  sourceCount: number | null,
+  scopedSource: Pick<SourceInfo, "probed"> | null | undefined,
+  programmeKbps: number | null,
+): boolean {
+  if (sourceCount === null || sourceCount <= 1) return seriesLive;
+  return scopedSource?.probed === true && (programmeKbps ?? 0) > 0;
 }

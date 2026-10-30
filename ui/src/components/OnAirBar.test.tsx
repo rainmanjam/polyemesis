@@ -10,7 +10,7 @@
  * nothing is wrong. */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { OnAirBar } from "./OnAirBar";
 import type { DestStatus, Status } from "@/lib/types";
@@ -159,5 +159,26 @@ describe("OnAirBar verdict line", () => {
     render(<OnAirBar status={status([proc("running"), proc("stopped", { id: did(2) })])} />);
 
     expect(screen.queryByText(translate("en", "health.verdictHealthy", { count: 2 }))).toBeNull();
+  });
+});
+
+describe("OnAirBar on-air strip (A8)", () => {
+  const timed = (state: string, uptimeSec: number, id = 1) =>
+    dest({ id: did(id), process: { state, uptimeSec } } as Partial<DestStatus>);
+
+  it("shows how long the broadcast has been on air, from the longest-running destination", () => {
+    render(<OnAirBar status={status([timed("running", 60, 1), timed("running", 760, 2)])} />);
+    expect(screen.getByTestId("on-air-duration").textContent).toMatch(/12/);
+  });
+
+  it("offers End all only while something is on air, and it asks the dashboard", () => {
+    let asked = 0;
+    const { rerender } = render(
+      <OnAirBar status={status([timed("stopped", 0)])} onEndAll={() => asked++} />,
+    );
+    expect(screen.queryByRole("button", { name: "End all" })).toBeNull();
+    rerender(<OnAirBar status={status([timed("running", 30)])} onEndAll={() => asked++} />);
+    fireEvent.click(screen.getByRole("button", { name: "End all" }));
+    expect(asked).toBe(1);
   });
 });

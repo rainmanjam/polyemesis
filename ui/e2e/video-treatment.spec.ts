@@ -137,6 +137,8 @@ async function openEditor(page: Page, name: string) {
   await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
+  // The video treatment is on step 4 of the dialog (A6).
+  await dialog.getByTestId("dest-step-4").click();
   return dialog;
 }
 

@@ -53,3 +53,28 @@ export function trackChipTitle(index: number, included: boolean, label?: string)
   const named = label ? `Track ${index + 1} (${label})` : `Track ${index + 1}`;
   return `${named} is ${included ? "included" : "excluded"}`;
 }
+
+/** How many audio tracks this card's programme's ingest carries, or null when
+ *  that is not known here: the snapshot is another programme's (the same rule
+ *  as trackLabels above), or the probe has not answered. */
+export function trackCount(
+  source: Pick<SourceInfo, "id" | "probed" | "tracks"> | null | undefined,
+  sourceId: number | null | undefined,
+): number | null {
+  if (!source || sourceId == null || source.id !== sourceId) return null;
+  if (!source.probed) return null;
+  return source.tracks?.length ?? 0;
+}
+
+/** How many track chips TrackSummary draws.
+ *
+ *  It drew SIX, always -- a constant from before the layout was probed -- so a
+ *  four-track ingest showed chips 5 and 6 as "excluded" tracks that do not
+ *  exist. One chip per ingest track when the layout is known; when it is not,
+ *  only as far as the highest routed track, inventing nothing. A routed track
+ *  past the end of the layout is still drawn, because a route to a track the
+ *  ingest no longer has is exactly what the operator needs to see. */
+export function trackChipCount(count: number | null | undefined, included: readonly number[]): number {
+  const routed = included.length > 0 ? Math.max(...included) + 1 : 0;
+  return Math.max(count ?? 0, routed);
+}

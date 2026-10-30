@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   Archive,
+  ChevronDown,
   Clock,
   Gauge,
   Loader2,
@@ -27,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PageHeader } from "@/components/AppLayout";
@@ -34,6 +36,8 @@ import { Experimental, ExperimentalBadge } from "@/components/Experimental";
 import { TrackRows, type TrackRowsLive } from "@/components/signature/TrackRows";
 import { MixMatrix } from "@/components/signature/MixMatrix";
 import { RoutingSaveBar } from "@/components/signature/RoutingSaveBar";
+import { routingChanges } from "@/lib/routingDiff";
+import { PresetReviewDialog, type PresetReview } from "@/components/PresetReviewDialog";
 import { FilterString } from "@/components/signature/FilterString";
 import { useLiveData, useSourceTracks } from "@/hooks/useLiveData";
 import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
@@ -41,6 +45,7 @@ import { cn } from "@/lib/utils";
 import { musicRailMark, musicRailReason, railTextClass } from "@/lib/musicRail";
 import { duckSeed } from "@/lib/duckSeed";
 import { storedMixes } from "@/lib/storedMixes";
+import { readVodStash, writeVodStash } from "@/lib/vodStash";
 import { isLevelOnlySave } from "@/lib/saveImpact";
 import { autoApi } from "@/lib/autoApi";
 import { outputState, reportKey, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
@@ -60,6 +65,7 @@ import {
 import { RouteOverview, type OverviewRow, type OverviewTrack } from "@/components/signature/RouteOverview";
 import { routedTracks, toggleTrackSelection } from "@/lib/routeOverview";
 import { toneForState } from "@/lib/signal";
+import { presetOptsFromRoles, presetPicks } from "@/lib/presetTrackDefaults";
 import {
   DEFAULT_DUCK_ATTACK_MS,
   DEFAULT_DUCK_RATIO,
@@ -82,7 +88,6 @@ import {
   MIN_LOUDNESS_LRA,
   MIN_TARGET_LUFS,
   MIN_TRUE_PEAK_DB,
-  ROLE_LABEL,
   TRACK_ROLES,
   type Destination,
   type DestinationId,
@@ -102,8 +107,9 @@ import {
   type TrackAnnotation,
   type TrackRole,
   type TrackSel,
+  ROLE_LABEL_KEY,
 } from "@/lib/types";
-import { useT, type TranslationKey } from "@/lib/i18n";
+import { useT, useTN, type Translator, type TranslationKey } from "@/lib/i18n";
 
 const NORMALIZE_LABEL: Record<NormalizeMode, TranslationKey> = {
   auto: "route.autoLimitWhen2Tracks",
@@ -111,6 +117,7 @@ const NORMALIZE_LABEL: Record<NormalizeMode, TranslationKey> = {
   limiter: "route.limiter04DbfsCeiling",
   loudnorm: "route.normalizeLoudnorm",
 };
+
 
 /** The named loudness targets, plus the two ends of the range. Every value
  *  here is a starting point, never a default: the right number depends
@@ -169,6 +176,10 @@ export function RoutingPage() {
     language: "",
     musicPolicy: "",
   });
+  // The pickers the operator set by hand. Kept apart from presetOpts (the
+  // server's defaults) so neither a re-read of the defaults nor a later
+  // annotation can move them. See lib/presetTrackDefaults.ts.
+  const [presetPicked, setPresetPicked] = useState<Partial<PresetOpts>>({});
   const [annotations, setAnnotations] = useState<TrackAnnotation[]>([]);
   const [annotating, setAnnotating] = useState(false);
   // Whether the server accepted an annotation write. Null means "not tried
@@ -189,6 +200,10 @@ export function RoutingPage() {
   // has to be confirmed. It is per DESTINATION and is cleared on a switch: the
   // stash is an undo for the toggle, not a clipboard between destinations.
   const stashedVod = useRef<RoutingProfile | null>(null);
+
+  // The preset waiting on the review dialog (A14). applyPresetTo reads the
+  // draft it will replace from draftRef, after its await.
+  const [presetReview, setPresetReview] = useState<PresetReview | null>(null);
 
   // ---- what applyPresetTo re-checks AFTER its await ----
   //
@@ -231,13 +246,14 @@ export function RoutingPage() {
   // The drafts as last rendered, for Save to compare after its awaits. A
   // closure holds the values from the click, which is exactly what is compared
   // AGAINST; this is the other side.
-  const draftRef = useRef<{ profile: RoutingProfile | null; vod: RoutingProfile | null }>({
+  const draftRef = useRef<{ profile: RoutingProfile | null; vod: RoutingProfile | null; dirty: boolean }>({
     profile: null,
     vod: null,
+    dirty: false,
   });
   useEffect(() => {
-    draftRef.current = { profile, vod: vodProfile };
-  }, [profile, vodProfile]);
+    draftRef.current = { profile, vod: vodProfile, dirty };
+  }, [profile, vodProfile, dirty]);
 
   // The live editor's latest compile and the draft it was compiled from. The
   // save bar compares it, levels masked, with the stored graph to say whether
@@ -321,8 +337,9 @@ export function RoutingPage() {
       setVodProfile(vod);
       selectedIdRef.current = found.destination.id;
       vodEnabledRef.current = vod !== null;
-      // A stash from the destination we just left is not an undo for this one.
-      stashedVod.current = null;
+      // A stash from the destination we just left is not an undo for this one;
+      // this one's own, from earlier in the tab, is (A14).
+      stashedVod.current = readVodStash(found.destination.id);
       setDirty(false);
     }
   }, [id, list]);
@@ -469,6 +486,7 @@ export function RoutingPage() {
     setVodProfile(storedVod);
     vodEnabledRef.current = storedVod !== null;
     stashedVod.current = null;
+    writeVodStash(found.destination.id, null);
     setDirty(false);
   };
 
@@ -499,6 +517,28 @@ export function RoutingPage() {
   // red error — with Save disabled underneath them — until the editor's own
   // debounce came round 180 ms and a round trip later. The editor still owns
   // `compiled`; this only lets it stop showing an answer it knows is out of date.
+  // What each preset picker shows and a preset is applied with: the server's
+  // defaults, replaced by the track annotated with the picker's role, with the
+  // operator's own picks over both. lib/presetTrackDefaults.ts.
+  const shownPresetOpts = useMemo(
+    () =>
+      presetOptsFromRoles(
+        presetOpts,
+        annotations,
+        tracks.map((tr) => tr.index),
+        presetPicked,
+      ),
+    [presetOpts, annotations, tracks, presetPicked],
+  );
+  // PresetRow's setter, recording whatever the edit changed as a pick.
+  const pickPresetOpts = useCallback(
+    (update: (o: PresetOpts) => PresetOpts) => {
+      const picked = presetPicks(shownPresetOpts, update(shownPresetOpts));
+      setPresetPicked((prev) => ({ ...prev, ...picked }));
+    },
+    [shownPresetOpts],
+  );
+
   const applyPresetTo = useCallback(
     async (mix: "live" | "vod", presetId: string): Promise<RoutingResult | null> => {
       const destAtClick = selectedIdRef.current;
@@ -506,22 +546,48 @@ export function RoutingPage() {
       try {
         // Against THIS destination's programme: a preset picks track indices,
         // and the default programme's layout is a different ingest (#497).
-        const res = await api.applyPreset(presetId, presetOpts, editedSourceId);
+        const res = await api.applyPreset(presetId, shownPresetOpts, editedSourceId);
         if (seq !== presetSeq.current[mix]) return null;
         if (selectedIdRef.current !== destAtClick) return null;
         if (mix === "vod" && !vodEnabledRef.current) return null;
         // A preset arrives unmuted; a mute the operator set stays (carryMutes).
-        if (mix === "live") setProfile((prev) => carryMutes(res.profile, prev));
-        else setVodProfile(res.profile);
+        const before = mix === "live" ? draftRef.current.profile : draftRef.current.vod;
+        const after = mix === "live" ? carryMutes(res.profile, before) : res.profile;
+        // SHOWN BEFORE IT LANDS (A14). What goes in, what comes out and which
+        // destination changes, with Back to edit; nothing is written until the
+        // operator says so, and even then only into the draft Save applies.
+        const ok = await new Promise<boolean>((resolve) =>
+          setPresetReview({ presetId, mix, before, after, resolve }),
+        );
+        setPresetReview(null);
+        if (!ok) return null;
+        if (seq !== presetSeq.current[mix]) return null;
+        if (selectedIdRef.current !== destAtClick) return null;
+        const wasDirty = draftRef.current.dirty;
+        if (mix === "live") setProfile(after);
+        else setVodProfile(after);
         setDirty(true);
-        toast.success(t("route.presetApplied"));
+        // Undo puts back the very draft the preset replaced, dirty flag and all,
+        // and only while the same destination is still selected.
+        toast.success(t("route.presetApplied"), {
+          action: {
+            label: t("routing.matrix.undo"),
+            onClick: () => {
+              if (selectedIdRef.current !== destAtClick) return;
+              presetSeq.current = { ...presetSeq.current, [mix]: presetSeq.current[mix] + 1 };
+              if (mix === "live") setProfile(before);
+              else setVodProfile(before);
+              setDirty(wasDirty);
+            },
+          },
+        });
         return res.routing;
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("route.couldNotApplyThePreset"));
         return null;
       }
     },
-    [presetOpts, editedSourceId, t],
+    [shownPresetOpts, editedSourceId, t],
   );
 
   const applyPreset = useCallback(
@@ -636,6 +702,20 @@ export function RoutingPage() {
     draftProfile: profile,
   });
 
+  // What the pending save moves, for the save bar's scope line and live diff.
+  const pendingChanges = useMemo(
+    () =>
+      dirty
+        ? routingChanges({
+            stored: storedRow?.profile,
+            draft: profile,
+            storedSecond: storedRow?.vodProfile ?? null,
+            draftSecond: vodProfile ?? null,
+          })
+        : [],
+    [dirty, storedRow, profile, vodProfile],
+  );
+
   // ---- A10: the destination's output, measured after routing ----
   //
   // Polled like the Meters page polls it: the analyser publishes about once a
@@ -703,8 +783,8 @@ export function RoutingPage() {
   }, [storedRow, liveRefusals, t]);
 
   const trackOptions = useMemo(
-    () => tracks.map((t) => ({ value: String(t.index), label: `Track ${t.index + 1}` })),
-    [tracks],
+    () => tracks.map((tr) => ({ value: String(tr.index), label: t("routing.overview.trackLabel", { n: tr.index + 1 }) })),
+    [tracks, t],
   );
 
   const musicTracks = useMemo(
@@ -753,8 +833,8 @@ export function RoutingPage() {
       annotationsStored,
       mixPresets,
       platformPresets,
-      presetOpts,
-      setPresetOpts,
+      presetOpts: shownPresetOpts,
+      setPresetOpts: pickPresetOpts,
       trackOptions,
       musicPlatformName: selectedPolicy?.name ?? "",
       musicDecision: selectedPolicy?.policy,
@@ -772,7 +852,8 @@ export function RoutingPage() {
       annotationsStored,
       mixPresets,
       platformPresets,
-      presetOpts,
+      shownPresetOpts,
+      pickPresetOpts,
       trackOptions,
       selectedPolicy,
       musicTracks,
@@ -860,7 +941,7 @@ export function RoutingPage() {
         <PageHeader title={t("route.title")} />
         <Card>
           <CardContent className="py-8 text-center text-[12px] text-muted-foreground">
-            Add a destination first — routing is configured per destination.
+            {t("route.noDestinations")}
           </CardContent>
         </Card>
       </div>
@@ -876,7 +957,7 @@ export function RoutingPage() {
           <>
             <Button size="sm" onClick={save} disabled={!dirty || saving || !!blockingError}>
               {saving ? <Loader2 className="animate-spin" /> : <Save />}
-              Save
+              {t("common.save")}
             </Button>
           </>
         }
@@ -1008,7 +1089,10 @@ export function RoutingPage() {
                 // Switching OFF stashes what is being dropped, so switching
                 // back on is an UNDO rather than a fresh copy of the live mix.
                 // See stashedVod.
-                if (next === null && vodProfile) stashedVod.current = vodProfile;
+                if (next === null && vodProfile) {
+                  stashedVod.current = vodProfile;
+                  writeVodStash(selected.id, vodProfile);
+                }
                 setVodProfile(next);
                 vodEnabledRef.current = next !== null;
                 setDirty(true);
@@ -1036,51 +1120,19 @@ export function RoutingPage() {
                 // where nothing is conditional: a probed ingest, off Twitch.
                 footer={() => {
                   if (vodBlockedByToggle) {
-                    return (
-                      <>
-                        This is the graph the second audio track WOULD be built from. It is not
-                        being emitted while Enhanced Broadcasting is off for this destination —
-                        see the note above — so nothing here reaches Twitch yet. It is still
-                        compiled and still saved.
-                      </>
-                    );
+                    return <>{t("route.vodFooterBlocked")}</>;
                   }
                   // engine/destinations.go refuses the pair on the provisional
                   // path for EVERY platform, not just Twitch: a provisional
                   // compile already runs on a guessed channel layout, and a
                   // second guessed mix on top of it doubles what is approximate.
                   if (!ctx.probed) {
-                    return (
-                      <>
-                        This is the graph the second audio track WOULD be built from. The ingest
-                        has not been probed, so the live mix is running on a guessed channel
-                        layout and the engine does not add a second guessed mix on top of it —
-                        nothing here is being emitted yet, on any platform. It returns by itself
-                        on the first reconcile after a probe succeeds, which is the same moment
-                        the live mix stops being provisional. It is still compiled and still
-                        saved.
-                      </>
-                    );
+                    return <>{t("route.vodFooterUnprobed")}</>;
                   }
                   if (twitchRtmp) {
-                    return (
-                      <>
-                        This is the graph the second audio track would be built from. Whether it
-                        is sent is decided at go-live by the Enhanced Broadcasting negotiation —
-                        where Twitch does not grant it, this destination publishes the live mix
-                        alone and this graph is not emitted. The answer appears on this
-                        destination's card. Either way the video is copied without re-encoding
-                        and both mixes are built from the same ingest in one FFmpeg process.
-                      </>
-                    );
+                    return <>{t("route.vodFooterTwitch")}</>;
                   }
-                  return (
-                    <>
-                      This graph is the SECOND audio track. The first is the live mix above, the
-                      video is copied without re-encoding either way, and both are built from the
-                      same ingest in one FFmpeg process.
-                    </>
-                  );
+                  return <>{t("route.vodFooterSecond")}</>;
                 }}
               />
             )}
@@ -1096,8 +1148,19 @@ export function RoutingPage() {
         destinationName={selected?.name ?? ""}
         restarts={!!selected?.enabled}
         levelOnly={levelOnly}
+        changes={pendingChanges}
         onSave={save}
         onDiscard={discardChanges}
+      />
+
+      <PresetReviewDialog
+        review={presetReview}
+        presetName={(() => {
+          const p = presets.find((x) => x.id === presetReview?.presetId);
+          return p ? presetText(t, p).name : "";
+        })()}
+        destinationName={selected?.name ?? ""}
+        live={!!selected?.enabled}
       />
     </div>
   );
@@ -1278,6 +1341,11 @@ function ProfileEditor({
     [onApplyPreset, onCompileError],
   );
 
+  // The three starters, in this order when the server has them; anything it
+  // does not offer is skipped rather than drawn as a dead tile.
+  const starters = STARTER_PRESETS.flatMap((id) => ctx.mixPresets.filter((p) => p.id === id));
+  const recipes = ctx.mixPresets.filter((p) => !STARTER_PRESETS.includes(p.id));
+
   const excludeRoles = profile.excludeRoles ?? [];
   // The compiler's own answer to "which tracks reach this destination", which
   // is the only one that survives a role exclusion.
@@ -1285,35 +1353,57 @@ function ProfileEditor({
 
   return (
     <>
-      {/* presets */}
+      {/* presets: three starters in view, the rest a click away (A14), so the
+          editor and Music rights are not pushed below the fold by a wall of
+          equal-weight tiles. Every preset goes through the review dialog. */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-1.5">
-            <Wand2 className="h-3.5 w-3.5" /> Presets
+            <Wand2 className="h-3.5 w-3.5" /> {t("routing.presets.title")}
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+        <CardContent className="flex flex-wrap items-start gap-2">
           <PresetRow
-            presets={ctx.mixPresets}
+            presets={starters}
             opts={ctx.presetOpts}
             setOpts={ctx.setPresetOpts}
             trackOptions={ctx.trackOptions}
             onApply={handleApplyPreset}
           />
-          {ctx.platformPresets.length > 0 && (
-            <div className="flex flex-col gap-1.5 border-t border-border pt-3">
-              <div className="text-sm uppercase tracking-wider text-muted-foreground">
-                Platform defaults
-              </div>
-              <PresetRow
-                presets={ctx.platformPresets}
-                opts={ctx.presetOpts}
-                setOpts={ctx.setPresetOpts}
-                trackOptions={ctx.trackOptions}
-                onApply={handleApplyPreset}
-                showMusicPolicy
-              />
-            </div>
+          {(recipes.length > 0 || ctx.platformPresets.length > 0) && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="sm" data-testid="more-recipes">
+                  <ChevronDown /> {t("routing.presets.more")}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="flex w-[min(44rem,90vw)] flex-col gap-3">
+                {recipes.length > 0 && (
+                  <PresetRow
+                    presets={recipes}
+                    opts={ctx.presetOpts}
+                    setOpts={ctx.setPresetOpts}
+                    trackOptions={ctx.trackOptions}
+                    onApply={handleApplyPreset}
+                  />
+                )}
+                {ctx.platformPresets.length > 0 && (
+                  <div className="flex flex-col gap-1.5 border-t border-border pt-3">
+                    <div className="text-sm uppercase tracking-wider text-muted-foreground">
+                      {t("routing.presets.platformDefaults")}
+                    </div>
+                    <PresetRow
+                      presets={ctx.platformPresets}
+                      opts={ctx.presetOpts}
+                      setOpts={ctx.setPresetOpts}
+                      trackOptions={ctx.trackOptions}
+                      onApply={handleApplyPreset}
+                      showMusicPolicy
+                    />
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
           )}
         </CardContent>
       </Card>
@@ -1338,11 +1428,11 @@ function ProfileEditor({
                     size="sm"
                     onClick={() => ctx.onAnnotatingChange(!ctx.annotating)}
                   >
-                    <Tags /> Label tracks
+                    <Tags /> {t("route.labelTracks")}
                   </Button>
                 )}
                 <Label htmlFor={`${idPrefix}-norm`} className="whitespace-nowrap">
-                  Clip protection
+                  {t("route.clipProtection")}
                 </Label>
                 <Select
                   value={profile.normalize}
@@ -1444,14 +1534,15 @@ function ProfileEditor({
               )}
               {(profile.delayMs ?? 0) !== 0 && (
                 <Badge variant="outline">
-                  {describeDelay(profile.delayMs ?? 0, compiled.videoDelayMs ?? 0)}
+                  {describeDelay(t, profile.delayMs ?? 0, compiled.videoDelayMs ?? 0)}
                 </Badge>
               )}
-              {profile.ducking && <Badge variant="outline">ducking</Badge>}
+              {profile.ducking && <Badge variant="outline">{t("route.badgeDucking")}</Badge>}
               {excludeRoles.length > 0 && (
                 <Badge variant="warn">
-                  excludes{" "}
-                  {excludeRoles.map((r) => ROLE_LABEL[r as Exclude<TrackRole, "">]).join(", ")}
+                  {t("route.badgeExcludes", {
+                    roles: excludeRoles.map((r) => t(ROLE_LABEL_KEY[r as Exclude<TrackRole, "">])).join(", "),
+                  })}
                 </Badge>
               )}
             </div>
@@ -1580,6 +1671,7 @@ function SecondMixCard({
   probed: boolean;
 }) {
   const t = useT();
+  const tn = useTN();
   const enable = (on: boolean) => {
     if (!on) return onChange(null);
     // RESTORE FIRST. Switching off drops the whole profile, and re-seeding from
@@ -1634,11 +1726,7 @@ function SecondMixCard({
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
-              This second mix is <strong>not being sent yet</strong>, on any platform. The ingest
-              has not been probed, so the live mix is compiled on a guessed channel layout and
-              the engine does not add a second guessed mix on top of one it is already calling
-              approximate. It comes back by itself on the first reconcile after a probe succeeds.
-              Everything below is still saved.
+              {tn("route.vodUnprobedAlert", { b: <strong>{t("route.vodNotSentYet")}</strong> })}
             </span>
           </div>
         )}
@@ -1648,11 +1736,7 @@ function SecondMixCard({
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
-              This second mix is <strong>not being sent</strong>. The ordinary Twitch RTMP ingest
-              carries one audio track, and Enhanced Broadcasting is switched off for this
-              destination — so the engine refuses the pair before the broadcast starts and
-              publishes the live mix alone. Switch Enhanced Broadcasting on in this destination's
-              settings to negotiate an ingest that takes it. Everything below is still saved.
+              {tn("route.vodBlockedAlert", { b: <strong>{t("route.vodNotSent")}</strong> })}
             </span>
           </div>
         )}
@@ -1661,36 +1745,18 @@ function SecondMixCard({
             a dependency, never as a success — the answer does not exist until
             go-live, and it lands on the destination card. */}
         {twitchRtmp && multitrack && profile !== null && probed && (
-          <span className="text-sm text-muted-foreground">
-            Whether this second track is actually sent is decided at go-live: Twitch grants
-            Enhanced Broadcasting only to a client with a GPU it supports, and where it is not
-            granted this destination publishes the live mix alone to the ordinary Twitch ingest.
-            What was decided appears on this destination's card once it goes live — it is not
-            known here and this page does not claim it.
-          </span>
+          <span className="text-sm text-muted-foreground">{t("route.vodTwitchDepends")}</span>
         )}
 
         {/* Off Twitch there is no negotiation and nothing conditional: the
             generic two-mix egress is what runs. Said plainly so the Twitch
             caveats above are not read as applying everywhere. */}
         {!twitchRtmp && profile !== null && probed && (
-          <span className="text-sm text-muted-foreground">
-            This destination is not a Twitch RTMP one, so nothing is negotiated: both mixes are
-            built in the same FFmpeg process and published as two audio tracks. Whether the far
-            end accepts a second track is a property of that endpoint — an RTMP ingest that takes
-            one track will typically ignore or reject the second.
-          </span>
+          <span className="text-sm text-muted-foreground">{t("route.vodNotTwitch")}</span>
         )}
 
         {twitchRtmp && (
-          <Experimental>
-            On Twitch this depends on Enhanced Broadcasting. The negotiation runs against
-            ingest.twitch.tv and succeeds — polyemesis's own tests reach the live endpoint on
-            every run and watch Twitch grant a VOD audio track and mint a key. What has never
-            been observed is a broadcast published through that key, so no second audio track has
-            been seen arriving at Twitch. The mix you configure here is stored and compiled
-            regardless, and on a non-Twitch destination it does not depend on any of this.
-          </Experimental>
+          <Experimental>{t("route.vodExperimental")}</Experimental>
         )}
       </CardContent>
     </Card>
@@ -1700,6 +1766,29 @@ function SecondMixCard({
 /* ==========================================================================
    Presets
    ========================================================================== */
+
+/** The presets shown without opening "More recipes": everything, no music and
+ *  mic only, the three a first-time operator reaches for (A14). The ids are
+ *  internal/routing/presets.go's. */
+const STARTER_PRESETS: readonly string[] = ["everything", "no-music", "mic-only"];
+
+/** The built-in mix presets' names and descriptions in the catalogue. The
+ *  server sends English (internal/routing/presets.go); a preset it adds that
+ *  is not listed here, and every platform preset, shows as sent. */
+const PRESET_TEXT: Record<string, { name: TranslationKey; description: TranslationKey }> = {
+  everything: { name: "route.preset.everything", description: "route.preset.everythingDesc" },
+  "no-music": { name: "route.preset.noMusic", description: "route.preset.noMusicDesc" },
+  "mic-only": { name: "route.preset.micOnly", description: "route.preset.micOnlyDesc" },
+  "surround-downmix": { name: "route.preset.surround", description: "route.preset.surroundDesc" },
+  "commentary-language": { name: "route.preset.commentary", description: "route.preset.commentaryDesc" },
+  "clean-feed": { name: "route.preset.cleanFeed", description: "route.preset.cleanFeedDesc" },
+  "except-music": { name: "route.preset.exceptMusic", description: "route.preset.exceptMusicDesc" },
+};
+
+function presetText(t: Translator, p: Preset): { name: string; description: string } {
+  const k = PRESET_TEXT[p.id];
+  return k ? { name: t(k.name), description: t(k.description) } : { name: p.name, description: p.description };
+}
 
 interface PresetRowProps {
   presets: Preset[];
@@ -1728,13 +1817,13 @@ function PresetRow({
             size="sm"
             className="justify-start"
             onClick={() => onApply(p.id)}
-            title={p.description}
+            title={presetText(t, p).description}
           >
-            {p.name}
+            {presetText(t, p).name}
           </Button>
           {p.policy?.exclude && (
             <Badge variant="warn" className="w-fit">
-              no music
+              {t("route.railNoMusic")}
             </Badge>
           )}
           {p.needsMusicTrack && !p.platform && (
@@ -1815,9 +1904,10 @@ function TrackPick({
   options: { value: string; label: string }[];
   onChange: (v: number) => void;
 }) {
+  const t = useT();
   return (
     <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
-      <SelectTrigger className="h-6 text-sm" aria-label={`${label} track`}>
+      <SelectTrigger className="h-6 text-sm" aria-label={t("route.trackPickAria", { label })}>
         <span className="mr-1 text-muted-foreground">{label}</span>
         <SelectValue />
       </SelectTrigger>
@@ -1854,9 +1944,10 @@ function MusicRightsCard({
   onExcludeRoles: (roles: TrackRole[]) => void;
 }) {
   const t = useT();
+  const tn = useTN();
   const excluded = excludeRoles.includes("music");
   const platformWants = decision?.exclude ?? false;
-  const reason = decision?.reason || "this platform's music policy";
+  const reason = decision?.reason || t("route.musicPolicyFallback");
   const who = platformName || t("route.thisDestinationSPlatform");
 
   const toggleRole = (role: TrackRole, on: boolean) => {
@@ -1870,22 +1961,22 @@ function MusicRightsCard({
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-1.5">
-          <ShieldCheck className="h-3.5 w-3.5" /> Music rights
+          <ShieldCheck className="h-3.5 w-3.5" /> {t("routing.overview.musicRights")}
         </CardTitle>
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="cursor-help">
               {excluded ? (
                 <Badge variant="live">
-                  <Music className="h-2.5 w-2.5" /> music excluded
+                  <Music className="h-2.5 w-2.5" /> {t("route.musicExcluded")}
                 </Badge>
               ) : platformWants ? (
                 <Badge variant="down">
-                  <Music className="h-2.5 w-2.5" /> music is being sent
+                  <Music className="h-2.5 w-2.5" /> {t("route.musicBeingSent")}
                 </Badge>
               ) : (
                 <Badge variant="outline">
-                  <Music className="h-2.5 w-2.5" /> music allowed
+                  <Music className="h-2.5 w-2.5" /> {t("route.musicAllowed")}
                 </Badge>
               )}
             </span>
@@ -1893,25 +1984,14 @@ function MusicRightsCard({
           <TooltipContent className="max-w-80 leading-relaxed">
             {excluded ? (
               <>
-                Any ingest track marked with the “Music” role is dropped before this
-                destination’s mix is built.{" "}
-                {platformWants &&
-                  `${who} is widely observed to act on recorded music — ${reason} — which is why this is on by default. `}
-                Nothing else about the mix changes.
+                {t("route.musicTipExcluded")}{" "}
+                {platformWants && <>{t("route.musicTipExcludedWhy", { who, reason })} </>}
+                {t("route.musicTipNothingElse")}
               </>
             ) : platformWants ? (
-              <>
-                {who} is widely observed to mute the VOD, block the replay or strike the
-                channel over recorded music ({reason}). polyemesis is not enforcing that here:
-                this destination is configured to carry music. Turn the switch on to keep it
-                out.
-              </>
+              <>{t("route.musicTipSent", { who, reason })}</>
             ) : (
-              <>
-                No music policy is known for this destination, so nothing is filtered. The
-                policy table is a convenience default and never legal advice — the operator
-                decides.
-              </>
+              <>{t("route.musicTipUnknown")}</>
             )}
           </TooltipContent>
         </Tooltip>
@@ -1925,7 +2005,7 @@ function MusicRightsCard({
           />
           <span className="text-[12px]">{t("route.keepMusicOut")}</span>
           {excluded !== platformWants && decision && (
-            <Badge variant="outline">operator override</Badge>
+            <Badge variant="outline">{t("route.operatorOverride")}</Badge>
           )}
         </label>
 
@@ -1933,19 +2013,26 @@ function MusicRightsCard({
           {excluded ? (
             musicTracks.length > 0 ? (
               <>
-                <span className="text-live">
-                  {musicTracks.map((t) => `Track ${t + 1}`).join(", ")}
-                </span>{" "}
-                {musicTracks.length === 1 ? "is" : "are"} marked as music and{" "}
-                {musicTracks.length === 1 ? "is" : "are"} not being sent. The exclusion follows
-                the role, so moving the music to another track keeps working.
+                {tn(
+                  musicTracks.length === 1
+                    ? "route.musicTracksExcludedOne"
+                    : "route.musicTracksExcludedMany",
+                  {
+                    tracks: (
+                      <span className="text-live">
+                        {musicTracks
+                          .map((n) => t("routing.overview.trackLabel", { n: n + 1 }))
+                          .join(", ")}
+                      </span>
+                    ),
+                  },
+                )}
               </>
             ) : (
               <>
-                No ingest track is marked as music yet. Open{" "}
-                <span className="text-foreground">{t("route.labelTracks")}</span> above and set one to
-                “Music” — this destination will drop it from that moment on, without another
-                edit here.
+                {tn("route.noMusicTrack", {
+                  labelTracks: <span className="text-foreground">{t("route.labelTracks")}</span>,
+                })}
               </>
             )
           ) : (
@@ -1955,7 +2042,7 @@ function MusicRightsCard({
 
         <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
           <span className="mr-1 text-sm uppercase tracking-wider text-muted-foreground">
-            Also exclude
+            {t("route.alsoExclude")}
           </span>
           {TRACK_ROLES.filter((r) => r !== "music").map((r) => {
             const on = excludeRoles.includes(r);
@@ -1971,7 +2058,7 @@ function MusicRightsCard({
                     : "border-border text-muted-foreground hover:border-border-strong hover:text-muted-foreground",
                 )}
               >
-                {ROLE_LABEL[r]}
+                {t(ROLE_LABEL_KEY[r])}
               </button>
             );
           })}
@@ -1997,6 +2084,7 @@ export function LoudnessCard({
   onChange: (l: Loudness | null) => void;
 }) {
   const t = useT();
+  const tn = useTN();
   const named = loudness && LOUDNESS_PRESETS.some((p) => p.lufs === loudness.targetLufs);
   const value = !loudness ? LOUDNESS_OFF : named ? String(loudness.targetLufs) : LOUDNESS_CUSTOM;
   // A target under `off` or `limiter` is stored but inert — routing never
@@ -2089,11 +2177,7 @@ export function LoudnessCard({
         {inert && (
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm leading-relaxed text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-            <span>
-              Clip protection is set to “{t(NORMALIZE_LABEL[normalize])}”, which polyemesis never
-              overrides — you chose it. This target is stored but not applied. Switch clip
-              protection to Auto or Loudness to arm it.
-            </span>
+            <span>{t("route.loudnessInert", { mode: t(NORMALIZE_LABEL[normalize]) })}</span>
           </div>
         )}
 
@@ -2101,11 +2185,9 @@ export function LoudnessCard({
           {loudness ? (
             t("route.measuredOverTheWholeProgramme")
           ) : normalize === "loudnorm" ? (
-            <>
-              Clip protection is set to Loudness, which normalises to a fixed{" "}
-              <span className="tnum">{LUFS_PODCAST} LUFS</span> — the value that shipped before
-              targets were configurable. Choosing one above replaces it.
-            </>
+            tn("route.loudnormFixed", {
+              lufs: <span className="tnum">{LUFS_PODCAST} LUFS</span>,
+            })
           ) : (
             t("route.withoutATargetTheMix")
           )}
@@ -2137,6 +2219,7 @@ export function DelayCard({
   onChange: (ms: number) => void;
 }) {
   const t = useT();
+  const tn = useTN();
   const direction: DelayDirection = delayMs < 0 ? "video" : "audio";
   const magnitude = Math.abs(delayMs);
   const max = direction === "audio" ? MAX_DELAY_MS : -MIN_DELAY_MS;
@@ -2155,11 +2238,11 @@ export function DelayCard({
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-1.5">
-          <Clock className="h-3.5 w-3.5" /> A/V delay
+          <Clock className="h-3.5 w-3.5" /> {t("route.avDelay")}
         </CardTitle>
         {delayMs !== 0 && (
           <Badge variant="armed" className="tnum">
-            {describeDelay(delayMs, videoDelayMs)}
+            {describeDelay(t, delayMs, videoDelayMs)}
           </Badge>
         )}
       </CardHeader>
@@ -2194,18 +2277,15 @@ export function DelayCard({
           {delayMs === 0 ? (
             t("route.audioAndVideoGoOut")
           ) : direction === "audio" ? (
-            <>
-              Audio is held back <span className="tnum text-foreground">{magnitude} ms</span>, so
-              a sound lands after the picture that made it. Up to {MAX_DELAY_MS / 1000} s —
-              enough for lip-sync repair or a moderation delay in front of a live audience.
-            </>
+            tn("route.delayAudioDesc", {
+              ms: <span className="tnum text-foreground">{magnitude} ms</span>,
+              max: MAX_DELAY_MS / 1000,
+            })
           ) : (
-            <>
-              Video is held back <span className="tnum text-foreground">{magnitude} ms</span> at
-              the input so the audio runs ahead of it. Capped at {-MIN_DELAY_MS / 1000} s:
-              every millisecond costs downstream video buffering, and this direction is only
-              ever lip-sync repair.
-            </>
+            tn("route.delayVideoDesc", {
+              ms: <span className="tnum text-foreground">{magnitude} ms</span>,
+              max: -MIN_DELAY_MS / 1000,
+            })
           )}
         </p>
       </CardContent>
@@ -2213,10 +2293,10 @@ export function DelayCard({
   );
 }
 
-function describeDelay(delayMs: number, videoDelayMs: number): string {
-  if (delayMs > 0) return `audio +${delayMs} ms`;
-  if (delayMs < 0) return `video +${videoDelayMs || -delayMs} ms`;
-  return "in sync";
+function describeDelay(t: Translator, delayMs: number, videoDelayMs: number): string {
+  if (delayMs > 0) return t("route.delayBadgeAudio", { ms: delayMs });
+  if (delayMs < 0) return t("route.delayBadgeVideo", { ms: videoDelayMs || -delayMs });
+  return t("route.inSync");
 }
 
 /* ==========================================================================
@@ -2273,7 +2353,7 @@ export function DuckingCard({
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-1.5">
-          <Waves className="h-3.5 w-3.5" /> Ducking
+          <Waves className="h-3.5 w-3.5" /> {t("route.duckingTitle")}
         </CardTitle>
         <label className="flex items-center gap-2">
           <span className="text-sm uppercase tracking-wider text-muted-foreground">
@@ -2296,7 +2376,7 @@ export function DuckingCard({
           <>
             <div className="flex flex-col gap-1.5">
               <div className="text-sm uppercase tracking-wider text-muted-foreground">
-                When these speak
+                {t("route.duckWhenSpeak")}
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {allTracks.map((t) => (
@@ -2317,7 +2397,7 @@ export function DuckingCard({
 
             <div className="flex flex-col gap-1.5">
               <div className="text-sm uppercase tracking-wider text-muted-foreground">
-                Push these down
+                {t("route.duckPushDown")}
               </div>
               {mixedTracks.length === 0 && (
                 <p className="text-sm text-warn" data-testid="duck-no-target">
@@ -2381,10 +2461,12 @@ export function DuckingCard({
               />
             </div>
             <p className="text-sm text-muted-foreground">
-              Blank uses the defaults: {DEFAULT_DUCK_THRESHOLD_DB} dB, {DEFAULT_DUCK_RATIO}:1,{" "}
-              {DEFAULT_DUCK_ATTACK_MS} ms attack, {DEFAULT_DUCK_RELEASE_MS} ms release — about
-              12 dB of reduction, fast enough to catch a word’s first syllable and slow enough
-              not to chatter between them.
+              {t("route.duckDefaults", {
+                threshold: DEFAULT_DUCK_THRESHOLD_DB,
+                ratio: DEFAULT_DUCK_RATIO,
+                attack: DEFAULT_DUCK_ATTACK_MS,
+                release: DEFAULT_DUCK_RELEASE_MS,
+              })}
             </p>
           </>
         )}
@@ -2406,7 +2488,8 @@ function TrackChip({
   tone: "armed" | "warn";
   onClick: () => void;
 }) {
-  const name = annotation?.label || (annotation?.role ? ROLE_LABEL[annotation.role as Exclude<TrackRole, "">] : "");
+  const t = useT();
+  const name = annotation?.label || (annotation?.role ? t(ROLE_LABEL_KEY[annotation.role as Exclude<TrackRole, "">]) : "");
   return (
     <button
       onClick={onClick}

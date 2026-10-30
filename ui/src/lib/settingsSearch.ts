@@ -8,6 +8,7 @@ export const SETTINGS_TABS = [
   "platforms",
   "overlays",
   "security",
+  "danger",
   "debug",
 ] as const;
 
@@ -126,7 +127,9 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: "security", key: "set.apiTokens" },
   { tab: "security", key: "set.name", card: "set.apiTokens", anchor: "tok-name" },
   { tab: "security", key: "set.tokenScope", card: "set.apiTokens", anchor: "tok-scope" },
-  // debug
+  // danger zone (A17)
+  { tab: "danger", key: "danger.title" },
+  // debug: on the System page since A17; a hit navigates there
   { tab: "debug", key: "debug.title" },
 ];
 

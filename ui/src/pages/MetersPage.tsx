@@ -17,7 +17,7 @@ import { loudnessMeasured } from "@/lib/meterFacts";
 import { autoZoomRange, FIXED_RANGE, type DbRange } from "@/lib/meterScale";
 import { toneBadge, type SignalTone } from "@/lib/signal";
 import { cn } from "@/lib/utils";
-import { useT } from "@/lib/i18n";
+import { useT, useTN } from "@/lib/i18n";
 
 type Verdict = "unknown" | "pass" | "warn" | "fail";
 
@@ -104,6 +104,7 @@ function signed(v: number): string {
  *  way to be certain before going live, so it gets the whole width. */
 export function MetersPage() {
   const t = useT();
+  const tn = useTN();
   const { levels, source, status, programme, programmeKnown, sourceCount } = useLiveData();
   const tracks = useSourceTracks();
   const probed = source?.probed ?? false;
@@ -224,7 +225,7 @@ export function MetersPage() {
             {sourceCount > 1 && source?.name && (
               <Badge
                 variant="outline"
-                title="These meters describe this programme only. The console follows one at a time."
+                title={t("meters.programmeOnly")}
               >
                 {source.name}
               </Badge>
@@ -266,7 +267,7 @@ export function MetersPage() {
           </CardTitle>
           <div className="flex items-center gap-2">
             <Label htmlFor="loud-monitor" className="text-[10px] text-muted-foreground">
-              Monitor
+              {t("meters.monitor")}
             </Label>
             {/* Disabled rather than guessed while the state is unknown: a
                 switch drawn in a position nobody chose is a lie one click
@@ -324,13 +325,14 @@ export function MetersPage() {
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
           <span>
             <strong className="font-semibold">
-              The last {source?.metersDropped} track
-              {(source?.metersDropped ?? 0) === 1 ? " is" : "s are"} not being metered.
+              {t(
+                (source?.metersDropped ?? 0) === 1 ? "meters.droppedOne" : "meters.droppedMany",
+                { n: source?.metersDropped ?? 0 },
+              )}
             </strong>{" "}
-            This ingest is wider than the 64 channels one metering process can merge, so
-            only the leading tracks are measured. The bars below for the remaining tracks
-            are <em>unmeasured, not silent</em> — do not read them as proof of a clean
-            track.
+            {tn("meters.droppedBody", {
+              em: <em>{t("meters.droppedBodyEmph")}</em>,
+            })}
           </span>
         </div>
       )}
@@ -359,7 +361,7 @@ export function MetersPage() {
             <Card key={track.index} className={cn(clipping && "border-down/50")}>
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
-                  Track {track.index + 1}
+                  {t("lib.trackLabel", { n: track.index + 1 })}
                   <span className="font-mono text-[10px] font-normal text-muted-foreground">
                     {track.layout} · {track.codec}
                   </span>
@@ -421,7 +423,7 @@ export function MetersPage() {
                       ))}
                     </div>
                     <div className="pl-[calc(1.25rem+0.5rem)] text-[9px] uppercase tracking-wider text-muted-foreground">
-                      rms / peak dBFS
+                      {t("meters.rmsPeakDbfs")}
                     </div>
                   </>
                 ) : (
@@ -472,7 +474,7 @@ export function ComplianceRow({
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[12px]">{report.destination}</span>
         <Badge variant={toneBadge[tone]} title={report.reason}>
-          {report.error ? "analyser failed" : notSet ? t("routing.meters.notSet") : report.verdict}
+          {report.error ? t("meters.analyserFailed") : notSet ? t("routing.meters.notSet") : report.verdict}
         </Badge>
         {notSet && (
           <Button asChild variant="outline" size="sm" className="h-6 px-2 text-xs">
@@ -486,8 +488,11 @@ export function ComplianceRow({
         )}
         {targeted && (
           <span className="text-[10px] text-muted-foreground" title={report.target.reason}>
-            target {report.target.lufs.toFixed(0)} LUFS ±{report.target.toleranceLu.toFixed(0)} LU,
-            true peak {report.target.truePeakDbtp.toFixed(1)} dBTP
+            {t("meters.targetLine", {
+              lufs: report.target.lufs.toFixed(0),
+              tolerance: report.target.toleranceLu.toFixed(0),
+              truePeak: report.target.truePeakDbtp.toFixed(1),
+            })}
           </span>
         )}
       </div>

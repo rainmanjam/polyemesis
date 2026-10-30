@@ -1,6 +1,8 @@
 /** Types mirroring the Go API. Kept hand-written and small rather than
  *  generated, so the shapes the UI actually consumes stay obvious. */
 
+import type { TranslationKey } from "./i18n";
+
 /** Mirrors routing.MaxTracks. The server also reports this as `maxTracks` in
  *  its capabilities response — prefer that where it is to hand, and treat this
  *  as the fallback for code that renders before capabilities have loaded. */
@@ -91,13 +93,14 @@ export const TRACK_ROLES = [
   "other",
 ] as const satisfies readonly Exclude<TrackRole, "">[];
 
-export const ROLE_LABEL: Record<Exclude<TrackRole, "">, string> = {
-  mic: "Mic",
-  commentary: "Commentary",
-  game: "Game",
-  music: "Music",
-  clean: "Clean",
-  other: "Other",
+/** The role names, as catalogue keys: every surface renders them through t(). */
+export const ROLE_LABEL_KEY: Record<Exclude<TrackRole, "">, TranslationKey> = {
+  mic: "signature.role.mic",
+  commentary: "signature.role.commentary",
+  game: "signature.role.game",
+  music: "signature.role.music",
+  clean: "signature.role.clean",
+  other: "signature.role.other",
 };
 
 /** Matches routing.MaxLabelLen / MaxLangTagLen. */
@@ -1974,6 +1977,19 @@ export interface PlatformAccount {
    *  the BINARY changes, not when the row does — upgrading polyemesis can turn
    *  a fine account into one that needs reconnecting. */
   reconnect?: ReconnectReason;
+  /** The last token refresh's outcome and the token's own expiry (A5), read
+   *  per request; see internal/api/account_health.go. Absent on an older
+   *  server, which the UI reads as "no news" rather than as healthy. */
+  health?: AccountHealth;
+}
+
+/** internal/api/account_health.go's AccountHealth. */
+export interface AccountHealth {
+  state: "ok" | "expiring" | "refreshFailing" | "expired";
+  /** Refreshes in a row that failed, and the platform's words for the last. */
+  failures?: number;
+  lastError?: string;
+  failedAt?: string;
 }
 
 /** What `POST /platforms/credentials/{platform}/device` answers with: the code
@@ -2752,18 +2768,18 @@ export type JobMode = "realtime" | "deferred" | "scheduled" | "manual";
 
 export const JOB_MODES = ["realtime", "deferred", "scheduled", "manual"] as const;
 
-export const JOB_MODE_LABEL: Record<JobMode, string> = {
-  realtime: "Realtime",
-  deferred: "Yield to stream",
-  scheduled: "Scheduled",
-  manual: "Manual only",
+export const JOB_MODE_LABEL: Record<JobMode, TranslationKey> = {
+  realtime: "jobs.modeRealtime",
+  deferred: "jobs.modeDeferred",
+  scheduled: "jobs.modeScheduled",
+  manual: "jobs.modeManual",
 };
 
-export const JOB_MODE_HINT: Record<JobMode, string> = {
-  realtime: "Runs immediately, even while a broadcast is going out. Only for work you know is cheap.",
-  deferred: "Waits for the ingest to stop and for the machine to be quiet. The safe default.",
-  scheduled: "Only runs inside the windows below — overnight, typically.",
-  manual: "Never starts on its own. You release each job by hand.",
+export const JOB_MODE_HINT: Record<JobMode, TranslationKey> = {
+  realtime: "jobs.modeRealtimeHint",
+  deferred: "jobs.modeDeferredHint",
+  scheduled: "jobs.modeScheduledHint",
+  manual: "jobs.modeManualHint",
 };
 
 /** Priority is stored as a number; these are the three the API mints. */

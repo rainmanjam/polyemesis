@@ -11,6 +11,7 @@ const labels = {
   platforms: "Platforms",
   overlays: "Overlays",
   security: "Security",
+  danger: "Danger zone",
   debug: "Debug",
 } as const;
 
