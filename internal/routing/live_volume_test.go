@@ -195,3 +195,50 @@ func TestMatrixMuteIsLiveAndCellGainIsNot(t *testing.T) {
 func withoutVolumeStages(graph string) string {
 	return regexp.MustCompile(`,volume@[A-Za-z0-9_]+=volume=[0-9.]+`).ReplaceAllString(graph, "")
 }
+
+// A `c` command is sent with FFmpeg's "first matching filter" flag. If two
+// stages shared a name, only the first would move, FFmpeg would still answer
+// ret:0, and the operator would be told a mute took effect while the other
+// copy kept playing. So every volume@ name in one -filter_complex must be
+// unique -- across the primary and second mix of a pair, and with ducking,
+// whose key taps are built from the same per-track chain.
+func TestEveryVolumeStageNameIsUniqueInItsGraph(t *testing.T) {
+	duck := simple(NormOff, 0, 1, 2)
+	duck.Ducking = &Ducking{Trigger: []int{0}, Target: []int{1, 2}}
+	single, err := Compile(duck, stereoSource(3))
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	// A trigger that is NOT in the mix gets its own key tap, built from the
+	// same per-track chain as a mixed track.
+	tapped := simple(NormOff, 1, 2)
+	tapped.Ducking = &Ducking{Trigger: []int{0}, Target: []int{1, 2}}
+	tap, err := Compile(tapped, stereoSource(3))
+	if err != nil {
+		t.Fatalf("Compile tapped: %v", err)
+	}
+	vod := simple(NormOff, 0, 2)
+	pair, err := CompilePair(duck, &vod, stereoSource(3))
+	if err != nil {
+		t.Fatalf("CompilePair: %v", err)
+	}
+	for name, graph := range map[string]string{"ducked": single.FilterComplex, "tapped": tap.FilterComplex, "pair": pair.FilterComplex} {
+		seen := map[string]int{}
+		for _, m := range regexp.MustCompile(`volume@[A-Za-z0-9_]+`).FindAllString(graph, -1) {
+			seen[m]++
+		}
+		if len(seen) == 0 {
+			t.Errorf("%s: no volume stage at all: %s", name, graph)
+		}
+		for inst, n := range seen {
+			if n != 1 {
+				t.Errorf("%s: %s appears %d times; a live command would move only the first:\n%s", name, inst, n, graph)
+			}
+		}
+	}
+	// The second mix's stages are its own, so muting the VOD mix never moves
+	// the live mix's level.
+	if !strings.Contains(pair.FilterComplex, "volume@"+SecondaryPrefix+"trk0") {
+		t.Errorf("the second mix has no stage of its own: %s", pair.FilterComplex)
+	}
+}
