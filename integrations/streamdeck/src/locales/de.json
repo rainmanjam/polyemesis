@@ -80,5 +80,16 @@
   "streamdeck.pi.notListed": "{id} (nicht mehr aufgeführt)",
   "streamdeck.pi.trackHint": "Eine Änderung wird live übernommen, wenn möglich. Sonst startet das Ziel neu und die Zuschauer sehen eine Neuverbindung. Ein Windows-Server startet immer neu.",
   "streamdeck.pi.destinationLabel": "Ziel",
-  "streamdeck.gain.matrix": "Matrix: UI nutzen"
+  "streamdeck.gain.matrix": "Matrix: UI nutzen",
+  "streamdeck.issue.restartStorm": "Verbindet neu ×{count}",
+  "streamdeck.issue.droppingFrames": "Verwirft Frames",
+  "streamdeck.issue.platformPoor": "{platform}: schlecht",
+  "streamdeck.issue.reconnectAccount": "Konto neu verbinden",
+  "streamdeck.issue.accountExpiring": "Konto läuft ab",
+  "streamdeck.issue.sourceBackup": "Auf Backup-Quelle",
+  "streamdeck.issue.sourcePlaylist": "Auf Playlist",
+  "streamdeck.issue.sourceSlate": "Auf Slate",
+  "streamdeck.issue.sourceDegraded": "Quelle beeinträchtigt",
+  "streamdeck.pi.issues": "Aktuelle Probleme",
+  "streamdeck.pi.noIssues": "Für dieses Ziel wird nichts gemeldet."
 }

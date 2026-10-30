@@ -888,6 +888,17 @@ export interface DestStatus {
    *  out. Not a warning: the destination is publishing correctly, one track
    *  short of what was configured, and the fix is a toggle not a repair. */
   vodAudioDropped?: string;
+  /** Respawns in the last 15 minutes, present only when more than five: the
+   *  threshold of the PolyemesisDestinationRestartStorm alert. */
+  restartStorm?: number;
+  /** Frames dropped over the last few seconds, present only when that is at
+   *  least one percent of the frames output. */
+  droppingFrames?: number;
+  /** The connected account's health state, present only when it is not ok. */
+  accountHealth?: "expiring" | "refreshFailing" | "expired";
+  /** The platform's own verdict on the stream, present only while it is poor.
+   *  YouTube only. */
+  platformHealth?: { platform: string; status: string; issues?: string[] };
 }
 
 /** One advisory note about a negotiated Enhanced Broadcasting configuration. */

@@ -80,5 +80,16 @@
   "streamdeck.pi.notListed": "{id} (tidak lagi terdaftar)",
   "streamdeck.pi.trackHint": "Perubahan diterapkan langsung bila bisa. Jika tidak, tujuan dimulai ulang dan penonton melihat sambungan ulang. Server Windows selalu memulai ulang.",
   "streamdeck.pi.destinationLabel": "Tujuan",
-  "streamdeck.gain.matrix": "matriks: pakai UI"
+  "streamdeck.gain.matrix": "matriks: pakai UI",
+  "streamdeck.issue.restartStorm": "Menyambung ulang ×{count}",
+  "streamdeck.issue.droppingFrames": "Frame terbuang",
+  "streamdeck.issue.platformPoor": "{platform}: buruk",
+  "streamdeck.issue.reconnectAccount": "Sambungkan ulang akun",
+  "streamdeck.issue.accountExpiring": "Akun segera kedaluwarsa",
+  "streamdeck.issue.sourceBackup": "Pakai sumber cadangan",
+  "streamdeck.issue.sourcePlaylist": "Pakai playlist",
+  "streamdeck.issue.sourceSlate": "Pakai slate",
+  "streamdeck.issue.sourceDegraded": "Sumber menurun",
+  "streamdeck.pi.issues": "Masalah saat ini",
+  "streamdeck.pi.noIssues": "Tidak ada laporan untuk tujuan ini."
 }

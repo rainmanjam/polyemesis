@@ -246,6 +246,22 @@
     result.textContent = payload.detail ? `${label}: ${payload.detail}` : label;
   }
 
+  // The destination key's current issues, most severe first, as the plugin
+  // worded them. textContent only: a line can carry the server's own words.
+  function showIssues(payload) {
+    const list = $("issues");
+    const lines = Array.isArray(payload.issues) ? payload.issues.filter((l) => typeof l === "string") : [];
+    list.replaceChildren();
+    lines.forEach((line) => {
+      const li = document.createElement("li");
+      li.textContent = line;
+      list.appendChild(li);
+    });
+    const empty = $("issues-empty");
+    empty.textContent = strings["streamdeck.pi.noIssues"] || "";
+    empty.hidden = lines.length > 0;
+  }
+
   function onMessage(raw) {
     const msg = JSON.parse(raw.data);
     if (msg.event === "didReceiveGlobalSettings") showGlobal(msg.payload.settings || {});
@@ -255,6 +271,7 @@
       if (payload.type === "test") onTestResult(payload);
       else if (payload.type === "presets") showPresets(payload);
       else if (payload.type === "destinations") showDestinations(payload);
+      else if (payload.type === "issues") showIssues(payload);
     }
   }
 
@@ -269,6 +286,7 @@
     $("block-track").hidden = !isTrackAction();
     $("block-preset").hidden = actionType !== "com.polyemesis.streamdeck.preset";
     $("block-install-wide").hidden = actionType !== "com.polyemesis.streamdeck.record";
+    $("block-issues").hidden = actionType !== "com.polyemesis.streamdeck.destination";
     // Recording is install-wide: the Record key takes no programme, so it shows no programme field.
     $("block-source").hidden = actionType === "com.polyemesis.streamdeck.record";
     socket = new WebSocket("ws://127.0.0.1:" + port);
@@ -277,6 +295,10 @@
       send({ event: "getGlobalSettings", context: uuid });
       send({ event: "getSettings", context: actionContext });
       if (!$("block-preset").hidden) requestPresets();
+      // The list the key last painted; the plugin sends it again whenever it changes.
+      if (!$("block-issues").hidden) {
+        send({ action: actionType, event: "sendToPlugin", context: actionContext, payload: { type: "issues" } });
+      }
     };
     socket.onmessage = onMessage;
     fields.forEach((f) => $(f).addEventListener("change", saveGlobal));

@@ -19,10 +19,11 @@ describe("inspector strings", () => {
     const all = JSON.parse(json) as Record<string, Record<string, string>>;
     expect(Object.keys(all).sort()).toEqual(Object.keys(CATALOGS).sort());
     const enKeys = Object.keys(all.en!).sort();
-    // 23 inspector labels (including the preset picker, its placeholder and missing-preset mark, the
-    // install-wide note, and the track controls' destination and track pickers with their placeholders,
-    // load error, not-listed mark and live-or-restart hint), 6 connection messages and 4 config errors.
-    expect(enKeys).toHaveLength(33);
+    // 25 inspector labels (including the preset picker, its placeholder and missing-preset mark, the
+    // install-wide note, the track controls' destination and track pickers with their placeholders,
+    // load error, not-listed mark and live-or-restart hint, and the destination key's issue list heading
+    // and its empty line), 6 connection messages and 4 config errors.
+    expect(enKeys).toHaveLength(35);
     for (const [locale, strings] of Object.entries(all)) {
       expect(Object.keys(strings).sort(), locale).toEqual(enKeys);
     }

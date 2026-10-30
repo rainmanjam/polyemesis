@@ -80,5 +80,16 @@
   "streamdeck.pi.notListed": "{id} (больше нет в списке)",
   "streamdeck.pi.trackHint": "Изменение применяется вживую, когда это возможно. Иначе назначение перезапускается, и зрители видят переподключение. Сервер Windows всегда перезапускается.",
   "streamdeck.pi.destinationLabel": "Назначение",
-  "streamdeck.gain.matrix": "матрица: через UI"
+  "streamdeck.gain.matrix": "матрица: через UI",
+  "streamdeck.issue.restartStorm": "Переподключение ×{count}",
+  "streamdeck.issue.droppingFrames": "Пропуск кадров",
+  "streamdeck.issue.platformPoor": "{platform}: плохо",
+  "streamdeck.issue.reconnectAccount": "Переподключите аккаунт",
+  "streamdeck.issue.accountExpiring": "Аккаунт истекает",
+  "streamdeck.issue.sourceBackup": "На резервном источнике",
+  "streamdeck.issue.sourcePlaylist": "На плейлисте",
+  "streamdeck.issue.sourceSlate": "На заставке",
+  "streamdeck.issue.sourceDegraded": "Источник ухудшен",
+  "streamdeck.pi.issues": "Текущие проблемы",
+  "streamdeck.pi.noIssues": "Для этого назначения ничего не сообщается."
 }

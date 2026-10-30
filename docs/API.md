@@ -867,6 +867,22 @@ to). `backupProcess` is deliberately separate from `process`: a backup that has
 been dead for an hour beside a healthy primary is the one state this must not
 hide.
 
+**Destination signals on the status (unreleased):** four optional fields, each
+absent while there is nothing to report.
+
+| Field | Present when | Value |
+|---|---|---|
+| `restartStorm` | More than 5 respawns in the last 15 minutes, the threshold of `PolyemesisDestinationRestartStorm` | The respawn count in that window |
+| `droppingFrames` | At least 1% of the frames in the last 10 seconds were dropped | The frames dropped in that window |
+| `accountHealth` | The connected account is not healthy | `expiring`, `refreshFailing` or `expired`. The state only: the refresh error stays on `GET /platforms/accounts` |
+| `platformHealth` | YouTube rates the stream `bad`, or reports an error-severity configuration issue | `{"platform", "status", "issues"}`: YouTube's own status word and its issue codes |
+
+`platformHealth` is read through the destination's connected account, read-only,
+at most once every 5 minutes per destination, and only while the destination is
+delivering. Twitch has no stream-health API, so a Twitch destination never
+carries the field. The Stream Deck plugin reads all four; see
+[STREAM-DECK.md](STREAM-DECK.md#what-the-faces-mean).
+
 **Expert mode splices arbitrary arguments into an FFmpeg command line.** Treat
 access to it as equivalent to shell access. `dry-run` tells you whether the
 result would start, without starting it.

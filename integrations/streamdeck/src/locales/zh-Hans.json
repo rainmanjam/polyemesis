@@ -80,5 +80,16 @@
   "streamdeck.pi.notListed": "{id}（已不在列表中）",
   "streamdeck.pi.trackHint": "可以时，更改会实时生效。否则目标会重启，观众会看到重新连接。Windows 服务器总是重启。",
   "streamdeck.pi.destinationLabel": "目标",
-  "streamdeck.gain.matrix": "矩阵：请用界面"
+  "streamdeck.gain.matrix": "矩阵：请用界面",
+  "streamdeck.issue.restartStorm": "重新连接中 ×{count}",
+  "streamdeck.issue.droppingFrames": "正在丢帧",
+  "streamdeck.issue.platformPoor": "{platform}：较差",
+  "streamdeck.issue.reconnectAccount": "重新连接账号",
+  "streamdeck.issue.accountExpiring": "账号即将过期",
+  "streamdeck.issue.sourceBackup": "正在使用备用源",
+  "streamdeck.issue.sourcePlaylist": "正在播放列表",
+  "streamdeck.issue.sourceSlate": "正在垫片",
+  "streamdeck.issue.sourceDegraded": "源质量下降",
+  "streamdeck.pi.issues": "当前问题",
+  "streamdeck.pi.noIssues": "此目标没有报告任何问题。"
 }

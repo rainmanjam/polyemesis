@@ -80,5 +80,16 @@
   "streamdeck.pi.notListed": "{id} (ya no aparece)",
   "streamdeck.pi.trackHint": "Un cambio se aplica en directo cuando es posible. Si no, el destino se reinicia y los espectadores ven una reconexión. Un servidor Windows siempre reinicia.",
   "streamdeck.pi.destinationLabel": "Destino",
-  "streamdeck.gain.matrix": "matriz: usa la UI"
+  "streamdeck.gain.matrix": "matriz: usa la UI",
+  "streamdeck.issue.restartStorm": "Reconectando ×{count}",
+  "streamdeck.issue.droppingFrames": "Perdiendo fotogramas",
+  "streamdeck.issue.platformPoor": "{platform}: deficiente",
+  "streamdeck.issue.reconnectAccount": "Reconectar cuenta",
+  "streamdeck.issue.accountExpiring": "Cuenta por caducar",
+  "streamdeck.issue.sourceBackup": "En fuente de respaldo",
+  "streamdeck.issue.sourcePlaylist": "En lista de reproducción",
+  "streamdeck.issue.sourceSlate": "En cartela",
+  "streamdeck.issue.sourceDegraded": "Fuente degradada",
+  "streamdeck.pi.issues": "Problemas actuales",
+  "streamdeck.pi.noIssues": "No hay nada que informar sobre este destino."
 }

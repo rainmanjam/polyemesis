@@ -80,5 +80,16 @@
   "streamdeck.pi.notListed": "{id}（一覧にありません）",
   "streamdeck.pi.trackHint": "変更は可能ならライブで適用されます。そうでなければ配信先が再起動し、視聴者には再接続が見えます。Windows サーバーは常に再起動します。",
   "streamdeck.pi.destinationLabel": "配信先",
-  "streamdeck.gain.matrix": "マトリクス: UIで操作"
+  "streamdeck.gain.matrix": "マトリクス: UIで操作",
+  "streamdeck.issue.restartStorm": "再接続中 ×{count}",
+  "streamdeck.issue.droppingFrames": "フレーム欠落",
+  "streamdeck.issue.platformPoor": "{platform}: 不良",
+  "streamdeck.issue.reconnectAccount": "アカウントを再接続",
+  "streamdeck.issue.accountExpiring": "アカウント期限切れ間近",
+  "streamdeck.issue.sourceBackup": "バックアップ入力に切替",
+  "streamdeck.issue.sourcePlaylist": "プレイリストに切替",
+  "streamdeck.issue.sourceSlate": "スレートに切替",
+  "streamdeck.issue.sourceDegraded": "入力品質低下",
+  "streamdeck.pi.issues": "現在の問題",
+  "streamdeck.pi.noIssues": "この配信先に報告はありません。"
 }

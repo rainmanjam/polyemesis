@@ -458,6 +458,11 @@ func run(h *hooks) error {
 	// The stream-key cross-check behind "YouTube's key changed — click to
 	// update". Read-only against the platform; see internal/api/keycheck.go.
 	eng.SetKeyChecker(srv.KeyChecker())
+	// The connected account's health and YouTube's own stream-health verdict
+	// on each destination's status, for the Stream Deck's destination key. The
+	// health read is paced and read-only; see internal/engine/destsignals.go.
+	eng.SetAccountHealth(srv.AccountHealth())
+	eng.SetPlatformHealth(srv.PlatformHealth())
 
 	// After the API, because the adapters refresh their tokens through it.
 	// Nothing here fails the start: a platform that will not connect is a line

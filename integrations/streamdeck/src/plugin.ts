@@ -90,6 +90,11 @@ function surfaceFor(a: Action<JsonObject>, kind: SurfaceKind, settings: KeySetti
     async setFeedback(payload) {
       if (a.isDial()) await a.setFeedback(payload);
     },
+    async showIssues(lines) {
+      // Only to this key's own inspector: the SDK sends to whichever inspector is open, and the list
+      // of one destination must never land in another key's.
+      if (streamDeck.ui.action?.id === a.id) await streamDeck.ui.sendToPropertyInspector({ type: "issues", issues: lines });
+    },
   };
 }
 
@@ -264,6 +269,10 @@ streamDeck.ui.onSendToPlugin(async (ev: SendToPluginEvent<JsonValue, JsonObject>
     // The preset picker reads the saved pairing, never the inspector's form: a token typed but not saved
     // must not be what lists the presets.
     await streamDeck.ui.sendToPropertyInspector(await presetList());
+  } else if (msg.type === "issues") {
+    // A destination key's inspector, opening: the list its key last painted. Read from the runtime, never
+    // fetched: the inspector adds no request to the install.
+    await streamDeck.ui.sendToPropertyInspector({ type: "issues", issues: rt().issuesFor(ev.action.id) ?? [] });
   } else if (msg.type === "destinations") {
     // The same rule as the presets: the saved pairing lists them, never the inspector's form.
     await streamDeck.ui.sendToPropertyInspector(await destinationList(keySettings({ sourceId: msg.sourceId }).sourceId));

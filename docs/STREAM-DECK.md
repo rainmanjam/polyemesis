@@ -208,6 +208,66 @@ How the server applies a level live is in
 | Not found | The destination ID names nothing on this install |
 | Other programme | The destination belongs to a programme other than the key's |
 
+**Everything the server reports about a destination's stream.** A key can have
+several issues at once. The key shows the most severe one and adds **+N** to its
+line for the rest. The top line is always the destination's true state, so a red
+**Reconnect account** on a destination that is on air still says **Live**.
+
+Every face below, with its colour and where the server gets it. The rows are in
+order of severity: the higher row wins.
+
+| Rank | Face (top line, second line) | Colour | Shown when | The server's source |
+|---|---|---|---|---|
+| 1 | **Held** | Accent | The server stopped retrying after repeated quick rejections | `destinationHold`, `reason.held` |
+| 2 | **Failed**, then the cause or **Key changed** | Red | The process stopped on an error | `process.state`, `reason.cause`, `reason.keyChanged` |
+| 2 | **Stalled** | Amber | Running, but its output stopped moving | `stalled` |
+| 2 | **Reconnecting** (or **Reconnecting ×N** in a storm), then the cause | Amber | Retrying after a drop | `process.state`, `reason`, `restartStorm` |
+| 3 | **Reconnect account** | Red | The connected account has expired or keeps failing to refresh. Also shown on a key that is off, because going live would fail | `accountHealth`: `expired` or `refreshFailing` |
+| 3 | **Account expiring** | Amber | The connected account cannot refresh and expires within a day | `accountHealth`: `expiring` |
+| 4 | **Live**, **Reconnecting ×N** | Amber | More than 5 restarts in 15 minutes, the threshold of the `PolyemesisDestinationRestartStorm` alert | `restartStorm` |
+| 5 | **Live**, **Dropping frames** | Amber | At least 1% of the frames in the last 10 seconds were dropped | `droppingFrames` |
+| 6 | **Live**, **YouTube: poor** | Amber | YouTube rates the stream `bad`, or reports an error-severity configuration issue | `platformHealth` |
+| 7 | **Live**, **On backup source**, **On playlist** or **On slate** | Amber | The destination's programme is not on its primary | `failover.active` |
+| 7 | **Live**, **Source degraded** | Amber | The programme's primary link is measured degraded. The line beneath is the server's measurement | `failover.degraded` |
+| 8 | **Live**, **Upload slow** | Amber | Running, but delivering slower than realtime | `reason.cause`: `upload_too_slow` |
+
+The signals at ranks 5 to 7 apply only while the destination is running.
+
+**The key's settings list every current issue.** A key cannot be hovered. Open
+the key's settings in the Stream Deck app to see **Current issues**: every issue,
+most severe first, with the server's own words, then any warning. The plugin
+sends the list it last painted, so opening the settings adds no request to the
+install.
+
+The plugin makes no new requests for any of this. It reads every field from the
+`GET /api/v1/status` it already polls. Some notes on where the fields come from:
+
+- **Restart storm.** The supervisor keeps the time of each respawn for 15
+  minutes. `process.restarts` counts for the life of the process, so it cannot
+  say "now".
+- **Dropping frames.** Judged on a 10-second window, not on FFmpeg's cumulative
+  count. A destination that dropped a burst at its start is not dropping now.
+  Only dropped frames count. Duplicated frames mean the source is short of
+  frames, which is the source's problem, not the upload's.
+- **Account.** The same state as the account chip in the destination dialog,
+  from the same derivation. The status carries only the state word. The refresh
+  error stays on `GET /platforms/accounts`, which needs an admin token.
+- **YouTube: poor.** Read from YouTube's `liveStreams` `healthStatus`, through
+  the destination's connected account, read-only. It is read only for a YouTube
+  destination that is delivering and has a connected account. A destination with
+  a pasted key has no token to ask with. The read happens at most once every 5
+  minutes per destination, and one read answers for every destination on the same
+  channel. One live destination spends about 288 of a project's 10,000 daily
+  quota units. `noData`, `ok` and `good` show nothing. In YouTube's order, `good`
+  is better than `ok`.
+- **Twitch has no stream-health API,** so a Twitch destination never shows a
+  platform face. Neither does Facebook, Kick or a custom RTMP target.
+- **Source.** Shown on every destination of the programme, not only on the
+  Failover key. A key with no Programme ID reads the default programme's
+  failover. The plugin places it only on destinations of that programme, never
+  on another programme's. **Source degraded** needs a server with degraded-link
+  failover. On an older server the field is absent, and the face never shows.
+
 **Stop keys:** **Hold to stop**, then **{n} YouTube will end** or **No YouTube
 broadcasts** once the count has loaded. **Count unavailable** means the stop
 was refused because the count could not be read.
@@ -239,6 +299,8 @@ judge freshness itself. It draws what `feed` says: `none` before any reading,
 | **Needs admin token** (a padlock, on violet) | The key changes something and the token is `read` | Pair with an admin token, or keep the read token and use the key for state only |
 | "Use https:// for the server" | A plain `http://` address for a host other than this machine | Use the install's `https://` address |
 | **Not found** or **Other programme** on a Destination key | The Destination ID or Programme ID does not match the install | Correct the IDs in the key's settings |
+| **Reconnect account** on a Destination key | The destination's connected account has expired, or its token refresh keeps failing | Reconnect the account in Settings → Platforms. The key clears within about 15 seconds |
+| **+N** after a Destination key's line | The destination has N more issues than the one shown | Open the key's settings: **Current issues** lists them all |
 | **Count unavailable** on a stop key | The YouTube count could not be loaded, so the stop was refused | Use the polyemesis UI to stop, or retry once the install answers |
 | **NO FEED** on the dial | The meters have no current reading: no ingest, the meter sidecar is down, or the wrong programme | Check the source in polyemesis; on a multi-programme install, check the dial's Programme ID |
 | "The preset list could not be loaded." | The preset list request failed | Test the connection, then reopen the key's settings |

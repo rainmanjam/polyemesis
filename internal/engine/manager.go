@@ -188,6 +188,8 @@ type engineSettings struct {
 	stream        *eventstream.Hub
 	lifecycle     LifecycleObserver
 	keyChecker    KeyChecker
+	accountHealth AccountHealthReader
+	platHealth    PlatformHealthChecker
 	// alertGate is not a setting anybody saves: NewManager builds it once.
 	// It rides here anyway because this is the one path every engine is
 	// configured through, and an engine that missed it would publish its own
@@ -240,6 +242,8 @@ func (m *Manager) applyEngineSettings(eng *Engine, s engineSettings) {
 	eng.SetStream(s.stream)
 	eng.SetLifecycle(s.lifecycle)
 	eng.SetKeyChecker(s.keyChecker)
+	eng.SetAccountHealth(s.accountHealth)
+	eng.SetPlatformHealth(s.platHealth)
 	eng.SetAlertGate(s.alertGate)
 }
 
@@ -1418,6 +1422,18 @@ func (m *Manager) SetLifecycle(o LifecycleObserver) {
 // any created later, through the same one path as SetLifecycle.
 func (m *Manager) SetKeyChecker(k KeyChecker) {
 	m.saveEngineSetting(func(s *engineSettings) { s.keyChecker = k })
+}
+
+// SetAccountHealth attaches the connected-account health reader behind
+// DestStatus.AccountHealth to every engine, now and to any created later.
+func (m *Manager) SetAccountHealth(r AccountHealthReader) {
+	m.saveEngineSetting(func(s *engineSettings) { s.accountHealth = r })
+}
+
+// SetPlatformHealth attaches the platform stream-health reader behind
+// DestStatus.PlatformHealth to every engine, now and to any created later.
+func (m *Manager) SetPlatformHealth(c PlatformHealthChecker) {
+	m.saveEngineSetting(func(s *engineSettings) { s.platHealth = c })
 }
 
 // SetAlertRetry applies the alert delivery budget to every engine, now and to

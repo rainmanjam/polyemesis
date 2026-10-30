@@ -15,7 +15,7 @@ import type {
   TrackLevel,
   TrackLevelResult,
 } from "./model.js";
-import { clip, KEY_STATE, stateFor, stopTitle, titleFor } from "./render.js";
+import { clip, inspectorLines, KEY_STATE, stateFor, stopTitle, titleFor } from "./render.js";
 import { barFor, formatDb, gainForDb, gainToDb, stepDb } from "./trackLevel.js";
 import { nodeTransport } from "./transport.js";
 
@@ -64,6 +64,11 @@ export interface Surface {
   showAlert(): Promise<void>;
   showOk(): Promise<void>;
   setFeedback(payload: { title: string; value: string; indicator: number }): Promise<void>;
+  /**
+   * Hands the property inspector a destination key's current issues, one line each. Optional: only a
+   * destination key has a list, and the adapter sends it only while that key's inspector is open.
+   */
+  showIssues?(lines: string[]): Promise<void>;
 }
 
 /** The translated message for a failed connection check. The server's own words travel separately. */
@@ -173,6 +178,8 @@ export class Runtime {
   private readonly statuses = new Map<string, StatusPayload>();
   private readonly levels = new Map<string, LevelsReading | { error: true }>();
   private readonly lastMeterPaint = new Map<string, string>();
+  /** The issue list last handed to each destination key's inspector, so an unchanged list is not re-sent. */
+  private readonly lastIssues = new Map<string, string[]>();
   /** The install-wide recording state, read each tick while a Record key is on the deck. */
   private recordingState: RecordingState | undefined;
   private recordingError: ApiError | undefined;
@@ -293,6 +300,7 @@ export class Runtime {
     this.holds.delete(id);
     this.surfaces.delete(id);
     this.lastMeterPaint.delete(id);
+    this.lastIssues.delete(id);
     this.flashes.get(id)?.();
     this.flashes.delete(id);
     this.levelRefused.delete(id);
@@ -505,7 +513,11 @@ export class Runtime {
       case "destination": {
         if (s.settings.destinationId === undefined) return { tone: "unbound", label: "streamdeck.state.missing" };
         const dest = payload.destinations?.find((d) => d.id === s.settings.destinationId);
-        return destinationFace(dest, s.settings.sourceId, payload.destinationHold);
+        // The payload's failover is source.id's: placed on a destination only when it is that programme's.
+        return destinationFace(dest, s.settings.sourceId, payload.destinationHold, {
+          sourceId: payload.source?.id,
+          failover: payload.failover,
+        });
       }
       case "failover":
         return failoverFace(payload.failover);
@@ -677,6 +689,20 @@ export class Runtime {
   private async paintFace(s: Surface, face: KeyFace): Promise<void> {
     await s.setState(stateFor(face.tone));
     await s.setTitle(titleFor(face, this.locale));
+    if (s.kind === "destination") await this.sendIssues(s, inspectorLines(face, this.locale));
+  }
+
+  /** Hands a destination key's inspector its issue list when the list has changed. */
+  private async sendIssues(s: Surface, lines: string[]): Promise<void> {
+    const last = this.lastIssues.get(s.id);
+    if (last && last.length === lines.length && last.every((l, i) => l === lines[i])) return;
+    this.lastIssues.set(s.id, lines);
+    await s.showIssues?.(lines);
+  }
+
+  /** The issue list a destination key's inspector asked for on opening: the one last painted. */
+  issuesFor(id: string): string[] | undefined {
+    return this.lastIssues.get(id);
   }
 
   private async paintMeters(): Promise<void> {

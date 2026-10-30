@@ -80,5 +80,16 @@
   "streamdeck.pi.notListed": "{id} (더 이상 목록에 없음)",
   "streamdeck.pi.trackHint": "변경은 가능하면 실시간으로 적용됩니다. 그렇지 않으면 대상이 재시작되고 시청자에게 재연결이 보입니다. Windows 서버는 항상 재시작합니다.",
   "streamdeck.pi.destinationLabel": "대상",
-  "streamdeck.gain.matrix": "매트릭스: UI 사용"
+  "streamdeck.gain.matrix": "매트릭스: UI 사용",
+  "streamdeck.issue.restartStorm": "재연결 중 ×{count}",
+  "streamdeck.issue.droppingFrames": "프레임 손실",
+  "streamdeck.issue.platformPoor": "{platform}: 나쁨",
+  "streamdeck.issue.reconnectAccount": "계정 다시 연결",
+  "streamdeck.issue.accountExpiring": "계정 만료 임박",
+  "streamdeck.issue.sourceBackup": "백업 소스 사용 중",
+  "streamdeck.issue.sourcePlaylist": "플레이리스트 사용 중",
+  "streamdeck.issue.sourceSlate": "슬레이트 사용 중",
+  "streamdeck.issue.sourceDegraded": "소스 품질 저하",
+  "streamdeck.pi.issues": "현재 문제",
+  "streamdeck.pi.noIssues": "이 대상에 보고된 문제가 없습니다."
 }

@@ -80,5 +80,16 @@
   "streamdeck.pi.notListed": "{id} (artık listede değil)",
   "streamdeck.pi.trackHint": "Değişiklik mümkünse canlı uygulanır. Değilse hedef yeniden başlar ve izleyiciler yeniden bağlanma görür. Windows sunucusu her zaman yeniden başlatır.",
   "streamdeck.pi.destinationLabel": "Hedef",
-  "streamdeck.gain.matrix": "matris: UI kullanın"
+  "streamdeck.gain.matrix": "matris: UI kullanın",
+  "streamdeck.issue.restartStorm": "Yeniden bağlanıyor ×{count}",
+  "streamdeck.issue.droppingFrames": "Kare kaybı",
+  "streamdeck.issue.platformPoor": "{platform}: zayıf",
+  "streamdeck.issue.reconnectAccount": "Hesabı yeniden bağla",
+  "streamdeck.issue.accountExpiring": "Hesap süresi doluyor",
+  "streamdeck.issue.sourceBackup": "Yedek kaynakta",
+  "streamdeck.issue.sourcePlaylist": "Listede",
+  "streamdeck.issue.sourceSlate": "Slate'te",
+  "streamdeck.issue.sourceDegraded": "Kaynak bozuk",
+  "streamdeck.pi.issues": "Mevcut sorunlar",
+  "streamdeck.pi.noIssues": "Bu hedef için bildirilen bir şey yok."
 }

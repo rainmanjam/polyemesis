@@ -10,6 +10,28 @@ its first tagged release.
 
 ### Added
 
+- **Stream Deck: a Destination key shows every issue polyemesis reports for its
+  stream.** Beside the states it already showed, the key now shows:
+  - **Reconnecting ×N**: more than five restarts in 15 minutes, the threshold of
+    the restart-storm alert.
+  - **Dropping frames**.
+  - **YouTube: poor**: YouTube's own stream-health verdict, for a destination
+    with a connected account.
+  - **Reconnect account** (red) or **Account expiring**.
+  - **On backup source**, **On playlist**, **On slate** or **Source degraded**:
+    shown on every destination its programme feeds, not only on the Failover
+    key.
+
+  When several are true at once, the key shows the most severe one with a
+  **+N** badge. The key's settings list every current issue. The plugin adds no
+  requests. `GET /api/v1/status` gains four optional destination fields:
+  `restartStorm`, `droppingFrames`, `accountHealth` and `platformHealth`. Each
+  is absent while there is nothing to report. `accountHealth` is the state word
+  only, so a read token sees no account detail. The YouTube read is read-only,
+  happens at most once every 5 minutes per destination, and one read is shared
+  by every destination on a channel. Twitch has no stream-health API, so a
+  Twitch destination never shows a platform face. See
+  [docs/STREAM-DECK.md](docs/STREAM-DECK.md#what-the-faces-mean).
 - **`destination.held`: page on the stops that won't fix themselves.** When
   polyemesis stops retrying a destination after repeated quick rejections, it
   now raises a `destination.held` alert (`critical`, on the timeline) and sends

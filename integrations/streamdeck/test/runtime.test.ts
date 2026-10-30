@@ -1029,3 +1029,72 @@ describe("releasing a held key", () => {
     expect(req.url.searchParams.get("source")).toBe("7");
   });
 });
+
+describe("destination signals on the key and in the inspector", () => {
+  /** Programme 7's status with one destination carrying three signals at once. */
+  const STORMY: StatusPayload = {
+    source: { id: 7 },
+    failover: { active: "backup" },
+    destinations: [
+      {
+        id: 5,
+        name: "YouTube",
+        platform: "youtube",
+        enabled: true,
+        sourceId: 7,
+        process: { state: "running" },
+        restartStorm: 8,
+        accountHealth: "expired",
+      },
+    ],
+  };
+
+  function withIssues(id: string, settings: Surface["settings"]) {
+    const sent: string[][] = [];
+    const key = Object.assign(surface(id, "destination", settings), {
+      async showIssues(lines: string[]) {
+        sent.push(lines);
+      },
+    });
+    return { key, sent };
+  }
+
+  it("paints the most severe issue with a +N badge, and places the programme's failover on its destinations", async () => {
+    const { rt } = runtimeFor({ "GET /api/v1/auth/connection": READ, "GET /api/v1/status": json(200, STORMY) });
+    rt.configure(PAIRED);
+    const { key } = withIssues("d", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.error);
+    expect(key.titles.at(-1)).toBe("Live\nReconnect account +2");
+  });
+
+  it("sends the inspector every issue, and sends again only when the list changes", async () => {
+    const { rt } = runtimeFor({ "GET /api/v1/auth/connection": READ, "GET /api/v1/status": json(200, STORMY) });
+    rt.configure(PAIRED);
+    const { key, sent } = withIssues("d", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    await rt.tick();
+    await rt.tick();
+    expect(sent).toEqual([["Reconnect account", "Reconnecting ×8", "On backup source"]]);
+    expect(rt.issuesFor("d")).toEqual(["Reconnect account", "Reconnecting ×8", "On backup source"]);
+  });
+
+  it("tells the inspector why there is no list when the install cannot be reached", async () => {
+    const { rt } = runtimeFor({ "GET /api/v1/auth/connection": () => new Error("ECONNREFUSED") });
+    rt.configure(PAIRED);
+    const { key, sent } = withIssues("d", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    await rt.tick();
+    expect(sent.at(-1)?.[0]).toContain("Unreachable");
+  });
+
+  it("sends a healthy destination an empty list", async () => {
+    const { rt } = runtimeFor({ "GET /api/v1/auth/connection": READ, "GET /api/v1/status": json(200, STATUS_7) });
+    rt.configure(PAIRED);
+    const { key, sent } = withIssues("d", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    await rt.tick();
+    expect(sent).toEqual([[]]);
+  });
+});

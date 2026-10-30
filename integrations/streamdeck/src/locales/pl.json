@@ -80,5 +80,16 @@
   "streamdeck.pi.notListed": "{id} (już nie na liście)",
   "streamdeck.pi.trackHint": "Zmiana jest stosowana na żywo, gdy to możliwe. W przeciwnym razie miejsce docelowe się restartuje, a widzowie widzą ponowne połączenie. Serwer Windows zawsze się restartuje.",
   "streamdeck.pi.destinationLabel": "Miejsce docelowe",
-  "streamdeck.gain.matrix": "macierz: użyj UI"
+  "streamdeck.gain.matrix": "macierz: użyj UI",
+  "streamdeck.issue.restartStorm": "Ponowne łączenie ×{count}",
+  "streamdeck.issue.droppingFrames": "Gubi klatki",
+  "streamdeck.issue.platformPoor": "{platform}: słabo",
+  "streamdeck.issue.reconnectAccount": "Połącz konto ponownie",
+  "streamdeck.issue.accountExpiring": "Konto wkrótce wygaśnie",
+  "streamdeck.issue.sourceBackup": "Na źródle zapasowym",
+  "streamdeck.issue.sourcePlaylist": "Na playliście",
+  "streamdeck.issue.sourceSlate": "Na planszy",
+  "streamdeck.issue.sourceDegraded": "Źródło pogorszone",
+  "streamdeck.pi.issues": "Bieżące problemy",
+  "streamdeck.pi.noIssues": "Brak zgłoszeń dla tego miejsca docelowego."
 }
