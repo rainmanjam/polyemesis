@@ -68,10 +68,17 @@ var redactAllowlist = map[string]string{
 		"is a NO-OP on an https path secret.",
 
 	// --- the read-scoped WebSocket view ---
-	"internal/api/ws_policy.go": "redactJSONTree, the residual pass over a read-scoped " +
-		"socket frame. Note the []any arm: it joins an all-string array and redacts the " +
-		"JOIN rather than the elements, precisely so a payload carrying an argv is not " +
-		"redacted per element. See TestRedactJSONTreeDoesNotLeakAnArgvHeader.",
+	"internal/alerts/tree.go": "RedactJSONTree, the residual pass over a read-scoped " +
+		"socket frame and an events-stream payload (moved here from internal/api/ws_policy.go " +
+		"when the events API became its second caller). Note the []any arm: it joins an " +
+		"all-string array and redacts the JOIN rather than the elements, precisely so a " +
+		"payload carrying an argv is not redacted per element. See " +
+		"TestRedactJSONTreeDoesNotLeakAnArgvHeader.",
+	"internal/eventstream/hub.go": "residual only, the events-stream twin of hooks/payload.go's " +
+		"pass over the same envelope fields. The boundary runs first: a destination's error " +
+		"and failure line come from the supervisor's log ring, which has already had the " +
+		"process's exact secret literals scrubbed (supervisor.Spec.Secrets, #150). Whole " +
+		"strings, never argv elements; payloads go through RedactJSONTree.",
 
 	// --- the retained MQTT sink ---
 	"internal/engine/status.go": "the residual half of ScrubDestinationText, which masks a " +
