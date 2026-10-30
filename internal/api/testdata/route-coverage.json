@@ -9,11 +9,11 @@
   "inertCeiling": 6,
   "varianceExemptCeiling": 2,
   "shapeFloor": 27,
-  "guardedFloor": 22,
+  "guardedFloor": 23,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 229,
-    "swept": 63,
+    "methodPatternPairs": 230,
+    "swept": 64,
     "excused": 50,
     "denied": 116,
     "nonTrieProbes": 12,
@@ -22,7 +22,7 @@
   },
   "partition": {
     "differential": 8,
-    "invariant": 50,
+    "invariant": 51,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 1,
     "unstable": 4
@@ -356,6 +356,12 @@
       "method": "POST",
       "pattern": "/api/v1/destinations/stop-all",
       "coverage": "denied-by-method",
+      "zeroSource": "guarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/destinations/stop-impact",
+      "coverage": "swept",
       "zeroSource": "guarded"
     },
     {
@@ -1505,6 +1511,11 @@
     {
       "path": "/api/v1/destinations/3",
       "pattern": "GET /api/v1/destinations/{id}",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/destinations/stop-impact",
+      "pattern": "GET /api/v1/destinations/stop-impact",
       "class": "invariant"
     },
     {
