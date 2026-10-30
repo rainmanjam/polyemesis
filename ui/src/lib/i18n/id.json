@@ -1696,5 +1696,18 @@
   "nav.group.content": "Konten",
   "nav.group.community": "Komunitas",
   "nav.group.operations": "Operasi",
-  "nav.group.settings": "Pengaturan"
+  "nav.group.settings": "Pengaturan",
+  "monitor.errorsCount": "Galat {count}",
+  "monitor.warningsCount": "Peringatan {count}",
+  "monitor.filterErrors": "Galat",
+  "monitor.filterWarnings": "Peringatan",
+  "monitor.filterAll": "Semua",
+  "monitor.searchLog": "Cari di log",
+  "monitor.repeatTitle": "{count} baris identik, digabung",
+  "monitor.verdictErrors": "{process}: {count} galat dalam {window} detik terakhir",
+  "monitor.verdictClean": "Tidak ada galat dalam {window} detik terakhir",
+  "monitor.showRaw": "Tampilkan keluaran mentah",
+  "monitor.hideRaw": "Sembunyikan keluaran mentah",
+  "monitor.processErrors": "{count} galat",
+  "monitor.noMatchingLines": "Tidak ada baris yang cocok dengan tampilan ini."
 }

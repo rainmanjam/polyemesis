@@ -1696,5 +1696,18 @@
   "nav.group.content": "Content",
   "nav.group.community": "Community",
   "nav.group.operations": "Operations",
-  "nav.group.settings": "Settings"
+  "nav.group.settings": "Settings",
+  "monitor.errorsCount": "Errors {count}",
+  "monitor.warningsCount": "Warnings {count}",
+  "monitor.filterErrors": "Errors",
+  "monitor.filterWarnings": "Warnings",
+  "monitor.filterAll": "All",
+  "monitor.searchLog": "Search log",
+  "monitor.repeatTitle": "{count} identical lines, collapsed",
+  "monitor.verdictErrors": "{process}: {count} errors in the last {window} s",
+  "monitor.verdictClean": "No errors in the last {window} s",
+  "monitor.showRaw": "Show raw output",
+  "monitor.hideRaw": "Hide raw output",
+  "monitor.processErrors": "{count} errors",
+  "monitor.noMatchingLines": "No lines match this view."
 }

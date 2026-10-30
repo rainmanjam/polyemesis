@@ -1696,5 +1696,18 @@
   "nav.group.content": "Content",
   "nav.group.community": "Community",
   "nav.group.operations": "Beheer",
-  "nav.group.settings": "Instellingen"
+  "nav.group.settings": "Instellingen",
+  "monitor.errorsCount": "Fouten {count}",
+  "monitor.warningsCount": "Waarschuwingen {count}",
+  "monitor.filterErrors": "Fouten",
+  "monitor.filterWarnings": "Waarschuwingen",
+  "monitor.filterAll": "Alles",
+  "monitor.searchLog": "Log doorzoeken",
+  "monitor.repeatTitle": "{count} identieke regels, samengevouwen",
+  "monitor.verdictErrors": "{process}: {count} fouten in de afgelopen {window} s",
+  "monitor.verdictClean": "Geen fouten in de afgelopen {window} s",
+  "monitor.showRaw": "Ruwe uitvoer tonen",
+  "monitor.hideRaw": "Ruwe uitvoer verbergen",
+  "monitor.processErrors": "{count} fouten",
+  "monitor.noMatchingLines": "Geen regels die bij deze weergave passen."
 }

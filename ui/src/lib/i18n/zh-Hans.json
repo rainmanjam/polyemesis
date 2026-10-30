@@ -1696,5 +1696,18 @@
   "nav.group.content": "内容",
   "nav.group.community": "社区",
   "nav.group.operations": "运维",
-  "nav.group.settings": "设置"
+  "nav.group.settings": "设置",
+  "monitor.errorsCount": "错误 {count}",
+  "monitor.warningsCount": "警告 {count}",
+  "monitor.filterErrors": "错误",
+  "monitor.filterWarnings": "警告",
+  "monitor.filterAll": "全部",
+  "monitor.searchLog": "搜索日志",
+  "monitor.repeatTitle": "{count} 行相同内容，已合并",
+  "monitor.verdictErrors": "{process}：最近 {window} 秒内 {count} 个错误",
+  "monitor.verdictClean": "最近 {window} 秒内没有错误",
+  "monitor.showRaw": "显示原始输出",
+  "monitor.hideRaw": "隐藏原始输出",
+  "monitor.processErrors": "{count} 个错误",
+  "monitor.noMatchingLines": "没有符合此视图的日志行。"
 }

@@ -1696,5 +1696,18 @@
   "nav.group.content": "Inhalt",
   "nav.group.community": "Community",
   "nav.group.operations": "Betrieb",
-  "nav.group.settings": "Einstellungen"
+  "nav.group.settings": "Einstellungen",
+  "monitor.errorsCount": "Fehler {count}",
+  "monitor.warningsCount": "Warnungen {count}",
+  "monitor.filterErrors": "Fehler",
+  "monitor.filterWarnings": "Warnungen",
+  "monitor.filterAll": "Alle",
+  "monitor.searchLog": "Log durchsuchen",
+  "monitor.repeatTitle": "{count} identische Zeilen, zusammengefasst",
+  "monitor.verdictErrors": "{process}: {count} Fehler in den letzten {window} s",
+  "monitor.verdictClean": "Keine Fehler in den letzten {window} s",
+  "monitor.showRaw": "Rohausgabe anzeigen",
+  "monitor.hideRaw": "Rohausgabe ausblenden",
+  "monitor.processErrors": "{count} Fehler",
+  "monitor.noMatchingLines": "Keine Zeilen passen zu dieser Ansicht."
 }

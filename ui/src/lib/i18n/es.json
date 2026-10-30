@@ -1696,5 +1696,18 @@
   "nav.group.content": "Contenido",
   "nav.group.community": "Comunidad",
   "nav.group.operations": "Operaciones",
-  "nav.group.settings": "Ajustes"
+  "nav.group.settings": "Ajustes",
+  "monitor.errorsCount": "Errores {count}",
+  "monitor.warningsCount": "Advertencias {count}",
+  "monitor.filterErrors": "Errores",
+  "monitor.filterWarnings": "Advertencias",
+  "monitor.filterAll": "Todos",
+  "monitor.searchLog": "Buscar en el registro",
+  "monitor.repeatTitle": "{count} líneas idénticas, agrupadas",
+  "monitor.verdictErrors": "{process}: {count} errores en los últimos {window} s",
+  "monitor.verdictClean": "Sin errores en los últimos {window} s",
+  "monitor.showRaw": "Mostrar salida sin procesar",
+  "monitor.hideRaw": "Ocultar salida sin procesar",
+  "monitor.processErrors": "{count} errores",
+  "monitor.noMatchingLines": "Ninguna línea coincide con esta vista."
 }

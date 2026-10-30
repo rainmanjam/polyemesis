@@ -1696,5 +1696,18 @@
   "nav.group.content": "콘텐츠",
   "nav.group.community": "커뮤니티",
   "nav.group.operations": "운영",
-  "nav.group.settings": "설정"
+  "nav.group.settings": "설정",
+  "monitor.errorsCount": "오류 {count}",
+  "monitor.warningsCount": "경고 {count}",
+  "monitor.filterErrors": "오류",
+  "monitor.filterWarnings": "경고",
+  "monitor.filterAll": "전체",
+  "monitor.searchLog": "로그 검색",
+  "monitor.repeatTitle": "같은 줄 {count}개를 묶음",
+  "monitor.verdictErrors": "{process}: 최근 {window}초 동안 오류 {count}건",
+  "monitor.verdictClean": "최근 {window}초 동안 오류가 없습니다",
+  "monitor.showRaw": "원본 출력 보기",
+  "monitor.hideRaw": "원본 출력 숨기기",
+  "monitor.processErrors": "오류 {count}건",
+  "monitor.noMatchingLines": "이 보기와 일치하는 줄이 없습니다."
 }

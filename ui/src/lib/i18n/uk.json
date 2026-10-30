@@ -1696,5 +1696,18 @@
   "nav.group.content": "Контент",
   "nav.group.community": "Спільнота",
   "nav.group.operations": "Експлуатація",
-  "nav.group.settings": "Налаштування"
+  "nav.group.settings": "Налаштування",
+  "monitor.errorsCount": "Помилки {count}",
+  "monitor.warningsCount": "Попередження {count}",
+  "monitor.filterErrors": "Помилки",
+  "monitor.filterWarnings": "Попередження",
+  "monitor.filterAll": "Усі",
+  "monitor.searchLog": "Пошук у журналі",
+  "monitor.repeatTitle": "{count} однакових рядків, згорнуто",
+  "monitor.verdictErrors": "{process}: {count} помилок за останні {window} с",
+  "monitor.verdictClean": "Помилок за останні {window} с немає",
+  "monitor.showRaw": "Показати сирий вивід",
+  "monitor.hideRaw": "Приховати сирий вивід",
+  "monitor.processErrors": "помилок: {count}",
+  "monitor.noMatchingLines": "Жоден рядок не відповідає цьому вигляду."
 }

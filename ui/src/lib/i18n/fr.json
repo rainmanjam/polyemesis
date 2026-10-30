@@ -1696,5 +1696,18 @@
   "nav.group.content": "Contenu",
   "nav.group.community": "Communauté",
   "nav.group.operations": "Exploitation",
-  "nav.group.settings": "Réglages"
+  "nav.group.settings": "Réglages",
+  "monitor.errorsCount": "Erreurs {count}",
+  "monitor.warningsCount": "Avertissements {count}",
+  "monitor.filterErrors": "Erreurs",
+  "monitor.filterWarnings": "Avertissements",
+  "monitor.filterAll": "Tout",
+  "monitor.searchLog": "Rechercher dans le journal",
+  "monitor.repeatTitle": "{count} lignes identiques, regroupées",
+  "monitor.verdictErrors": "{process} : {count} erreurs au cours des {window} dernières s",
+  "monitor.verdictClean": "Aucune erreur au cours des {window} dernières s",
+  "monitor.showRaw": "Afficher la sortie brute",
+  "monitor.hideRaw": "Masquer la sortie brute",
+  "monitor.processErrors": "{count} erreurs",
+  "monitor.noMatchingLines": "Aucune ligne ne correspond à cette vue."
 }

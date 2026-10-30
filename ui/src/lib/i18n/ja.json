@@ -1696,5 +1696,18 @@
   "nav.group.content": "コンテンツ",
   "nav.group.community": "コミュニティ",
   "nav.group.operations": "運用",
-  "nav.group.settings": "設定"
+  "nav.group.settings": "設定",
+  "monitor.errorsCount": "エラー {count}",
+  "monitor.warningsCount": "警告 {count}",
+  "monitor.filterErrors": "エラー",
+  "monitor.filterWarnings": "警告",
+  "monitor.filterAll": "すべて",
+  "monitor.searchLog": "ログを検索",
+  "monitor.repeatTitle": "同一の行 {count} 件をまとめて表示",
+  "monitor.verdictErrors": "{process}: 直近 {window} 秒で {count} 件のエラー",
+  "monitor.verdictClean": "直近 {window} 秒にエラーはありません",
+  "monitor.showRaw": "生の出力を表示",
+  "monitor.hideRaw": "生の出力を隠す",
+  "monitor.processErrors": "エラー {count} 件",
+  "monitor.noMatchingLines": "この表示に一致する行はありません。"
 }

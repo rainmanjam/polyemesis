@@ -1696,5 +1696,18 @@
   "nav.group.content": "Контент",
   "nav.group.community": "Сообщество",
   "nav.group.operations": "Эксплуатация",
-  "nav.group.settings": "Настройки"
+  "nav.group.settings": "Настройки",
+  "monitor.errorsCount": "Ошибки {count}",
+  "monitor.warningsCount": "Предупреждения {count}",
+  "monitor.filterErrors": "Ошибки",
+  "monitor.filterWarnings": "Предупреждения",
+  "monitor.filterAll": "Все",
+  "monitor.searchLog": "Поиск в журнале",
+  "monitor.repeatTitle": "{count} одинаковых строк, свёрнуты",
+  "monitor.verdictErrors": "{process}: {count} ошибок за последние {window} с",
+  "monitor.verdictClean": "Ошибок за последние {window} с нет",
+  "monitor.showRaw": "Показать исходный вывод",
+  "monitor.hideRaw": "Скрыть исходный вывод",
+  "monitor.processErrors": "ошибок: {count}",
+  "monitor.noMatchingLines": "Ни одна строка не подходит под этот вид."
 }

@@ -1696,5 +1696,18 @@
   "nav.group.content": "İçerik",
   "nav.group.community": "Topluluk",
   "nav.group.operations": "İşletim",
-  "nav.group.settings": "Ayarlar"
+  "nav.group.settings": "Ayarlar",
+  "monitor.errorsCount": "Hata {count}",
+  "monitor.warningsCount": "Uyarı {count}",
+  "monitor.filterErrors": "Hatalar",
+  "monitor.filterWarnings": "Uyarılar",
+  "monitor.filterAll": "Tümü",
+  "monitor.searchLog": "Günlükte ara",
+  "monitor.repeatTitle": "{count} aynı satır, daraltıldı",
+  "monitor.verdictErrors": "{process}: son {window} saniyede {count} hata",
+  "monitor.verdictClean": "Son {window} saniyede hata yok",
+  "monitor.showRaw": "Ham çıktıyı göster",
+  "monitor.hideRaw": "Ham çıktıyı gizle",
+  "monitor.processErrors": "{count} hata",
+  "monitor.noMatchingLines": "Bu görünümle eşleşen satır yok."
 }
