@@ -13,6 +13,12 @@ import { laneLayout } from "@/lib/sourceLanes";
 import { cn } from "@/lib/utils";
 import { topRowLayout } from "@/lib/dashboardLayout";
 import { failoverNotice, type FailoverNotice } from "@/lib/failoverNotice";
+import {
+  failoverBannerTone,
+  failoverElapsedSeconds,
+  failoverSinceClock,
+  formatElapsed,
+} from "@/lib/failoverBanner";
 import { backupOnAir } from "@/lib/ingestChip";
 import { trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -893,17 +899,39 @@ export function FailoverControl({
   const name = (kind: FailoverSource) =>
     FAILOVER_LABEL[kind] ? t(FAILOVER_LABEL[kind]) : kind;
   const target = confirm.target ?? "primary";
+  // Amber for a degraded picture the audience still gets, red for a slate.
+  // A pin on the primary has no severity of its own, so it reads as amber.
+  const severity = failoverBannerTone(state.active) ?? "warn";
+  const since = failoverSinceClock(state.switchedAt);
 
   return (
     <section
-      className="mb-3 flex flex-col gap-2 rounded-md border border-warn/40 bg-warn-dim px-2.5 py-2"
+      className={cn(
+        "mb-3 flex w-full flex-col gap-2 rounded-md border px-3 py-2.5",
+        severity === "down" ? "border-down/40 bg-down-dim" : "border-warn/40 bg-warn-dim",
+      )}
       aria-label={t("dash.failoverTitle")}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-warn" />
-        <span className="text-[11px] font-medium">
-          {t("dash.failoverOnAir", { source: name(state.active) })}
-        </span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <ShieldAlert
+          className={cn("h-4 w-4 shrink-0", severity === "down" ? "text-down" : "text-warn")}
+        />
+        {/* THE LIVE REGION IS THE STATE, NOT THE CLOCK. The source and the
+            switch time change only when the broadcast changes source, so this
+            is the one thing a screen reader should announce. The elapsed
+            figure sits outside it and is hidden from assistive tech: a figure
+            that ticks every second would be read out every second. */}
+        <div aria-live="polite" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-sm font-semibold">
+            {t("dash.failoverOnAir", { source: name(state.active) })}
+          </span>
+          {since && (
+            <span className="text-sm text-muted-foreground">
+              {t("failover.bannerSince", { time: since })}
+            </span>
+          )}
+        </div>
+        <FailoverElapsed switchedAt={state.switchedAt} />
         <Badge variant="outline">
           {pinned ? t("dash.failoverByHand") : t("dash.failoverAutomatic")}
         </Badge>
@@ -913,9 +941,9 @@ export function FailoverControl({
           than re-derived here: it names the cause ("the primary ingest stopped
           delivering") and a paraphrase computed from `active` alone could only
           restate the effect, which is the half already on screen above. */}
-      {state.reason && <p className="text-[10px] text-muted-foreground">{state.reason}</p>}
+      {state.reason && <p className="text-sm text-muted-foreground">{state.reason}</p>}
 
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         {onPrimary
           ? t("dash.failoverPinnedHere")
           : manualReturn
@@ -929,7 +957,7 @@ export function FailoverControl({
           is back. Without this line the operator presses the button, gets a
           success toast, and watches the backup keep going out. */}
       {!onPrimary && !state.primaryLive && (
-        <p className="text-[10px] text-warn">{t("dash.failoverPrimaryDown")}</p>
+        <p className="text-sm font-medium text-warn">{t("dash.failoverPrimaryDown")}</p>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -964,6 +992,24 @@ export function FailoverControl({
         onConfirm={() => onSwitch(target)}
       />
     </section>
+  );
+}
+
+/** The ticking "for 2m 14s" figure. Its own component so the one-second tick
+ *  re-renders this span and nothing else: the Dashboard is 1800 lines and a
+ *  tick in the parent would redraw all of them every second. */
+function FailoverElapsed({ switchedAt }: { switchedAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const secs = failoverElapsedSeconds(switchedAt, now);
+  if (secs === null) return null;
+  return (
+    <span aria-hidden="true" className="tnum font-mono text-sm">
+      {formatElapsed(secs)}
+    </span>
   );
 }
 
