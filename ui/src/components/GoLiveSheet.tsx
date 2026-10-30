@@ -10,6 +10,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { planStarts, runPacedStarts, type GoLiveRow } from "@/lib/goLive";
+import { TrackSummary } from "@/components/signature/TrackRows";
+import { StatusReason } from "@/components/signature/StatusReason";
 import type { DestStatus, DestinationId } from "@/lib/types";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -58,6 +60,9 @@ export function GoLiveSheet({
   const [running, setRunning] = useState(false);
   const [attempted, setAttempted] = useState<Set<number>>(new Set());
   const [errors, setErrors] = useState<Map<number, string>>(new Map());
+  // Which source the sheet is scoped to, by name; null is every source. This is
+  // the per-source Go live: the same sheet, the same press, fewer rows.
+  const [scope, setScope] = useState<string | null>(null);
 
   // A new snapshot is a new sheet. The parent takes a fresh rows array each
   // time it opens, so a refusal from an earlier press must not still be on
@@ -69,7 +74,12 @@ export function GoLiveSheet({
     setAttempted(new Set());
     setErrors(new Map());
     setRunning(false);
+    setScope(null);
   }
+
+  // The source chips, in first-seen order. Only offered when there is a choice.
+  const sourceNames = [...new Set(rows.map((r) => r.sourceName).filter((n): n is string => n !== null))];
+  const scoped = scope === null ? rows : rows.filter((r) => r.sourceName === scope);
 
   const liveOf = (id: number) => live.find((d) => (d.id as unknown as number) === id);
 
@@ -87,9 +97,9 @@ export function GoLiveSheet({
     return "pending";
   };
 
-  const progress = rows.map((r) => ({ row: r, p: progressOf(r) }));
+  const progress = scoped.map((r) => ({ row: r, p: progressOf(r) }));
   const count = (p: Progress) => progress.filter((x) => x.p === p).length;
-  const readyNow = planStarts(rows).filter((r) => !liveOf(r.id as unknown as number)?.enabled);
+  const readyNow = planStarts(scoped).filter((r) => !liveOf(r.id as unknown as number)?.enabled);
 
   const go = async () => {
     setRunning(true);
@@ -123,18 +133,40 @@ export function GoLiveSheet({
           </p>
         )}
 
+        {sourceNames.length > 1 && (
+          <div role="group" aria-label={t("golive.colSource")} className="flex flex-wrap gap-1.5">
+            {[null, ...sourceNames].map((name) => {
+              const n = name === null ? rows.length : rows.filter((r) => r.sourceName === name).length;
+              return (
+                <Button
+                  key={name ?? "*"}
+                  size="sm"
+                  variant={scope === name ? "secondary" : "outline"}
+                  aria-pressed={scope === name}
+                  disabled={running}
+                  onClick={() => setScope(name)}
+                >
+                  {name ?? t("golive.allSources")}
+                  <span className="font-mono text-xs text-muted-foreground">{n}</span>
+                </Button>
+              );
+            })}
+          </div>
+        )}
+
         <div className="flex flex-col divide-y divide-border rounded-md border border-border">
-          <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr] gap-3 px-3 py-2 text-xs uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[1.4fr_1fr_1fr_auto_1fr] gap-3 px-3 py-2 text-xs uppercase tracking-wide text-muted-foreground">
             <span>{t("golive.colDestination")}</span>
             <span>{t("golive.colSource")}</span>
             <span>{t("golive.colReadiness")}</span>
+            <span>{t("golive.colAudio")}</span>
             <span>{t("golive.colProgress")}</span>
           </div>
           {progress.map(({ row, p }) => (
             <div
               key={row.id as unknown as number}
               data-row
-              className="grid grid-cols-[1.4fr_1fr_1fr_1fr] items-center gap-3 px-3 py-2 text-sm"
+              className="grid grid-cols-[1.4fr_1fr_1fr_auto_1fr] items-center gap-3 px-3 py-2 text-sm"
             >
               <span className="min-w-0">
                 <span className="block truncate font-medium">{row.name}</span>
@@ -148,12 +180,21 @@ export function GoLiveSheet({
                   <Badge variant="warn">{t("golive.blockedNoSource")}</Badge>
                 )}
               </span>
+              {/* What this platform will hear, from the live list: the snapshot
+                  carries no tracks, and routing can change while the sheet is
+                  open. */}
+              <TrackSummary tracks={liveOf(row.id as unknown as number)?.tracks ?? null} />
               <span className={cn("flex flex-col gap-0.5", p === "failed" && "text-down")}>
                 <span>
                   <Badge variant={CHIP[p].variant}>{t(CHIP[p].key)}</Badge>
                 </span>
                 {p === "failed" && errors.has(row.id as unknown as number) && (
-                  <span className="text-xs">{errors.get(row.id as unknown as number)}</span>
+                  <StatusReason
+                    className="text-xs"
+                    reason={errors.get(row.id as unknown as number) ?? ""}
+                    step={t("foundation.status.step.destination", { platform: row.platform })}
+                    asOf={null}
+                  />
                 )}
               </span>
             </div>

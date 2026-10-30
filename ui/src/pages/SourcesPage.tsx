@@ -50,6 +50,7 @@ import { InfoHint } from "@/components/InfoHint";
 import { SecretCode } from "@/components/SecretCode";
 import { useLiveData } from "@/hooks/useLiveData";
 import { copyToClipboard as copy } from "@/lib/clipboard";
+import { WaitingForEncoder } from "@/components/WaitingForEncoder";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { tokenNotEnforcedKey } from "@/lib/tokenNotice";
 import { LIMITS } from "@/lib/limits";
@@ -591,21 +592,7 @@ export function SourceCard({
           )}
         </div>
 
-        {phase === "waiting" && (
-          <div
-            role="status"
-            className="flex items-start gap-3 rounded-md border border-dashed border-armed/40 bg-armed-dim/20 px-3 py-2"
-          >
-            <span
-              aria-hidden
-              className="mt-1 h-2 w-2 shrink-0 rounded-full bg-armed motion-safe:animate-pulse"
-            />
-            <div className="min-w-0">
-              <p className="text-[12px] font-semibold text-armed">{t("sources.waitingForEncoder")}</p>
-              <p className="text-[12px] text-muted-foreground">{t("sources.waitingForEncoderBody")}</p>
-            </div>
-          </div>
-        )}
+        {phase === "waiting" && <WaitingForEncoder />}
 
         {phase === "receiving" && (
           <div

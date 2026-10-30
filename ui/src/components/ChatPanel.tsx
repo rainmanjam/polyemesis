@@ -728,6 +728,7 @@ export function ChatPanel({
   className?: string;
   showComposer?: boolean;
 }) {
+  const t = useT();
   const {
     messages,
     statuses,
@@ -829,9 +830,9 @@ export function ChatPanel({
         {frameError && (
           <Badge
             variant="warn"
-            title="A message could not be understood and was dropped. The timeline may be missing something."
+            title={t("i18nSweep.chatFrameErrorHint")}
           >
-            frame error
+            {t("i18nSweep.frameError")}
           </Badge>
         )}
         <div className="ml-auto">

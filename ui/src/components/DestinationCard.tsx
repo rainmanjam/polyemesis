@@ -226,27 +226,27 @@ export function DestinationCard({
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${dest.name}`}>
+                <Button variant="ghost" size="icon-sm" aria-label={t("i18nSweep.actionsFor", { name: dest.name })}>
                   <MoreVertical />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onSelect={onEdit}>
-                  <Pencil /> Edit
+                  <Pencil /> {t("common.edit")}
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
                   <Link to={`/routing/${dest.id}`}>
-                    <KeyRound /> Edit routing
+                    <KeyRound /> {t("i18nSweep.editRouting")}
                   </Link>
                 </DropdownMenuItem>
                 {dest.enabled && (
                   <DropdownMenuItem onSelect={onRestart}>
-                    <RefreshCw /> Restart
+                    <RefreshCw /> {t("common.restart")}
                   </DropdownMenuItem>
                 )}
                 {dest.platform !== "custom" && dest.platform !== "kick" && (
                   <DropdownMenuItem onSelect={onRefreshKey}>
-                    <RefreshCw /> Refresh stream key
+                    <RefreshCw /> {t("i18nSweep.refreshStreamKey")}
                   </DropdownMenuItem>
                 )}
                 {/* Below the separator, with Delete, because this reaches the
@@ -263,7 +263,7 @@ export function DestinationCard({
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem destructive onSelect={onDelete}>
-                  <Trash2 /> Delete
+                  <Trash2 /> {t("common.delete")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -279,7 +279,7 @@ export function DestinationCard({
             className="group flex items-center justify-between gap-2 px-2 py-1.5 transition-colors hover:bg-muted"
           >
             <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
-              video
+              {t("route.video")}
             </span>
             <span className="truncate font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
               {video}
@@ -291,12 +291,12 @@ export function DestinationCard({
           >
             <div className="flex min-w-0 items-center gap-2">
               <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
-                audio
+                {t("route.audio")}
               </span>
               <TrackSummary tracks={dest.tracks} labels={trackLabels} />
             </div>
             <span className="truncate font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
-              {dest.summary || "not configured"}
+              {dest.summary || t("automod.notConfigured")}
             </span>
           </Link>
         </div>
@@ -455,7 +455,7 @@ export function DestinationCard({
             whether it is healthy or not. */}
         {dest.backupProcess && (
           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <span>backup feed:</span>
+            <span>{t("i18nSweep.backupFeed")}</span>
             {/* Through toneForState, like every other state in the app. The
                 two hand-written classes this replaced were `text-ok` and
                 `text-warn`: there is no --color-ok token, so Tailwind never
@@ -486,7 +486,7 @@ export function DestinationCard({
             rel="noreferrer"
             className="text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
           >
-            Scheduled Facebook broadcast
+            {t("i18nSweep.scheduledFacebook")}
           </a>
         )}
 
@@ -539,9 +539,9 @@ export function DestinationCard({
               size="sm"
               className="flex-1"
               onClick={held.cancel}
-              aria-label={`Undo stopping ${dest.name}`}
+              aria-label={t("i18nSweep.undoStopping", { name: dest.name })}
             >
-              <Undo2 /> Undo ({undoSecondsLeft(held.remaining)})
+              <Undo2 /> {t("i18nSweep.undoCountdown", { seconds: undoSecondsLeft(held.remaining) })}
             </Button>
           ) : dest.enabled ? (
             <Button
@@ -556,11 +556,11 @@ export function DestinationCard({
               // guard exists to interrupt.
               title={
                 unsettled
-                  ? "This button just changed to Stop. Wait a moment, so a repaint cannot turn a Start you meant into a Stop you did not."
-                  : `Stop ${dest.name}`
+                  ? t("i18nSweep.justChangedToStop")
+                  : t("i18nSweep.stopNamed", { name: dest.name })
               }
             >
-              <Square /> Stop
+              <Square /> {t("common.stop")}
             </Button>
           ) : (
             <Button
@@ -571,11 +571,11 @@ export function DestinationCard({
               disabled={busy || unsettled}
               title={
                 unsettled
-                  ? "This button just changed to Start. Wait a moment, so a repaint cannot turn a Stop you meant into a Start you did not."
-                  : `Start ${dest.name}`
+                  ? t("i18nSweep.justChangedToStart")
+                  : t("i18nSweep.startNamed", { name: dest.name })
               }
             >
-              <Play /> Start
+              <Play /> {t("common.start")}
             </Button>
           )}
           {/* Buttons rather than drag: they work from the keyboard, and moving
@@ -586,7 +586,7 @@ export function DestinationCard({
             size="icon-sm"
             onClick={onMoveEarlier}
             disabled={!canMoveEarlier}
-            aria-label={`Move ${dest.name} earlier`}
+            aria-label={t("i18nSweep.moveEarlier", { name: dest.name })}
           >
             <ChevronUp />
           </Button>
@@ -595,7 +595,7 @@ export function DestinationCard({
             size="icon-sm"
             onClick={onMoveLater}
             disabled={!canMoveLater}
-            aria-label={`Move ${dest.name} later`}
+            aria-label={t("i18nSweep.moveLater", { name: dest.name })}
           >
             <ChevronDown />
           </Button>

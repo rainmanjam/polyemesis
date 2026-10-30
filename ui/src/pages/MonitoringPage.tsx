@@ -1,3 +1,4 @@
+import { InfoHint } from "@/components/InfoHint";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
@@ -259,7 +260,7 @@ export function ExpertPanel() {
       <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
         <CardTitle className="flex items-center gap-1.5">
           <TerminalSquare className="h-3.5 w-3.5" />
-          Expert mode — extra FFmpeg arguments
+          {t("i18nSweep.expertModeTitle")}
         </CardTitle>
         <Select value={selected} onValueChange={choose}>
           <SelectTrigger className="h-7 w-56 text-tiny">
@@ -318,7 +319,7 @@ export function ExpertPanel() {
             <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="secondary" onClick={preview} disabled={busy !== ""}>
                 {busy === "preview" && <Loader2 className="h-3 w-3 animate-spin" />}
-                Resolve command
+                {t("i18nSweep.resolveCommand")}
               </Button>
               <Button size="sm" variant="secondary" onClick={doDryRun} disabled={busy !== ""}>
                 {busy === "dryrun" && <Loader2 className="h-3 w-3 animate-spin" />}
@@ -326,7 +327,7 @@ export function ExpertPanel() {
               </Button>
               <Button size="sm" onClick={apply} disabled={!canApply}>
                 {busy === "apply" && <Loader2 className="h-3 w-3 animate-spin" />}
-                Apply
+                {t("common.apply")}
               </Button>
               <Button
                 size="sm"
@@ -394,7 +395,7 @@ export function ExpertPanel() {
                   <Badge variant={resolved.command.live ? "default" : "outline"}>
                     {resolved.command.live ? t("mon.fromRunningProcess") : t("mon.rebuilt")}
                   </Badge>
-                  {!shown && <Badge variant="outline">stale</Badge>}
+                  {!shown && <Badge variant="outline">{t("i18nSweep.stale")}</Badge>}
                 </div>
                 <pre
                   className={cn(
@@ -426,7 +427,7 @@ export function ExpertPanel() {
                 {dryRun.output && (
                   <details className="mt-1">
                     <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
-                      FFmpeg output
+                      {t("i18nSweep.ffmpegOutput")}
                     </summary>
                     <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
                       {dryRun.output}
@@ -630,7 +631,8 @@ export function MonitoringPage() {
               tone={(system?.cpuPercent ?? 0) > 85 ? "warn" : "default"}
             />
             <div className="mt-1 text-micro text-muted-foreground">
-              {system?.numCpu ?? 0} cores · polyemesis {pct(system?.procCpuPercent ?? 0)}
+              {t("i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
+              <InfoHint body="mon.hostCpu.hint" title="mon.hostCpu" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -644,6 +646,7 @@ export function MonitoringPage() {
             <div className="mt-1 text-micro text-muted-foreground">
               {bytes(system?.memUsedBytes ?? 0)} / {bytes(system?.memTotalBytes ?? 0)} · rss{" "}
               {bytes(system?.procMemBytes ?? 0)}
+              <InfoHint body="mon.memory.hint" title="mon.memory" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -651,7 +654,11 @@ export function MonitoringPage() {
           <CardContent className="pt-3">
             <Stat labelKey="mon.relayIn" value={bytes(status?.relay.rxBytes ?? 0)} />
             <div className="mt-1 text-micro text-muted-foreground">
-              {status?.relay.subscribers?.length ?? 0} subscribers · port {status?.relay.port ?? "—"}
+              {t("i18nSweep.monSubscribers", {
+                count: status?.relay.subscribers?.length ?? 0,
+                port: status?.relay.port ?? "—",
+              })}
+              <InfoHint body="mon.relayIn.hint" title="mon.relayIn" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -664,6 +671,7 @@ export function MonitoringPage() {
             />
             <div className="mt-1 text-micro text-muted-foreground">
               {t("mon.relayDropsNote")}
+              <InfoHint body="mon.relayDrops.hint" title="mon.relayDrops" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -675,9 +683,12 @@ export function MonitoringPage() {
               tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
             />
             <div className="mt-1 text-micro text-muted-foreground">
-              {(status?.relay.tsLost ?? 0).toLocaleString()} of{" "}
-              {((status?.relay.tsPackets ?? 0) + (status?.relay.tsLost ?? 0)).toLocaleString()} TS
-              packets missing · {(status?.relay.discontinuities ?? 0).toLocaleString()} breaks
+              {t("i18nSweep.monTsMissing", {
+                lost: (status?.relay.tsLost ?? 0).toLocaleString(),
+                total: ((status?.relay.tsPackets ?? 0) + (status?.relay.tsLost ?? 0)).toLocaleString(),
+                breaks: (status?.relay.discontinuities ?? 0).toLocaleString(),
+              })}
+              <InfoHint body="mon.ingestLoss.hint" title="mon.ingestLoss" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -691,7 +702,7 @@ export function MonitoringPage() {
         <CardContent className="h-40 px-1">
           {chartData.length < 2 ? (
             <div className="flex h-full items-center justify-center text-tiny text-muted-foreground">
-              Collecting samples…
+              {t("i18nSweep.collectingSamples")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -757,8 +768,8 @@ export function MonitoringPage() {
           <CardHeader>
             <CardTitle>{t("mon.processes")}</CardTitle>
               {procFreshness.stale && (
-                <Badge variant="warn" title={`${procFreshness.failures} consecutive failed refreshes`}>
-                  not updating
+                <Badge variant="warn" title={t("i18nSweep.failedRefreshes", { count: procFreshness.failures })}>
+                  {t("meters.notUpdating")}
                 </Badge>
               )}
           </CardHeader>
@@ -801,7 +812,7 @@ export function MonitoringPage() {
                   </div>
                   {p.nextRetryIn ? (
                     <div className="mt-1 text-micro text-warn">
-                      retrying in {p.nextRetryIn.toFixed(0)}s
+                      {t("i18nSweep.retryingIn", { seconds: p.nextRetryIn.toFixed(0) })}
                     </div>
                   ) : null}
                   {p.lastError && (
@@ -811,7 +822,7 @@ export function MonitoringPage() {
                   )}
                   <details className="mt-1">
                     <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
-                      command line
+                      {t("i18nSweep.commandLine")}
                     </summary>
                     <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
                       {command}
@@ -850,7 +861,7 @@ export function MonitoringPage() {
               <div className="flex items-center gap-1.5">
                 <Switch id="follow" checked={follow} onCheckedChange={setFollow} />
                 <Label htmlFor="follow" className="cursor-pointer">
-                  Follow
+                  {t("i18nSweep.follow")}
                 </Label>
               </div>
               <Button variant="ghost" size="icon-sm" onClick={clearAll} aria-label={t("mon.clearLog")}>

@@ -139,4 +139,21 @@ describe("DestinationDialog, connecting an account in place", () => {
     // And the operator's typing is still there.
     expect((screen.getByLabelText(/^Name$/i) as HTMLInputElement).value).toBe("Renamed");
   }, 15000);
+  it("names where the redirect sign-in returns to, before it leaves the form (A5)", async () => {
+    guides.value = [
+      {
+        platform: "twitch",
+        name: "Twitch",
+        deviceFlow: false,
+        redirectPath: "https://box.example/api/v1/oauth/twitch/callback",
+        redirectWarnings: ["This host is not reachable from Twitch."],
+      },
+    ];
+    guides.creds = [{ platform: "twitch", clientId: "abc", hasSecret: true, updatedAt: "" }];
+    guides.accounts = [];
+    open();
+    await waitFor(() => expect(screen.getByText(/Connect Twitch account/)).toBeTruthy());
+    expect(screen.getByText("https://box.example/api/v1/oauth/twitch/callback")).toBeTruthy();
+    expect(screen.getByText("This host is not reachable from Twitch.")).toBeTruthy();
+  });
 });

@@ -99,7 +99,7 @@ export function OnAirBar({
             kind of figure that gets read as a bitrate on a console full of
             them. */}
         <span className="tnum font-mono text-[12px] text-muted-foreground">
-          <span className="text-foreground">{air.live}</span>/{air.enabled} destinations live
+          <span className="text-foreground">{air.live}</span>/{air.enabled} {t("i18nSweep.destinationsLive")}
         </span>
 
         {/* Counts, each with its own mark. Rendered only when non-zero: a
@@ -108,13 +108,13 @@ export function OnAirBar({
         {air.degraded > 0 && (
           <span className="flex items-center gap-1.5 text-[12px] text-warn">
             <StatusDot tone="warn" size="sm" />
-            {air.degraded} connecting
+            {t("i18nSweep.connectingCount", { count: air.degraded })}
           </span>
         )}
         {air.failed > 0 && (
           <span className="flex items-center gap-1.5 text-[12px] text-down">
             <StatusDot tone="down" size="sm" />
-            {air.failed} failed
+            {t("i18nSweep.failedCount", { count: air.failed })}
           </span>
         )}
 
@@ -157,9 +157,9 @@ export function OnAirBar({
           size="sm"
           className="ml-auto"
           onClick={() => setRoomOpen(true)}
-          title="A large-type state view, for a machine sitting beside the desk"
+          title={t("i18nSweep.acrossTheRoomHint")}
         >
-          <Tv /> Across the room
+          <Tv /> {t("i18nSweep.acrossTheRoom")}
         </Button>
       </div>
 

@@ -39,11 +39,17 @@ export function SetupChecklist({
   ingestUrl,
   onCopyIngest,
   onAddDestination,
+  addresses = [],
+  onCopyAddress,
 }: Readonly<{
   checklist: Checklist;
   ingestUrl: string;
   onCopyIngest: () => void;
   onAddDestination: () => void;
+  /** The source's publish rows, host filled in (A1): its address, and in RTMP
+   *  mode a `streamKey` row, offered as a copy and never displayed. */
+  addresses?: readonly { proto: string; url: string }[];
+  onCopyAddress?: (address: { proto: string; url: string }) => void;
 }>) {
   const t = useT();
   const stateOf = (id: ChecklistStepId) => checklist.steps.find((s) => s.id === id)!.state;
@@ -161,6 +167,25 @@ export function SetupChecklist({
                         <Copy />
                       </Button>
                       </div>
+                      {/* One button per protocol, so an encoder that wants SRT
+                          is not handed an RTMP address to edit. */}
+                      {addresses.length > 0 && onCopyAddress && (
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {addresses.map((a, i) => (
+                            <Button
+                              key={a.proto}
+                              size="sm"
+                              variant={i === 0 ? "default" : "outline"}
+                              onClick={() => onCopyAddress(a)}
+                            >
+                              <Copy />{" "}
+                              {a.proto === "streamKey"
+                                ? t("firstRun.copyStreamKey")
+                                : t("firstRun.copyAddress", { proto: a.proto.toUpperCase() })}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 

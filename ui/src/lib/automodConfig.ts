@@ -179,3 +179,17 @@ export const MAX_CONFIDENCE = 1;
 export function confidenceOutOfRange(v: number): boolean {
   return !(v >= MIN_CONFIDENCE && v <= MAX_CONFIDENCE);
 }
+
+/** The model checker's state in one word, for the badge on its card (A17).
+ *
+ *  "No key" is a warning rather than an error: a local endpoint may need no key
+ *  at all, but a hosted one refuses every call without one, and an operator who
+ *  switched the checker on should see that before the first message is missed. */
+export function modelStatus(model: { enabled: boolean; hasApiKey: boolean }): {
+  key: TranslationKey;
+  tone: "outline" | "live" | "warn";
+} {
+  if (!model.enabled) return { key: "automod.statusOff", tone: "outline" };
+  if (!model.hasApiKey) return { key: "automod.statusNoKey", tone: "warn" };
+  return { key: "automod.statusOn", tone: "live" };
+}

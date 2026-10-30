@@ -195,3 +195,49 @@ describe("GoLiveSheet: what a press shows while it runs", () => {
     expect(within(row).queryByText(T("golive.live"))).toBeNull();
   });
 });
+
+describe("Go live sheet: audio and scope (A3)", () => {
+  const two = [{ id: 1, name: "Studio A" }, { id: 2, name: "Studio B" }] as unknown as SourceView[];
+
+  function drawTwo(destinations: DestStatus[], onStart = vi.fn(async (_id: DestinationId) => {})) {
+    render(
+      <GoLiveSheet
+        open
+        onOpenChange={() => {}}
+        rows={goLiveRows(destinations, two)}
+        live={destinations}
+        youtubeAtRisk={0}
+        onStart={onStart}
+        onFinished={() => {}}
+        paceMs={0}
+      />,
+    );
+    return onStart;
+  }
+
+  it("shows each row's audio tracks", () => {
+    drawTwo([dest({ tracks: [0, 2] })]);
+    const row = document.querySelector("[data-row]") as HTMLElement;
+    const on = within(row).getAllByTitle(/is included$/);
+    expect(on.map((el) => el.textContent)).toEqual(["1", "3"]);
+  });
+
+  it("offers a filter per source when there is more than one, and starts only that source", async () => {
+    const onStart = drawTwo([
+      dest({ id: did(1), name: "A1", sourceId: 1 }),
+      dest({ id: did(2), name: "B1", sourceId: 2 }),
+      dest({ id: did(3), name: "B2", sourceId: 2 }),
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: /Studio B/ }));
+    expect(document.querySelectorAll("[data-row]").length).toBe(2);
+    const go = screen.getByRole("button", { name: T("golive.goCount", { count: 2 }) });
+    fireEvent.click(go);
+    await waitFor(() => expect(onStart).toHaveBeenCalledTimes(2));
+    expect(onStart.mock.calls.map((c) => c[0])).toEqual([did(2), did(3)]);
+  });
+
+  it("offers no filter for a single source", () => {
+    drawTwo([dest({ sourceId: 1 })]);
+    expect(screen.queryByRole("button", { name: /All sources/ })).toBeNull();
+  });
+});

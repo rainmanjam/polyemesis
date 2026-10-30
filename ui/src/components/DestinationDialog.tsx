@@ -35,6 +35,7 @@ import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
 import { useT } from "@/lib/i18n";
 import { isIpLiteralHost, platformSupportsDeviceCode } from "@/lib/platformConnect";
 import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
+import { InfoHint } from "@/components/InfoHint";
 import {
   failedRead,
   mayClaim,
@@ -886,6 +887,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // Read from the browser: a self-signed certificate on a name is not visible
   // here, and the dialog does not claim that it is.
   const ipOrigin = typeof window !== "undefined" && isIpLiteralHost(window.location.hostname);
+  // Where the redirect sign-in comes back to, and the server's reasons it may
+  // not (A5). Shown before the operator follows the link, because following it
+  // leaves this form.
+  const connectGuide =
+    caps?.connect !== undefined ? rowsOf(guidesRead).find((g) => g.platform === caps.connect) : undefined;
   // Whether the connected Facebook account publishes to a PAGE rather than a
   // profile, which decides whether an audience setting means anything at all.
   //
@@ -1250,7 +1256,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                                 a URL pasting. */}
                             {rowCaps.tier === "unsupported" && (
                               <Badge variant="warn" className="shrink-0">
-                                not supported
+                                {t("dest.tierNotSupported")}
                               </Badge>
                             )}
                             {/* Partial signs in as much as integrated does —
@@ -1259,15 +1265,20 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                                 The suffix is what stops "sign in" reading as
                                 "and you are done". */}
                             {(rowCaps.tier === "integrated" || rowCaps.tier === "partial") && (
-                              <span className="shrink-0 text-sm text-muted-foreground">
-                                {rowCaps.tier === "partial" ? "sign in + paste key" : "sign in"}
+                              // B2 follow-up: at the 12px floor these hints can
+                              // starve the platform name on a phone-width dialog,
+                              // and in the longer locales overflow the row. They
+                              // truncate instead of refusing to shrink; the
+                              // transport tag and the name keep their room.
+                              <span className="min-w-0 max-w-[40%] truncate text-sm text-muted-foreground">
+                                {rowCaps.tier === "partial" ? t("dest.tierSignInPasteKey") : t("dest.tierSignIn")}
                               </span>
                             )}
                             {/* Saying so here saves the operator picking a
                                 platform and then wondering why the URL box is
                                 still empty. */}
                             {p.kind && !p.url && rowCaps.tier !== "unsupported" && (
-                              <span className="shrink-0 text-sm text-muted-foreground">
+                              <span className="min-w-0 max-w-[40%] truncate text-sm text-muted-foreground">
                                 {t("dest.urlFromDashboard")}
                               </span>
                             )}
@@ -1401,9 +1412,20 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   {ipOrigin && <p className="text-sm text-muted-foreground">{t("addDest.ipOriginNote")}</p>}
                   <Button variant={deviceCodeOK ? "outline" : "default"} size="sm" asChild>
                     <a href={api.connectUrl(caps.connect)}>
-                      <ExternalLink /> Connect {caps.name} account
+                      <ExternalLink /> {t("addDest.connectAccount", { platform: caps.name })}
                     </a>
                   </Button>
+                  {connectGuide?.redirectPath && (
+                    <p className="flex flex-wrap items-baseline gap-1 text-sm text-muted-foreground">
+                      {t("addDest.redirectReturnsTo")}
+                      <code className="break-all font-mono text-xs text-foreground">{connectGuide.redirectPath}</code>
+                    </p>
+                  )}
+                  {connectGuide?.redirectWarnings?.map((w) => (
+                    <p key={w} className="text-sm text-warn">
+                      {w}
+                    </p>
+                  ))}
                 </div>
               )}
               {/* The mixed case, spelled out. Kick's sign-in is worth having on
@@ -1542,7 +1564,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               the whole point, and it is what Restreamer already does (its
               filter controls render only when the codec is not `copy`). */}
           <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-[12px] font-medium">{t("dest.videoTreatment")}</legend>
+            <legend className="mb-1 flex items-center gap-1.5 text-[12px] font-medium">
+              {t("dest.videoTreatment")}
+              {/* A6: the first place a rendition is offered, so the first place
+                  it is explained. */}
+              <InfoHint body="dest.help.rendition" title="dest.videoTreatment" />
+            </legend>
 
             {/* role="radio" is only meaningful inside a radiogroup. Without this
                 wrapper the two cards are announced as two unrelated radios with
@@ -1564,11 +1591,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 <span className="flex items-center gap-2">
                   <StatusDot tone={renditionId === PASSTHROUGH ? "live" : "idle"} size="sm" />
                   <span className="text-[13px] font-medium">{t("dest.copySource")}</span>
-                  <Badge variant="outline" className="ml-auto">recommended</Badge>
+                  <Badge variant="outline" className="ml-auto">{t("dest.recommended")}</Badge>
                 </span>
                 <span className="mt-1 block text-sm text-muted-foreground">
-                  <span className="font-mono">-c:v copy</span> — the source video exactly as your
-                  encoder sent it. No encode, no process, no CPU.
+                  <span className="font-mono">-c:v copy</span> — {t("dest.copySourceBody")}
                 </span>
               </button>
 
