@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Wypełnij",
   "routing.matrix.fillIdentity": "Wszystkie ścieżki 1:1",
   "routing.matrix.fillFirst": "Tylko ścieżka 1",
-  "routing.matrix.fillRears": "Tylko tylne kanały surround"
+  "routing.matrix.fillRears": "Tylko tylne kanały surround",
+  "dash.deleteDestUsedBy": "Nadal z niego korzysta",
+  "dash.deleteDestSchedules": "Harmonogramy",
+  "dash.deleteDestSchedulesNote": "Te harmonogramy pozostaną, ale od teraz niczego tu nie uruchomią ani nie zatrzymają. Edytuj je na stronie Automatyzacja.",
+  "dash.deleteDestUsageUnknown": "Nie udało się odczytać harmonogramów, więc nie wiadomo, czy któryś uruchamia ten cel.",
+  "automod.deleteRuleKept": "Wiadomości już oznaczone, ukryte lub usunięte pozostają bez zmian, podobnie jak dziennik moderacji.",
+  "automod.deleteRuleReachLabel": "Gdzie teraz działa",
+  "automod.deleteRuleReach": "Platformy reagujące na dopasowania",
+  "automod.deleteRuleConfirm": "Usuń regułę"
 }

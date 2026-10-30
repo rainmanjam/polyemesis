@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Füllen",
   "routing.matrix.fillIdentity": "Alle Spuren 1:1",
   "routing.matrix.fillFirst": "Nur Spur 1",
-  "routing.matrix.fillRears": "Nur hintere Surround-Kanäle"
+  "routing.matrix.fillRears": "Nur hintere Surround-Kanäle",
+  "dash.deleteDestUsedBy": "Verweist noch darauf",
+  "dash.deleteDestSchedules": "Zeitpläne",
+  "dash.deleteDestSchedulesNote": "Diese Zeitpläne bleiben, starten oder stoppen hier aber ab jetzt nichts mehr. Bearbeite sie auf der Seite Automatisierung.",
+  "dash.deleteDestUsageUnknown": "Die Zeitpläne konnten nicht gelesen werden, daher lässt sich nicht sagen, ob einer davon dieses Ziel startet.",
+  "automod.deleteRuleKept": "Bereits markierte, ausgeblendete oder entfernte Nachrichten bleiben unverändert, ebenso das Moderationsprotokoll.",
+  "automod.deleteRuleReachLabel": "Wo sie gerade greift",
+  "automod.deleteRuleReach": "Plattformen, die auf Treffer reagieren",
+  "automod.deleteRuleConfirm": "Regel löschen"
 }

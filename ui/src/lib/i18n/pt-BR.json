@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Preencher",
   "routing.matrix.fillIdentity": "Todas as faixas 1:1",
   "routing.matrix.fillFirst": "Só a faixa 1",
-  "routing.matrix.fillRears": "Só traseiros do surround"
+  "routing.matrix.fillRears": "Só traseiros do surround",
+  "dash.deleteDestUsedBy": "Ainda apontam para ele",
+  "dash.deleteDestSchedules": "Agendamentos",
+  "dash.deleteDestSchedulesNote": "Esses agendamentos continuam, mas a partir de agora não iniciam nem param nada aqui. Edite-os na página Automação.",
+  "dash.deleteDestUsageUnknown": "Não foi possível ler os agendamentos, então não dá para saber se algum inicia este destino.",
+  "automod.deleteRuleKept": "As mensagens que ela já sinalizou, ocultou ou removeu ficam como estão, assim como o registro de moderação.",
+  "automod.deleteRuleReachLabel": "Onde age agora",
+  "automod.deleteRuleReach": "Plataformas que agem sobre as correspondências",
+  "automod.deleteRuleConfirm": "Excluir regra"
 }

@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "填充",
   "routing.matrix.fillIdentity": "所有音轨 1:1",
   "routing.matrix.fillFirst": "仅音轨 1",
-  "routing.matrix.fillRears": "仅环绕后置声道"
+  "routing.matrix.fillRears": "仅环绕后置声道",
+  "dash.deleteDestUsedBy": "仍在引用它的项目",
+  "dash.deleteDestSchedules": "计划任务",
+  "dash.deleteDestSchedulesNote": "这些计划任务会保留，但此后不会在这里启动或停止任何内容。请在“自动化”页面中编辑它们。",
+  "dash.deleteDestUsageUnknown": "无法读取计划任务，因此无法确定是否有计划任务会启动此目标。",
+  "automod.deleteRuleKept": "已被它标记、隐藏或删除的消息保持原样，审核记录也会保留。",
+  "automod.deleteRuleReachLabel": "当前生效的位置",
+  "automod.deleteRuleReach": "对其匹配结果执行操作的平台",
+  "automod.deleteRuleConfirm": "删除规则"
 }

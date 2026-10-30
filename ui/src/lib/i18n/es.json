@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Rellenar",
   "routing.matrix.fillIdentity": "Todas las pistas 1:1",
   "routing.matrix.fillFirst": "Solo la pista 1",
-  "routing.matrix.fillRears": "Solo traseros envolventes"
+  "routing.matrix.fillRears": "Solo traseros envolventes",
+  "dash.deleteDestUsedBy": "Todavía lo usan",
+  "dash.deleteDestSchedules": "Programaciones",
+  "dash.deleteDestSchedulesNote": "Esas programaciones se mantienen, pero a partir de ahora no inician ni detienen nada aquí. Edítalas en la página Automatización.",
+  "dash.deleteDestUsageUnknown": "No se pudieron leer las programaciones, así que no se puede saber si alguna inicia este destino.",
+  "automod.deleteRuleKept": "Los mensajes que ya marcó, ocultó o eliminó se quedan como están, igual que el registro de moderación.",
+  "automod.deleteRuleReachLabel": "Dónde actúa ahora",
+  "automod.deleteRuleReach": "Plataformas que actúan sobre sus coincidencias",
+  "automod.deleteRuleConfirm": "Eliminar regla"
 }

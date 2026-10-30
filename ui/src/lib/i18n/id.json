@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Isi",
   "routing.matrix.fillIdentity": "Semua trek 1:1",
   "routing.matrix.fillFirst": "Hanya trek 1",
-  "routing.matrix.fillRears": "Hanya kanal surround belakang"
+  "routing.matrix.fillRears": "Hanya kanal surround belakang",
+  "dash.deleteDestUsedBy": "Masih merujuk ke sini",
+  "dash.deleteDestSchedules": "Jadwal",
+  "dash.deleteDestSchedulesNote": "Jadwal itu tetap ada, tetapi mulai sekarang tidak memulai atau menghentikan apa pun di sini. Ubah di halaman Otomasi.",
+  "dash.deleteDestUsageUnknown": "Jadwal tidak dapat dibaca, jadi tidak bisa dipastikan apakah ada yang memulai tujuan ini.",
+  "automod.deleteRuleKept": "Pesan yang sudah ditandai, disembunyikan, atau dihapus tetap seperti semula, begitu pula log moderasi.",
+  "automod.deleteRuleReachLabel": "Tempat aturan ini bertindak sekarang",
+  "automod.deleteRuleReach": "Platform yang menindak kecocokannya",
+  "automod.deleteRuleConfirm": "Hapus aturan"
 }

@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Vullen",
   "routing.matrix.fillIdentity": "Alle sporen 1:1",
   "routing.matrix.fillFirst": "Alleen spoor 1",
-  "routing.matrix.fillRears": "Alleen surround-achterkanalen"
+  "routing.matrix.fillRears": "Alleen surround-achterkanalen",
+  "dash.deleteDestUsedBy": "Verwijst er nog naar",
+  "dash.deleteDestSchedules": "Planningen",
+  "dash.deleteDestSchedulesNote": "Die planningen blijven, maar starten of stoppen hier voortaan niets meer. Bewerk ze op de pagina Automatisering.",
+  "dash.deleteDestUsageUnknown": "De planningen konden niet worden gelezen, dus het is onbekend of er een deze bestemming start.",
+  "automod.deleteRuleKept": "Berichten die al zijn gemarkeerd, verborgen of verwijderd blijven zoals ze zijn, net als het moderatielogboek.",
+  "automod.deleteRuleReachLabel": "Waar hij nu ingrijpt",
+  "automod.deleteRuleReach": "Platforms die op de treffers ingrijpen",
+  "automod.deleteRuleConfirm": "Regel verwijderen"
 }

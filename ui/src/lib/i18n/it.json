@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Riempi",
   "routing.matrix.fillIdentity": "Tutte le tracce 1:1",
   "routing.matrix.fillFirst": "Solo traccia 1",
-  "routing.matrix.fillRears": "Solo posteriori surround"
+  "routing.matrix.fillRears": "Solo posteriori surround",
+  "dash.deleteDestUsedBy": "Ancora collegati",
+  "dash.deleteDestSchedules": "Pianificazioni",
+  "dash.deleteDestSchedulesNote": "Quelle pianificazioni restano, ma da ora non avviano né fermano più nulla qui. Modificale nella pagina Automazione.",
+  "dash.deleteDestUsageUnknown": "Non è stato possibile leggere le pianificazioni, quindi non si sa se qualcuna avvia questa destinazione.",
+  "automod.deleteRuleKept": "I messaggi già segnalati, nascosti o rimossi restano come sono, così come il registro di moderazione.",
+  "automod.deleteRuleReachLabel": "Dove agisce ora",
+  "automod.deleteRuleReach": "Piattaforme che agiscono sulle sue corrispondenze",
+  "automod.deleteRuleConfirm": "Elimina regola"
 }

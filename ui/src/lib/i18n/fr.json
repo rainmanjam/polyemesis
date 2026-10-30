@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Remplir",
   "routing.matrix.fillIdentity": "Toutes les pistes 1:1",
   "routing.matrix.fillFirst": "Piste 1 seulement",
-  "routing.matrix.fillRears": "Arrières surround seulement"
+  "routing.matrix.fillRears": "Arrières surround seulement",
+  "dash.deleteDestUsedBy": "Y font encore référence",
+  "dash.deleteDestSchedules": "Planifications",
+  "dash.deleteDestSchedulesNote": "Ces planifications restent, mais ne démarrent ni n'arrêtent plus rien ici. Modifiez-les sur la page Automatisation.",
+  "dash.deleteDestUsageUnknown": "Les planifications n'ont pas pu être lues : impossible de dire si l'une d'elles démarre cette destination.",
+  "automod.deleteRuleKept": "Les messages déjà signalés, masqués ou supprimés restent en l'état, tout comme le journal de modération.",
+  "automod.deleteRuleReachLabel": "Où elle agit actuellement",
+  "automod.deleteRuleReach": "Plateformes qui agissent sur ses correspondances",
+  "automod.deleteRuleConfirm": "Supprimer la règle"
 }

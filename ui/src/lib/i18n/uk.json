@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Заповнити",
   "routing.matrix.fillIdentity": "Усі доріжки 1:1",
   "routing.matrix.fillFirst": "Лише доріжка 1",
-  "routing.matrix.fillRears": "Лише тилові канали об'ємного звуку"
+  "routing.matrix.fillRears": "Лише тилові канали об'ємного звуку",
+  "dash.deleteDestUsedBy": "Досі посилаються на нього",
+  "dash.deleteDestSchedules": "Розклади",
+  "dash.deleteDestSchedulesNote": "Ці розклади залишаться, але відтепер нічого тут не запускатимуть і не зупинятимуть. Змініть їх на сторінці «Автоматизація».",
+  "dash.deleteDestUsageUnknown": "Не вдалося прочитати розклади, тому невідомо, чи запускає якийсь із них це призначення.",
+  "automod.deleteRuleKept": "Уже позначені, приховані чи видалені повідомлення залишаються як є, як і журнал модерації.",
+  "automod.deleteRuleReachLabel": "Де правило діє зараз",
+  "automod.deleteRuleReach": "Платформи, що реагують на збіги",
+  "automod.deleteRuleConfirm": "Видалити правило"
 }

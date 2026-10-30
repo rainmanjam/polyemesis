@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "一括設定",
   "routing.matrix.fillIdentity": "全トラック 1:1",
   "routing.matrix.fillFirst": "トラック 1 のみ",
-  "routing.matrix.fillRears": "サラウンド後方のみ"
+  "routing.matrix.fillRears": "サラウンド後方のみ",
+  "dash.deleteDestUsedBy": "まだこれを参照しているもの",
+  "dash.deleteDestSchedules": "スケジュール",
+  "dash.deleteDestSchedulesNote": "これらのスケジュールは残りますが、今後ここでは何も開始・停止しません。オートメーションページで編集してください。",
+  "dash.deleteDestUsageUnknown": "スケジュールを読み込めなかったため、この配信先を開始するスケジュールがあるかどうか分かりません。",
+  "automod.deleteRuleKept": "すでにフラグ付け・非表示・削除したメッセージはそのまま残り、モデレーション記録も残ります。",
+  "automod.deleteRuleReachLabel": "現在作動している場所",
+  "automod.deleteRuleReach": "一致に対して処理を行うプラットフォーム",
+  "automod.deleteRuleConfirm": "ルールを削除"
 }

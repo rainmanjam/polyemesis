@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Fill",
   "routing.matrix.fillIdentity": "All tracks 1:1",
   "routing.matrix.fillFirst": "Track 1 only",
-  "routing.matrix.fillRears": "Surround rears only"
+  "routing.matrix.fillRears": "Surround rears only",
+  "dash.deleteDestUsedBy": "Still pointing at it",
+  "dash.deleteDestSchedules": "Schedules",
+  "dash.deleteDestSchedulesNote": "Those schedules stay, but from now on they start or stop nothing here. Edit them on the Automation page.",
+  "dash.deleteDestUsageUnknown": "The schedules could not be read, so this cannot say whether any of them start this destination.",
+  "automod.deleteRuleKept": "Messages it already flagged, hid or removed stay as they are, and so does the moderation log.",
+  "automod.deleteRuleReachLabel": "Where it acts now",
+  "automod.deleteRuleReach": "Platforms acting on its matches",
+  "automod.deleteRuleConfirm": "Delete rule"
 }

@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Заполнить",
   "routing.matrix.fillIdentity": "Все дорожки 1:1",
   "routing.matrix.fillFirst": "Только дорожка 1",
-  "routing.matrix.fillRears": "Только тыловые каналы объёмного звука"
+  "routing.matrix.fillRears": "Только тыловые каналы объёмного звука",
+  "dash.deleteDestUsedBy": "Всё ещё ссылаются на него",
+  "dash.deleteDestSchedules": "Расписания",
+  "dash.deleteDestSchedulesNote": "Эти расписания останутся, но с этого момента ничего здесь не запускают и не останавливают. Измените их на странице «Автоматизация».",
+  "dash.deleteDestUsageUnknown": "Не удалось прочитать расписания, поэтому неизвестно, запускает ли какое-то из них это назначение.",
+  "automod.deleteRuleKept": "Уже отмеченные, скрытые или удалённые сообщения остаются как есть, как и журнал модерации.",
+  "automod.deleteRuleReachLabel": "Где правило действует сейчас",
+  "automod.deleteRuleReach": "Платформы, реагирующие на совпадения",
+  "automod.deleteRuleConfirm": "Удалить правило"
 }

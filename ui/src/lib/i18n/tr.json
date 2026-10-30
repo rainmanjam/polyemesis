@@ -2025,5 +2025,13 @@
   "routing.matrix.fill": "Doldur",
   "routing.matrix.fillIdentity": "Tüm parçalar 1:1",
   "routing.matrix.fillFirst": "Yalnızca 1. parça",
-  "routing.matrix.fillRears": "Yalnızca surround arka kanallar"
+  "routing.matrix.fillRears": "Yalnızca surround arka kanallar",
+  "dash.deleteDestUsedBy": "Hâlâ buna bağlı olanlar",
+  "dash.deleteDestSchedules": "Zamanlamalar",
+  "dash.deleteDestSchedulesNote": "Bu zamanlamalar kalır, ancak bundan sonra burada hiçbir şeyi başlatıp durdurmaz. Otomasyon sayfasından düzenleyin.",
+  "dash.deleteDestUsageUnknown": "Zamanlamalar okunamadı, bu yüzden bu hedefi başlatan bir zamanlama olup olmadığı bilinmiyor.",
+  "automod.deleteRuleKept": "Daha önce işaretlediği, gizlediği veya kaldırdığı mesajlar olduğu gibi kalır; moderasyon kaydı da öyle.",
+  "automod.deleteRuleReachLabel": "Şu anda etkin olduğu yerler",
+  "automod.deleteRuleReach": "Eşleşmelerine işlem uygulayan platformlar",
+  "automod.deleteRuleConfirm": "Kuralı sil"
 }

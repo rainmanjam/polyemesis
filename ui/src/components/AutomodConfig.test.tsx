@@ -131,7 +131,9 @@ describe("AutomodConfig: the rule list", () => {
     expect(screen.getByText("Delete “caps”?")).toBeTruthy();
     expect(onChange).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    // The verb names the thing (A18), and the dialog says how far it reaches.
+    expect(screen.getByText("Platforms acting on its matches")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete rule" }));
     await waitFor(() => expect(onChange).toHaveBeenCalled());
     const left = (onChange.mock.calls[0][0] as Settings).automod?.rules ?? [];
     expect(left.map((r) => r.name)).toEqual(["spam"]);

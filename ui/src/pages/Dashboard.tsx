@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { useDestinationUsage } from "@/lib/destinationUsage";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
 import { audioTrackCount, ingestAttribution, ingestBitrateKbps, processAbsence } from "@/lib/dashboardFacts";
@@ -1287,6 +1288,8 @@ export function Dashboard() {
   };
 
   const confirmDelete = useConfirm<{ id: DestinationId; name: string; live: boolean }>();
+  // What still points at the destination being deleted (A18).
+  const deleteUsage = useDestinationUsage(confirmDelete.open ? (confirmDelete.target?.id ?? null) : null);
 
   const remove = async (id: DestinationId) => {
     await act(id, () => api.deleteDestination(id), "delete the destination");
@@ -2024,16 +2027,27 @@ export function Dashboard() {
         requireTyping={confirmDelete.target?.live ?? false}
         title={t("confirm.deleteTitle", { name: confirmDelete.target?.name ?? "" })}
         description={
-          confirmDelete.target?.live ? (
-            <>
-              <span className="block font-medium text-down">
-                {t("dash.deleteDestLive")}
-              </span>
-              {t("dash.deleteDestDescription")}
-            </>
-          ) : (
-            t("dash.deleteDestDescription")
-          )
+          <>
+            {confirmDelete.target?.live && (
+              <span className="block font-medium text-down">{t("dash.deleteDestLive")}</span>
+            )}
+            {t("dash.deleteDestDescription")}
+            {deleteUsage.status === "ready" && deleteUsage.schedules > 0 && (
+              <span className="mt-1 block">{t("dash.deleteDestSchedulesNote")}</span>
+            )}
+            {deleteUsage.status === "failed" && (
+              <span className="mt-1 block text-muted-foreground">{t("dash.deleteDestUsageUnknown")}</span>
+            )}
+          </>
+        }
+        // Held shut only while the count is on its way; a failed read says so
+        // in the description and does not block a delete the operator asked for.
+        confirmDisabled={deleteUsage.status === "loading"}
+        consequencesLabel={t("dash.deleteDestUsedBy")}
+        consequences={
+          deleteUsage.status === "ready" && deleteUsage.schedules > 0
+            ? [{ label: t("dash.deleteDestSchedules"), count: deleteUsage.schedules }]
+            : undefined
         }
         confirmLabel={t("dash.deleteDest")}
         onConfirm={async () => {
