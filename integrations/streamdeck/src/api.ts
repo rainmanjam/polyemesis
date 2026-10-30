@@ -1,12 +1,16 @@
 import type {
   ConnectionInfo,
+  DestinationLevels,
   Feed,
   LevelsReading,
   PresetSummary,
   RecordingState,
   StatusPayload,
   StopImpact,
+  TrackLevel,
+  TrackLevelResult,
 } from "./model.js";
+import { MAX_GAIN } from "./trackLevel.js";
 
 // The polyemesis REST client. It knows the routes and the error taxonomy and
 // nothing about Stream Deck. The transport is injected, so the tests run
@@ -185,6 +189,80 @@ export class PolyemesisClient {
     return this.call("POST", "/failover/source", sourceId, { source });
   }
 
+  /**
+   * Every destination's stored track levels. The server ignores ?source= on this list, so it is
+   * one install-wide read; a key picks its own row and checks the programme itself.
+   */
+  async destinations(): Promise<DestinationLevels[]> {
+    const body = await this.call<unknown>("GET", "/destinations");
+    if (!Array.isArray(body)) throw new ApiError("malformed", 200, "the destination list is not a list");
+    return body.map((item) => {
+      const parsed = parseDestinationLevels((item as { destination?: unknown } | null)?.destination);
+      if (!parsed) throw new ApiError("malformed", 200, "a destination carries no id, name or track levels");
+      return parsed;
+    });
+  }
+
+  /**
+   * The names an operator knows a programme's tracks by, per 0-based track: the label set in
+   * the UI, else the title the container carried. A track with neither is left out, and the
+   * caller names it by number.
+   */
+  async trackNames(sourceId?: number): Promise<Map<number, string>> {
+    const body = await this.call<{ tracks?: unknown; annotations?: unknown }>("GET", "/source", sourceId);
+    const names = new Map<number, string>();
+    if (Array.isArray(body.tracks)) {
+      for (const t of body.tracks as { index?: unknown; title?: unknown }[]) {
+        if (Number.isSafeInteger(t?.index) && typeof t.title === "string" && t.title.trim() !== "") {
+          names.set(t.index as number, t.title.trim());
+        }
+      }
+    }
+    if (Array.isArray(body.annotations)) {
+      for (const a of body.annotations as { track?: unknown; label?: unknown }[]) {
+        if (Number.isSafeInteger(a?.track) && typeof a.label === "string" && a.label.trim() !== "") {
+          names.set(a.track as number, a.label.trim());
+        }
+      }
+    }
+    return new Map([...names.entries()].sort(([a], [b]) => a - b));
+  }
+
+  /**
+   * Mutes, unmutes or sets the gain of one track on one destination. Needs an admin token.
+   * A gain the server would refuse (zero, negative, NaN, Inf, above its cap) is refused HERE,
+   * before any request: the dial clamps, and this is the last guard.
+   */
+  async setTrackLevel(
+    destinationId: number,
+    track: number,
+    change: { muted?: boolean; gain?: number },
+    sourceId?: number,
+  ): Promise<TrackLevelResult> {
+    if (!Number.isSafeInteger(track) || track < 0) throw new RangeError(`track ${track} is not a track index`);
+    if (change.muted === undefined && change.gain === undefined) throw new RangeError("nothing to change");
+    if (change.gain !== undefined && !(Number.isFinite(change.gain) && change.gain > 0 && change.gain <= MAX_GAIN)) {
+      throw new RangeError(`gain ${change.gain} is outside (0, ${MAX_GAIN}]`);
+    }
+    const body: { muted?: boolean; gain?: number } = {};
+    if (change.muted !== undefined) body.muted = change.muted;
+    if (change.gain !== undefined) body.gain = change.gain;
+    const out = await this.call<{ applied?: unknown; reason?: unknown; destination?: unknown }>(
+      "POST",
+      `/destinations/${destinationId}/tracks/${track}/gain`,
+      sourceId,
+      body,
+    );
+    if (out?.applied !== "live" && out?.applied !== "restart") {
+      throw new ApiError("malformed", 200, "the answer does not say how the level applied");
+    }
+    const result: TrackLevelResult = { applied: out.applied };
+    if (typeof out.reason === "string" && out.reason !== "") result.reason = out.reason;
+    const destination = parseDestinationLevels(out.destination);
+    if (destination) result.destination = destination;
+    return result;
+  }
+
   private async call<T>(
     method: Method,
     path: string,
@@ -251,4 +329,38 @@ function serverMessage(body: string, fallback: string): string {
     // Not JSON: the fallback is the honest answer.
   }
   return fallback;
+}
+
+/**
+ * The part of a stored destination a track-level control needs, or undefined when the row is not
+ * the server's shape. Nothing else is copied: the row carries publish credentials for an admin token.
+ */
+function parseDestinationLevels(raw: unknown): DestinationLevels | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const d = raw as {
+    id?: unknown;
+    name?: unknown;
+    kind?: unknown;
+    sourceId?: unknown;
+    audio?: { copy?: unknown } | null;
+    profile?: { mode?: unknown; tracks?: unknown } | null;
+  };
+  if (!Number.isSafeInteger(d.id) || typeof d.name !== "string") return undefined;
+  const rawTracks = d.profile?.tracks ?? [];
+  if (!Array.isArray(rawTracks)) return undefined;
+  const tracks: TrackLevel[] = [];
+  for (const t of rawTracks as { track?: unknown; enabled?: unknown; gain?: unknown; muted?: unknown }[]) {
+    if (!Number.isSafeInteger(t?.track) || typeof t.gain !== "number" || !Number.isFinite(t.gain)) return undefined;
+    tracks.push({ track: t.track as number, enabled: t.enabled === true, gain: t.gain, muted: t.muted === true });
+  }
+  const out: DestinationLevels = {
+    id: d.id as number,
+    name: d.name,
+    matrix: d.profile?.mode === "matrix",
+    // An audio-only destination (an Icecast mount) has its own copy rule on the server, and it is mixed.
+    copyAudio: d.audio?.copy === true && d.kind !== "audio",
+    tracks,
+  };
+  if (Number.isSafeInteger(d.sourceId)) out.sourceId = d.sourceId as number;
+  return out;
 }

@@ -89,3 +89,41 @@ export interface LevelsReading {
   levels: LevelsFrame | null;
   feed: Feed;
 }
+
+/** One track of a destination's stored selection (profile.tracks[] in internal/routing/profile.go). */
+export interface TrackLevel {
+  /** The 0-based ingest track index. */
+  track: number;
+  enabled: boolean;
+  /** Linear: 1.0 is unity. The server caps it at routing.MaxGain. */
+  gain: number;
+  muted: boolean;
+}
+
+/**
+ * What the plugin keeps of one GET /destinations row: enough to show and change a track's
+ * level. Publish credentials are in that answer for an admin token; none of them is kept.
+ */
+export interface DestinationLevels {
+  id: number;
+  name: string;
+  /** The programme the destination carries. Absent on legacy rows. */
+  sourceId?: number;
+  /** A matrix mix takes its gain per cell, so the server refuses a track gain (mute still applies). */
+  matrix: boolean;
+  /** The audio is passed through unchanged, so no level can apply: the server answers 409. */
+  copyAudio: boolean;
+  tracks: TrackLevel[];
+}
+
+/** How a track level reached the output: on the running process's command channel, or by a (re)start. */
+export type LevelApplied = "live" | "restart";
+
+/** The answer of POST /destinations/{id}/tracks/{track}/gain. */
+export interface TrackLevelResult {
+  applied: LevelApplied;
+  /** The server's own words for why, sent with a restart and with some live answers. */
+  reason?: string;
+  /** The stored destination after the change, when the answer carries one the plugin can read. */
+  destination?: DestinationLevels;
+}
