@@ -2,9 +2,12 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -284,13 +287,21 @@ func TestAPollIsMirroredToTwitchAndItsVotesMerged(t *testing.T) {
 		t.Errorf("native = %+v", cur.Native)
 	}
 
+	// A vote in the mirrored channel's chat is not counted: that channel's
+	// share is the native poll's. One in the channel that could not be
+	// mirrored is.
+	s.polls.Offer(chat.Message{ID: "c1", Platform: db.PlatformTwitch, Account: "affiliate",
+		Author: chat.Author{ID: "viewer-a"}, Text: "1"}, chat.DisplayClear)
+	s.polls.Offer(chat.Message{ID: "c2", Platform: db.PlatformTwitch, Account: "oldtoken",
+		Author: chat.Author{ID: "viewer-b"}, Text: "2"}, chat.DisplayClear)
+
 	if _, err := s.polls.End(started.ID); err != nil {
 		t.Fatal(err)
 	}
 	s.polls.Wait()
 	s.polls.Tick()
 	final := storedPoll(t, store, started.ID)
-	if final.Options[0].Votes != 9 || final.Options[1].Votes != 2 || final.ByPlatform["twitch"] != 11 {
+	if final.Options[0].Votes != 9 || final.Options[1].Votes != 3 || final.ByPlatform["twitch"] != 12 {
 		t.Errorf("final = %+v", final)
 	}
 	if fake.ended != 1 {
@@ -315,24 +326,24 @@ func TestAPollThatTwitchCannotRunIsNotMirrored(t *testing.T) {
 	m := s.PollMirror()
 
 	// No Twitch account at all.
-	if got := m.Start(t.Context(), polls.Spec{Question: "q", Options: []string{"a", "b"}, DurationSeconds: 60}); len(got) != 1 ||
+	if got := m.Start(t.Context(), polls.Spec{Question: "q", Options: []string{"a", "b"}, DurationSeconds: 60, MirrorTwitch: true}); len(got) != 1 ||
 		got[0].Result.Status != polls.NativeSkipped {
 		t.Errorf("no account = %+v", got)
 	}
 	_ = store.PutPlatformCreds(s.box, db.PlatformTwitch, "cid", "secret")
 	seedTwitch(t, s, store, "chan", "channel:manage:polls")
 	// Six options: Twitch allows five. Skipped, not shortened.
-	got := m.Start(t.Context(), polls.Spec{Question: "q", Options: []string{"a", "b", "c", "d", "e", "f"}, DurationSeconds: 60})
+	got := m.Start(t.Context(), polls.Spec{Question: "q", Options: []string{"a", "b", "c", "d", "e", "f"}, DurationSeconds: 60, MirrorTwitch: true})
 	if len(got) != 1 || got[0].Result.Status != polls.NativeSkipped || !strings.Contains(got[0].Result.Reason, "5") {
 		t.Errorf("six options = %+v", got)
 	}
 	// Twitch refuses (not an Affiliate): reported, not fatal.
 	fake.status = http.StatusForbidden
-	got = m.Start(t.Context(), polls.Spec{Question: "q", Options: []string{"a", "b"}, DurationSeconds: 60})
+	got = m.Start(t.Context(), polls.Spec{Question: "q", Options: []string{"a", "b"}, DurationSeconds: 60, MirrorTwitch: true})
 	if len(got) != 1 || got[0].Result.Status != polls.NativeFailed || strings.Contains(got[0].Result.Reason, "tok-chan") {
 		t.Errorf("refused = %+v", got)
 	}
-	if _, err := m.Read(t.Context(), polls.Mirrored{}, false); err == nil {
+	if _, _, err := m.Read(t.Context(), polls.Mirrored{}, false); err == nil {
 		t.Error("a mirror with no handle was read")
 	}
 	fake.mu.Lock()
@@ -340,4 +351,86 @@ func TestAPollThatTwitchCannotRunIsNotMirrored(t *testing.T) {
 		t.Errorf("a native poll was created: %v", fake.created)
 	}
 	fake.mu.Unlock()
+}
+
+// pollerAdapter is a YouTube chat that can run a native poll, without a
+// network: the real request shapes are tested in internal/chat.
+type pollerAdapter struct {
+	account string
+	mu      sync.Mutex
+	created []string
+	closeV  []int
+	err     error
+	closeE  error
+}
+
+func (a *pollerAdapter) Platform() db.Platform { return db.PlatformYouTube }
+func (a *pollerAdapter) Account() string       { return a.account }
+func (a *pollerAdapter) Run(ctx context.Context, _ chat.Sink) error {
+	<-ctx.Done()
+	return nil
+}
+func (a *pollerAdapter) CreatePoll(_ context.Context, q string, _ []string) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.err != nil {
+		return "", a.err
+	}
+	a.created = append(a.created, q)
+	return "ytp-1", nil
+}
+func (a *pollerAdapter) ClosePoll(context.Context, string) ([]int, error) { return a.closeV, a.closeE }
+
+// TestAPollIsMirroredToYouTubeAndCountedAtClose: the YouTube chat's live poll
+// is created through the chat adapter, YouTube chat votes are not counted
+// while it runs, and its tally is merged when it closes. A quota refusal is a
+// skip and leaves that chat voting by number.
+func TestAPollIsMirroredToYouTubeAndCountedAtClose(t *testing.T) {
+	hub := chat.New(chat.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+	t.Cleanup(hub.Close)
+	yt := &pollerAdapter{account: "UC-me", closeV: []int{6, 1}}
+	if err := hub.Attach(context.Background(), yt); err != nil {
+		t.Fatal(err)
+	}
+	s, _, store := pollServer(t, Options{Chat: hub})
+	s.polls.SetMirror(s.PollMirror())
+
+	r, err := s.polls.Start(polls.Spec{Question: "q", Options: []string{"a", "b"}, DurationSeconds: 60, MirrorYouTube: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.polls.Wait()
+	s.polls.Offer(chat.Message{ID: "y1", Platform: db.PlatformYouTube, Account: "UC-me",
+		Author: chat.Author{ID: "UCviewer"}, Text: "2"}, chat.DisplayClear)
+	cur, _ := s.polls.Current()
+	if len(cur.Native) != 1 || cur.Native[0].Status != polls.NativeMirrored || cur.Total != 0 {
+		t.Fatalf("running = %+v", cur)
+	}
+	if _, err := s.polls.End(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.polls.Wait()
+	s.polls.Tick()
+	final := storedPoll(t, store, r.ID)
+	if final.Options[0].Votes != 6 || final.Options[1].Votes != 1 || final.ByPlatform["youtube"] != 7 {
+		t.Errorf("final = %+v", final)
+	}
+
+	// No quota above the reserve: skipped, and the chat vote counts.
+	yt.err = chat.ErrPollQuota
+	r, _ = s.polls.Start(polls.Spec{Question: "q2", Options: []string{"a", "b"}, DurationSeconds: 60, MirrorYouTube: true})
+	s.polls.Wait()
+	s.polls.Offer(chat.Message{ID: "y2", Platform: db.PlatformYouTube, Account: "UC-me",
+		Author: chat.Author{ID: "UCviewer"}, Text: "2"}, chat.DisplayClear)
+	cur, _ = s.polls.Current()
+	if len(cur.Native) != 1 || cur.Native[0].Status != polls.NativeSkipped || cur.Total != 1 {
+		t.Errorf("no quota = %+v", cur)
+	}
+	// Five options: YouTube allows four.
+	m := s.PollMirror()
+	got := m.Start(t.Context(), polls.Spec{Question: "q", Options: []string{"a", "b", "c", "d", "e"}, DurationSeconds: 60, MirrorYouTube: true})
+	if len(got) != 1 || got[0].Result.Status != polls.NativeSkipped {
+		t.Errorf("five options = %+v", got)
+	}
+	_, _ = s.polls.End(r.ID)
 }

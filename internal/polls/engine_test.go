@@ -94,17 +94,41 @@ func (c *clock) add(d time.Duration) {
 }
 
 type fakeSender struct {
-	mu    sync.Mutex
-	texts []string
-	res   []chat.SendResult
-	err   error
+	mu     sync.Mutex
+	texts  []string
+	byChat map[string][]string
+	res    []chat.SendResult
+	err    error
 }
 
-func (f *fakeSender) Send(_ context.Context, text string) ([]chat.SendResult, error) {
+// SendEach asks textFor for every chat in res -- or for one Twitch chat when
+// res is empty -- and records what it was told to send.
+func (f *fakeSender) SendEach(_ context.Context, textFor func(db.Platform, string) string) ([]chat.SendResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.texts = append(f.texts, text)
-	return f.res, f.err
+	chats := f.res
+	if len(chats) == 0 {
+		chats = []chat.SendResult{{Platform: db.PlatformTwitch, Account: "acct-twitch"}}
+	}
+	var out []chat.SendResult
+	for _, c := range chats {
+		if text := textFor(c.Platform, c.Account); text != "" {
+			f.texts = append(f.texts, text)
+			if f.byChat == nil {
+				f.byChat = map[string][]string{}
+			}
+			k := string(c.Platform) + "/" + c.Account
+			f.byChat[k] = append(f.byChat[k], text)
+			out = append(out, c)
+		}
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(f.res) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 func (f *fakeSender) sent() []string {
@@ -493,7 +517,8 @@ func TestThePollIsAnnouncedInEveryChatAndFailuresAreReported(t *testing.T) {
 	}
 	f.e.Wait()
 	sent := s.sent()
-	if len(sent) != 2 || !strings.HasPrefix(sent[0], "POLL: Next map?") || !strings.HasPrefix(sent[1], "POLL CLOSED: Next map?") {
+	// Each of the three chats is asked once when it opens and once when it closes.
+	if len(sent) != 6 || !strings.HasPrefix(sent[0], "POLL: Next map?") || !strings.HasPrefix(sent[3], "POLL CLOSED: Next map?") {
 		t.Errorf("sent = %q", sent)
 	}
 }
@@ -511,22 +536,31 @@ func TestAFailedAnnouncementDoesNotFailThePoll(t *testing.T) {
 // ---------------------------------------------------------------- mirror
 
 type fakeMirror struct {
-	mu     sync.Mutex
-	start  []Mirrored
-	counts []int
-	ended  int
-	reads  int
+	mu      sync.Mutex
+	start   []Mirrored
+	counts  []int
+	ended   int
+	reads   int
+	stopped bool
+	endErr  error
+	readErr error
 }
 
 func (m *fakeMirror) Start(context.Context, Spec) []Mirrored { return m.start }
-func (m *fakeMirror) Read(_ context.Context, _ Mirrored, end bool) ([]int, error) {
+func (m *fakeMirror) Read(_ context.Context, _ Mirrored, end bool) ([]int, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.reads++
 	if end {
 		m.ended++
+		if m.endErr != nil {
+			return nil, false, m.endErr
+		}
 	}
-	return append([]int(nil), m.counts...), nil
+	if m.readErr != nil && !end {
+		return nil, true, m.readErr
+	}
+	return append([]int(nil), m.counts...), !m.stopped, nil
 }
 
 // TestANativeTwitchPollsVotesAreMergedIn: the native poll's anonymous totals
@@ -601,7 +635,9 @@ func (m *blockingMirror) Start(context.Context, Spec) []Mirrored {
 	<-m.release
 	return nil
 }
-func (m *blockingMirror) Read(context.Context, Mirrored, bool) ([]int, error) { return nil, nil }
+func (m *blockingMirror) Read(context.Context, Mirrored, bool) ([]int, bool, error) {
+	return nil, false, nil
+}
 
 // ---------------------------------------------------------------- identity
 

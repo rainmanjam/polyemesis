@@ -20,7 +20,7 @@ export interface PollAnnouncement {
 
 export interface PollNative {
   platform: string;
-  status: "mirrored" | "skipped" | "failed" | string;
+  status: "mirrored" | "stopped" | "skipped" | "failed" | string;
   reason?: string;
   votes?: number[];
 }
@@ -53,6 +53,7 @@ export interface PollSpec {
   options: string[];
   durationSeconds: number;
   mirrorTwitch?: boolean;
+  mirrorYouTube?: boolean;
 }
 
 /** The server's limits (internal/polls), checked here too so the form can say

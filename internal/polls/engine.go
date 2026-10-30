@@ -57,9 +57,10 @@ type Publisher interface {
 	Publish(eventstream.Envelope)
 }
 
-// Sender posts into every connected chat. *chat.Hub implements it.
+// Sender posts into the connected chats, each its own text. *chat.Hub
+// implements it.
 type Sender interface {
-	Send(ctx context.Context, text string) ([]chat.SendResult, error)
+	SendEach(ctx context.Context, textFor func(p db.Platform, account string) string) ([]chat.SendResult, error)
 }
 
 // Mirror runs a poll as a platform's own native poll too.
@@ -67,16 +68,23 @@ type Mirror interface {
 	// Start creates the native polls it can, one Mirrored per account it
 	// considered, including the ones it skipped and why.
 	Start(ctx context.Context, s Spec) []Mirrored
-	// Read returns a native poll's running count, one per option. With end,
-	// it closes the native poll first and returns the final count.
-	Read(ctx context.Context, m Mirrored, end bool) ([]int, error)
+	// Read returns a native poll's running count, one per option, and
+	// whether it is still running on the platform. With end, it closes the
+	// native poll first and returns the final count. A nil count with live
+	// set is "running, and the platform cannot say how it stands" -- YouTube
+	// until it is closed.
+	Read(ctx context.Context, m Mirrored, end bool) (counts []int, live bool, err error)
 }
 
 // Mirrored is one native poll, or the reason there is none. Ref is the
 // mirror's own handle and is never serialised.
 type Mirrored struct {
 	Result NativeResult
-	Ref    any
+	// Account is the platform account (chat account ref) the native poll
+	// runs in. While it runs, chat votes from that account are not counted:
+	// the platform's own poll is where its viewers vote.
+	Account string
+	Ref     any
 }
 
 // Option configures an Engine.
@@ -118,6 +126,11 @@ type vote struct {
 	option int
 	seq    uint64
 	msg    msgRef
+	// native: cast in a chat whose native poll was running. Not counted --
+	// that chat's viewers were told to vote in the platform's poll -- unless
+	// the native poll's final count could not be read, when these are the
+	// only count there is.
+	native bool
 }
 
 type held struct {
@@ -125,6 +138,13 @@ type held struct {
 	option   int
 	seq      uint64
 	deadline time.Time
+	native   bool
+}
+
+// chatKey is one connected chat: a platform account.
+type chatKey struct {
+	platform db.Platform
+	account  string
 }
 
 // active is the running poll.
@@ -141,9 +161,14 @@ type active struct {
 	closeBy time.Time
 
 	// mirror is the engine's mirror as it was when this poll started.
-	mirror        Mirror
-	mirrors       []Mirrored
-	mirrorVotes   [][]int
+	mirror      Mirror
+	mirrors     []Mirrored
+	mirrorVotes [][]int
+	// native is every chat whose native poll is running now; fallback is
+	// every chat whose native poll's final count could not be read, whose
+	// chat votes are therefore counted after all.
+	native        map[chatKey]bool
+	fallback      map[chatKey]bool
 	mirrorReading bool
 	mirrorFinal   bool
 	mirrorBy      time.Time
@@ -207,11 +232,13 @@ func (e *Engine) Start(s Spec) (Result, error) {
 	}
 	now := e.now()
 	a := &active{
-		spec:    s,
-		votes:   map[voter]vote{},
-		byMsg:   map[msgRef]voter{},
-		pending: map[msgRef]held{},
-		banned:  map[voter]bool{},
+		spec:     s,
+		votes:    map[voter]vote{},
+		byMsg:    map[msgRef]voter{},
+		pending:  map[msgRef]held{},
+		banned:   map[voter]bool{},
+		native:   map[chatKey]bool{},
+		fallback: map[chatKey]bool{},
 		res: Result{
 			Question: s.Question, State: StateOpen, DurationSeconds: s.DurationSeconds,
 			StartedAt: now, EndsAt: now.Add(s.Duration()),
@@ -232,13 +259,23 @@ func (e *Engine) Start(s Spec) (Result, error) {
 	e.publishLocked(eventstream.TypePollStarted, a)
 	e.publishDisplayLocked(a)
 
-	if e.send != nil {
-		e.goAsync(func(ctx context.Context) { e.announceStart(ctx, a) })
-	}
-	if s.MirrorTwitch && e.mirror != nil {
+	// The native polls are created FIRST and the announcement waits for
+	// them, because a chat with a native poll is told to vote there and every
+	// other chat to type a number -- which needs to know which is which.
+	mirror := (s.MirrorTwitch || s.MirrorYouTube) && e.mirror != nil
+	if mirror {
 		a.mirror = e.mirror
 		a.mirrorFinal = false
-		e.goAsync(func(ctx context.Context) { e.startMirror(ctx, a) })
+	}
+	if mirror || e.send != nil {
+		e.goAsync(func(ctx context.Context) {
+			if mirror {
+				e.startMirror(ctx, a)
+			}
+			if e.send != nil {
+				e.announceStart(ctx, a)
+			}
+		})
 	}
 	return snapshot(a), nil
 }
@@ -417,6 +454,9 @@ func recount(a *active) {
 	total := 0
 	by := map[string]int{}
 	for v, b := range a.votes {
+		if b.native && !a.fallback[chatKey{b.msg.platform, b.msg.account}] {
+			continue
+		}
 		p := string(v.platform)
 		opts[b.option].Votes++
 		opts[b.option].ByPlatform[p]++
@@ -424,7 +464,8 @@ func recount(a *active) {
 		total++
 	}
 	for i, m := range a.mirrors {
-		if m.Result.Status != NativeMirrored || i >= len(a.mirrorVotes) || len(a.mirrorVotes[i]) != n {
+		counted := m.Result.Status == NativeMirrored || m.Result.Status == NativeStopped
+		if !counted || i >= len(a.mirrorVotes) || len(a.mirrorVotes[i]) != n {
 			continue
 		}
 		p := m.Result.Platform
@@ -480,14 +521,29 @@ func snapshot(a *active) Result {
 // ------------------------------------------------------------- chat side
 
 func (e *Engine) announceStart(ctx context.Context, a *active) {
-	results := e.sendText(ctx, StartText(a.spec))
+	e.mu.Lock()
+	native := map[chatKey]bool{}
+	for k, v := range a.native {
+		native[k] = v
+	}
+	e.mu.Unlock()
+	results := e.sendEach(ctx, func(p db.Platform, account string) string {
+		if native[chatKey{p, account}] {
+			return NativeStartText(a.spec, p)
+		}
+		return StartText(a.spec)
+	})
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	a.res.Announced = results
 }
 
 func (e *Engine) sendText(ctx context.Context, text string) []Announcement {
-	res, err := e.send.Send(ctx, text)
+	return e.sendEach(ctx, func(db.Platform, string) string { return text })
+}
+
+func (e *Engine) sendEach(ctx context.Context, textFor func(db.Platform, string) string) []Announcement {
+	res, err := e.send.SendEach(ctx, textFor)
 	if err != nil {
 		e.log.Warn("polls: announce", "err", err)
 		return []Announcement{{OK: false, Detail: alerts.Redact(err.Error())}}
@@ -508,6 +564,26 @@ func (e *Engine) startMirror(ctx context.Context, a *active) {
 		a.mirrorVotes = make([][]int, len(ms))
 		a.mirrorFinal = len(live(ms)) == 0
 		a.nextMirror = e.now()
+		for _, m := range live(ms) {
+			k := chatKey{db.Platform(m.Result.Platform), m.Account}
+			a.native[k] = true
+			// A vote typed in this chat before its native poll existed is
+			// moved to the native side too: from now on this chat's viewers
+			// vote in the platform's poll, and counting both would be the
+			// double count the mirror is built to avoid.
+			for who, v := range a.votes {
+				if v.msg.platform == k.platform && v.msg.account == k.account {
+					v.native = true
+					a.votes[who] = v
+				}
+			}
+			for ref, h := range a.pending {
+				if ref.platform == k.platform && ref.account == k.account {
+					h.native = true
+					a.pending[ref] = h
+				}
+			}
+		}
 		recount(a)
 		a.dirty = true
 	} else {
@@ -532,26 +608,67 @@ func live(ms []Mirrored) []Mirrored {
 	return out
 }
 
-// readMirrors reads every live mirror's count, ending it first when end is
-// set. A failed read keeps the last count it had.
+// readMirrors reads every running native poll, ending it first when end is
+// set, and applies the two transitions a native poll can make:
+//
+//   - STOPPED EARLY: the platform says the poll is no longer running before
+//     the chat poll ended (a streamer closed it there, a moderator removed
+//     it). Its count so far stands, frozen, and from this moment that chat's
+//     votes count again -- the chat is no longer told to vote anywhere else.
+//   - NO FINAL COUNT: the close, or the read after it, failed. The native
+//     count is dropped, and the chat votes that chat's viewers typed while it
+//     ran are counted instead: the only count there is.
+//
+// A failed read while the poll runs changes nothing: the next one retries.
 func (e *Engine) readMirrors(ctx context.Context, a *active, ms []Mirrored, end bool) {
-	counts := make([][]int, len(ms))
+	type got struct {
+		counts []int
+		live   bool
+		err    error
+		read   bool
+	}
+	res := make([]got, len(ms))
 	for i, m := range ms {
 		if m.Result.Status != NativeMirrored {
 			continue
 		}
-		c, err := a.mirror.Read(ctx, m, end)
+		c, live, err := a.mirror.Read(ctx, m, end)
 		if err != nil {
 			e.log.Warn("polls: read native poll", "platform", m.Result.Platform, "err", alerts.Redact(err.Error()))
-			continue
 		}
-		counts[i] = c
+		res[i] = got{counts: c, live: live, err: err, read: true}
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	for i, c := range counts {
-		if c != nil && i < len(a.mirrorVotes) {
-			a.mirrorVotes[i] = c
+	for i, r := range res {
+		if !r.read || i >= len(a.mirrors) || a.mirrors[i].Result.Status != NativeMirrored {
+			continue
+		}
+		m := &a.mirrors[i]
+		k := chatKey{db.Platform(m.Result.Platform), m.Account}
+		switch {
+		case end && r.err != nil:
+			m.Result.Status = NativeFailed
+			m.Result.Reason = "the final count could not be read, so this chat's own votes are counted instead"
+			a.mirrorVotes[i] = nil
+			a.fallback[k] = true
+			delete(a.native, k)
+		case end:
+			if r.counts != nil {
+				a.mirrorVotes[i] = r.counts
+			}
+			m.Result.Reason = ""
+		case r.err != nil:
+			// Retried on the next read.
+		case !r.live:
+			if r.counts != nil {
+				a.mirrorVotes[i] = r.counts
+			}
+			m.Result.Status = NativeStopped
+			m.Result.Reason = "the platform's poll ended early; its votes so far stand and chat votes count again"
+			delete(a.native, k)
+		case r.counts != nil:
+			a.mirrorVotes[i] = r.counts
 		}
 	}
 	a.mirrorReading = false
@@ -591,11 +708,12 @@ func (e *Engine) Offer(m chat.Message, d chat.Display) {
 	}
 	a.seq++
 	ref := msgRef{platform: m.Platform, account: m.Account, id: m.ID}
+	native := a.native[chatKey{m.Platform, m.Account}]
 	switch d {
 	case chat.DisplayClear:
-		e.applyLocked(a, v, vote{option: k, seq: a.seq, msg: ref})
+		e.applyLocked(a, v, vote{option: k, seq: a.seq, msg: ref, native: native})
 	case chat.DisplayPending:
-		a.pending[ref] = held{voter: v, option: k, seq: a.seq, deadline: now.Add(PendingGrace)}
+		a.pending[ref] = held{voter: v, option: k, seq: a.seq, deadline: now.Add(PendingGrace), native: native}
 	default:
 		// Blocked, and anything this build does not know: not a vote.
 	}
@@ -633,7 +751,7 @@ func (e *Engine) Judge(p db.Platform, account, id string, d chat.Display) {
 	if d != chat.DisplayClear || e.now().After(h.deadline) || a.banned[h.voter] {
 		return
 	}
-	e.applyLocked(a, h.voter, vote{option: h.option, seq: h.seq, msg: ref})
+	e.applyLocked(a, h.voter, vote{option: h.option, seq: h.seq, msg: ref, native: h.native})
 }
 
 // RetractMessage implements chat.Tap: a deleted or hidden vote message is no

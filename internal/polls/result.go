@@ -46,6 +46,9 @@ const (
 	NativeMirrored = "mirrored"
 	NativeSkipped  = "skipped"
 	NativeFailed   = "failed"
+	// NativeStopped: the platform's poll ended before the chat poll did. Its
+	// votes so far stand, and that chat's votes count again from then on.
+	NativeStopped = "stopped"
 )
 
 // NativeResult is one native poll the poll was mirrored to, or why it was

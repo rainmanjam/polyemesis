@@ -66,6 +66,10 @@ type Spec struct {
 	// MirrorTwitch also runs the poll as a native Twitch poll on every
 	// connected Twitch channel that allows it, and adds its votes in.
 	MirrorTwitch bool `json:"mirrorTwitch,omitempty"`
+	// MirrorYouTube does the same as a YouTube live poll in every connected
+	// YouTube chat, when the poll fits YouTube's limits and the quota above
+	// the send reserve covers it (40 units).
+	MirrorYouTube bool `json:"mirrorYouTube,omitempty"`
 }
 
 // Duration is the spec's duration.
@@ -106,7 +110,8 @@ func Clean(s string) string {
 
 // Normalise cleans and validates a spec.
 func (s Spec) Normalise() (Spec, error) {
-	out := Spec{Question: Clean(s.Question), DurationSeconds: s.DurationSeconds, MirrorTwitch: s.MirrorTwitch}
+	out := Spec{Question: Clean(s.Question), DurationSeconds: s.DurationSeconds,
+		MirrorTwitch: s.MirrorTwitch, MirrorYouTube: s.MirrorYouTube}
 	if out.Question == "" {
 		return Spec{}, invalid("a question is required")
 	}

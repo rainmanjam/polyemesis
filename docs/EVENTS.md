@@ -341,6 +341,9 @@ All three types carry the same payload, the poll as it stands:
  "native": [{"platform": "twitch", "status": "mirrored", "votes": [12, 3]}]}
 ```
 
+`native[].status` is `mirrored`, `stopped` (the platform's poll ended early),
+`skipped` or `failed`, with a `reason`.
+
 `state` is `open`, `closing`, `ended` or `interrupted`. `closing` is the few
 seconds after the time is up while automod finishes judging the last votes.
 `poll.vote` is coalesced: at most one a second while votes are arriving.

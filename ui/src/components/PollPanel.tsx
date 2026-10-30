@@ -108,13 +108,15 @@ function StartForm({ onStarted }: { onStarted: () => Promise<void> }) {
   const [options, setOptions] = useState<string[]>(["", ""]);
   const [duration, setDuration] = useState(120);
   const [mirror, setMirror] = useState(true);
+  // Off by default: a YouTube live poll costs 40 units of the day's API quota.
+  const [mirrorYouTube, setMirrorYouTube] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   const setOption = (i: number, v: string) => setOptions((os) => os.map((o, k) => (k === i ? v : o)));
 
   const start = async () => {
-    const spec = { question, options, durationSeconds: duration, mirrorTwitch: mirror };
+    const spec = { question, options, durationSeconds: duration, mirrorTwitch: mirror, mirrorYouTube };
     const p = pollProblem(spec);
     if (p) {
       setProblem(t(p, { max: POLL_LIMITS.maxOption, maxQuestion: POLL_LIMITS.maxQuestion,
@@ -211,6 +213,19 @@ function StartForm({ onStarted }: { onStarted: () => Promise<void> }) {
         />
         <Label htmlFor="poll-mirror" className="text-sm">
           {t("polls.mirrorTwitch")}
+        </Label>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <input
+          id="poll-mirror-youtube"
+          type="checkbox"
+          checked={mirrorYouTube}
+          disabled={busy}
+          onChange={(e) => setMirrorYouTube(e.target.checked)}
+          className="h-3.5 w-3.5 accent-primary"
+        />
+        <Label htmlFor="poll-mirror-youtube" className="text-sm">
+          {t("polls.mirrorYouTube")}
         </Label>
       </div>
       <span className="text-sm text-muted-foreground">{t("polls.voteHint")}</span>
@@ -313,8 +328,12 @@ function Delivery({ poll }: { poll: Poll }) {
       {native.map((n, i) => (
         <li key={`n-${i}`} className={n.status === "failed" ? "text-warn" : undefined}>
           {n.status === "mirrored"
-            ? t("polls.nativeMirrored", { platform: platformLabel(n.platform) })
-            : t("polls.nativeNot", { platform: platformLabel(n.platform), reason: n.reason ?? "" })}
+            ? n.reason
+              ? t("polls.nativeMirroredWhy", { platform: platformLabel(n.platform), reason: n.reason })
+              : t("polls.nativeMirrored", { platform: platformLabel(n.platform) })
+            : n.status === "stopped"
+              ? t("polls.nativeStopped", { platform: platformLabel(n.platform) })
+              : t("polls.nativeNot", { platform: platformLabel(n.platform), reason: n.reason ?? "" })}
         </li>
       ))}
     </ul>

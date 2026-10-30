@@ -110,7 +110,7 @@ is [fenced as untrusted](#untrusted-viewer-content).
 | `switch_failover_source` | Force primary, backup, slate or playlist, or hand back to `auto` | | `POST /failover/source` |
 | `create_clip` | Cut the last N seconds (1–3600) into a clip | | `POST /clips` |
 | `schedule_broadcast` | Schedule destinations to start or stop, once or daily/weekly | **yes, for a stop** | `POST /schedules` |
-| `start_poll` | Start a [chat poll](POLLS.md): `question`, 2–6 `options`, `durationSeconds`, `mirrorTwitch`. Without confirm, answers with the exact message it would post | **yes** | `POST /polls` |
+| `start_poll` | Start a [chat poll](POLLS.md): `question`, 2–6 `options`, `durationSeconds`, `mirrorTwitch`, `mirrorYouTube`. Without confirm, answers with the exact message it would post | **yes** | `POST /polls` |
 | `end_poll` | End the running poll early. `pollId` | | `POST /polls/{id}/end` |
 
 Every tool carries MCP annotations. Read and content tools are `readOnlyHint`.

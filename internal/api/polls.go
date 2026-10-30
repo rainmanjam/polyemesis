@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/polls"
@@ -295,9 +296,19 @@ func csvSafe(s string) string {
 
 // ---------------------------------------------------------------- mirror
 
-// twitchPollMirror runs a poll as a native Twitch poll on every connected
-// Twitch account that holds the polls scope, and reads its counts back.
-type twitchPollMirror struct{ s *Server }
+// nativePollMirror runs a poll as the platforms' own polls: a Twitch poll on
+// every connected Twitch account that holds the polls scope (Helix, with the
+// account's token), and a YouTube live poll in every connected YouTube chat
+// (liveChatMessages, through the chat adapter that owns that chat and its
+// quota).
+type nativePollMirror struct{ s *Server }
+
+// youTubePollRef is a YouTube live poll: the adapter that created it and the
+// poll message's id.
+type youTubePollRef struct {
+	poller chat.NativePoller
+	pollID string
+}
 
 type twitchPollRef struct {
 	accountID     int64
@@ -306,7 +317,7 @@ type twitchPollRef struct {
 }
 
 // PollMirror is the native-poll mirror for the polls engine.
-func (s *Server) PollMirror() polls.Mirror { return twitchPollMirror{s: s} }
+func (s *Server) PollMirror() polls.Mirror { return nativePollMirror{s: s} }
 
 func hasScope(granted, want string) bool {
 	for _, g := range strings.Fields(strings.ReplaceAll(granted, ",", " ")) {
@@ -317,7 +328,7 @@ func hasScope(granted, want string) bool {
 	return false
 }
 
-func (m twitchPollMirror) twitch() (*oauth.Twitch, error) {
+func (m nativePollMirror) twitch() (*oauth.Twitch, error) {
 	p, err := m.s.providers.Get(db.PlatformTwitch)
 	if err != nil {
 		return nil, err
@@ -333,8 +344,59 @@ func skipped(reason string) polls.Mirrored {
 	return polls.Mirrored{Result: polls.NativeResult{Platform: string(db.PlatformTwitch), Status: polls.NativeSkipped, Reason: reason}}
 }
 
+func ytSkipped(reason string) polls.Mirrored {
+	return polls.Mirrored{Result: polls.NativeResult{Platform: string(db.PlatformYouTube), Status: polls.NativeSkipped, Reason: reason}}
+}
+
 // Start implements polls.Mirror.
-func (m twitchPollMirror) Start(ctx context.Context, spec polls.Spec) []polls.Mirrored {
+func (m nativePollMirror) Start(ctx context.Context, spec polls.Spec) []polls.Mirrored {
+	var out []polls.Mirrored
+	if spec.MirrorTwitch {
+		out = append(out, m.startTwitch(ctx, spec)...)
+	}
+	if spec.MirrorYouTube {
+		out = append(out, m.startYouTube(ctx, spec)...)
+	}
+	return out
+}
+
+// startYouTube creates a live poll in every connected YouTube chat that can
+// run one. A refusal -- too many options, no live chat open, the quota above
+// the send reserve too low -- leaves that chat voting by number, and says why.
+func (m nativePollMirror) startYouTube(ctx context.Context, spec polls.Spec) []polls.Mirrored {
+	if len(spec.Options) > chat.YouTubePollMaxOptions {
+		return []polls.Mirrored{ytSkipped(fmt.Sprintf("YouTube polls have at most %d options", chat.YouTubePollMaxOptions))}
+	}
+	if m.s.chat == nil {
+		return []polls.Mirrored{ytSkipped("YouTube chat is not connected")}
+	}
+	pollers := m.s.chat.NativePollers(db.PlatformYouTube)
+	if len(pollers) == 0 {
+		return []polls.Mirrored{ytSkipped("YouTube chat is not connected")}
+	}
+	var out []polls.Mirrored
+	for _, p := range pollers {
+		id, err := p.CreatePoll(ctx, spec.Question, spec.Options)
+		if err != nil {
+			status := polls.NativeFailed
+			if errors.Is(err, chat.ErrPollQuota) {
+				status = polls.NativeSkipped
+			}
+			out = append(out, polls.Mirrored{Account: p.Account(), Result: polls.NativeResult{
+				Platform: string(db.PlatformYouTube), Status: status, Reason: alerts.Redact(err.Error())}})
+			continue
+		}
+		out = append(out, polls.Mirrored{
+			Account: p.Account(),
+			Result: polls.NativeResult{Platform: string(db.PlatformYouTube), Status: polls.NativeMirrored,
+				Reason: "YouTube reports a live poll's count only when it closes; it is added then"},
+			Ref: youTubePollRef{poller: p, pollID: id},
+		})
+	}
+	return out
+}
+
+func (m nativePollMirror) startTwitch(ctx context.Context, spec polls.Spec) []polls.Mirrored {
 	accts, err := m.s.store.ListPlatformAccounts()
 	if err != nil {
 		return []polls.Mirrored{{Result: polls.NativeResult{Platform: "twitch", Status: polls.NativeFailed,
@@ -381,42 +443,57 @@ func (m twitchPollMirror) Start(ctx context.Context, spec polls.Spec) []polls.Mi
 			continue
 		}
 		out = append(out, polls.Mirrored{
-			Result: polls.NativeResult{Platform: "twitch", Status: polls.NativeMirrored, Votes: p.Votes},
-			Ref:    twitchPollRef{accountID: a.ID, broadcasterID: acct.AccountRef, pollID: p.ID},
+			Account: acct.AccountRef,
+			Result:  polls.NativeResult{Platform: "twitch", Status: polls.NativeMirrored, Votes: p.Votes},
+			Ref:     twitchPollRef{accountID: a.ID, broadcasterID: acct.AccountRef, pollID: p.ID},
 		})
 	}
 	return out
 }
 
 // Read implements polls.Mirror.
-func (m twitchPollMirror) Read(ctx context.Context, mm polls.Mirrored, end bool) ([]int, error) {
-	ref, ok := mm.Ref.(twitchPollRef)
-	if !ok {
-		return nil, errors.New("not a Twitch poll")
+func (m nativePollMirror) Read(ctx context.Context, mm polls.Mirrored, end bool) ([]int, bool, error) {
+	switch ref := mm.Ref.(type) {
+	case twitchPollRef:
+		return m.readTwitch(ctx, ref, end)
+	case youTubePollRef:
+		if !end {
+			// No API reads one running chat message: nothing to report yet.
+			return nil, true, nil
+		}
+		votes, err := ref.poller.ClosePoll(ctx, ref.pollID)
+		return votes, false, err
 	}
+	return nil, false, errors.New("not a native poll this server created")
+}
+
+// readTwitch reads, or ends and reads, a Twitch poll. Live is Twitch's own
+// status: anything but ACTIVE before the chat poll ended is a poll that was
+// closed, archived or removed on Twitch's side.
+func (m nativePollMirror) readTwitch(ctx context.Context, ref twitchPollRef, end bool) ([]int, bool, error) {
 	tw, err := m.twitch()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	creds, err := m.s.store.GetPlatformCreds(m.s.box, db.PlatformTwitch)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	acct, err := m.s.tokenFor(ctx, ref.accountID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if end {
 		p, err := tw.EndPoll(ctx, creds.ClientID, acct.AccessToken, ref.broadcasterID, ref.pollID)
 		if err == nil {
-			return p.Votes, nil
+			return p.Votes, false, nil
 		}
 		// Already over on Twitch's side (it ran its own clock): read the
 		// final count instead.
 	}
 	p, err := tw.GetPoll(ctx, creds.ClientID, acct.AccessToken, ref.broadcasterID, ref.pollID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return p.Votes, nil
+	return p.Votes, p.Status == "ACTIVE", nil
 }

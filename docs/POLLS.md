@@ -11,7 +11,7 @@ updates live in the console and, if you add it, on stream.
 Start a poll from any of these:
 
 - the **Polls** panel on the console's **Chat** page;
-- a Stream Deck **Poll** key (see [STREAM-DECK.md](STREAM-DECK.md));
+- a Stream Deck **Chat poll** key (see [STREAM-DECK.md](STREAM-DECK.md));
 - an AI assistant over MCP, with `start_poll` (see [MCP.md](MCP.md));
 - the API, with `POST /api/v1/polls` (see [API.md](API.md#chat-polls)).
 
@@ -113,17 +113,46 @@ the totals only, so it is safe on a Twitch-only scene. It is sent to every
 overlay key whatever that overlay's platform filter is, because there is
 nothing platform-specific in it. It never shows a voter's name.
 
-## Native Twitch polls
+## Native platform polls
 
-Tick **Also run as a native Twitch poll** to start a Twitch poll with the same
-question and options on every connected Twitch channel that allows it. Votes
-cast in Twitch's own poll are added to Twitch's share of the result, and the
-Twitch poll is ended when your poll ends.
+A poll can also run as the platform's own poll, in the places that have one:
+
+- **Also run as a native Twitch poll** starts a Twitch poll on every connected
+  Twitch channel that allows it.
+- **Also run as a native YouTube poll** starts a YouTube live poll in every
+  connected YouTube chat. It is off by default because it costs API quota.
+
+**While a chat's native poll runs, that chat votes there, not by typing.** Its
+viewers are told so when the poll opens:
+
+```text
+POLL: Next map? — vote in the Twitch poll above chat. 2 min to vote.
+```
+
+A number typed in that chat is not counted, and that platform's share of the
+result comes from the native poll alone. A viewer who votes in the Twitch poll
+and also types `1` in Twitch chat is counted once. Every other chat votes by
+typing as usual.
+
+Polyemesis creates the native polls first and announces the poll afterwards,
+so each chat is told the right way to vote. The announcement can therefore
+arrive a few seconds after you start the poll.
+
+| What happens | Result |
+|---|---|
+| The native poll can't be created (see below) | That chat votes by typing, as if you hadn't asked for a native poll. The reason is shown under the poll. |
+| The native poll ends early on the platform (a moderator or the streamer closes it there) | Its votes so far stand. From that moment, numbers typed in that chat count again. Numbers typed while it ran stay uncounted, because those viewers were told to vote in the native poll. |
+| Your poll ends | The native poll is ended too, and its final count is merged. |
+| The native poll's final count can't be read | The native count is dropped, and the numbers that chat's viewers typed while it ran are counted instead, since that is the only count there is. |
+
+Channel-points voting is always off.
+
+### Twitch
 
 A Twitch poll is skipped, with the reason shown under the poll, when:
 
-- the channel is not a Twitch Affiliate or Partner (Twitch runs polls only for
-  those, and answers 403 otherwise);
+- the channel is not a Twitch Affiliate or Partner. Twitch runs polls only for
+  those, and answers 403 otherwise;
 - the Twitch account was connected before polyemesis asked for the
   `channel:manage:polls` permission. Reconnect it once under **Settings →
   Platform credentials**; the account is marked "reconnect needed";
@@ -132,12 +161,27 @@ A Twitch poll is skipped, with the reason shown under the poll, when:
   Polyemesis does not shorten the poll to fit, because a Twitch poll that read
   differently from the chat poll would be a different poll.
 
-Twitch's own counts are anonymous. A viewer who votes in the Twitch poll **and**
-types a number in Twitch chat is counted twice, and polyemesis cannot tell.
-Channel-points voting is always off.
+The running count is read every 5 seconds, so Twitch's share updates while the
+poll is open.
 
-YouTube and Kick native polls are not mirrored. See
-[Known limitations](#known-limitations).
+### YouTube
+
+A YouTube live poll uses the `youtube` permission polyemesis already has, so
+no reconnect is needed. It is skipped when:
+
+- the poll has more than **4 options**, YouTube's limit. YouTube's API sets no
+  text lengths; the chat poll's own limits (100 and 30 characters) apply;
+- the YouTube chat has no live broadcast open;
+- **the API quota cannot cover it.** Creating the poll and closing it cost 20
+  units each. Polyemesis creates one only if those 40 units fit in the day's
+  quota *without* spending the send reserve, so replying in chat keeps working
+  for the rest of the day. Closing a poll is never refused for quota.
+
+**YouTube's count arrives when the poll closes.** YouTube's API cannot read a
+running poll's count; the count comes back only in the response to closing it.
+While the poll runs, YouTube's share shows nothing, and the panel says the
+count is added at close. The final result includes it. This needs the channel
+owner's account: YouTube shows the count only to the channel owner.
 
 ## History and export
 
@@ -167,12 +211,14 @@ Each poll publishes to the [real-time events API](EVENTS.md#polls):
 - **One poll at a time.**
 - **The count lives in memory while a poll runs.** A restart mid-poll loses it;
   the poll is marked interrupted.
-- **Native Twitch votes can double-count a viewer** who also votes in Twitch
-  chat. Twitch's poll results do not say who voted.
-- **YouTube and Kick native polls are not mirrored.** YouTube's API can create
-  a live-chat poll (2 to 4 options, through `liveChatMessages.insert` with a
-  `pollEvent`), at 20 quota units to create it and 20 more to close it. That
-  is not built yet. Kick's public API has no poll endpoint.
+- **YouTube's share of a native poll is known only at close.** See
+  [YouTube](#youtube).
+- **A native poll that stops early freezes its count.** A viewer who voted in
+  it and then types a number after it stopped is counted twice. The platforms
+  don't say who voted in their polls.
+- **Kick has no native polls.** Kick's public API has no poll endpoint.
+- **The YouTube live poll was built against the API reference and a fake
+  server.** It has not been tried against a live YouTube broadcast.
 - **Polls are not in a per-stream report yet.** The cross-platform stream report
   (#4) does not exist in this build. Poll history is queryable by time range so
   that report can include it.

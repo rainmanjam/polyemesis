@@ -1383,7 +1383,7 @@ is built.
 
 ```json
 {"question": "Next map?", "options": ["Dust", "Mirage"], "durationSeconds": 120,
- "mirrorTwitch": true}
+ "mirrorTwitch": true, "mirrorYouTube": false}
 ```
 
 A second poll while one runs is `409`; a question, option or duration outside

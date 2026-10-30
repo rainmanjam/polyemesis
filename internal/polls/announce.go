@@ -2,6 +2,8 @@ package polls
 
 import (
 	"fmt"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -75,6 +77,27 @@ func StartText(s Spec) string {
 		fmt.Fprintf(&b, " — type 1-%d or !vote N to vote. %s to vote.", len(labels), humanDuration(s.Duration()))
 		return b.String()
 	})
+}
+
+// NativeStartText is what the poll says in a chat where the platform's own
+// poll is running: vote THERE. It names only the platform it is posted on,
+// which is the one platform its viewers are already watching.
+func NativeStartText(s Spec, p db.Platform) string {
+	where := "the poll in this chat"
+	switch p {
+	case db.PlatformTwitch:
+		where = "the Twitch poll above chat"
+	case db.PlatformYouTube:
+		where = "the poll in the live chat"
+	}
+	q := s.Question
+	for n := utf8.RuneCountInString(q); n >= 1; n-- {
+		text := fmt.Sprintf("POLL: %s — vote in %s. %s to vote.", truncate(q, n), where, humanDuration(s.Duration()))
+		if fits(text) {
+			return text
+		}
+	}
+	return truncate("POLL — vote in "+where+".", MaxAnnouncement)
 }
 
 // EndText is what the poll says in every chat when it closes.

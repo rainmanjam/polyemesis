@@ -83,10 +83,13 @@ describe("starting a poll", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove option 3" }));
     fireEvent.change(screen.getByLabelText("Duration"), { target: { value: "45" } });
     fireEvent.click(screen.getByLabelText("Also run as a native Twitch poll"));
+    // YouTube's mirror costs quota, so it is off until asked for.
+    fireEvent.click(screen.getByLabelText(/Also run as a native YouTube poll/));
     fireEvent.click(screen.getByRole("button", { name: /Start poll/ }));
     await waitFor(() => expect(start).toHaveBeenCalled());
     expect(start.mock.calls[0][0]).toEqual({
       question: "Next map?", options: ["Dust", "Mirage"], durationSeconds: 45, mirrorTwitch: false,
+      mirrorYouTube: true,
     });
   });
 
@@ -118,6 +121,23 @@ describe("a running poll", () => {
     // The running poll is not repeated in the history; the finished one is.
     expect(screen.getByText("Snack?")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Start poll/ })).toBeNull();
+  });
+
+  it("says when a native poll stopped early and when one is counted at close", async () => {
+    respond({
+      current: {
+        ...running,
+        native: [
+          { platform: "twitch", status: "stopped", reason: "ended early" },
+          { platform: "youtube", status: "mirrored", reason: "counted when it closes" },
+        ],
+      },
+      history: [],
+    });
+    render(<PollPanel />);
+    const delivery = await screen.findByTestId("poll-delivery");
+    expect(within(delivery).getByText(/native Twitch poll ended early/)).toBeTruthy();
+    expect(within(delivery).getByText(/native YouTube poll \(counted when it closes\)/)).toBeTruthy();
   });
 
   it("ends it with End now", async () => {

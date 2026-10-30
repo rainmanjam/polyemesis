@@ -20,10 +20,16 @@ its first tagged release.
   exported as CSV or JSON. Results are counts only and never name a voter, so
   `read` tokens can see them. A logo-free poll widget for OBS uses your chat
   overlay's key and style. The `poll.started`, `poll.vote`, `poll.ended` and
-  `poll.display` events are on the events stream. Optionally, a poll is
-  mirrored as a native Twitch poll and its votes are merged in. This adds the
-  `channel:manage:polls` scope, so **connected Twitch accounts are marked
-  "reconnect needed" once.** See [docs/POLLS.md](docs/POLLS.md).
+  `poll.display` events are on the events stream. Optionally, a poll also
+  runs as a native Twitch poll and as a YouTube live poll. While one runs,
+  that chat votes there: its typed numbers are not counted, so nobody is
+  counted twice. If the native poll fails or stops early, typed votes count
+  again. Twitch's count updates live. YouTube's count is merged when the poll
+  closes, because its API can't read a running poll. A YouTube poll costs 40
+  API quota units and is skipped if they don't fit above the send reserve.
+  The Twitch mirror adds the `channel:manage:polls` scope, so **connected
+  Twitch accounts are marked "reconnect needed" once.** YouTube needs no new
+  scope. See [docs/POLLS.md](docs/POLLS.md).
 - **`destination.held`: page on the stops that won't fix themselves.** When
   polyemesis stops retrying a destination after repeated quick rejections, it
   now raises a `destination.held` alert (`critical`, on the timeline) and sends
