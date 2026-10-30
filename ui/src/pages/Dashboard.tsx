@@ -18,7 +18,8 @@ import {
   failoverElapsedSeconds,
   failoverSinceClock,
 } from "@/lib/failoverBanner";
-import { backupOnAir } from "@/lib/ingestChip";
+import { backupOnAir, ingestProblem } from "@/lib/ingestChip";
+import { StatusReason } from "@/components/signature/StatusReason";
 import { trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, RadioTower, RotateCcw, ShieldAlert, Square } from "lucide-react";
@@ -589,7 +590,14 @@ export function GoLiveComposer() {
                         {t("i18nSweep.pushNotSupported", { fields: res.skipped.join(", ") })}
                       </p>
                     )}
-                    {res.message && <p className="text-micro text-down">{res.message}</p>}
+                    {res.message && (
+                      <StatusReason
+                        className="text-micro text-down"
+                        reason={res.message}
+                        step={t("foundation.status.step.metaPush", { platform: res.platform })}
+                        asOf={null}
+                      />
+                    )}
                     {res.warnings?.map((warn) => (
                       <p key={warn} className="text-micro text-warn">
                         {warn}
@@ -664,6 +672,7 @@ function BulkDestinationControl({
 }>) {
   const t = useT();
   const [report, setReport] = useState<BulkDestReport | null>(null);
+  const [reportAt, setReportAt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // The sheet's rows, frozen when it opens. See GoLiveSheet.
   const [sheetRows, setSheetRows] = useState<GoLiveRow[] | null>(null);
@@ -721,6 +730,8 @@ function BulkDestinationControl({
     try {
       const res = await api.stopAllDestinations();
       setReport(res);
+      // The moment this answer arrived: the as-of time for every reason in it.
+      setReportAt(new Date().toISOString());
       const done = res.results.filter((r) => r.outcome === "stopped").length;
       const params = { done, total: res.results.length };
       if (done === res.results.length) {
@@ -797,13 +808,14 @@ function BulkDestinationControl({
                 </div>
                 {/* WHY, on every row that is not a clean stop. */}
                 {res.message && (
-                  <p
+                  <StatusReason
                     className={`text-micro ${
                       res.outcome === "failed" ? "text-down" : "text-warn"
                     }`}
-                  >
-                    {res.message}
-                  </p>
+                    reason={res.message}
+                    step={t("foundation.status.step.stop")}
+                    asOf={reportAt}
+                  />
                 )}
               </div>
             );
@@ -1295,6 +1307,11 @@ export function Dashboard() {
   // on-air banner. `failoverState` is the programme-scoped snapshot.
   const onBackup = backupOnAir(failoverState);
   const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
+  // The primary's failure stays visible here while the backup is on air: this
+  // card is about the primary, and the reason it fell over is what the
+  // operator needs to fix it. The header chip, which speaks for the show,
+  // hides it in that case.
+  const ingestReason = ingestProblem(ingest, ingestLive, false);
   const source = status?.source;
   // The word a pipeline row uses when it has no process. "—" for unknown: a
   // settings read that has not landed is not a fact about the feature.
@@ -1690,9 +1707,16 @@ export function Dashboard() {
                 </Button>
               </div>
 
-              {ingest?.lastError && ingest.state !== "running" && (
+              {/* B1: the reason, the failing step and the as-of line. Gated by
+                  ingestProblem, the same rule the header chip uses, so a stale
+                  lastError never sits beside a stream that has recovered. */}
+              {ingestReason && (
                 <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-micro text-down">
-                  {ingest.lastError}
+                  <StatusReason
+                    reason={ingestReason}
+                    step={t("foundation.status.step.ingest")}
+                    asOf={null}
+                  />
                 </div>
               )}
 

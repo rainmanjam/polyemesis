@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
-import { backupOnAir, ingestChipReading } from "@/lib/ingestChip";
+import { backupOnAir, ingestChipReading, ingestProblem } from "@/lib/ingestChip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { StatusReason } from "@/components/signature/StatusReason";
 import { useMotionTransition } from "@/lib/motion";
 import { NavLink, Outlet, useLocation } from "react-router";
 
@@ -13,6 +15,7 @@ import { TourOffer } from "./Tour";
 import { BrandMark } from "./BrandMark";
 import {
   Activity,
+  AlertTriangle,
   AudioLines,
   CalendarClock,
   Check,
@@ -203,6 +206,7 @@ export function AppLayout({
   const failoverIsOurs = programme == null || status?.source?.id === programme;
   const onBackup = failoverIsOurs && backupOnAir(status?.failover);
   const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
+  const ingestReason = ingestProblem(ingest, ingestLive, onBackup);
   const liveCount =
     status?.destinations.filter((d) => d.process?.state === "running").length ?? 0;
 
@@ -276,6 +280,26 @@ export function AppLayout({
               return r.kind === "bitrate" ? kbps(r.kbps) : stateLabel(r.state);
             })()}
           </span>
+          {/* B1: the WHY behind a non-pass chip, beside it rather than inside
+              it -- the chip's text is asserted by tests and by e2e, and a
+              three-line reason does not fit an 11-unit bar. Click, not hover,
+              for the reasons InfoHint gives. */}
+          {ingestReason && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t("b1.ingestWhy")}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded text-down hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80 text-sm">
+                <StatusReason reason={ingestReason} step={t("foundation.status.step.ingest")} asOf={null} />
+              </PopoverContent>
+            </Popover>
+          )}
         </div>
 
         <div className="ml-auto flex items-center gap-3">

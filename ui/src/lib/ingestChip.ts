@@ -55,3 +55,21 @@ export function ingestChipReading(
   }
   return { kind: "state", state: ingest?.state };
 }
+
+/** The reason to show beside a non-pass ingest (B1), or null when there is
+ *  nothing to explain.
+ *
+ *  Null whenever the chip is not a failure: bytes arriving, the backup on air,
+ *  or a running process. A lastError left over from an earlier failure must not
+ *  be shown beside a stream that has since recovered, which is why this checks
+ *  the same three things the chip does rather than only the error field. An
+ *  empty string is no reason, so it is null too. */
+export function ingestProblem(
+  ingest: ProcessStatus | null | undefined,
+  ingestLive: boolean,
+  onBackup: boolean,
+): string | null {
+  if (ingestLive || onBackup) return null;
+  if (!ingest || ingest.state === "running") return null;
+  return ingest.lastError ? ingest.lastError : null;
+}
