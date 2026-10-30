@@ -2343,9 +2343,6 @@ func previewIdle(s db.Settings, seen, now time.Time) bool {
 	return now.Sub(seen) >= previewIdleWindow(s)
 }
 
-// reconcileMeters restarts the metering sidecar whenever the ingest's track
-// layout changes, because the merged channel numbering it parses depends on
-// the exact per-track channel counts.
 // applyMeterInterval publishes a changed metering throttle to the sidecar that
 // is already running.
 //
@@ -2377,6 +2374,9 @@ func (t *meterThrottle) allow(now time.Time) bool {
 	return true
 }
 
+// reconcileMeters restarts the metering sidecar whenever the ingest's track
+// layout changes, because the merged channel numbering it parses depends on
+// the exact per-track channel counts.
 func (e *Engine) reconcileMeters(s db.Settings) {
 	// Before every early return below. See applyMeterInterval.
 	e.applyMeterInterval(s.Meters)
@@ -4826,8 +4826,6 @@ func (e *Engine) teardownCaptions(c *transcribe.LiveCaptioner, port int, hub *re
 	e.log.Info("live captions stopped")
 }
 
-// Levels returns the most recent metering frame, or an empty one and the zero
-// time when there is no engine to have measured anything. See Engine.Status.
 // MeterInterval is the metering throttle the engine is applying, or zero before
 // one has been set. It is the same value that gates the levels WebSocket frames.
 func (e *Engine) MeterInterval() time.Duration {
@@ -4837,6 +4835,8 @@ func (e *Engine) MeterInterval() time.Duration {
 	return time.Duration(e.meterInterval.Load())
 }
 
+// Levels returns the most recent metering frame, or an empty one and the zero
+// time when there is no engine to have measured anything. See Engine.Status.
 func (e *Engine) Levels() (ffmpeg.Levels, time.Time) {
 	if e == nil {
 		return ffmpeg.Levels{}, time.Time{}

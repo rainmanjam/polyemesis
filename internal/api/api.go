@@ -1035,6 +1035,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Order is display state and deliberately does NOT reconcile (see
 			// handleReorderDestinations), so it needs no programme either.
 			r.Put("/destinations/order", s.handleReorderDestinations)
+			// Read-only preview of what stop and stop-all would end. Reads the
+			// recorded phase and makes no platform call. See destinations_stop_impact.go.
+			r.With(s.requireSource).Get("/destinations/stop-impact", s.handleStopImpact)
 			// The bulk pair, beside the per-destination controls they drive.
 			// Static segments again, so they do not collide with {id} below.
 			//
@@ -1044,9 +1047,6 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// header before touching them, because "stop all" ends every
 			// YouTube broadcast on the install and that is not visible from
 			// here.
-			// Read-only preview of what stop and stop-all would end. Reads the
-			// recorded phase and makes no platform call. See destinations_stop_impact.go.
-			r.With(s.requireSource).Get("/destinations/stop-impact", s.handleStopImpact)
 			r.With(s.requireSource).Post("/destinations/start-all", s.handleStartAllDestinations)
 			r.With(s.requireSource).Post("/destinations/stop-all", s.handleStopAllDestinations)
 			r.Get("/destinations/{id}", s.handleGetDestination)
