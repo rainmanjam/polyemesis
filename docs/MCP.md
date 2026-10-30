@@ -100,11 +100,11 @@ is [fenced as untrusted](#untrusted-viewer-content).
 |---|---|---|---|
 | `start_destination` | Start one destination | | `POST /destinations/{id}/start` |
 | `stop_destination` | Stop one destination | **yes** | `POST /destinations/{id}/stop` |
-| `retry_destination` | Restart one destination now, clearing a retry hold | | `POST /destinations/{id}/restart` |
+| `retry_destination` | Restart one destination now, clearing a retry hold | **yes** | `POST /destinations/{id}/restart` |
 | `go_live` | Start every destination of a programme, paced | **yes** | `POST /destinations/start-all` |
 | `stop_all_destinations` | Stop every destination of a programme | **yes** | `POST /destinations/stop-all` |
 | `set_track_level` | Mute, unmute or set the gain of one track in one destination's live mix | | `POST /destinations/{id}/tracks/{track}/gain` |
-| `apply_routing_preset` | Replace a destination's live or VOD routing with a preset. Muted tracks stay muted | | `POST /routing/presets/{preset}`, `PUT /destinations/{id}` |
+| `apply_routing_preset` | Replace a destination's live or VOD routing with a preset. Muted tracks stay muted | **yes** | `POST /routing/presets/{preset}`, `PUT /destinations/{id}` |
 | `set_recording` | Recording on or off | **yes, to turn off** | `POST /recording` |
 | `switch_failover_source` | Force primary, backup, slate or playlist, or hand back to `auto` | | `POST /failover/source` |
 | `create_clip` | Cut the last N seconds (1–3600) into a clip | | `POST /clips` |
@@ -132,9 +132,10 @@ would not.
 
 ### Confirmation
 
-`stop_destination`, `stop_all_destinations`, `go_live`, `set_recording` with
-`enabled: false`, and `schedule_broadcast` with `action: stop` do nothing
-unless called with `confirm: true`. The server enforces this, not the client.
+`stop_destination`, `stop_all_destinations`, `retry_destination`,
+`apply_routing_preset`, `go_live`, `set_recording` with `enabled: false`, and
+`schedule_broadcast` with `action: stop` do nothing unless called with
+`confirm: true`. The server enforces this, not the client.
 Without it, the tool answers with an error that starts `Not done:` and carries
 what the action would affect:
 
@@ -146,6 +147,22 @@ Not done: this stops every destination. Show the user this impact, then call sto
 `youtubeBroadcasts` counts live YouTube broadcasts the stop would **complete**.
 A completed broadcast cannot return to live. A confirmed stop includes the
 same impact in its answer.
+
+The other previews say what each call would do:
+
+- `retry_destination` answers whether the destination is `running`, whether
+  it is `live` (delivering, so the restart interrupts it for a moment), and
+  whether it is `held` (so the retry lifts the hold).
+- `apply_routing_preset` answers the `tracks` whose enabled, mute or gain
+  setting would change, before and after, and `wouldRestart`. A running
+  destination restarts when its live mix changes in anything but a level or a
+  mute. To work this out, the preview compiles the preset with
+  `POST /routing/presets/{preset}`, which stores nothing and is not audited.
+
+Every tool marked `destructiveHint` takes `confirm`. Two ask for it only on
+the call that ends something: turning recording **on** starts a new file and
+ends nothing, and a scheduled **start** ends nothing and can be deleted under
+Automation before it runs.
 
 ### No credentials
 

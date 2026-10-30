@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"time"
 	"unicode"
@@ -59,6 +60,12 @@ type mcpTool struct {
 	// mcp.action event is a warning. A tool that only SOMETIMES stops
 	// (recording off, a scheduled stop) sets mcpCtx.stopping per call instead.
 	stopping bool
+	// confirms says when a destructive tool demands confirm:true, in words.
+	// Every destructive tool must say: either "every call", or which calls and
+	// why the others are safe to run unasked. TestEveryDestructiveToolAsksFirst
+	// holds the catalogue to it, so a destructive tool added later cannot ship
+	// without the decision being written down.
+	confirms string
 	props    map[string]any
 	required []string
 	run      func(c *mcpCtx, args json.RawMessage) (*mcp.CallToolResult, error)
@@ -875,6 +882,7 @@ func mcpCatalogue() []mcpTool {
 		},
 		{
 			name: "stop_destination", title: "Stop a destination", tier: mcpWrite, destructive: true, idempotent: true, stopping: true,
+			confirms:    "every call",
 			description: "Stop one destination. If it carries a live YouTube broadcast, the broadcast is completed and cannot return to live. Needs confirm:true; without it, answers with what the stop would end.",
 			props:       map[string]any{"destinationId": schemaDestID, "source": schemaSource, "confirm": schemaConfirm},
 			required:    []string{"destinationId"},
@@ -884,12 +892,11 @@ func mcpCatalogue() []mcpTool {
 		},
 		{
 			name: "retry_destination", title: "Retry a destination", tier: mcpWrite, destructive: true,
-			description: "Restart one destination now, clearing a retry hold. Interrupts its output for a moment if it is running.",
-			props:       map[string]any{"destinationId": schemaDestID, "source": schemaSource},
+			confirms:    "every call: a retry interrupts a running output and lifts a hold",
+			description: "Restart one destination now, clearing a retry hold. Interrupts its output for a moment if it is running. Needs confirm:true; without it, answers with whether it is running, live and held.",
+			props:       map[string]any{"destinationId": schemaDestID, "source": schemaSource, "confirm": schemaConfirm},
 			required:    []string{"destinationId"},
-			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-				return c.destAction(raw, "/restart", false)
-			},
+			run:         runRetry,
 		},
 		{
 			name: "go_live", title: "Go live", tier: mcpWrite, idempotent: true,
@@ -935,6 +942,7 @@ func mcpCatalogue() []mcpTool {
 		},
 		{
 			name: "stop_all_destinations", title: "Stop all destinations", tier: mcpWrite, destructive: true, idempotent: true, stopping: true,
+			confirms:    "every call",
 			description: "Stop every destination of a programme. Every live YouTube broadcast is completed and cannot return. Needs confirm:true; without it, answers with what would end.",
 			props:       map[string]any{"source": schemaSource, "confirm": schemaConfirm},
 			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
@@ -1025,17 +1033,21 @@ func mcpCatalogue() []mcpTool {
 		},
 		{
 			name: "apply_routing_preset", title: "Apply a routing preset", tier: mcpWrite, destructive: true,
-			description: "Replace one destination's audio routing with a preset from list_routing_presets. Tracks that were muted stay muted. May restart the destination.",
+			confirms:    "every call: it replaces a mix and can restart the destination",
+			description: "Replace one destination's audio routing with a preset from list_routing_presets. Tracks that were muted stay muted. May restart the destination. Needs confirm:true; without it, answers with the tracks that would change and whether it would restart.",
 			props: map[string]any{
 				"destinationId": schemaDestID,
 				"preset":        map[string]any{"type": "string", "pattern": presetName.String()},
 				"mix":           map[string]any{"type": "string", "enum": []string{"live", "vod"}, "description": "Which mix to replace (default live)."},
+				"confirm":       schemaConfirm,
 			},
 			required: []string{"destinationId", "preset"},
 			run:      runApplyPreset,
 		},
 		{
 			name: "set_recording", title: "Recording on or off", tier: mcpWrite, destructive: true, idempotent: true,
+			confirms: "turning recording off, which ends the recording in progress. Turning it on ends " +
+				"nothing: it starts a new file, and turning it off again (confirmed) undoes it.",
 			description: "Turn recording on or off. Turning it off ends the recording in progress, so that needs confirm:true; without it, answers with the recorder's state.",
 			props:       map[string]any{"enabled": map[string]any{"type": "boolean"}, "confirm": schemaConfirm},
 			required:    []string{"enabled"},
@@ -1133,6 +1145,8 @@ func mcpCatalogue() []mcpTool {
 		},
 		{
 			name: "schedule_broadcast", title: "Schedule a start or stop", tier: mcpWrite, destructive: true,
+			confirms: "a scheduled stop, which ends live broadcasts when it runs. A scheduled start ends " +
+				"nothing, and is listed under Automation, where it can be deleted before it runs.",
 			description: "Schedule destinations to start or stop: once at a time, or daily/weekly at a time of day in a time zone. A scheduled stop ends live YouTube broadcasts when it runs, so it needs confirm:true.",
 			props: map[string]any{
 				"name":           map[string]any{"type": "string", "minLength": 1, "maxLength": 100},
@@ -1245,6 +1259,7 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 		DestinationID int64  `json:"destinationId"`
 		Preset        string `json:"preset"`
 		Mix           string `json:"mix"`
+		Confirm       bool   `json:"confirm"`
 	}
 	if err := decodeArgs(raw, &a); err != nil {
 		return nil, err
@@ -1290,7 +1305,7 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 	if err != nil {
 		return nil, err
 	}
-	res, err := c.call(http.MethodPost, "/routing/presets/"+url.PathEscape(a.Preset), q, nil)
+	res, err := c.compilePreset(a.Preset, q)
 	if err != nil {
 		return nil, err
 	}
@@ -1298,11 +1313,222 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 	if profile == nil {
 		return nil, errors.New("the preset route returned no profile")
 	}
-	carryMutes(profile, pick(d, field)[field])
+	current := pick(d, field)[field]
+	carryMutes(profile, current)
+	if !a.Confirm {
+		// The preview: what the PUT below would change, and whether it would
+		// cost the destination a restart. Nothing has been written -- the
+		// compile above is a computation (see compilePreset).
+		health, err := c.destinationHealth(a.DestinationID, src)
+		if err != nil {
+			return nil, err
+		}
+		running := processRunning(health)
+		structural := profileStructureChanged(current, profile)
+		return c.refusal("Not done: applying a preset replaces this destination's audio routing"+
+			restartClause(running && field == "profile" && structural)+
+			". Show the user these changes, then call apply_routing_preset again with confirm:true.",
+			map[string]any{
+				"destination":  destSummary(d),
+				"preset":       a.Preset,
+				"mix":          field,
+				"tracks":       trackChanges(current, profile),
+				"running":      running,
+				"wouldRestart": running && field == "profile" && structural,
+			})
+	}
 	if _, err := c.call(http.MethodPut, mcpDestPath(a.DestinationID, ""), q, map[string]any{field: profile}); err != nil {
 		return nil, err
 	}
 	return c.result(map[string]any{"applied": a.Preset, "mix": field, "profile": profile, "routing": pick(res, "routing")["routing"]}, false)
+}
+
+// runRetry is retry_destination: POST /destinations/{id}/restart, which
+// interrupts a running output and lifts a hold -- so, like stop, it asks
+// first. The preview says what the restart would interrupt: whether the
+// destination is running, whether it is delivering (live), and whether it is
+// held (in which case nothing is delivering and the retry is the fix).
+func runRetry(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		DestinationID int64  `json:"destinationId"`
+		Source        *int64 `json:"source"`
+		Confirm       bool   `json:"confirm"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if err := checkID("destinationId", a.DestinationID); err != nil {
+		return nil, err
+	}
+	q, err := sourceQuery(a.Source)
+	if err != nil {
+		return nil, err
+	}
+	c.target = fmt.Sprintf("destination %d", a.DestinationID)
+	if !a.Confirm {
+		d, err := c.getDestination(a.DestinationID)
+		if err != nil {
+			return nil, err
+		}
+		src := a.Source
+		if src == nil {
+			if sid, ok := jsonInt(pick(d, "sourceId")["sourceId"]); ok {
+				src = &sid
+			}
+		}
+		health, err := c.destinationHealth(a.DestinationID, src)
+		if err != nil {
+			return nil, err
+		}
+		running := processRunning(health)
+		stalled, _ := health["stalled"].(bool)
+		held := false
+		if r, ok := health["reason"].(map[string]any); ok {
+			held, _ = r["held"].(bool)
+		}
+		msg := "Not done: retrying restarts this destination now"
+		switch {
+		case running && !stalled:
+			msg += ", which interrupts what it is delivering for a moment"
+		case held:
+			msg += " and lifts its hold"
+		}
+		return c.refusal(msg+". Show the user this, then call retry_destination again with confirm:true.",
+			map[string]any{
+				"destination": destSummary(d),
+				"running":     running,
+				"live":        running && !stalled,
+				"held":        held,
+				"health":      health,
+			})
+	}
+	v, err := c.call(http.MethodPost, mcpDestPath(a.DestinationID, "/restart"), q, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
+// destinationHealth is one destination's row of GET /status, as get_destination
+// reports it. Empty, not an error, when the programme's status does not list it.
+func (c *mcpCtx) destinationHealth(id int64, src *int64) (map[string]any, error) {
+	q, err := sourceQuery(src)
+	if err != nil {
+		return nil, err
+	}
+	st, err := c.call(http.MethodGet, "/status", q, nil)
+	if err != nil {
+		return nil, err
+	}
+	if h, ok := healthByID(st)[id]; ok {
+		return h, nil
+	}
+	return map[string]any{}, nil
+}
+
+// processRunning reads the supervisor's state off a destHealth row.
+func processRunning(health map[string]any) bool {
+	p, _ := health["process"].(map[string]any)
+	state, _ := p["state"].(string)
+	return state == "running"
+}
+
+// compilePreset is POST /routing/presets/{id}: it COMPILES a preset against a
+// programme's ingest and stores nothing. It is a POST because the options
+// travel in a body, so call() counts it as a write; it is not one, and a
+// preview that only compiled must not be audited as an action. The flags are
+// put back as they were.
+func (c *mcpCtx) compilePreset(preset string, q url.Values) (any, error) {
+	wrote, outcome := c.wrote, c.outcome
+	res, err := c.call(http.MethodPost, "/routing/presets/"+url.PathEscape(preset), q, nil)
+	c.wrote, c.outcome = wrote, outcome
+	return res, err
+}
+
+// restartClause finishes the preset preview's sentence.
+func restartClause(restart bool) string {
+	if restart {
+		return ", and restarts it: it is running and the change is more than a level or a mute"
+	}
+	return ""
+}
+
+// trackChanges lists the simple-mode track rows a preset would change, before
+// and after. A level or a mute is applied live; enabling or disabling a track
+// rebuilds the audio graph.
+func trackChanges(prev any, next map[string]any) []map[string]any {
+	type row struct {
+		enabled, muted bool
+		gain           any
+	}
+	read := func(v any) map[int64]row {
+		out := map[int64]row{}
+		for _, t := range asList(v, "tracks") {
+			n, ok := jsonInt(pick(t, "track")["track"])
+			if !ok {
+				continue
+			}
+			en, _ := pick(t, "enabled")["enabled"].(bool)
+			mu, _ := pick(t, "muted")["muted"].(bool)
+			out[n] = row{enabled: en, muted: mu, gain: pick(t, "gain")["gain"]}
+		}
+		return out
+	}
+	before, after := read(prev), read(next)
+	ids := map[int64]bool{}
+	for n := range before {
+		ids[n] = true
+	}
+	for n := range after {
+		ids[n] = true
+	}
+	sorted := make([]int64, 0, len(ids))
+	for n := range ids {
+		sorted = append(sorted, n)
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	changes := []map[string]any{}
+	for _, n := range sorted {
+		b, a := before[n], after[n]
+		if b.enabled == a.enabled && b.muted == a.muted && fmt.Sprint(b.gain) == fmt.Sprint(a.gain) {
+			continue
+		}
+		changes = append(changes, map[string]any{
+			"track":  n,
+			"before": map[string]any{"enabled": b.enabled, "muted": b.muted, "gain": b.gain},
+			"after":  map[string]any{"enabled": a.enabled, "muted": a.muted, "gain": a.gain},
+		})
+	}
+	return changes
+}
+
+// profileStructureChanged reports whether next differs from prev in anything
+// but track gains and mutes, which are applied live. Anything else -- which
+// tracks are in the mix, the mode, the matrix, normalisation, loudness,
+// delay, ducking -- changes the FFmpeg command, and a running destination is
+// restarted to take it (engine.destArgvSig).
+func profileStructureChanged(prev any, next map[string]any) bool {
+	strip := func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return ""
+		}
+		var m map[string]any
+		if json.Unmarshal(b, &m) != nil {
+			return ""
+		}
+		if tracks, ok := m["tracks"].([]any); ok {
+			for _, t := range tracks {
+				if tm, ok := t.(map[string]any); ok {
+					delete(tm, "gain")
+					delete(tm, "muted")
+				}
+			}
+		}
+		out, _ := json.Marshal(m)
+		return string(out)
+	}
+	return strip(prev) != strip(next)
 }
 
 // carryMutes keeps a mute the operator set across a preset, as the console

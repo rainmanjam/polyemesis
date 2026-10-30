@@ -158,11 +158,11 @@ func mcpSampleArgs() map[string]map[string]any {
 		"get_chat_user":          {"platform": "twitch", "authorId": "viewer-1"},
 		"start_destination":      {"destinationId": 1},
 		"stop_destination":       {"destinationId": 1, "confirm": true},
-		"retry_destination":      {"destinationId": 1},
+		"retry_destination":      {"destinationId": 1, "confirm": true},
 		"go_live":                {"confirm": true},
 		"stop_all_destinations":  {"confirm": true},
 		"set_track_level":        {"destinationId": 1, "track": 0, "muted": true},
-		"apply_routing_preset":   {"destinationId": 1, "preset": routing.Presets()[0].ID},
+		"apply_routing_preset":   {"destinationId": 1, "preset": routing.Presets()[0].ID, "confirm": true},
 		"set_recording":          {"enabled": true},
 		"switch_failover_source": {"input": "auto"},
 		"create_clip":            {"seconds": 5},
@@ -964,7 +964,7 @@ func TestApplyingAPresetOverMCPKeepsAMutedTrackMuted(t *testing.T) {
 	}
 	key := d.StreamKey
 	text, isErr := callText(t, mcpClient(t, rig.h, rig.admin), "apply_routing_preset",
-		map[string]any{"destinationId": 1, "preset": routing.Presets()[0].ID})
+		map[string]any{"destinationId": 1, "preset": routing.Presets()[0].ID, "confirm": true})
 	if isErr {
 		t.Fatalf("apply_routing_preset failed: %s", text)
 	}

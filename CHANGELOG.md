@@ -43,9 +43,11 @@ its first tagged release.
     on/off, failover switch, create a clip, and schedule a start or stop.
   - Every tool is a call to the HTTP API with the caller's own token, so scopes,
     `?source=` and the API's own checks apply unchanged.
-  - Stop tools, go live, recording off and scheduled stops do nothing without
-    `confirm: true`, and answer with what they would end. Write tools carry
-    MCP destructive hints.
+  - Stop tools, go live, retry, routing presets, recording off and scheduled
+    stops do nothing without `confirm: true`, and answer with what they would
+    do: what a stop ends, whether a retry interrupts a live output or lifts a
+    hold, and which tracks a preset changes and whether it restarts the
+    destination. Write tools carry MCP destructive hints.
   - No tool returns a credential, to any token. Requests made for MCP get the
     read-safe views, and every answer is checked against every stored
     credential.
