@@ -26,8 +26,8 @@ describe("navigation sections", () => {
 
   it("the scanner reads the whole NAV literal", () => {
     // Positive control: a scanner that matched nothing would make every test
-    // below pass over an empty list.
-    expect(routes.length).toBe(14);
+    // below pass over an empty list. Fifteen since the System page (A17).
+    expect(routes.length).toBe(15);
   });
 
   it("every route in NAV appears in exactly one section", () => {
